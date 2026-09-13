@@ -1,106 +1,67 @@
-# AGENTS.md — permanent rules for AI work in PlanReader-3D
+# PlanReader-3D agent contract
 
-This file is the contract every AI session (Claude, Cursor, or otherwise)
-must follow in this repository. It does not depend on any session
-remembering a prior conversation. Read this file, `docs/AI_ENGINEERING_PLAYBOOK.md`,
-and the task-specific brief you were given, before proposing or changing
-code.
+This file is the permanent engineering contract. Conversation memory is not a contract.
+If this file conflicts with a chat, this file wins.
 
-## The governing target
+## Before proposing or changing code
 
-≥99.0% of measurable takeoff items within ±5% of independently verified
-ground truth, on a **frozen, unseen** project-level holdout. This requires
-generalization from real drawing evidence — not memorization of the
-development benchmark's own expected values.
+1. Read `AGENTS.md`, `docs/AI_ENGINEERING_PLAYBOOK.md`, and the docs listed there.
+2. Trace the affected quantity through the real call path in the playbook.
+3. Prove compliance in the first reply: files read, functions traced, authority boundaries crossed, files that will stay untouched.
+4. Do not start from module names, prior chat claims, or benchmark scores.
+
+Loop for every task: **trace → propose → synthetic proof → shadow run → authority review**.
+
+Next engineering phase: the six evidence-compiler priorities in
+`docs/AI_ENGINEERING_PLAYBOOK.md` §13. Supporting research may inform
+them; this file still wins if wording conflicts. Typed negatives are
+evidence against promotion, not deletion before W2.
 
 ## Non-negotiable rules
 
-- Detection is not measurement authority. A plausible value is not an
-  authoritative value.
-- Preserve document, source-hash, revision, page, viewport, entity, and
-  evidence ownership through every stage.
-- Reuse `EvidenceResolutionStatus`, `QuantityEvidence`, `stable_contract_id`,
-  and existing authority modules. Do not introduce a second scale resolver,
-  evidence vocabulary, quantity schema, or canonical graph.
-- Unknown, conflicting, stale, or ambiguous evidence must abstain. Retain
-  all plausible candidates; never resolve ties using nearest, first, or
-  smallest.
-- Never use filenames, project names, benchmark IDs, or expected BOQ values
-  as prediction inputs, thresholds, or tuning targets. No magic correction
-  multipliers. No symmetry assumptions. No "looks approximately right"
-  quantities.
-- Never change production code and benchmark-defining files (gold values,
-  tolerances, scoring) in the same PR.
-- Do not give AI output, defaults, title-block scale text, a geometric gap
-  width, or an empty detector result firm authority on its own.
-- New topology and extraction work begins in **shadow mode** (research,
-  diagnostic-only, not wired into the live extraction path or commercial
-  publishing) until a separate authority-promotion review approves wiring
-  it in. Do not modify commercial output in the same change that introduces
-  the capability.
-- Never weaken an existing safe abstention to raise coverage or score.
+- Detection is not measurement authority. A plausible value is not an authoritative value.
+- Preserve document, source hash, revision, page, viewport, entity, and evidence ownership.
+- Reuse `EvidenceResolutionStatus`, `QuantityEvidence`, `stable_contract_id`, and the existing authority modules. Do not invent a second vocabulary.
+- Unknown, conflicting, stale, or ambiguous evidence must abstain.
+- Retain all plausible candidates. Never resolve ties with nearest, first, or smallest.
+- Never use filenames, project names, benchmark IDs, or expected BOQ values as prediction inputs.
+- Never change production code and benchmark-defining files in the same PR. CI enforces this via `scripts/check_benchmark_gold_separation.py`.
+- Do not introduce a second scale resolver, evidence vocabulary, quantity schema, or canonical graph.
+- Do not give AI output, defaults, title-block scale text, geometric gap width, or empty detector results firm authority.
+- New topology and extraction work begins in shadow mode.
+- Do not modify commercial output until a separate authority-promotion review approves it.
+- W10 `adapt_topology_to_canonical_level` must keep `takeoff_eligible=False` and `deduction_authority=False`.
+- Do not treat `#273` ranking `CORROBORATED` / non-abstained tiers as wall authority. Hosted-opening consumption of that ranking remains blocked.
 
-## Independence of evidence
+## Authority that may become firm
 
-A signal only counts as corroborating another if it comes from genuinely
-different structural evidence:
+Only existing seams may raise firm measurement authority:
 
-- A room face built FROM a wall candidate's own geometry does not
-  independently corroborate that same candidate.
-- A candidate merely touching (one-hop connectivity to) an already-evidenced
-  neighbour is not itself evidenced by anything except contact.
-- Candidate length is not proof of anything, in either direction: a short
-  candidate is not weaker evidence, a long one is not stronger.
-- Passing a broad plausibility band (a gap that could be a wall thickness)
-  is not proof — a room-width pair, a glazing gap, and a real wall thickness
-  can all fall inside the same generously-wide band.
+- `pb_page_scale_calibration_authority.resolve_page_scale_calibration` / `measurement_authority_for_page_scale`
+- `pb_viewport_scale_binding.bind_viewport_scale`
+- `pb_measurement_input_authority.resolve_linear_measurement_input`
+- `pb_figured_dimension_authority.resolve_measurement_authority`
+- `pb_wall_length_quantity.build_wall_length_quantity` (requires `WallCandidate.status == CORROBORATED` **and** a firm measurement input)
+- `pb_wall_height_authority.build_wall_height_quantity` (explicit owned height or corroborated datum pair only)
 
-## Git and PR discipline
+## Authority that must not become firm
 
-- Work in an isolated worktree; the shared main checkout is read-only for
-  verification.
-- Never merge a research branch into `main` or into another feature branch
-  without explicit instruction.
-- Research PRs stay **draft**, titled `[Research, DO NOT MERGE] ...`, until
-  explicitly promoted.
-- Create new commits; do not amend published history unless asked.
-- Never skip hooks or CI checks to force a merge.
+- Title-block scale text alone
+- Geometric gap width, hatch ticks, furniture loops, or W5 room faces
+- One-hop connectivity or `#273` evidence ranking
+- AI / default / assumed / 2.8 m / empty-detector results
+- Legacy `pb_vector_geometry_v130.solve_scale` as a competing authority
+- W7 `detect_opening_host_candidates` (always `ambiguous_host`)
+- `pb_hosted_opening_geometry` / `pb_hosted_opening_wall_binding` (unwired; diagnostic only)
+- W10 canonical translation
+- Benchmark gold, mappings, scorer tolerances, or development-project scores
 
-## Required testing, for every geometric or evidentiary hypothesis
+## Required tests for every geometric hypothesis
 
-- Synthetic positive cases and synthetic look-alike negatives (the specific
-  thing a naive version of the technique would wrongly accept).
-- Ambiguity and conflict cases, with an explicit expected abstention.
-- Translation, rotation, and scale metamorphic tests.
-- Input-order and segment-splitting (re-chunking) invariance.
-- Unrelated-content and viewport-expansion invariance.
-- Deterministic replay and stable-ID checks.
-- No-mutation checks (a reissue produces a new record; it never edits the
-  input in place).
-- Proof that live predictions and commercial quantities are unchanged while
-  the work is in shadow mode.
+Synthetic positives; look-alike negatives; ambiguity/conflict; translation/rotation/scale metamorphic tests; input-order and segment-splitting invariance; unrelated-content and viewport-expansion invariance; deterministic replay and stable-ID checks; no-mutation checks; proof that live predictions and commercial quantities stay unchanged in shadow mode.
 
-Real development drawings may reveal a failure mode worth fixing, but the
-benchmark's own expected quantities must never determine an algorithm or a
-threshold.
+Real development drawings may reveal failure modes. Expected benchmark quantities must not determine algorithms or thresholds.
 
-## Distinguish these explicitly, in every report
+## First deliverable on a new change
 
-- **Observed repository behaviour** (verified by reading the code or
-  running it).
-- **Inference** (a conclusion drawn from that behaviour).
-- **Proposed change** (not yet made).
-- **Benchmark observation** (context only — must not influence the
-  algorithm or its thresholds).
-
-## The trace-before-code habit
-
-Before implementing anything touching wall, room, or opening geometry,
-trace one real quantity end-to-end through the actual call path — file and
-function references, not module names from memory. See
-`docs/AI_ENGINEERING_PLAYBOOK.md` for the reference trace and the
-architecture's own known gaps. A report that repeats documentation without
-citing the functions actually involved has not done this step.
-
-Stop for review after a research deliverable. Do not chain into wiring a
-new capability into production without that review.
+Do not change code first. Produce a short architecture report that distinguishes **observed repository behavior**, **inference**, **proposed change**, and **benchmark observations that must not influence implementation**. Stop for review.
