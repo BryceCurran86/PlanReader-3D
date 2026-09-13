@@ -14,6 +14,7 @@ from pb_vector_geometry_v130 import extract_native_page
 from pb_wall_room_topology_primitive_lineage import (
     LINEAGE_KEY,
     SNAP_COLLAPSE_REASON,
+    attach_lineage_to_split_fragments,
     fabricated_live_fields,
     lineage_from_source_segments,
 )
@@ -107,6 +108,19 @@ class TestDuplicateAndOverlappingSources:
         for edge in graph["edges"]:
             assert _ids(edge) == ["a", "b"]
             assert len(_lineage(edge)["source_records"]) == 2
+
+    def test_incomplete_nonempty_line_bucket_keeps_every_contained_parent(self) -> None:
+        # Two collinear natives can land in adjacent 4-decimal offset cells
+        # (~3e-4 apart) while both still contain the same fragment. A
+        # non-empty incomplete bucket must not drop the second parent.
+        segments = [
+            _seg("a", 776.2548, 850.1796, 781.9241, 844.5103),
+            _seg("b", 772.0027, 854.4316, 780.0929, 846.3415),
+        ]
+        pair = ((779.0893876, 847.345), (780.0929, 846.3415))
+        fragments = attach_lineage_to_split_fragments([pair], segments)
+        assert len(fragments) == 1
+        assert _ids(fragments[0]) == ["a", "b"]
 
     def test_overlapping_coincident_sources_are_multi_parent(self) -> None:
         segments = [
