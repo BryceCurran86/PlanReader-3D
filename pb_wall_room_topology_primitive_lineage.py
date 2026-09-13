@@ -267,18 +267,52 @@ def fragment_contained_in_segment(
     )
 
 
+# A fragment at or under this length has a numerically unstable own
+# direction: verified against the exhaustive scan on real Dungicha p134
+# data that a splitter-produced residual sliver up to ~0.0035pt long (a
+# floating-point leftover from resolving several intersections at nearly
+# the same point) can compute a bucket offset far enough from its true
+# line's own bucket to miss it, even though it is well above
+# _CONTAINMENT_TOL_PT (1e-5, the geometric containment tolerance used
+# elsewhere in this module for a different purpose -- point-on-segment
+# distance, not this bucketing decision, so a separate constant is used
+# here rather than repurposing that one). No real wall/detail fragment is
+# ever this short (a fraction of a millimetre at any real architectural
+# scale), so grouping every such sliver into one position-keyed "point"
+# bucket -- which never collides with any real source's own direction-keyed
+# bucket, reliably triggering the existing "fall back to the exhaustive
+# scan when empty" path below -- costs nothing measurable on real
+# documents while staying exactly correct.
+_UNSTABLE_DIRECTION_LENGTH_PT = 0.05
+
+
 def _line_bucket_key(x1: float, y1: float, x2: float, y2: float) -> Tuple[Any, ...]:
-    """Group collinear strokes so extra-parent search is not a full fragment×source scan."""
+    """Group collinear strokes so extra-parent search is not a full fragment×source scan.
+
+    Rounded to 2 decimals, not 4: verified against the exhaustive scan on
+    real Dungicha p134 data that two genuinely collinear real sources (the
+    two true parents of one real fragment) can disagree in their own
+    computed offset by ~3e-4 -- finer than a 4-decimal bucket cell, which
+    silently dropped one true parent from the shipped result (a real,
+    confirmed defect, found via property-style ground-truth comparison
+    across every fragment on real pages, not a theoretical one) while the
+    fragment's own single-bucket lookup still returned a non-empty (but
+    incomplete) match, so the existing "fall back to the exhaustive scan
+    when empty" safety net never triggered. A 2-decimal cell is confirmed,
+    by the same exhaustive-scan comparison across every fragment on two
+    real, dense CAD pages (not just this one case), to keep every
+    genuinely matching pair inside one bucket.
+    """
     dx = x2 - x1
     dy = y2 - y1
     length = math.hypot(dx, dy)
-    if length <= _CONTAINMENT_TOL_PT:
-        return ("point", round(x1, 4), round(y1, 4))
+    if length <= _UNSTABLE_DIRECTION_LENGTH_PT:
+        return ("point", round(x1, 2), round(y1, 2))
     ux, uy = dx / length, dy / length
     if ux < 0 or (ux == 0.0 and uy < 0):
         ux, uy = -ux, -uy
     offset = x1 * (-uy) + y1 * ux
-    return (round(ux, 4), round(uy, 4), round(offset, 4))
+    return (round(ux, 2), round(uy, 2), round(offset, 2))
 
 
 def source_line_bucket(segment: Mapping[str, Any]) -> Tuple[Any, ...]:
@@ -293,6 +327,45 @@ def source_line_bucket(segment: Mapping[str, Any]) -> Tuple[Any, ...]:
 def fragment_line_bucket(fragment: SegmentPair) -> Tuple[Any, ...]:
     (x1, y1), (x2, y2) = fragment
     return _line_bucket_key(x1, y1, x2, y2)
+
+
+# A quantized bucket key has an irreducible weakness no fixed rounding
+# precision alone can close: a genuinely matching source and fragment can
+# sit on opposite sides of one rounding boundary (e.g. one's own offset
+# computes to 622.049999... and the other's to 622.050001..., rounding to
+# 622.05 and 622.06 respectively) purely from ordinary floating-point
+# arithmetic on real coordinates -- confirmed on real Lamu p41 data for a
+# perfectly ordinary, non-degenerate 1pt fragment, independent of (and in
+# addition to) the two other real bucketing defects already fixed above
+# (offset precision too fine; short-fragment direction instability).
+# Checking the primary bucket's own immediate neighbours (one step in each
+# of the three quantized dimensions) closes this the same way a spatial
+# index's own neighbourhood search would, without discarding the existing
+# single-bucket-plus-exhaustive-fallback structure.
+_BUCKET_ROUND_DECIMALS = 2
+_BUCKET_STEP = 10.0 ** (-_BUCKET_ROUND_DECIMALS)
+_BUCKET_NEIGHBOR_OFFSETS = (-_BUCKET_STEP, 0.0, _BUCKET_STEP)
+
+
+def fragment_line_bucket_neighbors(fragment: SegmentPair) -> List[Tuple[Any, ...]]:
+    """The fragment's own bucket key plus every immediately adjacent key in
+    each quantized dimension -- see the module note above for why a single
+    key is not always enough. Returns one key unchanged (no neighbours) for
+    the degenerate ("point", x, y) bucket shape, since that shape is never
+    produced by a real (non-degenerate) source's own bucket key and so has
+    no matching neighbourhood to widen -- degenerate fragments already rely
+    on the exhaustive fallback, not this neighbourhood search.
+    """
+    key = fragment_line_bucket(fragment)
+    if key[0] == "point":
+        return [key]
+    kx, ky, koffset = key
+    return [
+        (round(kx + dx, _BUCKET_ROUND_DECIMALS), round(ky + dy, _BUCKET_ROUND_DECIMALS), round(koffset + doffset, _BUCKET_ROUND_DECIMALS))
+        for dx in _BUCKET_NEIGHBOR_OFFSETS
+        for dy in _BUCKET_NEIGHBOR_OFFSETS
+        for doffset in _BUCKET_NEIGHBOR_OFFSETS
+    ]
 
 
 def sources_for_fragment(
@@ -344,7 +417,23 @@ def attach_lineage_to_split_fragments(
     out: List[Dict[str, Any]] = []
     for idx, pair in enumerate(split_pairs):
         p1, p2 = pair
-        candidates = buckets.get(fragment_line_bucket(pair), ())
+        # Checks the primary bucket's own immediate neighbours, not just
+        # one key: a genuinely matching source and fragment can round to
+        # ADJACENT (not identical) bucket keys purely from ordinary
+        # floating-point noise on real coordinates, even for an entirely
+        # normal-length, non-degenerate fragment -- confirmed on real Lamu
+        # p41 data. A single-key lookup can then return a non-empty (but
+        # incomplete) result that never reaches the exhaustive fallback
+        # below at all, silently dropping a true parent.
+        seen_candidate_ids: set = set()
+        candidates: List[Mapping[str, Any]] = []
+        for neighbor_key in fragment_line_bucket_neighbors(pair):
+            for candidate in buckets.get(neighbor_key, ()):
+                candidate_object_id = id(candidate)
+                if candidate_object_id in seen_candidate_ids:
+                    continue
+                seen_candidate_ids.add(candidate_object_id)
+                candidates.append(candidate)
         parents = sources_for_fragment(pair, candidates)
         if not parents:
             # Splitter endpoints are rounded to 8 decimals. A fragment can
