@@ -134,23 +134,46 @@ PDF page
 
 ## 4. Observed hosted-opening path
 
+**Correction (verified against current main, not the original PR #275 text):**
+`pb_opening_provenance_graph.py`, `pb_opening_deduction_readiness.py`, and
+`pb_wall_net_area_quantity.py` all **exist** on main — the prior wording
+here ("not present") was wrong. More importantly, `resolve_hosted_opening_spans`
+itself is **not** a dead end: it is imported and called live, in shadow
+scope only, via `pb_hosted_opening_instance_adapter.collect_hosted_opening_shadow_evidence`
+→ `pb_planreader_pdf_extractor.py`. `bind_hosted_opening_to_walls` remains
+an actual dead end — grep confirms its only callers are its own definition
+and its own test file.
+
 ```
 resolve_hosted_opening_spans                  pb_hosted_opening_geometry
   → HostedOpeningEvidence (found | abstained)
+  ↓ (LIVE, shadow-scoped)
+collect_hosted_opening_shadow_evidence        pb_hosted_opening_instance_adapter
+  → self.hosted_opening_shadow                pb_planreader_pdf_extractor
+      "Never appended to F.9 live openings"   (comment at the call site)
+  ↓
+collect_opening_provenance_shadow_for_doc     pb_opening_provenance_graph
+  → self.opening_provenance_shadow            pb_planreader_pdf_extractor
+      "Never mutates pred_dict or F.9"        (comment at the call site)
+
 bind_hosted_opening_to_walls                  pb_hosted_opening_wall_binding
   → HostedOpeningWallBinding (bound | ambiguous | unbound)
-        ★ dead end — not imported by the PDF extractor
+        ★ true dead end — only callers are its own definition and
+          tests/test_hosted_opening_wall_binding.py; NOT reached from
+          pb_hosted_opening_instance_adapter, pb_opening_provenance_graph,
+          or the PDF extractor
 ```
 
 **OBSERVED**
 
 - Section H never reads schedules, tags, AI, or title-block scale. `width_m` exists only if the caller supplies `scale_pt_per_m`.
 - Binding never picks nearest/first/smallest. Two plausible walls → `ambiguous`.
-- `pb_opening_provenance_graph.py`, `pb_opening_deduction_readiness.py`, and `pb_wall_net_area_quantity.py` are **not present**.
+- `pb_opening_provenance_graph.py` is live-imported (shadow-scoped, both call sites wrapped in `try/except` falling back to an explicit `empty_*_shadow(reason=...)`) — not merely present, actually wired. Its own docstring: "shadow / diagnostics only... never mints W1/W2/D1 from repetition, nearest text, width similarity, or benchmark expectation... bound_wall_id is not assigned here."
+- `pb_opening_deduction_readiness.py` and `pb_wall_net_area_quantity.py` exist but have no live (non-test) caller anywhere in the repository — genuinely standalone, development-only readiness layers, consistent with their own "development-only" / "fail-closed... readiness" docstrings.
 - Live deductions today use the schedule/tag path: `pb_opening_deduction_v174.apply_deductions` / `passes_eligibility_gate`, `pb_opening_production_v175`, and `GenericOpeningDeductionPipeline` from `pb_planreader_pdf_extractor`. That path is a different axis from hosted spans.
 - Opening **counts** in shadow use `ShadowOpeningCountProvider` → `GoldFreeShadowRunner` → `evaluate_opening_count_migration_gate`. Gate state is `new_shadow`. `CanonicalOpening.takeoff_eligible` is False.
 
-W7 topology gaps and Section H hatch/fill spans answer “which wall hosts this opening?” from incompatible evidence and do not reconcile. Do not merge them silently.
+W7 topology gaps and Section H hatch/fill spans answer “which wall hosts this opening?” from incompatible evidence and do not reconcile. Do not merge them silently. The shadow chain above collects evidence for later comparison — it still does not resolve that reconciliation, and per AGENTS.md's own authority table, `pb_hosted_opening_geometry` / `pb_hosted_opening_wall_binding` output stays unwired for any firm authority regardless of what shadow-collects it.
 
 ---
 
