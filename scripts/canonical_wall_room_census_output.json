@@ -1,0 +1,774 @@
+[
+  {
+    "name": "Baghau",
+    "elapsed_s": 10.69,
+    "raw_region_segments": 2398,
+    "stage_a_edges": 1922,
+    "excluded_segments": 916,
+    "wall_hypotheses": 670,
+    "wall_status_breakdown": {
+      "candidate": 370,
+      "conflict": 300
+    },
+    "wall_existence_breakdown": {
+      "corroborated": 170,
+      "candidate": 200,
+      "conflict": 300
+    },
+    "wall_pairs_detected": 398,
+    "rooms_conservative_total": 12,
+    "rooms_conservative_firm": 3,
+    "rooms_permissive_total": 160,
+    "corroborated_top_level_count": 0,
+    "existence_corroborated_but_capped_count": 170,
+    "corroborated_samples": [
+      {
+        "candidate_id": "wall_490b06404a87165e99aa",
+        "length_pt": 30.82,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 8,
+        "reason_codes": [
+          "assembled_from_7_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:paired_wall_faces,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_3d446b7bbd20aeb526f3",
+        "length_pt": 30.8,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:unresolved_at_start",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:paired_wall_faces,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_50d934b0029fe677eecd",
+        "length_pt": 16.86,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "chain_extension_blocked_by:near_junction_review_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:paired_wall_faces,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_f1dab66ca2da8f10e80a",
+        "length_pt": 21.81,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 5,
+        "reason_codes": [
+          "assembled_from_4_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:paired_wall_faces,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_6fc3e8e1837932f51923",
+        "length_pt": 22.06,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 6,
+        "reason_codes": [
+          "assembled_from_5_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:paired_wall_faces,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_e50ba1f55018cda3f6b5",
+        "length_pt": 21.81,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:paired_wall_faces,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_06ac665db16b5d4dfdb5",
+        "length_pt": 7.61,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:unresolved_at_start",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:paired_wall_faces,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_cb88777d99a1071fbcd3",
+        "length_pt": 9.58,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:paired_wall_faces,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      }
+    ],
+    "conflict_samples": [
+      {
+        "candidate_id": "wall_8cf0eed9d5d085aff90e",
+        "length_pt": 3.92,
+        "supporting": 1,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_2a4bde631ade42a78f20",
+        "length_pt": 21.88,
+        "supporting": 4,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_904f12477559a6f6fda1",
+        "length_pt": 21.45,
+        "supporting": 7,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_da994abd59539c9f597c",
+        "length_pt": 21.91,
+        "supporting": 6,
+        "opposing": 2
+      },
+      {
+        "candidate_id": "wall_c4d0b3e491d45af4956e",
+        "length_pt": 21.45,
+        "supporting": 5,
+        "opposing": 2
+      }
+    ]
+  },
+  {
+    "name": "Lamu",
+    "elapsed_s": 2.856,
+    "raw_region_segments": 1245,
+    "stage_a_edges": 1009,
+    "excluded_segments": 147,
+    "wall_hypotheses": 605,
+    "wall_status_breakdown": {
+      "conflict": 416,
+      "candidate": 189
+    },
+    "wall_existence_breakdown": {
+      "conflict": 416,
+      "candidate": 150,
+      "corroborated": 39
+    },
+    "wall_pairs_detected": 129,
+    "rooms_conservative_total": 0,
+    "rooms_conservative_firm": 0,
+    "rooms_permissive_total": 96,
+    "corroborated_top_level_count": 0,
+    "existence_corroborated_but_capped_count": 39,
+    "corroborated_samples": [
+      {
+        "candidate_id": "wall_8d01d52587a07d26b26e",
+        "length_pt": 3.6,
+        "families": [
+          "u2_physical_wall_linework",
+          "valid_junction_behavior"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:u2_physical_wall_linework,valid_junction_behavior",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_67bd6ccc2c6f9a163b13",
+        "length_pt": 3.6,
+        "families": [
+          "u2_physical_wall_linework",
+          "valid_junction_behavior"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:u2_physical_wall_linework,valid_junction_behavior",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_e507768e102c62c43e79",
+        "length_pt": 3.6,
+        "families": [
+          "u2_physical_wall_linework",
+          "valid_junction_behavior"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:u2_physical_wall_linework,valid_junction_behavior",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_5a15c9148b166095eef1",
+        "length_pt": 3.6,
+        "families": [
+          "u2_physical_wall_linework",
+          "valid_junction_behavior"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:u2_physical_wall_linework,valid_junction_behavior",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_72a1874c92e18fbfaf46",
+        "length_pt": 3.6,
+        "families": [
+          "u2_physical_wall_linework",
+          "valid_junction_behavior"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:u2_physical_wall_linework,valid_junction_behavior",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_ec2a8c6b165760ad7565",
+        "length_pt": 3.6,
+        "families": [
+          "u2_physical_wall_linework",
+          "valid_junction_behavior"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:u2_physical_wall_linework,valid_junction_behavior",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_34065ec478bc800e18cb",
+        "length_pt": 3.6,
+        "families": [
+          "u2_physical_wall_linework",
+          "valid_junction_behavior"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:u2_physical_wall_linework,valid_junction_behavior",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_1dd703497e6b6ca8923c",
+        "length_pt": 3.6,
+        "families": [
+          "u2_physical_wall_linework",
+          "valid_junction_behavior"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:u2_physical_wall_linework,valid_junction_behavior",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      }
+    ],
+    "conflict_samples": [
+      {
+        "candidate_id": "wall_2640bbfdc9ae8cf5dd7c",
+        "length_pt": 24.44,
+        "supporting": 3,
+        "opposing": 3
+      },
+      {
+        "candidate_id": "wall_6be05e5dfefb75c4fe7a",
+        "length_pt": 5.76,
+        "supporting": 2,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_542f5fb0e3d0cdb88c9a",
+        "length_pt": 5.64,
+        "supporting": 2,
+        "opposing": 2
+      },
+      {
+        "candidate_id": "wall_fb91d56feb2915e1528d",
+        "length_pt": 66.72,
+        "supporting": 3,
+        "opposing": 3
+      },
+      {
+        "candidate_id": "wall_6178f1432760cf8702aa",
+        "length_pt": 5.76,
+        "supporting": 1,
+        "opposing": 1
+      }
+    ]
+  },
+  {
+    "name": "Dungicha",
+    "elapsed_s": 105.818,
+    "raw_region_segments": 5133,
+    "stage_a_edges": 5514,
+    "excluded_segments": 0,
+    "wall_hypotheses": 1973,
+    "wall_status_breakdown": {
+      "conflict": 915,
+      "candidate": 1058
+    },
+    "wall_existence_breakdown": {
+      "conflict": 915,
+      "corroborated": 695,
+      "candidate": 363
+    },
+    "wall_pairs_detected": 517,
+    "rooms_conservative_total": 238,
+    "rooms_conservative_firm": 236,
+    "rooms_permissive_total": 308,
+    "corroborated_top_level_count": 0,
+    "existence_corroborated_but_capped_count": 695,
+    "corroborated_samples": [
+      {
+        "candidate_id": "wall_3497ad0dd45b1fbc5ecc",
+        "length_pt": 3.61,
+        "families": [
+          "native_layer_wall_support",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "chain_extension_blocked_by:unresolved_at_start",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:native_layer_wall_support,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_e3d31fa081f5c97cae83",
+        "length_pt": 9.6,
+        "families": [
+          "native_layer_wall_support",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:native_layer_wall_support,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_d72d95e2f0e4260c60ca",
+        "length_pt": 8.39,
+        "families": [
+          "native_layer_wall_support",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:native_layer_wall_support,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_42c66fd6be7a5da6b181",
+        "length_pt": 4.49,
+        "families": [
+          "native_layer_wall_support",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:native_layer_wall_support,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_647c9bb584d8b3374edd",
+        "length_pt": 9.19,
+        "families": [
+          "native_layer_wall_support",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:unresolved_at_start",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:native_layer_wall_support,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_7e17e3d94fc33bc1635c",
+        "length_pt": 13.69,
+        "families": [
+          "native_layer_wall_support",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:native_layer_wall_support,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_2f26d719a85b24585220",
+        "length_pt": 13.66,
+        "families": [
+          "native_layer_wall_support",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:native_layer_wall_support,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_1ffa50afc9123a27e3b2",
+        "length_pt": 2.98,
+        "families": [
+          "native_layer_wall_support",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "chain_extension_blocked_by:unresolved_at_start",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:native_layer_wall_support,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      }
+    ],
+    "conflict_samples": [
+      {
+        "candidate_id": "wall_bddb878a7576e2ebdd47",
+        "length_pt": 1622.24,
+        "supporting": 2,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_40604982dbe2e09b0f7e",
+        "length_pt": 1630.88,
+        "supporting": 2,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_dc04cead681c0763f427",
+        "length_pt": 8.47,
+        "supporting": 3,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_437aadbfd6068e43fbed",
+        "length_pt": 6.52,
+        "supporting": 3,
+        "opposing": 2
+      },
+      {
+        "candidate_id": "wall_fdf28f3ca3ef7996e9a6",
+        "length_pt": 6.58,
+        "supporting": 3,
+        "opposing": 2
+      }
+    ]
+  },
+  {
+    "name": "KSTVET",
+    "elapsed_s": 18.314,
+    "raw_region_segments": 2116,
+    "stage_a_edges": 2313,
+    "excluded_segments": 432,
+    "wall_hypotheses": 781,
+    "wall_status_breakdown": {
+      "conflict": 652,
+      "candidate": 129
+    },
+    "wall_existence_breakdown": {
+      "conflict": 652,
+      "candidate": 71,
+      "corroborated": 58
+    },
+    "wall_pairs_detected": 1381,
+    "rooms_conservative_total": 0,
+    "rooms_conservative_firm": 0,
+    "rooms_permissive_total": 83,
+    "corroborated_top_level_count": 0,
+    "existence_corroborated_but_capped_count": 58,
+    "corroborated_samples": [
+      {
+        "candidate_id": "wall_e71ff01006e2722aa52b",
+        "length_pt": 22.22,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:paired_wall_faces,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_a7ece5b410c8fad3302e",
+        "length_pt": 13.08,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:paired_wall_faces,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_95c0a14adbce2e1b88d5",
+        "length_pt": 8.0,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:paired_wall_faces,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_d5ea28f13104a8a244df",
+        "length_pt": 11.83,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:paired_wall_faces,u2_physical_wall_linework",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_2296f61799e37ab266fc",
+        "length_pt": 8.02,
+        "families": [
+          "u2_physical_wall_linework",
+          "valid_junction_behavior"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:u2_physical_wall_linework,valid_junction_behavior",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_ad2e0f805542bc598329",
+        "length_pt": 8.02,
+        "families": [
+          "u2_physical_wall_linework",
+          "valid_junction_behavior"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:u2_physical_wall_linework,valid_junction_behavior",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_fef689099950aad82b81",
+        "length_pt": 8.02,
+        "families": [
+          "u2_physical_wall_linework",
+          "valid_junction_behavior"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:u2_physical_wall_linework,valid_junction_behavior",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_2de996cee42d85986b1f",
+        "length_pt": 8.02,
+        "families": [
+          "u2_physical_wall_linework",
+          "valid_junction_behavior"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_families:u2_physical_wall_linework,valid_junction_behavior",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      }
+    ],
+    "conflict_samples": [
+      {
+        "candidate_id": "wall_b80edc2bf1f5ed7e1f14",
+        "length_pt": 63.8,
+        "supporting": 2,
+        "opposing": 2
+      },
+      {
+        "candidate_id": "wall_ba062ba71ced885a1be7",
+        "length_pt": 117.65,
+        "supporting": 2,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_637489cb14b3952c7fd6",
+        "length_pt": 4.42,
+        "supporting": 1,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_2a7dfc2c946b27814f8f",
+        "length_pt": 10.11,
+        "supporting": 2,
+        "opposing": 2
+      },
+      {
+        "candidate_id": "wall_8d16c11b228a444d4ce7",
+        "length_pt": 12.11,
+        "supporting": 4,
+        "opposing": 3
+      }
+    ]
+  }
+]
