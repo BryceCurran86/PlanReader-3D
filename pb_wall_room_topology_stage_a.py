@@ -9,9 +9,10 @@ and the specific extensions called for in Sections 6.5 and 6.11:
                                             unmodified)
     + a hatch/dimension-line pre-filter (Section 6.11) applied BEFORE splitting,
       while the original segment dicts still carry their stroke/dash/layer
-      metadata (that metadata does not survive the tuple-pair round trip
-      through ``split_segments_at_intersections``, so it must be consulted
-      first, not after).
+      metadata. Intersection splitting still uses the unmodified tuple-pair
+      engine; additive ``primitive_lineage`` is reattached afterwards so live
+      post-split fields stay the historical sentinels. The pre-filter must
+      therefore still run on the original dicts, not after the rebuild.
     + a collinear degree-two merge pass (Section 6.5) applied AFTER snapping,
       to collapse a spurious mid-run junction left by a redundant shared
       vertex (e.g. a CAD export that splits one straight wall into two
@@ -40,6 +41,17 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 from pb_accuracy_v13_engines_v145 import split_segments_at_intersections
 from pb_vector_geometry_v130 import snap_geometry
+from pb_wall_room_topology_primitive_lineage import (
+    LINEAGE_KEY,
+    attach_lineage_to_split_fragments,
+    collinear_merge_leaf_edge_ids,
+    empty_lineage,
+    fabricated_live_fields,
+    isolate_graph_lineage,
+    isolated_lineage,
+    lineage_from_edges,
+    observe_snap_collapsed_fragments,
+)
 
 # A gap this small between two collinear fragment endpoints is treated as a
 # drafting artifact (rounding, a CAD export's own tolerance) rather than a
@@ -145,36 +157,29 @@ def _point_pairs_to_segment_dicts(
     pairs: Sequence[Tuple[Tuple[float, float], Tuple[float, float]]],
     *,
     id_prefix: str = "split",
+    source_segments: Sequence[Dict[str, Any]] | None = None,
 ) -> List[Dict[str, Any]]:
-    """Rebuild minimal segment dicts after intersection-splitting.
+    """Rebuild historical split dicts, plus additive plural lineage when sources exist.
 
-    Stroke/dash/layer/width metadata does not survive this round trip -- it
-    was already consulted (Section 6.11's pre-filter) before splitting, and a
-    post-split fragment's provenance is "derived from the pre-split
-    structural-candidate segment set" rather than traced to one specific
-    parent segment id. Deeper provenance, if ever needed, remains available
-    by re-consulting the original (pre-split) segment list separately; this
-    function does not lose that list, it simply does not thread it through a
-    per-fragment id.
+    Live ``width`` / ``stroke`` / ``fill`` / ``layer`` / ``dashes`` remain the
+    fabricated sentinels so existing consumers do not start treating unknown
+    graphic state as supplied. Source evidence is in ``primitive_lineage``.
     """
-    out = []
-    for idx, (p1, p2) in enumerate(pairs):
-        out.append(
+    if source_segments is None:
+        live = fabricated_live_fields()
+        return [
             {
                 "id": f"{id_prefix}_{idx}",
-                "kind": "line",
                 "x1": p1[0],
                 "y1": p1[1],
                 "x2": p2[0],
                 "y2": p2[1],
-                "width": 0.0,
-                "stroke": None,
-                "fill": None,
-                "layer": "",
-                "dashes": "",
+                **live,
+                LINEAGE_KEY: empty_lineage(),
             }
-        )
-    return out
+            for idx, (p1, p2) in enumerate(pairs)
+        ]
+    return attach_lineage_to_split_fragments(pairs, source_segments, id_prefix=id_prefix)
 
 
 def merge_collinear_degree_two_nodes(
@@ -204,7 +209,11 @@ def merge_collinear_degree_two_nodes(
     naming the id of the edge that replaced their two incident edges.
     """
     nodes = [dict(n) for n in graph["nodes"]]
-    edges = [dict(e) for e in graph["edges"]]
+    edges = []
+    for edge in graph["edges"]:
+        copied = dict(edge)
+        copied[LINEAGE_KEY] = isolated_lineage(edge.get(LINEAGE_KEY))
+        edges.append(copied)
 
     def other_endpoint(edge: Dict[str, Any], node_idx: int) -> int:
         return edge["b"] if edge["a"] == node_idx else edge["a"]
@@ -270,6 +279,12 @@ def merge_collinear_degree_two_nodes(
                 e1.get("id", e1_idx),
                 e2.get("id", e2_idx),
             ]
+            # Immediate ids stay as above for existing callers. Leaf ids and
+            # primitive lineage union recursively so A+B then AB+C keeps A,B,C.
+            # Live graphic fields remain e1's historical sentinels; conflicts
+            # are recorded on primitive_lineage, not resolved by picking e1.
+            merged_edge["collinear_merge_leaf_edge_ids"] = collinear_merge_leaf_edge_ids(e1, e2)
+            merged_edge[LINEAGE_KEY] = isolated_lineage(lineage_from_edges(e1, e2))
 
             edges[e1_idx]["_removed"] = True
             edges[e2_idx]["_removed"] = True
@@ -325,10 +340,17 @@ def build_wall_graph_for_viewport(
     structural_segments, excluded_segments = filter_structural_segments(segments)
     point_pairs = _segments_to_point_pairs(structural_segments)
     split_pairs = split_segments_at_intersections(point_pairs)
-    split_segment_dicts = _point_pairs_to_segment_dicts(split_pairs)
+    split_segment_dicts = _point_pairs_to_segment_dicts(
+        split_pairs, source_segments=structural_segments
+    )
     snapped_graph = snap_geometry(split_segment_dicts, tolerance_pt=gap_snap_tolerance_pt)
+    isolate_graph_lineage(snapped_graph)
+    snap_collapsed_fragments = observe_snap_collapsed_fragments(
+        split_segment_dicts, snapped_graph
+    )
     merged_graph = merge_collinear_degree_two_nodes(
         snapped_graph, angle_tolerance_deg=collinear_angle_tolerance_deg
     )
     merged_graph["excluded_segments"] = excluded_segments
+    merged_graph["snap_collapsed_fragments"] = snap_collapsed_fragments
     return merged_graph

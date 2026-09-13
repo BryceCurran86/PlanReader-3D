@@ -513,6 +513,7 @@ def diagnose_wall_topology(snapshot: TopologySnapshot) -> Dict[str, Any]:
     junctions = list(snapshot.junctions)
     graph = snapshot.stage_a_graph or {}
     excluded = list(graph.get("excluded_segments") or [])
+    snap_collapsed = list(graph.get("snap_collapsed_fragments") or [])
     stage_a_edges = [edge for edge in graph.get("edges") or [] if not edge.get("_removed")]
 
     wall_to_component, components, neighbor_degree, junction_participation = _connected_components(
@@ -681,6 +682,7 @@ def diagnose_wall_topology(snapshot: TopologySnapshot) -> Dict[str, Any]:
             "scoped_primitives": snapshot.scoped_primitive_count,
             "stage_a_edges": len(stage_a_edges),
             "excluded_segments": len(excluded),
+            "snap_collapsed_fragments": len(snap_collapsed),
             "wall_candidates": len(wall_rows),
             "junctions": len(junctions),
             "topology_relationships": len(snapshot.relationships),
@@ -758,6 +760,7 @@ def diagnose_wall_topology(snapshot: TopologySnapshot) -> Dict[str, Any]:
         "isolated_candidate_ids": isolated_ids,
         "ambiguous_candidate_ids": sorted(set(ambiguous_candidates)),
         "opening_hosts": ambiguous_hosts,
+        "snap_collapsed_fragments": snap_collapsed,
         "highest_connectivity_candidate_ids": [row["candidate_id"] for row in highest_connectivity],
         "longest_candidate_ids": [row["candidate_id"] for row in longest],
         "largest_component_candidate_ids": [row["candidate_id"] for row in largest_component_members],
@@ -796,6 +799,7 @@ def report_to_markdown(report: Mapping[str, Any]) -> str:
             f"- scoped primitives: `{counts.get('scoped_primitives', 0)}`",
             f"- Stage-A edges: `{counts.get('stage_a_edges', 0)}`",
             f"- excluded segments: `{counts.get('excluded_segments', 0)}`",
+            f"- snap-collapsed fragments: `{counts.get('snap_collapsed_fragments', 0)}`",
             f"- WallCandidates: `{counts.get('wall_candidates', 0)}`",
             f"- junctions: `{counts.get('junctions', 0)}`",
             f"- room candidates: `{counts.get('room_candidates', 0)}`",
