@@ -39,6 +39,10 @@ from pb_wall_room_topology_room_faces import reconstruct_room_candidates
 from pb_wall_room_topology_room_label_binding import bind_room_labels_from_words
 from pb_wall_room_topology_room_wall_relationships import derive_room_wall_relationships
 from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
+from pb_wall_room_topology_typed_negative_evidence import (
+    GRAPH_ATOMS_KEY,
+    attach_typed_semantic_evidence,
+)
 from pb_wall_room_topology_wall_assembly import assemble_wall_candidates, rekey_junctions_to_wall_candidates
 
 DIAGNOSTIC_SCHEMA_VERSION = "1.0.0"
@@ -309,6 +313,13 @@ def collect_topology_from_segments(
     """
     segment_list = [dict(segment) for segment in segments]
     graph = build_wall_graph_for_viewport(segment_list)
+    graph = attach_typed_semantic_evidence(
+        graph,
+        document_id=document_id,
+        page_id=page_id,
+        viewport_id=viewport_id,
+        words=words,
+    )
     junctions, relationships = classify_junctions(
         graph,
         document_id=document_id,
@@ -514,6 +525,7 @@ def diagnose_wall_topology(snapshot: TopologySnapshot) -> Dict[str, Any]:
     graph = snapshot.stage_a_graph or {}
     excluded = list(graph.get("excluded_segments") or [])
     snap_collapsed = list(graph.get("snap_collapsed_fragments") or [])
+    semantic_atoms = list(graph.get(GRAPH_ATOMS_KEY) or [])
     stage_a_edges = [edge for edge in graph.get("edges") or [] if not edge.get("_removed")]
 
     wall_to_component, components, neighbor_degree, junction_participation = _connected_components(
@@ -683,6 +695,7 @@ def diagnose_wall_topology(snapshot: TopologySnapshot) -> Dict[str, Any]:
             "stage_a_edges": len(stage_a_edges),
             "excluded_segments": len(excluded),
             "snap_collapsed_fragments": len(snap_collapsed),
+            "semantic_evidence_atoms": len(semantic_atoms),
             "wall_candidates": len(wall_rows),
             "junctions": len(junctions),
             "topology_relationships": len(snapshot.relationships),
@@ -761,6 +774,13 @@ def diagnose_wall_topology(snapshot: TopologySnapshot) -> Dict[str, Any]:
         "ambiguous_candidate_ids": sorted(set(ambiguous_candidates)),
         "opening_hosts": ambiguous_hosts,
         "snap_collapsed_fragments": snap_collapsed,
+        "semantic_evidence": {
+            "kinds": dict(Counter(str(atom.get("kind")) for atom in semantic_atoms)),
+            "polarities": dict(
+                Counter(str((atom.get("metadata") or {}).get("polarity")) for atom in semantic_atoms)
+            ),
+            "atoms": semantic_atoms,
+        },
         "highest_connectivity_candidate_ids": [row["candidate_id"] for row in highest_connectivity],
         "longest_candidate_ids": [row["candidate_id"] for row in longest],
         "largest_component_candidate_ids": [row["candidate_id"] for row in largest_component_members],
@@ -800,6 +820,7 @@ def report_to_markdown(report: Mapping[str, Any]) -> str:
             f"- Stage-A edges: `{counts.get('stage_a_edges', 0)}`",
             f"- excluded segments: `{counts.get('excluded_segments', 0)}`",
             f"- snap-collapsed fragments: `{counts.get('snap_collapsed_fragments', 0)}`",
+            f"- semantic evidence atoms: `{counts.get('semantic_evidence_atoms', 0)}`",
             f"- WallCandidates: `{counts.get('wall_candidates', 0)}`",
             f"- junctions: `{counts.get('junctions', 0)}`",
             f"- room candidates: `{counts.get('room_candidates', 0)}`",
