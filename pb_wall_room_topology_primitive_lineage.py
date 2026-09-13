@@ -267,18 +267,37 @@ def fragment_contained_in_segment(
     )
 
 
+# Splitter residual slivers can be longer than the point-on-segment
+# tolerance yet still have an unstable computed direction. Those fragments
+# must not occupy a direction-keyed bucket that looks non-empty.
+_UNSTABLE_DIRECTION_LENGTH_PT = 0.05
+_BUCKET_ROUND_DECIMALS = 2
+_BUCKET_STEP = 10.0 ** (-_BUCKET_ROUND_DECIMALS)
+_BUCKET_NEIGHBOR_OFFSETS = (-_BUCKET_STEP, 0.0, _BUCKET_STEP)
+
+
 def _line_bucket_key(x1: float, y1: float, x2: float, y2: float) -> Tuple[Any, ...]:
-    """Group collinear strokes so extra-parent search is not a full fragment×source scan."""
+    """Group collinear strokes so extra-parent search is not a full fragment×source scan.
+
+    Coarse 2-decimal cells plus neighbor lookup are required because two
+    genuinely collinear parents can disagree in computed offset by ~3e-4.
+    A 4-decimal single-cell lookup can return a non-empty incomplete set,
+    so empty-only fallback never runs.
+    """
     dx = x2 - x1
     dy = y2 - y1
     length = math.hypot(dx, dy)
-    if length <= _CONTAINMENT_TOL_PT:
-        return ("point", round(x1, 4), round(y1, 4))
+    if length <= _UNSTABLE_DIRECTION_LENGTH_PT:
+        return ("point", round(x1, _BUCKET_ROUND_DECIMALS), round(y1, _BUCKET_ROUND_DECIMALS))
     ux, uy = dx / length, dy / length
     if ux < 0 or (ux == 0.0 and uy < 0):
         ux, uy = -ux, -uy
     offset = x1 * (-uy) + y1 * ux
-    return (round(ux, 4), round(uy, 4), round(offset, 4))
+    return (
+        round(ux, _BUCKET_ROUND_DECIMALS),
+        round(uy, _BUCKET_ROUND_DECIMALS),
+        round(offset, _BUCKET_ROUND_DECIMALS),
+    )
 
 
 def source_line_bucket(segment: Mapping[str, Any]) -> Tuple[Any, ...]:
@@ -293,6 +312,29 @@ def source_line_bucket(segment: Mapping[str, Any]) -> Tuple[Any, ...]:
 def fragment_line_bucket(fragment: SegmentPair) -> Tuple[Any, ...]:
     (x1, y1), (x2, y2) = fragment
     return _line_bucket_key(x1, y1, x2, y2)
+
+
+def fragment_line_bucket_neighbors(fragment: SegmentPair) -> List[Tuple[Any, ...]]:
+    """Primary line bucket plus adjacent quantized cells.
+
+    A matching source and fragment can land on opposite sides of one
+    rounding boundary. Neighbor cells keep the exact containment test as
+    the authority; this only widens the candidate set.
+    """
+    key = fragment_line_bucket(fragment)
+    if key[0] == "point":
+        return [key]
+    kx, ky, koffset = key
+    return [
+        (
+            round(kx + dx, _BUCKET_ROUND_DECIMALS),
+            round(ky + dy, _BUCKET_ROUND_DECIMALS),
+            round(koffset + doffset, _BUCKET_ROUND_DECIMALS),
+        )
+        for dx in _BUCKET_NEIGHBOR_OFFSETS
+        for dy in _BUCKET_NEIGHBOR_OFFSETS
+        for doffset in _BUCKET_NEIGHBOR_OFFSETS
+    ]
 
 
 def sources_for_fragment(
@@ -344,7 +386,15 @@ def attach_lineage_to_split_fragments(
     out: List[Dict[str, Any]] = []
     for idx, pair in enumerate(split_pairs):
         p1, p2 = pair
-        candidates = buckets.get(fragment_line_bucket(pair), ())
+        seen_candidates: set[int] = set()
+        candidates: List[Mapping[str, Any]] = []
+        for neighbor_key in fragment_line_bucket_neighbors(pair):
+            for candidate in buckets.get(neighbor_key, ()):
+                marker = id(candidate)
+                if marker in seen_candidates:
+                    continue
+                seen_candidates.add(marker)
+                candidates.append(candidate)
         parents = sources_for_fragment(pair, candidates)
         if not parents:
             # Splitter endpoints are rounded to 8 decimals. A fragment can
