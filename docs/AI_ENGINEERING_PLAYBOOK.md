@@ -173,7 +173,7 @@ bind_hosted_opening_to_walls                  pb_hosted_opening_wall_binding
 - Live deductions today use the schedule/tag path: `pb_opening_deduction_v174.apply_deductions` / `passes_eligibility_gate`, `pb_opening_production_v175`, and `GenericOpeningDeductionPipeline` from `pb_planreader_pdf_extractor`. That path is a different axis from hosted spans.
 - Opening **counts** in shadow use `ShadowOpeningCountProvider` → `GoldFreeShadowRunner` → `evaluate_opening_count_migration_gate`. Gate state is `new_shadow`. `CanonicalOpening.takeoff_eligible` is False.
 
-W7 topology gaps and Section H hatch/fill spans answer “which wall hosts this opening?” from incompatible evidence and do not reconcile. Do not merge them silently. The shadow chain above collects evidence for later comparison — it still does not resolve that reconciliation, and per AGENTS.md's own authority table, `pb_hosted_opening_geometry` / `pb_hosted_opening_wall_binding` output stays unwired for any firm authority regardless of what shadow-collects it.
+W7 topology gaps and Section H hatch/fill spans answer “which wall hosts this opening?” from incompatible evidence and do not reconcile. Do not merge them silently. The shadow chain above collects evidence for later comparison — it still does not resolve that reconciliation. `resolve_hosted_opening_spans` is shadow-collected, not unpublished-because-unwired. `bind_hosted_opening_to_walls` remains unwired. Neither may publish F.9 / W10 / commercial authority.
 
 ---
 
@@ -222,9 +222,9 @@ Crossing a later boundary does not promote an earlier one.
 |---|---|---|
 | Scale | `bind_viewport_scale` → `resolve_page_scale_calibration` | `pb_vector_geometry_v130.solve_scale` / `analyse_pdf_page` |
 | Wall identity | W4 `assemble_wall_candidates` | `#273` ranking status; legacy envelope detectors |
-| Opening host | none live | W7 gaps **and** Section H spans (parallel, unwired) |
-| Opening deduction | B5 / v175 / `GenericOpeningDeductionPipeline` | hosted-opening geometry |
-| Gross/net wall area | `pb_geometry_takeoff_model.calculate_wall_takeoff`; editable-3D / v174 helpers | missing `pb_wall_*_area_quantity.py` |
+| Opening host | none as a published host. Distinguish W7 `detect_opening_host_candidates` (candidate gaps; always `ambiguous_host`), shadow-collected Section H `resolve_hosted_opening_spans` (via `extract_from_pdf` → `collect_hosted_opening_shadow_evidence`), and `bind_hosted_opening_to_walls` (unwired; diagnostic only) | Do not treat W7 gaps and Section H spans as one reconciled host, or either as F.9 / W10 / commercial authority. Do not describe `resolve_hosted_opening_spans` as unwired. |
+| Opening deduction | B5 / v175 / `GenericOpeningDeductionPipeline` | hosted-opening geometry as a deduction publisher |
+| Gross/net wall area | `build_gross_wall_area_quantity` (FIRM length × FIRM height for the same wall) and `build_net_wall_area_quantity` (FIRM gross + corroborated complete opening set + one FIRM uniquely-hosted deduction per declared opening) | `calculate_wall_takeoff` / editable-3D / v174 helpers are formula helpers, not a competing publication authority |
 | Room faces | W5 `reconstruct_room_candidates` | older `pb_room_face_takeoff` as a second room graph |
 
 ---
@@ -295,7 +295,7 @@ Safe first homes for new topology work: diagnostic harnesses, shadow providers, 
 
 ## 12. Smallest safe place for new wall/opening work
 
-**OBSERVED:** W1–W10 are not live-wired into `pb_planreader_pdf_extractor`. Wall length/height quantity modules exist but require caller-built `EntityEvidence` and firm measurement input. Hosted-opening geometry is diagnostic only.
+**OBSERVED:** W1–W10 are not live-wired into `pb_planreader_pdf_extractor`. Wall length/height quantity modules exist but require caller-built `EntityEvidence` and firm measurement input. `resolve_hosted_opening_spans` is invoked in shadow scope through `collect_hosted_opening_shadow_evidence`. `bind_hosted_opening_to_walls` remains unwired. Neither may publish F.9 / W10 / commercial authority.
 
 **INFERRED smallest next step, not a change order:** keep new signals in shadow. If a later task consumes ranked walls, consume only after an independent validation that the tier means “physical wall,” and still leave W10 `takeoff_eligible=False`. Do not feed `#273` tiers into hosted-opening diagnostics until that review happens.
 
@@ -327,7 +327,7 @@ Implement in this order, **shadow first**. Do not publish through
 | 3. Typed negative evidence | Codify dimension, glazing, furniture, table, grid roles as **opposing evidence atoms** on retained candidates | W2 metadata prefilter stays metadata-only; ranking/diagnostics consume negatives | Reject/delete noise **before** topological assembly; nearest-role wins |
 | 4. Joint hosted-opening and schedule graph | Unify span, host, fill, tag, and schedule row by explicit tag/leader/coordinate ownership | `resolve_hosted_opening_spans`, `bind_hosted_opening_to_walls`, existing tag/schedule extractors | Proximity / first-bbox / single-envelope bind (`bind_openings_to_walls` steps 2–3) |
 | 5. Figured-dimension and vertical binding | Bind witness bundles and FFL/storey datums to entities; height only from owned evidence | `extract_dimension_evidence_bundle`, `resolve_linear_measurement_input`, `build_wall_height_quantity` | Typical door width as scale; `default_ceiling_height_m` as firm |
-| 6. Stage-wise accuracy and abstention metrics | Precision, coverage, and blocker rates at each boundary in §6 | diagnostic harness / shadow runner | Tune gold or thresholds to move 24/61 |
+| 6. Stage-wise accuracy and abstention metrics | Precision, coverage, and blocker rates at each boundary in §6 | diagnostic harness / shadow runner | Do not tune gold or thresholds to move a development dashboard. Repository development scores are diagnostic evidence only and are never algorithm inputs. |
 
 **Expected abstentions** stay those in §8. First implementation task, when
 authorized: priority 1 only, with the test matrix in §9, and proof that
