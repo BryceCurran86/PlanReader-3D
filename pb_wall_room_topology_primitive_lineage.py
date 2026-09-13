@@ -267,12 +267,51 @@ def fragment_contained_in_segment(
     )
 
 
+def _line_bucket_key(x1: float, y1: float, x2: float, y2: float) -> Tuple[Any, ...]:
+    """Group collinear strokes so extra-parent search is not a full fragment×source scan."""
+    dx = x2 - x1
+    dy = y2 - y1
+    length = math.hypot(dx, dy)
+    if length <= _CONTAINMENT_TOL_PT:
+        return ("point", round(x1, 4), round(y1, 4))
+    ux, uy = dx / length, dy / length
+    if ux < 0 or (ux == 0.0 and uy < 0):
+        ux, uy = -ux, -uy
+    offset = x1 * (-uy) + y1 * ux
+    return (round(ux, 4), round(uy, 4), round(offset, 4))
+
+
+def source_line_bucket(segment: Mapping[str, Any]) -> Tuple[Any, ...]:
+    return _line_bucket_key(
+        float(segment["x1"]),
+        float(segment["y1"]),
+        float(segment["x2"]),
+        float(segment["y2"]),
+    )
+
+
+def fragment_line_bucket(fragment: SegmentPair) -> Tuple[Any, ...]:
+    (x1, y1), (x2, y2) = fragment
+    return _line_bucket_key(x1, y1, x2, y2)
+
+
 def sources_for_fragment(
     fragment: SegmentPair,
     source_segments: Sequence[Mapping[str, Any]],
 ) -> List[Mapping[str, Any]]:
     """Return every source that can own this fragment. Never first/nearest/smallest."""
     return [segment for segment in source_segments if fragment_contained_in_segment(fragment, segment)]
+
+
+def isolated_lineage(payload: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    return copy.deepcopy(payload) if payload else empty_lineage()
+
+
+def isolate_graph_lineage(graph: Mapping[str, Any]) -> Dict[str, Any]:
+    """Give every edge its own nested lineage container after shallow snap/merge copies."""
+    for edge in graph.get("edges") or []:
+        edge[LINEAGE_KEY] = isolated_lineage(edge.get(LINEAGE_KEY))
+    return dict(graph)
 
 
 def fabricated_live_fields() -> Dict[str, Any]:
@@ -293,11 +332,25 @@ def attach_lineage_to_split_fragments(
     *,
     id_prefix: str = "split",
 ) -> List[Dict[str, Any]]:
-    """Rebuild the historical split-dict shape plus additive plural lineage."""
+    """Rebuild the historical split-dict shape plus additive plural lineage.
+
+    Official split geometry is caller-supplied. Extra parents are taken only
+    from the same collinear bucket so this is not a second global n² pass.
+    """
+    buckets: Dict[Tuple[Any, ...], List[Mapping[str, Any]]] = {}
+    for segment in source_segments:
+        buckets.setdefault(source_line_bucket(segment), []).append(segment)
+
     out: List[Dict[str, Any]] = []
     for idx, pair in enumerate(split_pairs):
         p1, p2 = pair
-        parents = sources_for_fragment(pair, source_segments)
+        candidates = buckets.get(fragment_line_bucket(pair), ())
+        parents = sources_for_fragment(pair, candidates)
+        if not parents:
+            # Splitter endpoints are rounded to 8 decimals. A fragment can
+            # leave its source's coarse line bucket while still lying on the
+            # source. Scan sources only for that miss — not every fragment.
+            parents = sources_for_fragment(pair, source_segments)
         fragment = {
             "id": f"{id_prefix}_{idx}",
             "x1": p1[0],
@@ -305,7 +358,7 @@ def attach_lineage_to_split_fragments(
             "x2": p2[0],
             "y2": p2[1],
             **fabricated_live_fields(),
-            LINEAGE_KEY: lineage_from_source_segments(parents),
+            LINEAGE_KEY: isolated_lineage(lineage_from_source_segments(parents)),
         }
         out.append(fragment)
     return out
@@ -325,7 +378,7 @@ def observe_snap_collapsed_fragments(
             {
                 "id": fragment_id,
                 "reason": SNAP_COLLAPSE_REASON,
-                LINEAGE_KEY: copy.deepcopy(fragment.get(LINEAGE_KEY) or empty_lineage()),
+                LINEAGE_KEY: isolated_lineage(fragment.get(LINEAGE_KEY)),
                 "x1": fragment.get("x1"),
                 "y1": fragment.get("y1"),
                 "x2": fragment.get("x2"),

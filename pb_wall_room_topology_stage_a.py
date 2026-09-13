@@ -47,6 +47,8 @@ from pb_wall_room_topology_primitive_lineage import (
     collinear_merge_leaf_edge_ids,
     empty_lineage,
     fabricated_live_fields,
+    isolate_graph_lineage,
+    isolated_lineage,
     lineage_from_edges,
     observe_snap_collapsed_fragments,
 )
@@ -207,7 +209,11 @@ def merge_collinear_degree_two_nodes(
     naming the id of the edge that replaced their two incident edges.
     """
     nodes = [dict(n) for n in graph["nodes"]]
-    edges = [dict(e) for e in graph["edges"]]
+    edges = []
+    for edge in graph["edges"]:
+        copied = dict(edge)
+        copied[LINEAGE_KEY] = isolated_lineage(edge.get(LINEAGE_KEY))
+        edges.append(copied)
 
     def other_endpoint(edge: Dict[str, Any], node_idx: int) -> int:
         return edge["b"] if edge["a"] == node_idx else edge["a"]
@@ -278,7 +284,7 @@ def merge_collinear_degree_two_nodes(
             # Live graphic fields remain e1's historical sentinels; conflicts
             # are recorded on primitive_lineage, not resolved by picking e1.
             merged_edge["collinear_merge_leaf_edge_ids"] = collinear_merge_leaf_edge_ids(e1, e2)
-            merged_edge[LINEAGE_KEY] = lineage_from_edges(e1, e2)
+            merged_edge[LINEAGE_KEY] = isolated_lineage(lineage_from_edges(e1, e2))
 
             edges[e1_idx]["_removed"] = True
             edges[e2_idx]["_removed"] = True
@@ -338,6 +344,7 @@ def build_wall_graph_for_viewport(
         split_pairs, source_segments=structural_segments
     )
     snapped_graph = snap_geometry(split_segment_dicts, tolerance_pt=gap_snap_tolerance_pt)
+    isolate_graph_lineage(snapped_graph)
     snap_collapsed_fragments = observe_snap_collapsed_fragments(
         split_segment_dicts, snapped_graph
     )
