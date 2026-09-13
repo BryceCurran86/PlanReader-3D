@@ -696,6 +696,9 @@ def diagnose_wall_topology(snapshot: TopologySnapshot) -> Dict[str, Any]:
             "excluded_segments": len(excluded),
             "snap_collapsed_fragments": len(snap_collapsed),
             "semantic_evidence_atoms": len(semantic_atoms),
+            "excluded_semantic_evidence_atoms": sum(
+                1 for atom in semantic_atoms if (atom.get("metadata") or {}).get("retained") is False
+            ),
             "wall_candidates": len(wall_rows),
             "junctions": len(junctions),
             "topology_relationships": len(snapshot.relationships),
@@ -779,6 +782,13 @@ def diagnose_wall_topology(snapshot: TopologySnapshot) -> Dict[str, Any]:
             "polarities": dict(
                 Counter(str((atom.get("metadata") or {}).get("polarity")) for atom in semantic_atoms)
             ),
+            "excluded_target_ids": sorted(
+                {
+                    str((atom.get("metadata") or {}).get("target_edge_id") or "")
+                    for atom in semantic_atoms
+                    if (atom.get("metadata") or {}).get("retained") is False
+                }
+            ),
             "atoms": semantic_atoms,
         },
         "highest_connectivity_candidate_ids": [row["candidate_id"] for row in highest_connectivity],
@@ -821,6 +831,7 @@ def report_to_markdown(report: Mapping[str, Any]) -> str:
             f"- excluded segments: `{counts.get('excluded_segments', 0)}`",
             f"- snap-collapsed fragments: `{counts.get('snap_collapsed_fragments', 0)}`",
             f"- semantic evidence atoms: `{counts.get('semantic_evidence_atoms', 0)}`",
+            f"- excluded-segment semantic evidence atoms: `{counts.get('excluded_semantic_evidence_atoms', 0)}`",
             f"- WallCandidates: `{counts.get('wall_candidates', 0)}`",
             f"- junctions: `{counts.get('junctions', 0)}`",
             f"- room candidates: `{counts.get('room_candidates', 0)}`",
