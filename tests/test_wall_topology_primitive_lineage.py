@@ -15,11 +15,13 @@ from pb_wall_room_topology_primitive_lineage import (
     LINEAGE_KEY,
     SNAP_COLLAPSE_REASON,
     fabricated_live_fields,
+    lineage_from_source_segments,
 )
 from pb_wall_room_topology_stage_a import (
     build_wall_graph_for_viewport,
     filter_structural_segments,
     is_structural_candidate_segment,
+    merge_collinear_degree_two_nodes,
 )
 from pb_wall_topology_diagnostics import (
     collect_topology_from_segments,
@@ -72,6 +74,29 @@ class TestOneSourceMultipleFragments:
         assert all(_ids(edge) == ["v"] for edge in vertical)
         for edge in graph["edges"]:
             _assert_live_sentinels(edge)
+
+    def test_near_horizontal_crossing_keeps_nonempty_lineage(self) -> None:
+        graph = build_wall_graph_for_viewport(
+            [_seg("h", 0, 0, 100, 0.03), _seg("v", 50, -10, 50, 10)]
+        )
+        assert graph["edges"]
+        assert all(_ids(edge) for edge in graph["edges"])
+        assert any(_ids(edge) == ["h"] for edge in graph["edges"])
+        assert any(_ids(edge) == ["v"] for edge in graph["edges"])
+
+
+class TestPartialCollinearOverlap:
+    def test_partial_overlap_keeps_separate_provenance_and_does_not_invent_a_shared_fragment(self) -> None:
+        # Geometry may stay two overlapping edges. U1 must not invent a third
+        # overlap fragment or treat B+C as the same provenance as one A.
+        graph = build_wall_graph_for_viewport(
+            [_seg("a", 0, 0, 10, 0), _seg("b", 5, 0, 15, 0)]
+        )
+        assert len(graph["edges"]) == 2
+        id_sets = sorted(_ids(edge) for edge in graph["edges"])
+        assert id_sets == [["a"], ["b"]]
+        for edge in graph["edges"]:
+            assert len(_ids(edge)) == 1
 
 
 class TestDuplicateAndOverlappingSources:
@@ -183,6 +208,15 @@ class TestUnknownnessAndConflicts:
         assert record["dashes_present"] is False
         assert record["stroke_present"] is False
 
+    def test_explicit_zero_width_present_is_agreed_not_unknown(self) -> None:
+        segment = _seg("s", 0, 0, 8, 0, width=0.0)
+        segment["width_present"] = True
+        graph = build_wall_graph_for_viewport([segment])
+        lineage = _lineage(graph["edges"][0])
+        assert lineage["source_records"][0]["width_present"] is True
+        assert lineage["attribute_status"]["width"] == "agreed"
+        assert "width" not in lineage["attribute_conflicts"]
+
     def test_conflicting_metadata_is_unresolved(self) -> None:
         segments = [
             _seg("a", 0, 0, 5, 0, width=1.0, stroke=(0, 0, 0), layer="A", dashes="[] 0"),
@@ -251,6 +285,49 @@ class TestCollinearMergeLineage:
         records_by_id = {record["id"]: record for record in _lineage(edge)["source_records"]}
         assert set(records_by_id) == {"a", "b", "c"}
 
+    def test_plural_children_recursive_merge_unions_all_four_parents(self) -> None:
+        left = {
+            "id": "e0",
+            "a": 0,
+            "b": 1,
+            "x1": 0.0,
+            "y1": 0.0,
+            "x2": 5.0,
+            "y2": 0.0,
+            "angle_deg": 0.0,
+            "length_pt": 5.0,
+            LINEAGE_KEY: lineage_from_source_segments(
+                [_seg("A", 0, 0, 5, 0), _seg("B", 0, 0, 5, 0)]
+            ),
+        }
+        right = {
+            "id": "e1",
+            "a": 1,
+            "b": 2,
+            "x1": 5.0,
+            "y1": 0.0,
+            "x2": 10.0,
+            "y2": 0.0,
+            "angle_deg": 0.0,
+            "length_pt": 5.0,
+            LINEAGE_KEY: lineage_from_source_segments(
+                [_seg("C", 5, 0, 10, 0), _seg("D", 5, 0, 10, 0)]
+            ),
+        }
+        merged = merge_collinear_degree_two_nodes(
+            {
+                "nodes": [
+                    {"id": 0, "x": 0.0, "y": 0.0, "samples": 1, "degree": 1},
+                    {"id": 1, "x": 5.0, "y": 0.0, "samples": 1, "degree": 2},
+                    {"id": 2, "x": 10.0, "y": 0.0, "samples": 1, "degree": 1},
+                ],
+                "edges": [left, right],
+                "adjacency": {0: [0], 1: [0, 1], 2: [1]},
+            }
+        )
+        assert len(merged["edges"]) == 1
+        assert _ids(merged["edges"][0]) == ["A", "B", "C", "D"]
+
 
 class TestReplayImmutabilityViewportAndCurves:
     def test_deterministic_replay(self) -> None:
@@ -267,6 +344,17 @@ class TestReplayImmutabilityViewportAndCurves:
         before = copy.deepcopy(segments)
         build_wall_graph_for_viewport(segments)
         assert segments == before
+
+    def test_nested_lineage_containers_are_not_aliased(self) -> None:
+        segments = [_seg("h", -5, 0, 5, 0), _seg("v", 0, -5, 0, 5)]
+        graph = build_wall_graph_for_viewport(segments)
+        first, second = graph["edges"][0], graph["edges"][1]
+        first[LINEAGE_KEY]["source_records"][0]["layer"] = "MUTATED"
+        first[LINEAGE_KEY]["source_primitive_ids"].append("injected")
+        assert all(record.get("layer") != "MUTATED" for record in second[LINEAGE_KEY]["source_records"])
+        assert "injected" not in second[LINEAGE_KEY]["source_primitive_ids"]
+        assert segments[0]["layer"] == "WALL"
+        assert segments[1]["layer"] == "WALL"
 
     def test_mixed_viewport_isolation_without_invented_ownership(self) -> None:
         viewport_a = [_seg("a1", 0, 0, 10, 0, viewport_id="vpA", document_id="doc", page_id="p1")]
@@ -345,6 +433,21 @@ class TestExistingSplitterAndFilterUnchanged:
         )
         assert [segment["id"] for segment in kept] == ["wall"]
         assert {segment["id"] for segment in excluded} == {"hatch", "dim", "text"}
+
+    def test_excluded_sources_remain_observable_and_absent_from_edge_lineage(self) -> None:
+        graph = build_wall_graph_for_viewport(
+            [
+                _seg("wall", 0, 0, 10, 0),
+                _seg("hatch", 1, 1, 2, 2, layer="hatch"),
+                _seg("dim", 2, 2, 4, 2, layer="dimensions"),
+            ]
+        )
+        excluded_ids = {segment["id"] for segment in graph["excluded_segments"]}
+        assert excluded_ids == {"hatch", "dim"}
+        assert all("reason_codes" in segment for segment in graph["excluded_segments"])
+        lineage_ids = {source_id for edge in graph["edges"] for source_id in _ids(edge)}
+        assert lineage_ids == {"wall"}
+        assert "hatch" not in lineage_ids
 
     def test_shuffled_order_is_lineage_invariant(self) -> None:
         segments = [_seg("h", -5, 0, 5, 0), _seg("v", 0, -5, 0, 5), _seg("t", 5, 0, 5, 4)]
