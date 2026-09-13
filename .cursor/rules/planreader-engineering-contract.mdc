@@ -1,0 +1,14 @@
+---
+description: Enforce the PlanReader engineering contract before any proposal or code change
+alwaysApply: true
+---
+
+# PlanReader contract
+
+Read `AGENTS.md` and `docs/AI_ENGINEERING_PLAYBOOK.md` before proposing or changing code.
+
+Prove compliance in the first reply: files read, functions traced, authority boundaries, untouched files.
+
+Loop: trace → propose → synthetic proof → shadow run → authority review.
+
+Detection is not measurement authority. Abstain on unknown, conflicting, stale, or ambiguous evidence. Do not use filenames, project names, benchmark IDs, or expected BOQ values as prediction inputs. Do not change production code and benchmark-defining files in the same PR. New topology work stays in shadow. Do not treat #273 ranking tiers as wall authority.
