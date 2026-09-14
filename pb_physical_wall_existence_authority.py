@@ -2,11 +2,14 @@
 
 ``WallCandidate.status == CORROBORATED`` cannot be used as existence proof:
 that top-level status is coupled to ``thickness_authority`` by
-``WallCandidate.__post_init__``. This module mints a dedicated
-``EvidenceAtom`` whose kind is physical-wall existence only.
+``WallCandidate.__post_init__``. This module exposes:
 
-It reuses ``EvidenceAtom`` / ``EvidenceResolutionStatus`` / ``stable_contract_id``
-and the #286 causal-domain map. It does not read
+- ``wall_physical_existence_status`` — typed ``EvidenceResolutionStatus``
+- ``adapt_wall_candidate_to_entity_evidence`` — WallCandidate → EntityEvidence
+- ``resolve_physical_wall_existence`` — diagnostic existence atom
+
+It reuses ``EntityEvidence`` / ``EvidenceResolutionStatus`` / ``stable_contract_id``
+and the canonical causal-domain map. It does not read
 ``metadata["physical_evidence_status"]``, invent thickness, or publish
 quantities.
 """
@@ -24,11 +27,13 @@ from pb_canonical_wall_room_evidence_model import (
 )
 from pb_migration_contracts import (
     DocumentEvidence,
+    EntityEvidence,
     EvidenceAtom,
     EvidenceResolutionStatus,
     ViewportEvidence,
     stable_contract_id,
 )
+from pb_migration_provider_envelope import ProviderContext
 from pb_wall_room_topology_contracts import WallCandidate
 from pb_wall_room_topology_typed_negative_evidence import KIND_PHYSICAL_WALL
 
@@ -199,4 +204,79 @@ def resolve_physical_wall_existence(
             "corroborating_domains": sorted(d.value for d in corroborating_domains),
             "schema_version": PHYSICAL_WALL_EXISTENCE_SCHEMA_VERSION,
         },
+    )
+
+
+def wall_physical_existence_status(
+    wall: WallCandidate,
+    *,
+    evidence_atoms: Sequence[_AtomLike],
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+) -> EvidenceResolutionStatus:
+    """Typed existence status. Does not read wall.metadata or wall.status."""
+    return resolve_physical_wall_existence(
+        wall=wall,
+        evidence_atoms=evidence_atoms,
+        document=document,
+        viewport=viewport,
+    ).status
+
+
+def adapt_wall_candidate_to_entity_evidence(
+    wall: WallCandidate,
+    *,
+    evidence_atoms: Sequence[_AtomLike],
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+    context: ProviderContext,
+    additional_owned_evidence_ids: Sequence[str] = (),
+) -> Optional[EntityEvidence]:
+    """WallCandidate → EntityEvidence using typed existence, not wall.status.
+
+    ``evidence_ids`` are the wall's real supporting/conflicting ids plus any
+    extra ids the caller already owns (for example a figured dimension).
+    Missing ownership or empty real provenance returns None (abstain).
+    """
+    if wall.viewport_id != viewport.viewport_id:
+        return None
+    if document.document_id != context.document_id:
+        return None
+    if viewport.document_id != context.document_id:
+        return None
+    if document.source_sha256 != context.source_sha256:
+        return None
+    if viewport.viewport_id not in context.trusted_viewport_ids():
+        return None
+
+    existence = resolve_physical_wall_existence(
+        wall=wall,
+        evidence_atoms=evidence_atoms,
+        document=document,
+        viewport=viewport,
+    )
+    real_ids = tuple(dict.fromkeys((*wall.supporting_evidence_ids, *wall.conflicting_evidence_ids)))
+    extra = tuple(str(v) for v in additional_owned_evidence_ids if str(v))
+    evidence_ids = tuple(dict.fromkeys((*real_ids, *extra)))
+    if not evidence_ids:
+        return None
+    if not set(evidence_ids).issubset(set(document.evidence_ids)):
+        return None
+
+    conflict_ids = tuple(wall.conflicting_evidence_ids)
+    status = existence.status
+    if status == EvidenceResolutionStatus.CORROBORATED:
+        conflict_ids = ()
+    elif status == EvidenceResolutionStatus.CONFLICT and not conflict_ids:
+        status = EvidenceResolutionStatus.ABSTAINED
+
+    return EntityEvidence(
+        candidate_entity_id=wall.candidate_id,
+        candidate_type="wall",
+        evidence_ids=evidence_ids,
+        status=status,
+        confidence=existence.confidence,
+        conflict_evidence_ids=conflict_ids,
+        reason_codes=existence.reason_codes,
+        metadata={"viewport_id": wall.viewport_id, "existence_evidence_id": existence.evidence_id},
     )

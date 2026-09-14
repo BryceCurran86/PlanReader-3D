@@ -99,7 +99,9 @@ PDF page
   bind_viewport_scale                         pb_viewport_scale_binding
     → resolve_page_scale_calibration          pb_page_scale_calibration_authority
 
-  EntityEvidence                              caller-built; W2–W10 do not emit it
+  wall_physical_existence_status /
+  adapt_wall_candidate_to_entity_evidence     pb_physical_wall_existence_authority
+  EntityEvidence                              adapter-built from typed existence; W2–W10 do not emit it
   build_wall_length_quantity                  pb_wall_length_quantity
     → resolve_linear_measurement_input        pb_measurement_input_authority
     → QuantityEvidence
@@ -123,7 +125,7 @@ PDF page
 - W7 always emits `host_status="ambiguous_host"`. It is not a hosted-opening quantity.
 - W9 does not mutate topology.
 - W10 copies into `CanonicalWall` / `CanonicalSpace` with `takeoff_eligible=False`, `deduction_authority=False`, `height_m=None`, `openings=[]`.
-- `build_wall_length_quantity` abstains unless a CORROBORATED `physical_wall_existence` EvidenceAtom is owned for that wall **and** `resolve_linear_measurement_input` returns a firm value. `WallCandidate.status` is not existence authority. Duplicate wall ids or overlapping source segments abstain in the batch builder.
+- `build_wall_length_quantity` abstains unless `EntityEvidence.status` is `CORROBORATED` from the typed physical-existence adapter **and** `resolve_linear_measurement_input` returns a firm value. `WallCandidate.status` is not existence authority. Duplicate wall ids or overlapping source segments abstain in the batch builder.
 - `build_wall_height_quantity` accepts only owned explicit height kinds or a corroborated datum pair. Tokens such as `default` / `assumed` / `legacy_default` are forbidden.
 
 **INFERRED:** there is no single production function that runs PDF → JobHub wall length today. `pb_wall_topology_diagnostics` is an observability harness, not live extraction.
