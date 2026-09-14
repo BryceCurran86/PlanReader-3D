@@ -349,11 +349,24 @@ def verify_local_manifest_against_parent_snapshot(
 ) -> AuthorityVerification:
     """Verify parent -> enumerator -> local universe -> manifest.
 
-    The default identities match the first physical-wall foundation tests, but
-    production integrations should pass their expected producer/enumerator
-    identities explicitly.  The quantity publication boundary is deliberately
-    not wired to this function in this branch.
+    The verifier identity is itself part of the trust boundary.  An integration
+    that cannot name the producer and enumerator/version it expects is UNBOUND;
+    an empty expectation must never be satisfiable by caller-controlled data.
+    The quantity publication boundary is deliberately not wired to this
+    function in this branch.
     """
+    expected_identity = (
+        expected_parent_producer_id,
+        expected_parent_producer_version,
+        expected_enumerator_id,
+        expected_enumerator_version,
+    )
+    if any(not str(value or "").strip() for value in expected_identity):
+        return AuthorityVerification(
+            AuthorityBindingStatus.UNBOUND,
+            ("expected_authority_identity_unbound",),
+        )
+
     parent_verification = _verify_parent_snapshot(
         parent_snapshot,
         expected_producer_id=expected_parent_producer_id,
