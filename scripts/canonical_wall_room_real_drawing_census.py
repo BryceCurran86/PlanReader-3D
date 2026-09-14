@@ -75,7 +75,18 @@ def _census_one(spec) -> Dict[str, Any]:
         pe = w.metadata.get("physical_evidence_status", "")
         by_existence[pe] = by_existence.get(pe, 0) + 1
 
+    # "Firm" rooms under the NEW boundary contract: reconstruct_room_
+    # candidates_from_credible_walls(exclude_conflict=True) already only
+    # offers wall_is_credible_room_boundary-satisfying edges to the room
+    # reconstructor (positive support AND no opposition -- see
+    # pb_canonical_wall_room_evidence_model.wall_is_credible_room_boundary),
+    # so every returned room's boundaries are ALREADY credible by
+    # construction; "firm" here additionally requires the room's own
+    # reconstruction status not be ABSTAINED (tiny/spurious loop, or an
+    # unresolved boundary trace) -- not merely "did not touch ABSTAINED/
+    # CONFLICT wall status" as the pre-remediation definition was.
     firm_rooms_conservative = [r for r in rooms_conservative if r.status != EvidenceResolutionStatus.ABSTAINED]
+    positive_supported_count = sum(1 for w in resolved if w.supporting_evidence_ids and not w.conflicting_evidence_ids)
 
     # False-strong samples: CORROBORATED-top-level walls whose evidence should be double-checked.
     corroborated = [w for w in resolved if w.status == EvidenceResolutionStatus.CORROBORATED]
@@ -91,8 +102,9 @@ def _census_one(spec) -> Dict[str, Any]:
         "wall_status_breakdown": by_status,
         "wall_existence_breakdown": by_existence,
         "wall_pairs_detected": len(pairs),
+        "positive_supported_candidates": positive_supported_count,
         "rooms_conservative_total": len(rooms_conservative),
-        "rooms_conservative_firm": len(firm_rooms_conservative),
+        "rooms_conservative_firm_under_new_boundary_contract": len(firm_rooms_conservative),
         "rooms_permissive_total": len(rooms_permissive),
         "corroborated_top_level_count": len(corroborated),
         "existence_corroborated_but_capped_count": len(existence_corroborated_capped),

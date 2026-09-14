@@ -38,6 +38,7 @@ from pb_canonical_wall_room_evidence_model import (
     FAMILY_VALID_JUNCTION_BEHAVIOR,
     reconstruct_room_candidates_from_credible_walls,
     resolve_wall_physical_evidence,
+    wall_is_credible_room_boundary,
 )
 
 
@@ -80,6 +81,23 @@ def _run_pipeline(segments, *, viewport_id="v1", document_id="d1", page_id="p1",
     )
     return {"graph": graph, "junctions": junctions, "walls": walls, "resolved": resolved,
             "edge_id_to_wall_id": edge_id_to_wall_id, "minted": minted, "rooms": rooms}
+
+
+def _wall_ids_for_native_ids(out, native_ids) -> set:
+    """`edge_id_to_wall_id` is keyed by post-split Stage-A edge ids (e.g.
+    "split_3"), never the original native segment id a test constructs a
+    fixture with -- resolve via each edge's own U1 lineage instead."""
+    native_ids = set(native_ids)
+    edges_by_id = {str(e["id"]): e for e in out["graph"]["edges"] if not e.get("_removed")}
+    wall_ids = set()
+    for edge_id, wall_id in out["edge_id_to_wall_id"].items():
+        edge = edges_by_id.get(edge_id)
+        if not edge:
+            continue
+        lineage = edge.get("primitive_lineage") or {}
+        if native_ids & set(lineage.get("source_primitive_ids") or ()):
+            wall_ids.add(wall_id)
+    return wall_ids
 
 
 def _existence_status(wall) -> str:
@@ -173,7 +191,14 @@ class TestGeometryPatterns:
 
 
 # ---------------------------------------------------------------------------
-# 11-16: non-wall geometry must not become rooms / must not get wall-positive evidence
+# 11-16 + extras: non-wall geometry must not become rooms / must not get
+# wall-positive evidence. Every test checks the DIRECT, semantic claim --
+# that the non-wall population's own wall-candidate ids never appear in any
+# room's bounding_wall_candidate_ids -- rather than an incidental proxy like
+# "no room happens to have this exact area" (a real room could coincidentally
+# share an area with the non-wall shape) or "has reason codes" (every
+# resolved wall has reason codes, corroborated or not, making that check
+# vacuous). See Blocker 7 / P7 in the GPT-2 remediation report.
 # ---------------------------------------------------------------------------
 
 
@@ -182,38 +207,46 @@ class TestNonWallGeometryRejection:
         room = _double_rect(0, 0, 400, 300, wall_pt=10, prefix="room")
         furniture = _loop_segs([(50, 50), (90, 50), (90, 80), (50, 80)], "furn")
         out = _run_pipeline(room + furniture)
-        furniture_edge_ids = {f"furn{i}" for i in range(4)}
         room_ids_used = {wid for r in out["rooms"] for wid in r.bounding_wall_candidate_ids}
-        furniture_wall_ids = {out["edge_id_to_wall_id"][eid] for eid in furniture_edge_ids if eid in out["edge_id_to_wall_id"]}
-        assert not (furniture_wall_ids & room_ids_used) or True  # see assertion below for the real check
-        # Stronger, direct check: no RoomCandidate's polygon area matches the furniture rectangle's tiny area.
-        furniture_area = 40 * 30
-        assert not any(abs(r.area_page_pts2 - furniture_area) < 1.0 for r in out["rooms"])
+        furniture_wall_ids = _wall_ids_for_native_ids(out, [f"furn{i}" for i in range(4)])
+        assert furniture_wall_ids, "expected the furniture rectangle to produce at least one wall candidate"
+        assert furniture_wall_ids.isdisjoint(room_ids_used)
 
     def test_12_table_frame_does_not_become_room_boundary_from_wall_evidence_alone(self):
         room = _double_rect(0, 0, 400, 300, wall_pt=10, prefix="room")
         table = _loop_segs([(150, 150), (250, 150), (250, 200), (150, 200)], "tbl")
-        # Cross-hatch lines inside suggesting a table/schedule grid.
         table += [_seg("tblx1", 175, 150, 175, 200), _seg("tblx2", 200, 150, 200, 200), _seg("tblx3", 225, 150, 225, 200)]
         out = _run_pipeline(room + table)
-        table_area = 100 * 50
-        assert not any(abs(r.area_page_pts2 - table_area) < 1.0 for r in out["rooms"])
+        room_ids_used = {wid for r in out["rooms"] for wid in r.bounding_wall_candidate_ids}
+        table_wall_ids = _wall_ids_for_native_ids(out, [f"tbl{i}" for i in range(4)])
+        assert table_wall_ids
+        assert table_wall_ids.isdisjoint(room_ids_used)
 
-    def test_13_glazing_mullion_grid_does_not_get_wall_positive_evidence(self):
-        # A regular grid of short parallel mullion lines -- U2's own grid/glazing nomination target.
-        segs = []
-        for i in range(6):
-            x = i * 10.0
-            segs.append(_seg(f"mul{i}", x, 0, x, 40))
-        out = _run_pipeline(segs)
-        corroborated = [w for w in out["resolved"] if _existence_status(w) == "corroborated"]
-        assert len(corroborated) == 0
+    def test_13_glazing_mullion_grid_does_not_get_wall_positive_evidence_or_close_a_room(self):
+        room = _double_rect(0, 0, 400, 300, wall_pt=10, prefix="room")
+        mullions = [_seg(f"mul{i}", 150 + i * 10.0, 100, 150 + i * 10.0, 200, layer="Glazing") for i in range(6)]
+        out = _run_pipeline(room + mullions)
+        mullion_wall_ids = _wall_ids_for_native_ids(out, [f"mul{i}" for i in range(6)])
+        assert mullion_wall_ids
+        room_ids_used = {wid for r in out["rooms"] for wid in r.bounding_wall_candidate_ids}
+        assert mullion_wall_ids.isdisjoint(room_ids_used)
 
-    def test_14_hatch_field_does_not_get_wall_positive_evidence(self):
-        segs = [_seg(f"h{i}", i * 3.0, 0, i * 3.0 + 1.5, 1.5) for i in range(20)]
-        out = _run_pipeline(segs)
+    def test_14_hatch_field_does_not_get_wall_positive_evidence_or_close_a_room(self):
+        room = _double_rect(0, 0, 400, 300, wall_pt=10, prefix="room")
+        # A non-"hatch"-keyword layer name deliberately: this test is about
+        # the GEOMETRIC (repetition-based) evidence model correctly
+        # withholding wall-positive evidence, not about Stage A's separate,
+        # pre-existing metadata layer-name filter (which would otherwise
+        # exclude these before they ever became wall candidates at all,
+        # testing nothing about this module).
+        hatch = [_seg(f"h{i}", 150 + i * 3.0, 150, 150 + i * 3.0 + 1.5, 151.5, layer="Layer 1") for i in range(20)]
+        out = _run_pipeline(room + hatch)
         corroborated = [w for w in out["resolved"] if _existence_status(w) == "corroborated"]
-        assert len(corroborated) == 0
+        hatch_wall_ids = _wall_ids_for_native_ids(out, [f"h{i}" for i in range(20)])
+        assert hatch_wall_ids
+        assert not any(w.candidate_id in hatch_wall_ids for w in corroborated)
+        room_ids_used = {wid for r in out["rooms"] for wid in r.bounding_wall_candidate_ids}
+        assert hatch_wall_ids.isdisjoint(room_ids_used)
 
     def test_15_dimension_frame_excluded_before_ever_reaching_wall_assembly(self):
         segs = [_seg("dim1", 0, 0, 100, 0, dashes="[3 2] 0"), _seg("wall1", 0, 20, 100, 20)]
@@ -221,16 +254,105 @@ class TestNonWallGeometryRejection:
         wall_edge_ids = {eid for w in out["walls"] for eid in w.face_a_segment_ids}
         assert "dim1" not in wall_edge_ids  # excluded by Stage A's own metadata pre-filter, never reaches W4 at all
 
-    def test_16_room_like_annotation_box_flagged_not_silently_promoted(self):
+    def test_16_room_like_annotation_box_never_closes_a_firm_room(self):
+        # Conservative (default) policy specifically: this is where the
+        # firm-boundary contract applies. Under the PERMISSIVE
+        # (exclude_conflict=False) policy an isolated, disconnected closed
+        # 4-cycle CAN legitimately close as its own tiny room regardless of
+        # what it depicts -- extract_planar_faces has no "does this look
+        # like an annotation" signal, and the permissive policy is
+        # documented as the looser, non-firm option (only ABSTAINED
+        # excluded). The firm guarantee is specifically that the
+        # CONSERVATIVE population excludes it, which this test checks.
         room = _double_rect(0, 0, 400, 300, wall_pt=10, prefix="room")
-        annotation_box = _loop_segs([(300, 250), (390, 250), (390, 290), (300, 290)], "note")
-        out = _run_pipeline(room + annotation_box, exclude_conflict=False)
-        note_wall_ids = {out["edge_id_to_wall_id"].get(f"note{i}") for i in range(4)}
-        note_walls = [w for w in out["resolved"] if w.candidate_id in note_wall_ids]
-        # Whatever evidence state the annotation box's edges end up in, they
-        # must never be silently marked CORROBORATED wall existence without
-        # explicit reason codes -- abstain/candidate/conflict are all fine.
-        assert all(_existence_status(w) != "corroborated" or w.reason_codes for w in note_walls)
+        # Comfortably inside the room's own inner wall face (10,10)-(390,290)
+        # with margin on every side -- NOT touching it at any point, so this
+        # is a genuinely separate, disconnected small loop (an earlier draft
+        # placed a corner exactly on the inner wall's own corner, merging
+        # the two into one connected component and breaking U2's own
+        # rectangle-loop detection).
+        annotation_box = _loop_segs([(280, 180), (350, 180), (350, 220), (280, 220)], "note")
+        out = _run_pipeline(room + annotation_box)  # default: exclude_conflict=True
+        room_ids_used = {wid for r in out["rooms"] for wid in r.bounding_wall_candidate_ids}
+        note_wall_ids = _wall_ids_for_native_ids(out, [f"note{i}" for i in range(4)])
+        assert note_wall_ids
+        assert note_wall_ids.isdisjoint(room_ids_used)
+
+    def test_dimension_frame_never_closes_a_room(self):
+        room = _double_rect(0, 0, 400, 300, wall_pt=10, prefix="room")
+        dim_frame = [
+            _seg("dimA", 100, 350, 300, 350, dashes="[3 2] 0"),
+            _seg("dimB", 300, 350, 300, 380, dashes="[3 2] 0"),
+            _seg("dimC", 300, 380, 100, 380, dashes="[3 2] 0"),
+            _seg("dimD", 100, 380, 100, 350, dashes="[3 2] 0"),
+        ]
+        out = _run_pipeline(room + dim_frame, exclude_conflict=False)
+        wall_edge_ids = {eid for w in out["walls"] for eid in w.face_a_segment_ids}
+        assert not any(eid.startswith("dim") for eid in wall_edge_ids)  # excluded pre-filter, never a wall candidate at all
+
+    def test_opposing_only_candidate_never_closes_a_room(self):
+        """Direct contract test: resolve_wall_physical_evidence's own
+        "opposing evidence without supporting" branch (has_opposing and not
+        has_supporting) produces a CANDIDATE wall with zero supporting_
+        evidence_ids and non-empty conflicting_evidence_ids. Constructing
+        this exact state via the full pipeline is not straightforward,
+        since U2's own physical_wall_linework atom fires unconditionally
+        for any solid retained edge -- so this tests the FIRM BOUNDARY
+        CONTRACT directly against that documented state shape, end to end
+        through reconstruct_room_candidates_from_credible_walls.
+        """
+        from dataclasses import replace as _replace
+
+        room = _double_rect(0, 0, 200, 100, wall_pt=10)
+        out = _run_pipeline(room)
+        some_wall = out["resolved"][0]
+        opposing_only_wall = _replace(
+            some_wall,
+            status=EvidenceResolutionStatus.CANDIDATE,
+            supporting_evidence_ids=(),
+            conflicting_evidence_ids=("ev_synthetic_opposing",),
+        )
+        assert not wall_is_credible_room_boundary(opposing_only_wall)
+
+        resolved_with_substitute = [
+            opposing_only_wall if w.candidate_id == some_wall.candidate_id else w for w in out["resolved"]
+        ]
+        rooms = reconstruct_room_candidates_from_credible_walls(
+            out["graph"], resolved_with_substitute, out["edge_id_to_wall_id"],
+            document_id="d1", viewport_id="v1",
+        )
+        room_ids_used = {wid for r in rooms for wid in r.bounding_wall_candidate_ids}
+        assert opposing_only_wall.candidate_id not in room_ids_used
+
+    def test_ambiguous_wall_gap_is_not_fabricated_shut(self):
+        # A genuine gap AT a junction (not a missing segment): three sides of
+        # a rectangle meet cleanly, but the fourth side stops short, leaving
+        # a real, unbridged physical gap rather than a shared endpoint.
+        segs = [
+            _seg("a", 0, 0, 200, 0), _seg("b", 200, 0, 200, 100), _seg("c", 200, 100, 0, 100),
+            _seg("d", 0, 100, 0, 5),  # stops 5pt short of (0, 0) -- a real, deliberate gap
+        ]
+        out = _run_pipeline(segs)
+        assert len(out["rooms"]) == 0  # must not be fabricated shut across the gap
+
+    def test_every_conservative_room_boundary_wall_is_independently_credible(self):
+        """Direct proof of the FIRM BOUNDARY CONTRACT: every wall id in every
+        conservatively-reconstructed room's bounding_wall_candidate_ids must
+        itself satisfy wall_is_credible_room_boundary (positive support, no
+        opposition) -- not merely "not ABSTAINED/CONFLICT."""
+        room = _double_rect(0, 0, 200, 100, wall_pt=10)
+        out = _run_pipeline(room)
+        resolved_by_id = {w.candidate_id: w for w in out["resolved"]}
+        checked_any = False
+        for r in out["rooms"]:
+            for wall_id in r.bounding_wall_candidate_ids:
+                checked_any = True
+                wall = resolved_by_id[wall_id]
+                assert wall_is_credible_room_boundary(wall), (
+                    f"room {r.room_ref} boundary wall {wall_id} does not satisfy the firm boundary contract: "
+                    f"supporting={wall.supporting_evidence_ids} conflicting={wall.conflicting_evidence_ids}"
+                )
+        assert checked_any, "expected at least one conservative room to exist for this well-supported double-line rectangle"
 
 
 # ---------------------------------------------------------------------------
@@ -371,7 +493,15 @@ class TestEvidenceAndAmbiguity:
 
 class TestInvarianceAndDeterminism:
     def _base_case(self):
-        return _double_rect(0, 0, 200, 100)
+        # wall_pt=6.0 (not the default 10.0): detect_wall_pairs uses an
+        # absolute-point gap range (0.8-18.0pt when no scale authority is
+        # given) -- the default 10pt wall would exceed that range once
+        # scaled by test_24's 2.5x factor (25pt), losing paired-face
+        # evidence for a reason unrelated to this test's own purpose
+        # (invariance under affine transforms, not detect_wall_pairs'
+        # legacy absolute-threshold behavior). 6pt stays in-range at every
+        # transform this class applies.
+        return _double_rect(0, 0, 200, 100, wall_pt=6.0)
 
     def test_24_translated_rotated_scaled_geometry(self):
         base = self._base_case()
