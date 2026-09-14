@@ -2,9 +2,10 @@
 
 **Branch:** `cursor/live-extractor-accuracy-audit-v1`  
 **Base SHA:** `b76f084f8f28c7a8e2c2519386086b04fe5715a0` (`origin/main`, merge of #288)  
+**Audit commit:** `483e16a` (tests + report only)  
 **Worktree:** `C:\Users\bryce\Documents\worktrees\live-extractor-accuracy-audit-v1`  
 **Date:** 2026-09-15  
-**Stop:** before merge. Benchmark gold untouched. No production fixes in this pass.
+**Stop:** before merge. Benchmark gold untouched. No production fixes in this pass. Not pushed.
 
 ---
 
