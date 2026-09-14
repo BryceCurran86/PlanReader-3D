@@ -5,7 +5,7 @@ not rewrite the canonical wall/room architecture or publish quantities.
 """
 from types import SimpleNamespace
 
-from pb_canonical_wall_room_evidence_model import _paired_face_atom
+from pb_canonical_wall_room_evidence_model import _native_layer_atom, _paired_face_atom
 from pb_wall_room_topology_wall_identity_v2 import canonical_wall_candidate_id_v2
 from tests.test_canonical_wall_room_model import _existence_status, _run_pipeline, _loop_segs
 
@@ -114,3 +114,45 @@ def test_firm_room_cannot_be_built_only_from_single_domain_positive_wall_support
     assert out["resolved"]
     assert all(_existence_status(w) != "corroborated" for w in out["resolved"])
     assert len(out["rooms"]) == 0
+
+
+def test_native_layer_support_requires_wall_candidate_wide_agreement_not_one_wall_edge():
+    """One agreed A-WALL child cannot promote a mixed-lineage whole wall.
+
+    Each edge may be internally self-consistent while the WallCandidate as a
+    whole contains mutually different native layer semantics. That must fail
+    closed rather than returning on the first wall-looking contributor.
+    """
+    wall = SimpleNamespace(
+        candidate_id="mixed_wall",
+        viewport_id="v1",
+        face_a_segment_ids=("edge_wall", "edge_glazing"),
+        face_b_segment_ids=(),
+    )
+    edges_by_id = {
+        "edge_wall": {
+            "id": "edge_wall",
+            "primitive_lineage": {
+                "attribute_status": {"layer": "agreed"},
+                "source_records": [
+                    {"layer_present": True, "layer": "A-WALL"},
+                ],
+            },
+        },
+        "edge_glazing": {
+            "id": "edge_glazing",
+            "primitive_lineage": {
+                "attribute_status": {"layer": "agreed"},
+                "source_records": [
+                    {"layer_present": True, "layer": "Glazing"},
+                ],
+            },
+        },
+    }
+    atom = _native_layer_atom(
+        wall,
+        edges_by_id,
+        document_id="doc",
+        page_id="page",
+    )
+    assert atom is None
