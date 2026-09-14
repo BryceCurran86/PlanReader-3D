@@ -6,10 +6,17 @@ universe to the immutable upstream snapshot from which the authoritative
 enumerator produced it.
 
 There is deliberately no secret constructor, nonce, trust boolean, Python
-identity check, or signing key.  Authenticity is architectural: publication
-must compare the stored commitment with the independently supplied current
-upstream snapshot content fingerprint and the universe re-enumerated from that
-snapshot.  A caller-curated candidate list cannot stand in for those inputs.
+identity check, or signing key.  Authenticity is architectural: verification
+requires the actual immutable upstream snapshot payload so its content digest
+can be recomputed independently.  A caller-echoed snapshot id/fingerprint,
+caller-curated candidate list, or self-consistent manifest cannot stand in for
+that upstream content.
+
+The current wall-length publication boundary intentionally does *not* expose an
+upstream-snapshot-payload argument.  Until the canonical graph / viewport
+producers supply their content-addressed snapshots directly, C1/C5 therefore
+fail closed instead of pretending that a caller-provided digest is an
+independent completeness proof.
 """
 from __future__ import annotations
 
@@ -17,7 +24,6 @@ from dataclasses import dataclass
 from typing import Optional, Sequence
 
 from pb_authority_completeness import (
-    AUTHORITY_COMPLETENESS_SCHEMA_VERSION,
     AuthorityBindingStatus,
     AuthorityScope,
     AuthorityUniverseFingerprint,
@@ -27,7 +33,7 @@ from pb_authority_completeness import (
     verify_completeness_manifest,
 )
 
-ENUMERATOR_SNAPSHOT_COMMITMENT_SCHEMA_VERSION = "1.0.0"
+ENUMERATOR_SNAPSHOT_COMMITMENT_SCHEMA_VERSION = "1.0.1"
 
 
 @dataclass(frozen=True)
@@ -123,9 +129,17 @@ def verify_enumerator_snapshot_commitment(
     current_enumerated_universe: Optional[AuthorityUniverseFingerprint],
     manifest: Optional[CompletenessManifest],
     supplied_admitted_ids: Sequence[str],
+    current_upstream_snapshot_payload: Optional[object] = None,
     require_resolved: bool = True,
 ) -> AuthorityVerification:
-    """Verify the independent snapshot -> enumerator -> manifest provenance chain."""
+    """Verify snapshot content -> enumerator -> universe -> manifest provenance.
+
+    ``current_upstream_snapshot_payload`` is the independent anchor.  A caller
+    echoing a digest into ``current_upstream_snapshot_fingerprint`` cannot make
+    a commitment authentic: without the actual immutable snapshot content the
+    result is UNBOUND.  Publication code must obtain that payload from the
+    upstream canonical producer, not from the quantity caller.
+    """
     if commitment is None:
         return AuthorityVerification(
             AuthorityBindingStatus.UNBOUND,
@@ -140,6 +154,21 @@ def verify_enumerator_snapshot_commitment(
             AuthorityBindingStatus.UNBOUND,
             ("current_enumerator_snapshot_verification_unavailable",),
         )
+    if current_upstream_snapshot_payload is None:
+        return AuthorityVerification(
+            AuthorityBindingStatus.UNBOUND,
+            ("authoritative_upstream_snapshot_content_unavailable",),
+        )
+
+    recomputed_snapshot_fingerprint = immutable_snapshot_fingerprint(
+        current_upstream_snapshot_payload
+    )
+    if recomputed_snapshot_fingerprint != current_upstream_snapshot_fingerprint:
+        return AuthorityVerification(
+            AuthorityBindingStatus.MISMATCH,
+            ("current_upstream_snapshot_content_fingerprint_mismatch",),
+        )
+
     if commitment.scope != expected_scope:
         stale_fields = (
             commitment.scope.source_sha256 != expected_scope.source_sha256
