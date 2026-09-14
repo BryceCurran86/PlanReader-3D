@@ -1,0 +1,52 @@
+[
+  {
+    "project": "Baghau",
+    "dimension_systems_discovered": 42,
+    "complete_witness_bound_chain": 3,
+    "both_endpoints_resolved": 3,
+    "exact_semantic_span_binding": 0,
+    "blocked_breakdown": {
+      "line_bound": 2,
+      "ambiguous": 23,
+      "unsupported": 14
+    },
+    "blocked_reason": "no endpoint-to-physical-entity classifier exists yet at this layer (target_entity_id + semantic_span_kind are not derivable from raw PDF evidence alone) -- explicitly future work, see module docstring"
+  },
+  {
+    "project": "Lamu",
+    "dimension_systems_discovered": 50,
+    "complete_witness_bound_chain": 23,
+    "both_endpoints_resolved": 23,
+    "exact_semantic_span_binding": 0,
+    "blocked_breakdown": {
+      "ambiguous": 25,
+      "unsupported": 2
+    },
+    "blocked_reason": "no endpoint-to-physical-entity classifier exists yet at this layer (target_entity_id + semantic_span_kind are not derivable from raw PDF evidence alone) -- explicitly future work, see module docstring"
+  },
+  {
+    "project": "Dungicha",
+    "dimension_systems_discovered": 213,
+    "complete_witness_bound_chain": 8,
+    "both_endpoints_resolved": 8,
+    "exact_semantic_span_binding": 0,
+    "blocked_breakdown": {
+      "ambiguous": 204,
+      "unsupported": 1
+    },
+    "blocked_reason": "no endpoint-to-physical-entity classifier exists yet at this layer (target_entity_id + semantic_span_kind are not derivable from raw PDF evidence alone) -- explicitly future work, see module docstring"
+  },
+  {
+    "project": "KSTVET",
+    "dimension_systems_discovered": 58,
+    "complete_witness_bound_chain": 12,
+    "both_endpoints_resolved": 12,
+    "exact_semantic_span_binding": 0,
+    "blocked_breakdown": {
+      "partial_witness": 1,
+      "ambiguous": 44,
+      "unsupported": 1
+    },
+    "blocked_reason": "no endpoint-to-physical-entity classifier exists yet at this layer (target_entity_id + semantic_span_kind are not derivable from raw PDF evidence alone) -- explicitly future work, see module docstring"
+  }
+]
