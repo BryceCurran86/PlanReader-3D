@@ -450,7 +450,7 @@ def test_figured_dimension_route_is_disabled_after_lower_level_resolution() -> N
     assert resolved.abstained is False
     assert resolved.value_m == 5.0
     downgraded = _downgrade_figured_dimension_result(resolved)
-    assert downgraded.abstained is False
+    assert downgraded.abstained is True
     assert downgraded.value_m is None
     assert downgraded.authority_status == AuthorityStatus.BLOCKED.value
     assert FIGURED_DIMENSION_WALL_LENGTH_DISABLED_REASON in downgraded.blocking_reasons
