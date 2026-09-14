@@ -1,0 +1,421 @@
+[
+  {
+    "name": "Baghau",
+    "elapsed_s": 26.546,
+    "raw_region_segments": 2398,
+    "stage_a_edges": 1922,
+    "excluded_segments": 916,
+    "wall_hypotheses": 670,
+    "wall_status_breakdown": {
+      "candidate": 370,
+      "conflict": 300
+    },
+    "wall_existence_breakdown": {
+      "corroborated": 21,
+      "candidate": 349,
+      "conflict": 300
+    },
+    "wall_pairs_detected": 398,
+    "positive_supported_candidates": 370,
+    "rooms_conservative_total": 0,
+    "rooms_conservative_firm_under_new_boundary_contract": 0,
+    "rooms_permissive_total": 160,
+    "corroborated_top_level_count": 0,
+    "existence_corroborated_but_capped_count": 21,
+    "corroborated_samples": [
+      {
+        "candidate_id": "wall_490b06404a87165e99aa",
+        "length_pt": 30.82,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 8,
+        "reason_codes": [
+          "assembled_from_7_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_domains:geometric_relation,native_metadata",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_3d446b7bbd20aeb526f3",
+        "length_pt": 30.8,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:unresolved_at_start",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_domains:geometric_relation,native_metadata",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_50d934b0029fe677eecd",
+        "length_pt": 16.86,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "chain_extension_blocked_by:near_junction_review_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_domains:geometric_relation,native_metadata",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_f1dab66ca2da8f10e80a",
+        "length_pt": 21.81,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 5,
+        "reason_codes": [
+          "assembled_from_4_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_domains:geometric_relation,native_metadata",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_6fc3e8e1837932f51923",
+        "length_pt": 22.06,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 6,
+        "reason_codes": [
+          "assembled_from_5_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_domains:geometric_relation,native_metadata",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_e50ba1f55018cda3f6b5",
+        "length_pt": 21.81,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_domains:geometric_relation,native_metadata",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_c4328e4d4db4533668c0",
+        "length_pt": 21.81,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_domains:geometric_relation,native_metadata",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_c1916dc0877f23d95ccb",
+        "length_pt": 21.88,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 4,
+        "reason_codes": [
+          "assembled_from_3_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_domains:geometric_relation,native_metadata",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      }
+    ],
+    "conflict_samples": [
+      {
+        "candidate_id": "wall_8cf0eed9d5d085aff90e",
+        "length_pt": 3.92,
+        "supporting": 1,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_2a4bde631ade42a78f20",
+        "length_pt": 21.88,
+        "supporting": 4,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_904f12477559a6f6fda1",
+        "length_pt": 21.45,
+        "supporting": 7,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_da994abd59539c9f597c",
+        "length_pt": 21.91,
+        "supporting": 6,
+        "opposing": 2
+      },
+      {
+        "candidate_id": "wall_c4d0b3e491d45af4956e",
+        "length_pt": 21.45,
+        "supporting": 5,
+        "opposing": 2
+      }
+    ]
+  },
+  {
+    "name": "Lamu",
+    "elapsed_s": 5.1,
+    "raw_region_segments": 1245,
+    "stage_a_edges": 1009,
+    "excluded_segments": 147,
+    "wall_hypotheses": 605,
+    "wall_status_breakdown": {
+      "conflict": 416,
+      "candidate": 189
+    },
+    "wall_existence_breakdown": {
+      "conflict": 416,
+      "candidate": 189
+    },
+    "wall_pairs_detected": 129,
+    "positive_supported_candidates": 189,
+    "rooms_conservative_total": 0,
+    "rooms_conservative_firm_under_new_boundary_contract": 0,
+    "rooms_permissive_total": 96,
+    "corroborated_top_level_count": 0,
+    "existence_corroborated_but_capped_count": 0,
+    "corroborated_samples": [],
+    "conflict_samples": [
+      {
+        "candidate_id": "wall_2640bbfdc9ae8cf5dd7c",
+        "length_pt": 24.44,
+        "supporting": 2,
+        "opposing": 3
+      },
+      {
+        "candidate_id": "wall_6be05e5dfefb75c4fe7a",
+        "length_pt": 5.76,
+        "supporting": 1,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_542f5fb0e3d0cdb88c9a",
+        "length_pt": 5.64,
+        "supporting": 1,
+        "opposing": 2
+      },
+      {
+        "candidate_id": "wall_fb91d56feb2915e1528d",
+        "length_pt": 66.72,
+        "supporting": 3,
+        "opposing": 3
+      },
+      {
+        "candidate_id": "wall_6178f1432760cf8702aa",
+        "length_pt": 5.76,
+        "supporting": 1,
+        "opposing": 1
+      }
+    ]
+  },
+  {
+    "name": "Dungicha",
+    "elapsed_s": 132.849,
+    "raw_region_segments": 5133,
+    "stage_a_edges": 5514,
+    "excluded_segments": 0,
+    "wall_hypotheses": 1973,
+    "wall_status_breakdown": {
+      "conflict": 915,
+      "candidate": 1058
+    },
+    "wall_existence_breakdown": {
+      "conflict": 915,
+      "candidate": 1056,
+      "corroborated": 2
+    },
+    "wall_pairs_detected": 517,
+    "positive_supported_candidates": 1058,
+    "rooms_conservative_total": 0,
+    "rooms_conservative_firm_under_new_boundary_contract": 0,
+    "rooms_permissive_total": 308,
+    "corroborated_top_level_count": 0,
+    "existence_corroborated_but_capped_count": 2,
+    "corroborated_samples": [
+      {
+        "candidate_id": "wall_e71cd3a00825ea6e66f3",
+        "length_pt": 280.74,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 3,
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:near_junction_review_at_start",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_domains:geometric_relation,native_metadata",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      },
+      {
+        "candidate_id": "wall_148bf4ab89af9ecbbf48",
+        "length_pt": 116.52,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "chain_extension_blocked_by:near_junction_review_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_domains:geometric_relation,native_metadata",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      }
+    ],
+    "conflict_samples": [
+      {
+        "candidate_id": "wall_bddb878a7576e2ebdd47",
+        "length_pt": 1622.24,
+        "supporting": 2,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_40604982dbe2e09b0f7e",
+        "length_pt": 1630.88,
+        "supporting": 2,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_dc04cead681c0763f427",
+        "length_pt": 8.47,
+        "supporting": 3,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_437aadbfd6068e43fbed",
+        "length_pt": 6.52,
+        "supporting": 3,
+        "opposing": 2
+      },
+      {
+        "candidate_id": "wall_fdf28f3ca3ef7996e9a6",
+        "length_pt": 6.58,
+        "supporting": 3,
+        "opposing": 2
+      }
+    ]
+  },
+  {
+    "name": "KSTVET",
+    "elapsed_s": 23.517,
+    "raw_region_segments": 2116,
+    "stage_a_edges": 2313,
+    "excluded_segments": 432,
+    "wall_hypotheses": 781,
+    "wall_status_breakdown": {
+      "conflict": 652,
+      "candidate": 129
+    },
+    "wall_existence_breakdown": {
+      "conflict": 652,
+      "candidate": 128,
+      "corroborated": 1
+    },
+    "wall_pairs_detected": 1381,
+    "positive_supported_candidates": 129,
+    "rooms_conservative_total": 0,
+    "rooms_conservative_firm_under_new_boundary_contract": 0,
+    "rooms_permissive_total": 83,
+    "corroborated_top_level_count": 0,
+    "existence_corroborated_but_capped_count": 1,
+    "corroborated_samples": [
+      {
+        "candidate_id": "wall_e71ff01006e2722aa52b",
+        "length_pt": 22.22,
+        "families": [
+          "paired_wall_faces",
+          "u2_physical_wall_linework"
+        ],
+        "supporting_evidence_ids": 2,
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_end",
+          "future_family_not_implemented:explicit_figured_dimension",
+          "future_family_not_implemented:opening_interruption_continuity",
+          "corroborated_by_independent_domains:geometric_relation,native_metadata",
+          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
+        ]
+      }
+    ],
+    "conflict_samples": [
+      {
+        "candidate_id": "wall_b80edc2bf1f5ed7e1f14",
+        "length_pt": 63.8,
+        "supporting": 1,
+        "opposing": 2
+      },
+      {
+        "candidate_id": "wall_ba062ba71ced885a1be7",
+        "length_pt": 117.65,
+        "supporting": 1,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_637489cb14b3952c7fd6",
+        "length_pt": 4.42,
+        "supporting": 1,
+        "opposing": 1
+      },
+      {
+        "candidate_id": "wall_2a7dfc2c946b27814f8f",
+        "length_pt": 10.11,
+        "supporting": 2,
+        "opposing": 2
+      },
+      {
+        "candidate_id": "wall_8d16c11b228a444d4ce7",
+        "length_pt": 12.11,
+        "supporting": 3,
+        "opposing": 3
+      }
+    ]
+  }
+]
