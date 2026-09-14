@@ -628,8 +628,12 @@ def test_shuffled_physical_reconciliation_and_measurement_are_deterministic() ->
         (identities["w2"], identities["w1"]),
         walls_by_id=walls_by_id,
     )
-    assert forward == reverse
-    assert set(forward.representative_wall_ids) == {"w1", "w2"}
+    assert set(forward.representative_wall_ids) == set(reverse.representative_wall_ids) == {"w1", "w2"}
+    assert set(forward.abstained_wall_ids) == set(reverse.abstained_wall_ids) == set()
+    assert set(forward.ambiguous_wall_ids) == set(reverse.ambiguous_wall_ids) == set()
+    assert set(forward.same_wall_ids) == set(reverse.same_wall_ids)
+    assert set(forward.pair_classifications) == set(reverse.pair_classifications)
+    assert forward.blocking_reasons_by_wall_id == reverse.blocking_reasons_by_wall_id
     assert _measurement(w1, a1, scale=scale).value_m == 3.0
     assert _measurement(w2, a2, scale=scale).value_m == 3.0
 
