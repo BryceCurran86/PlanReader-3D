@@ -1,8 +1,12 @@
-"""Shadow typed-negative semantic evidence over retained W2 edges (U2).
+"""Shadow typed-negative semantic evidence over retained and excluded W2 geometry (U2).
 
 Perception nominates. Geometry relates. This module does not publish
-quantities and does not delete graph edges. Existing W2 metadata exclusions
-stay unchanged. Status never becomes CORROBORATED.
+quantities and does not delete or restore graph edges. Existing W2 metadata
+exclusions stay unchanged. Status never becomes CORROBORATED.
+
+Excluded primitives stay excluded. They may carry zero or more evidence atoms
+at once; conflicting kinds remain CONFLICT. Exclusion reason codes may
+support a nomination and are not a single-label winner.
 
 Reuses ``EvidenceAtom`` / ``EvidenceResolutionStatus`` / ``stable_contract_id``.
 """
@@ -49,6 +53,40 @@ _OPPOSING_KINDS = frozenset(
 
 _ORTHO_DEG = 18.0
 _PARALLEL_DEG = 12.0
+
+# Exclusion reasons may support a kind. They never erase other nominations.
+_EXCLUSION_KIND_HINTS = {
+    "hatch_layer_excluded": (KIND_HATCH, POLARITY_OPPOSING, "exclusion_reason_hatch_layer"),
+    "dimension_layer_excluded": (KIND_DIMENSION, POLARITY_OPPOSING, "exclusion_reason_dimension_layer"),
+    "text_frame_layer_excluded": (KIND_ANNOTATION_BORDER, POLARITY_OPPOSING, "exclusion_reason_text_frame"),
+}
+
+
+def _exclusion_reason_codes(item: Mapping[str, Any]) -> Tuple[str, ...]:
+    raw = item.get("raw") if "raw" in item and isinstance(item.get("raw"), Mapping) else item
+    codes = [str(code) for code in (raw.get("reason_codes") or []) if code not in (None, "")]
+    return tuple(sorted(set(codes)))
+
+
+def _exclusion_hint_nominations(target: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    nominations: List[Dict[str, Any]] = []
+    seen = set()
+    for code in _exclusion_reason_codes(target):
+        hint = _EXCLUSION_KIND_HINTS.get(code)
+        if hint is None or hint[0] in seen:
+            continue
+        kind, polarity, reason = hint
+        seen.add(kind)
+        nominations.append(
+            {
+                "kind": kind,
+                "polarity": polarity,
+                "confidence": 0.35,
+                "reason_codes": (reason, code),
+                "feature_basis": {"exclusion_reason_codes": list(_exclusion_reason_codes(target))},
+            }
+        )
+    return nominations
 
 
 def _lineage_ids(edge: Mapping[str, Any]) -> List[str]:
@@ -502,6 +540,9 @@ def _atom(
     target: Mapping[str, Any],
     nomination: Mapping[str, Any],
 ) -> EvidenceAtom:
+    retained = bool(target.get("retained", True))
+    exclusion_codes = list(_exclusion_reason_codes(target))
+    raw = target.get("raw") if isinstance(target.get("raw"), Mapping) else {}
     payload = {
         "kind": nomination["kind"],
         "method": METHOD,
@@ -511,6 +552,9 @@ def _atom(
         "feature_basis": nomination["feature_basis"],
         "polarity": nomination["polarity"],
     }
+    if not retained:
+        payload["target_role"] = "excluded"
+        payload["exclusion_reason_codes"] = exclusion_codes
     return EvidenceAtom(
         evidence_id=stable_contract_id("ev", payload),
         document_id=document_id,
@@ -527,6 +571,10 @@ def _atom(
             "target_edge_id": target["id"],
             "source_primitive_ids": list(target["source_primitive_ids"]),
             "feature_basis": nomination["feature_basis"],
+            "retained": retained,
+            "exclusion_reason_codes": exclusion_codes,
+            "layer": raw.get("layer"),
+            "dashes": raw.get("dashes"),
         },
     )
 
@@ -543,6 +591,43 @@ def bundle_status(atoms: Sequence[EvidenceAtom]) -> EvidenceResolutionStatus:
     return EvidenceResolutionStatus.CANDIDATE
 
 
+def _emit_atoms_for_target(
+    *,
+    target: Mapping[str, Any],
+    nominations: Sequence[Mapping[str, Any]],
+    document_id: str,
+    page_id: str,
+    viewport_id: Optional[str],
+) -> List[EvidenceAtom]:
+    pending = list(nominations)
+    if not pending:
+        pending = [
+            {
+                "kind": KIND_UNKNOWN,
+                "polarity": POLARITY_UNKNOWN,
+                "confidence": 0.0,
+                "reason_codes": ("no_typed_semantic_feature",),
+                "feature_basis": {},
+            }
+        ]
+    atoms: List[EvidenceAtom] = []
+    seen_kinds = set()
+    for nomination in sorted(pending, key=lambda item: (item["kind"], item["reason_codes"])):
+        if nomination["kind"] in seen_kinds:
+            continue
+        seen_kinds.add(nomination["kind"])
+        atoms.append(
+            _atom(
+                document_id=document_id,
+                page_id=page_id,
+                viewport_id=viewport_id,
+                target=target,
+                nomination=nomination,
+            )
+        )
+    return atoms
+
+
 def collect_typed_semantic_evidence(
     graph: Mapping[str, Any],
     *,
@@ -551,14 +636,15 @@ def collect_typed_semantic_evidence(
     viewport_id: Optional[str] = None,
     words: Sequence[Mapping[str, Any]] = (),
 ) -> Tuple[EvidenceAtom, ...]:
-    """Nominate supporting and opposing semantic atoms on retained edges only."""
+    """Nominate supporting and opposing semantic atoms on retained and excluded geometry."""
     context = _context_items(graph)
-    targets = [item for item in context if item.get("retained")]
+    retained = [item for item in context if item.get("retained")]
+    excluded = [item for item in context if not item.get("retained")]
     by_id = {item["id"]: item for item in context if item["id"]}
     loops = _rectangle_loops(graph, by_id)
     family_noms: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     families: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = defaultdict(list)
-    for target in targets:
+    for target in retained:
         families[_line_family_key(target)].append(target)
     family_len_by_id = {
         item["id"]: _family_host(members)["length"]
@@ -570,36 +656,50 @@ def collect_typed_semantic_evidence(
         for nomination in _array_nominations(host, context, family_len_by_id):
             for member in members:
                 family_noms[member["id"]].append(nomination)
+    excluded_families: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = defaultdict(list)
+    for target in excluded:
+        excluded_families[_line_family_key(target)].append(target)
+    excluded_family_len = {
+        item["id"]: _family_host(members)["length"]
+        for members in excluded_families.values()
+        for item in members
+    }
+    excluded_family_noms: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for members in excluded_families.values():
+        host = _family_host(members)
+        for nomination in _array_nominations(host, context, excluded_family_len):
+            for member in members:
+                excluded_family_noms[member["id"]].append(nomination)
     atoms: List[EvidenceAtom] = []
-    for target in targets:
+    for target in retained:
         nominations = list(family_noms.get(target["id"]) or [])
         nominations.extend(
             _nominations_for_target(target, context, words=words, loops=loops, by_id=by_id)
         )
-        if not nominations:
-            nominations = [
-                {
-                    "kind": KIND_UNKNOWN,
-                    "polarity": POLARITY_UNKNOWN,
-                    "confidence": 0.0,
-                    "reason_codes": ("no_typed_semantic_feature",),
-                    "feature_basis": {},
-                }
-            ]
-        seen_kinds = set()
-        for nomination in sorted(nominations, key=lambda item: (item["kind"], item["reason_codes"])):
-            if nomination["kind"] in seen_kinds:
-                continue
-            seen_kinds.add(nomination["kind"])
-            atoms.append(
-                _atom(
-                    document_id=document_id,
-                    page_id=page_id,
-                    viewport_id=viewport_id,
-                    target=target,
-                    nomination=nomination,
-                )
+        atoms.extend(
+            _emit_atoms_for_target(
+                target=target,
+                nominations=nominations,
+                document_id=document_id,
+                page_id=page_id,
+                viewport_id=viewport_id,
             )
+        )
+    for target in excluded:
+        nominations = list(excluded_family_noms.get(target["id"]) or [])
+        nominations.extend(_exclusion_hint_nominations(target))
+        nominations.extend(
+            _nominations_for_target(target, context, words=words, loops=loops, by_id=by_id)
+        )
+        atoms.extend(
+            _emit_atoms_for_target(
+                target=target,
+                nominations=nominations,
+                document_id=document_id,
+                page_id=page_id,
+                viewport_id=viewport_id,
+            )
+        )
     atoms.sort(key=lambda atom: atom.evidence_id)
     return tuple(atoms)
 
@@ -646,6 +746,9 @@ def census_semantic_evidence(atoms: Sequence[EvidenceAtom]) -> Dict[str, Any]:
     grouped = _group_by_edge(atoms)
     conflicts = sum(1 for group in grouped.values() if bundle_status(group) == EvidenceResolutionStatus.CONFLICT)
     abstained = sum(1 for group in grouped.values() if bundle_status(group) == EvidenceResolutionStatus.ABSTAINED)
+    excluded_atoms = [
+        atom for atom in atoms if (atom.metadata or {}).get("retained") is False
+    ]
     return {
         "atom_count": len(atoms),
         "kinds": kinds,
@@ -653,6 +756,7 @@ def census_semantic_evidence(atoms: Sequence[EvidenceAtom]) -> Dict[str, Any]:
         "conflict_edge_bundles": conflicts,
         "abstained_edge_bundles": abstained,
         "retained_edge_bundles": len(grouped),
+        "excluded_target_atoms": len(excluded_atoms),
     }
 
 
@@ -665,3 +769,11 @@ def assert_graph_geometry_unchanged(before: Mapping[str, Any], after: Mapping[st
         for key in ("id", "x1", "y1", "x2", "y2", "a", "b"):
             if left.get(key) != right.get(key):
                 raise AssertionError(f"U2 mutated edge geometry field {key}")
+    before_excluded = [str(item.get("id") or "") for item in (before.get("excluded_segments") or [])]
+    after_excluded = [str(item.get("id") or "") for item in (after.get("excluded_segments") or [])]
+    if before_excluded != after_excluded:
+        raise AssertionError("U2 must not add, delete, or restore excluded segments")
+    after_edge_ids = {str(edge.get("id") or "") for edge in after_edges}
+    leaked = [seg_id for seg_id in after_excluded if seg_id and seg_id in after_edge_ids]
+    if leaked:
+        raise AssertionError(f"U2 restored excluded geometry into edges: {leaked}")
