@@ -2,6 +2,16 @@ from __future__ import annotations
 
 import math
 
+from pb_authority_completeness import (
+    DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+    DOMAIN_WALL_LENGTH_SCALE,
+    AuthorityScope,
+    bind_resolution_fingerprint,
+    build_authority_universe,
+    build_completeness_manifest,
+    physical_wall_identity_member,
+    scale_binding_member,
+)
 from pb_canonical_wall_room_evidence_model import FAMILY_PAIRED_WALL_FACES
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_measurement_input_authority import scale_calibration_fingerprint
@@ -20,6 +30,11 @@ from pb_page_scale_calibration_authority import (
     resolve_page_scale_calibration,
 )
 from pb_physical_wall_existence_authority import adapt_wall_candidate_to_entity_evidence
+from pb_physical_wall_identity import (
+    PHYSICAL_WALL_EQUIVALENCE_SCHEMA_VERSION,
+    resolve_physical_wall_equivalence,
+    resolve_physical_wall_identity,
+)
 from pb_viewport_scale_binding import ViewportScaleBinding
 from pb_wall_length_quantity import build_wall_length_quantities, build_wall_length_quantity
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
@@ -191,19 +206,72 @@ def _bind(wall: WallCandidate, extra_atoms: tuple[EvidenceAtom, ...] = ()):
     return entity, document, atoms
 
 
-def _solo_equivalence(*wall_ids: str):
-    from pb_physical_wall_identity import PhysicalWallEquivalenceResolution
-
-    return PhysicalWallEquivalenceResolution(
-        scope_viewport_id="vp",
-        representative_wall_ids=tuple(wall_ids),
-        abstained_wall_ids=(),
-        equivalence_groups=(),
-        ambiguous_wall_ids=(),
-        same_wall_ids=(),
-        pair_classifications=(),
-        blocking_reasons_by_wall_id={},
+def _authority_scope(domain: str, viewport_id: str = "vp") -> AuthorityScope:
+    return AuthorityScope(
+        domain=domain,
+        document_id="doc",
+        source_sha256=SHA,
+        revision_id="R1",
+        evidence_snapshot_id="evsnap",
+        graph_snapshot_id="graphsnap",
+        page_id="page-1",
+        viewport_id=viewport_id,
     )
+
+
+def _test_identity(wall: WallCandidate):
+    edge_ids = tuple(wall.face_a_segment_ids) + tuple(wall.face_b_segment_ids or ())
+    if not edge_ids:
+        edge_ids = (f"test-edge-{wall.candidate_id}",)
+    start = wall.centerline_pts[0]
+    end = wall.centerline_pts[-1]
+    edges = {
+        edge_id: {
+            "id": edge_id,
+            "x1": float(start[0]),
+            "y1": float(start[1]),
+            "x2": float(end[0]),
+            "y2": float(end[1]),
+            "primitive_lineage": {
+                "source_primitive_ids": [f"native-{wall.candidate_id}-{edge_id}"]
+            },
+        }
+        for edge_id in edge_ids
+    }
+    identity = resolve_physical_wall_identity(
+        wall=wall,
+        edge_ids=edge_ids,
+        edges_by_id=edges,
+    )
+    assert identity.usable
+    return identity
+
+
+def _scale_proof(bindings):
+    scope = _authority_scope(DOMAIN_WALL_LENGTH_SCALE)
+    universe = build_authority_universe(
+        scope,
+        tuple(scale_binding_member(binding) for binding in bindings),
+    )
+    manifest = build_completeness_manifest(
+        universe,
+        admitted_candidate_ids=tuple(scale_binding_member(binding).candidate_id for binding in bindings),
+    )
+    return universe, manifest
+
+
+def _candidate_proof(walls, identities):
+    scope = _authority_scope(DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES)
+    identity_seq = tuple(identities.values()) if isinstance(identities, dict) else tuple(identities)
+    universe = build_authority_universe(
+        scope,
+        tuple(physical_wall_identity_member(identity) for identity in identity_seq),
+    )
+    manifest = build_completeness_manifest(
+        universe,
+        admitted_candidate_ids=tuple(wall.candidate_id for wall in walls),
+    )
+    return identity_seq, universe, manifest
 
 
 def _qty_kwargs(wall: WallCandidate, extra_atoms: tuple[EvidenceAtom, ...] = (), **overrides):
@@ -218,6 +286,20 @@ def _qty_kwargs(wall: WallCandidate, extra_atoms: tuple[EvidenceAtom, ...] = (),
         "viewport",
         _viewport(resolved_scale_id=binding.scale_fingerprint if binding is not None else None),
     )
+    scale_universe, scale_manifest = _scale_proof(bindings)
+    identity = _test_identity(wall)
+    identities, candidate_universe, candidate_manifest = _candidate_proof((wall,), (identity,))
+    equivalence = resolve_physical_wall_equivalence(
+        identities,
+        walls_by_id={wall.candidate_id: wall},
+    )
+    equivalence_binding = bind_resolution_fingerprint(
+        equivalence,
+        scope=_authority_scope(DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES),
+        candidate_universe=candidate_universe,
+        identities=identities,
+        resolver_rule_version=PHYSICAL_WALL_EQUIVALENCE_SCHEMA_VERSION,
+    )
     kwargs = dict(
         wall=wall,
         context=_context(),
@@ -225,9 +307,16 @@ def _qty_kwargs(wall: WallCandidate, extra_atoms: tuple[EvidenceAtom, ...] = (),
         viewport=viewport,
         entity=entity,
         evidence_atoms=atoms,
-        equivalence=_solo_equivalence(wall.candidate_id),
+        equivalence=equivalence,
+        equivalence_binding=equivalence_binding,
         page_no=1,
         scale_bindings=bindings,
+        scale_universe=scale_universe,
+        scale_manifest=scale_manifest,
+        candidate_universe=candidate_universe,
+        candidate_manifest=candidate_manifest,
+        physical_identity_universe=identities,
+        physical_walls_by_id={wall.candidate_id: wall},
     )
     kwargs.update(overrides)
     return kwargs
@@ -370,13 +459,9 @@ def _edge(edge_id: str, x1, y1, x2, y2, *primitive_ids: str) -> dict:
 
 def _batch_with_identities(walls, identities):
     # Each wall gets its own wall-scoped literal evidence_id. Real production
-    # ids are content-hashed (stable_contract_id) and therefore already
-    # wall-specific; the module-default "u2-ev"/"pair-ev" literals reused
-    # verbatim across two different walls in one pooled evidence_atoms
-    # sequence would be a genuine (if fixture-only) evidence-id collision
-    # under collision-safe existence recomputation, so the walls themselves
-    # are rebuilt here with wall-scoped supporting_evidence_ids -- geometry,
-    # candidate_id, and face_ids are preserved unchanged from the caller.
+    # ids are content-hashed and therefore already wall-specific. Preserve
+    # that ownership in this multi-wall fixture while exercising authentic
+    # candidate-universe reconciliation.
     from dataclasses import replace as _dc_replace
 
     scoped_walls = [
@@ -407,16 +492,28 @@ def _batch_with_identities(walls, identities):
         entities[wall.candidate_id] = entity
     scale = _scale()
     binding = _scale_binding(scale)
+    scale_universe, scale_manifest = _scale_proof((binding,))
+    identity_seq, candidate_universe, candidate_manifest = _candidate_proof(scoped_walls, identities)
+    identity_map = (
+        dict(identities)
+        if isinstance(identities, dict)
+        else {identity.wall_candidate_id: identity for identity in identity_seq}
+    )
     return build_wall_length_quantities(
         walls=scoped_walls,
         entities_by_wall_id=entities,
         evidence_atoms=all_atoms,
-        physical_identities=identities,
+        physical_identities=identity_map,
+        physical_identity_universe=identity_seq,
         context=context,
         document=document,
         viewport=_dc_replace(viewport, resolved_scale_id=binding.scale_fingerprint),
         page_no=1,
         scale_bindings=(binding,),
+        scale_universe=scale_universe,
+        scale_manifest=scale_manifest,
+        candidate_universe=candidate_universe,
+        candidate_manifest=candidate_manifest,
     )
 
 
