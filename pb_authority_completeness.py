@@ -1,9 +1,9 @@
-"""Deterministic completeness and authenticity contracts for authority universes.
+"""Scoped deterministic completeness/authenticity contracts.
 
-The central invariant is deliberately stronger than "no conflict was supplied":
-a FIRM decision must be bound to the exact scoped universe that was enumerated.
-All hashes use canonical JSON plus SHA-256.  Python object identity, ``hash()``,
-memory addresses, and unordered set serialization are never authority inputs.
+FIRM authority is never inferred from the absence of a supplied conflict.  A
+caller must bind the exact decision to the exact enumerated universe.  Hashes
+use canonical JSON + SHA-256 only; Python identity/hash and unordered set
+serialization are forbidden authority inputs.
 """
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from typing import Any, Mapping, Optional, Sequence
 
 AUTHORITY_COMPLETENESS_SCHEMA_VERSION = "1.0.0"
 BOUND_RESOLUTION_SCHEMA_VERSION = "1.0.0"
-
 DOMAIN_WALL_LENGTH_SCALE = "wall_length.scale"
 DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES = "wall_length.physical_candidates"
 
@@ -119,10 +118,7 @@ def _canonicalize(value: Any) -> Any:
     if isinstance(value, Enum):
         return _canonicalize(value.value)
     if is_dataclass(value):
-        return {
-            item.name: _canonicalize(getattr(value, item.name))
-            for item in fields(value)
-        }
+        return {field.name: _canonicalize(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, Mapping):
         return {
             str(key): _canonicalize(value[key])
@@ -166,28 +162,25 @@ def build_authority_universe(
         raise ValueError("duplicate_authority_universe_candidate_id")
     if any(not item.candidate_id or not item.provenance_fingerprint for item in ordered):
         raise ValueError("invalid_authority_universe_member")
-    payload = {
-        "schema_version": AUTHORITY_COMPLETENESS_SCHEMA_VERSION,
-        "scope": scope.payload(),
-        "members": [_member_payload(item) for item in ordered],
-    }
-    return AuthorityUniverseFingerprint(
-        scope=scope,
-        members=ordered,
-        fingerprint=canonical_sha256(payload),
+    fingerprint = canonical_sha256(
+        {
+            "schema_version": AUTHORITY_COMPLETENESS_SCHEMA_VERSION,
+            "scope": scope.payload(),
+            "members": [_member_payload(item) for item in ordered],
+        }
     )
+    return AuthorityUniverseFingerprint(scope=scope, members=ordered, fingerprint=fingerprint)
 
 
-def _exclusion_payload(exclusion: ExplicitExclusion) -> dict[str, Any]:
+def _exclusion_payload(item: ExplicitExclusion) -> dict[str, Any]:
     return {
-        "candidate_id": exclusion.candidate_id,
-        "reason_code": exclusion.reason_code,
-        "evidence_ids": sorted(exclusion.evidence_ids),
+        "candidate_id": item.candidate_id,
+        "reason_code": item.reason_code,
+        "evidence_ids": sorted(item.evidence_ids),
     }
 
 
 def _manifest_payload(
-    *,
     scope: AuthorityScope,
     discovered: Sequence[str],
     admitted: Sequence[str],
@@ -218,27 +211,21 @@ def build_completeness_manifest(
     unresolved_candidate_ids: Sequence[str] = (),
     explicit_exclusions: Sequence[ExplicitExclusion] = (),
 ) -> CompletenessManifest:
-    discovered = tuple(item.candidate_id for item in universe.members)
+    discovered = tuple(sorted(item.candidate_id for item in universe.members))
     admitted = tuple(sorted(str(item) for item in admitted_candidate_ids))
     unresolved = tuple(sorted(str(item) for item in unresolved_candidate_ids))
     exclusions = tuple(sorted(explicit_exclusions, key=lambda item: item.candidate_id))
     excluded = tuple(item.candidate_id for item in exclusions)
 
-    for label, values in (
-        ("admitted", admitted),
-        ("unresolved", unresolved),
-        ("excluded", excluded),
-    ):
+    for label, values in (("admitted", admitted), ("unresolved", unresolved), ("excluded", excluded)):
         if len(values) != len(set(values)):
             raise ValueError(f"duplicate_{label}_candidate_id")
-
     admitted_set = set(admitted)
     unresolved_set = set(unresolved)
     excluded_set = set(excluded)
-    discovered_set = set(discovered)
     if admitted_set & unresolved_set or admitted_set & excluded_set or unresolved_set & excluded_set:
         raise ValueError("authority_universe_partition_overlap")
-    if admitted_set | unresolved_set | excluded_set != discovered_set:
+    if admitted_set | unresolved_set | excluded_set != set(discovered):
         raise ValueError("authority_universe_partition_incomplete")
     if any(not item.reason_code or not item.evidence_ids for item in exclusions):
         raise ValueError("explicit_exclusion_requires_reason_and_evidence")
@@ -247,17 +234,17 @@ def build_completeness_manifest(
         sorted((item.candidate_id, item.provenance_fingerprint) for item in universe.members)
     )
     payload = _manifest_payload(
-        scope=universe.scope,
-        discovered=discovered,
-        admitted=admitted,
-        unresolved=unresolved,
-        exclusions=exclusions,
-        member_fingerprints=member_fingerprints,
-        universe_fingerprint=universe.fingerprint,
+        universe.scope,
+        discovered,
+        admitted,
+        unresolved,
+        exclusions,
+        member_fingerprints,
+        universe.fingerprint,
     )
     return CompletenessManifest(
         scope=universe.scope,
-        discovered_candidate_ids=tuple(sorted(discovered)),
+        discovered_candidate_ids=discovered,
         admitted_candidate_ids=admitted,
         unresolved_candidate_ids=unresolved,
         explicit_exclusions=exclusions,
@@ -270,16 +257,12 @@ def build_completeness_manifest(
 def _scope_verification(actual: AuthorityScope, expected: AuthorityScope) -> AuthorityVerification:
     if actual == expected:
         return AuthorityVerification(AuthorityBindingStatus.AUTHENTIC)
-    stale_fields = {
-        "source_sha256",
-        "revision_id",
-        "evidence_snapshot_id",
-        "graph_snapshot_id",
-    }
+    stale_fields = {"source_sha256", "revision_id", "evidence_snapshot_id", "graph_snapshot_id"}
     actual_payload = actual.payload()
     expected_payload = expected.payload()
     differing = {
-        key for key in actual_payload
+        key
+        for key in actual_payload
         if key != "schema_version" and actual_payload[key] != expected_payload[key]
     }
     status = (
@@ -289,7 +272,7 @@ def _scope_verification(actual: AuthorityScope, expected: AuthorityScope) -> Aut
     )
     return AuthorityVerification(
         status,
-        tuple(sorted(f"authority_scope_{key}_mismatch" for key in differing)),
+        tuple(sorted(f"authority_scope_{field}_mismatch" for field in differing)),
     )
 
 
@@ -306,13 +289,12 @@ def verify_completeness_manifest(
             AuthorityBindingStatus.UNBOUND,
             ("authority_universe_manifest_unbound",),
         )
-
-    scope_check = _scope_verification(manifest.scope, expected_scope)
-    if not scope_check.authentic:
-        return scope_check
-    current_scope_check = _scope_verification(current_universe.scope, expected_scope)
-    if not current_scope_check.authentic:
-        return current_scope_check
+    manifest_scope = _scope_verification(manifest.scope, expected_scope)
+    if not manifest_scope.authentic:
+        return manifest_scope
+    universe_scope = _scope_verification(current_universe.scope, expected_scope)
+    if not universe_scope.authentic:
+        return universe_scope
 
     try:
         rebuilt_universe = build_authority_universe(current_universe.scope, current_universe.members)
@@ -332,22 +314,21 @@ def verify_completeness_manifest(
             ("authority_universe_changed_after_manifest",),
         )
 
-    discovered = tuple(item.candidate_id for item in current_universe.members)
-    current_member_fingerprints = tuple(
+    current_ids = tuple(sorted(item.candidate_id for item in current_universe.members))
+    current_members = tuple(
         sorted((item.candidate_id, item.provenance_fingerprint) for item in current_universe.members)
     )
-    if tuple(sorted(manifest.discovered_candidate_ids)) != tuple(sorted(discovered)):
+    if tuple(sorted(manifest.discovered_candidate_ids)) != current_ids:
         return AuthorityVerification(
             AuthorityBindingStatus.MISMATCH,
             ("authority_universe_discovered_ids_mismatch",),
         )
-    if tuple(sorted(manifest.member_fingerprints)) != current_member_fingerprints:
+    if tuple(sorted(manifest.member_fingerprints)) != current_members:
         return AuthorityVerification(
             AuthorityBindingStatus.MISMATCH,
             ("authority_universe_member_provenance_mismatch",),
         )
 
-    excluded_ids = tuple(item.candidate_id for item in manifest.explicit_exclusions)
     try:
         rebuilt_manifest = build_completeness_manifest(
             current_universe,
@@ -376,10 +357,10 @@ def verify_completeness_manifest(
             AuthorityBindingStatus.MISMATCH,
             ("authority_universe_admitted_set_mismatch",),
         )
-    if len(excluded_ids) != len(set(excluded_ids)):
+    if expected_scope.domain == DOMAIN_WALL_LENGTH_SCALE and len(manifest.admitted_candidate_ids) > 1:
         return AuthorityVerification(
             AuthorityBindingStatus.MISMATCH,
-            ("authority_universe_duplicate_exclusion",),
+            ("scale_universe_multiple_admitted_candidates_unreconciled",),
         )
     return AuthorityVerification(AuthorityBindingStatus.AUTHENTIC)
 
@@ -403,6 +384,7 @@ def scale_binding_member(binding: Any) -> AuthorityUniverseMember:
 
 def physical_wall_identity_member(identity: Any) -> AuthorityUniverseMember:
     candidate_id = str(getattr(identity, "wall_candidate_id", "") or "")
+    status = getattr(identity, "status", None)
     payload = {
         "wall_candidate_id": candidate_id,
         "viewport_id": str(getattr(identity, "viewport_id", "") or ""),
@@ -410,7 +392,7 @@ def physical_wall_identity_member(identity: Any) -> AuthorityUniverseMember:
         "path_fingerprint": getattr(identity, "path_fingerprint", None),
         "source_primitive_ids": sorted(tuple(getattr(identity, "source_primitive_ids", ()) or ())),
         "edge_ids": sorted(tuple(getattr(identity, "edge_ids", ()) or ())),
-        "status": getattr(getattr(identity, "status", None), "value", getattr(identity, "status", None)),
+        "status": getattr(status, "value", status),
         "blocking_reasons": sorted(tuple(getattr(identity, "blocking_reasons", ()) or ())),
         "comparison_mode": str(getattr(identity, "comparison_mode", "") or ""),
         "level_id": getattr(identity, "level_id", None),
@@ -420,21 +402,28 @@ def physical_wall_identity_member(identity: Any) -> AuthorityUniverseMember:
 
 
 def physical_wall_graph_fingerprint(identities: Sequence[Any]) -> str:
-    members = tuple(sorted(
-        (physical_wall_identity_member(item) for item in identities),
-        key=lambda item: (item.candidate_id, item.provenance_fingerprint),
-    ))
+    members = tuple(
+        sorted(
+            (physical_wall_identity_member(item) for item in identities),
+            key=lambda item: (item.candidate_id, item.provenance_fingerprint),
+        )
+    )
     ids = [item.candidate_id for item in members]
     if len(ids) != len(set(ids)):
         raise ValueError("duplicate_physical_wall_identity_id")
-    return canonical_sha256({
-        "schema_version": BOUND_RESOLUTION_SCHEMA_VERSION,
-        "physical_wall_members": [_member_payload(item) for item in members],
-    })
+    return canonical_sha256(
+        {
+            "schema_version": BOUND_RESOLUTION_SCHEMA_VERSION,
+            "physical_wall_members": [_member_payload(item) for item in members],
+        }
+    )
 
 
 def _resolution_payload(resolution: Any) -> dict[str, Any]:
-    groups = [tuple(sorted(str(item) for item in group)) for group in getattr(resolution, "equivalence_groups", ())]
+    groups = [
+        tuple(sorted(str(item) for item in group))
+        for group in getattr(resolution, "equivalence_groups", ())
+    ]
     pairs = [
         (str(left), str(right), str(classification))
         for left, right, classification in getattr(resolution, "pair_classifications", ())
@@ -465,15 +454,21 @@ def bind_resolution_fingerprint(
     resolver_rule_version: str,
 ) -> BoundResolutionFingerprint:
     graph_fingerprint = physical_wall_graph_fingerprint(identities)
-    member_ids = tuple(sorted(str(getattr(item, "wall_candidate_id", "") or "") for item in identities))
+    member_ids = tuple(
+        sorted(str(getattr(item, "wall_candidate_id", "") or "") for item in identities)
+    )
     if len(member_ids) != len(set(member_ids)) or any(not item for item in member_ids):
         raise ValueError("invalid_bound_resolution_member_ids")
-    decision_evidence_ids = tuple(sorted({
-        str(evidence_id)
-        for identity in identities
-        for evidence_id in (getattr(identity, "source_primitive_ids", ()) or ())
-    }))
-    representative_ids = tuple(sorted(tuple(getattr(resolution, "representative_wall_ids", ()) or ())))
+    evidence_ids = tuple(
+        sorted(
+            {
+                str(evidence_id)
+                for identity in identities
+                for evidence_id in (getattr(identity, "source_primitive_ids", ()) or ())
+            }
+        )
+    )
+    representatives = tuple(sorted(tuple(getattr(resolution, "representative_wall_ids", ()) or ())))
     resolution_fingerprint = canonical_sha256(_resolution_payload(resolution))
     payload = {
         "schema_version": BOUND_RESOLUTION_SCHEMA_VERSION,
@@ -481,9 +476,9 @@ def bind_resolution_fingerprint(
         "candidate_universe_fingerprint": candidate_universe.fingerprint,
         "physical_wall_graph_fingerprint": graph_fingerprint,
         "resolver_rule_version": resolver_rule_version,
-        "representative_wall_ids": list(representative_ids),
+        "representative_wall_ids": list(representatives),
         "member_ids": list(member_ids),
-        "decision_evidence_ids": list(decision_evidence_ids),
+        "decision_evidence_ids": list(evidence_ids),
         "resolution_fingerprint": resolution_fingerprint,
     }
     return BoundResolutionFingerprint(
@@ -491,9 +486,9 @@ def bind_resolution_fingerprint(
         candidate_universe_fingerprint=candidate_universe.fingerprint,
         physical_wall_graph_fingerprint=graph_fingerprint,
         resolver_rule_version=resolver_rule_version,
-        representative_wall_ids=representative_ids,
+        representative_wall_ids=representatives,
         member_ids=member_ids,
-        decision_evidence_ids=decision_evidence_ids,
+        decision_evidence_ids=evidence_ids,
         resolution_fingerprint=resolution_fingerprint,
         fingerprint=canonical_sha256(payload),
     )
