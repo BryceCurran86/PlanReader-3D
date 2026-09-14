@@ -37,73 +37,8 @@ _PHASE5M_SUPERSEDED_FLOOR_DROP_TESTS = {
     "test_free_form_page_level_is_not_floor_storey_authority",
 }
 
-# C1/C5 deliberately make public wall-length FIRM unavailable until the
-# canonical physical-wall and viewport/scale enumerators expose independently
-# content-addressed upstream snapshot payloads.  These historical tests predate
-# that trust boundary and either require public FIRM/value output or require a
-# deeper downstream blocker that is now intentionally pre-empted by the
-# upstream completeness gate.
-#
-# Keep their original assertions intact as strict xfails.  This is not a skip
-# or production bypass: an unexpected pass is XPASS(strict) and fails CI.  The
-# markers must be removed once a real upstream snapshot producer is wired so
-# the original publication assertions execute again.  New C1/C4/C5 commitment
-# attacks are NOT listed here and must pass normally.
-_COMPLETENESS_UPSTREAM_SNAPSHOT_PRODUCER_REQUIRED = frozenset(
-    {
-        # tests/test_completeness_authority_attacks.py
-        "tests/test_completeness_authority_attacks.py::test_authentic_singleton_baseline_can_reach_firm",
-        "tests/test_completeness_authority_attacks.py::test_c1_hidden_same_viewport_scale_competitor_cannot_leave_firm",
-        "tests/test_completeness_authority_attacks.py::test_c1_omitted_admitted_scale_candidate_blocks",
-        "tests/test_completeness_authority_attacks.py::test_c1_explicit_evidenced_scale_exclusion_allows_remaining_proven_scale",
-        "tests/test_completeness_authority_attacks.py::test_c1_conflict_monotonicity_never_strengthens_authority",
-        "tests/test_completeness_authority_attacks.py::test_c5_explicit_evidenced_exclusion_allows_unrelated_admitted_wall",
-        "tests/test_completeness_authority_attacks.py::test_c5_candidate_outside_local_viewport_does_not_poison_local_scope",
-        "tests/test_completeness_authority_attacks.py::test_c5_conflict_addition_monotonicity_never_strengthens",
-        # tests/test_wall_length_authority_remediation_v3.py
-        "tests/test_wall_length_authority_remediation_v3.py::TestBlockerRegressions::test_blocker1_page_viewports_path_derives_instead_of_trusting_caller_bindings",
-        "tests/test_wall_length_authority_remediation_v3.py::TestBlockerRegressions::test_blocker6_direct_single_wall_call_requires_a_real_equivalence_argument",
-        "tests/test_wall_length_authority_remediation_v3.py::TestBlockerRegressions::test_blocker7_generic_figured_dimension_alone_publishes_firm",
-        "tests/test_wall_length_authority_remediation_v3.py::TestAuthorityMonotonicity::test_adding_competing_eligible_scale_cannot_preserve_firm",
-        "tests/test_wall_length_authority_remediation_v3.py::TestAuthorityMonotonicity::test_removing_current_snapshot_proof_cannot_preserve_firm",
-        "tests/test_wall_length_authority_remediation_v3.py::TestAuthorityMonotonicity::test_adding_same_id_changed_atom_cannot_preserve_firm",
-        "tests/test_wall_length_authority_remediation_v3.py::TestAuthorityMonotonicity::test_adding_ambiguous_physical_competitor_cannot_preserve_firm",
-        "tests/test_wall_length_authority_remediation_v3.py::TestAuthorityMonotonicity::test_direct_single_wall_path_cannot_bypass_publication_gate",
-        "tests/test_wall_length_authority_remediation_v3.py::TestAuthorityMonotonicity::test_adding_generic_figured_dimension_cannot_create_firm",
-        "tests/test_wall_length_authority_remediation_v3.py::TestAuthorityMonotonicity::test_duplicate_identical_evidence_does_not_strengthen",
-        # tests/test_wall_length_quantity.py
-        "tests/test_wall_length_quantity.py::test_scaled_wall_length_emits_firm_quantity",
-        "tests/test_wall_length_quantity.py::test_translation_is_metamorphically_invariant",
-        "tests/test_wall_length_quantity.py::test_rotation_is_metamorphically_invariant",
-        "tests/test_wall_length_quantity.py::test_figured_dimension_is_authoritative_when_scale_absent",
-        "tests/test_wall_length_quantity.py::test_stale_scale_causes_abstention_not_old_length_reuse",
-        "tests/test_wall_length_quantity.py::test_reversed_and_rechunked_walls_cannot_publish_two_physical_quantities",
-        "tests/test_wall_length_quantity.py::test_paired_face_and_centerline_cannot_both_publish",
-        "tests/test_wall_length_quantity.py::test_same_path_different_duplicated_native_ids_cannot_publish_twice",
-        "tests/test_wall_length_quantity.py::test_rechunk_equivalent_geometry_keeps_one_physical_quantity_count",
-        # tests/test_wall_linear_authority_bridge.py
-        "tests/test_wall_linear_authority_bridge.py::test_trusted_wall_and_firm_scale_publish_linear_quantity",
-        "tests/test_wall_linear_authority_bridge.py::test_reverse_and_rechunk_keep_length",
-        "tests/test_wall_linear_authority_bridge.py::test_thickness_change_alone_does_not_alter_length",
-        "tests/test_wall_linear_authority_bridge.py::test_height_or_stored_length_alone_does_not_alter_length",
-        "tests/test_wall_linear_authority_bridge.py::test_shuffled_batch_is_deterministic",
-        "tests/test_wall_linear_authority_bridge.py::test_scale_from_another_page_cannot_leak",
-        "tests/test_wall_linear_authority_bridge.py::test_unbound_scale_cannot_leak_across_viewports_on_same_page",
-        "tests/test_wall_linear_authority_bridge.py::test_provisional_thickness_does_not_block_length_and_is_not_invented",
-        "tests/test_wall_linear_authority_bridge.py::test_adding_conflict_cannot_leave_firm_length",
-        "tests/test_wall_linear_authority_bridge.py::test_firm_path_reconciles_complete_binding_set_not_caller_preferred",
-    }
-)
-
 
 def pytest_collection_modifyitems(items):
-    completeness_marker = pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "requires real content-addressed canonical graph/viewport snapshot "
-            "producer; public wall-length authority intentionally fails closed"
-        ),
-    )
     for item in items:
         if item.name in _PHASE5M_SUPERSEDED_UNSAFE_ROOF_TESTS:
             item.add_marker(pytest.mark.xfail(
@@ -122,8 +57,6 @@ def pytest_collection_modifyitems(items):
                     "because free-form sheet text is not storey authority"
                 ),
             ))
-        if item.nodeid in _COMPLETENESS_UPSTREAM_SNAPSHOT_PRODUCER_REQUIRED:
-            item.add_marker(completeness_marker)
 
 
 def make_temp_db() -> sqlite3.Connection:
