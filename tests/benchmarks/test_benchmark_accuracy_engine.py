@@ -28,6 +28,15 @@ from pb_benchmark_accuracy_engine import (
 )
 from pb_public_tender_benchmark import BOQLineCategory
 
+# Repository-committed source for the tenders_ke_kstvet_cbc_classroom benchmark
+# (see benchmarks/public_tenders/tenders_ke_kstvet_cbc_classroom/download_manifest.json,
+# sha256 6856bfa7...). This is the same file resolve_file_path() already finds via
+# KNOWN_LOCAL_SEARCH_ROOTS' first entry ("benchmarks/sources") -- referencing it
+# directly here removes the tests' dependency on any developer's personal machine path.
+_KSTVET_TENDER_PDF = (
+    Path(__file__).resolve().parents[2] / "benchmarks" / "sources" / "1727358888238-bq-nd-drawing.pdf"
+)
+
 
 @pytest.fixture
 def engine():
@@ -312,25 +321,35 @@ def test_convenience_runner(tmp_path):
 
 
 def test_native_pdf_extraction_and_evaluation(engine):
-    """If real tender PDF is present on disk, verify genuine independent extraction."""
-    pdf_path = Path(r"C:\Users\bryce\Downloads\1727358888238-bq-nd-drawing.pdf")
-    if not pdf_path.exists():
-        pytest.skip("Verified tender PDF not present in local test environment")
+    """Verify genuine independent extraction against the repo-committed tender PDF."""
+    assert _KSTVET_TENDER_PDF.exists(), f"repository-committed benchmark source missing: {_KSTVET_TENDER_PDF}"
 
     report = engine.evaluate_benchmark(
         benchmark_id="tenders_ke_kstvet_cbc_classroom",
-        pdf_path=pdf_path,
+        pdf_path=_KSTVET_TENDER_PDF,
     )
     assert report.is_scored is True
-    # Post-cleanup: genuine schedule extraction without hardcoded fallbacks finds scheduled W1 and chalkboard exactly
+    # Post-cleanup: genuine schedule extraction without hardcoded fallbacks finds scheduled W1 and chalkboard exactly.
+    # total_items_compared == 13 matches expected_boq_summary.json's own total_measurable_expected for this
+    # benchmark; this assertion was previously untested outside the author's own machine (the test unconditionally
+    # skipped whenever the hardcoded personal Downloads path was absent), so "12" was never actually verified here.
     assert report.exact_matches >= 2
-    assert report.total_items_compared == 12
+    assert report.total_items_compared == 13
     assert report.overall_accuracy_percentage > 0.0
 
 
 def test_cli_main_entrypoint(monkeypatch, tmp_path):
-    """Test main CLI entrypoint."""
+    """Test main CLI entrypoint.
+
+    ``main()`` is invoked with no explicit ``--pdf`` flag: with
+    ``--auto-extract`` (default True) it must resolve the benchmark's own
+    repository-committed source PDF via resolve_file_path()'s
+    "benchmarks/sources" search root and succeed regardless of any
+    developer's personal machine paths.
+    """
     from pb_benchmark_accuracy_engine import main
+
+    assert _KSTVET_TENDER_PDF.exists(), f"repository-committed benchmark source missing: {_KSTVET_TENDER_PDF}"
 
     monkeypatch.setattr(
         "sys.argv",
@@ -342,12 +361,8 @@ def test_cli_main_entrypoint(monkeypatch, tmp_path):
             str(tmp_path),
         ],
     )
-    pdf_path = Path(r"C:\Users\bryce\Downloads\1727358888238-bq-nd-drawing.pdf")
     code = main()
-    if pdf_path.exists():
-        assert code == 0
-    else:
-        assert code == 1
+    assert code == 0
 
 
 def test_malformed_benchmark_fails_closed(engine):
