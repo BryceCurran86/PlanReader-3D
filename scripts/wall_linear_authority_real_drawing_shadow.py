@@ -170,7 +170,7 @@ def _shadow_one(spec: Dict[str, Any]) -> Dict[str, Any]:
             viewport=viewport,
             entity=entity,
             page_no=page_no,
-            scale_calibration=None,
+            scale_binding=None,
         )
         if qty.abstained:
             for reason in qty.blocking_reasons:

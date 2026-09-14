@@ -12,10 +12,15 @@ external/internal scope.
 from __future__ import annotations
 
 import math
-from typing import Optional, Sequence
+from typing import Mapping, Optional, Sequence
 
-from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType, ScaleCalibration
+from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_measurement_input_authority import resolve_linear_measurement_input
+from pb_physical_wall_identity import (
+    PhysicalWallIdentity,
+    resolve_physical_wall_equivalence,
+)
+from pb_viewport_scale_binding import ViewportScaleBinding
 from pb_migration_contracts import (
     DocumentEvidence,
     EntityEvidence,
@@ -29,7 +34,7 @@ from pb_migration_provider_envelope import ProviderContext
 from pb_wall_room_topology_contracts import WallCandidate
 
 WALL_LENGTH_FAMILY = "wall_length"
-WALL_LENGTH_FORMULA_VERSION = "1.1.0"
+WALL_LENGTH_FORMULA_VERSION = "1.2.0"
 
 
 def _polyline_length(points: Sequence[tuple[float, float]]) -> float:
@@ -127,10 +132,14 @@ def build_wall_length_quantity(
     viewport: ViewportEvidence,
     entity: EntityEvidence,
     page_no: int,
-    scale_calibration: Optional[ScaleCalibration] = None,
+    scale_binding: Optional[ViewportScaleBinding] = None,
     figured_evidence: Optional[EvidenceAtom] = None,
 ) -> QuantityEvidence:
-    """Build one wall-length quantity from existence + geometry + measurement."""
+    """Build one wall-length quantity from existence + geometry + measurement.
+
+    Scaled FIRM length requires an owned ``ViewportScaleBinding``. A bare
+    ``ScaleCalibration`` is not accepted.
+    """
     topology_blockers: list[str] = []
     topology_blockers.extend(
         _existence_blockers(
@@ -161,9 +170,10 @@ def build_wall_length_quantity(
         viewport=viewport,
         entity=entity,
         page_no=page_no,
-        scaled_length_page_units=page_length if scale_calibration is not None else None,
-        scale_calibration=scale_calibration,
+        scaled_length_page_units=page_length if scale_binding is not None else None,
+        scale_binding=scale_binding,
         figured_evidence=figured_evidence,
+        wall_viewport_id=wall.viewport_id,
     )
     if resolved.abstained:
         return _abstention(
@@ -233,8 +243,9 @@ def build_wall_length_quantities(
     document: DocumentEvidence,
     viewport: ViewportEvidence,
     page_no: int,
-    scale_calibration: Optional[ScaleCalibration] = None,
+    scale_binding: Optional[ViewportScaleBinding] = None,
     figured_evidence_by_wall_id: Optional[dict[str, EvidenceAtom]] = None,
+    physical_identities: Optional[Mapping[str, PhysicalWallIdentity]] = None,
 ) -> tuple[QuantityEvidence, ...]:
     """Batch builder with fail-closed duplicate representation protection.
 
@@ -260,6 +271,26 @@ def build_wall_length_quantities(
                 overlapping_ids.add(left.candidate_id)
                 overlapping_ids.add(right.candidate_id)
 
+    equivalence_blockers: dict[str, tuple[str, ...]] = {}
+    if physical_identities is not None:
+        equivalence = resolve_physical_wall_equivalence(
+            tuple(physical_identities.get(wall.candidate_id) for wall in walls),
+            walls_by_id={wall.candidate_id: wall for wall in walls},
+        )
+        allowed = set(equivalence.representative_wall_ids)
+        for wall in walls:
+            reasons: list[str] = []
+            if wall.candidate_id not in physical_identities:
+                reasons.append("physical_wall_identity_unavailable")
+            reasons.extend(equivalence.blockers_for(wall.candidate_id))
+            identity = physical_identities.get(wall.candidate_id)
+            if identity is not None and not identity.usable and not reasons:
+                reasons.extend(identity.blocking_reasons or ("physical_wall_identity_abstained",))
+            if identity is not None and identity.usable and wall.candidate_id not in allowed:
+                reasons.append("physical_wall_not_selected_representative")
+            if reasons:
+                equivalence_blockers[wall.candidate_id] = tuple(dict.fromkeys(reasons))
+
     output: list[QuantityEvidence] = []
     for wall in walls:
         entity = entities_by_wall_id.get(wall.candidate_id)
@@ -273,6 +304,7 @@ def build_wall_length_quantities(
             blockers.append("duplicate_wall_identity")
         if wall.candidate_id in overlapping_ids:
             blockers.append("overlapping_wall_source_segments")
+        blockers.extend(equivalence_blockers.get(wall.candidate_id, ()))
         if blockers:
             output.append(
                 _abstention(
@@ -293,7 +325,7 @@ def build_wall_length_quantities(
                 viewport=viewport,
                 entity=entity,
                 page_no=page_no,
-                scale_calibration=scale_calibration,
+                scale_binding=scale_binding,
                 figured_evidence=figured.get(wall.candidate_id),
             )
         )

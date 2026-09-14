@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import math
 
+from dataclasses import replace
+
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_measurement_input_authority import (
     resolve_linear_measurement_input,
     scale_calibration_fingerprint,
+    select_owned_viewport_scale_binding,
 )
 from pb_migration_contracts import (
     DocumentEvidence,
@@ -19,8 +22,10 @@ from pb_migration_provider_envelope import ProviderContext
 from pb_page_scale_calibration_authority import (
     ScaleSourceReading,
     ScaleSourceType,
+    measurement_authority_for_page_scale,
     resolve_page_scale_calibration,
 )
+from pb_viewport_scale_binding import ViewportScaleBinding
 
 
 SHA = "a" * 64
@@ -57,7 +62,7 @@ def _document(*, evidence_ids=("ev-wall", "ev-dim")) -> DocumentEvidence:
     )
 
 
-def _viewport(viewport_id: str = "vp-1") -> ViewportEvidence:
+def _viewport(viewport_id: str = "vp-1", *, resolved_scale_id=None) -> ViewportEvidence:
     return ViewportEvidence(
         viewport_id=viewport_id,
         document_id="doc-1",
@@ -67,7 +72,23 @@ def _viewport(viewport_id: str = "vp-1") -> ViewportEvidence:
         status=ViewportResolutionStatus.RESOLVED,
         evidence_ids=("ev-wall",),
         scale_evidence_ids=(),
+        resolved_scale_id=resolved_scale_id,
         confidence=1.0,
+    )
+
+
+def _binding(scale, *, viewport_id="vp-1", source_sha256=SHA):
+    fingerprint = scale_calibration_fingerprint(scale)
+    authority = measurement_authority_for_page_scale(scale)
+    return ViewportScaleBinding(
+        viewport_id=viewport_id,
+        page_no=scale.page_no,
+        source_sha256=source_sha256,
+        revision_id=scale.revision_id,
+        calibration=scale,
+        scale_fingerprint=fingerprint,
+        measurement_authority=authority,
+        blocking_reasons=() if authority == AuthorityStatus.FIRM.value else ("scale_not_firm",),
     )
 
 
@@ -106,15 +127,16 @@ def _figured(text: str = "6500") -> EvidenceAtom:
 
 def test_scale_bar_firm_scaled_geometry_resolves() -> None:
     scale = _scale(ScaleSourceType.SCALE_BAR)
-    # At 1:100, px_per_m is ~28.346; 10m therefore spans px_per_m*10 page units.
+    binding = _binding(scale)
     result = resolve_linear_measurement_input(
         context=_context(),
         document=_document(evidence_ids=("ev-wall",)),
-        viewport=_viewport(),
+        viewport=_viewport(resolved_scale_id=binding.scale_fingerprint),
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 10.0,
-        scale_calibration=scale,
+        scale_binding=binding,
+        wall_viewport_id="vp-1",
     )
     assert result.abstained is False
     assert result.authority_status == AuthorityStatus.FIRM.value
@@ -123,31 +145,50 @@ def test_scale_bar_firm_scaled_geometry_resolves() -> None:
     assert result.scale_fingerprint == scale_calibration_fingerprint(scale)
 
 
-def test_title_block_only_scale_is_not_firm_and_abstains() -> None:
-    scale = _scale(ScaleSourceType.TITLE_BLOCK)
+def test_bare_scale_calibration_cannot_authorize_firm() -> None:
+    scale = _scale(ScaleSourceType.SCALE_BAR)
     result = resolve_linear_measurement_input(
         context=_context(),
         document=_document(evidence_ids=("ev-wall",)),
-        viewport=_viewport(),
+        viewport=_viewport(resolved_scale_id=scale_calibration_fingerprint(scale)),
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
-        scaled_length_page_units=100.0,
+        scaled_length_page_units=scale.px_per_m * 10.0,
         scale_calibration=scale,
     )
     assert result.abstained
-    assert result.blocking_reasons == ("scale_not_firm",)
+    assert result.blocking_reasons == ("bare_scale_calibration_rejected",)
+
+
+def test_title_block_only_scale_is_not_firm_and_abstains() -> None:
+    scale = _scale(ScaleSourceType.TITLE_BLOCK)
+    binding = _binding(scale)
+    result = resolve_linear_measurement_input(
+        context=_context(),
+        document=_document(evidence_ids=("ev-wall",)),
+        viewport=_viewport(resolved_scale_id=binding.scale_fingerprint),
+        entity=_entity(evidence_ids=("ev-wall",)),
+        page_no=1,
+        scaled_length_page_units=100.0,
+        scale_binding=binding,
+        wall_viewport_id="vp-1",
+    )
+    assert result.abstained
+    assert "scale_not_firm" in result.blocking_reasons
 
 
 def test_inferred_scale_is_not_firm_and_abstains() -> None:
     scale = _scale(ScaleSourceType.INFERRED)
+    binding = _binding(scale)
     result = resolve_linear_measurement_input(
         context=_context(),
         document=_document(evidence_ids=("ev-wall",)),
-        viewport=_viewport(),
+        viewport=_viewport(resolved_scale_id=binding.scale_fingerprint),
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
         scaled_length_page_units=100.0,
-        scale_calibration=scale,
+        scale_binding=binding,
+        wall_viewport_id="vp-1",
     )
     assert result.abstained
     assert result.authority_status == AuthorityStatus.BLOCKED.value
@@ -155,17 +196,19 @@ def test_inferred_scale_is_not_firm_and_abstains() -> None:
 
 def test_stale_scale_abstains() -> None:
     scale = _scale(ScaleSourceType.SCALE_BAR, revision="R0")
+    binding = _binding(scale)
     result = resolve_linear_measurement_input(
         context=_context(revision="R1"),
         document=_document(evidence_ids=("ev-wall",)),
-        viewport=_viewport(),
+        viewport=_viewport(resolved_scale_id=binding.scale_fingerprint),
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
         scaled_length_page_units=100.0,
-        scale_calibration=scale,
+        scale_binding=binding,
+        wall_viewport_id="vp-1",
     )
     assert result.abstained
-    assert result.blocking_reasons == ("scale_not_firm",)
+    assert "scale_binding_revision_mismatch" in result.blocking_reasons
     assert "Stale calibration" in result.notes
 
 
@@ -177,7 +220,8 @@ def test_foreign_viewport_abstains_before_measurement() -> None:
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
         scaled_length_page_units=100.0,
-        scale_calibration=_scale(ScaleSourceType.SCALE_BAR),
+        scale_binding=_binding(_scale(ScaleSourceType.SCALE_BAR), viewport_id="vp-foreign"),
+        wall_viewport_id="vp-foreign",
     )
     assert result.abstained
     assert "viewport_not_owned" in result.blocking_reasons
@@ -198,7 +242,8 @@ def test_source_hash_mismatch_abstains() -> None:
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
         scaled_length_page_units=100.0,
-        scale_calibration=_scale(ScaleSourceType.SCALE_BAR),
+        scale_binding=_binding(_scale(ScaleSourceType.SCALE_BAR)),
+        wall_viewport_id="vp-1",
     )
     assert result.abstained
     assert "source_sha256_mismatch" in result.blocking_reasons
@@ -221,14 +266,16 @@ def test_figured_dimension_resolves_without_scale() -> None:
 
 def test_figured_dimension_outweighs_agreeing_scaled_geometry() -> None:
     scale = _scale(ScaleSourceType.SCALE_BAR)
+    binding = _binding(scale)
     result = resolve_linear_measurement_input(
         context=_context(),
         document=_document(),
-        viewport=_viewport(),
+        viewport=_viewport(resolved_scale_id=binding.scale_fingerprint),
         entity=_entity(),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 6.5,
-        scale_calibration=scale,
+        scale_binding=binding,
+        wall_viewport_id="vp-1",
         figured_evidence=_figured("6500"),
     )
     assert result.abstained is False
@@ -238,14 +285,16 @@ def test_figured_dimension_outweighs_agreeing_scaled_geometry() -> None:
 
 def test_figured_vs_scaled_conflict_abstains() -> None:
     scale = _scale(ScaleSourceType.SCALE_BAR)
+    binding = _binding(scale)
     result = resolve_linear_measurement_input(
         context=_context(),
         document=_document(),
-        viewport=_viewport(),
+        viewport=_viewport(resolved_scale_id=binding.scale_fingerprint),
         entity=_entity(),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 9.0,
-        scale_calibration=scale,
+        scale_binding=binding,
+        wall_viewport_id="vp-1",
         figured_evidence=_figured("6500"),
     )
     assert result.abstained
@@ -260,7 +309,8 @@ def test_unresolved_entity_abstains() -> None:
         entity=_entity(evidence_ids=("ev-wall",), status=EvidenceResolutionStatus.ABSTAINED),
         page_no=1,
         scaled_length_page_units=100.0,
-        scale_calibration=_scale(ScaleSourceType.SCALE_BAR),
+        scale_binding=_binding(_scale(ScaleSourceType.SCALE_BAR)),
+        wall_viewport_id="vp-1",
     )
     assert result.abstained
     assert "entity_unresolved" in result.blocking_reasons
@@ -269,27 +319,65 @@ def test_unresolved_entity_abstains() -> None:
 def test_resolution_fingerprint_is_deterministic_and_changes_with_scale() -> None:
     scale_100 = _scale(ScaleSourceType.SCALE_BAR, 100.0)
     scale_50 = _scale(ScaleSourceType.SCALE_BAR, 50.0)
-    kwargs = dict(
+    bind_100 = _binding(scale_100)
+    bind_50 = _binding(scale_50)
+    first = resolve_linear_measurement_input(
         context=_context(),
         document=_document(evidence_ids=("ev-wall",)),
-        viewport=_viewport(),
+        viewport=_viewport(resolved_scale_id=bind_100.scale_fingerprint),
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
-    )
-    first = resolve_linear_measurement_input(
-        **kwargs,
         scaled_length_page_units=scale_100.px_per_m * 4.0,
-        scale_calibration=scale_100,
+        scale_binding=bind_100,
+        wall_viewport_id="vp-1",
     )
     replay = resolve_linear_measurement_input(
-        **kwargs,
+        context=_context(),
+        document=_document(evidence_ids=("ev-wall",)),
+        viewport=_viewport(resolved_scale_id=bind_100.scale_fingerprint),
+        entity=_entity(evidence_ids=("ev-wall",)),
+        page_no=1,
         scaled_length_page_units=scale_100.px_per_m * 4.0,
-        scale_calibration=scale_100,
+        scale_binding=bind_100,
+        wall_viewport_id="vp-1",
     )
     changed = resolve_linear_measurement_input(
-        **kwargs,
+        context=_context(),
+        document=_document(evidence_ids=("ev-wall",)),
+        viewport=_viewport(resolved_scale_id=bind_50.scale_fingerprint),
+        entity=_entity(evidence_ids=("ev-wall",)),
+        page_no=1,
         scaled_length_page_units=scale_50.px_per_m * 4.0,
-        scale_calibration=scale_50,
+        scale_binding=bind_50,
+        wall_viewport_id="vp-1",
     )
     assert first.fingerprint() == replay.fingerprint()
     assert first.fingerprint() != changed.fingerprint()
+
+
+def test_two_conflicting_eligible_bindings_block_without_picking_first() -> None:
+    scale_100 = _scale(ScaleSourceType.SCALE_BAR, 100.0)
+    scale_50 = _scale(ScaleSourceType.SCALE_BAR, 50.0)
+    bind_100 = _binding(scale_100)
+    bind_50 = _binding(scale_50)
+    selected, reasons = select_owned_viewport_scale_binding(
+        (bind_100, bind_50),
+        context=_context(),
+        document=_document(evidence_ids=("ev-wall",)),
+        viewport=_viewport(resolved_scale_id=bind_100.scale_fingerprint),
+        page_no=1,
+        wall_viewport_id="vp-1",
+    )
+    # Fingerprint equality is required. Only bind_100 matches this viewport.
+    assert selected == bind_100
+    assert reasons == ()
+    selected_conflict, conflict_reasons = select_owned_viewport_scale_binding(
+        (bind_100, replace(bind_50, scale_fingerprint=bind_100.scale_fingerprint, calibration=scale_100)),
+        context=_context(),
+        document=_document(evidence_ids=("ev-wall",)),
+        viewport=_viewport(resolved_scale_id=bind_100.scale_fingerprint),
+        page_no=1,
+        wall_viewport_id="vp-1",
+    )
+    assert selected_conflict is None
+    assert conflict_reasons == ("conflicting_eligible_scale_bindings",)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pb_geometry_takeoff_model import AuthorityStatus
 from pb_measurement_input_authority import (
     resolve_linear_measurement_input,
     scale_calibration_fingerprint,
@@ -16,8 +17,10 @@ from pb_migration_provider_envelope import ProviderContext
 from pb_page_scale_calibration_authority import (
     ScaleSourceReading,
     ScaleSourceType,
+    measurement_authority_for_page_scale,
     resolve_page_scale_calibration,
 )
+from pb_viewport_scale_binding import ViewportScaleBinding
 
 SHA = "a" * 64
 
@@ -98,6 +101,21 @@ def _scale():
     )
 
 
+def _binding(scale, *, viewport_id="vp-1"):
+    fingerprint = scale_calibration_fingerprint(scale)
+    authority = measurement_authority_for_page_scale(scale)
+    return ViewportScaleBinding(
+        viewport_id=viewport_id,
+        page_no=scale.page_no,
+        source_sha256=SHA,
+        revision_id=scale.revision_id,
+        calibration=scale,
+        scale_fingerprint=fingerprint,
+        measurement_authority=authority,
+        blocking_reasons=() if authority == AuthorityStatus.FIRM.value else ("scale_not_firm",),
+    )
+
+
 def test_candidate_figured_evidence_cannot_become_firm() -> None:
     result = resolve_linear_measurement_input(
         context=_context(),
@@ -120,7 +138,8 @@ def test_candidate_entity_cannot_back_firm_measurement() -> None:
         entity=_entity(EvidenceResolutionStatus.CANDIDATE),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 4.0,
-        scale_calibration=scale,
+        scale_binding=_binding(scale),
+        wall_viewport_id="vp-1",
     )
     assert result.abstained
     assert "entity_unresolved" in result.blocking_reasons
@@ -135,7 +154,8 @@ def test_ambiguous_viewport_status_cannot_measure() -> None:
         entity=_entity(),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 4.0,
-        scale_calibration=scale,
+        scale_binding=_binding(scale),
+        wall_viewport_id="vp-1",
     )
     assert result.abstained
     assert "viewport_unresolved" in result.blocking_reasons
@@ -150,22 +170,41 @@ def test_page_scale_cannot_leak_across_multiple_viewports_without_binding() -> N
         entity=_entity(),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 4.0,
-        scale_calibration=scale,
+        scale_binding=_binding(scale),
+        wall_viewport_id="vp-1",
     )
     assert result.abstained
-    assert "scale_not_bound_to_multi_viewport" in result.blocking_reasons
+    assert "viewport_scale_fingerprint_mismatch" in result.blocking_reasons
+
+
+def test_single_viewport_without_resolved_scale_id_is_blocked() -> None:
+    scale = _scale()
+    result = resolve_linear_measurement_input(
+        context=_context(),
+        document=_document(),
+        viewport=_viewport(resolved_scale_id=None),
+        entity=_entity(),
+        page_no=1,
+        scaled_length_page_units=scale.px_per_m * 4.0,
+        scale_binding=_binding(scale),
+        wall_viewport_id="vp-1",
+    )
+    assert result.abstained
+    assert "viewport_scale_fingerprint_mismatch" in result.blocking_reasons
 
 
 def test_multi_viewport_scale_may_measure_when_fingerprint_is_explicitly_bound() -> None:
     scale = _scale()
+    binding = _binding(scale)
     result = resolve_linear_measurement_input(
         context=_context(multi_viewport=True),
         document=_document(),
-        viewport=_viewport(resolved_scale_id=scale_calibration_fingerprint(scale)),
+        viewport=_viewport(resolved_scale_id=binding.scale_fingerprint),
         entity=_entity(),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 4.0,
-        scale_calibration=scale,
+        scale_binding=binding,
+        wall_viewport_id="vp-1",
     )
     assert not result.abstained
     assert result.value_m == 4.0

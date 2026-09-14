@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pb_measurement_input_authority import resolve_linear_measurement_input
+from pb_geometry_takeoff_model import AuthorityStatus
+from pb_measurement_input_authority import resolve_linear_measurement_input, scale_calibration_fingerprint
+from pb_viewport_scale_binding import ViewportScaleBinding
 from pb_migration_contracts import (
     DocumentEvidence,
     EntityEvidence,
@@ -12,6 +14,7 @@ from pb_migration_provider_envelope import ProviderContext
 from pb_page_scale_calibration_authority import (
     ScaleSourceReading,
     ScaleSourceType,
+    measurement_authority_for_page_scale,
     resolve_page_scale_calibration,
 )
 
@@ -78,19 +81,47 @@ def _scale(*, revision: str | None):
     )
 
 
+def _binding(scale):
+    fingerprint = scale_calibration_fingerprint(scale)
+    authority = measurement_authority_for_page_scale(scale)
+    return ViewportScaleBinding(
+        viewport_id="vp",
+        page_no=scale.page_no,
+        source_sha256=SHA,
+        revision_id=scale.revision_id,
+        calibration=scale,
+        scale_fingerprint=fingerprint,
+        measurement_authority=authority,
+        blocking_reasons=() if authority == AuthorityStatus.FIRM.value else ("scale_not_firm",),
+    )
+
+
 def test_unversioned_scale_cannot_become_firm_measurement() -> None:
     scale = _scale(revision=None)
+    binding = _binding(scale)
     result = resolve_linear_measurement_input(
         context=_context(),
         document=_document(),
-        viewport=_viewport(),
+        viewport=ViewportEvidence(
+            viewport_id="vp",
+            document_id="doc",
+            page_id="page-1",
+            bbox=(0.0, 0.0, 100.0, 100.0),
+            view_type="floor_plan",
+            status=ViewportResolutionStatus.RESOLVED,
+            evidence_ids=("ev-wall",),
+            resolved_scale_id=binding.scale_fingerprint,
+            confidence=1.0,
+        ),
         entity=_entity(),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 5.0,
-        scale_calibration=scale,
+        scale_binding=binding,
+        wall_viewport_id="vp",
     )
     assert result.abstained is True
     assert result.value_m is None
+    assert "scale_binding_revision_mismatch" in result.blocking_reasons
     assert "scale_revision_unbound" in result.blocking_reasons
 
 
@@ -103,7 +134,8 @@ def test_unbound_run_revision_blocks_before_measurement() -> None:
         entity=_entity(),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 5.0,
-        scale_calibration=scale,
+        scale_binding=_binding(scale),
+        wall_viewport_id="vp",
     )
     assert result.abstained is True
     assert "revision_unbound" in result.blocking_reasons
