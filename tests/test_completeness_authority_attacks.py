@@ -24,6 +24,7 @@ from pb_canonical_wall_room_evidence_model import FAMILY_PAIRED_WALL_FACES
 from pb_enumerator_snapshot_commitment import (
     build_enumerator_snapshot_commitment,
     immutable_snapshot_fingerprint,
+    verify_enumerator_snapshot_commitment,
 )
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_measurement_input_authority import scale_calibration_fingerprint
@@ -49,7 +50,11 @@ from pb_physical_wall_identity import (
     resolve_physical_wall_identity,
 )
 from pb_viewport_scale_binding import ViewportScaleBinding
-from pb_wall_length_quantity import build_wall_length_quantities, build_wall_length_quantity
+from pb_wall_length_quantity import (
+    _local_physical_identities,
+    build_wall_length_quantities,
+    build_wall_length_quantity,
+)
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 from pb_wall_room_topology_typed_negative_evidence import KIND_PHYSICAL_WALL
 
@@ -293,22 +298,24 @@ def _candidate_proof(
     return universe, manifest
 
 
+def _snapshot_payload(domain: str, universe) -> dict[str, object]:
+    return {
+        "domain": domain,
+        "scope": universe.scope.payload(),
+        "members": tuple(
+            {
+                "candidate_id": item.candidate_id,
+                "provenance_fingerprint": item.provenance_fingerprint,
+            }
+            for item in sorted(universe.members, key=lambda item: item.candidate_id)
+        ),
+    }
+
+
 def _enumerator_proof(domain: str, universe: object, *, snapshot_tag: str):
-    members = tuple(
-        {
-            "candidate_id": item.candidate_id,
-            "provenance_fingerprint": item.provenance_fingerprint,
-        }
-        for item in sorted(universe.members, key=lambda item: item.candidate_id)
-    )
+    snapshot_payload = _snapshot_payload(domain, universe)
     snapshot_id = f"{snapshot_tag}-snapshot-1"
-    snapshot_fingerprint = immutable_snapshot_fingerprint(
-        {
-            "domain": domain,
-            "scope": universe.scope.payload(),
-            "members": members,
-        }
-    )
+    snapshot_fingerprint = immutable_snapshot_fingerprint(snapshot_payload)
     commitment = build_enumerator_snapshot_commitment(
         scope=universe.scope,
         enumerator_id=f"test.{snapshot_tag}.enumerator",
@@ -318,6 +325,31 @@ def _enumerator_proof(domain: str, universe: object, *, snapshot_tag: str):
         candidate_universe=universe,
     )
     return commitment, snapshot_id, snapshot_fingerprint, universe
+
+
+def _verify_enumerator_current(
+    domain: str,
+    universe,
+    manifest,
+    supplied_admitted_ids: tuple[str, ...],
+    *,
+    snapshot_tag: str,
+):
+    commitment, snapshot_id, snapshot_fp, current = _enumerator_proof(
+        domain,
+        universe,
+        snapshot_tag=snapshot_tag,
+    )
+    return verify_enumerator_snapshot_commitment(
+        commitment,
+        expected_scope=_scope(domain),
+        current_upstream_snapshot_id=snapshot_id,
+        current_upstream_snapshot_fingerprint=snapshot_fp,
+        current_enumerated_universe=current,
+        manifest=manifest,
+        supplied_admitted_ids=supplied_admitted_ids,
+        current_upstream_snapshot_payload=_snapshot_payload(domain, current),
+    )
 
 
 def _install_scale_enumerator(kwargs: dict, universe) -> None:
@@ -365,6 +397,12 @@ def _equivalence_bundle(walls, identities, candidate_universe, *, scope=None):
 
 
 def _firm_single_kwargs(wall: WallCandidate | None = None):
+    """Legacy-shaped public-boundary inputs.
+
+    These deliberately do not and cannot install an authoritative upstream
+    snapshot payload. They are useful for asserting the publication boundary
+    fails closed, not for constructing a synthetic FIRM quantity.
+    """
     resolved_wall = wall or _wall("w1")
     atoms = _atoms(resolved_wall.candidate_id)
     document = _document(tuple(atom.evidence_id for atom in atoms))
@@ -406,68 +444,82 @@ def _assert_blocked(qty, reason: str) -> None:
     assert reason in qty.blocking_reasons
 
 
-def test_authentic_singleton_baseline_can_reach_firm() -> None:
+def test_public_boundary_stays_blocked_without_authoritative_snapshot_producer() -> None:
     qty = build_wall_length_quantity(**_firm_single_kwargs())
-    assert qty.abstained is False
-    assert qty.status == AuthorityStatus.FIRM.value
+    assert qty.abstained is True
+    assert qty.value is None
+    assert "physical_candidate_enumerator_commitment_unavailable" in qty.blocking_reasons
+    assert "scale_enumerator_commitment_unavailable" in qty.blocking_reasons
+    assert "authoritative_upstream_snapshot_content_unavailable" in qty.blocking_reasons
 
 
 # C1 --------------------------------------------------------------------------
 
 
-def test_c1_hidden_same_viewport_scale_competitor_cannot_leave_firm() -> None:
-    kwargs = _firm_single_kwargs()
-    admitted = kwargs["scale_bindings"][0]
+def test_c1_hidden_same_viewport_scale_competitor_is_detected_below_public_boundary() -> None:
+    admitted = _binding(100.0, label="A101")
     hidden = _binding(50.0, label="A102")
     universe, manifest = _scale_proof((admitted, hidden))
-    kwargs.update(scale_universe=universe, scale_manifest=manifest, scale_bindings=(admitted,))
-    _install_scale_enumerator(kwargs, universe)
-    _assert_blocked(build_wall_length_quantity(**kwargs), "scale_enumerator_commitment_mismatch")
+    result = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_SCALE,
+        universe,
+        manifest,
+        (scale_binding_member(admitted).candidate_id,),
+        snapshot_tag="scale-hidden",
+    )
+    assert result.status == AuthorityBindingStatus.MISMATCH
+    assert "authority_universe_admitted_set_mismatch" in result.reasons
 
 
-def test_c1_two_agreeing_scale_candidates_remain_fail_closed_until_reconciled() -> None:
-    kwargs = _firm_single_kwargs()
+def test_c1_two_agreeing_scale_candidates_remain_unreconciled() -> None:
     first = _binding(100.0, label="A101")
     second = _binding(100.0, label="A101-SECOND")
     universe, manifest = _scale_proof((first, second))
-    kwargs.update(
-        scale_bindings=(first, second),
-        viewport=_viewport(resolved_scale_id=first.scale_fingerprint),
-        scale_universe=universe,
-        scale_manifest=manifest,
+    admitted = tuple(item.candidate_id for item in universe.members)
+    result = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_SCALE,
+        universe,
+        manifest,
+        admitted,
+        snapshot_tag="scale-agreeing",
     )
-    _install_scale_enumerator(kwargs, universe)
-    assert build_wall_length_quantity(**kwargs).abstained is True
+    assert result.status == AuthorityBindingStatus.MISMATCH
+    assert "scale_universe_multiple_admitted_candidates_unreconciled" in result.reasons
 
 
-def test_c1_two_conflicting_scales_block() -> None:
-    kwargs = _firm_single_kwargs()
+def test_c1_two_conflicting_scales_remain_unreconciled() -> None:
     first = _binding(100.0, label="A101")
     second = _binding(50.0, label="A102")
     universe, manifest = _scale_proof((first, second))
-    kwargs.update(
-        scale_bindings=(first, second),
-        viewport=_viewport(resolved_scale_id=first.scale_fingerprint),
-        scale_universe=universe,
-        scale_manifest=manifest,
+    admitted = tuple(item.candidate_id for item in universe.members)
+    result = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_SCALE,
+        universe,
+        manifest,
+        admitted,
+        snapshot_tag="scale-conflicting",
     )
-    _install_scale_enumerator(kwargs, universe)
-    assert build_wall_length_quantity(**kwargs).abstained is True
+    assert result.status == AuthorityBindingStatus.MISMATCH
+    assert "scale_universe_multiple_admitted_candidates_unreconciled" in result.reasons
 
 
 def test_c1_omitted_admitted_scale_candidate_blocks() -> None:
-    kwargs = _firm_single_kwargs()
-    first = kwargs["scale_bindings"][0]
+    first = _binding(100.0, label="A101")
     second = _binding(75.0, label="A103")
     universe, manifest = _scale_proof((first, second))
-    kwargs.update(scale_bindings=(first,), scale_universe=universe, scale_manifest=manifest)
-    _install_scale_enumerator(kwargs, universe)
-    _assert_blocked(build_wall_length_quantity(**kwargs), "scale_enumerator_commitment_mismatch")
+    result = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_SCALE,
+        universe,
+        manifest,
+        (scale_binding_member(first).candidate_id,),
+        snapshot_tag="scale-omitted",
+    )
+    assert result.status == AuthorityBindingStatus.MISMATCH
+    assert "authority_universe_admitted_set_mismatch" in result.reasons
 
 
 def test_c1_unresolved_scale_candidate_blocks() -> None:
-    kwargs = _firm_single_kwargs()
-    first = kwargs["scale_bindings"][0]
+    first = _binding(100.0)
     unresolved = AuthorityUniverseMember("scale-unresolved", canonical_sha256({"candidate": "u"}))
     universe, manifest = _scale_proof(
         (first,),
@@ -475,24 +527,36 @@ def test_c1_unresolved_scale_candidate_blocks() -> None:
         admitted_ids=(scale_binding_member(first).candidate_id,),
         unresolved_ids=("scale-unresolved",),
     )
-    kwargs.update(scale_universe=universe, scale_manifest=manifest)
-    _install_scale_enumerator(kwargs, universe)
-    assert build_wall_length_quantity(**kwargs).abstained is True
+    result = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_SCALE,
+        universe,
+        manifest,
+        (scale_binding_member(first).candidate_id,),
+        snapshot_tag="scale-unresolved",
+    )
+    assert result.status == AuthorityBindingStatus.MISMATCH
+    assert "authority_universe_unresolved_candidates" in result.reasons
 
 
-def test_c1_explicit_evidenced_scale_exclusion_allows_remaining_proven_scale() -> None:
-    kwargs = _firm_single_kwargs()
-    first = kwargs["scale_bindings"][0]
+def test_c1_explicit_evidenced_scale_exclusion_authenticates_remaining_scale() -> None:
+    first = _binding(100.0, label="A101")
     excluded = _binding(50.0, label="A102")
+    first_id = scale_binding_member(first).candidate_id
     excluded_id = scale_binding_member(excluded).candidate_id
     universe, manifest = _scale_proof(
         (first, excluded),
-        admitted_ids=(scale_binding_member(first).candidate_id,),
+        admitted_ids=(first_id,),
         exclusions=(ExplicitExclusion(excluded_id, "wrong_view_type", ("ev-exclusion",)),),
     )
-    kwargs.update(scale_bindings=(first,), scale_universe=universe, scale_manifest=manifest)
-    _install_scale_enumerator(kwargs, universe)
-    assert build_wall_length_quantity(**kwargs).abstained is False
+    result = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_SCALE,
+        universe,
+        manifest,
+        (first_id,),
+        snapshot_tag="scale-exclusion",
+    )
+    assert result.status == AuthorityBindingStatus.AUTHENTIC
+    assert result.authentic
 
 
 @pytest.mark.parametrize(
@@ -507,18 +571,29 @@ def test_c1_explicit_evidenced_scale_exclusion_allows_remaining_proven_scale() -
     ),
 )
 def test_c1_stale_or_wrong_scale_scope_blocks(field: str, value: str) -> None:
-    kwargs = _firm_single_kwargs()
-    binding = kwargs["scale_bindings"][0]
+    binding = _binding(100.0)
     stale_scope = replace(_scope(DOMAIN_WALL_LENGTH_SCALE), **{field: value})
     universe, manifest = _scale_proof((binding,), scope=stale_scope)
-    kwargs.update(scale_universe=universe, scale_manifest=manifest)
-    _install_scale_enumerator(kwargs, universe)
-    assert build_wall_length_quantity(**kwargs).abstained is True
+    commitment, snapshot_id, snapshot_fp, current = _enumerator_proof(
+        DOMAIN_WALL_LENGTH_SCALE,
+        universe,
+        snapshot_tag="scale-stale-scope",
+    )
+    result = verify_enumerator_snapshot_commitment(
+        commitment,
+        expected_scope=_scope(DOMAIN_WALL_LENGTH_SCALE),
+        current_upstream_snapshot_id=snapshot_id,
+        current_upstream_snapshot_fingerprint=snapshot_fp,
+        current_enumerated_universe=current,
+        manifest=manifest,
+        supplied_admitted_ids=(scale_binding_member(binding).candidate_id,),
+        current_upstream_snapshot_payload=_snapshot_payload(DOMAIN_WALL_LENGTH_SCALE, current),
+    )
+    assert result.status in {AuthorityBindingStatus.STALE, AuthorityBindingStatus.MISMATCH}
 
 
 def test_c1_conflict_added_after_manifest_creation_invalidates_manifest() -> None:
-    kwargs = _firm_single_kwargs()
-    first = kwargs["scale_bindings"][0]
+    first = _binding(100.0)
     old_universe, old_manifest = _scale_proof((first,))
     added = _binding(50.0, label="A102")
     current_universe = build_authority_universe(
@@ -526,16 +601,29 @@ def test_c1_conflict_added_after_manifest_creation_invalidates_manifest() -> Non
         (scale_binding_member(first), scale_binding_member(added)),
     )
     assert current_universe.fingerprint != old_universe.fingerprint
-    kwargs.update(scale_universe=current_universe, scale_manifest=old_manifest)
-    kwargs["scale_enumerated_universe"] = current_universe
-    assert build_wall_length_quantity(**kwargs).abstained is True
+    result = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_SCALE,
+        current_universe,
+        old_manifest,
+        (scale_binding_member(first).candidate_id,),
+        snapshot_tag="scale-added-after-manifest",
+    )
+    assert result.status == AuthorityBindingStatus.MISMATCH
+    assert "manifest_not_bound_to_enumerator_commitment" in result.reasons
 
 
 def test_c1_conflict_monotonicity_never_strengthens_authority() -> None:
-    baseline = build_wall_length_quantity(**_firm_single_kwargs())
-    assert baseline.abstained is False
-    kwargs = _firm_single_kwargs()
-    first = kwargs["scale_bindings"][0]
+    first = _binding(100.0)
+    baseline_universe, baseline_manifest = _scale_proof((first,))
+    baseline = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_SCALE,
+        baseline_universe,
+        baseline_manifest,
+        (scale_binding_member(first).candidate_id,),
+        snapshot_tag="scale-monotonic-baseline",
+    )
+    assert baseline.status == AuthorityBindingStatus.AUTHENTIC
+
     unresolved = AuthorityUniverseMember("late-scale", canonical_sha256({"late": True}))
     universe, manifest = _scale_proof(
         (first,),
@@ -543,9 +631,15 @@ def test_c1_conflict_monotonicity_never_strengthens_authority() -> None:
         admitted_ids=(scale_binding_member(first).candidate_id,),
         unresolved_ids=("late-scale",),
     )
-    kwargs.update(scale_universe=universe, scale_manifest=manifest)
-    _install_scale_enumerator(kwargs, universe)
-    assert build_wall_length_quantity(**kwargs).abstained is True
+    degraded = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_SCALE,
+        universe,
+        manifest,
+        (scale_binding_member(first).candidate_id,),
+        snapshot_tag="scale-monotonic-conflict",
+    )
+    assert degraded.status == AuthorityBindingStatus.MISMATCH
+    assert "authority_universe_unresolved_candidates" in degraded.reasons
 
 
 # C4 --------------------------------------------------------------------------
@@ -685,6 +779,7 @@ def test_c4_unbound_resolution_cannot_authorize_publication() -> None:
 
 
 def _batch_inputs(walls: tuple[WallCandidate, ...], identities=None):
+    """Legacy-shaped public-boundary batch inputs; intentionally no snapshot payload."""
     resolved_identities = tuple(identities or tuple(_identity(wall) for wall in walls))
     atoms = tuple(atom for wall in walls for atom in _atoms(wall.candidate_id))
     document = _document(tuple(atom.evidence_id for atom in atoms))
@@ -716,53 +811,54 @@ def _batch_inputs(walls: tuple[WallCandidate, ...], identities=None):
     return kwargs
 
 
-def test_c5_hidden_competing_wall_blocks() -> None:
-    admitted = _wall("w1")
-    hidden = _wall("w2", y=2.0)
-    kwargs = _batch_inputs((admitted,))
-    hidden_identity = _identity(hidden)
-    identities = kwargs["physical_identity_universe"] + (hidden_identity,)
-    universe, manifest = _candidate_proof(identities)
-    kwargs.update(
-        candidate_universe=universe,
-        candidate_manifest=manifest,
-        physical_identity_universe=identities,
+def test_c5_hidden_competing_wall_is_detected_below_public_boundary() -> None:
+    admitted = _identity(_wall("w1"))
+    hidden = _identity(_wall("w2", y=2.0))
+    universe, manifest = _candidate_proof((admitted, hidden))
+    result = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+        universe,
+        manifest,
+        ("w1",),
+        snapshot_tag="wall-hidden",
     )
-    _install_candidate_enumerator(kwargs, universe)
-    out = build_wall_length_quantities(**kwargs)
-    assert out[0].abstained is True
+    assert result.status == AuthorityBindingStatus.MISMATCH
+    assert "authority_universe_admitted_set_mismatch" in result.reasons
 
 
-def test_c5_omitted_duplicate_candidate_blocks() -> None:
-    admitted = _wall("w1")
-    duplicate_representation = _wall("w2", y=0.0)
-    kwargs = _batch_inputs((admitted,))
-    hidden_identity = _identity(duplicate_representation, lineage="native-w1")
-    identities = kwargs["physical_identity_universe"] + (hidden_identity,)
-    universe, manifest = _candidate_proof(identities)
-    kwargs.update(
-        candidate_universe=universe,
-        candidate_manifest=manifest,
-        physical_identity_universe=identities,
+def test_c5_omitted_duplicate_candidate_is_detected() -> None:
+    admitted = _identity(_wall("w1"), lineage="native-w1")
+    duplicate = _identity(_wall("w2", y=0.0), lineage="native-w1")
+    universe, manifest = _candidate_proof((admitted, duplicate))
+    result = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+        universe,
+        manifest,
+        ("w1",),
+        snapshot_tag="wall-duplicate-omitted",
     )
-    _install_candidate_enumerator(kwargs, universe)
-    assert build_wall_length_quantities(**kwargs)[0].abstained is True
+    assert result.status == AuthorityBindingStatus.MISMATCH
+    assert "authority_universe_admitted_set_mismatch" in result.reasons
 
 
 def test_c5_unresolved_candidate_blocks() -> None:
-    wall = _wall("w1")
-    kwargs = _batch_inputs((wall,))
+    identity = _identity(_wall("w1"))
     unresolved = AuthorityUniverseMember("w-unresolved", canonical_sha256({"candidate": "w-unresolved"}))
-    identity = kwargs["physical_identity_universe"][0]
     universe, manifest = _candidate_proof(
         (identity,),
         extra_members=(unresolved,),
         admitted_ids=("w1",),
         unresolved_ids=("w-unresolved",),
     )
-    kwargs.update(candidate_universe=universe, candidate_manifest=manifest)
-    _install_candidate_enumerator(kwargs, universe)
-    assert build_wall_length_quantities(**kwargs)[0].abstained is True
+    result = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+        universe,
+        manifest,
+        ("w1",),
+        snapshot_tag="wall-unresolved",
+    )
+    assert result.status == AuthorityBindingStatus.MISMATCH
+    assert "authority_universe_unresolved_candidates" in result.reasons
 
 
 def test_c5_silent_exclusion_is_rejected_by_manifest_builder() -> None:
@@ -776,62 +872,69 @@ def test_c5_silent_exclusion_is_rejected_by_manifest_builder() -> None:
         build_completeness_manifest(universe, admitted_candidate_ids=("w1",))
 
 
-def test_c5_explicit_evidenced_exclusion_allows_unrelated_admitted_wall() -> None:
-    wall = _wall("w1")
-    excluded_wall = _wall("w2", y=100.0)
-    kwargs = _batch_inputs((wall,))
-    identity = kwargs["physical_identity_universe"][0]
-    excluded_identity = _identity(excluded_wall)
+def test_c5_explicit_evidenced_exclusion_authenticates_unrelated_wall_removal() -> None:
+    identity = _identity(_wall("w1"))
+    excluded_identity = _identity(_wall("w2", y=100.0))
     universe, manifest = _candidate_proof(
         (identity, excluded_identity),
         admitted_ids=("w1",),
         exclusions=(ExplicitExclusion("w2", "outside_local_wall_scope", ("scope-ev",)),),
     )
-    kwargs.update(candidate_universe=universe, candidate_manifest=manifest)
-    _install_candidate_enumerator(kwargs, universe)
-    out = build_wall_length_quantities(**kwargs)
-    assert out[0].abstained is False
+    result = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+        universe,
+        manifest,
+        ("w1",),
+        snapshot_tag="wall-exclusion",
+    )
+    assert result.status == AuthorityBindingStatus.AUTHENTIC
+    assert result.authentic
 
 
 def test_c5_candidate_added_after_manifest_creation_blocks() -> None:
-    wall = _wall("w1")
-    kwargs = _batch_inputs((wall,))
-    old_manifest = kwargs["candidate_manifest"]
-    identity = kwargs["physical_identity_universe"][0]
+    identity = _identity(_wall("w1"))
+    old_universe, old_manifest = _candidate_proof((identity,))
     late = _identity(_wall("w2", y=20.0))
     current_universe = build_authority_universe(
         _scope(DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES),
         (physical_wall_identity_member(identity), physical_wall_identity_member(late)),
     )
-    kwargs.update(candidate_universe=current_universe, candidate_manifest=old_manifest)
-    kwargs["candidate_enumerated_universe"] = current_universe
-    assert build_wall_length_quantities(**kwargs)[0].abstained is True
-
-
-def test_c5_candidate_removed_after_manifest_creation_blocks() -> None:
-    w1 = _wall("w1")
-    w2 = _wall("w2", y=20.0)
-    identities = (_identity(w1), _identity(w2))
-    old_universe, old_manifest = _candidate_proof(identities)
-    kwargs = _batch_inputs((w1,), identities=(identities[0],))
-    current_universe = build_authority_universe(
-        _scope(DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES),
-        (physical_wall_identity_member(identities[0]),),
-    )
     assert current_universe.fingerprint != old_universe.fingerprint
-    kwargs.update(candidate_universe=current_universe, candidate_manifest=old_manifest)
-    full_commitment, sid, sfp, _ = _enumerator_proof(
+    result = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+        current_universe,
+        old_manifest,
+        ("w1",),
+        snapshot_tag="wall-added-after-manifest",
+    )
+    assert result.status == AuthorityBindingStatus.MISMATCH
+    assert "manifest_not_bound_to_enumerator_commitment" in result.reasons
+
+
+def test_c5_candidate_removed_after_enumeration_is_stale() -> None:
+    w1 = _identity(_wall("w1"))
+    w2 = _identity(_wall("w2", y=20.0))
+    old_universe, _old_manifest = _candidate_proof((w1, w2))
+    commitment, snapshot_id, _old_snapshot_fp, _ = _enumerator_proof(
         DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
         old_universe,
-        snapshot_tag="physical-wall-old",
+        snapshot_tag="wall-pre-removal",
     )
-    kwargs.update(
-        candidate_enumerator_commitment=full_commitment,
-        candidate_upstream_snapshot_id=sid,
-        candidate_upstream_snapshot_fingerprint=sfp,
-        candidate_enumerated_universe=current_universe,
+    current_universe, current_manifest = _candidate_proof((w1,))
+    current_payload = _snapshot_payload(DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES, current_universe)
+    current_fp = immutable_snapshot_fingerprint(current_payload)
+    result = verify_enumerator_snapshot_commitment(
+        commitment,
+        expected_scope=_scope(DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES),
+        current_upstream_snapshot_id=snapshot_id,
+        current_upstream_snapshot_fingerprint=current_fp,
+        current_enumerated_universe=current_universe,
+        manifest=current_manifest,
+        supplied_admitted_ids=("w1",),
+        current_upstream_snapshot_payload=current_payload,
     )
-    assert build_wall_length_quantities(**kwargs)[0].abstained is True
+    assert result.status == AuthorityBindingStatus.STALE
+    assert "enumerator_upstream_snapshot_fingerprint_stale" in result.reasons
 
 
 @pytest.mark.parametrize(
@@ -844,14 +947,28 @@ def test_c5_candidate_removed_after_manifest_creation_blocks() -> None:
     ),
 )
 def test_c5_stale_or_wrong_candidate_scope_blocks(field: str, value: str) -> None:
-    wall = _wall("w1")
-    kwargs = _batch_inputs((wall,))
-    identity = kwargs["physical_identity_universe"][0]
+    identity = _identity(_wall("w1"))
     scope = replace(_scope(DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES), **{field: value})
     universe, manifest = _candidate_proof((identity,), scope=scope)
-    kwargs.update(candidate_universe=universe, candidate_manifest=manifest)
-    _install_candidate_enumerator(kwargs, universe)
-    assert build_wall_length_quantities(**kwargs)[0].abstained is True
+    commitment, snapshot_id, snapshot_fp, current = _enumerator_proof(
+        DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+        universe,
+        snapshot_tag="wall-stale-scope",
+    )
+    result = verify_enumerator_snapshot_commitment(
+        commitment,
+        expected_scope=_scope(DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES),
+        current_upstream_snapshot_id=snapshot_id,
+        current_upstream_snapshot_fingerprint=snapshot_fp,
+        current_enumerated_universe=current,
+        manifest=manifest,
+        supplied_admitted_ids=("w1",),
+        current_upstream_snapshot_payload=_snapshot_payload(
+            DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+            current,
+        ),
+    )
+    assert result.status in {AuthorityBindingStatus.STALE, AuthorityBindingStatus.MISMATCH}
 
 
 def test_c5_duplicate_candidate_ids_fail_closed() -> None:
@@ -880,33 +997,49 @@ def test_c5_candidate_order_does_not_change_universe_or_manifest_hash() -> None:
 
 
 def test_c5_scope_domain_mismatch_blocks() -> None:
-    wall = _wall("w1")
-    kwargs = _batch_inputs((wall,))
-    identity = kwargs["physical_identity_universe"][0]
+    identity = _identity(_wall("w1"))
     wrong_scope = _scope(DOMAIN_WALL_LENGTH_SCALE)
     universe, manifest = _candidate_proof((identity,), scope=wrong_scope)
-    kwargs.update(candidate_universe=universe, candidate_manifest=manifest)
-    _install_candidate_enumerator(kwargs, universe)
-    assert build_wall_length_quantities(**kwargs)[0].abstained is True
+    commitment, snapshot_id, snapshot_fp, current = _enumerator_proof(
+        DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+        universe,
+        snapshot_tag="wall-wrong-domain",
+    )
+    result = verify_enumerator_snapshot_commitment(
+        commitment,
+        expected_scope=_scope(DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES),
+        current_upstream_snapshot_id=snapshot_id,
+        current_upstream_snapshot_fingerprint=snapshot_fp,
+        current_enumerated_universe=current,
+        manifest=manifest,
+        supplied_admitted_ids=("w1",),
+        current_upstream_snapshot_payload=_snapshot_payload(
+            DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+            current,
+        ),
+    )
+    assert result.status == AuthorityBindingStatus.MISMATCH
 
 
-def test_c5_candidate_outside_local_viewport_does_not_poison_local_scope() -> None:
-    wall = _wall("w1")
-    outside = _wall("w-outside", y=50.0, viewport_id="vp-other")
-    kwargs = _batch_inputs((wall,))
-    local_identity = kwargs["physical_identity_universe"][0]
-    outside_identity = _identity(outside)
-    kwargs["physical_identity_universe"] = (local_identity, outside_identity)
-    out = build_wall_length_quantities(**kwargs)
-    assert out[0].abstained is False
+def test_c5_candidate_outside_local_viewport_does_not_poison_local_identity_scope() -> None:
+    local_identity = _identity(_wall("w1"))
+    outside_identity = _identity(_wall("w-outside", y=50.0, viewport_id="vp-other"))
+    local = _local_physical_identities((local_identity, outside_identity), "vp")
+    assert tuple(item.wall_candidate_id for item in local) == ("w1",)
 
 
 def test_c5_conflict_addition_monotonicity_never_strengthens() -> None:
-    wall = _wall("w1")
-    baseline_kwargs = _batch_inputs((wall,))
-    assert build_wall_length_quantities(**baseline_kwargs)[0].abstained is False
-    kwargs = _batch_inputs((wall,))
-    identity = kwargs["physical_identity_universe"][0]
+    identity = _identity(_wall("w1"))
+    baseline_universe, baseline_manifest = _candidate_proof((identity,))
+    baseline = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+        baseline_universe,
+        baseline_manifest,
+        ("w1",),
+        snapshot_tag="wall-monotonic-baseline",
+    )
+    assert baseline.status == AuthorityBindingStatus.AUTHENTIC
+
     late = AuthorityUniverseMember("w-late", canonical_sha256({"late": True}))
     universe, manifest = _candidate_proof(
         (identity,),
@@ -914,9 +1047,15 @@ def test_c5_conflict_addition_monotonicity_never_strengthens() -> None:
         admitted_ids=("w1",),
         unresolved_ids=("w-late",),
     )
-    kwargs.update(candidate_universe=universe, candidate_manifest=manifest)
-    _install_candidate_enumerator(kwargs, universe)
-    assert build_wall_length_quantities(**kwargs)[0].abstained is True
+    degraded = _verify_enumerator_current(
+        DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+        universe,
+        manifest,
+        ("w1",),
+        snapshot_tag="wall-monotonic-conflict",
+    )
+    assert degraded.status == AuthorityBindingStatus.MISMATCH
+    assert "authority_universe_unresolved_candidates" in degraded.reasons
 
 
 def test_explicit_exclusion_evidence_removal_cannot_strengthen() -> None:
