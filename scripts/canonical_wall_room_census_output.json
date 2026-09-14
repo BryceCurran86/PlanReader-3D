@@ -1,7 +1,7 @@
 [
   {
     "name": "Baghau",
-    "elapsed_s": 15.211,
+    "elapsed_s": 25.887,
     "raw_region_segments": 2398,
     "stage_a_edges": 1922,
     "excluded_segments": 916,
@@ -196,7 +196,7 @@
   },
   {
     "name": "Lamu",
-    "elapsed_s": 4.23,
+    "elapsed_s": 6.93,
     "raw_region_segments": 1245,
     "stage_a_edges": 1009,
     "excluded_segments": 147,
@@ -252,7 +252,7 @@
   },
   {
     "name": "Dungicha",
-    "elapsed_s": 143.782,
+    "elapsed_s": 130.761,
     "raw_region_segments": 5133,
     "stage_a_edges": 5514,
     "excluded_segments": 0,
@@ -362,7 +362,7 @@
   },
   {
     "name": "KSTVET",
-    "elapsed_s": 26.022,
+    "elapsed_s": 19.046,
     "raw_region_segments": 2116,
     "stage_a_edges": 2313,
     "excluded_segments": 432,
