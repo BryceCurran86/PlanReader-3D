@@ -301,19 +301,27 @@ def classify_physical_wall_pair(
 ) -> PhysicalEquivalenceClass:
     """Classify one pair. Never uses distance, confidence, or first-candidate.
 
-    Absence of SAME proof is not positive DISTINCT proof. Different path with
-    independent provenance is AMBIGUOUS unless a positive distinctness rule
-    applies (viewport, authoritative level, or proven disjoint common-ancestry
-    spans).
+    Absence of SAME proof is not positive DISTINCT proof. A bare label
+    (``viewport_id`` or ``level_id``) difference is likewise not positive
+    DISTINCT proof by itself -- this repository has no authoritative
+    level/scope-identity resolver yet, so two candidates whose only
+    difference is an unvalidated label string cannot be more than
+    AMBIGUOUS. Crossing that same unproven boundary (``cross_scope`` below)
+    also blocks the SAME rule: coordinate/ancestry coincidence across a
+    labelled-but-unverified viewport or level boundary is not proof of
+    physical identity either, only a coincidence. The only rules that may
+    ever return DISTINCT are grounded in proven, positive geometry+provenance
+    facts (disjoint spans under shared ancestry) that do not depend on any
+    label string at all.
     """
     if not left.usable or not right.usable:
         return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
-    if left.viewport_id != right.viewport_id:
-        return PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
+
     left_level = str(left.level_id or "").strip()
     right_level = str(right.level_id or "").strip()
-    if left_level and right_level and left_level != right_level:
-        return PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
+    cross_scope = (left.viewport_id != right.viewport_id) or (
+        bool(left_level) and bool(right_level) and left_level != right_level
+    )
 
     same_path = left.path_fingerprint is not None and left.path_fingerprint == right.path_fingerprint
     left_prims = tuple(left.source_primitive_ids)
@@ -322,8 +330,9 @@ def classify_physical_wall_pair(
     equal_ancestry = _ancestry_equal(left_prims, right_prims)
     coverage_identical = _ancestry_coverage_identical(left_prims, right_prims)
 
-    # SAME: same complete path + same U1 ancestry / identical coverage.
-    if same_path and (equal_ancestry or coverage_identical):
+    # SAME: same complete path + same U1 ancestry / identical coverage, and
+    # not crossing an unproven viewport/level label boundary while doing so.
+    if same_path and (equal_ancestry or coverage_identical) and not cross_scope:
         return PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
 
     # identical path + different primitive IDs, no duplication proof → AMBIGUOUS

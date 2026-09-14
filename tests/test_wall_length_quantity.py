@@ -191,8 +191,23 @@ def _bind(wall: WallCandidate, extra_atoms: tuple[EvidenceAtom, ...] = ()):
     return entity, document, atoms
 
 
+def _solo_equivalence(*wall_ids: str):
+    from pb_physical_wall_identity import PhysicalWallEquivalenceResolution
+
+    return PhysicalWallEquivalenceResolution(
+        scope_viewport_id="vp",
+        representative_wall_ids=tuple(wall_ids),
+        abstained_wall_ids=(),
+        equivalence_groups=(),
+        ambiguous_wall_ids=(),
+        same_wall_ids=(),
+        pair_classifications=(),
+        blocking_reasons_by_wall_id={},
+    )
+
+
 def _qty_kwargs(wall: WallCandidate, extra_atoms: tuple[EvidenceAtom, ...] = (), **overrides):
-    entity, document, _ = _bind(wall, extra_atoms=extra_atoms)
+    entity, document, atoms = _bind(wall, extra_atoms=extra_atoms)
     scale = overrides.pop("scale", _scale()) if "scale_bindings" not in overrides else None
     bindings = overrides.pop(
         "scale_bindings",
@@ -209,6 +224,8 @@ def _qty_kwargs(wall: WallCandidate, extra_atoms: tuple[EvidenceAtom, ...] = (),
         document=document,
         viewport=viewport,
         entity=entity,
+        evidence_atoms=atoms,
+        equivalence=_solo_equivalence(wall.candidate_id),
         page_no=1,
         scale_bindings=bindings,
     )
@@ -260,9 +277,17 @@ def test_figured_dimension_is_authoritative_when_scale_absent() -> None:
             figured_evidence=_figured("5000"),
         )
     )
-    assert qty.abstained is False
-    assert qty.value == 5.0
-    assert qty.authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+    # GPT-2 #288 blocker 7: a generic figured_dimension atom cannot
+    # independently create FIRM wall length in this PR. The underlying
+    # pb_figured_dimension_authority resolver still reaches FIRM internally
+    # (see its own dedicated test suite) -- this publication boundary
+    # explicitly downgrades that specific result pending the dedicated
+    # figured-dimension span-identity workstream.
+    assert qty.abstained is True
+    assert qty.value is None
+    from pb_wall_length_quantity import FIGURED_DIMENSION_WALL_LENGTH_DISABLED_REASON
+
+    assert FIGURED_DIMENSION_WALL_LENGTH_DISABLED_REASON in qty.blocking_reasons
 
 
 def test_untrusted_physical_existence_abstains() -> None:
@@ -274,10 +299,12 @@ def test_untrusted_physical_existence_abstains() -> None:
 
 def test_duplicate_candidate_identity_fails_closed() -> None:
     walls = (_wall("w1", face_ids=("seg-1",)), _wall("w1", face_ids=("seg-2",)))
-    entity, document, _ = _bind(walls[0])
+    entity, document, atoms = _bind(walls[0])
     out = build_wall_length_quantities(
         walls=walls,
         entities_by_wall_id={"w1": entity},
+        evidence_atoms=atoms,
+        physical_identities={},
         context=_context(),
         document=document,
         page_no=1,
@@ -292,11 +319,13 @@ def test_duplicate_candidate_identity_fails_closed() -> None:
 def test_overlapping_source_segments_fail_closed_instead_of_double_counting() -> None:
     w1 = _wall("w1", face_ids=("shared-seg",))
     w2 = _wall("w2", points=((0.0, 10.0), (100.0, 10.0)), face_ids=("shared-seg",))
-    e1, document, _ = _bind(w1)
-    e2, _, _ = _bind(w2)
+    e1, document, atoms1 = _bind(w1)
+    e2, _, atoms2 = _bind(w2)
     out = build_wall_length_quantities(
         walls=(w1, w2),
         entities_by_wall_id={"w1": e1, "w2": e2},
+        evidence_atoms=atoms1 + atoms2,
+        physical_identities={},
         context=_context(),
         document=document,
         page_no=1,
@@ -340,22 +369,54 @@ def _edge(edge_id: str, x1, y1, x2, y2, *primitive_ids: str) -> dict:
 
 
 def _batch_with_identities(walls, identities):
+    # Each wall gets its own wall-scoped literal evidence_id. Real production
+    # ids are content-hashed (stable_contract_id) and therefore already
+    # wall-specific; the module-default "u2-ev"/"pair-ev" literals reused
+    # verbatim across two different walls in one pooled evidence_atoms
+    # sequence would be a genuine (if fixture-only) evidence-id collision
+    # under collision-safe existence recomputation, so the walls themselves
+    # are rebuilt here with wall-scoped supporting_evidence_ids -- geometry,
+    # candidate_id, and face_ids are preserved unchanged from the caller.
+    from dataclasses import replace as _dc_replace
+
+    scoped_walls = [
+        _dc_replace(
+            wall,
+            supporting_evidence_ids=(f"u2-ev-{wall.candidate_id}", f"pair-ev-{wall.candidate_id}"),
+        )
+        for wall in walls
+    ]
     entities = {}
-    document = None
-    for wall in walls:
-        entity, document, _ = _bind(wall)
+    all_atoms: list[EvidenceAtom] = []
+    all_ids: list[str] = []
+    for wall in scoped_walls:
+        wall_atoms = (
+            _source_atom(f"u2-ev-{wall.candidate_id}", KIND_PHYSICAL_WALL, wall.candidate_id),
+            _source_atom(f"pair-ev-{wall.candidate_id}", FAMILY_PAIRED_WALL_FACES, wall.candidate_id),
+        )
+        all_atoms.extend(wall_atoms)
+        all_ids.extend(atom.evidence_id for atom in wall_atoms)
+    document = _document(tuple(dict.fromkeys(all_ids)))
+    viewport = _viewport()
+    context = _context()
+    for wall in scoped_walls:
+        entity = adapt_wall_candidate_to_entity_evidence(
+            wall, evidence_atoms=all_atoms, document=document, viewport=viewport, context=context,
+        )
+        assert entity is not None
         entities[wall.candidate_id] = entity
     scale = _scale()
     binding = _scale_binding(scale)
     return build_wall_length_quantities(
-        walls=walls,
+        walls=scoped_walls,
         entities_by_wall_id=entities,
-        context=_context(),
+        evidence_atoms=all_atoms,
+        physical_identities=identities,
+        context=context,
         document=document,
-        viewport=_viewport(resolved_scale_id=binding.scale_fingerprint),
+        viewport=_dc_replace(viewport, resolved_scale_id=binding.scale_fingerprint),
         page_no=1,
         scale_bindings=(binding,),
-        physical_identities=identities,
     )
 
 
@@ -441,11 +502,16 @@ def test_same_u1_ancestor_disjoint_spans_stay_distinct() -> None:
     assert set(resolution.representative_wall_ids) == {"w1", "w2"}
 
 
-def test_different_viewport_identities_do_not_collide() -> None:
+def test_different_viewport_label_alone_is_ambiguous_not_distinct() -> None:
+    """A bare ``viewport_id`` string difference is not positive DISTINCT
+    proof (GPT-2 #288 blocker 4). Same path + same native ancestry across a
+    labelled-but-unverified viewport boundary must fail closed to AMBIGUOUS
+    -- it must not collide as SAME either, since crossing an unproven scope
+    boundary is exactly what makes the coordinate/ancestry coincidence
+    untrustworthy in either direction."""
     from pb_physical_wall_identity import (
         PhysicalEquivalenceClass,
         classify_physical_wall_pair,
-        resolve_physical_wall_equivalence,
         resolve_physical_wall_identity,
     )
 
@@ -456,10 +522,31 @@ def test_different_viewport_identities_do_not_collide() -> None:
         resolve_physical_wall_identity(wall=a, edge_ids=("e1",), edges_by_id=edges),
         resolve_physical_wall_identity(wall=b, edge_ids=("e1",), edges_by_id=edges),
     )
+    assert classify_physical_wall_pair(*identities) == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+
+
+def test_distinct_viewports_with_disjoint_ancestry_spans_stay_distinct() -> None:
+    """Positive distinctness proof (shared ancestry, provably disjoint
+    spans) must still reach DISTINCT even across a viewport boundary --
+    removing the bare-label shortcut must not also remove the genuine
+    geometry+provenance proof this module already has."""
+    from pb_physical_wall_identity import (
+        PhysicalEquivalenceClass,
+        classify_physical_wall_pair,
+        resolve_physical_wall_identity,
+    )
+
+    a = _wall("w1", points=((0.0, 0.0), (60.0, 0.0)), face_ids=("e1",))
+    b = _wall("w2", points=((100.0, 0.0), (160.0, 0.0)), face_ids=("e2",), viewport_id="vp-other")
+    edges = {
+        "e1": _edge("e1", 0.0, 0.0, 60.0, 0.0, "shared_native"),
+        "e2": _edge("e2", 100.0, 0.0, 160.0, 0.0, "shared_native"),
+    }
+    identities = (
+        resolve_physical_wall_identity(wall=a, edge_ids=("e1",), edges_by_id=edges),
+        resolve_physical_wall_identity(wall=b, edge_ids=("e2",), edges_by_id=edges),
+    )
     assert classify_physical_wall_pair(*identities) == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
-    resolution = resolve_physical_wall_equivalence(identities)
-    assert resolution.ambiguous_wall_ids == ()
-    assert set(resolution.representative_wall_ids) == {"w1", "w2"}
 
 
 def test_missing_lineage_or_edges_abstains_identity_instead_of_endpoint_hash() -> None:
@@ -610,7 +697,14 @@ def test_partial_overlap_same_ancestry_is_ambiguous() -> None:
     assert classify_physical_wall_pair(*identities) == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
 
 
-def test_different_authoritative_levels_are_distinct() -> None:
+def test_different_level_label_alone_is_ambiguous_not_distinct() -> None:
+    """A bare ``level_id`` string difference is not positive DISTINCT proof
+    either (GPT-2 #288 blocker 4): this repository has no authoritative
+    level-identity/provenance resolver, so two differently-labelled level
+    strings are only an unvalidated label, not proof of two physically
+    distinct storeys. Same path + same ancestry across that unverified
+    label boundary must fail closed to AMBIGUOUS, matching the viewport
+    case immediately above."""
     from dataclasses import replace as dc_replace
 
     from pb_physical_wall_identity import (
@@ -632,4 +726,4 @@ def test_different_authoritative_levels_are_distinct() -> None:
         resolve_physical_wall_identity(wall=left, edge_ids=("e1",), edges_by_id=edges),
         resolve_physical_wall_identity(wall=right, edge_ids=("e2",), edges_by_id=edges),
     )
-    assert classify_physical_wall_pair(*identities) == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
+    assert classify_physical_wall_pair(*identities) == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE

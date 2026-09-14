@@ -200,6 +200,21 @@ def _adapt(wall: WallCandidate, atoms: tuple[EvidenceAtom, ...], *, extra: tuple
     return entity, document, viewport, context
 
 
+def _solo_equivalence(*wall_ids: str):
+    from pb_physical_wall_identity import PhysicalWallEquivalenceResolution
+
+    return PhysicalWallEquivalenceResolution(
+        scope_viewport_id="vp",
+        representative_wall_ids=tuple(wall_ids),
+        abstained_wall_ids=(),
+        equivalence_groups=(),
+        ambiguous_wall_ids=(),
+        same_wall_ids=(),
+        pair_classifications=(),
+        blocking_reasons_by_wall_id={},
+    )
+
+
 def _qty(wall, atoms, *, extra=(), extra_atoms=(), scale=None, scale_bindings=None, bind_scale=True, **overrides):
     all_atoms = tuple(atoms) + tuple(extra_atoms)
     extra_ids = extra + tuple(atom.evidence_id for atom in extra_atoms)
@@ -215,6 +230,8 @@ def _qty(wall, atoms, *, extra=(), extra_atoms=(), scale=None, scale_bindings=No
         document=document,
         viewport=viewport,
         entity=entity,
+        evidence_atoms=all_atoms,
+        equivalence=_solo_equivalence(wall.candidate_id),
         page_no=1,
         scale_bindings=scale_bindings or (),
     )
@@ -246,6 +263,8 @@ def test_trusted_wall_and_firm_scale_publish_linear_quantity() -> None:
         document=document,
         viewport=replace(viewport, resolved_scale_id=binding.scale_fingerprint),
         entity=entity,
+        evidence_atoms=atoms,
+        equivalence=_solo_equivalence(wall.candidate_id),
         page_no=1,
         scale_bindings=(binding,),
     )
@@ -319,6 +338,8 @@ def test_existence_abstained_unmapped_kind_abstains_quantity() -> None:
         document=document,
         viewport=viewport,
         entity=entity,
+        evidence_atoms=(noise,),
+        equivalence=_solo_equivalence(wall.candidate_id),
         page_no=1,
         scale_bindings=(_scale_binding(_scale()),),
     )
@@ -419,6 +440,8 @@ def test_wrong_document_on_quantity_abstains() -> None:
         document=other,
         viewport=viewport,
         entity=entity,
+        evidence_atoms=atoms,
+        equivalence=_solo_equivalence(wall.candidate_id),
         page_no=1,
         scale_bindings=(_scale_binding(scale),),
     )
@@ -450,6 +473,8 @@ def test_stale_revision_abstains_at_measurement() -> None:
         document=document,
         viewport=viewport,
         entity=entity,
+        evidence_atoms=atoms,
+        equivalence=_solo_equivalence(wall.candidate_id),
         page_no=1,
         scale_bindings=(_scale_binding(scale),),
     )
@@ -472,6 +497,8 @@ def test_entity_for_other_wall_cannot_authorize_length() -> None:
         document=document,
         viewport=viewport,
         entity=entity,
+        evidence_atoms=atoms,
+        equivalence=_solo_equivalence(wall.candidate_id),
         page_no=1,
         scale_bindings=(_scale_binding(scale),),
     )
@@ -527,17 +554,43 @@ def test_height_or_stored_length_alone_does_not_alter_length() -> None:
 def test_shuffled_batch_is_deterministic() -> None:
     scale = _scale()
     length = scale.px_per_m * 3.0
-    w1, a1 = _two_domain_wall(wall_id="w1", points=((0.0, 0.0), (length, 0.0)), face_ids=("seg-1",))
-    w2, a2 = _two_domain_wall(wall_id="w2", points=((0.0, 10.0), (length, 10.0)), face_ids=("seg-2",))
-    e1, document, viewport, context = _adapt(w1, a1)
-    e2, _, _, _ = _adapt(w2, a2)
+    # Wall-scoped literal evidence ids: real production ids are content-hashed
+    # (and therefore already wall-specific), so two different walls sharing
+    # the bare "u2-ev"/"pair-ev" literal in one pooled evidence_atoms sequence
+    # would be a fixture-only collision under collision-safe existence
+    # recomputation -- construct genuinely distinct ids per wall instead.
+    w1 = _wall(wall_id="w1", points=((0.0, 0.0), (length, 0.0)), face_ids=("seg-1",), supporting=("u2-ev-w1", "pair-ev-w1"))
+    w2 = _wall(wall_id="w2", points=((length + 50.0, 0.0), (2 * length + 50.0, 0.0)), face_ids=("seg-2",), supporting=("u2-ev-w2", "pair-ev-w2"))
+    a1 = (_source_atom("u2-ev-w1", KIND_PHYSICAL_WALL, "w1"), _source_atom("pair-ev-w1", FAMILY_PAIRED_WALL_FACES, "w1"))
+    a2 = (_source_atom("u2-ev-w2", KIND_PHYSICAL_WALL, "w2"), _source_atom("pair-ev-w2", FAMILY_PAIRED_WALL_FACES, "w2"))
+    all_atoms = a1 + a2
+    e1, document, viewport, context = _adapt(w1, all_atoms)
+    e2, _, _, _ = _adapt(w2, all_atoms)
     assert e1 is not None and e2 is not None
     entities = {"w1": e1, "w2": e2}
     binding = _scale_binding(scale)
     bound_viewport = replace(viewport, resolved_scale_id=binding.scale_fingerprint)
+    # This test is about batch ordering determinism under the now-mandatory
+    # reconciliation boundary. w1/w2 share one native ancestor but occupy
+    # proven-disjoint spans along it (pb_physical_wall_identity's own
+    # positive-distinctness rule, unchanged by this remediation) so both are
+    # legitimately independent DISTINCT representatives -- the property
+    # under test is that reconciliation reaches the same conclusion, and
+    # both walls the same FIRM value, regardless of batch input order.
+    from pb_physical_wall_identity import collect_physical_wall_identities
+
+    graph = {
+        "edges": [
+            {"id": "seg-1", "x1": 0.0, "y1": 0.0, "x2": length, "y2": 0.0, "primitive_lineage": {"source_primitive_ids": ["native_shared"]}},
+            {"id": "seg-2", "x1": length + 50.0, "y1": 0.0, "x2": 2 * length + 50.0, "y2": 0.0, "primitive_lineage": {"source_primitive_ids": ["native_shared"]}},
+        ]
+    }
+    identities = collect_physical_wall_identities((w1, w2), graph)
     forward = build_wall_length_quantities(
         walls=(w1, w2),
         entities_by_wall_id=entities,
+        evidence_atoms=all_atoms,
+        physical_identities=identities,
         context=context,
         document=document,
         viewport=bound_viewport,
@@ -547,6 +600,8 @@ def test_shuffled_batch_is_deterministic() -> None:
     reverse = build_wall_length_quantities(
         walls=(w2, w1),
         entities_by_wall_id=entities,
+        evidence_atoms=all_atoms,
+        physical_identities=identities,
         context=context,
         document=document,
         viewport=bound_viewport,
@@ -567,6 +622,8 @@ def test_same_wall_cannot_double_count() -> None:
     out = build_wall_length_quantities(
         walls=(wall, clone),
         entities_by_wall_id={"w1": entity, "w1-dup": clone_entity},
+        evidence_atoms=atoms,
+        physical_identities={},
         context=context,
         document=document,
         viewport=viewport,
@@ -600,11 +657,17 @@ def test_unbound_scale_cannot_leak_across_viewports_on_same_page() -> None:
         document=document,
         viewport=viewport,
         entity=entity,
+        evidence_atoms=atoms,
+        equivalence=_solo_equivalence(wall.candidate_id),
         page_no=1,
         scale_bindings=(_scale_binding(scale),),
     )
     assert qty.abstained
-    assert "viewport_scale_fingerprint_mismatch" in qty.blocking_reasons
+    # A binding for only one of the two context-known sibling viewports is now
+    # caught earlier, by the scale-binding universe completeness gate (GPT-2
+    # #288 blocker 1), before the deeper per-binding fingerprint check would
+    # otherwise have caught the same underlying leak.
+    assert "incomplete_scale_binding_universe" in qty.blocking_reasons
 
 
 def test_provisional_thickness_does_not_block_length_and_is_not_invented() -> None:
@@ -856,6 +919,8 @@ def test_firm_path_reconciles_complete_binding_set_not_caller_preferred() -> Non
         document=document,
         viewport=replace(viewport, resolved_scale_id=preferred.scale_fingerprint),
         entity=entity,
+        evidence_atoms=atoms,
+        equivalence=_solo_equivalence(wall.candidate_id),
         page_no=1,
         scale_bindings=(preferred, twin),
     )

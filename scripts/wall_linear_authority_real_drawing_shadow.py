@@ -23,6 +23,7 @@ from pb_physical_wall_existence_authority import (
     adapt_wall_candidate_to_entity_evidence,
     wall_physical_existence_status,
 )
+from pb_physical_wall_identity import collect_physical_wall_identities, resolve_physical_wall_equivalence
 from pb_vector_geometry_v130 import detect_wall_pairs, extract_native_page
 from pb_wall_length_quantity import build_wall_length_quantity
 from pb_wall_room_topology_junction_classifier import classify_junctions
@@ -142,6 +143,12 @@ def _shadow_one(spec: Dict[str, Any]) -> Dict[str, Any]:
     firm_lengths = 0
     missing_entity = 0
 
+    physical_identities = collect_physical_wall_identities(resolved, graph)
+    equivalence = resolve_physical_wall_equivalence(
+        tuple(physical_identities.get(wall.candidate_id) for wall in resolved),
+        walls_by_id={wall.candidate_id: wall for wall in resolved},
+    )
+
     for wall in resolved:
         existence = wall_physical_existence_status(
             wall,
@@ -170,6 +177,8 @@ def _shadow_one(spec: Dict[str, Any]) -> Dict[str, Any]:
             document=document,
             viewport=viewport,
             entity=entity,
+            evidence_atoms=catalog,
+            equivalence=equivalence,
             page_no=page_no,
             scale_bindings=(),
         )
@@ -186,6 +195,9 @@ def _shadow_one(spec: Dict[str, Any]) -> Dict[str, Any]:
         "canonical_walls_considered": len(resolved),
         "physical_existence_corroborated": existence_counts.get("corroborated", 0),
         "entity_evidence_corroborated": entity_counts.get("corroborated", 0),
+        "physical_equivalence_representatives": len(equivalence.representative_wall_ids),
+        "physical_equivalence_ambiguous": len(equivalence.ambiguous_wall_ids),
+        "physical_equivalence_abstained": len(equivalence.abstained_wall_ids),
         "firm_scale_available": False,
         "firm_wall_length_quantities": firm_lengths,
         "existence_status_counts": dict(existence_counts),
