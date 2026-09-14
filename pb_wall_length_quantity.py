@@ -1,66 +1,9 @@
-"""Deterministic wall-length QuantityEvidence from W1-W10 topology.
+"""Deterministic wall-length QuantityEvidence with scoped completeness proofs.
 
-Linear wall length requires physical-wall existence, a measurable centerline,
-and firm scale or a documented dimension. It does not require thickness or
-height. ``WallCandidate.status`` is not existence authority: that field is
-coupled to thickness by the WallCandidate invariant.
-
-This module does not read ``metadata["physical_evidence_status"]``, does not
-invent thickness, does not publish commercial takeoff, and does not guess
-external/internal scope.
-
-PUBLICATION BOUNDARY (2026-09-14 remediation)
-----------------------------------------------
-``build_wall_length_quantity`` is the only function that may return
-``AuthorityStatus.FIRM``. It cannot be called safely with caller-curated
-inputs alone: every one of the checks below is mandatory and cannot be
-skipped by omission.
-
-1. ``entity: EntityEvidence`` is never trusted at face value.
-   ``evidence_atoms`` is REQUIRED and this module independently recomputes
-   existence via ``pb_physical_wall_existence_authority.
-   resolve_physical_wall_existence``; a caller-supplied ``entity`` whose
-   status disagrees with the recomputed, collision-checked, revision/
-   snapshot/SHA-owned result is rejected. A hand-built ``EntityEvidence``
-   asserting ``CORROBORATED`` with no real atoms behind it cannot reach
-   FIRM (closes GPT-2 blockers 2 and 3 -- collision-safety already lived
-   inside ``resolve_physical_wall_existence``; the gap was that this
-   boundary never called it).
-2. ``equivalence: PhysicalWallEquivalenceResolution`` is REQUIRED (no
-   default). Only a wall in ``equivalence.representative_wall_ids`` may
-   reach FIRM (closes blocker 5 -- reconciliation used to be an optional
-   batch-only parameter that defaulted to being skipped entirely, and
-   blocker 6 -- the single-wall function could reach FIRM independently of
-   any batch/equivalence boundary).
-3. Scale-binding universe completeness: when ``context.viewport_page_
-   ownership`` (or, absent that, ``context.trusted_viewport_ids()`` on a
-   multi-viewport page) names sibling viewports on this page, every named
-   viewport must be represented in ``scale_bindings`` or FIRM is blocked
-   (closes the sibling-viewport-omission shape of blocker 1). Callers that
-   pass ``page_viewports`` (the complete F.07 ``SegmentedViewport`` list for
-   the page) get the stronger, structural closure: bindings are derived
-   internally via ``pb_viewport_scale_binding.bind_page_viewport_scales``
-   and any caller-supplied ``scale_bindings`` are ignored, which also closes
-   the same-viewport-competing-binding shape of blocker 1 (a caller cannot
-   hide a second binding for one viewport_id, because there is only one
-   binding derivable from one ``SegmentedViewport`` record). Direct
-   ``scale_bindings``-only callers keep the weaker, partial mitigation
-   above; this is a known, documented residual gap, not silently claimed as
-   closed (see the remediation report).
-4. A generic ``figured_dimension`` atom cannot independently create FIRM
-   wall length in this PR (closes blocker 7). ``pb_figured_dimension_
-   authority.resolve_measurement_authority`` remains reused unchanged and
-   still FIRMs a scalar figured-vs-scaled comparison for other, unrelated
-   consumers listed in AGENTS.md; only THIS publication boundary downgrades
-   a documented-dimension-sourced result to BLOCKED, with an explicit,
-   diagnosable reason code, pending the dedicated figured-dimension span
-   authority workstream (dimension line -> terminators -> witnesses ->
-   endpoints -> exact physical span -> exact target entity).
-
-``build_wall_length_quantities`` (the batch entrypoint) computes ``entity``
-recomputation and ``equivalence`` once for the whole candidate set and
-forwards them into ``build_wall_length_quantity`` per wall, so there is
-exactly one place the completeness proofs are assembled.
+A FIRM wall length is permitted only when all authority inputs are bound to the
+exact document/revision/snapshot/viewport universe used for the decision.
+Completeness is dimensional: only the wall-length scale and physical-candidate
+universes are required here; unrelated opening/height completeness is not read.
 """
 from __future__ import annotations
 
@@ -68,16 +11,23 @@ import math
 from dataclasses import replace as dc_replace
 from typing import Mapping, Optional, Sequence
 
+from pb_authority_completeness import (
+    DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+    DOMAIN_WALL_LENGTH_SCALE,
+    AuthorityScope,
+    AuthorityUniverseFingerprint,
+    BoundResolutionFingerprint,
+    CompletenessManifest,
+    bind_resolution_fingerprint,
+    build_authority_universe,
+    build_completeness_manifest,
+    physical_wall_identity_member,
+    scale_binding_member,
+    verify_bound_resolution_fingerprint,
+    verify_completeness_manifest,
+)
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_measurement_input_authority import MeasurementInputResolution, resolve_linear_measurement_input
-from pb_physical_wall_existence_authority import resolve_physical_wall_existence
-from pb_physical_wall_identity import (
-    PhysicalWallEquivalenceResolution,
-    PhysicalWallIdentity,
-    resolve_physical_wall_equivalence,
-)
-from pb_viewport_scale_binding import ViewportScaleBinding, bind_page_viewport_scales
-from pb_viewport_segmentation import SegmentedViewport
 from pb_migration_contracts import (
     DocumentEvidence,
     EntityEvidence,
@@ -88,11 +38,19 @@ from pb_migration_contracts import (
     stable_contract_id,
 )
 from pb_migration_provider_envelope import ProviderContext
+from pb_physical_wall_existence_authority import resolve_physical_wall_existence
+from pb_physical_wall_identity import (
+    PHYSICAL_WALL_EQUIVALENCE_SCHEMA_VERSION,
+    PhysicalWallEquivalenceResolution,
+    PhysicalWallIdentity,
+    resolve_physical_wall_equivalence,
+)
+from pb_viewport_scale_binding import ViewportScaleBinding, bind_page_viewport_scales
+from pb_viewport_segmentation import SegmentedViewport
 from pb_wall_room_topology_contracts import WallCandidate
 
 WALL_LENGTH_FAMILY = "wall_length"
-WALL_LENGTH_FORMULA_VERSION = "1.3.0"
-
+WALL_LENGTH_FORMULA_VERSION = "1.4.0"
 FIGURED_DIMENSION_WALL_LENGTH_DISABLED_REASON = (
     "figured_dimension_wall_length_disabled_pending_span_authority"
 )
@@ -110,6 +68,25 @@ def _wall_source_segment_ids(wall: WallCandidate) -> frozenset[str]:
     if wall.face_b_segment_ids:
         ids.update(wall.face_b_segment_ids)
     return frozenset(ids)
+
+
+def _authority_scope(
+    domain: str,
+    *,
+    context: ProviderContext,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+) -> AuthorityScope:
+    return AuthorityScope(
+        domain=domain,
+        document_id=document.document_id,
+        source_sha256=document.source_sha256,
+        revision_id=context.current_revision_id,
+        evidence_snapshot_id=context.evidence_snapshot_id,
+        graph_snapshot_id=context.canonical_graph_snapshot_id,
+        page_id=viewport.page_id,
+        viewport_id=viewport.viewport_id,
+    )
 
 
 def _existence_blockers(
@@ -155,16 +132,6 @@ def _existence_recomputation_blockers(
     document: DocumentEvidence,
     viewport: ViewportEvidence,
 ) -> tuple[str, ...]:
-    """Independently re-derive existence from raw atoms; never trust ``entity``.
-
-    GPT-2 blockers 2 and 3: collision-safe, revision/snapshot/SHA-owned
-    existence resolution already exists in ``resolve_physical_wall_existence``,
-    but a caller who skips that resolver and hands ``build_wall_length_quantity``
-    a pre-built ``EntityEvidence`` bypassed it entirely. Recomputing here and
-    requiring agreement closes that route without removing ``entity`` (which
-    still carries the real ``evidence_ids``/identity bookkeeping the output
-    QuantityEvidence needs).
-    """
     recomputed = resolve_physical_wall_existence(
         wall=wall,
         evidence_atoms=evidence_atoms,
@@ -181,40 +148,6 @@ def _existence_recomputation_blockers(
     return tuple(dict.fromkeys(blockers))
 
 
-def _scale_universe_completeness_blockers(
-    *,
-    scale_bindings: Sequence[ViewportScaleBinding],
-    context: ProviderContext,
-    viewport: ViewportEvidence,
-    page_no: int,
-) -> tuple[str, ...]:
-    """Partial closure of blocker 1 for direct ``scale_bindings`` callers.
-
-    Cross-checks the supplied bindings against ``context.viewport_page_
-    ownership`` (falling back to ``trusted_viewport_ids()`` when ownership
-    pairs are not populated but more than one viewport is trusted): every
-    sibling viewport known to the current revision on this page must be
-    represented, so a caller cannot silently omit a sibling viewport's
-    binding. This does NOT prove completeness for two competing bindings
-    that both claim the SAME viewport_id -- that requires the
-    ``page_viewports``-derived path below, which is structurally complete
-    by construction.
-    """
-    if not scale_bindings:
-        return ()
-    expected = {
-        str(vp) for vp, pg in context.viewport_page_ownership if int(pg) == int(page_no)
-    }
-    if not expected and len(context.trusted_viewport_ids()) > 1:
-        expected = set(context.trusted_viewport_ids())
-    if not expected or viewport.viewport_id not in expected:
-        return ()
-    supplied = {b.viewport_id for b in scale_bindings}
-    if expected - supplied:
-        return ("incomplete_scale_binding_universe",)
-    return ()
-
-
 def _scale_bindings_from_page_viewports(
     page_viewports: Sequence[SegmentedViewport],
     *,
@@ -222,15 +155,6 @@ def _scale_bindings_from_page_viewports(
     context: ProviderContext,
     document: DocumentEvidence,
 ) -> tuple[Optional[tuple[ViewportScaleBinding, ...]], tuple[str, ...]]:
-    """Derive the complete per-page binding universe from F.07's own output.
-
-    Structural closure of blocker 1 (Option A): ``bind_viewport_scale`` is a
-    pure function of one ``SegmentedViewport``, so there is exactly one
-    binding derivable per ``view_id`` once the caller supplies the complete,
-    duplicate-free viewport list for the page -- there is no second,
-    competing binding a caller could hide, because none can exist outside
-    what this function derives.
-    """
     view_ids = [str(v.view_id) for v in page_viewports]
     if len(view_ids) != len(set(view_ids)):
         return None, ("duplicate_segmented_viewport_id_in_page_viewports",)
@@ -245,19 +169,190 @@ def _scale_bindings_from_page_viewports(
     return bindings, ()
 
 
+def _resolve_scale_authority_inputs(
+    *,
+    scale_bindings: Sequence[ViewportScaleBinding],
+    page_viewports: Optional[Sequence[SegmentedViewport]],
+    scale_universe: Optional[AuthorityUniverseFingerprint],
+    scale_manifest: Optional[CompletenessManifest],
+    page_no: int,
+    context: ProviderContext,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+) -> tuple[
+    tuple[ViewportScaleBinding, ...],
+    Optional[AuthorityUniverseFingerprint],
+    Optional[CompletenessManifest],
+    tuple[str, ...],
+]:
+    expected_scope = _authority_scope(
+        DOMAIN_WALL_LENGTH_SCALE,
+        context=context,
+        document=document,
+        viewport=viewport,
+    )
+    if page_viewports is not None:
+        derived, reasons = _scale_bindings_from_page_viewports(
+            page_viewports,
+            page_no=page_no,
+            context=context,
+            document=document,
+        )
+        if reasons or derived is None:
+            return (), None, None, reasons or ("page_viewports_binding_derivation_failed",)
+        local_bindings = tuple(item for item in derived if item.viewport_id == viewport.viewport_id)
+        try:
+            derived_universe = build_authority_universe(
+                expected_scope,
+                tuple(scale_binding_member(item) for item in local_bindings),
+            )
+            derived_manifest = build_completeness_manifest(
+                derived_universe,
+                admitted_candidate_ids=tuple(
+                    scale_binding_member(item).candidate_id for item in local_bindings
+                ),
+            )
+        except (TypeError, ValueError) as exc:
+            return (), None, None, (f"scale_universe_derivation_invalid:{exc}",)
+        return local_bindings, derived_universe, derived_manifest, ()
+    return tuple(scale_bindings), scale_universe, scale_manifest, ()
+
+
+def _scale_completeness_blockers(
+    *,
+    bindings: Sequence[ViewportScaleBinding],
+    universe: Optional[AuthorityUniverseFingerprint],
+    manifest: Optional[CompletenessManifest],
+    context: ProviderContext,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+) -> tuple[str, ...]:
+    expected_scope = _authority_scope(
+        DOMAIN_WALL_LENGTH_SCALE,
+        context=context,
+        document=document,
+        viewport=viewport,
+    )
+    supplied_ids = tuple(scale_binding_member(item).candidate_id for item in bindings)
+    verification = verify_completeness_manifest(
+        manifest,
+        current_universe=universe,
+        expected_scope=expected_scope,
+        supplied_admitted_ids=supplied_ids,
+        require_resolved=True,
+    )
+    if verification.authentic:
+        return ()
+    reasons = list(verification.reasons)
+    if verification.status.value == "UNBOUND":
+        reasons.insert(0, "scale_universe_completeness_unproven")
+    else:
+        reasons.insert(0, "scale_universe_completeness_mismatch")
+    return tuple(dict.fromkeys(reasons))
+
+
+def _local_physical_identities(
+    identities: Sequence[PhysicalWallIdentity],
+    viewport_id: str,
+) -> tuple[PhysicalWallIdentity, ...]:
+    return tuple(item for item in identities if item.viewport_id == viewport_id)
+
+
+def _local_walls(
+    walls_by_id: Optional[Mapping[str, WallCandidate]],
+    viewport_id: str,
+) -> dict[str, WallCandidate]:
+    return {
+        wall_id: wall
+        for wall_id, wall in (walls_by_id or {}).items()
+        if wall.viewport_id == viewport_id
+    }
+
+
+def _candidate_and_equivalence_blockers(
+    *,
+    wall: WallCandidate,
+    equivalence: PhysicalWallEquivalenceResolution,
+    equivalence_binding: Optional[BoundResolutionFingerprint],
+    physical_identity_universe: Sequence[PhysicalWallIdentity],
+    physical_walls_by_id: Optional[Mapping[str, WallCandidate]],
+    candidate_universe: Optional[AuthorityUniverseFingerprint],
+    candidate_manifest: Optional[CompletenessManifest],
+    context: ProviderContext,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+) -> tuple[str, ...]:
+    expected_scope = _authority_scope(
+        DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+        context=context,
+        document=document,
+        viewport=viewport,
+    )
+    local_identities = _local_physical_identities(
+        physical_identity_universe,
+        viewport.viewport_id,
+    )
+    local_walls = _local_walls(physical_walls_by_id, viewport.viewport_id)
+    supplied_ids = tuple(sorted(local_walls))
+    verification = verify_completeness_manifest(
+        candidate_manifest,
+        current_universe=candidate_universe,
+        expected_scope=expected_scope,
+        supplied_admitted_ids=supplied_ids,
+        require_resolved=True,
+    )
+    blockers: list[str] = []
+    if not verification.authentic:
+        blockers.append("physical_candidate_universe_completeness_unproven")
+        blockers.extend(verification.reasons)
+        blockers.append("physical_equivalence_authenticity_unproven")
+        return tuple(dict.fromkeys(blockers))
+
+    admitted = set(candidate_manifest.admitted_candidate_ids if candidate_manifest else ())
+    identities_by_id = {item.wall_candidate_id: item for item in local_identities}
+    if len(identities_by_id) != len(local_identities):
+        blockers.append("duplicate_physical_identity_id")
+    if set(identities_by_id) != admitted:
+        blockers.append("physical_identity_universe_admitted_set_mismatch")
+    if set(local_walls) != admitted:
+        blockers.append("physical_wall_universe_admitted_set_mismatch")
+    if blockers:
+        blockers.append("physical_equivalence_authenticity_unproven")
+        return tuple(dict.fromkeys(blockers))
+
+    ordered_identities = tuple(identities_by_id[item] for item in sorted(admitted))
+    expected_resolution = resolve_physical_wall_equivalence(
+        ordered_identities,
+        walls_by_id=local_walls,
+    )
+    if candidate_universe is None:
+        return (
+            "physical_candidate_universe_completeness_unproven",
+            "physical_equivalence_authenticity_unproven",
+        )
+    equivalence_verification = verify_bound_resolution_fingerprint(
+        equivalence,
+        equivalence_binding,
+        expected_resolution=expected_resolution,
+        expected_scope=expected_scope,
+        candidate_universe=candidate_universe,
+        identities=ordered_identities,
+        resolver_rule_version=PHYSICAL_WALL_EQUIVALENCE_SCHEMA_VERSION,
+    )
+    if not equivalence_verification.authentic:
+        blockers.append("physical_equivalence_authenticity_unproven")
+        blockers.extend(equivalence_verification.reasons)
+    if wall.candidate_id not in equivalence.representative_wall_ids:
+        equivalence_reasons = equivalence.blockers_for(wall.candidate_id)
+        blockers.extend(
+            equivalence_reasons or ("physical_wall_not_reconciled_as_representative",)
+        )
+    return tuple(dict.fromkeys(blockers))
+
+
 def _downgrade_figured_dimension_result(
     resolved: MeasurementInputResolution,
 ) -> MeasurementInputResolution:
-    """Blocker 7: a generic figured_dimension atom cannot create FIRM here.
-
-    ``resolve_linear_measurement_input`` / ``pb_figured_dimension_authority``
-    remain unchanged and still reused as-is (AGENTS.md's own "may become
-    firm" seam) -- this downgrade is local to the wall-length publication
-    boundary only, pending the dedicated figured-dimension span-identity
-    workstream (dimension line -> terminators -> witnesses -> endpoints ->
-    exact physical span -> exact target entity), which this PR does not
-    implement.
-    """
     if resolved.abstained:
         return resolved
     if resolved.source_type != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value:
@@ -266,8 +361,12 @@ def _downgrade_figured_dimension_result(
         resolved,
         value_m=None,
         authority_status=AuthorityStatus.BLOCKED.value,
-        blocking_reasons=(*resolved.blocking_reasons, FIGURED_DIMENSION_WALL_LENGTH_DISABLED_REASON),
-        notes=(resolved.notes + "; " if resolved.notes else "") + "figured-dimension FIRM route disabled for #288 wall length",
+        blocking_reasons=(
+            *resolved.blocking_reasons,
+            FIGURED_DIMENSION_WALL_LENGTH_DISABLED_REASON,
+        ),
+        notes=(resolved.notes + "; " if resolved.notes else "")
+        + "figured-dimension FIRM route disabled pending exact span authority",
     )
 
 
@@ -323,52 +422,86 @@ def build_wall_length_quantity(
     scale_bindings: Sequence[ViewportScaleBinding] = (),
     page_viewports: Optional[Sequence[SegmentedViewport]] = None,
     figured_evidence: Optional[EvidenceAtom] = None,
+    scale_universe: Optional[AuthorityUniverseFingerprint] = None,
+    scale_manifest: Optional[CompletenessManifest] = None,
+    candidate_universe: Optional[AuthorityUniverseFingerprint] = None,
+    candidate_manifest: Optional[CompletenessManifest] = None,
+    physical_identity_universe: Sequence[PhysicalWallIdentity] = (),
+    physical_walls_by_id: Optional[Mapping[str, WallCandidate]] = None,
+    equivalence_binding: Optional[BoundResolutionFingerprint] = None,
 ) -> QuantityEvidence:
-    """Build one wall-length quantity. See module docstring for the four
-    mandatory completeness proofs this function now owns unavoidably:
-    independent existence recomputation, mandatory physical-equivalence
-    representative selection, scale-binding universe completeness, and the
-    figured-dimension FIRM downgrade. There is no parameter combination that
-    skips any of them -- ``evidence_atoms`` and ``equivalence`` have no
-    default and must be supplied on every call.
-    """
+    """Build one wall length; FIRM requires exact scoped universe proofs."""
     topology_blockers: list[str] = []
     topology_blockers.extend(
-        _existence_blockers(wall=wall, context=context, document=document, viewport=viewport, entity=entity)
+        _existence_blockers(
+            wall=wall,
+            context=context,
+            document=document,
+            viewport=viewport,
+            entity=entity,
+        )
     )
     topology_blockers.extend(
         _existence_recomputation_blockers(
-            wall=wall, entity=entity, evidence_atoms=evidence_atoms, context=context, document=document, viewport=viewport,
+            wall=wall,
+            entity=entity,
+            evidence_atoms=evidence_atoms,
+            context=context,
+            document=document,
+            viewport=viewport,
         )
     )
-    if wall.candidate_id not in equivalence.representative_wall_ids:
-        equivalence_reasons = equivalence.blockers_for(wall.candidate_id)
-        topology_blockers.extend(equivalence_reasons or ("physical_wall_not_reconciled_as_representative",))
+    topology_blockers.extend(
+        _candidate_and_equivalence_blockers(
+            wall=wall,
+            equivalence=equivalence,
+            equivalence_binding=equivalence_binding,
+            physical_identity_universe=physical_identity_universe,
+            physical_walls_by_id=physical_walls_by_id,
+            candidate_universe=candidate_universe,
+            candidate_manifest=candidate_manifest,
+            context=context,
+            document=document,
+            viewport=viewport,
+        )
+    )
     if len(wall.centerline_pts) < 2:
         topology_blockers.append("wall_centerline_unresolved")
     page_length = _polyline_length(wall.centerline_pts)
     if not math.isfinite(page_length) or page_length <= 0.0:
         topology_blockers.append("wall_centerline_length_invalid")
-    if topology_blockers:
-        return _abstention(wall=wall, entity=entity, context=context, page_no=page_no, blockers=tuple(topology_blockers))
 
-    resolved_scale_bindings = scale_bindings
-    if page_viewports is not None:
-        derived, derive_reasons = _scale_bindings_from_page_viewports(
-            page_viewports, page_no=page_no, context=context, document=document,
+    resolved_scale_bindings, resolved_scale_universe, resolved_scale_manifest, scale_input_reasons = (
+        _resolve_scale_authority_inputs(
+            scale_bindings=scale_bindings,
+            page_viewports=page_viewports,
+            scale_universe=scale_universe,
+            scale_manifest=scale_manifest,
+            page_no=page_no,
+            context=context,
+            document=document,
+            viewport=viewport,
         )
-        if derive_reasons or derived is None:
-            return _abstention(
-                wall=wall, entity=entity, context=context, page_no=page_no,
-                blockers=derive_reasons or ("page_viewports_binding_derivation_failed",),
-            )
-        resolved_scale_bindings = derived
-    else:
-        universe_blockers = _scale_universe_completeness_blockers(
-            scale_bindings=scale_bindings, context=context, viewport=viewport, page_no=page_no,
+    )
+    topology_blockers.extend(scale_input_reasons)
+    topology_blockers.extend(
+        _scale_completeness_blockers(
+            bindings=resolved_scale_bindings,
+            universe=resolved_scale_universe,
+            manifest=resolved_scale_manifest,
+            context=context,
+            document=document,
+            viewport=viewport,
         )
-        if universe_blockers:
-            return _abstention(wall=wall, entity=entity, context=context, page_no=page_no, blockers=universe_blockers)
+    )
+    if topology_blockers:
+        return _abstention(
+            wall=wall,
+            entity=entity,
+            context=context,
+            page_no=page_no,
+            blockers=tuple(dict.fromkeys(topology_blockers)),
+        )
 
     resolved = resolve_linear_measurement_input(
         context=context,
@@ -408,6 +541,15 @@ def build_wall_length_quantity(
         "entity_status": entity.status.value,
         "measurement_input_fingerprint": resolved.fingerprint(),
         "value_m": resolved.value_m,
+        "scale_universe_fingerprint": (
+            resolved_scale_universe.fingerprint if resolved_scale_universe else None
+        ),
+        "candidate_universe_fingerprint": (
+            candidate_universe.fingerprint if candidate_universe else None
+        ),
+        "equivalence_binding_fingerprint": (
+            equivalence_binding.fingerprint if equivalence_binding else None
+        ),
     }
     return QuantityEvidence(
         quantity_id=stable_contract_id("qty", payload),
@@ -416,7 +558,11 @@ def build_wall_length_quantity(
         value=resolved.value_m,
         unit="m",
         input_entity_ids=(wall.candidate_id,),
-        formula="authoritative_figured_dimension" if resolved.source_type == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value else "polyline_length / trusted_px_per_m",
+        formula=(
+            "authoritative_figured_dimension"
+            if resolved.source_type == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+            else "polyline_length / trusted_px_per_m"
+        ),
         formula_version=WALL_LENGTH_FORMULA_VERSION,
         evidence_ids=tuple(entity.evidence_ids),
         authority=resolved.source_type or "unresolved",
@@ -438,6 +584,11 @@ def build_wall_length_quantity(
             "thickness_m": wall.thickness_m,
             "wall_status": wall.status.value,
             "entity_status": entity.status.value,
+            "scale_universe_fingerprint": resolved_scale_universe.fingerprint,
+            "scale_manifest_fingerprint": resolved_scale_manifest.manifest_fingerprint,
+            "candidate_universe_fingerprint": candidate_universe.fingerprint,
+            "candidate_manifest_fingerprint": candidate_manifest.manifest_fingerprint,
+            "equivalence_binding_fingerprint": equivalence_binding.fingerprint,
         },
     )
 
@@ -455,19 +606,13 @@ def build_wall_length_quantities(
     scale_bindings: Sequence[ViewportScaleBinding] = (),
     page_viewports: Optional[Sequence[SegmentedViewport]] = None,
     figured_evidence_by_wall_id: Optional[dict[str, EvidenceAtom]] = None,
+    scale_universe: Optional[AuthorityUniverseFingerprint] = None,
+    scale_manifest: Optional[CompletenessManifest] = None,
+    candidate_universe: Optional[AuthorityUniverseFingerprint] = None,
+    candidate_manifest: Optional[CompletenessManifest] = None,
+    physical_identity_universe: Optional[Sequence[PhysicalWallIdentity]] = None,
 ) -> tuple[QuantityEvidence, ...]:
-    """Batch builder with fail-closed duplicate representation protection.
-
-    ``physical_identities`` and ``evidence_atoms`` are REQUIRED (GPT-2
-    blocker 5): there is no argument combination that skips physical-
-    equivalence reconciliation or existence recomputation. Every wall's
-    identity is looked up (``physical_identities.get(wall.candidate_id)``
-    may legitimately be ``None`` for a wall with no resolvable identity,
-    which ``resolve_physical_wall_equivalence`` already treats as an
-    abstention) so a caller cannot silently omit a specific wall from
-    reconciliation while still publishing it -- every wall in ``walls`` is
-    represented in the equivalence pass, one way or another.
-    """
+    """Batch publication with complete candidate-universe reconciliation."""
     figured = figured_evidence_by_wall_id or {}
     duplicate_ids: set[str] = set()
     seen_ids: set[str] = set()
@@ -486,20 +631,67 @@ def build_wall_length_quantities(
                 overlapping_ids.add(left.candidate_id)
                 overlapping_ids.add(right.candidate_id)
 
+    identity_universe = tuple(
+        physical_identity_universe
+        if physical_identity_universe is not None
+        else tuple(
+            item for item in physical_identities.values() if item is not None
+        )
+    )
+    local_identities = _local_physical_identities(identity_universe, viewport.viewport_id)
+    local_walls_by_id = {
+        wall.candidate_id: wall for wall in walls if wall.viewport_id == viewport.viewport_id
+    }
+    expected_candidate_scope = _authority_scope(
+        DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+        context=context,
+        document=document,
+        viewport=viewport,
+    )
+    candidate_verification = verify_completeness_manifest(
+        candidate_manifest,
+        current_universe=candidate_universe,
+        expected_scope=expected_candidate_scope,
+        supplied_admitted_ids=tuple(sorted(local_walls_by_id)),
+        require_resolved=True,
+    )
+
+    identities_by_id = {item.wall_candidate_id: item for item in local_identities}
+    candidate_blockers: list[str] = []
+    if not candidate_verification.authentic:
+        candidate_blockers.append("physical_candidate_universe_completeness_unproven")
+        candidate_blockers.extend(candidate_verification.reasons)
+    if candidate_manifest is not None:
+        admitted = set(candidate_manifest.admitted_candidate_ids)
+        if set(identities_by_id) != admitted:
+            candidate_blockers.append("physical_identity_universe_admitted_set_mismatch")
+    if len(identities_by_id) != len(local_identities):
+        candidate_blockers.append("duplicate_physical_identity_id")
+
     equivalence = resolve_physical_wall_equivalence(
-        tuple(physical_identities.get(wall.candidate_id) for wall in walls),
+        tuple(identities_by_id.get(wall.candidate_id) for wall in walls),
         walls_by_id={wall.candidate_id: wall for wall in walls},
     )
+    equivalence_binding: Optional[BoundResolutionFingerprint] = None
+    if not candidate_blockers and candidate_universe is not None:
+        ordered_identities = tuple(
+            identities_by_id[item]
+            for item in sorted(candidate_manifest.admitted_candidate_ids)
+        )
+        equivalence_binding = bind_resolution_fingerprint(
+            equivalence,
+            scope=expected_candidate_scope,
+            candidate_universe=candidate_universe,
+            identities=ordered_identities,
+            resolver_rule_version=PHYSICAL_WALL_EQUIVALENCE_SCHEMA_VERSION,
+        )
 
     output: list[QuantityEvidence] = []
     for wall in walls:
         entity = entities_by_wall_id.get(wall.candidate_id)
         if entity is None:
-            # QuantityEvidence requires an evidence-bearing EntityEvidence for this path.
-            # Construct no synthetic entity: skip impossible binding as a deterministic
-            # explicit error rather than fabricating provenance.
             raise ValueError(f"missing EntityEvidence for wall {wall.candidate_id!r}")
-        blockers: list[str] = []
+        blockers: list[str] = list(candidate_blockers)
         if wall.candidate_id in duplicate_ids:
             blockers.append("duplicate_wall_identity")
         if wall.candidate_id in overlapping_ids:
@@ -511,7 +703,7 @@ def build_wall_length_quantities(
                     entity=entity,
                     context=context,
                     page_no=page_no,
-                    blockers=tuple(blockers),
+                    blockers=tuple(dict.fromkeys(blockers)),
                     metadata={"source_segment_ids": sorted(_wall_source_segment_ids(wall))},
                 )
             )
@@ -529,6 +721,13 @@ def build_wall_length_quantities(
                 scale_bindings=scale_bindings,
                 page_viewports=page_viewports,
                 figured_evidence=figured.get(wall.candidate_id),
+                scale_universe=scale_universe,
+                scale_manifest=scale_manifest,
+                candidate_universe=candidate_universe,
+                candidate_manifest=candidate_manifest,
+                physical_identity_universe=identity_universe,
+                physical_walls_by_id={wall.candidate_id: wall for wall in walls},
+                equivalence_binding=equivalence_binding,
             )
         )
     return tuple(output)
