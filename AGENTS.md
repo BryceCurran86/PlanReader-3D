@@ -43,6 +43,7 @@ Only existing seams may raise firm measurement authority:
 - `pb_figured_dimension_authority.resolve_measurement_authority`
 - `pb_wall_length_quantity.build_wall_length_quantity` (2026-09-14 remediation: `evidence_atoms` and `equivalence: PhysicalWallEquivalenceResolution` are now required, no default — existence is independently recomputed from `evidence_atoms` via `resolve_physical_wall_existence` and a caller-supplied `entity` whose status disagrees is rejected; only a wall in `equivalence.representative_wall_ids` may publish; a generic `figured_dimension` atom is explicitly downgraded to BLOCKED and cannot create FIRM here pending the dedicated figured-dimension span-identity workstream; `WallCandidate.status` is still not existence authority)
 - `pb_wall_height_authority.build_wall_height_quantity` (explicit owned height or corroborated datum pair only)
+- `pb_wall_boundary_role_authority.resolve_wall_boundary_roles` (shadow; role only, not a quantity — see below)
 
 ## Authority that must not become firm
 
@@ -55,6 +56,22 @@ Only existing seams may raise firm measurement authority:
 - `pb_hosted_opening_geometry` / `pb_hosted_opening_wall_binding` (unwired; diagnostic only)
 - W10 canonical translation
 - Benchmark gold, mappings, scorer tolerances, or development-project scores
+
+## Wall-boundary role authority (`pb_wall_boundary_role_authority`)
+
+Shadow only — role is independent of thickness, length, scale, commercial
+publishing, and W6 room-count; it never becomes a quantity. `context:
+ProviderContext` is required (no default): both physical-wall existence and
+viewport-coverage authority are current-revision/snapshot/source-SHA bound.
+A topologically-unbounded face is `UNKNOWN`, never `EXTERIOR_OPEN_SPACE` /
+`BUILDING_INTERIOR`, unless `resolve_viewport_coverage_authority` proves
+complete coverage from a `viewport_coverage` atom whose document/page/
+viewport/revision/evidence-snapshot/source-SHA all match the current
+context — a coverage atom from another document, SHA, revision, snapshot,
+or viewport fails exactly like a missing one. Crop contact, an explicit
+exterior label (courtyard/lightwell), and a covered-open-space label
+(verandah/porch/carport/loggia) remain independent, narrower routes that do
+not require coverage authority.
 
 ## Required tests for every geometric hypothesis
 
