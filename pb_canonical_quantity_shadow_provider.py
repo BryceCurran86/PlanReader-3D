@@ -1,65 +1,117 @@
-"""Canonical quantity shadow provider (Canonical Shadow Integration, Phase 2/6).
+"""Canonical quantity shadow provider (Canonical Shadow Integration).
 
 Gold-free, non-commercial, observability-only. This module NEVER touches
 `pred_dict`, never imports anything from the benchmark gold/scoring path, and
 never mutates any object the live `GenericPlanReaderExtractor` path owns.
 
 WHY THIS FILE EXISTS
-Phase 1's trace (see conversation record, not repeated here) confirmed that
-every newer fail-closed authority module for wall length/height/gross-area/
-net-area/opening-deduction has ZERO live callers -- `GenericPlanReaderExtractor`
-still produces every commercial quantity through legacy ad hoc geometry/regex
-paths, with exactly one live hard-coded height default
-(`GenericPlanReaderExtractor.default_ceiling_height_m = 2.80`,
-`pb_planreader_pdf_extractor.py:68`).
+Phase 1's trace confirmed that every newer fail-closed authority module for
+wall length/height/gross-area/net-area/opening-deduction has ZERO live
+callers -- `GenericPlanReaderExtractor` still produces every commercial
+quantity through legacy ad hoc geometry/regex paths, with exactly one live
+hard-coded height default (`GenericPlanReaderExtractor.default_ceiling_height_m
+= 2.80`, `pb_planreader_pdf_extractor.py:68`). This provider runs the
+*disconnected* canonical authority chain end-to-end, per physical wall, on a
+real drawing, and reports what it can and cannot prove -- without inventing
+any new detection algorithm and without changing what the live path returns.
 
-This provider runs the *disconnected* canonical authority chain end-to-end,
-per physical wall, on a real drawing, and reports what it can and cannot
-prove -- without inventing any new detection algorithm and without changing
-what the live path returns.
+DEPENDENCY CHAIN (each stage keeps its own status; never collapsed to a
+single boolean -- see `dependency_states` on every record, and
+DEPENDENCY_STAGE_KEYS / the controlled `_DependencyStatus` vocabulary):
+
+    canonical wall candidates -> physical identity -> existence -> equivalence
+    -> FIRM wall length -> FIRM wall height -> gross wall area
+    -> physical opening universe -> opening identity -> host resolution
+    -> opening dimensions -> deduction readiness -> net wall area
+    -> wall role -> finish applicability
+
+KNOWN, TRACKED DEBT -- NOT FIXED HERE, NOT THIS MODULE'S TO FIX
+`pb_wall_height_authority`'s own ownership check (`_validate_owned_evidence`)
+verifies document/entity membership, page/viewport identity, and
+CORROBORATED status -- but it does NOT itself verify that an evidence atom's
+revision/snapshot/source-SHA match the current context. This shadow module
+adds its OWN independent freshness gate (`_height_evidence_is_fresh`) as a
+protective boundary in front of that weaker upstream check. That gate does
+NOT mean the underlying authority module is fixed -- it still lacks
+revision/snapshot/source-SHA verification and needs separate remediation
+upstream (tracked as a known blocker, not addressed in this file; do not
+report "height freshness fixed globally" on the strength of this shadow-side
+gate alone).
+
+CONSTRAINT: FRESHNESS MUST NOT BE MANUFACTURED
+Provenance (revision_id/evidence_snapshot_id/source_sha256) is stamped onto
+a level-marker evidence atom EXACTLY ONCE, in `_stamp_level_marker_atoms`,
+called only from `_build_canonical_wall_universe` immediately after
+`find_level_markers` runs -- i.e. using the context that was genuinely
+active at the actual moment of extraction from the actual PDF. Every later
+consumer (`_attempt_wall_height`, called once per wall, well after
+extraction) only ever READS an already-stamped atom and verifies it against
+whatever context is active at ITS OWN call time; it never re-stamps, and it
+never accepts a bare `LevelMarker` and manufactures fresh-looking metadata
+for it on the spot. This is deliberate: retroactively stamping "current"
+context onto an atom of unknown origin would prove nothing (an old,
+unbound atom would pass just as easily as a genuinely fresh one) --
+freshness only means anything if the stamp was fixed at a DIFFERENT, EARLIER
+moment than the check, so a mismatch is actually possible to observe. See
+`test_evidence_cannot_become_fresh_merely_by_being_restamped_with_current_context`.
+
+CONSTRAINT: AN INCOMPLETE HOST-WALL UNIVERSE NEVER AUTHORIZES A HOST-DEPENDENT
+QUANTITY, EVEN WHEN THE GEOMETRIC BINDER SAYS "bound"
+`bind_hosted_opening_to_walls` is always called against the FULL region-
+clipped wall list (never a single-wall shortcut), but that list itself is
+never proven to be the complete relevant universe (this diagnostic clips to
+a small window, not the whole drawing). So even a "bound" result never
+becomes host AUTHORITY here: `hosted_opening_binding.canonical_status` is
+unconditionally "BLOCKED", carrying `regional_clip_wall_universe_not_proven_
+complete` in blocking_reasons -- the raw binder finding ("bound"/"ambiguous"/
+"unbound") is preserved separately in `candidate_result` rather than
+discarded, precisely so a future, independently-proven completeness contract
+can promote it later without recomputing any geometry. opening_deduction_
+readiness and net_wall_area both inherit this same unconditional BLOCKED
+host state; a "bound" candidate can never make either of them FIRM here.
+
+CONSTRAINT: OPENING COMPLETENESS IS NEVER CLAIMED, EVER
+This module never constructs, accepts, or trusts an `opening_set_complete`-
+kind evidence atom, and never calls `build_opening_deduction_quantity` /
+`build_net_wall_area_quantity` at all -- there is no code path here through
+which a caller-supplied completeness claim (real or fabricated) could reach
+either function. net_wall_area is unconditionally BLOCKED.
 
 WHAT IS REUSED, UNCHANGED, FROM THE EXISTING #288 SHADOW SCRIPT
-The existence/equivalence/entity construction pipeline below mirrors
+The existence/equivalence/entity construction pipeline mirrors
 `scripts/wall_linear_authority_real_drawing_shadow.py` exactly (same
-functions, same call order: build_wall_graph_for_viewport ->
-attach_typed_semantic_evidence -> classify_junctions -> assemble_wall_candidates
--> detect_wall_pairs -> resolve_wall_physical_evidence ->
-collect_physical_wall_identities -> resolve_physical_wall_equivalence). That
-script returns only a summary dict; this module needs the underlying
-objects (WallCandidate list, ProviderContext, DocumentEvidence,
-ViewportEvidence, evidence catalog, equivalence) so later authority calls
-(height, gross area) can be layered on the same wall universe -- so the
-pipeline is reconstructed here rather than imported, but it is not modified.
+functions, same call order). That script returns only a summary dict; this
+module needs the underlying objects so later authority calls (height, gross
+area) can be layered on the same wall universe -- so the pipeline is
+reconstructed here rather than imported, but it is not modified.
 
-WHAT IS NEW HERE
-1. Wall height: `pb_level_datum_extraction.find_level_markers` +
-   `pb_dimension_graph_constraint_engine.resolve_wall_height` already run in
-   the LIVE legacy path (via `pb_planreader_pdf_extractor.py:631-636`) and
-   already refuse to default when unresolved -- but their output is a bare
-   `HeightResolution`, never wrapped as an `EvidenceAtom` for
-   `pb_wall_height_authority.build_wall_height_quantity` to consume. That
-   adapter (`_level_marker_evidence_atom` / `_attempt_wall_height`) is new.
-2. Gross area: mechanical (`build_gross_wall_area_quantity`) once both
-   length and height are independently FIRM for the same wall_id. No new
-   logic beyond calling the existing authority.
-3. Net area / opening deduction: NOT attempted with fabricated inputs.
-   `pb_wall_room_topology_opening_host_binding.detect_opening_host_candidates`
-   is called for real (on the real WallCandidate universe, zero new
-   geometry work needed -- it takes only `Sequence[WallCandidate]`) so the
-   "always ambiguous_host" claim is an observed fact on this drawing, not
-   an assumed one; `build_opening_deduction_quantity`/
-   `build_net_wall_area_quantity` are never called with anything but real
-   host candidates, so net area is reported BLOCKED with the same
-   `opening_host_not_uniquely_resolved` reason those functions would
-   themselves produce, rather than skipped or guessed at.
+NOT WIRED IN THIS PASS (reported honestly via dependency_states, not
+attempted):
+- Opening tag/schedule identity (`pb_opening_provenance_graph`) -- exists,
+  runs live, is discarded live (Phase 1 finding), but is not yet wired into
+  THIS shadow provider either.
+- Wall role (`pb_wall_boundary_role_authority`) -- lives only on the
+  separate, not-yet-merged `claude/wall-role-authority-integration-v1`
+  branch; this provider is built on bare `origin/main` and cannot import a
+  module that does not exist there.
+- Internal wall length promotion beyond NOT_EVIDENCED, and any external
+  render/cladding producer.
 
 SCOPE MISMATCH, STATED EXPLICITLY
 Canonical authority publishes per physical wall. The live legacy path
 publishes one whole-drawing/whole-page aggregate (`perimeter_walling` etc.).
-This provider does not attempt a fabricated per-wall "same/different"
-comparison against that aggregate -- it reports canonical per-wall results
-and the legacy whole-drawing aggregate side by side, and leaves the
-granularity mismatch visible rather than papering over it.
+`comparison` is populated only on whole-drawing AGGREGATE_SUBJECT_ID rows
+(sum of FIRM per-wall values vs. the legacy figure, gated on family, unit
+compatibility, and tolerance -- see `_comparison_status`); individual wall
+rows leave it None rather than forcing a misleading verdict onto them.
+
+This module is intentionally free of consumer/benchmark dependencies beyond
+what it observes. It does not import or modify pb_wall_boundary_role_authority.py,
+pb_physical_wall_existence_authority.py (beyond calling its public function),
+pb_wall_height_authority.py (beyond calling its public function -- its
+freshness gap is this module's problem to defend against, not to patch),
+pb_completeness_manifest.py, pb_cross_view_registration.py, or the legacy
+pb_vector_geometry_v130.solve_scale. No new dependency.
 """
 from __future__ import annotations
 
@@ -68,7 +120,7 @@ import hashlib
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Optional, Sequence
+from typing import Any, Literal, Mapping, Optional, Sequence
 
 import fitz
 
@@ -78,23 +130,24 @@ if str(REPO_ROOT) not in sys.path:
 
 from pb_canonical_wall_room_evidence_model import resolve_wall_physical_evidence
 from pb_dimension_graph_constraint_engine import HeightResolution, LevelMarker, resolve_wall_height
+from pb_hosted_opening_geometry import resolve_hosted_opening_spans
+from pb_hosted_opening_wall_binding import bind_hosted_opening_to_walls
 from pb_level_datum_extraction import find_level_markers
 from pb_migration_contracts import (
     DocumentEvidence,
     EvidenceAtom,
     EvidenceResolutionStatus,
+    QuantityEvidence,
     ViewportEvidence,
     ViewportResolutionStatus,
 )
 from pb_migration_provider_envelope import ProviderContext
 from pb_physical_wall_existence_authority import adapt_wall_candidate_to_entity_evidence
-from pb_hosted_opening_geometry import resolve_hosted_opening_spans
-from pb_hosted_opening_wall_binding import bind_hosted_opening_to_walls
 from pb_physical_wall_identity import collect_physical_wall_identities, resolve_physical_wall_equivalence
 from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
 from pb_vector_geometry_v130 import detect_wall_pairs, extract_native_page
 from pb_wall_gross_area_quantity import build_gross_wall_area_quantity
-from pb_wall_height_authority import build_wall_height_quantity
+from pb_wall_height_authority import WALL_HEIGHT_FAMILY, build_wall_height_quantity
 from pb_wall_length_quantity import build_wall_length_quantity
 from pb_wall_room_topology_junction_classifier import classify_junctions
 from pb_wall_room_topology_opening_host_binding import detect_opening_host_candidates
@@ -102,28 +155,39 @@ from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
 from pb_wall_room_topology_typed_negative_evidence import GRAPH_ATOMS_KEY, attach_typed_semantic_evidence
 from pb_wall_room_topology_wall_assembly import assemble_wall_candidates
 
-SHADOW_PROVIDER_SCHEMA_VERSION = "1.0.0"
+SHADOW_PROVIDER_SCHEMA_VERSION = "3.0.0"
 
 ComparisonStatus = Literal["SAME", "DIFFERENT", "LEGACY_ONLY", "SHADOW_ONLY", "BOTH_BLOCKED"]
+DependencyStatus = Literal["FIRM", "BLOCKED", "CONFLICT", "AMBIGUOUS", "NOT_EVALUATED", "NOT_REQUIRED"]
 
-# family -> legacy prediction tag treated as its (approximate) reference.
+AGGREGATE_SUBJECT_ID = "__whole_drawing_aggregate__"
+
+_ALLOWED_DEPENDENCY_STATUSES: frozenset[str] = frozenset(
+    {"FIRM", "BLOCKED", "CONFLICT", "AMBIGUOUS", "NOT_EVALUATED", "NOT_REQUIRED"}
+)
+
+# family -> (legacy prediction tag treated as its approximate reference, expected legacy unit)
 # None means legacy has no comparable decomposition at all (it only ever
-# publishes a combined figure) -- that is reported as SHADOW_ONLY, not
-# guessed at via some other tag.
+# publishes a combined figure) -- reported as SHADOW_ONLY, not guessed at
+# via some other tag.
 _FAMILY_TO_LEGACY_TAG: dict[str, Optional[str]] = {
     "wall_length": None,
     "wall_height": None,
     "gross_wall_area": "perimeter_walling",
     "net_wall_area": "perimeter_walling",
 }
+_CANONICAL_UNIT_FOR_FAMILY = {"wall_length": "m", "wall_height": "m", "gross_wall_area": "m2", "net_wall_area": "m2"}
+# Units this codebase's legacy extractor actually emits (pb_planreader_pdf_extractor.py
+# ExtractedPrediction.unit: "NO"/"SM"/"M"/"M3") that are dimensionally
+# compatible with a given canonical unit -- comparison requires this match
+# before SAME/DIFFERENT is even considered (point 8: compatible units).
+_UNIT_COMPATIBLE_WITH_CANONICAL = {"m": {"M"}, "m2": {"SM"}, "m3": {"M3"}}
 # perimeter_walling is mutated in place to the NET value by
 # GenericOpeningDeductionPipeline.propagate_to_predictions whenever any
-# opening prediction exists on the page (see pb_opening_deduction_pipeline.py
+# opening prediction exists on the page (pb_opening_deduction_pipeline.py
 # :262-334) -- when it does, gross_wall_area's legacy comparison below is
-# against an already-net figure, not a clean gross one. That ambiguity is
-# inherent to the legacy representation, not disambiguated here; it is
-# surfaced as a note on every ShadowDrawingReport rather than silently
-# assumed away.
+# against an already-net figure, not a clean gross one. Surfaced as a note
+# on every ShadowDrawingReport rather than silently assumed away.
 _COMPARISON_RELATIVE_TOLERANCE = 0.01  # reporting-only heuristic for SAME/DIFFERENT; not an authority tolerance_policy
 
 # marker_type -> (allowed EvidenceAtom kind, "upper" or "lower" datum role)
@@ -135,54 +199,149 @@ _MARKER_TYPE_TO_DATUM_KIND: dict[str, tuple[str, str]] = {
     "ground": ("floor_level_datum", "lower"),
 }
 
+# Fixed dependency-chain stages every ShadowQuantityRecord reports against,
+# so a reviewer can see exactly which upstream stage blocked any given
+# claim -- not just that "something" was abstained.
+DEPENDENCY_STAGE_KEYS: tuple[str, ...] = (
+    "existence",
+    "identity",
+    "scale",
+    "length",
+    "height",
+    "host",
+    "opening_dimension",
+    "gross_area",
+    "net_area",
+    "role",
+    "finish",
+)
+
+_EVIDENCE_RESOLUTION_TO_DEPENDENCY: dict[str, str] = {
+    "raw": "NOT_EVALUATED",
+    "candidate": "NOT_EVALUATED",
+    "corroborated": "FIRM",
+    "conflict": "CONFLICT",
+    "abstained": "BLOCKED",
+}
+_IDENTITY_TO_DEPENDENCY: dict[str, str] = {
+    "same_or_representative": "FIRM",
+    "distinct": "FIRM",
+    "ambiguous": "AMBIGUOUS",
+    "abstained": "BLOCKED",
+}
+_QUANTITY_STATUS_TO_DEPENDENCY: dict[str, str] = {
+    "firm": "FIRM",
+    "conflict": "CONFLICT",
+    "blocked": "BLOCKED",
+    "abstained": "BLOCKED",
+    "provisional": "NOT_EVALUATED",
+    "review_required": "NOT_EVALUATED",
+}
+
+
+def _evidence_status_to_dependency(value: Optional[str]) -> str:
+    return _EVIDENCE_RESOLUTION_TO_DEPENDENCY.get(str(value), "BLOCKED")
+
+
+def _identity_status_to_dependency(value: Optional[str]) -> str:
+    return _IDENTITY_TO_DEPENDENCY.get(str(value), "BLOCKED")
+
+
+def _quantity_status_to_dependency(qty) -> str:
+    if qty.abstained:
+        return "BLOCKED"
+    return _QUANTITY_STATUS_TO_DEPENDENCY.get(str(qty.status).lower(), "BLOCKED")
+
+
+def _dependency_states(**overrides: str) -> dict[str, str]:
+    """Every record gets the full fixed key set; stages not relevant to
+    that particular record's family default to NOT_REQUIRED (never
+    omitted, so the shape is always uniform). Every supplied value must be
+    one of the controlled DependencyStatus values -- arbitrary free-text
+    status strings are rejected at construction, not merely discouraged."""
+    states = {key: "NOT_REQUIRED" for key in DEPENDENCY_STAGE_KEYS}
+    for key, value in overrides.items():
+        if key not in states:
+            raise ValueError(f"unknown dependency stage {key!r}")
+        if value not in _ALLOWED_DEPENDENCY_STATUSES:
+            raise ValueError(
+                f"dependency stage {key!r} got non-controlled status {value!r}; "
+                f"must be one of {sorted(_ALLOWED_DEPENDENCY_STATUSES)}"
+            )
+        states[key] = value
+    return states
+
 
 @dataclass(frozen=True)
 class ShadowQuantityRecord:
-    """One Phase-6 observability row. Never overwrites or feeds commercial
-    output; this is the whole point of the object -- read-only reporting.
+    """One observability row. Never overwrites or feeds commercial output;
+    this is the whole point of the object -- read-only reporting.
 
-    legacy_live_value/comparison_status are populated only for whole-drawing
+    candidate_result preserves a raw, ungated geometric/binder finding
+    (e.g. "bound", "ambiguous") separately from canonical_status (the
+    GATED authority verdict) -- useful, non-authoritative geometry is never
+    thrown away just because it isn't promotion-ready yet.
+
+    legacy_value/legacy_unit/comparison are populated only for whole-drawing
     AGGREGATE rows (subject_id == AGGREGATE_SUBJECT_ID) -- comparing one
     individual wall's canonical value against a whole-page legacy figure is
-    not a sound comparison, so per-wall rows leave both None rather than
-    forcing a misleading verdict onto them.
+    not a sound comparison, so per-wall rows leave all three None.
     """
 
     quantity_family: str
     subject_id: str
-    value: Optional[float]
-    unit: Optional[str]
-    authority_status: str
+    canonical_value: Optional[float]
+    canonical_unit: Optional[str]
+    canonical_status: str
     evidence_ids: tuple[str, ...]
     blocking_reasons: tuple[str, ...]
-    legacy_live_value: Optional[float] = None
-    comparison_status: Optional[str] = None
+    dependency_states: Mapping[str, str] = field(default_factory=_dependency_states)
+    candidate_result: Optional[str] = None
+    legacy_value: Optional[float] = None
+    legacy_unit: Optional[str] = None
+    comparison: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "quantity_family": self.quantity_family,
             "subject_id": self.subject_id,
-            "value": self.value,
-            "unit": self.unit,
-            "authority_status": self.authority_status,
+            "canonical_value": self.canonical_value,
+            "canonical_unit": self.canonical_unit,
+            "canonical_status": self.canonical_status,
             "evidence_ids": list(self.evidence_ids),
             "blocking_reasons": list(self.blocking_reasons),
-            "legacy_live_value": self.legacy_live_value,
-            "canonical_shadow_value": self.value,
-            "comparison_status": self.comparison_status,
+            "dependency_states": dict(self.dependency_states),
+            "candidate_result": self.candidate_result,
+            "legacy_value": self.legacy_value,
+            "legacy_unit": self.legacy_unit,
+            "comparison": self.comparison,
         }
 
 
-AGGREGATE_SUBJECT_ID = "__whole_drawing_aggregate__"
-
-
-def _comparison_status(shadow_value: Optional[float], legacy_value: Optional[float]) -> ComparisonStatus:
+def _comparison_status(
+    shadow_value: Optional[float],
+    legacy_value: Optional[float],
+    *,
+    canonical_unit: Optional[str] = None,
+    legacy_unit: Optional[str] = None,
+) -> ComparisonStatus:
+    """SAME requires more than numeric closeness (point 8): compatible
+    units too. Family/subject-scope agreement is the caller's
+    responsibility (this is only ever invoked per-family, per-aggregate-row
+    -- see call site), so it is not re-checked here, but unit compatibility
+    is checked here because it is cheap, always available, and exactly the
+    kind of accidental-numeric-coincidence risk an incompatible-unit
+    mismatch would otherwise hide."""
     if shadow_value is None and legacy_value is None:
         return "BOTH_BLOCKED"
     if shadow_value is None:
         return "LEGACY_ONLY"
     if legacy_value is None:
         return "SHADOW_ONLY"
+    if canonical_unit is not None and legacy_unit is not None:
+        compatible = _UNIT_COMPATIBLE_WITH_CANONICAL.get(canonical_unit, set())
+        if legacy_unit not in compatible:
+            return "DIFFERENT"
     tolerance = max(1e-6, _COMPARISON_RELATIVE_TOLERANCE * abs(legacy_value))
     return "SAME" if abs(shadow_value - legacy_value) <= tolerance else "DIFFERENT"
 
@@ -209,40 +368,82 @@ class ShadowDrawingReport:
         }
 
 
-def _record(qty, *, family: str, subject_id: str) -> ShadowQuantityRecord:
+def _record(qty, *, family: str, subject_id: str, dependency_states: Mapping[str, str]) -> ShadowQuantityRecord:
     value = None if qty.abstained else qty.value
     unit = qty.unit if not qty.abstained else None
     return ShadowQuantityRecord(
         quantity_family=family,
         subject_id=subject_id,
-        value=value,
-        unit=unit,
-        authority_status=qty.status,
+        canonical_value=value,
+        canonical_unit=unit,
+        canonical_status=qty.status,
         evidence_ids=tuple(qty.evidence_ids),
         blocking_reasons=tuple(qty.blocking_reasons),
+        dependency_states=dependency_states,
     )
 
 
-def _level_marker_evidence_atom(
-    marker: LevelMarker, *, document_id: str, page_id: str
-) -> Optional[EvidenceAtom]:
-    mapping = _MARKER_TYPE_TO_DATUM_KIND.get(marker.marker_type)
-    if mapping is None:
-        return None
-    kind, _role = mapping
-    return EvidenceAtom(
-        evidence_id=f"leveldatum-{marker.marker_id}",
-        document_id=document_id,
-        page_id=page_id,
-        kind=kind,
-        method="text_level_marker",
-        viewport_id=marker.view_id or None,
-        raw_text=marker.raw_text,
-        normalized_value=marker.level_m,
+def _stamp_level_marker_atoms(
+    levels: Sequence[LevelMarker], *, document_id: str, page_id: str, extraction_context: ProviderContext
+) -> dict[str, EvidenceAtom]:
+    """Stamps provenance EXACTLY ONCE, at the moment of extraction -- see
+    the module docstring's "CONSTRAINT: FRESHNESS MUST NOT BE MANUFACTURED"
+    section for why this must never be called again later, per-wall, from
+    _attempt_wall_height."""
+    atoms: dict[str, EvidenceAtom] = {}
+    for marker in levels:
+        mapping = _MARKER_TYPE_TO_DATUM_KIND.get(marker.marker_type)
+        if mapping is None:
+            continue
+        kind, _role = mapping
+        atoms[marker.marker_id] = EvidenceAtom(
+            evidence_id=f"leveldatum-{marker.marker_id}",
+            document_id=document_id,
+            page_id=page_id,
+            kind=kind,
+            method="text_level_marker",
+            viewport_id=marker.view_id or None,
+            raw_text=marker.raw_text,
+            normalized_value=marker.level_m,
+            unit="m",
+            confidence=1.0,
+            status=EvidenceResolutionStatus.CORROBORATED,
+            metadata={
+                "marker_type": marker.marker_type,
+                "source_page": marker.source_page,
+                "revision_id": extraction_context.current_revision_id,
+                "evidence_snapshot_id": extraction_context.evidence_snapshot_id,
+                "source_sha256": extraction_context.source_sha256,
+            },
+        )
+    return atoms
+
+
+def _height_evidence_is_fresh(atom: EvidenceAtom, *, context: ProviderContext) -> bool:
+    """Constraint: verify the ALREADY-STAMPED evidence belongs to the
+    CURRENT revision/snapshot/source-SHA, independent of
+    build_wall_height_quantity's own (weaker) ownership check, which never
+    inspects these three fields at all."""
+    meta = atom.metadata or {}
+    return (
+        meta.get("revision_id") == context.current_revision_id
+        and meta.get("evidence_snapshot_id") == context.evidence_snapshot_id
+        and meta.get("source_sha256") == context.source_sha256
+    )
+
+
+def _freshness_blocked_height(*, wall_id: str, evidence_ids: tuple[str, ...]) -> QuantityEvidence:
+    return QuantityEvidence(
+        quantity_id=f"blocked-height-freshness-{wall_id}",
+        family=WALL_HEIGHT_FAMILY,
+        semantic_key=f"wall_height:{wall_id}",
+        value=None,
         unit="m",
-        confidence=1.0,
-        status=EvidenceResolutionStatus.CORROBORATED,
-        metadata={"marker_type": marker.marker_type, "source_page": marker.source_page},
+        authority="none",
+        status="blocked",
+        abstained=True,
+        blocking_reasons=("height_evidence_freshness_unproven",),
+        evidence_ids=evidence_ids,
     )
 
 
@@ -254,7 +455,14 @@ def _attempt_wall_height(
     viewport: ViewportEvidence,
     entity,
     levels: Sequence[LevelMarker],
-):
+    level_atoms: Mapping[str, EvidenceAtom],
+) -> QuantityEvidence:
+    """`level_atoms` must already be stamped (see `_stamp_level_marker_atoms`,
+    called once in `_build_canonical_wall_universe`) -- this function never
+    constructs a new atom from a raw LevelMarker itself; it only looks one
+    up by marker_id and verifies it, so an atom's freshness can only ever
+    reflect the context that was active when it was ORIGINALLY stamped, not
+    whatever context happens to be passed to this call."""
     resolution: HeightResolution = resolve_wall_height(levels, scope_id=None)
     lower_evidence: Optional[EvidenceAtom] = None
     upper_evidence: Optional[EvidenceAtom] = None
@@ -269,26 +477,24 @@ def _attempt_wall_height(
                 continue
             _kind, role = mapping
             if role == "upper" and upper_evidence is None and marker.level_m == roof_value:
-                upper_evidence = _level_marker_evidence_atom(
-                    marker, document_id=document.document_id, page_id=document.page_ids[0]
-                )
+                upper_evidence = level_atoms.get(marker.marker_id)
             elif role == "lower" and lower_evidence is None and marker.level_m == floor_value:
-                lower_evidence = _level_marker_evidence_atom(
-                    marker, document_id=document.document_id, page_id=document.page_ids[0]
-                )
+                lower_evidence = level_atoms.get(marker.marker_id)
+
+    candidate_evidence = tuple(e for e in (lower_evidence, upper_evidence) if e is not None)
+    if candidate_evidence and not all(_height_evidence_is_fresh(e, context=context) for e in candidate_evidence):
+        return _freshness_blocked_height(
+            wall_id=wall_id, evidence_ids=tuple(e.evidence_id for e in candidate_evidence)
+        )
 
     # build_wall_height_quantity's ownership check requires each datum
     # evidence_id to be a member of BOTH document.evidence_ids AND
-    # entity.evidence_ids. `entity` here is the wall's *existence* entity
-    # (from adapt_wall_candidate_to_entity_evidence) and `document` was built
-    # from the wall-topology catalog -- neither knows about height evidence
-    # yet. Extending both (never replacing/shrinking) is the correct move:
-    # this is still the same document and the same corroborated physical
-    # wall, now with an additional, independent kind of evidence attached,
-    # exactly as a real accumulating evidence bundle should behave. Doing
-    # this here (not in the caller) keeps "where do level-marker evidence
-    # ids get registered" in one place.
-    new_ids = {e.evidence_id for e in (lower_evidence, upper_evidence) if e is not None}
+    # entity.evidence_ids. Extending both (never replacing/shrinking) is
+    # the correct move: this is still the same document and the same
+    # corroborated physical wall, now with an additional, independent kind
+    # of evidence attached, exactly as a real accumulating evidence bundle
+    # should behave.
+    new_ids = {e.evidence_id for e in candidate_evidence}
     if new_ids:
         entity = dataclasses.replace(
             entity, evidence_ids=tuple(dict.fromkeys((*entity.evidence_ids, *sorted(new_ids))))
@@ -315,6 +521,13 @@ def _hosted_opening_bindings(
     a genuinely different, hatch/fill-gap-based detection mechanism from W7's
     dangling-end-based pb_wall_room_topology_opening_host_binding, with
     richer status semantics ("bound" is reachable, not just "ambiguous").
+    Called with the FULL region-clipped wall candidate list every time --
+    never a single-wall shortcut.
+
+    Host AUTHORITY (`canonical_status`) is unconditionally "BLOCKED" here,
+    regardless of what the binder found -- see the module docstring's
+    "incomplete host-wall universe" constraint. The binder's own raw
+    finding is preserved in `candidate_result`, never discarded.
 
     No scale_authority is passed (none is proven anywhere in this shadow
     yet, same honesty as wall_length's scale_bindings=()), so every
@@ -334,61 +547,85 @@ def _hosted_opening_bindings(
             ShadowQuantityRecord(
                 quantity_family="hosted_opening_binding",
                 subject_id=f"vp-{page_no}",
-                value=None,
-                unit=None,
-                authority_status="abstained",
+                canonical_value=None,
+                canonical_unit=None,
+                canonical_status="BLOCKED",
                 evidence_ids=(),
                 blocking_reasons=(f"hosted_opening_evidence_{evidence.status}:{evidence.reason}",),
+                dependency_states=_dependency_states(existence="NOT_EVALUATED"),
             )
         )
         return records
 
-    for i, span in enumerate(evidence.openings):
+    for span in evidence.openings:
         binding = bind_hosted_opening_to_walls(span, list(resolved), viewport_id=viewport_id)
-        blocking = () if binding.status == "bound" else (f"hosted_opening_{binding.status}:{binding.reason}",)
+        if binding.status == "bound":
+            candidate_result = "bound"
+            reason = "regional_clip_wall_universe_not_proven_complete"
+        else:
+            candidate_result = binding.status  # "ambiguous" / "unbound"
+            reason = f"hosted_opening_{binding.status}:{binding.reason}"
+
+        # Host authority is unconditionally BLOCKED -- see docstring. The
+        # controlled dependency vocabulary has no "bound" value; the raw
+        # finding lives only in candidate_result, never in dependency_states.
+        opening_deps = _dependency_states(existence="FIRM", identity="NOT_EVALUATED", host="BLOCKED")
         records.append(
             ShadowQuantityRecord(
                 quantity_family="hosted_opening_binding",
                 subject_id=binding.binding_id,
-                value=None,  # binding never carries a quantity -- see module docstring
-                unit=None,
-                authority_status=binding.status,
+                canonical_value=None,  # binding never carries a quantity -- see module docstring
+                canonical_unit=None,
+                canonical_status="BLOCKED",
                 evidence_ids=(),
-                blocking_reasons=blocking,
+                blocking_reasons=(reason,),
+                candidate_result=candidate_result,
+                dependency_states=opening_deps,
             )
+        )
+        dim_deps = _dependency_states(
+            existence="FIRM", identity="NOT_EVALUATED", host="BLOCKED", scale="NOT_EVALUATED",
+            opening_dimension="BLOCKED",
         )
         records.append(
             ShadowQuantityRecord(
                 quantity_family="hosted_opening_width",
                 subject_id=binding.binding_id,
-                value=span.width_m,
-                unit="m" if span.width_m is not None else None,
-                authority_status="abstained" if span.width_m is None else "candidate",
+                canonical_value=None,
+                canonical_unit=None,
+                canonical_status="BLOCKED",
                 evidence_ids=(),
-                blocking_reasons=() if span.width_m is not None else ("no_scale_authority_wired_in_this_shadow",),
+                blocking_reasons=("no_scale_authority_wired_in_this_shadow",),
+                candidate_result=f"width_candidate_m={span.width_m}" if span.width_m is not None else None,
+                dependency_states=dim_deps,
             )
         )
         records.append(
             ShadowQuantityRecord(
                 quantity_family="hosted_opening_height",
                 subject_id=binding.binding_id,
-                value=None,
-                unit=None,
-                authority_status="abstained",
+                canonical_value=None,
+                canonical_unit=None,
+                canonical_status="BLOCKED",
                 evidence_ids=(),
                 blocking_reasons=("plan_geometry_never_shows_height",),
+                dependency_states=dim_deps,
             )
         )
         records.append(
             ShadowQuantityRecord(
                 quantity_family="opening_deduction_readiness",
                 subject_id=binding.binding_id,
-                value=None,
-                unit=None,
-                authority_status="abstained",
+                canonical_value=None,
+                canonical_unit=None,
+                canonical_status="BLOCKED",
                 evidence_ids=(),
                 blocking_reasons=(
                     "opening_deduction_readiness_requires_OpeningHostCandidate_not_HostedOpeningWallBinding",
+                ),
+                dependency_states=_dependency_states(
+                    existence="FIRM", identity="NOT_EVALUATED", host="BLOCKED",
+                    opening_dimension="BLOCKED", net_area="BLOCKED",
                 ),
             )
         )
@@ -452,7 +689,6 @@ def _build_canonical_wall_universe(
         )
     )
 
-    levels = find_level_markers(page_text, source_page=page_no, view_id=viewport_id)
     document = DocumentEvidence(
         document_id=document_id,
         source_sha256=source_sha256,
@@ -483,6 +719,16 @@ def _build_canonical_wall_universe(
         owned_page_numbers=(page_no,),
         viewport_page_ownership=((viewport_id, page_no),),
     )
+    # Level markers are extracted HERE, and their evidence atoms are
+    # stamped HERE (via _stamp_level_marker_atoms, immediately below) --
+    # both using this same, genuinely-current `context` -- see the module
+    # docstring's freshness constraint for why this must be the ONLY place
+    # stamping happens.
+    levels = find_level_markers(page_text, source_page=page_no, view_id=viewport_id)
+    level_atoms = _stamp_level_marker_atoms(
+        levels, document_id=document_id, page_id=page_id, extraction_context=context
+    )
+
     physical_identities = collect_physical_wall_identities(resolved, graph)
     equivalence = resolve_physical_wall_equivalence(
         tuple(physical_identities.get(wall.candidate_id) for wall in resolved),
@@ -497,11 +743,22 @@ def _build_canonical_wall_universe(
         "context": context,
         "equivalence": equivalence,
         "levels": levels,
+        "level_atoms": level_atoms,
         "page_no": page_no,
         "pdf_path": pdf_path,
         "viewport_id": viewport_id,
         "hosted_opening_evidence": hosted_opening_evidence,
     }
+
+
+def _identity_state_for_wall(wall_id: str, equivalence) -> str:
+    if wall_id in equivalence.representative_wall_ids:
+        return "same_or_representative"
+    if wall_id in equivalence.ambiguous_wall_ids:
+        return "ambiguous"
+    if wall_id in equivalence.abstained_wall_ids:
+        return "abstained"
+    return "distinct"
 
 
 def run_canonical_shadow_for_drawing(spec: dict[str, Any]) -> ShadowDrawingReport:
@@ -515,6 +772,7 @@ def run_canonical_shadow_for_drawing(spec: dict[str, Any]) -> ShadowDrawingRepor
     context = universe["context"]
     equivalence = universe["equivalence"]
     levels = universe["levels"]
+    level_atoms = universe["level_atoms"]
     page_no = universe["page_no"]
 
     records: list[ShadowQuantityRecord] = []
@@ -522,6 +780,7 @@ def run_canonical_shadow_for_drawing(spec: dict[str, Any]) -> ShadowDrawingRepor
     height_by_wall: dict[str, Any] = {}
 
     for wall in resolved:
+        identity_state = _identity_state_for_wall(wall.candidate_id, equivalence)
         entity = adapt_wall_candidate_to_entity_evidence(
             wall, evidence_atoms=catalog, document=document, viewport=viewport, context=context
         )
@@ -530,11 +789,14 @@ def run_canonical_shadow_for_drawing(spec: dict[str, Any]) -> ShadowDrawingRepor
                 ShadowQuantityRecord(
                     quantity_family="wall_length",
                     subject_id=wall.candidate_id,
-                    value=None,
-                    unit=None,
-                    authority_status=EvidenceResolutionStatus.ABSTAINED.value,
+                    canonical_value=None,
+                    canonical_unit=None,
+                    canonical_status=EvidenceResolutionStatus.ABSTAINED.value,
                     evidence_ids=(),
                     blocking_reasons=("physical_wall_entity_evidence_unavailable",),
+                    dependency_states=_dependency_states(
+                        existence="BLOCKED", identity=_identity_status_to_dependency(identity_state)
+                    ),
                 )
             )
             continue
@@ -551,19 +813,53 @@ def run_canonical_shadow_for_drawing(spec: dict[str, Any]) -> ShadowDrawingRepor
             scale_bindings=(),
         )
         length_by_wall[wall.candidate_id] = length_qty
-        records.append(_record(length_qty, family="wall_length", subject_id=wall.candidate_id))
+        records.append(
+            _record(
+                length_qty, family="wall_length", subject_id=wall.candidate_id,
+                dependency_states=_dependency_states(
+                    existence=_evidence_status_to_dependency(entity.status.value),
+                    identity=_identity_status_to_dependency(identity_state),
+                    scale="NOT_EVALUATED",
+                    length=_quantity_status_to_dependency(length_qty),
+                ),
+            )
+        )
 
         height_qty = _attempt_wall_height(
-            wall_id=wall.candidate_id, context=context, document=document, viewport=viewport, entity=entity, levels=levels
+            wall_id=wall.candidate_id, context=context, document=document, viewport=viewport, entity=entity,
+            levels=levels, level_atoms=level_atoms,
         )
         height_by_wall[wall.candidate_id] = height_qty
-        records.append(_record(height_qty, family="wall_height", subject_id=wall.candidate_id))
+        records.append(
+            _record(
+                height_qty, family="wall_height", subject_id=wall.candidate_id,
+                dependency_states=_dependency_states(
+                    existence=_evidence_status_to_dependency(entity.status.value),
+                    identity=_identity_status_to_dependency(identity_state),
+                    height=_quantity_status_to_dependency(height_qty),
+                ),
+            )
+        )
 
+        gross_deps_base = dict(
+            existence=_evidence_status_to_dependency(entity.status.value),
+            identity=_identity_status_to_dependency(identity_state),
+            scale="NOT_EVALUATED",
+            length=_quantity_status_to_dependency(length_qty),
+            height=_quantity_status_to_dependency(height_qty),
+        )
         if not length_qty.abstained and not height_qty.abstained:
             gross_qty = build_gross_wall_area_quantity(
                 wall_id=wall.candidate_id, wall_length=length_qty, wall_height=height_qty
             )
-            records.append(_record(gross_qty, family="gross_wall_area", subject_id=wall.candidate_id))
+            records.append(
+                _record(
+                    gross_qty, family="gross_wall_area", subject_id=wall.candidate_id,
+                    dependency_states=_dependency_states(
+                        **gross_deps_base, gross_area=_quantity_status_to_dependency(gross_qty)
+                    ),
+                )
+            )
         else:
             blockers = []
             if length_qty.abstained:
@@ -574,23 +870,21 @@ def run_canonical_shadow_for_drawing(spec: dict[str, Any]) -> ShadowDrawingRepor
                 ShadowQuantityRecord(
                     quantity_family="gross_wall_area",
                     subject_id=wall.candidate_id,
-                    value=None,
-                    unit=None,
-                    authority_status=EvidenceResolutionStatus.ABSTAINED.value,
+                    canonical_value=None,
+                    canonical_unit=None,
+                    canonical_status=EvidenceResolutionStatus.ABSTAINED.value,
                     evidence_ids=(),
                     blocking_reasons=tuple(blockers),
+                    dependency_states=_dependency_states(**gross_deps_base, gross_area="BLOCKED"),
                 )
             )
 
     # Net area / opening deduction (W7 path): real host-candidate detection
-    # on the real wall universe, not fabricated. detect_opening_host_candidates
-    # only needs Sequence[WallCandidate] -- no new geometry work required.
+    # on the real wall universe, not fabricated. See module docstring --
+    # net_wall_area is unconditionally BLOCKED, never gated on host-candidate
+    # count or status, because opening-set completeness is never claimed.
     host_candidates = detect_opening_host_candidates(list(resolved))
     observed_statuses = tuple(sorted({h.host_status for h in host_candidates}))
-    hosted_candidates = [h for h in host_candidates if h.host_status == "hosted"]
-    net_area_blocked_reason = (
-        "opening_host_not_uniquely_resolved" if not hosted_candidates else "net_wall_area_not_attempted"
-    )
     for wall in resolved:
         if wall.candidate_id not in length_by_wall:
             continue
@@ -598,16 +892,22 @@ def run_canonical_shadow_for_drawing(spec: dict[str, Any]) -> ShadowDrawingRepor
             ShadowQuantityRecord(
                 quantity_family="net_wall_area",
                 subject_id=wall.candidate_id,
-                value=None,
-                unit=None,
-                authority_status=EvidenceResolutionStatus.ABSTAINED.value,
+                canonical_value=None,
+                canonical_unit=None,
+                canonical_status=EvidenceResolutionStatus.ABSTAINED.value,
                 evidence_ids=(),
-                blocking_reasons=(net_area_blocked_reason,),
+                blocking_reasons=("opening_completeness_not_independently_proven",),
+                dependency_states=_dependency_states(
+                    existence=_quantity_status_to_dependency(length_by_wall[wall.candidate_id]),
+                    length=_quantity_status_to_dependency(length_by_wall[wall.candidate_id]),
+                    height=_quantity_status_to_dependency(height_by_wall[wall.candidate_id]),
+                    host="BLOCKED", net_area="BLOCKED",
+                ),
             )
         )
 
-    # Newer hosted-opening geometry + wall-binding path (task 6) -- a
-    # genuinely different mechanism from W7, wired for real, kept distinct.
+    # Newer hosted-opening geometry + wall-binding path -- a genuinely
+    # different mechanism from W7, wired for real, kept distinct.
     records.extend(
         _hosted_opening_bindings(
             evidence=universe["hosted_opening_evidence"],
@@ -617,39 +917,42 @@ def run_canonical_shadow_for_drawing(spec: dict[str, Any]) -> ShadowDrawingRepor
         )
     )
 
-    # Internal wall length (task 7): pb_wall_fill_internal_partition_evidence
-    # already computes a genuine internal-partition length from real solid-
-    # fill geometry, but only for a whole-envelope length_m/width_m this
-    # region-scoped shadow does not independently derive (that function's
-    # own contract requires the caller's already-resolved envelope scale,
-    # not just wall-candidate geometry) -- reported NOT_EVIDENCED rather
-    # than guessing an envelope size, per "do not promote to FIRM merely
-    # because the function returns a number."
+    # Internal wall length: pb_wall_fill_internal_partition_evidence already
+    # computes a genuine internal-partition length from real solid-fill
+    # geometry, but only for a whole-envelope length_m/width_m this region-
+    # scoped shadow does not independently derive -- reported NOT_EVIDENCED.
+    # Must independently pass existence+identity+role+length+scope-
+    # completeness before any promotion; none of those are proven here.
     records.append(
         ShadowQuantityRecord(
             quantity_family="internal_wall_length",
             subject_id=AGGREGATE_SUBJECT_ID,
-            value=None,
-            unit=None,
-            authority_status="not_evidenced",
+            canonical_value=None,
+            canonical_unit=None,
+            canonical_status="not_evidenced",
             evidence_ids=(),
             blocking_reasons=("requires_whole_envelope_length_width_not_derived_in_this_shadow",),
+            dependency_states=_dependency_states(
+                existence="NOT_EVALUATED", identity="NOT_EVALUATED", length="NOT_EVALUATED",
+                role="NOT_EVALUATED",
+            ),
         )
     )
 
-    # External render / cladding (task 8): no finish-identity/applicable-
-    # scope authority exists anywhere in this shadow (or, per Phase 1's
-    # trace, anywhere live) -- reported NOT_EVIDENCED, never fabricated.
+    # External render / cladding: no finish-identity/applicable-scope
+    # authority exists anywhere in this shadow (or, per Phase 1's trace,
+    # anywhere live) -- reported NOT_EVIDENCED, never fabricated.
     for family in ("external_render", "cladding"):
         records.append(
             ShadowQuantityRecord(
                 quantity_family=family,
                 subject_id=AGGREGATE_SUBJECT_ID,
-                value=None,
-                unit=None,
-                authority_status="not_evidenced",
+                canonical_value=None,
+                canonical_unit=None,
+                canonical_status="not_evidenced",
                 evidence_ids=(),
                 blocking_reasons=("no_finish_identity_or_applicable_scope_authority_implemented",),
+                dependency_states=_dependency_states(finish="NOT_EVALUATED", net_area="BLOCKED"),
             )
         )
 
@@ -665,12 +968,9 @@ def run_canonical_shadow_for_drawing(spec: dict[str, Any]) -> ShadowDrawingRepor
     except Exception as exc:  # noqa: BLE001 -- observability only, must not raise
         legacy_aggregate = {"error": f"{type(exc).__name__}: {exc}"}
 
-    # Family-aggregate comparison rows (task 3): the only granularity at
-    # which a canonical-vs-legacy comparison is sound (see class docstring
-    # for why per-wall rows leave comparison_status=None). Sums only FIRM
-    # per-wall values -- an abstained wall contributes 0 to the sum but is
-    # separately visible via its own per-wall record's blocking_reasons, it
-    # is never silently dropped from the walls-considered count.
+    # Family-aggregate comparison rows: the only granularity at which a
+    # canonical-vs-legacy comparison is sound. Sums only FIRM per-wall
+    # values.
     def _firm_sum(by_wall: dict[str, Any]) -> Optional[float]:
         firm_values = [q.value for q in by_wall.values() if not q.abstained and q.value is not None]
         return round(sum(firm_values), 6) if firm_values else None
@@ -681,26 +981,41 @@ def run_canonical_shadow_for_drawing(spec: dict[str, Any]) -> ShadowDrawingRepor
     aggregate_inputs = {
         "wall_length": _firm_sum(length_by_wall),
         "wall_height": _firm_sum(height_by_wall),
-        "gross_wall_area": round(sum(r.value for r in gross_by_wall.values() if r.value is not None), 6)
-        if any(r.value is not None for r in gross_by_wall.values())
+        "gross_wall_area": round(sum(r.canonical_value for r in gross_by_wall.values() if r.canonical_value is not None), 6)
+        if any(r.canonical_value is not None for r in gross_by_wall.values())
         else None,
-        "net_wall_area": None,  # never attempted this run -- see net_area_blocked_reason above
+        "net_wall_area": None,  # never attempted this run -- opening completeness never proven
     }
-    _AGGREGATE_UNIT = {"wall_length": "m", "wall_height": "m", "gross_wall_area": "m2", "net_wall_area": "m2"}
     for family, shadow_total in aggregate_inputs.items():
         legacy_tag = _FAMILY_TO_LEGACY_TAG[family]
-        legacy_value = legacy_aggregate.get(legacy_tag, {}).get("quantity") if legacy_tag else None
+        legacy_entry = legacy_aggregate.get(legacy_tag) if legacy_tag else None
+        legacy_value = legacy_entry.get("quantity") if legacy_entry else None
+        legacy_unit = legacy_entry.get("unit") if legacy_entry else None
+        canonical_unit = _CANONICAL_UNIT_FOR_FAMILY[family] if shadow_total is not None else None
+        # Net area is BLOCKED unconditionally -- if legacy still shows a
+        # numeric figure, that is LEGACY_ONLY with the canonical blocker
+        # retained (point 8), not a comparison collapsing into "same".
+        blocking = () if family != "net_wall_area" else ("opening_completeness_not_independently_proven",)
         records.append(
             ShadowQuantityRecord(
                 quantity_family=family,
                 subject_id=AGGREGATE_SUBJECT_ID,
-                value=shadow_total,
-                unit=_AGGREGATE_UNIT[family] if shadow_total is not None else None,
-                authority_status="aggregate_of_firm_walls" if shadow_total is not None else "aggregate_none_firm",
+                canonical_value=shadow_total,
+                canonical_unit=canonical_unit,
+                canonical_status="aggregate_of_firm_walls" if shadow_total is not None else "aggregate_none_firm",
                 evidence_ids=(),
-                blocking_reasons=(),
-                legacy_live_value=legacy_value,
-                comparison_status=_comparison_status(shadow_total, legacy_value),
+                blocking_reasons=blocking,
+                dependency_states=_dependency_states(
+                    length="FIRM" if family != "wall_height" and shadow_total is not None else "NOT_REQUIRED",
+                    height="FIRM" if family in ("wall_height", "gross_wall_area", "net_wall_area") and shadow_total is not None else "NOT_REQUIRED",
+                    gross_area="FIRM" if family in ("gross_wall_area", "net_wall_area") and shadow_total is not None else "NOT_REQUIRED",
+                    net_area="BLOCKED" if family == "net_wall_area" else "NOT_REQUIRED",
+                ),
+                legacy_value=legacy_value,
+                legacy_unit=legacy_unit,
+                comparison=_comparison_status(
+                    shadow_total, legacy_value, canonical_unit=canonical_unit, legacy_unit=legacy_unit
+                ),
             )
         )
 
@@ -712,15 +1027,23 @@ def run_canonical_shadow_for_drawing(spec: dict[str, Any]) -> ShadowDrawingRepor
         opening_host_statuses_observed=observed_statuses,
         legacy_aggregate=legacy_aggregate,
         notes=(
-            "Canonical per-wall records are per-physical-wall; comparison_status "
+            "Canonical per-wall records are per-physical-wall; comparison "
             "is populated only on the AGGREGATE_SUBJECT_ID rows (sum of FIRM "
-            "per-wall values vs. the legacy whole-page figure) -- individual "
-            "wall rows are not compared against a whole-page legacy value.",
+            "per-wall values vs. the legacy whole-page figure, gated on unit "
+            "compatibility) -- individual wall rows are not compared against "
+            "a whole-page legacy value.",
             "perimeter_walling (the legacy reference for gross/net_wall_area) "
             "is mutated in place to the NET value by GenericOpeningDeductionPipeline "
             "whenever any opening prediction exists on this page -- this "
             "comparison does not disambiguate gross vs. net on the legacy side.",
             "Region-scoped diagnostic window only, not a whole-building "
-            "perimeter claim.",
+            "perimeter claim -- every hosted_opening_binding row is BLOCKED "
+            "for exactly this reason regardless of the underlying binder's "
+            "own finding, which is preserved in candidate_result.",
+            "pb_wall_height_authority's own ownership check does not verify "
+            "revision/snapshot/source-SHA freshness at all -- this module's "
+            "_height_evidence_is_fresh gate is a shadow-side protective "
+            "boundary, not a fix to that module, which still needs separate "
+            "remediation upstream.",
         ),
     )
