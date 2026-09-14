@@ -47,7 +47,14 @@ def _abstained(bundle):
 
 
 def _font(size: int = 28) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", size)
+    """Cross-platform deterministic font for synthetic raster text.
+
+    Pillow's own bundled scalable default font (added in Pillow 10.1, and
+    exactly Pillow==12.3.0 here per requirements.txt) renders identical
+    glyphs on every OS with no external file path and no network fetch --
+    unlike a hardcoded Linux font path, which does not exist on Windows/macOS.
+    """
+    return ImageFont.load_default(size=size)
 
 
 def _raster_page_pdf(
