@@ -4,6 +4,11 @@ A FIRM wall length is permitted only when all authority inputs are bound to the
 exact document/revision/snapshot/viewport universe used for the decision.
 Completeness is dimensional: only the wall-length scale and physical-candidate
 universes are required here; unrelated opening/height completeness is not read.
+
+A caller-supplied AuthorityUniverseFingerprint + CompletenessManifest is not a
+proof that enumeration was complete.  FIRM publication additionally requires
+an EnumeratorSnapshotCommitment verified against the current immutable
+upstream snapshot fingerprint and a universe re-enumerated from that snapshot.
 """
 from __future__ import annotations
 
@@ -19,12 +24,14 @@ from pb_authority_completeness import (
     BoundResolutionFingerprint,
     CompletenessManifest,
     bind_resolution_fingerprint,
-    build_authority_universe,
-    build_completeness_manifest,
     physical_wall_identity_member,
     scale_binding_member,
     verify_bound_resolution_fingerprint,
     verify_completeness_manifest,
+)
+from pb_enumerator_snapshot_commitment import (
+    EnumeratorSnapshotCommitment,
+    verify_enumerator_snapshot_commitment,
 )
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_measurement_input_authority import MeasurementInputResolution, resolve_linear_measurement_input
@@ -50,7 +57,7 @@ from pb_viewport_segmentation import SegmentedViewport
 from pb_wall_room_topology_contracts import WallCandidate
 
 WALL_LENGTH_FAMILY = "wall_length"
-WALL_LENGTH_FORMULA_VERSION = "1.4.0"
+WALL_LENGTH_FORMULA_VERSION = "1.5.0"
 FIGURED_DIMENSION_WALL_LENGTH_DISABLED_REASON = (
     "figured_dimension_wall_length_disabled_pending_span_authority"
 )
@@ -185,12 +192,6 @@ def _resolve_scale_authority_inputs(
     Optional[CompletenessManifest],
     tuple[str, ...],
 ]:
-    expected_scope = _authority_scope(
-        DOMAIN_WALL_LENGTH_SCALE,
-        context=context,
-        document=document,
-        viewport=viewport,
-    )
     if page_viewports is not None:
         derived, reasons = _scale_bindings_from_page_viewports(
             page_viewports,
@@ -199,22 +200,14 @@ def _resolve_scale_authority_inputs(
             document=document,
         )
         if reasons or derived is None:
-            return (), None, None, reasons or ("page_viewports_binding_derivation_failed",)
+            return (), scale_universe, scale_manifest, reasons or (
+                "page_viewports_binding_derivation_failed",
+            )
+        # IMPORTANT: a duplicate-free caller-supplied page_viewports sequence is
+        # not evidence that viewport enumeration was complete.  Derive the local
+        # bindings, but never synthesize a completeness universe/manifest here.
         local_bindings = tuple(item for item in derived if item.viewport_id == viewport.viewport_id)
-        try:
-            derived_universe = build_authority_universe(
-                expected_scope,
-                tuple(scale_binding_member(item) for item in local_bindings),
-            )
-            derived_manifest = build_completeness_manifest(
-                derived_universe,
-                admitted_candidate_ids=tuple(
-                    scale_binding_member(item).candidate_id for item in local_bindings
-                ),
-            )
-        except (TypeError, ValueError) as exc:
-            return (), None, None, (f"scale_universe_derivation_invalid:{exc}",)
-        return local_bindings, derived_universe, derived_manifest, ()
+        return local_bindings, scale_universe, scale_manifest, ()
     return tuple(scale_bindings), scale_universe, scale_manifest, ()
 
 
@@ -223,6 +216,10 @@ def _scale_completeness_blockers(
     bindings: Sequence[ViewportScaleBinding],
     universe: Optional[AuthorityUniverseFingerprint],
     manifest: Optional[CompletenessManifest],
+    enumerator_commitment: Optional[EnumeratorSnapshotCommitment],
+    current_upstream_snapshot_id: Optional[str],
+    current_upstream_snapshot_fingerprint: Optional[str],
+    current_enumerated_universe: Optional[AuthorityUniverseFingerprint],
     context: ProviderContext,
     document: DocumentEvidence,
     viewport: ViewportEvidence,
@@ -234,6 +231,24 @@ def _scale_completeness_blockers(
         viewport=viewport,
     )
     supplied_ids = tuple(scale_binding_member(item).candidate_id for item in bindings)
+    commitment_verification = verify_enumerator_snapshot_commitment(
+        enumerator_commitment,
+        expected_scope=expected_scope,
+        current_upstream_snapshot_id=current_upstream_snapshot_id,
+        current_upstream_snapshot_fingerprint=current_upstream_snapshot_fingerprint,
+        current_enumerated_universe=current_enumerated_universe,
+        manifest=manifest,
+        supplied_admitted_ids=supplied_ids,
+        require_resolved=True,
+    )
+    if not commitment_verification.authentic:
+        reasons = list(commitment_verification.reasons)
+        if commitment_verification.status.value == "UNBOUND":
+            reasons.insert(0, "scale_enumerator_commitment_unavailable")
+        else:
+            reasons.insert(0, "scale_enumerator_commitment_mismatch")
+        return tuple(dict.fromkeys(reasons))
+
     verification = verify_completeness_manifest(
         manifest,
         current_universe=universe,
@@ -278,6 +293,10 @@ def _candidate_and_equivalence_blockers(
     physical_walls_by_id: Optional[Mapping[str, WallCandidate]],
     candidate_universe: Optional[AuthorityUniverseFingerprint],
     candidate_manifest: Optional[CompletenessManifest],
+    enumerator_commitment: Optional[EnumeratorSnapshotCommitment],
+    current_upstream_snapshot_id: Optional[str],
+    current_upstream_snapshot_fingerprint: Optional[str],
+    current_enumerated_universe: Optional[AuthorityUniverseFingerprint],
     context: ProviderContext,
     document: DocumentEvidence,
     viewport: ViewportEvidence,
@@ -294,6 +313,27 @@ def _candidate_and_equivalence_blockers(
     )
     local_walls = _local_walls(physical_walls_by_id, viewport.viewport_id)
     supplied_ids = tuple(sorted(local_walls))
+    blockers: list[str] = []
+
+    commitment_verification = verify_enumerator_snapshot_commitment(
+        enumerator_commitment,
+        expected_scope=expected_scope,
+        current_upstream_snapshot_id=current_upstream_snapshot_id,
+        current_upstream_snapshot_fingerprint=current_upstream_snapshot_fingerprint,
+        current_enumerated_universe=current_enumerated_universe,
+        manifest=candidate_manifest,
+        supplied_admitted_ids=supplied_ids,
+        require_resolved=True,
+    )
+    if not commitment_verification.authentic:
+        if commitment_verification.status.value == "UNBOUND":
+            blockers.append("physical_candidate_enumerator_commitment_unavailable")
+        else:
+            blockers.append("physical_candidate_enumerator_commitment_mismatch")
+        blockers.extend(commitment_verification.reasons)
+        blockers.append("physical_equivalence_authenticity_unproven")
+        return tuple(dict.fromkeys(blockers))
+
     verification = verify_completeness_manifest(
         candidate_manifest,
         current_universe=candidate_universe,
@@ -301,7 +341,6 @@ def _candidate_and_equivalence_blockers(
         supplied_admitted_ids=supplied_ids,
         require_resolved=True,
     )
-    blockers: list[str] = []
     if not verification.authentic:
         blockers.append("physical_candidate_universe_completeness_unproven")
         blockers.extend(verification.reasons)
@@ -424,8 +463,16 @@ def build_wall_length_quantity(
     figured_evidence: Optional[EvidenceAtom] = None,
     scale_universe: Optional[AuthorityUniverseFingerprint] = None,
     scale_manifest: Optional[CompletenessManifest] = None,
+    scale_enumerator_commitment: Optional[EnumeratorSnapshotCommitment] = None,
+    scale_upstream_snapshot_id: Optional[str] = None,
+    scale_upstream_snapshot_fingerprint: Optional[str] = None,
+    scale_enumerated_universe: Optional[AuthorityUniverseFingerprint] = None,
     candidate_universe: Optional[AuthorityUniverseFingerprint] = None,
     candidate_manifest: Optional[CompletenessManifest] = None,
+    candidate_enumerator_commitment: Optional[EnumeratorSnapshotCommitment] = None,
+    candidate_upstream_snapshot_id: Optional[str] = None,
+    candidate_upstream_snapshot_fingerprint: Optional[str] = None,
+    candidate_enumerated_universe: Optional[AuthorityUniverseFingerprint] = None,
     physical_identity_universe: Sequence[PhysicalWallIdentity] = (),
     physical_walls_by_id: Optional[Mapping[str, WallCandidate]] = None,
     equivalence_binding: Optional[BoundResolutionFingerprint] = None,
@@ -460,6 +507,10 @@ def build_wall_length_quantity(
             physical_walls_by_id=physical_walls_by_id,
             candidate_universe=candidate_universe,
             candidate_manifest=candidate_manifest,
+            enumerator_commitment=candidate_enumerator_commitment,
+            current_upstream_snapshot_id=candidate_upstream_snapshot_id,
+            current_upstream_snapshot_fingerprint=candidate_upstream_snapshot_fingerprint,
+            current_enumerated_universe=candidate_enumerated_universe,
             context=context,
             document=document,
             viewport=viewport,
@@ -484,16 +535,24 @@ def build_wall_length_quantity(
         )
     )
     topology_blockers.extend(scale_input_reasons)
-    topology_blockers.extend(
-        _scale_completeness_blockers(
-            bindings=resolved_scale_bindings,
-            universe=resolved_scale_universe,
-            manifest=resolved_scale_manifest,
-            context=context,
-            document=document,
-            viewport=viewport,
+    # Scale completeness is required only when scale evidence participates in
+    # this wall-length decision.  An absent scale cannot be promoted by a
+    # missing commitment; it simply reaches the normal no-input/figured route.
+    if resolved_scale_bindings:
+        topology_blockers.extend(
+            _scale_completeness_blockers(
+                bindings=resolved_scale_bindings,
+                universe=resolved_scale_universe,
+                manifest=resolved_scale_manifest,
+                enumerator_commitment=scale_enumerator_commitment,
+                current_upstream_snapshot_id=scale_upstream_snapshot_id,
+                current_upstream_snapshot_fingerprint=scale_upstream_snapshot_fingerprint,
+                current_enumerated_universe=scale_enumerated_universe,
+                context=context,
+                document=document,
+                viewport=viewport,
+            )
         )
-    )
     if topology_blockers:
         return _abstention(
             wall=wall,
@@ -547,6 +606,16 @@ def build_wall_length_quantity(
         "candidate_universe_fingerprint": (
             candidate_universe.fingerprint if candidate_universe else None
         ),
+        "scale_enumerator_commitment": (
+            scale_enumerator_commitment.commitment_fingerprint
+            if scale_enumerator_commitment
+            else None
+        ),
+        "candidate_enumerator_commitment": (
+            candidate_enumerator_commitment.commitment_fingerprint
+            if candidate_enumerator_commitment
+            else None
+        ),
         "equivalence_binding_fingerprint": (
             equivalence_binding.fingerprint if equivalence_binding else None
         ),
@@ -586,8 +655,18 @@ def build_wall_length_quantity(
             "entity_status": entity.status.value,
             "scale_universe_fingerprint": resolved_scale_universe.fingerprint,
             "scale_manifest_fingerprint": resolved_scale_manifest.manifest_fingerprint,
+            "scale_enumerator_commitment_fingerprint": (
+                scale_enumerator_commitment.commitment_fingerprint
+                if scale_enumerator_commitment
+                else None
+            ),
             "candidate_universe_fingerprint": candidate_universe.fingerprint,
             "candidate_manifest_fingerprint": candidate_manifest.manifest_fingerprint,
+            "candidate_enumerator_commitment_fingerprint": (
+                candidate_enumerator_commitment.commitment_fingerprint
+                if candidate_enumerator_commitment
+                else None
+            ),
             "equivalence_binding_fingerprint": equivalence_binding.fingerprint,
         },
     )
@@ -608,8 +687,16 @@ def build_wall_length_quantities(
     figured_evidence_by_wall_id: Optional[dict[str, EvidenceAtom]] = None,
     scale_universe: Optional[AuthorityUniverseFingerprint] = None,
     scale_manifest: Optional[CompletenessManifest] = None,
+    scale_enumerator_commitment: Optional[EnumeratorSnapshotCommitment] = None,
+    scale_upstream_snapshot_id: Optional[str] = None,
+    scale_upstream_snapshot_fingerprint: Optional[str] = None,
+    scale_enumerated_universe: Optional[AuthorityUniverseFingerprint] = None,
     candidate_universe: Optional[AuthorityUniverseFingerprint] = None,
     candidate_manifest: Optional[CompletenessManifest] = None,
+    candidate_enumerator_commitment: Optional[EnumeratorSnapshotCommitment] = None,
+    candidate_upstream_snapshot_id: Optional[str] = None,
+    candidate_upstream_snapshot_fingerprint: Optional[str] = None,
+    candidate_enumerated_universe: Optional[AuthorityUniverseFingerprint] = None,
     physical_identity_universe: Optional[Sequence[PhysicalWallIdentity]] = None,
 ) -> tuple[QuantityEvidence, ...]:
     """Batch publication with complete candidate-universe reconciliation."""
@@ -634,9 +721,7 @@ def build_wall_length_quantities(
     identity_universe = tuple(
         physical_identity_universe
         if physical_identity_universe is not None
-        else tuple(
-            item for item in physical_identities.values() if item is not None
-        )
+        else tuple(item for item in physical_identities.values() if item is not None)
     )
     local_identities = _local_physical_identities(identity_universe, viewport.viewport_id)
     local_walls_by_id = {
@@ -648,6 +733,16 @@ def build_wall_length_quantities(
         document=document,
         viewport=viewport,
     )
+    candidate_commitment_verification = verify_enumerator_snapshot_commitment(
+        candidate_enumerator_commitment,
+        expected_scope=expected_candidate_scope,
+        current_upstream_snapshot_id=candidate_upstream_snapshot_id,
+        current_upstream_snapshot_fingerprint=candidate_upstream_snapshot_fingerprint,
+        current_enumerated_universe=candidate_enumerated_universe,
+        manifest=candidate_manifest,
+        supplied_admitted_ids=tuple(sorted(local_walls_by_id)),
+        require_resolved=True,
+    )
     candidate_verification = verify_completeness_manifest(
         candidate_manifest,
         current_universe=candidate_universe,
@@ -658,6 +753,12 @@ def build_wall_length_quantities(
 
     identities_by_id = {item.wall_candidate_id: item for item in local_identities}
     candidate_blockers: list[str] = []
+    if not candidate_commitment_verification.authentic:
+        if candidate_commitment_verification.status.value == "UNBOUND":
+            candidate_blockers.append("physical_candidate_enumerator_commitment_unavailable")
+        else:
+            candidate_blockers.append("physical_candidate_enumerator_commitment_mismatch")
+        candidate_blockers.extend(candidate_commitment_verification.reasons)
     if not candidate_verification.authentic:
         candidate_blockers.append("physical_candidate_universe_completeness_unproven")
         candidate_blockers.extend(candidate_verification.reasons)
@@ -723,8 +824,16 @@ def build_wall_length_quantities(
                 figured_evidence=figured.get(wall.candidate_id),
                 scale_universe=scale_universe,
                 scale_manifest=scale_manifest,
+                scale_enumerator_commitment=scale_enumerator_commitment,
+                scale_upstream_snapshot_id=scale_upstream_snapshot_id,
+                scale_upstream_snapshot_fingerprint=scale_upstream_snapshot_fingerprint,
+                scale_enumerated_universe=scale_enumerated_universe,
                 candidate_universe=candidate_universe,
                 candidate_manifest=candidate_manifest,
+                candidate_enumerator_commitment=candidate_enumerator_commitment,
+                candidate_upstream_snapshot_id=candidate_upstream_snapshot_id,
+                candidate_upstream_snapshot_fingerprint=candidate_upstream_snapshot_fingerprint,
+                candidate_enumerated_universe=candidate_enumerated_universe,
                 physical_identity_universe=identity_universe,
                 physical_walls_by_id={wall.candidate_id: wall for wall in walls},
                 equivalence_binding=equivalence_binding,
