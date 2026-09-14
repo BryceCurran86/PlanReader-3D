@@ -768,31 +768,48 @@ def test_scenario_d_documents_no_code_path_to_firm_deduction_exists_yet() -> Non
     # Documents the gap rather than asserting a false "it works" claim.
 
 
-def test_scenario_e_ceiling_marker_currently_not_distinguished_from_wall_height() -> None:
-    """E (GAP, not a guarantee): wall length FIRM, ceiling height FIRM,
-    wall-height RELATION unproven -> per the new rule, wall height should
-    be BLOCKED. This test demonstrates that pb_dimension_graph_constraint_
-    engine._ROOF_LIKE = {"roof", "ceiling", "beam"} treats a "ceiling"
-    marker identically to a "roof" marker for resolve_wall_height's clear-
-    height computation, and this shadow's own _MARKER_TYPE_TO_DATUM_KIND
-    mirrors that by mapping "ceiling" to the same upper-datum role as
-    "roof" -- so a Ceiling+Floor marker pair CURRENTLY resolves a FIRM wall
-    height here, with no independent proof that this particular room's
-    ceiling height equals this particular wall's own height (a dropped/
-    suspended ceiling would make that false). This is a real, currently-
-    unaddressed gap relative to the new height-independence rule -- flagged
-    in the report, not silently fixed, per "identify before changing scope."
-    """
+def test_scenario_e_ceiling_marker_alone_never_resolves_wall_height() -> None:
+    """E, fixed: wall length FIRM, ceiling height FIRM, wall-height RELATION
+    unproven -> wall height BLOCKED, gross area BLOCKED.
+
+    Regression test for a real gap found and then corrected in this module:
+    pb_dimension_graph_constraint_engine._ROOF_LIKE = {"roof", "ceiling",
+    "beam"} treats a "ceiling" marker identically to "roof" for its OWN
+    clear-height computation -- that upstream behavior is unchanged (out of
+    scope to patch here). What changed is that this shadow now excludes
+    "ceiling" from the marker set it ever hands to resolve_wall_height at
+    all (_WALL_HEIGHT_ELIGIBLE_MARKER_TYPES), so a ceiling+floor pair
+    resolves here exactly like a missing roof marker: unresolved, not
+    fully_constrained -- never a proven wall height. A room's ceiling
+    (possibly dropped/suspended) is still not independently proven to
+    coincide with the bounding wall's own height; that independent proof,
+    if it ever exists, is a different, richer evidence source than a bare
+    marker_type=="ceiling" text marker, and is not what this test grants."""
     ceiling_marker = LevelMarker(
         marker_id="m-ceil", level_m=2.4, raw_text="Ceiling +2.4", marker_type="ceiling",
         view_id=_VIEWPORT_ID, source_page=1, scope_id=None,
     )
     qty = _attempt_height(levels=[ceiling_marker, _floor_marker(0.0)])
-    # This assertion documents CURRENT (gap) behavior, not desired behavior:
-    assert qty.abstained is False, (
-        "if this ever becomes True, the gap this test documents has been fixed "
-        "upstream or in this module's own marker-kind mapping -- update the docstring"
+    assert qty.abstained is True
+
+    length_qty = _firm_quantity()
+    gross_qty = build_gross_wall_area_quantity(wall_id="w1", wall_length=length_qty, wall_height=qty)
+    assert gross_qty.abstained is True
+    assert "wall_height_abstained" in gross_qty.blocking_reasons
+
+
+def test_ceiling_marker_does_not_block_a_genuine_roof_plus_floor_resolution() -> None:
+    """A ceiling marker present ALONGSIDE a genuine roof marker must not
+    interfere with resolving height from the roof+floor pair -- exclusion
+    of "ceiling" must be additive-safe, not a blanket abstention whenever
+    any ceiling marker exists anywhere in `levels`."""
+    ceiling_marker = LevelMarker(
+        marker_id="m-ceil", level_m=2.4, raw_text="Ceiling +2.4", marker_type="ceiling",
+        view_id=_VIEWPORT_ID, source_page=1, scope_id=None,
     )
+    qty = _attempt_height(levels=[_roof_marker(3.325), ceiling_marker, _floor_marker(0.175)])
+    assert qty.abstained is False
+    assert abs(qty.value - 3.15) < 1e-6
 
 
 def test_scenario_f_blocked_height_for_any_reason_preserves_firm_length() -> None:

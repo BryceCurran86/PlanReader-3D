@@ -190,14 +190,28 @@ _UNIT_COMPATIBLE_WITH_CANONICAL = {"m": {"M"}, "m2": {"SM"}, "m3": {"M3"}}
 # on every ShadowDrawingReport rather than silently assumed away.
 _COMPARISON_RELATIVE_TOLERANCE = 0.01  # reporting-only heuristic for SAME/DIFFERENT; not an authority tolerance_policy
 
-# marker_type -> (allowed EvidenceAtom kind, "upper" or "lower" datum role)
+# marker_type -> (allowed EvidenceAtom kind, "upper" or "lower" datum role).
+# "ceiling" is deliberately absent: pb_dimension_graph_constraint_engine.
+# _ROOF_LIKE = {"roof", "ceiling", "beam"} treats a ceiling marker
+# identically to a roof marker for its own clear-height computation, but a
+# room's ceiling (possibly dropped/suspended) is not independently proven
+# to coincide with the bounding wall's own height -- room/ceiling height
+# must never automatically become wall height (see _WALL_HEIGHT_MARKER_TYPES
+# and _attempt_wall_height, which excludes "ceiling" from the levels it
+# ever hands to resolve_wall_height, not merely from this mapping, so a
+# ceiling marker can never masquerade as resolve_wall_height's own
+# "roof_level_m" either).
 _MARKER_TYPE_TO_DATUM_KIND: dict[str, tuple[str, str]] = {
     "roof": ("elevation_datum", "upper"),
-    "ceiling": ("ceiling_level_datum", "upper"),
     "beam": ("elevation_datum", "upper"),
     "floor": ("floor_level_datum", "lower"),
     "ground": ("floor_level_datum", "lower"),
 }
+# marker_type values resolve_wall_height is ever allowed to see when
+# resolving WALL height specifically -- excludes "ceiling" for the same
+# reason. A caller-facing constant rather than an inline filter so the
+# exclusion is visible without reading _attempt_wall_height's body.
+_WALL_HEIGHT_ELIGIBLE_MARKER_TYPES: frozenset[str] = frozenset({"roof", "beam", "floor", "ground"})
 
 # Fixed dependency-chain stages every ShadowQuantityRecord reports against,
 # so a reviewer can see exactly which upstream stage blocked any given
@@ -462,14 +476,23 @@ def _attempt_wall_height(
     constructs a new atom from a raw LevelMarker itself; it only looks one
     up by marker_id and verifies it, so an atom's freshness can only ever
     reflect the context that was active when it was ORIGINALLY stamped, not
-    whatever context happens to be passed to this call."""
-    resolution: HeightResolution = resolve_wall_height(levels, scope_id=None)
+    whatever context happens to be passed to this call.
+
+    Ceiling markers are excluded from what resolve_wall_height is even
+    allowed to see (not merely from the atom-construction mapping) -- a
+    ceiling+floor pair must resolve exactly like a missing roof marker,
+    never like a proven wall-height pair. Room/ceiling height is not
+    independently proven to equal this wall's own height; a dropped or
+    suspended ceiling would make that false.
+    """
+    wall_height_eligible_levels = tuple(m for m in levels if m.marker_type in _WALL_HEIGHT_ELIGIBLE_MARKER_TYPES)
+    resolution: HeightResolution = resolve_wall_height(wall_height_eligible_levels, scope_id=None)
     lower_evidence: Optional[EvidenceAtom] = None
     upper_evidence: Optional[EvidenceAtom] = None
     if resolution.status == "fully_constrained" and resolution.clear_height_m is not None:
         roof_value = resolution.sources.get("roof_level_m")
         floor_value = resolution.sources.get("floor_level_m")
-        for marker in levels:
+        for marker in wall_height_eligible_levels:
             if marker.scope_id is not None:
                 continue
             mapping = _MARKER_TYPE_TO_DATUM_KIND.get(marker.marker_type)
