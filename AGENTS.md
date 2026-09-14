@@ -55,6 +55,7 @@ Only existing seams may raise firm measurement authority:
 - `pb_hosted_opening_geometry` / `pb_hosted_opening_wall_binding` (unwired; diagnostic only)
 - W10 canonical translation
 - `pb_wall_boundary_role_authority` wall-role evidence (shadow; not a quantity)
+- `pb_dpc_quantity.build_dpc_quantity` (shadow; consumes FIRM wall lengths + corroborated roles + explicit spec; not live)
 - Benchmark gold, mappings, scorer tolerances, or development-project scores
 
 ## Required tests for every geometric hypothesis
