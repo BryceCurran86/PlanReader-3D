@@ -5,8 +5,12 @@ This does not publish quantities, mutate W1-W10 contracts, or treat
 
 Observed W5 already walks directed half-edges inside ``extract_planar_faces``
 and drops the unbounded face. This module reuses that same rotation system
-and **keeps** the unbounded face as ``EXTERIOR_OPEN_SPACE``. Side adjacency
-is the directed twin relation, not ``touches()`` / ``intersects()``.
+and **keeps** the unbounded face as a topological concept.
+
+TOPOLOGICALLY_UNBOUNDED is not ARCHITECTURAL_EXTERIOR_OPEN_SPACE unless
+independent viewport-coverage authority (or an explicit exterior space label)
+proves the drawing coverage is complete. Crop contact alone never proves
+EXTERNAL.
 
 A corroborated physical wall may still have UNKNOWN role.
 """
@@ -30,11 +34,12 @@ from pb_wall_room_topology_room_faces import _canonicalize_polygon, _point_in_po
 
 WALL_BOUNDARY_ROLE_KIND = "wall_boundary_role"
 WALL_BOUNDARY_ROLE_METHOD = "wall_boundary_role_authority"
-WALL_BOUNDARY_ROLE_SCHEMA_VERSION = "1.0.0"
+WALL_BOUNDARY_ROLE_SCHEMA_VERSION = "1.1.0"
 UNBOUNDED_FACE_KIND = "unbounded"
 BOUNDED_FACE_KIND = "bounded"
 SPACE_ROLE_LABEL_KIND = "space_role_label"
 EXPLICIT_WALL_ROLE_KIND = "explicit_wall_role"
+VIEWPORT_COVERAGE_KIND = "viewport_coverage"
 
 _AtomLike = Union[EvidenceAtom, Mapping[str, Any]]
 
@@ -50,11 +55,16 @@ class SpaceRole(str, Enum):
     BUILDING_INTERIOR = "building_interior"
     EXTERIOR_OPEN_SPACE = "exterior_open_space"
     EXTERIOR_ENCLOSED_VOID = "exterior_enclosed_void"
+    COVERED_OPEN_SPACE = "covered_open_space"
     UNKNOWN = "unknown"
 
 
 _EXTERIOR_SPACE = frozenset(
-    {SpaceRole.EXTERIOR_OPEN_SPACE, SpaceRole.EXTERIOR_ENCLOSED_VOID}
+    {
+        SpaceRole.EXTERIOR_OPEN_SPACE,
+        SpaceRole.EXTERIOR_ENCLOSED_VOID,
+        SpaceRole.COVERED_OPEN_SPACE,
+    }
 )
 
 _COURTYARD_LABELS = frozenset(
@@ -67,6 +77,30 @@ _COURTYARD_LABELS = frozenset(
         "open courtyard",
         "yard",
         "court",
+    }
+)
+
+_COVERED_LABELS = frozenset(
+    {
+        "verandah",
+        "veranda",
+        "porch",
+        "covered way",
+        "covered open space",
+        "carport",
+        "loggia",
+    }
+)
+
+_NON_COURTYARD_VOID_LABELS = frozenset(
+    {
+        "lift shaft",
+        "elevator shaft",
+        "stair void",
+        "stairwell void",
+        "riser",
+        "service shaft",
+        "shaft",
     }
 )
 
@@ -423,6 +457,11 @@ def _label_space_role(text: str) -> Optional[SpaceRole]:
     normalized = " ".join(str(text or "").lower().split())
     if not normalized:
         return None
+    if any(token in normalized for token in _NON_COURTYARD_VOID_LABELS):
+        # Shaft/stair voids are not courtyard and not building interior.
+        return None
+    if any(token in normalized for token in _COVERED_LABELS):
+        return SpaceRole.COVERED_OPEN_SPACE
     if any(token in normalized for token in _COURTYARD_LABELS):
         return SpaceRole.EXTERIOR_ENCLOSED_VOID
     return None
@@ -451,12 +490,53 @@ def _label_point(atom: _AtomLike) -> Optional[tuple[float, float]]:
     return None
 
 
+def resolve_viewport_coverage_authority(
+    *,
+    viewport: ViewportEvidence,
+    coverage_atoms: Sequence[_AtomLike] = (),
+) -> tuple[bool, tuple[str, ...]]:
+    """Independent coverage proof. Crop/topology alone never establishes this.
+
+    Returns ``(coverage_complete, reason_codes)``. Conflicting coverage atoms
+    fail closed (incomplete). Missing atoms are incomplete.
+    """
+    statuses: list[str] = []
+    reasons: list[str] = []
+    for atom in coverage_atoms:
+        if str(_atom_field(atom, "kind") or "") != VIEWPORT_COVERAGE_KIND:
+            continue
+        metadata = _atom_field(atom, "metadata") or {}
+        atom_vp = str(metadata.get("viewport_id") or _atom_field(atom, "viewport_id") or "")
+        if atom_vp and atom_vp != viewport.viewport_id:
+            reasons.append("viewport_coverage_viewport_mismatch")
+            continue
+        status = str(metadata.get("coverage_status") or "").strip().lower()
+        if status:
+            statuses.append(status)
+    distinct = tuple(dict.fromkeys(statuses))
+    if not distinct:
+        return False, tuple(dict.fromkeys(("viewport_coverage_unproven", *reasons)))
+    if len(distinct) > 1:
+        return False, tuple(dict.fromkeys(("conflicting_viewport_coverage_evidence", *reasons)))
+    if distinct[0] == "complete":
+        return True, ("viewport_coverage_complete",)
+    if distinct[0] in {"incomplete", "partial", "cropped", "unknown"}:
+        return False, tuple(dict.fromkeys(("viewport_coverage_incomplete", *reasons)))
+    return False, tuple(dict.fromkeys(("viewport_coverage_unproven", *reasons)))
+
+
 def resolve_space_roles(
     embedding: WallSideEmbedding,
     *,
     space_label_atoms: Sequence[_AtomLike] = (),
+    coverage_complete: bool = False,
 ) -> dict[str, tuple[SpaceRole, tuple[str, ...]]]:
-    """Space role per face. Unbounded is exterior open space. No flood-fill."""
+    """Space role per face.
+
+    Unbounded is TOPOLOGICALLY_UNBOUNDED. It becomes ARCHITECTURAL
+    ``EXTERIOR_OPEN_SPACE`` only when ``coverage_complete`` is proven.
+    No flood-fill. No bbox-as-building-face.
+    """
     out: dict[str, tuple[SpaceRole, tuple[str, ...]]] = {}
     labels = []
     for atom in space_label_atoms:
@@ -466,7 +546,9 @@ def resolve_space_roles(
             continue
         labels.append((point, role, str(_atom_field(atom, "evidence_id") or "")))
 
-    labeled_faces: dict[str, list[tuple[SpaceRole, str]]] = {face_id: [] for face_id, rec in embedding.faces.items() if rec.kind == BOUNDED_FACE_KIND}
+    labeled_faces: dict[str, list[tuple[SpaceRole, str]]] = {
+        face_id: [] for face_id, rec in embedding.faces.items() if rec.kind == BOUNDED_FACE_KIND
+    }
     for point, role, evidence_id in labels:
         containers = []
         for face_id, rec in embedding.faces.items():
@@ -481,7 +563,16 @@ def resolve_space_roles(
 
     for face_id, rec in embedding.faces.items():
         if rec.kind == UNBOUNDED_FACE_KIND:
-            out[face_id] = (SpaceRole.EXTERIOR_OPEN_SPACE, ("unbounded_face",))
+            if coverage_complete:
+                out[face_id] = (
+                    SpaceRole.EXTERIOR_OPEN_SPACE,
+                    ("unbounded_face_with_complete_coverage",),
+                )
+            else:
+                out[face_id] = (
+                    SpaceRole.UNKNOWN,
+                    ("topologically_unbounded_without_architectural_exterior",),
+                )
             continue
         hits = labeled_faces.get(face_id, [])
         distinct = tuple(dict.fromkeys(role for role, _ in hits))
@@ -492,10 +583,16 @@ def resolve_space_roles(
             out[face_id] = (distinct[0], ("explicit_space_role_label",))
             continue
         if rec.adjacent_to_unbounded:
-            out[face_id] = (
-                SpaceRole.BUILDING_INTERIOR,
-                ("unlabeled_bounded_face_adjacent_to_unbounded",),
-            )
+            if coverage_complete:
+                out[face_id] = (
+                    SpaceRole.BUILDING_INTERIOR,
+                    ("unlabeled_bounded_face_adjacent_to_unbounded",),
+                )
+            else:
+                out[face_id] = (
+                    SpaceRole.UNKNOWN,
+                    ("bounded_face_adjacent_to_unbounded_without_coverage_authority",),
+                )
             continue
         out[face_id] = (
             SpaceRole.UNKNOWN,
@@ -586,6 +683,7 @@ def resolve_wall_boundary_roles(
     viewport: ViewportEvidence,
     space_label_atoms: Sequence[_AtomLike] = (),
     explicit_role_atoms: Sequence[_AtomLike] = (),
+    coverage_atoms: Sequence[_AtomLike] = (),
 ) -> tuple[WallBoundaryRoleEvidence, ...]:
     """Typed wall-role evidence. Shadow only. Existence stays independent."""
     embedding = build_wall_side_embedding(
@@ -594,7 +692,21 @@ def resolve_wall_boundary_roles(
         walls=walls,
         viewport_id=viewport.viewport_id,
     )
-    space_roles = resolve_space_roles(embedding, space_label_atoms=space_label_atoms)
+    # Coverage atoms may also arrive mixed into evidence_atoms / space labels.
+    merged_coverage = tuple(coverage_atoms) + tuple(
+        atom
+        for atom in (*evidence_atoms, *space_label_atoms)
+        if str(_atom_field(atom, "kind") or "") == VIEWPORT_COVERAGE_KIND
+    )
+    coverage_complete, coverage_reasons = resolve_viewport_coverage_authority(
+        viewport=viewport,
+        coverage_atoms=merged_coverage,
+    )
+    space_roles = resolve_space_roles(
+        embedding,
+        space_label_atoms=space_label_atoms,
+        coverage_complete=coverage_complete,
+    )
 
     overlapping: set[str] = set()
     seen_ids: set[str] = set()
@@ -634,6 +746,7 @@ def resolve_wall_boundary_roles(
             reasons.append("overlapping_wall_source_segments")
         if wall_lies_on_viewport_boundary(wall, viewport):
             reasons.append("insufficient_viewport_coverage")
+        reasons.extend(coverage_reasons)
 
         existence = wall_physical_existence_status(
             wall,
@@ -689,6 +802,13 @@ def resolve_wall_boundary_roles(
             "same_face_both_sides",
             "conflicting_explicit_wall_role_evidence",
             "conflicting_space_roles_on_same_side",
+            "viewport_coverage_unproven",
+            "viewport_coverage_incomplete",
+            "conflicting_viewport_coverage_evidence",
+            "viewport_coverage_viewport_mismatch",
+            "topologically_unbounded_without_architectural_exterior",
+            "bounded_face_adjacent_to_unbounded_without_coverage_authority",
+            "ambiguous_space_role",
         }
         hard_block = any(r in blocker_set for r in reasons)
         if role != WallBoundaryRole.CONFLICT and not hard_block:
@@ -743,6 +863,7 @@ def resolve_wall_boundary_roles(
             "status": status.value,
             "reason_codes": list(reason_codes),
             "schema_version": WALL_BOUNDARY_ROLE_SCHEMA_VERSION,
+            "coverage_complete": coverage_complete,
         }
         records.append(
             WallBoundaryRoleEvidence(
@@ -760,6 +881,7 @@ def resolve_wall_boundary_roles(
                 right_space_role=right_space.value if right_space else None,
                 metadata={
                     "existence_status": existence.value,
+                    "coverage_complete": coverage_complete,
                     "schema_version": WALL_BOUNDARY_ROLE_SCHEMA_VERSION,
                 },
             )

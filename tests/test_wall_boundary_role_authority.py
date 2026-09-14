@@ -23,6 +23,7 @@ from pb_physical_wall_existence_authority import wall_physical_existence_status
 from pb_wall_boundary_role_authority import (
     EXPLICIT_WALL_ROLE_KIND,
     SPACE_ROLE_LABEL_KIND,
+    VIEWPORT_COVERAGE_KIND,
     WallBoundaryRole,
     resolve_wall_boundary_roles,
 )
@@ -120,14 +121,42 @@ def _existence_atoms():
     )
 
 
-def _roles(segments, *, bbox=(-1000.0, -1000.0, 2000.0, 2000.0), corroborate=True, conflicting=(), extra_atoms=(), space_labels=(), explicit=(), walls_transform=None):
+def _coverage_complete():
+    return _atom(
+        "cov-complete",
+        VIEWPORT_COVERAGE_KIND,
+        metadata={"coverage_status": "complete", "viewport_id": "vp_1"},
+    )
+
+
+def _roles(
+    segments,
+    *,
+    bbox=(-1000.0, -1000.0, 2000.0, 2000.0),
+    corroborate=True,
+    conflicting=(),
+    extra_atoms=(),
+    space_labels=(),
+    explicit=(),
+    walls_transform=None,
+    with_coverage=True,
+):
     graph, walls, edge_map = _pipeline(segments)
     if corroborate:
         walls = _corroborate(walls, conflicting=conflicting)
     if walls_transform is not None:
         walls = walls_transform(walls)
-    atoms = _existence_atoms() + extra_atoms
-    ids = tuple(dict.fromkeys([*(a.evidence_id for a in atoms), *(a.evidence_id for a in space_labels), *(a.evidence_id for a in explicit)]))
+    coverage = (_coverage_complete(),) if with_coverage else ()
+    atoms = _existence_atoms() + extra_atoms + coverage
+    ids = tuple(
+        dict.fromkeys(
+            [
+                *(a.evidence_id for a in atoms),
+                *(a.evidence_id for a in space_labels),
+                *(a.evidence_id for a in explicit),
+            ]
+        )
+    )
     records = resolve_wall_boundary_roles(
         walls=walls,
         graph=graph,
@@ -351,6 +380,16 @@ def test_walls_on_viewport_boundary_are_not_automatically_external() -> None:
     assert all("insufficient_viewport_coverage" in r.reason_codes for r in records)
 
 
+def test_unbounded_without_coverage_is_not_architectural_exterior() -> None:
+    _, records = _roles(_rectangle(), with_coverage=False)
+    assert all(r.role != WallBoundaryRole.EXTERNAL for r in records)
+    assert any(
+        "topologically_unbounded_without_architectural_exterior" in r.reason_codes
+        or "viewport_coverage_unproven" in r.reason_codes
+        for r in records
+    )
+
+
 def test_two_detached_buildings_each_have_external_shell() -> None:
     segs = [
         _seg("a1", 0, 0, 100, 0),
@@ -434,8 +473,8 @@ def test_conflicting_explicit_internal_external_is_conflict() -> None:
 def test_reversed_centerline_keeps_semantic_role() -> None:
     graph, walls, edge_map = _pipeline(_rectangle())
     walls = _corroborate(walls)
-    atoms = _existence_atoms()
-    document = _document(("u2-ev", "pair-ev"))
+    atoms = _existence_atoms() + (_coverage_complete(),)
+    document = _document(tuple(a.evidence_id for a in atoms))
     viewport = _viewport()
     forward = resolve_wall_boundary_roles(
         walls=walls, graph=graph, edge_id_to_wall_id=edge_map, evidence_atoms=atoms, document=document, viewport=viewport
@@ -456,8 +495,8 @@ def test_reversed_centerline_keeps_semantic_role() -> None:
 def test_shuffled_walls_are_deterministic() -> None:
     graph, walls, edge_map = _pipeline(_rectangle_plus_partition())
     walls = _corroborate(walls)
-    atoms = _existence_atoms()
-    document = _document(("u2-ev", "pair-ev"))
+    atoms = _existence_atoms() + (_coverage_complete(),)
+    document = _document(tuple(a.evidence_id for a in atoms))
     viewport = _viewport()
     a = resolve_wall_boundary_roles(
         walls=walls, graph=graph, edge_id_to_wall_id=edge_map, evidence_atoms=atoms, document=document, viewport=viewport
@@ -491,13 +530,13 @@ def test_duplicate_source_segments_do_not_double_role() -> None:
     graph, walls, edge_map = _pipeline(_rectangle())
     walls = _corroborate(walls)
     clone = replace(walls[0], candidate_id=walls[0].candidate_id + "-dup")
-    atoms = _existence_atoms()
+    atoms = _existence_atoms() + (_coverage_complete(),)
     records = resolve_wall_boundary_roles(
         walls=(*walls, clone),
         graph=graph,
         edge_id_to_wall_id=edge_map,
         evidence_atoms=atoms,
-        document=_document(("u2-ev", "pair-ev")),
+        document=_document(tuple(a.evidence_id for a in atoms)),
         viewport=_viewport(),
     )
     dup = [r for r in records if r.wall_candidate_id in (walls[0].candidate_id, clone.candidate_id)]
