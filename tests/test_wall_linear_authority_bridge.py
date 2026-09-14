@@ -2,7 +2,10 @@
 
 Existence, measurable baseline geometry, and scale/dimension authority are
 separate. Thickness may remain PROVISIONAL. Metadata strings are not authority.
-Quantity tests go through adapt_wall_candidate_to_entity_evidence.
+The public wall-length boundary now deliberately remains BLOCKED until a real
+content-addressed upstream enumeration snapshot producer exists, so tests whose
+subject is lower-level measurement or existence exercise those authorities
+directly rather than manufacturing a synthetic FIRM publication.
 """
 from __future__ import annotations
 
@@ -18,6 +21,10 @@ from pb_canonical_wall_room_evidence_model import (
     FAMILY_PAIRED_WALL_FACES,
 )
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
+from pb_measurement_input_authority import (
+    resolve_linear_measurement_input,
+    scale_calibration_fingerprint,
+)
 from pb_migration_contracts import (
     DocumentEvidence,
     EvidenceAtom,
@@ -26,7 +33,6 @@ from pb_migration_contracts import (
     ViewportResolutionStatus,
 )
 from pb_migration_provider_envelope import ProviderContext
-from pb_measurement_input_authority import scale_calibration_fingerprint
 from pb_page_scale_calibration_authority import (
     ScaleSourceReading,
     ScaleSourceType,
@@ -215,6 +221,50 @@ def _solo_equivalence(*wall_ids: str):
     )
 
 
+def _page_length(wall: WallCandidate) -> float:
+    return sum(
+        math.hypot(b[0] - a[0], b[1] - a[1])
+        for a, b in zip(wall.centerline_pts, wall.centerline_pts[1:])
+    )
+
+
+def _measurement(
+    wall: WallCandidate,
+    atoms: tuple[EvidenceAtom, ...],
+    *,
+    scale=None,
+    scale_bindings=None,
+    context=None,
+    viewport=None,
+):
+    entity, document, resolved_viewport, resolved_context = _adapt(
+        wall,
+        atoms,
+        context=context,
+        viewport=viewport,
+    )
+    assert entity is not None
+    if scale_bindings is None:
+        used_scale = scale if scale is not None else _scale()
+        scale_bindings = (_scale_binding(used_scale, viewport_id=wall.viewport_id),)
+    bindings = tuple(scale_bindings)
+    if bindings:
+        resolved_viewport = replace(
+            resolved_viewport,
+            resolved_scale_id=bindings[0].scale_fingerprint,
+        )
+    return resolve_linear_measurement_input(
+        context=resolved_context,
+        document=document,
+        viewport=resolved_viewport,
+        entity=entity,
+        page_no=1,
+        scaled_length_page_units=_page_length(wall),
+        scale_bindings=bindings,
+        wall_viewport_id=wall.viewport_id,
+    )
+
+
 def _qty(wall, atoms, *, extra=(), extra_atoms=(), scale=None, scale_bindings=None, bind_scale=True, **overrides):
     all_atoms = tuple(atoms) + tuple(extra_atoms)
     extra_ids = extra + tuple(atom.evidence_id for atom in extra_atoms)
@@ -243,7 +293,7 @@ def _qty(wall, atoms, *, extra=(), extra_atoms=(), scale=None, scale_bindings=No
     return build_wall_length_quantity(**kwargs)
 
 
-def test_trusted_wall_and_firm_scale_publish_linear_quantity() -> None:
+def test_trusted_wall_and_firm_scale_resolve_length_but_publication_stays_blocked() -> None:
     scale = _scale()
     wall, atoms = _two_domain_wall(points=((0.0, 0.0), (scale.px_per_m * 4.0, 0.0)))
     assert wall_physical_existence_status(
@@ -251,11 +301,15 @@ def test_trusted_wall_and_firm_scale_publish_linear_quantity() -> None:
     ) == EvidenceResolutionStatus.CORROBORATED
     entity, document, viewport, context = _adapt(wall, atoms)
     assert entity is not None
-    assert entity.candidate_entity_id == wall.candidate_id
     assert entity.status == EvidenceResolutionStatus.CORROBORATED
-    assert wall.status == EvidenceResolutionStatus.CANDIDATE
     assert wall.thickness_authority == MeasurementAuthorityType.PROVISIONAL
     assert wall.thickness_m is None
+
+    resolved = _measurement(wall, atoms, scale=scale)
+    assert resolved.abstained is False
+    assert resolved.authority_status == AuthorityStatus.FIRM.value
+    assert math.isclose(resolved.value_m or 0.0, 4.0, abs_tol=1e-6)
+
     binding = _scale_binding(scale)
     qty = build_wall_length_quantity(
         wall=wall,
@@ -268,12 +322,10 @@ def test_trusted_wall_and_firm_scale_publish_linear_quantity() -> None:
         page_no=1,
         scale_bindings=(binding,),
     )
-    assert qty.abstained is False
-    assert qty.status == AuthorityStatus.FIRM.value
-    assert math.isclose(qty.value or 0.0, 4.0, abs_tol=1e-6)
-    assert qty.metadata["thickness_authority"] == MeasurementAuthorityType.PROVISIONAL.value
-    assert qty.metadata["thickness_m"] is None
-    assert qty.metadata["entity_status"] == EvidenceResolutionStatus.CORROBORATED.value
+    assert qty.abstained is True
+    assert qty.value is None
+    assert "physical_candidate_enumerator_commitment_unavailable" in qty.blocking_reasons
+    assert "scale_enumerator_commitment_unavailable" in qty.blocking_reasons
 
 
 def test_trusted_wall_unknown_scale_abstains() -> None:
@@ -389,7 +441,7 @@ def test_plural_lineage_replay_is_deterministic() -> None:
     assert first.evidence_ids == second.evidence_ids
 
 
-def test_reverse_and_rechunk_keep_length() -> None:
+def test_reverse_and_rechunk_keep_length_below_publication_boundary() -> None:
     scale = _scale()
     length = scale.px_per_m * 6.0
     forward, atoms = _two_domain_wall(points=((0.0, 0.0), (length, 0.0)))
@@ -397,9 +449,9 @@ def test_reverse_and_rechunk_keep_length() -> None:
     rechunked, _ = _two_domain_wall(points=((0.0, 0.0), (length / 2.0, 0.0), (length, 0.0)))
     values = []
     for wall in (forward, reversed_wall, rechunked):
-        qty = _qty(wall, atoms, scale=scale)
-        assert qty is not None and qty.abstained is False
-        values.append(qty.value)
+        resolved = _measurement(wall, atoms, scale=scale)
+        assert resolved.abstained is False
+        values.append(resolved.value_m)
     assert values[0] == values[1] == values[2] == 6.0
 
 
@@ -485,6 +537,7 @@ def test_stale_revision_abstains_at_measurement() -> None:
         or "physical_wall_existence_abstained" in qty.blocking_reasons
     )
 
+
 def test_entity_for_other_wall_cannot_authorize_length() -> None:
     scale = _scale()
     wall, atoms = _two_domain_wall(points=((0.0, 0.0), (scale.px_per_m * 3.0, 0.0)))
@@ -521,7 +574,7 @@ def test_nan_and_inf_geometry_rejected_at_wall_construction() -> None:
         _wall(points=((0.0, 0.0), (float("inf"), 0.0)))
 
 
-def test_thickness_change_alone_does_not_alter_length() -> None:
+def test_thickness_change_alone_does_not_alter_length_below_publication_boundary() -> None:
     scale = _scale()
     length = scale.px_per_m * 2.5
     wall, atoms = _two_domain_wall(points=((0.0, 0.0), (length, 0.0)))
@@ -530,55 +583,35 @@ def test_thickness_change_alone_does_not_alter_length() -> None:
         thickness_m=0.2,
         thickness_authority=MeasurementAuthorityType.USER_APPROVED,
     )
-    a = _qty(wall, atoms, scale=scale)
-    b = _qty(thicker, atoms, scale=scale)
-    assert a is not None and b is not None
+    a = _measurement(wall, atoms, scale=scale)
+    b = _measurement(thicker, atoms, scale=scale)
     assert a.abstained is False and b.abstained is False
-    assert a.value == b.value == 2.5
-    assert a.metadata["thickness_m"] is None
-    assert b.metadata["thickness_m"] == 0.2
+    assert a.value_m == b.value_m == 2.5
+    assert wall.thickness_m is None
+    assert thicker.thickness_m == 0.2
 
 
-def test_height_or_stored_length_alone_does_not_alter_length() -> None:
+def test_height_or_stored_length_alone_does_not_alter_measured_length() -> None:
     scale = _scale()
     length = scale.px_per_m * 2.5
     wall, atoms = _two_domain_wall(points=((0.0, 0.0), (length, 0.0)))
     with_height = replace(wall, length_m=99.0, metadata={"documented_height_m": 2.8, "height_m": 2.8})
-    a = _qty(wall, atoms, scale=scale)
-    b = _qty(with_height, atoms, scale=scale)
-    assert a is not None and b is not None
-    assert a.value == b.value == 2.5
-    assert "height" not in (a.formula or "")
+    a = _measurement(wall, atoms, scale=scale)
+    b = _measurement(with_height, atoms, scale=scale)
+    assert a.value_m == b.value_m == 2.5
+    assert a.source_type == b.source_type == MeasurementAuthorityType.PDF_SCALED.value
 
 
-def test_shuffled_batch_is_deterministic() -> None:
+def test_shuffled_physical_reconciliation_and_measurement_are_deterministic() -> None:
+    from pb_physical_wall_identity import (
+        collect_physical_wall_identities,
+        resolve_physical_wall_equivalence,
+    )
+
     scale = _scale()
     length = scale.px_per_m * 3.0
-    # Wall-scoped literal evidence ids: real production ids are content-hashed
-    # (and therefore already wall-specific), so two different walls sharing
-    # the bare "u2-ev"/"pair-ev" literal in one pooled evidence_atoms sequence
-    # would be a fixture-only collision under collision-safe existence
-    # recomputation -- construct genuinely distinct ids per wall instead.
-    w1 = _wall(wall_id="w1", points=((0.0, 0.0), (length, 0.0)), face_ids=("seg-1",), supporting=("u2-ev-w1", "pair-ev-w1"))
-    w2 = _wall(wall_id="w2", points=((length + 50.0, 0.0), (2 * length + 50.0, 0.0)), face_ids=("seg-2",), supporting=("u2-ev-w2", "pair-ev-w2"))
-    a1 = (_source_atom("u2-ev-w1", KIND_PHYSICAL_WALL, "w1"), _source_atom("pair-ev-w1", FAMILY_PAIRED_WALL_FACES, "w1"))
-    a2 = (_source_atom("u2-ev-w2", KIND_PHYSICAL_WALL, "w2"), _source_atom("pair-ev-w2", FAMILY_PAIRED_WALL_FACES, "w2"))
-    all_atoms = a1 + a2
-    e1, document, viewport, context = _adapt(w1, all_atoms)
-    e2, _, _, _ = _adapt(w2, all_atoms)
-    assert e1 is not None and e2 is not None
-    entities = {"w1": e1, "w2": e2}
-    binding = _scale_binding(scale)
-    bound_viewport = replace(viewport, resolved_scale_id=binding.scale_fingerprint)
-    # This test is about batch ordering determinism under the now-mandatory
-    # reconciliation boundary. w1/w2 share one native ancestor but occupy
-    # proven-disjoint spans along it (pb_physical_wall_identity's own
-    # positive-distinctness rule, unchanged by this remediation) so both are
-    # legitimately independent DISTINCT representatives -- the property
-    # under test is that reconciliation reaches the same conclusion, and
-    # both walls the same FIRM value, regardless of batch input order.
-    from pb_physical_wall_identity import collect_physical_wall_identities
-
+    w1, a1 = _two_domain_wall(wall_id="w1", points=((0.0, 0.0), (length, 0.0)), face_ids=("seg-1",))
+    w2, a2 = _two_domain_wall(wall_id="w2", points=((length + 50.0, 0.0), (2 * length + 50.0, 0.0)), face_ids=("seg-2",))
     graph = {
         "edges": [
             {"id": "seg-1", "x1": 0.0, "y1": 0.0, "x2": length, "y2": 0.0, "primitive_lineage": {"source_primitive_ids": ["native_shared"]}},
@@ -586,31 +619,19 @@ def test_shuffled_batch_is_deterministic() -> None:
         ]
     }
     identities = collect_physical_wall_identities((w1, w2), graph)
-    forward = build_wall_length_quantities(
-        walls=(w1, w2),
-        entities_by_wall_id=entities,
-        evidence_atoms=all_atoms,
-        physical_identities=identities,
-        context=context,
-        document=document,
-        viewport=bound_viewport,
-        page_no=1,
-        scale_bindings=(binding,),
+    walls_by_id = {"w1": w1, "w2": w2}
+    forward = resolve_physical_wall_equivalence(
+        (identities["w1"], identities["w2"]),
+        walls_by_id=walls_by_id,
     )
-    reverse = build_wall_length_quantities(
-        walls=(w2, w1),
-        entities_by_wall_id=entities,
-        evidence_atoms=all_atoms,
-        physical_identities=identities,
-        context=context,
-        document=document,
-        viewport=bound_viewport,
-        page_no=1,
-        scale_bindings=(binding,),
+    reverse = resolve_physical_wall_equivalence(
+        (identities["w2"], identities["w1"]),
+        walls_by_id=walls_by_id,
     )
-    by_id_fwd = {q.semantic_key: q.value for q in forward}
-    by_id_rev = {q.semantic_key: q.value for q in reverse}
-    assert by_id_fwd == by_id_rev == {"wall_length:w1": 3.0, "wall_length:w2": 3.0}
+    assert forward == reverse
+    assert set(forward.representative_wall_ids) == {"w1", "w2"}
+    assert _measurement(w1, a1, scale=scale).value_m == 3.0
+    assert _measurement(w2, a2, scale=scale).value_m == 3.0
 
 
 def test_same_wall_cannot_double_count() -> None:
@@ -634,12 +655,24 @@ def test_same_wall_cannot_double_count() -> None:
     assert all("overlapping_wall_source_segments" in q.blocking_reasons for q in out)
 
 
-def test_scale_from_another_page_cannot_leak() -> None:
+def test_scale_from_another_page_cannot_leak_below_publication_boundary() -> None:
+    scale = _scale(page_no=2)
     wall, atoms = _two_domain_wall(points=((0.0, 0.0), (300.0, 0.0)))
-    qty = _qty(wall, atoms, scale=_scale(page_no=2))
-    assert qty is not None
-    assert qty.abstained
-    assert "scale_binding_page_mismatch" in qty.blocking_reasons
+    entity, document, viewport, context = _adapt(wall, atoms)
+    assert entity is not None
+    binding = _scale_binding(scale)
+    resolved = resolve_linear_measurement_input(
+        context=context,
+        document=document,
+        viewport=replace(viewport, resolved_scale_id=binding.scale_fingerprint),
+        entity=entity,
+        page_no=1,
+        scaled_length_page_units=_page_length(wall),
+        scale_bindings=(binding,),
+        wall_viewport_id=wall.viewport_id,
+    )
+    assert resolved.abstained
+    assert "scale_binding_page_mismatch" in resolved.blocking_reasons
 
 
 def test_unbound_scale_cannot_leak_across_viewports_on_same_page() -> None:
@@ -651,36 +684,30 @@ def test_unbound_scale_cannot_leak_across_viewports_on_same_page() -> None:
     )
     entity, document, viewport, _ = _adapt(wall, atoms, context=multi)
     assert entity is not None
-    qty = build_wall_length_quantity(
-        wall=wall,
+    binding = _scale_binding(scale)
+    resolved = resolve_linear_measurement_input(
         context=multi,
         document=document,
         viewport=viewport,
         entity=entity,
-        evidence_atoms=atoms,
-        equivalence=_solo_equivalence(wall.candidate_id),
         page_no=1,
-        scale_bindings=(_scale_binding(scale),),
+        scaled_length_page_units=_page_length(wall),
+        scale_bindings=(binding,),
+        wall_viewport_id=wall.viewport_id,
     )
-    assert qty.abstained
-    # A binding for only one of the two context-known sibling viewports is now
-    # caught earlier, by the scale-binding universe completeness gate (GPT-2
-    # #288 blocker 1), before the deeper per-binding fingerprint check would
-    # otherwise have caught the same underlying leak.
-    assert "incomplete_scale_binding_universe" in qty.blocking_reasons
+    assert resolved.abstained
+    assert "viewport_scale_fingerprint_mismatch" in resolved.blocking_reasons
 
 
-def test_provisional_thickness_does_not_block_length_and_is_not_invented() -> None:
+def test_provisional_thickness_does_not_block_lower_level_length_or_get_invented() -> None:
     scale = _scale()
     wall, atoms = _two_domain_wall(points=((0.0, 0.0), (scale.px_per_m * 2.5, 0.0)))
-    qty = _qty(wall, atoms, scale=scale)
-    assert qty is not None
-    assert qty.abstained is False
+    resolved = _measurement(wall, atoms, scale=scale)
+    assert resolved.abstained is False
+    assert resolved.value_m == 2.5
     assert wall.thickness_m is None
     assert wall.thickness_authority == MeasurementAuthorityType.PROVISIONAL
-    assert "height" not in qty.formula
-    assert qty.unit == "m"
-    assert qty.value != 0.15
+    assert resolved.source_type == MeasurementAuthorityType.PDF_SCALED.value
 
 
 def _imported_top_level(path: Path) -> set[str]:
@@ -820,19 +847,25 @@ def test_removing_support_cannot_increase_existence_authority() -> None:
     assert weaker != EvidenceResolutionStatus.CORROBORATED
 
 
-def test_adding_conflict_cannot_leave_firm_length() -> None:
+def test_adding_conflict_cannot_strengthen_firm_measurement_into_public_authority() -> None:
     scale = _scale()
     wall, atoms = _two_domain_wall(points=((0.0, 0.0), (scale.px_per_m * 3.0, 0.0)))
-    qty = _qty(wall, atoms, scale=scale)
-    assert qty is not None and qty.abstained is False
+    baseline_measurement = _measurement(wall, atoms, scale=scale)
+    baseline_existence = _existence(wall, atoms)
+    assert baseline_measurement.abstained is False and baseline_measurement.value_m == 3.0
+    assert baseline_existence.status == EvidenceResolutionStatus.CORROBORATED
+
     opposing = _source_atom("opp-ev", "glazing")
     conflicted, _ = _two_domain_wall(
         points=((0.0, 0.0), (scale.px_per_m * 3.0, 0.0)),
         conflicting=("opp-ev",),
     )
+    degraded = _existence(conflicted, atoms + (opposing,))
+    assert degraded.status == EvidenceResolutionStatus.CONFLICT
+    assert "supporting_and_opposing_physical_wall_evidence" in degraded.reason_codes
+
     blocked = _qty(conflicted, atoms + (opposing,), scale=scale)
-    assert blocked is not None
-    assert blocked.abstained
+    assert blocked is not None and blocked.abstained
     assert blocked.status != AuthorityStatus.FIRM.value
 
 
@@ -899,30 +932,22 @@ def test_schema_version_only_evidence_id_collision_blocks() -> None:
     assert "existence_evidence_id_collision" in existence.reason_codes
 
 
-def test_firm_path_reconciles_complete_binding_set_not_caller_preferred() -> None:
+def test_complete_binding_set_conflict_is_detected_below_publication_boundary() -> None:
     scale = _scale()
     wall, atoms = _two_domain_wall(points=((0.0, 0.0), (scale.px_per_m * 4.0, 0.0)))
     preferred = _scale_binding(scale)
-    competitor = replace(
-        preferred,
-        calibration=replace(scale, px_per_m=scale.px_per_m * 2.0),
-    )
-    # Force competitor eligible by matching fingerprint on viewport for preferred only —
-    # both bindings share viewport/page/SHA/revision; only preferred matches resolved_scale_id.
-    # Construct a second eligible clone with identical fingerprint via replace.
     twin = replace(preferred)
     entity, document, viewport, context = _adapt(wall, atoms)
     assert entity is not None
-    qty = build_wall_length_quantity(
-        wall=wall,
+    resolved = resolve_linear_measurement_input(
         context=context,
         document=document,
         viewport=replace(viewport, resolved_scale_id=preferred.scale_fingerprint),
         entity=entity,
-        evidence_atoms=atoms,
-        equivalence=_solo_equivalence(wall.candidate_id),
         page_no=1,
+        scaled_length_page_units=_page_length(wall),
         scale_bindings=(preferred, twin),
+        wall_viewport_id=wall.viewport_id,
     )
-    assert qty.abstained
-    assert "conflicting_eligible_scale_bindings" in qty.blocking_reasons
+    assert resolved.abstained
+    assert "conflicting_eligible_scale_bindings" in resolved.blocking_reasons
