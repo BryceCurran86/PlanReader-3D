@@ -436,7 +436,8 @@ def test_mixed_scale_matching_measurement_abstains_because_text_is_not_firm() ->
         entity=_entity("wall-plan", "ev-plan"),
         page_no=1,
         scaled_length_page_units=plan_binding.calibration.px_per_m * 8.0,
-        scale_calibration=plan_binding.calibration,
+        scale_bindings=(plan_binding,),
+        wall_viewport_id=plan.view_id,
     )
     assert result.abstained
     assert "scale_not_firm" in result.blocking_reasons
@@ -481,10 +482,11 @@ def test_mixed_scale_sibling_substitution_is_blocked() -> None:
         entity=_entity("wall-plan", "ev-plan"),
         page_no=1,
         scaled_length_page_units=plan_binding.calibration.px_per_m * 8.0,
-        scale_calibration=elev_binding.calibration,
+        scale_bindings=(elev_binding,),
+        wall_viewport_id=plan.view_id,
     )
     assert swapped.abstained
-    assert "scale_not_bound_to_multi_viewport" in swapped.blocking_reasons
+    assert "scale_binding_wall_viewport_mismatch" in swapped.blocking_reasons
 
 
 def test_mixed_scale_pdf_bindings_are_translation_invariant_at_provisional() -> None:

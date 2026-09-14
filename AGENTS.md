@@ -41,7 +41,7 @@ Only existing seams may raise firm measurement authority:
 - `pb_viewport_scale_binding.bind_viewport_scale`
 - `pb_measurement_input_authority.resolve_linear_measurement_input`
 - `pb_figured_dimension_authority.resolve_measurement_authority`
-- `pb_wall_length_quantity.build_wall_length_quantity` (requires `WallCandidate.status == CORROBORATED` **and** a firm measurement input)
+- `pb_wall_length_quantity.build_wall_length_quantity` (2026-09-14 remediation: `evidence_atoms` and `equivalence: PhysicalWallEquivalenceResolution` are now required, no default — existence is independently recomputed from `evidence_atoms` via `resolve_physical_wall_existence` and a caller-supplied `entity` whose status disagrees is rejected; only a wall in `equivalence.representative_wall_ids` may publish; a generic `figured_dimension` atom is explicitly downgraded to BLOCKED and cannot create FIRM here pending the dedicated figured-dimension span-identity workstream; `WallCandidate.status` is still not existence authority)
 - `pb_wall_height_authority.build_wall_height_quantity` (explicit owned height or corroborated datum pair only)
 
 ## Authority that must not become firm

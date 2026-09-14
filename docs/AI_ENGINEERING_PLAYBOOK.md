@@ -99,7 +99,9 @@ PDF page
   bind_viewport_scale                         pb_viewport_scale_binding
     → resolve_page_scale_calibration          pb_page_scale_calibration_authority
 
-  EntityEvidence                              caller-built; W2–W10 do not emit it
+  wall_physical_existence_status /
+  adapt_wall_candidate_to_entity_evidence     pb_physical_wall_existence_authority
+  EntityEvidence                              adapter-built from typed existence; W2–W10 do not emit it
   build_wall_length_quantity                  pb_wall_length_quantity
     → resolve_linear_measurement_input        pb_measurement_input_authority
     → QuantityEvidence
@@ -123,7 +125,8 @@ PDF page
 - W7 always emits `host_status="ambiguous_host"`. It is not a hosted-opening quantity.
 - W9 does not mutate topology.
 - W10 copies into `CanonicalWall` / `CanonicalSpace` with `takeoff_eligible=False`, `deduction_authority=False`, `height_m=None`, `openings=[]`.
-- `build_wall_length_quantity` abstains unless `wall.status == CORROBORATED` **and** `resolve_linear_measurement_input` returns a firm value. Duplicate wall ids or overlapping source segments abstain in the batch builder.
+- `build_wall_length_quantity` abstains unless `EntityEvidence.status` is `CORROBORATED` from the typed physical-existence adapter **and** `resolve_linear_measurement_input` returns a firm value. `WallCandidate.status` is not existence authority. Duplicate wall ids or overlapping source segments abstain in the batch builder.
+- 2026-09-14 remediation (GPT-2 #288 blocker set): `build_wall_length_quantity` no longer trusts a caller-supplied `EntityEvidence` at face value -- `evidence_atoms` (required) is independently re-resolved through `resolve_physical_wall_existence`, and disagreement with the supplied `entity` blocks. `equivalence: PhysicalWallEquivalenceResolution` (required) gates publication: only a wall in `equivalence.representative_wall_ids` may reach FIRM, so the single-wall function can no longer publish independently of a completed physical-equivalence reconciliation, and `build_wall_length_quantities`' `physical_identities` is no longer optional. Scale-binding-universe completeness is checked against `context.viewport_page_ownership` for direct `scale_bindings` callers (partial: catches an omitted sibling viewport, not a hidden second binding for the same viewport_id); a caller that supplies `page_viewports` (the complete F.07 `SegmentedViewport` list for the page) gets bindings derived internally via `bind_page_viewport_scales`, which is structurally complete (there is no second binding a caller could hide). A generic `figured_dimension` atom is explicitly downgraded to BLOCKED at this boundary and cannot independently create FIRM wall length, pending the dedicated figured-dimension span-identity workstream (dimension line -> terminators -> witnesses -> endpoints -> exact physical span -> exact target entity) -- `pb_figured_dimension_authority.resolve_measurement_authority` itself is unchanged and still FIRMs for its other existing callers. `classify_physical_wall_pair` (`pb_physical_wall_identity.py`) no longer treats a bare `viewport_id` or `level_id` string difference as positive DISTINCT proof by itself; only proven geometry+provenance facts (disjoint spans under shared ancestry) can.
 - `build_wall_height_quantity` accepts only owned explicit height kinds or a corroborated datum pair. Tokens such as `default` / `assumed` / `legacy_default` are forbidden.
 
 **INFERRED:** there is no single production function that runs PDF → JobHub wall length today. `pb_wall_topology_diagnostics` is an observability harness, not live extraction.
@@ -238,7 +241,7 @@ Crossing a later boundary does not promote an earlier one.
 - W5 untraceable or tiny loops → room `ABSTAINED` (kept).
 - W7 unpaired dangling ends omitted; reported hosts stay `ambiguous_host`.
 - Scale binding abstains unless measurement authority is `FIRM`.
-- Wall length abstains if topology is not `CORROBORATED`, identities mismatch, centerline is invalid, measurement input abstains, or two walls share source segments.
+- Wall length abstains if physical-wall existence is not a CORROBORATED `physical_wall_existence` atom, identities mismatch, centerline is invalid, measurement input abstains, or two walls share source segments.
 - Height abstains without owned explicit evidence.
 - Hosted spans abstain on orientation conflict, missing jamb proof, or empty detector.
 - Hosted binding abstains on two walls or one-sided adjacency.

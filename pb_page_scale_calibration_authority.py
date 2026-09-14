@@ -10,10 +10,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import Enum
+import hashlib
 import math
 from typing import Dict, List, Optional
 
 from pb_geometry_takeoff_model import AuthorityStatus, ScaleCalibration
+from pb_migration_contracts import canonical_contract_json
 
 # PDF native resolution is 72 points/inch; 1 metre = 39.3701 inches.
 # At true 1:1 scale, one real-world metre spans this many PDF points.
@@ -36,6 +38,34 @@ class ScaleCalibrationStatus(str, Enum):
     MANUAL_REQUIRED = "manual_required"
     USER_APPROVED = "user_approved"
     BLOCKED = "blocked"
+
+
+def scale_calibration_fingerprint(calibration: ScaleCalibration) -> str:
+    """Content fingerprint for the trusted calibration inputs actually consumed.
+
+    Single canonical implementation shared by viewport binding and measurement
+    authority. Lives with the page-scale contract so neither consumer imports
+    the other.
+    """
+    payload = {
+        "page_no": calibration.page_no,
+        "ratio_str": calibration.ratio_str,
+        "px_per_m": calibration.px_per_m,
+        "method": calibration.method,
+        "is_verified": calibration.is_verified,
+        "confidence": calibration.confidence,
+        "sheet_label": calibration.sheet_label,
+        "scale_text": calibration.scale_text,
+        "source_type": calibration.source_type,
+        "status": calibration.status,
+        "issues": list(calibration.issues),
+        "revision_id": calibration.revision_id,
+        "approved_by": calibration.approved_by,
+        "approved_at": calibration.approved_at,
+    }
+    return hashlib.sha256(
+        canonical_contract_json(payload).encode("utf-8")
+    ).hexdigest()
 
 
 # Sources whose disagreement is serious enough to require manual estimator resolution

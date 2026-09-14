@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import math
-from typing import Optional
+from typing import Optional, Sequence
 
 from pb_figured_dimension_authority import resolve_measurement_authority
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType, ScaleCalibration
@@ -31,9 +31,11 @@ from pb_migration_provider_envelope import ProviderContext
 from pb_page_scale_calibration_authority import (
     check_calibration_freshness,
     measurement_authority_for_page_scale,
+    scale_calibration_fingerprint,
 )
+from pb_viewport_scale_binding import ViewportScaleBinding
 
-MEASUREMENT_INPUT_SCHEMA_VERSION = "1.0.2"
+MEASUREMENT_INPUT_SCHEMA_VERSION = "1.0.4"
 
 
 @dataclass(frozen=True)
@@ -113,29 +115,6 @@ def _blocked(
         blocking_reasons=reasons,
         notes=notes,
     )
-
-
-def scale_calibration_fingerprint(calibration: ScaleCalibration) -> str:
-    """Content fingerprint for the trusted calibration inputs actually consumed."""
-    payload = {
-        "page_no": calibration.page_no,
-        "ratio_str": calibration.ratio_str,
-        "px_per_m": calibration.px_per_m,
-        "method": calibration.method,
-        "is_verified": calibration.is_verified,
-        "confidence": calibration.confidence,
-        "sheet_label": calibration.sheet_label,
-        "scale_text": calibration.scale_text,
-        "source_type": calibration.source_type,
-        "status": calibration.status,
-        "issues": list(calibration.issues),
-        "revision_id": calibration.revision_id,
-        "approved_by": calibration.approved_by,
-        "approved_at": calibration.approved_at,
-    }
-    return hashlib.sha256(
-        canonical_contract_json(payload).encode("utf-8")
-    ).hexdigest()
 
 
 def _validate_ownership(
@@ -221,6 +200,161 @@ def validate_scale_binding(
     return tuple(reasons), fresh, scale_fp
 
 
+def validate_owned_viewport_scale_binding(
+    *,
+    binding: ViewportScaleBinding,
+    context: ProviderContext,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+    page_no: int,
+    wall_viewport_id: Optional[str] = None,
+) -> tuple[tuple[str, ...], ScaleCalibration, str]:
+    """Validate one ownership-bearing ViewportScaleBinding before using its calibration.
+
+    The contained ScaleCalibration is consulted only after identity, SHA,
+    revision, page, viewport, fingerprint, and FIRM authority all match.
+    Title-block and other non-FIRM bindings stay blocked.
+    """
+    reasons: list[str] = []
+    if wall_viewport_id is not None:
+        if not (binding.viewport_id == wall_viewport_id == viewport.viewport_id):
+            reasons.append("scale_binding_wall_viewport_mismatch")
+    elif binding.viewport_id != viewport.viewport_id:
+        reasons.append("scale_binding_viewport_mismatch")
+
+    mapped_from_binding = context.page_for_viewport(binding.viewport_id)
+    mapped_from_viewport = context.page_for_viewport(viewport.viewport_id)
+    if not (
+        binding.page_no == page_no
+        and mapped_from_binding == page_no
+        and mapped_from_viewport == page_no
+    ):
+        reasons.append("scale_binding_page_mismatch")
+
+    if not (
+        binding.source_sha256
+        and binding.source_sha256 == context.source_sha256 == document.source_sha256
+    ):
+        reasons.append("scale_binding_source_sha_mismatch")
+
+    if not (
+        binding.revision_id
+        and context.revision_id
+        and context.current_revision_id
+        and binding.revision_id == context.revision_id == context.current_revision_id
+    ):
+        reasons.append("scale_binding_revision_mismatch")
+
+    if binding.measurement_authority != AuthorityStatus.FIRM.value:
+        reasons.append("scale_not_firm")
+    if binding.blocking_reasons:
+        reasons.extend(binding.blocking_reasons)
+
+    if viewport.resolved_scale_id != binding.scale_fingerprint:
+        reasons.append("viewport_scale_fingerprint_mismatch")
+
+    fresh = check_calibration_freshness(binding.calibration, context.current_revision_id)
+    scale_fp = scale_calibration_fingerprint(fresh)
+    if scale_fp != binding.scale_fingerprint:
+        reasons.append("scale_binding_fingerprint_stale")
+    if measurement_authority_for_page_scale(fresh) != AuthorityStatus.FIRM.value:
+        reasons.append("scale_not_firm")
+    if not math.isfinite(float(fresh.px_per_m)) or fresh.px_per_m <= 0.0:
+        reasons.append("invalid_scale_factor")
+    if fresh.page_no != page_no:
+        reasons.append("scale_page_mismatch")
+    if fresh.revision_id is None:
+        reasons.append("scale_revision_unbound")
+
+    return tuple(dict.fromkeys(reasons)), fresh, scale_fp
+
+
+def select_owned_viewport_scale_binding(
+    bindings: Sequence[ViewportScaleBinding],
+    *,
+    context: ProviderContext,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+    page_no: int,
+    wall_viewport_id: Optional[str] = None,
+) -> tuple[Optional[ViewportScaleBinding], tuple[str, ...]]:
+    """Keep every eligible owned FIRM binding; never pick first or nearest.
+
+    Zero input bindings abstain. Zero eligible among candidates surfaces the
+    candidate validation blockers. Two or more eligible bindings conflict.
+    """
+    eligible: list[ViewportScaleBinding] = []
+    failed_reasons: list[str] = []
+    for binding in bindings:
+        reasons, _fresh, _fp = validate_owned_viewport_scale_binding(
+            binding=binding,
+            context=context,
+            document=document,
+            viewport=viewport,
+            page_no=page_no,
+            wall_viewport_id=wall_viewport_id,
+        )
+        if not reasons:
+            eligible.append(binding)
+        else:
+            failed_reasons.extend(reasons)
+    if len(eligible) > 1:
+        return None, ("conflicting_eligible_scale_bindings",)
+    if len(eligible) == 1:
+        return eligible[0], ()
+    if not bindings:
+        return None, ("no_authoritative_scale_binding",)
+    return None, tuple(dict.fromkeys(failed_reasons)) or ("no_authoritative_scale_binding",)
+
+
+def _reconcile_owned_scale_binding(
+    scale_bindings: Sequence[ViewportScaleBinding],
+    *,
+    context: ProviderContext,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+    page_no: int,
+    wall_viewport_id: Optional[str] = None,
+) -> tuple[Optional[ViewportScaleBinding], tuple[str, ...], Optional[ScaleCalibration], Optional[str]]:
+    """Mandatory complete-set reconciliation before any FIRM scaled use.
+
+    Callers cannot pre-select one binding and hide competitors: every candidate
+    in ``scale_bindings`` is validated, and 0 / 2+ eligible bindings block.
+    """
+    selected, select_reasons = select_owned_viewport_scale_binding(
+        scale_bindings,
+        context=context,
+        document=document,
+        viewport=viewport,
+        page_no=page_no,
+        wall_viewport_id=wall_viewport_id,
+    )
+    if select_reasons or selected is None:
+        fresh: Optional[ScaleCalibration] = None
+        scale_fp: Optional[str] = None
+        if len(scale_bindings) == 1:
+            _reasons, fresh, scale_fp = validate_owned_viewport_scale_binding(
+                binding=scale_bindings[0],
+                context=context,
+                document=document,
+                viewport=viewport,
+                page_no=page_no,
+                wall_viewport_id=wall_viewport_id,
+            )
+        return None, select_reasons or ("no_authoritative_scale_binding",), fresh, scale_fp
+    scale_reasons, fresh, scale_fp = validate_owned_viewport_scale_binding(
+        binding=selected,
+        context=context,
+        document=document,
+        viewport=viewport,
+        page_no=page_no,
+        wall_viewport_id=wall_viewport_id,
+    )
+    if scale_reasons:
+        return None, scale_reasons, fresh, scale_fp
+    return selected, (), fresh, scale_fp
+
+
 def resolve_linear_measurement_input(
     *,
     context: ProviderContext,
@@ -229,16 +363,21 @@ def resolve_linear_measurement_input(
     entity: EntityEvidence,
     page_no: int,
     scaled_length_page_units: Optional[float] = None,
+    scale_bindings: Sequence[ViewportScaleBinding] = (),
     scale_calibration: Optional[ScaleCalibration] = None,
     figured_evidence: Optional[EvidenceAtom] = None,
+    wall_viewport_id: Optional[str] = None,
     max_delta_ratio: float = 0.05,
 ) -> MeasurementInputResolution:
     """Resolve one linear measurement using authoritative figured or FIRM scale.
 
     A CORROBORATED figured dimension has precedence. If a FIRM, viewport-bound
     scaled comparison is also available, disagreement beyond the existing
-    figured-dimension tolerance blocks. Scaled-only geometry requires a current
-    FIRM page scale that is unambiguous for the target viewport.
+    figured-dimension tolerance blocks. Scaled-only geometry requires the
+    complete candidate ``scale_bindings`` set for the owned page/viewport to
+    reconcile to exactly one eligible owned ``ViewportScaleBinding``. A bare
+    ``ScaleCalibration`` is not an authority input. A caller-selected single
+    binding is never validated in isolation for FIRM publication.
     """
     evidence_ids = tuple(entity.evidence_ids)
     ownership_reasons = _validate_ownership(
@@ -257,6 +396,17 @@ def resolve_linear_measurement_input(
             entity_id=entity.candidate_entity_id,
             evidence_ids=evidence_ids,
             reasons=ownership_reasons,
+        )
+    if scale_calibration is not None:
+        return _blocked(
+            context=context,
+            document=document,
+            page_no=page_no,
+            viewport_id=viewport.viewport_id,
+            entity_id=entity.candidate_entity_id,
+            evidence_ids=evidence_ids,
+            reasons=("bare_scale_calibration_rejected",),
+            source_type=MeasurementAuthorityType.PDF_SCALED.value,
         )
 
     if figured_evidence is not None:
@@ -288,15 +438,17 @@ def resolve_linear_measurement_input(
 
         trusted_scaled_mm: Optional[float] = None
         scale_fp: Optional[str] = None
-        if scaled_length_page_units is not None and scale_calibration is not None:
+        if scaled_length_page_units is not None and scale_bindings:
             if math.isfinite(float(scaled_length_page_units)) and float(scaled_length_page_units) > 0.0:
-                scale_reasons, fresh, candidate_fp = validate_scale_binding(
+                _selected, scale_reasons, fresh, candidate_fp = _reconcile_owned_scale_binding(
+                    scale_bindings,
                     context=context,
+                    document=document,
                     viewport=viewport,
                     page_no=page_no,
-                    calibration=scale_calibration,
+                    wall_viewport_id=wall_viewport_id,
                 )
-                if not scale_reasons:
+                if not scale_reasons and fresh is not None:
                     trusted_scaled_mm = float(scaled_length_page_units) / fresh.px_per_m * 1000.0
                     scale_fp = candidate_fp
 
@@ -341,7 +493,7 @@ def resolve_linear_measurement_input(
             notes=result.notes,
         )
 
-    if scaled_length_page_units is None or scale_calibration is None:
+    if scaled_length_page_units is None or not scale_bindings:
         return _blocked(
             context=context,
             document=document,
@@ -364,13 +516,15 @@ def resolve_linear_measurement_input(
             source_type=MeasurementAuthorityType.PDF_SCALED.value,
         )
 
-    scale_reasons, fresh, scale_fp = validate_scale_binding(
+    _selected, scale_reasons, fresh, scale_fp = _reconcile_owned_scale_binding(
+        scale_bindings,
         context=context,
+        document=document,
         viewport=viewport,
         page_no=page_no,
-        calibration=scale_calibration,
+        wall_viewport_id=wall_viewport_id,
     )
-    if scale_reasons:
+    if scale_reasons or fresh is None:
         return _blocked(
             context=context,
             document=document,
@@ -378,10 +532,10 @@ def resolve_linear_measurement_input(
             viewport_id=viewport.viewport_id,
             entity_id=entity.candidate_entity_id,
             evidence_ids=evidence_ids,
-            reasons=scale_reasons,
+            reasons=scale_reasons or ("no_authoritative_scale_binding",),
             source_type=MeasurementAuthorityType.PDF_SCALED.value,
             scale_fingerprint=scale_fp,
-            notes="; ".join(fresh.issues),
+            notes="; ".join(fresh.issues) if fresh is not None else "",
         )
 
     value_m = float(scaled_length_page_units) / fresh.px_per_m

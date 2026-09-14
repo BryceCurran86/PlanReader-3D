@@ -7,8 +7,9 @@ views.
 
 This module does not invent a second scale authority.  It reuses
 ``resolve_page_scale_calibration`` / ``measurement_authority_for_page_scale``
-and the existing measurement-input fingerprint seam, scoped to one owned
-viewport.
+and the existing page-scale fingerprint seam
+(``pb_page_scale_calibration_authority.scale_calibration_fingerprint``),
+scoped to one owned viewport.
 
 Safety:
 - project/file/benchmark identity is never an input to scale semantics;
@@ -32,7 +33,6 @@ import re
 from typing import Optional, Sequence
 
 from pb_geometry_takeoff_model import AuthorityStatus, ScaleCalibration
-from pb_measurement_input_authority import scale_calibration_fingerprint
 from pb_migration_contracts import ViewportEvidence, ViewportResolutionStatus
 from pb_page_scale_calibration_authority import (
     ScaleCalibrationStatus,
@@ -40,6 +40,7 @@ from pb_page_scale_calibration_authority import (
     ScaleSourceType,
     measurement_authority_for_page_scale,
     resolve_page_scale_calibration,
+    scale_calibration_fingerprint,
 )
 from pb_viewport_segmentation import (
     SegmentedViewport,
