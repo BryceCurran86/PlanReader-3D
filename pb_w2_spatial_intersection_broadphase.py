@@ -15,13 +15,21 @@ module changes is which (i, j) pairs are ever handed to that predicate.
 
 Correctness argument (why this is a superset, not an approximation)
 ---------------------------------------------------------------------
-Two line segments can only intersect if their axis-aligned bounding boxes
-overlap -- this is a necessary (not sufficient) condition with no exceptions,
-independent of tolerance. So any candidate-pair search that is guaranteed to
-return every bbox-overlapping pair is guaranteed to return a superset of
-every truly-intersecting pair. Feeding that superset through the unchanged
-exact predicate can only ever produce the same set of true intersections the
-O(n^2) oracle would have found -- it cannot invent one or drop one.
+The frozen oracle ``_segment_intersection(..., tol=1e-9)`` accepts an
+infinite-line crossing when each coordinate lies in
+``[min(endpoint) - tol, max(endpoint) + tol]``. Strict (unpadded) AABB
+overlap is therefore NOT a necessary condition for an oracle hit: two
+segments whose boxes are separated by at most ``1e-9`` can still be
+accepted. A review counterexample is the horizontal ``(0,0)->(1,0)`` and
+the vertical at ``x = 1 + gap`` for ``gap <= 1e-9``.
+
+The required invariant is: every pair the frozen oracle accepts must be
+presented to that oracle. The broad phase therefore expands every segment
+box on all four sides by exactly ``_INTERSECTION_BROADPHASE_TOL = 1e-9``
+(the frozen default, not ``_same``'s ``1e-6`` and not the ``1e-7``
+fragment cutoff). Padded-bbox overlap is a necessary condition for any
+pair ``_segment_intersection`` can accept. Extra padded pairs are allowed;
+the unchanged predicate remains the only decision-maker.
 
 Determinism argument (why replay order stays byte-for-byte identical)
 ---------------------------------------------------------------------
@@ -85,21 +93,33 @@ from pb_accuracy_v13_engines_v145 import (
 
 BBox = Tuple[float, float, float, float]
 
+# Must equal the frozen ``_segment_intersection`` default. Not ``_same`` (1e-6)
+# and not the fragment-length cutoff (1e-7). Drift is guarded in tests.
+_INTERSECTION_BROADPHASE_TOL = 1e-9
+
 
 def segment_bbox(segment: Segment) -> BBox:
-    """Axis-aligned bounding box (xmin, ymin, xmax, ymax) of one segment."""
+    """Padded AABB (xmin, ymin, xmax, ymax) for candidate discovery.
+
+    Padding is exactly the frozen oracle endpoint-containment tolerance.
+    """
     (x1, y1), (x2, y2) = segment
-    return (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+    pad = _INTERSECTION_BROADPHASE_TOL
+    return (
+        min(x1, x2) - pad,
+        min(y1, y2) - pad,
+        max(x1, x2) + pad,
+        max(y1, y2) + pad,
+    )
 
 
 def build_candidate_pairs(segments: Sequence[Segment]) -> Dict[int, List[int]]:
     """For each segment index i, the sorted list of indices j > i whose
-    bounding box overlaps segment i's -- a guaranteed superset of every pair
-    the exact intersection predicate could return a point for. Uses a
-    sweep-and-prune pass over x-intervals (sorted by xmin, an ascending-xmax
-    min-heap for O(log n) eviction) followed by a direct y-interval check on
-    the surviving active set; see module docstring for the correctness and
-    determinism arguments.
+    *padded* bounding box overlaps segment i's -- a guaranteed superset of
+    every pair the exact intersection predicate could return a point for.
+    Uses a sweep-and-prune pass over padded x-intervals (sorted by xmin, an
+    ascending-xmax min-heap for O(log n) eviction) followed by a padded
+    y-interval check on the surviving active set.
     """
     n = len(segments)
     if n < 2:

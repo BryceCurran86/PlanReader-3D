@@ -23,17 +23,23 @@ changed or wired to the new function by this file.
 """
 from __future__ import annotations
 
+import inspect
 import json
 import math
 import random
 import time
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Sequence, Set, Tuple
 
 import pytest
 
-from pb_accuracy_v13_engines_v145 import Segment, split_segments_at_intersections
+from pb_accuracy_v13_engines_v145 import (
+    Segment,
+    _segment_intersection,
+    split_segments_at_intersections,
+)
 from pb_w2_spatial_intersection_broadphase import (
+    _INTERSECTION_BROADPHASE_TOL,
     broadphase_reduction_stats,
     build_candidate_pairs,
     segment_bbox,
@@ -52,6 +58,31 @@ def _assert_equivalent(segments: List[Segment], label: str = "") -> None:
         f"{label}: indexed splitter diverged from the O(n^2) oracle "
         f"(oracle produced {len(oracle)} segments, indexed produced {len(fast)})"
     )
+
+
+def _indexed_candidate_pairs(segments: Sequence[Segment]) -> Set[Tuple[int, int]]:
+    candidates = build_candidate_pairs(segments)
+    return {(i, j) for i, js in candidates.items() for j in js}
+
+
+def _oracle_hit_pairs(segments: Sequence[Segment]) -> Set[Tuple[int, int]]:
+    hits: Set[Tuple[int, int]] = set()
+    for i in range(len(segments)):
+        for j in range(i + 1, len(segments)):
+            if _segment_intersection(segments[i], segments[j]) is not None:
+                hits.add((i, j))
+    return hits
+
+
+def _assert_oracle_hits_are_candidates(segments: Sequence[Segment], label: str = "") -> Tuple[int, int]:
+    hits = _oracle_hit_pairs(segments)
+    candidates = _indexed_candidate_pairs(segments)
+    missing = hits - candidates
+    assert not missing, (
+        f"{label}: TOTAL ORACLE-HIT PAIRS = {len(hits)}; "
+        f"MISSING ORACLE-HIT PAIRS = {len(missing)}; sample={sorted(missing)[:5]}"
+    )
+    return len(hits), len(missing)
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +143,32 @@ class TestBasicCorrectness:
         candidates = build_candidate_pairs(segments)
         assert candidates.get(0, []) == [1]
         _assert_equivalent(segments, "touching bboxes")
+
+
+class TestOracleToleranceContract:
+    def test_broadphase_pad_matches_frozen_oracle_default(self) -> None:
+        default = inspect.signature(_segment_intersection).parameters["tol"].default
+        assert default == 1e-9
+        assert _INTERSECTION_BROADPHASE_TOL == 1e-9
+        assert _INTERSECTION_BROADPHASE_TOL == default
+        assert _INTERSECTION_BROADPHASE_TOL != 1e-6
+        assert _INTERSECTION_BROADPHASE_TOL != 1e-7
+
+
+class TestVerifiedBoundaryMiss:
+    """The reviewed strict-AABB miss: vertical just past x=1, padded inside()."""
+
+    @pytest.mark.parametrize("gap", (4e-10, 5e-10, 9e-10, 1e-9, 1.1e-9, 2e-9))
+    def test_candidate_membership_follows_frozen_oracle(self, gap: float) -> None:
+        horizontal = _seg(0.0, 0.0, 1.0, 0.0)
+        vertical = _seg(1.0 + gap, -1.0, 1.0 + gap, 1.0)
+        segments = [horizontal, vertical]
+        oracle = _segment_intersection(horizontal, vertical)
+        in_candidates = (0, 1) in _indexed_candidate_pairs(segments)
+        if oracle is not None:
+            assert in_candidates is True
+        _assert_oracle_hits_are_candidates(segments, f"boundary gap={gap}")
+        _assert_equivalent(segments, f"boundary gap={gap}")
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +325,81 @@ class TestSyntheticAdversarialPatterns:
         _assert_equivalent(combined, "dense synthetic CAD-like drawing")
 
 
+class TestOracleHitSuperset:
+    """oracle_hit_pairs ⊆ indexed_candidate_pairs. Missing must stay 0."""
+
+    def _near_tolerance_sets(self) -> List[List[Segment]]:
+        tol = _INTERSECTION_BROADPHASE_TOL
+        sets: List[List[Segment]] = []
+        for gap in (tol - 4e-10, tol - 1e-10, tol, tol + 1e-10, tol + 4e-10):
+            sets.append([_seg(0.0, 0.0, 1.0, 0.0), _seg(1.0 + gap, -1.0, 1.0 + gap, 1.0)])
+            sets.append([_seg(0.0, 0.0, 0.0, 1.0), _seg(-1.0, 1.0 + gap, 1.0, 1.0 + gap)])
+            sets.append([_seg(0.0, 0.0, 2.0, 0.0), _seg(2.0 + gap, 0.0, 2.0 + gap, 2.0)])
+        return sets
+
+    def test_near_tolerance_gaps_and_endpoint_near_misses(self) -> None:
+        total = 0
+        missing = 0
+        for idx, segments in enumerate(self._near_tolerance_sets()):
+            hits, miss = _assert_oracle_hits_are_candidates(segments, f"near-tol set {idx}")
+            total += hits
+            missing += miss
+            _assert_equivalent(segments, f"near-tol set {idx}")
+        assert missing == 0
+        assert total >= 1
+
+    @pytest.mark.parametrize("seed", [1, 2, 3, 11, 42])
+    def test_random_clouds_and_metamorphics(self, seed: int) -> None:
+        base = _random_cloud(80, seed)
+        for name, segments in (
+            ("cloud", base),
+            ("translated", _translate(base, 40.0, -15.0)),
+            ("rotated", _rotate(base, math.pi / 7)),
+            ("scaled", _scale(base, 2.5)),
+        ):
+            _assert_oracle_hits_are_candidates(segments, f"{name} seed={seed}")
+            _assert_equivalent(segments, f"{name} seed={seed}")
+
+    def test_concurrent_nearly_parallel_duplicates_short_cad_shuffle(self) -> None:
+        sets = [
+            _star_pattern(19),
+            _nearly_parallel_lines(40),
+            _duplicate_and_repeated_lines(_grid_pattern(3, 3), 3),
+            [_seg(0, 0, 1e-4, 1e-4), _seg(0, 1e-4, 1e-4, 0), _seg(0, 0, 2, 0)],
+            _orthogonal_floor_plan(12, seed=8),
+        ]
+        shuffled = list(sets[-1])
+        random.Random(4).shuffle(shuffled)
+        sets.append(shuffled)
+        total = 0
+        missing = 0
+        for idx, segments in enumerate(sets):
+            hits, miss = _assert_oracle_hits_are_candidates(segments, f"property set {idx}")
+            total += hits
+            missing += miss
+            _assert_equivalent(segments, f"property set {idx}")
+        assert missing == 0
+        assert total >= 1
+
+    def test_exhaustive_small_sets_report_zero_missing(self) -> None:
+        sets = [
+            [_seg(0, 0, 10, 0), _seg(5, -5, 5, 5)],
+            [_seg(0, 0, 5, 0), _seg(5, 0, 5, 5)],
+            [_seg(0, 0, 10, 0), _seg(0, 0, 10, 0), _seg(5, -5, 5, 5)],
+            _grid_pattern(4, 4),
+            _star_pattern(11),
+            _random_cloud(40, seed=9),
+        ]
+        total_hits = 0
+        total_missing = 0
+        for idx, segments in enumerate(sets):
+            hits, miss = _assert_oracle_hits_are_candidates(segments, f"exhaustive set {idx}")
+            total_hits += hits
+            total_missing += miss
+        assert total_missing == 0
+        assert total_hits >= 1
+
+
 # ---------------------------------------------------------------------------
 # broadphase_reduction_stats / build_candidate_pairs sanity
 # ---------------------------------------------------------------------------
@@ -293,8 +425,9 @@ class TestBroadphaseStats:
             assert js == sorted(js)
 
     def test_segment_bbox_orders_min_max_regardless_of_endpoint_order(self):
-        assert segment_bbox(_seg(5, 5, 0, 0)) == (0.0, 0.0, 5.0, 5.0)
-        assert segment_bbox(_seg(0, 5, 5, 0)) == (0.0, 0.0, 5.0, 5.0)
+        pad = _INTERSECTION_BROADPHASE_TOL
+        assert segment_bbox(_seg(5, 5, 0, 0)) == (0.0 - pad, 0.0 - pad, 5.0 + pad, 5.0 + pad)
+        assert segment_bbox(_seg(0, 5, 5, 0)) == (0.0 - pad, 0.0 - pad, 5.0 + pad, 5.0 + pad)
 
 
 # ---------------------------------------------------------------------------
@@ -388,6 +521,13 @@ class TestRealDrawingEquivalenceAndPerformance:
         pairs = _real_structural_point_pairs(_DUNGICHA_SNAPSHOT_PATH)
         assert len(pairs) > 5000
         _assert_equivalent(pairs, "real Dungicha committed snapshot")
+
+    def test_oracle_hit_superset_on_committed_snapshots(self):
+        for path in (_BAGHAU_SNAPSHOT_PATH, _DUNGICHA_SNAPSHOT_PATH):
+            pairs = _real_structural_point_pairs(path)
+            hits, miss = _assert_oracle_hits_are_candidates(pairs, path.name)
+            assert miss == 0
+            assert hits >= 1
 
     def test_indexed_splitter_stays_fast_on_real_committed_snapshots(self):
         for path in (_BAGHAU_SNAPSHOT_PATH, _DUNGICHA_SNAPSHOT_PATH):
