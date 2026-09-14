@@ -275,8 +275,14 @@ def _intervals_overlap(left: tuple[str, float, float], right: tuple[str, float, 
 
 
 def _intervals_disjoint(left: tuple[str, float, float], right: tuple[str, float, float]) -> bool:
+    """Positive disjointness requires comparable projections on the same axis.
+
+    A dominant-axis mismatch can arise from curved/L-shaped/reconstructed
+    paths.  It is therefore lack of a comparable 1-D span, not proof that two
+    physical walls are distinct.
+    """
     if left[0] != right[0]:
-        return True
+        return False
     return left[2] <= right[1] or right[2] <= left[1]
 
 
@@ -330,32 +336,31 @@ def classify_physical_wall_pair(
     equal_ancestry = _ancestry_equal(left_prims, right_prims)
     coverage_identical = _ancestry_coverage_identical(left_prims, right_prims)
 
-    # SAME: same complete path + same U1 ancestry / identical coverage, and
-    # not crossing an unproven viewport/level label boundary while doing so.
     if same_path and (equal_ancestry or coverage_identical) and not cross_scope:
         return PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
 
-    # identical path + different primitive IDs, no duplication proof → AMBIGUOUS
     if same_path and not equal_ancestry:
         return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
 
     left_iv = _axis_interval(left.path_fingerprint or ())
     right_iv = _axis_interval(right.path_fingerprint or ())
 
-    # DISTINCT: same ancestry, proven disjoint spans in a common topology
+    # Span comparisons are only positive evidence when both paths have the
+    # same dominant projection axis.  Different axes are incomparable, not
+    # disjoint proof.
+    if left_iv is not None and right_iv is not None and left_iv[0] != right_iv[0]:
+        return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+
     if equal_ancestry and left_iv is not None and right_iv is not None:
         if _intervals_disjoint(left_iv, right_iv):
             return PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
-        # partial overlap / contained subspan without split provenance
         return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
 
-    # shared ancestry, different paths, overlapping intervals (paired-face etc.)
     if shared and left_iv is not None and right_iv is not None:
         if _intervals_overlap(left_iv, right_iv):
             return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
         return PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
 
-    # different path + independent provenance is NOT positive DISTINCT proof
     return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
 
 
@@ -398,7 +403,7 @@ def resolve_physical_wall_equivalence(
     Any AMBIGUOUS edge in a connected component → all members abstain.
     Proven DISTINCT walls publish independently when otherwise usable.
     """
-    del walls_by_id  # ownership already baked into each identity; kept for call-site compat
+    del walls_by_id
     usable: list[PhysicalWallIdentity] = []
     blockers: dict[str, list[str]] = {}
     viewport_ids: set[str] = set()
@@ -416,7 +421,6 @@ def resolve_physical_wall_equivalence(
 
     scope_viewport = sorted(viewport_ids)[0] if len(viewport_ids) == 1 else "multi"
     member_ids = [identity.wall_candidate_id for identity in usable]
-    by_id = {identity.wall_candidate_id: identity for identity in usable}
 
     pair_classifications: list[tuple[str, str, str]] = []
     same_links: list[tuple[str, str]] = []
@@ -432,7 +436,6 @@ def resolve_physical_wall_equivalence(
             elif classification == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE:
                 ambiguous_links.append((a, b))
 
-    # Components over SAME ∪ AMBIGUOUS edges.
     related_links = same_links + ambiguous_links
     components = _union_find_groups(related_links, member_ids) if member_ids else []
     ambiguous_edges = {frozenset(pair) for pair in ambiguous_links}
@@ -441,7 +444,6 @@ def resolve_physical_wall_equivalence(
     ambiguous_walls: set[str] = set()
     same_groups: list[tuple[str, ...]] = []
     representatives: list[str] = []
-    covered_non_representatives: set[str] = set()
 
     for component in components:
         component_set = set(component)
@@ -468,17 +470,14 @@ def resolve_physical_wall_equivalence(
             for wall_id in group:
                 if wall_id == rep:
                     continue
-                covered_non_representatives.add(wall_id)
                 blockers.setdefault(wall_id, []).append(
                     f"equivalent_physical_wall_represented_by:{rep}"
                 )
             continue
-        # singleton or unrelated — fall through to independent publication
         for wall_id in component:
             if wall_id not in blockers:
                 representatives.append(wall_id)
 
-    # Usable walls never linked into a SAME/AMBIGUOUS component publish alone.
     linked = {wall_id for group in components for wall_id in group}
     for wall_id in member_ids:
         if wall_id in linked:
@@ -486,9 +485,7 @@ def resolve_physical_wall_equivalence(
         if wall_id not in blockers:
             representatives.append(wall_id)
 
-    # Preserve deterministic unique order.
     representatives = list(dict.fromkeys(representatives))
-    # Drop representatives that somehow also got blockers.
     representatives = [wall_id for wall_id in representatives if wall_id not in blockers]
 
     abstained: list[str] = []
@@ -517,37 +514,3 @@ def resolve_physical_wall_equivalence(
             wall_id: tuple(dict.fromkeys(reasons)) for wall_id, reasons in blockers.items() if reasons
         },
     )
-
-
-def colliding_physical_wall_ids(
-    identities: Iterable[Optional[PhysicalWallIdentity]],
-) -> set[str]:
-    """Wall ids that must abstain under physical-equivalence resolution."""
-    resolution = resolve_physical_wall_equivalence(tuple(identities))
-    return set(resolution.abstained_wall_ids)
-
-
-def walls_missing_or_abstained_identity(
-    walls: Sequence[WallCandidate],
-    identities: Mapping[str, PhysicalWallIdentity],
-) -> dict[str, tuple[str, ...]]:
-    """Fail-closed map of walls that cannot publish when a sidecar was supplied."""
-    resolution = resolve_physical_wall_equivalence(
-        tuple(identities.get(wall.candidate_id) for wall in walls),
-        walls_by_id={wall.candidate_id: wall for wall in walls},
-    )
-    blocked: dict[str, tuple[str, ...]] = {}
-    for wall in walls:
-        identity = identities.get(wall.candidate_id)
-        if identity is None:
-            blocked[wall.candidate_id] = ("physical_wall_identity_unavailable",)
-            continue
-        reasons = list(resolution.blockers_for(wall.candidate_id))
-        if identity.usable and wall.candidate_id not in resolution.representative_wall_ids:
-            if not reasons:
-                reasons = ["physical_wall_not_selected_representative"]
-        if not identity.usable and not reasons:
-            reasons = list(identity.blocking_reasons or ("physical_wall_identity_abstained",))
-        if reasons:
-            blocked[wall.candidate_id] = tuple(dict.fromkeys(reasons))
-    return blocked
