@@ -395,24 +395,32 @@ def _native_layer_atom(
 ) -> Optional[EvidenceAtom]:
     """See LAYER EVIDENCE CONTRACT in the module docstring: reuses U1's own
     already-computed ``attribute_status`` for the ``layer`` field instead of
-    re-implementing plural-source dedup. A "conflict" status (two or more
-    DIFFERENT present layer values among ONE edge's own native sources)
-    makes layer evidence abstain entirely for that edge.
+    re-implementing plural-source dedup.
 
-    REVISED after a second independent GPT-2 re-review found the previous
-    per-edge early-return was itself a whole-wall independence violation:
-    each contributing edge can be internally self-consistent (its OWN
-    parents agree) while DIFFERENT edges of the SAME WallCandidate disagree
-    with EACH OTHER (e.g. one edge's parents all say "A-WALL", another
-    edge's parents all say "Glazing") -- returning on the first "wall"-
-    looking edge ignored every other edge's own opinion entirely. This now
-    collects a representative present-and-agreed layer value from EVERY
-    contributing edge first, and only credits when (a) at least one edge
-    agrees layer support exists AND (b) no OTHER edge's own present layer
-    value disagrees (fails to contain "wall") -- a single "Wall"-named
-    parent among genuinely mixed edges must never promote the whole
-    candidate, matching the same fail-closed principle already applied
-    within one edge, now applied across the whole wall.
+    REVISED (candidate-wide agreement) after a second independent GPT-2
+    re-review found the previous per-edge early-return was itself a
+    whole-wall independence violation: each contributing edge can be
+    internally self-consistent (its OWN parents agree) while DIFFERENT
+    edges of the SAME WallCandidate disagree with EACH OTHER (e.g. one
+    edge's parents all say "A-WALL", another edge's parents all say
+    "Glazing") -- returning on the first "wall"-looking edge ignored every
+    other edge's own opinion entirely. This collects a representative
+    present-and-agreed layer value from EVERY contributing edge first, and
+    only credits when (a) at least one edge agrees layer support exists AND
+    (b) no OTHER edge's own present layer value disagrees.
+
+    REVISED AGAIN (conflicted edge must not be silently dropped) after a
+    third independent GPT-2 re-review found that an edge whose OWN
+    ``attribute_status.layer == "conflict"`` (this ONE edge's own native
+    parents disagree with each other, e.g. "A-WALL" + "Glazing" among its
+    own source records) was simply skipped -- contributing no opinion, but
+    also raising no objection -- letting some OTHER, internally-clean
+    "A-WALL" edge promote the whole wall regardless. A contributor whose
+    own layer evidence is internally contradictory is exactly the kind of
+    fact that must fail closed for the WHOLE candidate, not vanish from
+    consideration: any contributing edge with an unresolved internal layer
+    conflict now aborts whole-wall layer support immediately, before any
+    other edge's clean value is even consulted.
     """
     wall_edge_ids = list(wall.face_a_segment_ids) + list(wall.face_b_segment_ids or ())
     per_edge_layers: List[Tuple[str, str]] = []
@@ -424,7 +432,11 @@ def _native_layer_atom(
         attribute_status = lineage.get("attribute_status") or {}
         layer_status = attribute_status.get("layer")
         if layer_status == "conflict":
-            continue  # disagreeing native layer parents WITHIN this one edge -- no opinion from this edge
+            # This edge's OWN native parents disagree with each other.
+            # That is unresolved evidence, not an absent opinion -- it must
+            # fail closed for the WHOLE wall, not be silently dropped while
+            # some other clean edge promotes the candidate regardless.
+            return None
         present_layers = [
             str(record.get("layer") or "")
             for record in (lineage.get("source_records") or ())
