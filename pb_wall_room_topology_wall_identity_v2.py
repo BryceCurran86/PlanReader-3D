@@ -76,7 +76,7 @@ Required properties, each proven by a dedicated test in
 from __future__ import annotations
 
 import math
-from typing import Any, Iterable, Mapping, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 from pb_migration_contracts import stable_contract_id
 from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
@@ -139,6 +139,75 @@ def canonical_path_fingerprint(
     return min(collapsed, reversed_collapsed)
 
 
+def _path_from_edges(
+    edge_ids: Sequence[str],
+    edges_by_id: Mapping[str, Mapping[str, Any]],
+    p1: Tuple[float, float],
+    p2: Tuple[float, float],
+) -> Tuple[Tuple[float, float], ...]:
+    """Reconstruct the chain's own actual interior polyline from its
+    contributing edges' own coordinates, walking shared endpoints -- NOT
+    just the two boundary points. This is the fix for a real, independently
+    found defect: the first version of this module always fingerprinted
+    only (p1, p2), so two chains with identical endpoints and identical
+    provenance but a genuinely different interior route (e.g. a straight
+    run versus a detour via an intermediate point) collided, because the
+    "hybrid" fingerprint was never actually shown the interior geometry it
+    was named for. Falls back to (p1, p2) when edge coordinates are
+    unavailable (a caller with no geometry, e.g. a unit test exercising
+    identity in isolation) or when the edges do not form one clean simple
+    path (a degenerate/closed-loop input, which assemble_wall_candidates'
+    own "non_simple_chain_topology_fallback_ordering" reason code already
+    flags elsewhere as an existing, documented edge case) -- never guesses
+    a partial reconstruction.
+    """
+    raw_segments: List[Tuple[Tuple[float, float], Tuple[float, float]]] = []
+    for edge_id in edge_ids:
+        edge = edges_by_id.get(edge_id) or {}
+        try:
+            x1, y1 = float(edge["x1"]), float(edge["y1"])
+            x2, y2 = float(edge["x2"]), float(edge["y2"])
+        except (KeyError, TypeError, ValueError):
+            return (p1, p2)
+        raw_segments.append(((x1, y1), (x2, y2)))
+
+    if not raw_segments:
+        return (p1, p2)
+    if len(raw_segments) == 1:
+        return raw_segments[0]
+
+    def _round_key(point: Tuple[float, float]) -> Tuple[float, float]:
+        return (round(point[0], _PATH_QUANTIZATION_NDIGITS), round(point[1], _PATH_QUANTIZATION_NDIGITS))
+
+    adjacency: Dict[Tuple[float, float], List[int]] = {}
+    for idx, (a, b) in enumerate(raw_segments):
+        adjacency.setdefault(_round_key(a), []).append(idx)
+        adjacency.setdefault(_round_key(b), []).append(idx)
+
+    endpoints = [point for point, incident in adjacency.items() if len(incident) == 1]
+    if len(endpoints) != 2:
+        return (p1, p2)  # degenerate/non-simple -- fall back rather than guess
+
+    start = sorted(endpoints)[0]
+    path: List[Tuple[float, float]] = [start]
+    used: set = set()
+    current = start
+    for _ in range(len(raw_segments)):
+        candidates = [idx for idx in adjacency[current] if idx not in used]
+        if not candidates:
+            break
+        idx = candidates[0]
+        used.add(idx)
+        a, b = raw_segments[idx]
+        nxt = b if _round_key(a) == current else a
+        path.append(nxt)
+        current = _round_key(nxt)
+
+    if len(path) != len(raw_segments) + 1:
+        return (p1, p2)  # could not walk cleanly -- fall back rather than guess
+    return tuple(path)
+
+
 def canonical_wall_candidate_id_v2(
     viewport_id: str,
     edge_ids: Sequence[str],
@@ -151,18 +220,16 @@ def canonical_wall_candidate_id_v2(
     ``edge_ids`` are the Stage-A edge ids assembled into this one chain
     (``assemble_wall_candidates``'s own per-group ``edge_ids`` set);
     ``edges_by_id`` is that same function's already-built lookup; ``p1``/
-    ``p2`` are the chain's two boundary endpoints. Callers with the chain's
-    full interior polyline (``WallCandidate.centerline_pts``) may pass it
-    via ``p1``/``p2`` as a 2-tuple degenerate case, or a future caller could
-    extend this signature to accept the full path directly -- for every
-    wall this repository's assemble_wall_candidates can currently produce,
-    the two boundary points already fully determine the canonical
-    fingerprint (see module docstring: chains are always single straight
-    runs by construction), so the 2-point signature is not a loss of
-    precision for today's callers.
+    ``p2`` are the chain's two boundary endpoints, used as a fallback path
+    when the contributing edges' own coordinates are unavailable. The
+    ACTUAL interior path is reconstructed from the edges themselves via
+    ``_path_from_edges`` -- this is what makes the fingerprint genuinely
+    path-sensitive rather than only endpoint-sensitive (see that function's
+    docstring for the defect this fixes).
     """
     source_primitive_ids = _chain_source_primitive_ids(edge_ids, edges_by_id)
-    path_fingerprint = canonical_path_fingerprint((p1, p2))
+    path = _path_from_edges(edge_ids, edges_by_id, p1, p2)
+    path_fingerprint = canonical_path_fingerprint(path)
     payload = {
         "viewport_id": viewport_id,
         "path_fingerprint": path_fingerprint,

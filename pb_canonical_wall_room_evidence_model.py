@@ -301,27 +301,6 @@ def _wall_native_source_ids(wall: WallCandidate, edges_by_id: Mapping[str, Mappi
     return ids
 
 
-def _edge_bbox(edge: Mapping[str, Any]) -> Optional[Tuple[float, float, float, float]]:
-    try:
-        x1, y1, x2, y2 = float(edge["x1"]), float(edge["y1"]), float(edge["x2"]), float(edge["y2"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    return (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
-
-
-def _bbox_union(boxes: Sequence[Tuple[float, float, float, float]]) -> Optional[Tuple[float, float, float, float]]:
-    if not boxes:
-        return None
-    return (
-        min(b[0] for b in boxes), min(b[1] for b in boxes),
-        max(b[2] for b in boxes), max(b[3] for b in boxes),
-    )
-
-
-def _bboxes_disjoint(a: Tuple[float, float, float, float], b: Tuple[float, float, float, float]) -> bool:
-    return a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1]
-
-
 def _paired_face_atom(
     wall: WallCandidate,
     paired_wall_faces: Sequence[Mapping[str, Any]],
@@ -331,13 +310,25 @@ def _paired_face_atom(
     page_id: str,
 ) -> Optional[EvidenceAtom]:
     """See PAIRED-FACE DESCENDANT-OWNERSHIP CONTRACT in the module
-    docstring. A native id shared with some OTHER edge outside this wall
-    means the pair evidence's true target is ambiguous between descendants;
-    it is only credited to THIS wall when this wall's own edges can be
-    shown to occupy a geometrically disjoint region from that other edge.
-    When that cannot be established (missing coordinates, or the regions
-    are not clearly disjoint), this abstains for that pair rather than
-    guessing -- no nearest/first/smallest tie-break.
+    docstring.
+
+    REVISED after a second independent GPT-2 re-review found the previous
+    "credit if the sibling descendants are geometrically disjoint" rule was
+    backwards: sibling disjointness proves the two descendants are
+    DIFFERENT, not that either one is the pair's actual target. `detect_
+    wall_pairs` records only ids + a gap/overlap scalar, never an interval
+    on the native primitive's own extent, so THIS module currently has no
+    way to positively localize which descendant a shared-parent pair
+    belongs to. Per the fail-closed principle already used everywhere else
+    in this module: when a matched native id is also carried by ANY edge
+    outside this wall, ownership is ambiguous and this always abstains for
+    that pair -- no bbox heuristic, no nearest/first/smallest tie-break.
+    A future enhancement could resolve this properly by additionally
+    passing native-segment coordinates (not just descendant/Stage-A edge
+    coordinates) so the actual overlap interval on the native primitive's
+    own line could be computed and compared against this specific
+    descendant's own span; that is not implemented here, and no currently
+    required test needs it.
     """
     wall_edge_ids = set(wall.face_a_segment_ids) | set(wall.face_b_segment_ids or ())
     wall_native_ids = _wall_native_source_ids(wall, edges_by_id)
@@ -350,17 +341,13 @@ def _paired_face_atom(
         if matched_native_id is None:
             continue
 
-        other_edges_sharing_native_id = [
-            eid
-            for eid, edge in edges_by_id.items()
-            if eid not in wall_edge_ids
+        native_id_shared_with_other_descendant = any(
+            eid not in wall_edge_ids
             and matched_native_id in ((edge.get(LINEAGE_KEY) or {}).get("source_primitive_ids") or ())
-        ]
-        if other_edges_sharing_native_id:
-            this_bbox = _bbox_union([b for eid in wall_edge_ids if (b := _edge_bbox(edges_by_id.get(eid, {}))) is not None])
-            other_bbox = _bbox_union([b for eid in other_edges_sharing_native_id if (b := _edge_bbox(edges_by_id.get(eid, {}))) is not None])
-            if this_bbox is None or other_bbox is None or not _bboxes_disjoint(this_bbox, other_bbox):
-                continue  # ambiguous descendant ownership -- abstain for this pair
+            for eid, edge in edges_by_id.items()
+        )
+        if native_id_shared_with_other_descendant:
+            continue  # ambiguous ownership across descendants sharing this native id -- always abstain for this pair
 
         return _atom(
             document_id=document_id,
@@ -409,15 +396,26 @@ def _native_layer_atom(
     """See LAYER EVIDENCE CONTRACT in the module docstring: reuses U1's own
     already-computed ``attribute_status`` for the ``layer`` field instead of
     re-implementing plural-source dedup. A "conflict" status (two or more
-    DIFFERENT present layer values among this edge's native sources) makes
-    layer evidence abstain entirely for that edge -- a single "Wall"-named
-    parent among genuinely disagreeing parents must never promote the whole
-    candidate. Only a real, present ("agreed") single layer value is ever
-    tested for the "wall" substring; a fabricated/absent sentinel is
-    filtered by the `layer_present` flag before it can even become a
-    candidate present value.
+    DIFFERENT present layer values among ONE edge's own native sources)
+    makes layer evidence abstain entirely for that edge.
+
+    REVISED after a second independent GPT-2 re-review found the previous
+    per-edge early-return was itself a whole-wall independence violation:
+    each contributing edge can be internally self-consistent (its OWN
+    parents agree) while DIFFERENT edges of the SAME WallCandidate disagree
+    with EACH OTHER (e.g. one edge's parents all say "A-WALL", another
+    edge's parents all say "Glazing") -- returning on the first "wall"-
+    looking edge ignored every other edge's own opinion entirely. This now
+    collects a representative present-and-agreed layer value from EVERY
+    contributing edge first, and only credits when (a) at least one edge
+    agrees layer support exists AND (b) no OTHER edge's own present layer
+    value disagrees (fails to contain "wall") -- a single "Wall"-named
+    parent among genuinely mixed edges must never promote the whole
+    candidate, matching the same fail-closed principle already applied
+    within one edge, now applied across the whole wall.
     """
     wall_edge_ids = list(wall.face_a_segment_ids) + list(wall.face_b_segment_ids or ())
+    per_edge_layers: List[Tuple[str, str]] = []
     for edge_id in wall_edge_ids:
         edge = edges_by_id.get(edge_id)
         if not edge:
@@ -426,30 +424,43 @@ def _native_layer_atom(
         attribute_status = lineage.get("attribute_status") or {}
         layer_status = attribute_status.get("layer")
         if layer_status == "conflict":
-            continue  # disagreeing native layer parents -- abstain for this edge's layer signal
+            continue  # disagreeing native layer parents WITHIN this one edge -- no opinion from this edge
         present_layers = [
             str(record.get("layer") or "")
             for record in (lineage.get("source_records") or ())
             if record.get("layer_present")
         ]
         if not present_layers:
-            continue  # missing layer = no layer support
+            continue  # missing layer = no opinion from this edge
         # attribute_status != "conflict" guarantees every present value here
-        # is identical (U1's own dedup already established that); any one
-        # of them is representative.
-        layer = present_layers[0]
-        if "wall" in layer.lower():
-            return _atom(
-                document_id=document_id,
-                page_id=page_id,
-                viewport_id=wall.viewport_id,
-                kind=FAMILY_NATIVE_LAYER_WALL_SUPPORT,
-                wall_id=wall.candidate_id,
-                reason_codes=("all_present_native_layers_agree_and_contain_wall",),
-                confidence=0.3,
-                feature_basis={"layer": layer, "present_source_count": len(present_layers)},
-            )
-    return None
+        # is identical (U1's own dedup already established that for THIS
+        # edge); any one of them is representative of this edge's own view.
+        per_edge_layers.append((edge_id, present_layers[0]))
+
+    if not per_edge_layers:
+        return None  # no edge on this wall has any present layer opinion at all
+
+    wall_matches = [(eid, layer) for eid, layer in per_edge_layers if "wall" in layer.lower()]
+    non_wall_matches = [(eid, layer) for eid, layer in per_edge_layers if "wall" not in layer.lower()]
+    if not wall_matches:
+        return None
+    if non_wall_matches:
+        # Candidate-wide disagreement: at least one edge says wall-ish,
+        # at least one other says something else entirely -- fail closed
+        # rather than letting the first wall-looking edge speak for edges
+        # that plainly disagree with it.
+        return None
+
+    return _atom(
+        document_id=document_id,
+        page_id=page_id,
+        viewport_id=wall.viewport_id,
+        kind=FAMILY_NATIVE_LAYER_WALL_SUPPORT,
+        wall_id=wall.candidate_id,
+        reason_codes=("all_edges_with_a_present_native_layer_agree_and_contain_wall",),
+        confidence=0.3,
+        feature_basis={"per_edge_layers": per_edge_layers},
+    )
 
 
 def resolve_wall_physical_evidence(
@@ -606,20 +617,38 @@ def resolve_wall_physical_evidence(
     return resolved, minted_atoms
 
 
-def wall_is_credible_room_boundary(wall: WallCandidate) -> bool:
-    """FIRM BOUNDARY CONTRACT: a wall may bound a conservatively-reconstructed
-    room only when it carries POSITIVE physical-wall evidence (at least one
-    supporting evidence id) AND no unresolved opposing evidence at all.
-
-    This is stricter than "status not in {ABSTAINED, CONFLICT}": an
-    opposing-only CANDIDATE (zero supporting evidence, one or more opposing
-    atoms -- see the ``has_opposing and not has_supporting`` branch of
-    ``resolve_wall_physical_evidence``) previously passed that weaker check
-    and could still close a room on nothing but disputed, unsupported
-    geometry. It fails this contract on both counts (no support, has
-    opposition) and is correctly excluded.
+def wall_has_positive_uncontested_evidence(wall: WallCandidate) -> bool:
+    """WEAK signal: at least one supporting evidence id and zero opposing
+    evidence. NOT sufficient, on its own, for a firm/quantity-chain-eligible
+    room boundary -- see ``wall_is_credible_room_boundary`` for that
+    stronger contract. A wall with exactly one evidence DOMAIN (e.g. an
+    ordinary solid retained line with nothing opposing it) satisfies this
+    check trivially; kept only for the permissive research-visibility
+    policy and for direct before/after comparison, never as the default
+    "firm" claim.
     """
     return bool(wall.supporting_evidence_ids) and not bool(wall.conflicting_evidence_ids)
+
+
+def wall_is_credible_room_boundary(wall: WallCandidate) -> bool:
+    """FIRM BOUNDARY CONTRACT (revised after a second independent GPT-2
+    re-review): a wall may bound a conservatively-reconstructed, quantity-
+    chain-eligible room only when its OWN physical existence is genuinely
+    CORROBORATED -- 2+ independent evidence domains, zero opposition (see
+    the CAUSAL-DOMAIN CONTRACT in the module docstring) -- not merely "has
+    some uncontested support".
+
+    The previous version of this function accepted ``wall_has_positive_
+    uncontested_evidence`` as sufficient. That is a real, weaker, still-
+    honest claim ("nothing currently disputes this wall"), but it let a
+    room close on walls the physical-existence model itself only ever
+    labelled CANDIDATE (single-domain) -- confidence inflation at the room
+    level, even though the wall-to-room dependency itself remained
+    correctly one-directional (no room ever feeds back into wall
+    corroboration). A room whose boundaries are meant to be "firm" enough
+    for a later quantity chain must require the stronger claim.
+    """
+    return wall.metadata.get("physical_evidence_status") == "corroborated"
 
 
 def reconstruct_room_candidates_from_credible_walls(
@@ -643,13 +672,20 @@ def reconstruct_room_candidates_from_credible_walls(
 
     ``exclude_conflict=True`` (the default, "conservative" policy) applies
     the FIRM BOUNDARY CONTRACT above (``wall_is_credible_room_boundary``):
-    positive support AND no opposition, required. A resulting room's
-    ``bounding_wall_candidate_ids`` are therefore, by construction, entirely
-    walls that satisfy that contract -- there is no separate "firm room"
-    concept beyond this; a caller wanting to confirm can re-check every id
-    in that list against ``wall_is_credible_room_boundary`` directly. If no
-    boundary population is strong enough to close a loop, the returned list
-    is legitimately empty -- this function never fabricates a closure.
+    genuine physical-existence CORROBORATION (2+ independent domains, zero
+    opposition) is required per boundary wall -- merely uncontested single-
+    domain support (``wall_has_positive_uncontested_evidence``) is NOT
+    enough. A resulting room's ``bounding_wall_candidate_ids`` are
+    therefore, by construction, entirely walls that satisfy the stronger
+    contract -- there is no separate "firm room" concept beyond this; a
+    caller wanting to confirm can re-check every id in that list against
+    ``wall_is_credible_room_boundary`` directly. If no boundary population
+    is strong enough to close a loop, the returned list is legitimately
+    empty -- this function never fabricates a closure. On real, messy
+    drawings this is expected to shrink the conservative room count
+    substantially relative to the weaker check, since genuine 2-domain
+    corroboration is rare with the evidence families implemented so far --
+    that reduction is preferred over an inflated, unearned "firm" count.
 
     ``exclude_conflict=False`` (the "permissive" policy) drops only
     ABSTAINED walls (no evidence at all either way), keeping CONFLICT and

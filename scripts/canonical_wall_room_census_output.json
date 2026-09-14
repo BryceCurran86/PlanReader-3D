@@ -1,7 +1,7 @@
 [
   {
     "name": "Baghau",
-    "elapsed_s": 25.887,
+    "elapsed_s": 24.912,
     "raw_region_segments": 2398,
     "stage_a_edges": 1922,
     "excluded_segments": 916,
@@ -11,17 +11,17 @@
       "conflict": 300
     },
     "wall_existence_breakdown": {
-      "corroborated": 26,
-      "candidate": 344,
+      "corroborated": 21,
+      "candidate": 349,
       "conflict": 300
     },
     "wall_pairs_detected": 398,
     "positive_supported_candidates": 370,
-    "rooms_conservative_total": 12,
-    "rooms_conservative_firm_under_new_boundary_contract": 3,
+    "rooms_conservative_total": 0,
+    "rooms_conservative_firm_under_new_boundary_contract": 0,
     "rooms_permissive_total": 160,
     "corroborated_top_level_count": 0,
-    "existence_corroborated_but_capped_count": 26,
+    "existence_corroborated_but_capped_count": 21,
     "corroborated_samples": [
       {
         "candidate_id": "wall_490b06404a87165e99aa",
@@ -196,7 +196,7 @@
   },
   {
     "name": "Lamu",
-    "elapsed_s": 6.93,
+    "elapsed_s": 5.54,
     "raw_region_segments": 1245,
     "stage_a_edges": 1009,
     "excluded_segments": 147,
@@ -252,7 +252,7 @@
   },
   {
     "name": "Dungicha",
-    "elapsed_s": 130.761,
+    "elapsed_s": 139.066,
     "raw_region_segments": 5133,
     "stage_a_edges": 5514,
     "excluded_segments": 0,
@@ -263,34 +263,17 @@
     },
     "wall_existence_breakdown": {
       "conflict": 915,
-      "candidate": 1055,
-      "corroborated": 3
+      "candidate": 1056,
+      "corroborated": 2
     },
     "wall_pairs_detected": 517,
     "positive_supported_candidates": 1058,
-    "rooms_conservative_total": 238,
-    "rooms_conservative_firm_under_new_boundary_contract": 236,
+    "rooms_conservative_total": 0,
+    "rooms_conservative_firm_under_new_boundary_contract": 0,
     "rooms_permissive_total": 308,
     "corroborated_top_level_count": 0,
-    "existence_corroborated_but_capped_count": 3,
+    "existence_corroborated_but_capped_count": 2,
     "corroborated_samples": [
-      {
-        "candidate_id": "wall_4b2017a76a5029fe845a",
-        "length_pt": 52.98,
-        "families": [
-          "paired_wall_faces",
-          "u2_physical_wall_linework"
-        ],
-        "supporting_evidence_ids": 3,
-        "reason_codes": [
-          "assembled_from_2_stage_a_edges",
-          "chain_extension_blocked_by:ambiguous_at_start",
-          "future_family_not_implemented:explicit_figured_dimension",
-          "future_family_not_implemented:opening_interruption_continuity",
-          "corroborated_by_independent_domains:geometric_relation,native_metadata",
-          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
-        ]
-      },
       {
         "candidate_id": "wall_e71cd3a00825ea6e66f3",
         "length_pt": 280.74,
@@ -362,7 +345,7 @@
   },
   {
     "name": "KSTVET",
-    "elapsed_s": 19.046,
+    "elapsed_s": 26.702,
     "raw_region_segments": 2116,
     "stage_a_edges": 2313,
     "excluded_segments": 432,
@@ -373,8 +356,8 @@
     },
     "wall_existence_breakdown": {
       "conflict": 652,
-      "candidate": 126,
-      "corroborated": 3
+      "candidate": 128,
+      "corroborated": 1
     },
     "wall_pairs_detected": 1381,
     "positive_supported_candidates": 129,
@@ -382,7 +365,7 @@
     "rooms_conservative_firm_under_new_boundary_contract": 0,
     "rooms_permissive_total": 83,
     "corroborated_top_level_count": 0,
-    "existence_corroborated_but_capped_count": 3,
+    "existence_corroborated_but_capped_count": 1,
     "corroborated_samples": [
       {
         "candidate_id": "wall_e71ff01006e2722aa52b",
@@ -394,42 +377,6 @@
         "supporting_evidence_ids": 2,
         "reason_codes": [
           "assembled_from_1_stage_a_edges",
-          "chain_extension_blocked_by:ambiguous_at_end",
-          "future_family_not_implemented:explicit_figured_dimension",
-          "future_family_not_implemented:opening_interruption_continuity",
-          "corroborated_by_independent_domains:geometric_relation,native_metadata",
-          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
-        ]
-      },
-      {
-        "candidate_id": "wall_95c0a14adbce2e1b88d5",
-        "length_pt": 8.0,
-        "families": [
-          "paired_wall_faces",
-          "u2_physical_wall_linework"
-        ],
-        "supporting_evidence_ids": 2,
-        "reason_codes": [
-          "assembled_from_1_stage_a_edges",
-          "chain_extension_blocked_by:ambiguous_at_start",
-          "chain_extension_blocked_by:ambiguous_at_end",
-          "future_family_not_implemented:explicit_figured_dimension",
-          "future_family_not_implemented:opening_interruption_continuity",
-          "corroborated_by_independent_domains:geometric_relation,native_metadata",
-          "physical_existence_corroborated_but_top_level_status_capped_by_provisional_thickness_authority"
-        ]
-      },
-      {
-        "candidate_id": "wall_d5ea28f13104a8a244df",
-        "length_pt": 11.83,
-        "families": [
-          "paired_wall_faces",
-          "u2_physical_wall_linework"
-        ],
-        "supporting_evidence_ids": 2,
-        "reason_codes": [
-          "assembled_from_1_stage_a_edges",
-          "chain_extension_blocked_by:ambiguous_at_start",
           "chain_extension_blocked_by:ambiguous_at_end",
           "future_family_not_implemented:explicit_figured_dimension",
           "future_family_not_implemented:opening_interruption_continuity",

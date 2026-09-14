@@ -124,9 +124,18 @@ class TestGeometryPatterns:
         assert len(out["rooms"]) >= 1
 
     def test_03_l_shaped_room(self):
+        # Single-line geometry (no second parallel face) can never reach
+        # 2-domain physical-existence corroboration -- see the room-gating
+        # fix in pb_canonical_wall_room_evidence_model.wall_is_credible_
+        # room_boundary. This test is about room-SHAPE reconstruction
+        # mechanics (an L-shaped closed polyline), not evidence strength,
+        # so it uses the permissive population; firm/quantity-eligible
+        # boundary correctness is covered separately by test_every_
+        # conservative_room_boundary_wall_is_independently_credible and the
+        # GPT-2 rereview regression for single-domain rooms.
         l_shape = [(0, 0), (200, 0), (200, 60), (100, 60), (100, 100), (0, 100)]
         segs = _loop_segs(l_shape, "lw")
-        out = _run_pipeline(segs)
+        out = _run_pipeline(segs, exclude_conflict=False)
         assert len(out["rooms"]) >= 1
 
     def test_04_corridor_plus_rooms(self):
@@ -306,11 +315,14 @@ class TestNonWallGeometryRejection:
         room = _double_rect(0, 0, 200, 100, wall_pt=10)
         out = _run_pipeline(room)
         some_wall = out["resolved"][0]
+        synthetic_metadata = dict(some_wall.metadata)
+        synthetic_metadata["physical_evidence_status"] = "candidate"  # matches the synthetic opposing-only state below
         opposing_only_wall = _replace(
             some_wall,
             status=EvidenceResolutionStatus.CANDIDATE,
             supporting_evidence_ids=(),
             conflicting_evidence_ids=("ev_synthetic_opposing",),
+            metadata=synthetic_metadata,
         )
         assert not wall_is_credible_room_boundary(opposing_only_wall)
 
@@ -464,9 +476,13 @@ class TestEvidenceAndAmbiguity:
 
     def test_21_ambiguous_closure_preserves_multiple_plausible_faces(self):
         # A figure-eight-like double cell: two rectangles sharing one edge, plus a diagonal offering an alternate closure.
+        # Single-line geometry -- see test_03's note on why this uses the
+        # permissive population; the property under test here is "no single
+        # 'best' closure is force-picked," which the permissive population
+        # still exercises correctly.
         segs = _loop_segs([(0, 0), (100, 0), (100, 100), (0, 100)], "a")
         segs += _loop_segs([(100, 0), (200, 0), (200, 100), (100, 100)], "b")
-        out = _run_pipeline(segs)
+        out = _run_pipeline(segs, exclude_conflict=False)
         assert len(out["rooms"]) >= 2  # both cells preserved, no single "best" pick
 
     def test_22_repeated_partitions_still_individually_evaluated(self):
@@ -480,9 +496,10 @@ class TestEvidenceAndAmbiguity:
         assert len(out["walls"]) == len(segs)  # no partition silently merged/dropped for being repeated
 
     def test_23_non_axis_aligned_walls(self):
+        # Single-line geometry -- see test_03's note.
         pts = [(0, 0), (100, 30), (130, 130), (20, 100)]
         segs = _loop_segs(pts, "diag")
-        out = _run_pipeline(segs)
+        out = _run_pipeline(segs, exclude_conflict=False)
         assert len(out["rooms"]) >= 1
 
 
