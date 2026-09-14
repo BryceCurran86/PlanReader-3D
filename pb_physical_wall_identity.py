@@ -278,7 +278,7 @@ def _intervals_disjoint(left: tuple[str, float, float], right: tuple[str, float,
     """Positive disjointness requires comparable projections on the same axis.
 
     A dominant-axis mismatch can arise from curved/L-shaped/reconstructed
-    paths.  It is therefore lack of a comparable 1-D span, not proof that two
+    paths. It is therefore lack of a comparable 1-D span, not proof that two
     physical walls are distinct.
     """
     if left[0] != right[0]:
@@ -345,9 +345,6 @@ def classify_physical_wall_pair(
     left_iv = _axis_interval(left.path_fingerprint or ())
     right_iv = _axis_interval(right.path_fingerprint or ())
 
-    # Span comparisons are only positive evidence when both paths have the
-    # same dominant projection axis.  Different axes are incomparable, not
-    # disjoint proof.
     if left_iv is not None and right_iv is not None and left_iv[0] != right_iv[0]:
         return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
 
@@ -514,3 +511,37 @@ def resolve_physical_wall_equivalence(
             wall_id: tuple(dict.fromkeys(reasons)) for wall_id, reasons in blockers.items() if reasons
         },
     )
+
+
+def colliding_physical_wall_ids(
+    identities: Iterable[Optional[PhysicalWallIdentity]],
+) -> set[str]:
+    """Wall ids that must abstain under physical-equivalence resolution."""
+    resolution = resolve_physical_wall_equivalence(tuple(identities))
+    return set(resolution.abstained_wall_ids)
+
+
+def walls_missing_or_abstained_identity(
+    walls: Sequence[WallCandidate],
+    identities: Mapping[str, PhysicalWallIdentity],
+) -> dict[str, tuple[str, ...]]:
+    """Fail-closed map of walls that cannot publish when a sidecar was supplied."""
+    resolution = resolve_physical_wall_equivalence(
+        tuple(identities.get(wall.candidate_id) for wall in walls),
+        walls_by_id={wall.candidate_id: wall for wall in walls},
+    )
+    blocked: dict[str, tuple[str, ...]] = {}
+    for wall in walls:
+        identity = identities.get(wall.candidate_id)
+        if identity is None:
+            blocked[wall.candidate_id] = ("physical_wall_identity_unavailable",)
+            continue
+        reasons = list(resolution.blockers_for(wall.candidate_id))
+        if identity.usable and wall.candidate_id not in resolution.representative_wall_ids:
+            if not reasons:
+                reasons = ["physical_wall_not_selected_representative"]
+        if not identity.usable and not reasons:
+            reasons = list(identity.blocking_reasons or ("physical_wall_identity_abstained",))
+        if reasons:
+            blocked[wall.candidate_id] = tuple(dict.fromkeys(reasons))
+    return blocked
