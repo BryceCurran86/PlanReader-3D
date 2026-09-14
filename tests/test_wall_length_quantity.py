@@ -13,6 +13,10 @@ from pb_authority_completeness import (
     scale_binding_member,
 )
 from pb_canonical_wall_room_evidence_model import FAMILY_PAIRED_WALL_FACES
+from pb_enumerator_snapshot_commitment import (
+    build_enumerator_snapshot_commitment,
+    immutable_snapshot_fingerprint,
+)
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_measurement_input_authority import scale_calibration_fingerprint
 from pb_migration_contracts import (
@@ -274,6 +278,32 @@ def _candidate_proof(walls, identities):
     return identity_seq, universe, manifest
 
 
+def _enumerator_proof(domain: str, universe, tag: str):
+    snapshot_id = f"{tag}-snapshot"
+    snapshot_fingerprint = immutable_snapshot_fingerprint(
+        {
+            "domain": domain,
+            "scope": universe.scope.payload(),
+            "members": [
+                {
+                    "candidate_id": member.candidate_id,
+                    "provenance_fingerprint": member.provenance_fingerprint,
+                }
+                for member in sorted(universe.members, key=lambda item: item.candidate_id)
+            ],
+        }
+    )
+    commitment = build_enumerator_snapshot_commitment(
+        scope=universe.scope,
+        enumerator_id=f"test.{tag}.enumerator",
+        enumerator_version="1",
+        upstream_snapshot_id=snapshot_id,
+        upstream_snapshot_fingerprint=snapshot_fingerprint,
+        candidate_universe=universe,
+    )
+    return commitment, snapshot_id, snapshot_fingerprint, universe
+
+
 def _qty_kwargs(wall: WallCandidate, extra_atoms: tuple[EvidenceAtom, ...] = (), **overrides):
     entity, document, atoms = _bind(wall, extra_atoms=extra_atoms)
     scale = overrides.pop("scale", _scale()) if "scale_bindings" not in overrides else None
@@ -287,8 +317,18 @@ def _qty_kwargs(wall: WallCandidate, extra_atoms: tuple[EvidenceAtom, ...] = (),
         _viewport(resolved_scale_id=binding.scale_fingerprint if binding is not None else None),
     )
     scale_universe, scale_manifest = _scale_proof(bindings)
+    scale_commitment, scale_snapshot_id, scale_snapshot_fp, scale_current = _enumerator_proof(
+        DOMAIN_WALL_LENGTH_SCALE,
+        scale_universe,
+        "scale",
+    )
     identity = _test_identity(wall)
     identities, candidate_universe, candidate_manifest = _candidate_proof((wall,), (identity,))
+    candidate_commitment, candidate_snapshot_id, candidate_snapshot_fp, candidate_current = _enumerator_proof(
+        DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+        candidate_universe,
+        "physical-wall",
+    )
     equivalence = resolve_physical_wall_equivalence(
         identities,
         walls_by_id={wall.candidate_id: wall},
@@ -313,8 +353,16 @@ def _qty_kwargs(wall: WallCandidate, extra_atoms: tuple[EvidenceAtom, ...] = (),
         scale_bindings=bindings,
         scale_universe=scale_universe,
         scale_manifest=scale_manifest,
+        scale_enumerator_commitment=scale_commitment,
+        scale_upstream_snapshot_id=scale_snapshot_id,
+        scale_upstream_snapshot_fingerprint=scale_snapshot_fp,
+        scale_enumerated_universe=scale_current,
         candidate_universe=candidate_universe,
         candidate_manifest=candidate_manifest,
+        candidate_enumerator_commitment=candidate_commitment,
+        candidate_upstream_snapshot_id=candidate_snapshot_id,
+        candidate_upstream_snapshot_fingerprint=candidate_snapshot_fp,
+        candidate_enumerated_universe=candidate_current,
         physical_identity_universe=identities,
         physical_walls_by_id={wall.candidate_id: wall},
     )
@@ -366,12 +414,6 @@ def test_figured_dimension_is_authoritative_when_scale_absent() -> None:
             figured_evidence=_figured("5000"),
         )
     )
-    # GPT-2 #288 blocker 7: a generic figured_dimension atom cannot
-    # independently create FIRM wall length in this PR. The underlying
-    # pb_figured_dimension_authority resolver still reaches FIRM internally
-    # (see its own dedicated test suite) -- this publication boundary
-    # explicitly downgrades that specific result pending the dedicated
-    # figured-dimension span-identity workstream.
     assert qty.abstained is True
     assert qty.value is None
     from pb_wall_length_quantity import FIGURED_DIMENSION_WALL_LENGTH_DISABLED_REASON
@@ -458,10 +500,6 @@ def _edge(edge_id: str, x1, y1, x2, y2, *primitive_ids: str) -> dict:
 
 
 def _batch_with_identities(walls, identities):
-    # Each wall gets its own wall-scoped literal evidence_id. Real production
-    # ids are content-hashed and therefore already wall-specific. Preserve
-    # that ownership in this multi-wall fixture while exercising authentic
-    # candidate-universe reconciliation.
     from dataclasses import replace as _dc_replace
 
     scoped_walls = [
@@ -493,7 +531,17 @@ def _batch_with_identities(walls, identities):
     scale = _scale()
     binding = _scale_binding(scale)
     scale_universe, scale_manifest = _scale_proof((binding,))
+    scale_commitment, scale_snapshot_id, scale_snapshot_fp, scale_current = _enumerator_proof(
+        DOMAIN_WALL_LENGTH_SCALE,
+        scale_universe,
+        "scale-batch",
+    )
     identity_seq, candidate_universe, candidate_manifest = _candidate_proof(scoped_walls, identities)
+    candidate_commitment, candidate_snapshot_id, candidate_snapshot_fp, candidate_current = _enumerator_proof(
+        DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+        candidate_universe,
+        "physical-wall-batch",
+    )
     identity_map = (
         dict(identities)
         if isinstance(identities, dict)
@@ -512,8 +560,16 @@ def _batch_with_identities(walls, identities):
         scale_bindings=(binding,),
         scale_universe=scale_universe,
         scale_manifest=scale_manifest,
+        scale_enumerator_commitment=scale_commitment,
+        scale_upstream_snapshot_id=scale_snapshot_id,
+        scale_upstream_snapshot_fingerprint=scale_snapshot_fp,
+        scale_enumerated_universe=scale_current,
         candidate_universe=candidate_universe,
         candidate_manifest=candidate_manifest,
+        candidate_enumerator_commitment=candidate_commitment,
+        candidate_upstream_snapshot_id=candidate_snapshot_id,
+        candidate_upstream_snapshot_fingerprint=candidate_snapshot_fp,
+        candidate_enumerated_universe=candidate_current,
     )
 
 
@@ -600,12 +656,6 @@ def test_same_u1_ancestor_disjoint_spans_stay_distinct() -> None:
 
 
 def test_different_viewport_label_alone_is_ambiguous_not_distinct() -> None:
-    """A bare ``viewport_id`` string difference is not positive DISTINCT
-    proof (GPT-2 #288 blocker 4). Same path + same native ancestry across a
-    labelled-but-unverified viewport boundary must fail closed to AMBIGUOUS
-    -- it must not collide as SAME either, since crossing an unproven scope
-    boundary is exactly what makes the coordinate/ancestry coincidence
-    untrustworthy in either direction."""
     from pb_physical_wall_identity import (
         PhysicalEquivalenceClass,
         classify_physical_wall_pair,
@@ -623,10 +673,6 @@ def test_different_viewport_label_alone_is_ambiguous_not_distinct() -> None:
 
 
 def test_distinct_viewports_with_disjoint_ancestry_spans_stay_distinct() -> None:
-    """Positive distinctness proof (shared ancestry, provably disjoint
-    spans) must still reach DISTINCT even across a viewport boundary --
-    removing the bare-label shortcut must not also remove the genuine
-    geometry+provenance proof this module already has."""
     from pb_physical_wall_identity import (
         PhysicalEquivalenceClass,
         classify_physical_wall_pair,
@@ -689,7 +735,6 @@ def test_paired_face_and_centerline_cannot_both_publish() -> None:
 
 
 def test_same_path_different_duplicated_native_ids_cannot_publish_twice() -> None:
-    """Same path + different primitive IDs without duplication proof → AMBIGUOUS."""
     from pb_physical_wall_identity import (
         PhysicalEquivalenceClass,
         classify_physical_wall_pair,
@@ -795,13 +840,6 @@ def test_partial_overlap_same_ancestry_is_ambiguous() -> None:
 
 
 def test_different_level_label_alone_is_ambiguous_not_distinct() -> None:
-    """A bare ``level_id`` string difference is not positive DISTINCT proof
-    either (GPT-2 #288 blocker 4): this repository has no authoritative
-    level-identity/provenance resolver, so two differently-labelled level
-    strings are only an unvalidated label, not proof of two physically
-    distinct storeys. Same path + same ancestry across that unverified
-    label boundary must fail closed to AMBIGUOUS, matching the viewport
-    case immediately above."""
     from dataclasses import replace as dc_replace
 
     from pb_physical_wall_identity import (
