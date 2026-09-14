@@ -9,10 +9,11 @@ Physical equivalence is a separate fail-closed classification:
 
 - SAME_PHYSICAL_WALL — positive proof (same path + same U1 ancestry, or
   ancestor/descendant coverage identity)
-- DISTINCT_PHYSICAL_WALLS — positive proof (different viewport; disjoint
-  spans with same ancestry; different path and disjoint provenance)
+- DISTINCT_PHYSICAL_WALLS — positive proof only (different viewport;
+  authoritative different levels; same ancestry with proven disjoint spans)
 - AMBIGUOUS_PHYSICAL_EQUIVALENCE — neither proven (including identical path
-  with different primitive IDs and no explicit duplication proof)
+  with different primitive IDs and no explicit duplication proof; different
+  path with independent provenance)
 
 Geometry equality alone is never enough when provenance differs.
 No confidence, nearest, first, or epsilon merge.
@@ -34,7 +35,7 @@ from pb_wall_room_topology_wall_identity_v2 import (
 
 PHYSICAL_WALL_IDENTITY_SCHEMA_VERSION = "1.0.0"
 PHYSICAL_WALL_IDENTITY_METHOD = "physical_wall_identity_v2_sidecar"
-PHYSICAL_WALL_EQUIVALENCE_SCHEMA_VERSION = "1.1.0"
+PHYSICAL_WALL_EQUIVALENCE_SCHEMA_VERSION = "1.2.0"
 
 
 class PhysicalEquivalenceClass(str, Enum):
@@ -56,6 +57,7 @@ class PhysicalWallIdentity:
     status: EvidenceResolutionStatus
     blocking_reasons: tuple[str, ...] = ()
     comparison_mode: str = "v2_path"
+    level_id: Optional[str] = None
     schema_version: str = PHYSICAL_WALL_IDENTITY_SCHEMA_VERSION
 
     @property
@@ -160,6 +162,7 @@ def _abstain(
         status=EvidenceResolutionStatus.ABSTAINED,
         blocking_reasons=reasons,
         comparison_mode="abstained",
+        level_id=str(wall.level_id or "").strip() or None,
     )
 
 
@@ -227,6 +230,7 @@ def resolve_physical_wall_identity(
         edge_ids=resolved_edge_ids,
         status=EvidenceResolutionStatus.CORROBORATED,
         comparison_mode=comparison_mode,
+        level_id=str(wall.level_id or "").strip() or None,
     )
 
 
@@ -295,10 +299,20 @@ def classify_physical_wall_pair(
     left: PhysicalWallIdentity,
     right: PhysicalWallIdentity,
 ) -> PhysicalEquivalenceClass:
-    """Classify one pair. Never uses distance, confidence, or first-candidate."""
+    """Classify one pair. Never uses distance, confidence, or first-candidate.
+
+    Absence of SAME proof is not positive DISTINCT proof. Different path with
+    independent provenance is AMBIGUOUS unless a positive distinctness rule
+    applies (viewport, authoritative level, or proven disjoint common-ancestry
+    spans).
+    """
     if not left.usable or not right.usable:
         return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
     if left.viewport_id != right.viewport_id:
+        return PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
+    left_level = str(left.level_id or "").strip()
+    right_level = str(right.level_id or "").strip()
+    if left_level and right_level and left_level != right_level:
         return PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
 
     same_path = left.path_fingerprint is not None and left.path_fingerprint == right.path_fingerprint
@@ -319,7 +333,7 @@ def classify_physical_wall_pair(
     left_iv = _axis_interval(left.path_fingerprint or ())
     right_iv = _axis_interval(right.path_fingerprint or ())
 
-    # DISTINCT: same ancestry, disjoint spans
+    # DISTINCT: same ancestry, proven disjoint spans in a common topology
     if equal_ancestry and left_iv is not None and right_iv is not None:
         if _intervals_disjoint(left_iv, right_iv):
             return PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
@@ -332,10 +346,7 @@ def classify_physical_wall_pair(
             return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
         return PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
 
-    # different path and no shared provenance → DISTINCT
-    if not same_path and not shared:
-        return PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
-
+    # different path + independent provenance is NOT positive DISTINCT proof
     return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
 
 

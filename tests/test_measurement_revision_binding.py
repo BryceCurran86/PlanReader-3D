@@ -116,7 +116,7 @@ def test_unversioned_scale_cannot_become_firm_measurement() -> None:
         entity=_entity(),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 5.0,
-        scale_binding=binding,
+        scale_bindings=(binding,),
         wall_viewport_id="vp",
     )
     assert result.abstained is True
@@ -134,7 +134,7 @@ def test_unbound_run_revision_blocks_before_measurement() -> None:
         entity=_entity(),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 5.0,
-        scale_binding=_binding(scale),
+        scale_bindings=(_binding(scale),),
         wall_viewport_id="vp",
     )
     assert result.abstained is True

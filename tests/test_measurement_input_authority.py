@@ -135,7 +135,7 @@ def test_scale_bar_firm_scaled_geometry_resolves() -> None:
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 10.0,
-        scale_binding=binding,
+        scale_bindings=(binding,),
         wall_viewport_id="vp-1",
     )
     assert result.abstained is False
@@ -170,7 +170,7 @@ def test_title_block_only_scale_is_not_firm_and_abstains() -> None:
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
         scaled_length_page_units=100.0,
-        scale_binding=binding,
+        scale_bindings=(binding,),
         wall_viewport_id="vp-1",
     )
     assert result.abstained
@@ -187,7 +187,7 @@ def test_inferred_scale_is_not_firm_and_abstains() -> None:
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
         scaled_length_page_units=100.0,
-        scale_binding=binding,
+        scale_bindings=(binding,),
         wall_viewport_id="vp-1",
     )
     assert result.abstained
@@ -204,7 +204,7 @@ def test_stale_scale_abstains() -> None:
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
         scaled_length_page_units=100.0,
-        scale_binding=binding,
+        scale_bindings=(binding,),
         wall_viewport_id="vp-1",
     )
     assert result.abstained
@@ -220,7 +220,7 @@ def test_foreign_viewport_abstains_before_measurement() -> None:
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
         scaled_length_page_units=100.0,
-        scale_binding=_binding(_scale(ScaleSourceType.SCALE_BAR), viewport_id="vp-foreign"),
+        scale_bindings=(_binding(_scale(ScaleSourceType.SCALE_BAR), viewport_id="vp-foreign"),),
         wall_viewport_id="vp-foreign",
     )
     assert result.abstained
@@ -242,7 +242,7 @@ def test_source_hash_mismatch_abstains() -> None:
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
         scaled_length_page_units=100.0,
-        scale_binding=_binding(_scale(ScaleSourceType.SCALE_BAR)),
+        scale_bindings=(_binding(_scale(ScaleSourceType.SCALE_BAR)),),
         wall_viewport_id="vp-1",
     )
     assert result.abstained
@@ -274,7 +274,7 @@ def test_figured_dimension_outweighs_agreeing_scaled_geometry() -> None:
         entity=_entity(),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 6.5,
-        scale_binding=binding,
+        scale_bindings=(binding,),
         wall_viewport_id="vp-1",
         figured_evidence=_figured("6500"),
     )
@@ -293,7 +293,7 @@ def test_figured_vs_scaled_conflict_abstains() -> None:
         entity=_entity(),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 9.0,
-        scale_binding=binding,
+        scale_bindings=(binding,),
         wall_viewport_id="vp-1",
         figured_evidence=_figured("6500"),
     )
@@ -309,7 +309,7 @@ def test_unresolved_entity_abstains() -> None:
         entity=_entity(evidence_ids=("ev-wall",), status=EvidenceResolutionStatus.ABSTAINED),
         page_no=1,
         scaled_length_page_units=100.0,
-        scale_binding=_binding(_scale(ScaleSourceType.SCALE_BAR)),
+        scale_bindings=(_binding(_scale(ScaleSourceType.SCALE_BAR)),),
         wall_viewport_id="vp-1",
     )
     assert result.abstained
@@ -328,7 +328,7 @@ def test_resolution_fingerprint_is_deterministic_and_changes_with_scale() -> Non
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
         scaled_length_page_units=scale_100.px_per_m * 4.0,
-        scale_binding=bind_100,
+        scale_bindings=(bind_100,),
         wall_viewport_id="vp-1",
     )
     replay = resolve_linear_measurement_input(
@@ -338,7 +338,7 @@ def test_resolution_fingerprint_is_deterministic_and_changes_with_scale() -> Non
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
         scaled_length_page_units=scale_100.px_per_m * 4.0,
-        scale_binding=bind_100,
+        scale_bindings=(bind_100,),
         wall_viewport_id="vp-1",
     )
     changed = resolve_linear_measurement_input(
@@ -348,7 +348,7 @@ def test_resolution_fingerprint_is_deterministic_and_changes_with_scale() -> Non
         entity=_entity(evidence_ids=("ev-wall",)),
         page_no=1,
         scaled_length_page_units=scale_50.px_per_m * 4.0,
-        scale_binding=bind_50,
+        scale_bindings=(bind_50,),
         wall_viewport_id="vp-1",
     )
     assert first.fingerprint() == replay.fingerprint()
@@ -381,3 +381,22 @@ def test_two_conflicting_eligible_bindings_block_without_picking_first() -> None
     )
     assert selected_conflict is None
     assert conflict_reasons == ("conflicting_eligible_scale_bindings",)
+
+
+def test_resolve_requires_complete_binding_set_reconciliation() -> None:
+    """FIRM scaled path cannot validate one pre-selected binding in isolation."""
+    scale_100 = _scale(ScaleSourceType.SCALE_BAR, 100.0)
+    bind_100 = _binding(scale_100)
+    twin = replace(bind_100)
+    result = resolve_linear_measurement_input(
+        context=_context(),
+        document=_document(),
+        viewport=_viewport(resolved_scale_id=bind_100.scale_fingerprint),
+        entity=_entity(),
+        page_no=1,
+        scaled_length_page_units=scale_100.px_per_m * 4.0,
+        scale_bindings=(bind_100, twin),
+        wall_viewport_id="vp-1",
+    )
+    assert result.abstained
+    assert "conflicting_eligible_scale_bindings" in result.blocking_reasons

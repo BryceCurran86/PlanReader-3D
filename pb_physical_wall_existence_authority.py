@@ -40,7 +40,7 @@ from pb_wall_room_topology_typed_negative_evidence import KIND_PHYSICAL_WALL
 
 PHYSICAL_WALL_EXISTENCE_KIND = "physical_wall_existence"
 PHYSICAL_WALL_EXISTENCE_METHOD = "physical_wall_existence_authority"
-PHYSICAL_WALL_EXISTENCE_SCHEMA_VERSION = "1.1.0"
+PHYSICAL_WALL_EXISTENCE_SCHEMA_VERSION = "1.2.0"
 ADDITIONAL_WALL_EVIDENCE_KIND_FIGURED = "figured_dimension"
 
 _AtomLike = Union[EvidenceAtom, Mapping[str, Any]]
@@ -89,23 +89,17 @@ def _atom_status_value(atom: _AtomLike) -> str:
 
 
 def _atom_content_key(atom: _AtomLike) -> str:
-    metadata = _atom_field(atom, "metadata") or {}
-    if not isinstance(metadata, Mapping):
-        metadata = {}
-    payload = {
-        "kind": str(_atom_field(atom, "kind") or ""),
-        "document_id": str(_atom_field(atom, "document_id") or ""),
-        "page_id": str(_atom_field(atom, "page_id") or ""),
-        "viewport_id": str(_atom_field(atom, "viewport_id") or ""),
-        "method": str(_atom_field(atom, "method") or ""),
-        "raw_text": str(_atom_field(atom, "raw_text") or ""),
-        "normalized_value": _atom_field(atom, "normalized_value"),
-        "unit": _atom_field(atom, "unit"),
-        "status": _atom_status_value(atom),
-        "reason_codes": list(_atom_field(atom, "reason_codes") or ()),
-        "metadata": dict(metadata),
-    }
-    return canonical_contract_json(payload)
+    """Fingerprint the complete immutable EvidenceAtom contract.
+
+    Prefer canonical serialization of ``EvidenceAtom.to_dict()`` so every
+    immutable field (including bbox, confidence, schema_version) participates.
+    Mapping inputs are fingerprinted as their full plain mapping.
+    """
+    if isinstance(atom, EvidenceAtom):
+        return canonical_contract_json(atom.to_dict())
+    if isinstance(atom, Mapping):
+        return canonical_contract_json(dict(atom))
+    return canonical_contract_json({"repr": repr(atom)})
 
 
 def _index_atoms(atoms: Sequence[_AtomLike]) -> tuple[dict[str, _AtomLike], frozenset[str]]:
@@ -166,12 +160,53 @@ def _atom_bound_to_wall(atom: _AtomLike, wall: WallCandidate) -> bool:
     return bool(atom_prims and wall_prims and atom_prims & wall_prims)
 
 
+def _atom_snapshot_ownership_reasons(
+    atom: _AtomLike,
+    *,
+    context: ProviderContext,
+    document: DocumentEvidence,
+) -> tuple[str, ...]:
+    """Prove atom belongs to the current source SHA / revision / evidence snapshot.
+
+    EvidenceAtom has no revision field; ownership uses existing metadata seams
+    ``revision_id``, ``evidence_snapshot_id``, and ``source_sha256``. Missing
+    proof abstains rather than trusting document/page/viewport alone.
+    """
+    reasons: list[str] = []
+    if not context.revision_id or not context.current_revision_id:
+        return ("existence_context_revision_unbound",)
+    if context.revision_id != context.current_revision_id:
+        return ("existence_context_revision_stale",)
+
+    metadata = _atom_metadata(atom)
+    atom_revision = str(metadata.get("revision_id") or "").strip()
+    if not atom_revision:
+        reasons.append("existence_atom_revision_unproven")
+    elif atom_revision != context.revision_id:
+        reasons.append("existence_atom_revision_stale")
+
+    atom_snapshot = str(metadata.get("evidence_snapshot_id") or "").strip()
+    if not atom_snapshot:
+        reasons.append("existence_atom_snapshot_unproven")
+    elif atom_snapshot != context.evidence_snapshot_id:
+        reasons.append("existence_atom_snapshot_mismatch")
+
+    atom_sha = str(metadata.get("source_sha256") or "").strip().lower()
+    if not atom_sha:
+        reasons.append("existence_atom_source_sha_unproven")
+    elif not (atom_sha == document.source_sha256 == context.source_sha256):
+        reasons.append("existence_atom_source_sha_mismatch")
+
+    return tuple(reasons)
+
+
 def _atom_target_ownership_reasons(
     atom: _AtomLike,
     *,
     wall: WallCandidate,
     document: DocumentEvidence,
     viewport: ViewportEvidence,
+    context: ProviderContext,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
     if str(_atom_field(atom, "document_id") or "") != document.document_id:
@@ -183,7 +218,10 @@ def _atom_target_ownership_reasons(
         reasons.append("existence_atom_viewport_mismatch")
     if not _atom_bound_to_wall(atom, wall):
         reasons.append("existence_atom_not_bound_to_wall")
-    return tuple(reasons)
+    reasons.extend(
+        _atom_snapshot_ownership_reasons(atom, context=context, document=document)
+    )
+    return tuple(dict.fromkeys(reasons))
 
 
 def bind_additional_wall_owned_evidence(
@@ -192,6 +230,7 @@ def bind_additional_wall_owned_evidence(
     atom: _AtomLike,
     document: DocumentEvidence,
     viewport: ViewportEvidence,
+    context: ProviderContext,
 ) -> Optional[str]:
     """Typed extra-evidence seam. Figured dimensions only, wall-bound."""
     evidence_id = str(_atom_field(atom, "evidence_id") or "").strip()
@@ -201,7 +240,9 @@ def bind_additional_wall_owned_evidence(
         return None
     if str(_atom_field(atom, "kind") or "") != ADDITIONAL_WALL_EVIDENCE_KIND_FIGURED:
         return None
-    if _atom_target_ownership_reasons(atom, wall=wall, document=document, viewport=viewport):
+    if _atom_target_ownership_reasons(
+        atom, wall=wall, document=document, viewport=viewport, context=context
+    ):
         return None
     return evidence_id
 
@@ -212,12 +253,14 @@ def resolve_physical_wall_existence(
     evidence_atoms: Sequence[_AtomLike],
     document: DocumentEvidence,
     viewport: ViewportEvidence,
+    context: ProviderContext,
 ) -> EvidenceAtom:
     """Mint one existence atom from owned supporting/opposing source atoms.
 
     Existence is CORROBORATED only when two or more *independent causal
     domains* support the wall and no opposing atoms are present. Thickness,
-    height, scale, and scope are out of scope.
+    height, scale, and scope are out of scope. Source atoms must prove current
+    revision/snapshot ownership; document/page/viewport alone is insufficient.
     """
     catalog, collided_ids = _index_atoms(evidence_atoms)
     supporting_ids = tuple(wall.supporting_evidence_ids)
@@ -231,6 +274,10 @@ def resolve_physical_wall_existence(
         blockers.append("existence_wall_viewport_mismatch")
     if viewport.document_id != document.document_id:
         blockers.append("existence_viewport_document_mismatch")
+    if document.document_id != context.document_id:
+        blockers.append("existence_document_context_mismatch")
+    if document.source_sha256 != context.source_sha256:
+        blockers.append("existence_source_sha_mismatch")
 
     for evidence_id in supporting_ids:
         if evidence_id in collided_ids:
@@ -241,7 +288,7 @@ def resolve_physical_wall_existence(
             missing_ids.append(evidence_id)
             continue
         ownership = _atom_target_ownership_reasons(
-            atom, wall=wall, document=document, viewport=viewport
+            atom, wall=wall, document=document, viewport=viewport, context=context
         )
         if ownership:
             blockers.extend(ownership)
@@ -261,7 +308,7 @@ def resolve_physical_wall_existence(
             missing_ids.append(evidence_id)
             continue
         ownership = _atom_target_ownership_reasons(
-            atom, wall=wall, document=document, viewport=viewport
+            atom, wall=wall, document=document, viewport=viewport, context=context
         )
         if ownership:
             blockers.extend(ownership)
@@ -315,6 +362,9 @@ def resolve_physical_wall_existence(
         "document_id": document.document_id,
         "page_id": viewport.page_id,
         "viewport_id": viewport.viewport_id,
+        "revision_id": context.revision_id,
+        "evidence_snapshot_id": context.evidence_snapshot_id,
+        "source_sha256": context.source_sha256,
         "supporting_evidence_ids": list(supporting_ids),
         "opposing_evidence_ids": list(opposing_ids),
         "families_present": sorted(families_present),
@@ -335,6 +385,9 @@ def resolve_physical_wall_existence(
         reason_codes=reason_codes,
         metadata={
             "wall_candidate_id": wall.candidate_id,
+            "revision_id": context.revision_id,
+            "evidence_snapshot_id": context.evidence_snapshot_id,
+            "source_sha256": context.source_sha256,
             "supporting_evidence_ids": list(supporting_ids),
             "opposing_evidence_ids": list(opposing_ids),
             "families_present": sorted(families_present),
@@ -350,6 +403,7 @@ def wall_physical_existence_status(
     evidence_atoms: Sequence[_AtomLike],
     document: DocumentEvidence,
     viewport: ViewportEvidence,
+    context: ProviderContext,
 ) -> EvidenceResolutionStatus:
     """Typed existence status. Does not read wall.metadata or wall.status."""
     return resolve_physical_wall_existence(
@@ -357,6 +411,7 @@ def wall_physical_existence_status(
         evidence_atoms=evidence_atoms,
         document=document,
         viewport=viewport,
+        context=context,
     ).status
 
 
@@ -394,6 +449,7 @@ def adapt_wall_candidate_to_entity_evidence(
         evidence_atoms=evidence_atoms,
         document=document,
         viewport=viewport,
+        context=context,
     )
     real_ids = tuple(dict.fromkeys((*wall.supporting_evidence_ids, *wall.conflicting_evidence_ids)))
     extra_ids: list[str] = []
@@ -409,6 +465,7 @@ def adapt_wall_candidate_to_entity_evidence(
             atom=atom,
             document=document,
             viewport=viewport,
+            context=context,
         )
         if bound:
             extra_ids.append(bound)

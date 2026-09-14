@@ -138,7 +138,7 @@ def test_candidate_entity_cannot_back_firm_measurement() -> None:
         entity=_entity(EvidenceResolutionStatus.CANDIDATE),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 4.0,
-        scale_binding=_binding(scale),
+        scale_bindings=(_binding(scale),),
         wall_viewport_id="vp-1",
     )
     assert result.abstained
@@ -154,7 +154,7 @@ def test_ambiguous_viewport_status_cannot_measure() -> None:
         entity=_entity(),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 4.0,
-        scale_binding=_binding(scale),
+        scale_bindings=(_binding(scale),),
         wall_viewport_id="vp-1",
     )
     assert result.abstained
@@ -170,7 +170,7 @@ def test_page_scale_cannot_leak_across_multiple_viewports_without_binding() -> N
         entity=_entity(),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 4.0,
-        scale_binding=_binding(scale),
+        scale_bindings=(_binding(scale),),
         wall_viewport_id="vp-1",
     )
     assert result.abstained
@@ -186,7 +186,7 @@ def test_single_viewport_without_resolved_scale_id_is_blocked() -> None:
         entity=_entity(),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 4.0,
-        scale_binding=_binding(scale),
+        scale_bindings=(_binding(scale),),
         wall_viewport_id="vp-1",
     )
     assert result.abstained
@@ -203,7 +203,7 @@ def test_multi_viewport_scale_may_measure_when_fingerprint_is_explicitly_bound()
         entity=_entity(),
         page_no=1,
         scaled_length_page_units=scale.px_per_m * 4.0,
-        scale_binding=binding,
+        scale_bindings=(binding,),
         wall_viewport_id="vp-1",
     )
     assert not result.abstained

@@ -132,12 +132,13 @@ def build_wall_length_quantity(
     viewport: ViewportEvidence,
     entity: EntityEvidence,
     page_no: int,
-    scale_binding: Optional[ViewportScaleBinding] = None,
+    scale_bindings: Sequence[ViewportScaleBinding] = (),
     figured_evidence: Optional[EvidenceAtom] = None,
 ) -> QuantityEvidence:
     """Build one wall-length quantity from existence + geometry + measurement.
 
-    Scaled FIRM length requires an owned ``ViewportScaleBinding``. A bare
+    Scaled FIRM length requires the complete candidate ``scale_bindings`` set to
+    reconcile to exactly one owned ``ViewportScaleBinding``. A bare
     ``ScaleCalibration`` is not accepted.
     """
     topology_blockers: list[str] = []
@@ -170,8 +171,8 @@ def build_wall_length_quantity(
         viewport=viewport,
         entity=entity,
         page_no=page_no,
-        scaled_length_page_units=page_length if scale_binding is not None else None,
-        scale_binding=scale_binding,
+        scaled_length_page_units=page_length if scale_bindings else None,
+        scale_bindings=scale_bindings,
         figured_evidence=figured_evidence,
         wall_viewport_id=wall.viewport_id,
     )
@@ -243,7 +244,7 @@ def build_wall_length_quantities(
     document: DocumentEvidence,
     viewport: ViewportEvidence,
     page_no: int,
-    scale_binding: Optional[ViewportScaleBinding] = None,
+    scale_bindings: Sequence[ViewportScaleBinding] = (),
     figured_evidence_by_wall_id: Optional[dict[str, EvidenceAtom]] = None,
     physical_identities: Optional[Mapping[str, PhysicalWallIdentity]] = None,
 ) -> tuple[QuantityEvidence, ...]:
@@ -325,7 +326,7 @@ def build_wall_length_quantities(
                 viewport=viewport,
                 entity=entity,
                 page_no=page_no,
-                scale_binding=scale_binding,
+                scale_bindings=scale_bindings,
                 figured_evidence=figured.get(wall.candidate_id),
             )
         )

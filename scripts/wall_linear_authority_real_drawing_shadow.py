@@ -148,6 +148,7 @@ def _shadow_one(spec: Dict[str, Any]) -> Dict[str, Any]:
             evidence_atoms=catalog,
             document=document,
             viewport=viewport,
+            context=context,
         )
         existence_counts[existence.value] += 1
         entity = adapt_wall_candidate_to_entity_evidence(
@@ -170,7 +171,7 @@ def _shadow_one(spec: Dict[str, Any]) -> Dict[str, Any]:
             viewport=viewport,
             entity=entity,
             page_no=page_no,
-            scale_binding=None,
+            scale_bindings=(),
         )
         if qty.abstained:
             for reason in qty.blocking_reasons:

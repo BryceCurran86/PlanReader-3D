@@ -81,7 +81,12 @@ def _source_atom(evidence_id: str, kind: str, wall_id: str = "w1") -> EvidenceAt
         method="test",
         confidence=0.7,
         status=EvidenceResolutionStatus.CANDIDATE,
-        metadata={"wall_candidate_id": wall_id},
+        metadata={
+            "wall_candidate_id": wall_id,
+            "revision_id": "R1",
+            "evidence_snapshot_id": "evsnap",
+            "source_sha256": SHA,
+        },
     )
 
 
@@ -160,7 +165,12 @@ def _figured(text="5000", wall_id: str = "w1") -> EvidenceAtom:
         raw_text=text,
         confidence=1.0,
         status=EvidenceResolutionStatus.CORROBORATED,
-        metadata={"wall_candidate_id": wall_id},
+        metadata={
+            "wall_candidate_id": wall_id,
+            "revision_id": "R1",
+            "evidence_snapshot_id": "evsnap",
+            "source_sha256": SHA,
+        },
     )
 
 
@@ -183,8 +193,12 @@ def _bind(wall: WallCandidate, extra_atoms: tuple[EvidenceAtom, ...] = ()):
 
 def _qty_kwargs(wall: WallCandidate, extra_atoms: tuple[EvidenceAtom, ...] = (), **overrides):
     entity, document, _ = _bind(wall, extra_atoms=extra_atoms)
-    scale = overrides.pop("scale", _scale()) if "scale_binding" not in overrides else None
-    binding = overrides.pop("scale_binding", _scale_binding(scale) if scale is not None else None)
+    scale = overrides.pop("scale", _scale()) if "scale_bindings" not in overrides else None
+    bindings = overrides.pop(
+        "scale_bindings",
+        (_scale_binding(scale),) if scale is not None else (),
+    )
+    binding = bindings[0] if bindings else None
     viewport = overrides.pop(
         "viewport",
         _viewport(resolved_scale_id=binding.scale_fingerprint if binding is not None else None),
@@ -196,7 +210,7 @@ def _qty_kwargs(wall: WallCandidate, extra_atoms: tuple[EvidenceAtom, ...] = (),
         viewport=viewport,
         entity=entity,
         page_no=1,
-        scale_binding=binding,
+        scale_bindings=bindings,
     )
     kwargs.update(overrides)
     return kwargs
@@ -242,7 +256,7 @@ def test_figured_dimension_is_authoritative_when_scale_absent() -> None:
         **_qty_kwargs(
             wall,
             extra_atoms=(_figured("5000"),),
-            scale_binding=None,
+            scale_bindings=(),
             figured_evidence=_figured("5000"),
         )
     )
@@ -267,7 +281,7 @@ def test_duplicate_candidate_identity_fails_closed() -> None:
         context=_context(),
         document=document,
         page_no=1,
-        scale_binding=_scale_binding(_scale()),
+        scale_bindings=(_scale_binding(_scale()),),
         viewport=_viewport(resolved_scale_id=scale_calibration_fingerprint(_scale())),
     )
     assert len(out) == 2
@@ -286,7 +300,7 @@ def test_overlapping_source_segments_fail_closed_instead_of_double_counting() ->
         context=_context(),
         document=document,
         page_no=1,
-        scale_binding=_scale_binding(_scale()),
+        scale_bindings=(_scale_binding(_scale()),),
         viewport=_viewport(resolved_scale_id=scale_calibration_fingerprint(_scale())),
     )
     assert len(out) == 2
@@ -304,7 +318,7 @@ def test_stale_scale_causes_abstention_not_old_length_reuse() -> None:
 
 def test_bare_scale_calibration_cannot_reach_quantity_builder() -> None:
     wall = _wall()
-    kwargs = _qty_kwargs(wall, scale_binding=None)
+    kwargs = _qty_kwargs(wall, scale_bindings=())
     kwargs["scale_calibration"] = _scale()
     try:
         qty = build_wall_length_quantity(**kwargs)
@@ -340,7 +354,7 @@ def _batch_with_identities(walls, identities):
         document=document,
         viewport=_viewport(resolved_scale_id=binding.scale_fingerprint),
         page_no=1,
-        scale_binding=binding,
+        scale_bindings=(binding,),
         physical_identities=identities,
     )
 
@@ -376,7 +390,7 @@ def test_reversed_and_rechunked_walls_cannot_publish_two_physical_quantities() -
     )
 
 
-def test_same_endpoints_different_interior_path_stay_distinct() -> None:
+def test_same_endpoints_different_interior_path_is_ambiguous_without_shared_provenance() -> None:
     from pb_physical_wall_identity import (
         PhysicalEquivalenceClass,
         classify_physical_wall_pair,
@@ -396,10 +410,10 @@ def test_same_endpoints_different_interior_path_stay_distinct() -> None:
     assert left.usable and right.usable
     assert left.candidate_identity_id != right.candidate_identity_id
     assert left.path_fingerprint != right.path_fingerprint
-    assert classify_physical_wall_pair(left, right) == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
+    assert classify_physical_wall_pair(left, right) == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
     resolution = resolve_physical_wall_equivalence((left, right))
-    assert resolution.ambiguous_wall_ids == ()
-    assert set(resolution.representative_wall_ids) == {"w1", "w2"}
+    assert set(resolution.ambiguous_wall_ids) == {"w1", "w2"}
+    assert resolution.representative_wall_ids == ()
 
 
 def test_same_u1_ancestor_disjoint_spans_stay_distinct() -> None:
@@ -522,7 +536,7 @@ def test_same_path_different_duplicated_native_ids_cannot_publish_twice() -> Non
     assert all("ambiguous_physical_wall_equivalence" in qty.blocking_reasons for qty in out)
 
 
-def test_slight_offset_candidate_is_not_merged_by_distance() -> None:
+def test_slight_offset_candidate_is_ambiguous_without_positive_distinctness() -> None:
     from pb_physical_wall_identity import (
         PhysicalEquivalenceClass,
         classify_physical_wall_pair,
@@ -540,10 +554,10 @@ def test_slight_offset_candidate_is_not_merged_by_distance() -> None:
         resolve_physical_wall_identity(wall=a, edge_ids=("e1",), edges_by_id=edges),
         resolve_physical_wall_identity(wall=b, edge_ids=("e2",), edges_by_id=edges),
     )
-    assert classify_physical_wall_pair(*identities) == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
+    assert classify_physical_wall_pair(*identities) == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
     resolution = resolve_physical_wall_equivalence(identities)
-    assert resolution.ambiguous_wall_ids == ()
-    assert set(resolution.representative_wall_ids) == {"w1", "w2"}
+    assert set(resolution.ambiguous_wall_ids) == {"w1", "w2"}
+    assert resolution.representative_wall_ids == ()
 
 
 def test_rechunk_equivalent_geometry_keeps_one_physical_quantity_count() -> None:
@@ -594,3 +608,28 @@ def test_partial_overlap_same_ancestry_is_ambiguous() -> None:
         resolve_physical_wall_identity(wall=right, edge_ids=("e2",), edges_by_id=edges),
     )
     assert classify_physical_wall_pair(*identities) == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+
+
+def test_different_authoritative_levels_are_distinct() -> None:
+    from dataclasses import replace as dc_replace
+
+    from pb_physical_wall_identity import (
+        PhysicalEquivalenceClass,
+        classify_physical_wall_pair,
+        resolve_physical_wall_identity,
+    )
+
+    left = _wall("w1", points=((0.0, 0.0), (100.0, 0.0)), face_ids=("e1",))
+    right = dc_replace(
+        _wall("w2", points=((0.0, 0.0), (100.0, 0.0)), face_ids=("e2",)),
+        level_id="L2",
+    )
+    edges = {
+        "e1": _edge("e1", 0.0, 0.0, 100.0, 0.0, "native_a"),
+        "e2": _edge("e2", 0.0, 0.0, 100.0, 0.0, "native_b"),
+    }
+    identities = (
+        resolve_physical_wall_identity(wall=left, edge_ids=("e1",), edges_by_id=edges),
+        resolve_physical_wall_identity(wall=right, edge_ids=("e2",), edges_by_id=edges),
+    )
+    assert classify_physical_wall_pair(*identities) == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS

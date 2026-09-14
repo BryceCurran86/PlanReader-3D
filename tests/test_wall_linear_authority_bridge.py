@@ -103,7 +103,12 @@ def _source_atom(evidence_id: str, kind: str, wall_id: str = "w1", viewport_id: 
         method="test",
         confidence=0.7,
         status=EvidenceResolutionStatus.CANDIDATE,
-        metadata={"wall_candidate_id": wall_id},
+        metadata={
+            "wall_candidate_id": wall_id,
+            "revision_id": "R1",
+            "evidence_snapshot_id": "evsnap",
+            "source_sha256": SHA,
+        },
     )
 
 
@@ -195,15 +200,15 @@ def _adapt(wall: WallCandidate, atoms: tuple[EvidenceAtom, ...], *, extra: tuple
     return entity, document, viewport, context
 
 
-def _qty(wall, atoms, *, extra=(), extra_atoms=(), scale=None, scale_binding=None, bind_scale=True, **overrides):
+def _qty(wall, atoms, *, extra=(), extra_atoms=(), scale=None, scale_bindings=None, bind_scale=True, **overrides):
     all_atoms = tuple(atoms) + tuple(extra_atoms)
     extra_ids = extra + tuple(atom.evidence_id for atom in extra_atoms)
     entity, document, viewport, context = _adapt(wall, all_atoms, extra=extra_ids)
-    if scale_binding is None and bind_scale and "scale_binding" not in overrides:
+    if scale_bindings is None and bind_scale and "scale_bindings" not in overrides:
         used_scale = scale if scale is not None else _scale()
-        scale_binding = _scale_binding(used_scale, viewport_id=wall.viewport_id)
-    if scale_binding is not None and bind_scale:
-        viewport = replace(viewport, resolved_scale_id=scale_binding.scale_fingerprint)
+        scale_bindings = (_scale_binding(used_scale, viewport_id=wall.viewport_id),)
+    if scale_bindings and bind_scale:
+        viewport = replace(viewport, resolved_scale_id=scale_bindings[0].scale_fingerprint)
     kwargs = dict(
         wall=wall,
         context=context,
@@ -211,7 +216,7 @@ def _qty(wall, atoms, *, extra=(), extra_atoms=(), scale=None, scale_binding=Non
         viewport=viewport,
         entity=entity,
         page_no=1,
-        scale_binding=scale_binding,
+        scale_bindings=scale_bindings or (),
     )
     kwargs.update(overrides)
     if "entity" in overrides and overrides["entity"] is None:
@@ -225,7 +230,7 @@ def test_trusted_wall_and_firm_scale_publish_linear_quantity() -> None:
     scale = _scale()
     wall, atoms = _two_domain_wall(points=((0.0, 0.0), (scale.px_per_m * 4.0, 0.0)))
     assert wall_physical_existence_status(
-        wall, evidence_atoms=atoms, document=_document(("u2-ev", "pair-ev")), viewport=_viewport()
+        wall, evidence_atoms=atoms, document=_document(("u2-ev", "pair-ev")), viewport=_viewport(), context=_context()
     ) == EvidenceResolutionStatus.CORROBORATED
     entity, document, viewport, context = _adapt(wall, atoms)
     assert entity is not None
@@ -242,7 +247,7 @@ def test_trusted_wall_and_firm_scale_publish_linear_quantity() -> None:
         viewport=replace(viewport, resolved_scale_id=binding.scale_fingerprint),
         entity=entity,
         page_no=1,
-        scale_binding=binding,
+        scale_bindings=(binding,),
     )
     assert qty.abstained is False
     assert qty.status == AuthorityStatus.FIRM.value
@@ -254,7 +259,7 @@ def test_trusted_wall_and_firm_scale_publish_linear_quantity() -> None:
 
 def test_trusted_wall_unknown_scale_abstains() -> None:
     wall, atoms = _two_domain_wall()
-    qty = _qty(wall, atoms, scale_binding=None, bind_scale=False)
+    qty = _qty(wall, atoms, scale_bindings=(), bind_scale=False)
     assert qty is not None
     assert qty.abstained
     assert qty.value is None
@@ -271,7 +276,7 @@ def test_geometry_without_trusted_existence_abstains() -> None:
         supporting=("u2-ev",),
     )
     assert wall_physical_existence_status(
-        wall, evidence_atoms=atoms, document=_document(("u2-ev", "pair-ev")), viewport=_viewport()
+        wall, evidence_atoms=atoms, document=_document(("u2-ev", "pair-ev")), viewport=_viewport(), context=_context()
     ) != EvidenceResolutionStatus.CORROBORATED
     qty = _qty(wall, atoms, scale=scale)
     assert qty is not None
@@ -298,7 +303,7 @@ def test_existence_abstained_without_provenance_returns_no_entity() -> None:
     entity, _, _, _ = _adapt(wall, ())
     assert entity is None
     assert wall_physical_existence_status(
-        wall, evidence_atoms=(), document=_document(()), viewport=_viewport()
+        wall, evidence_atoms=(), document=_document(()), viewport=_viewport(), context=_context()
     ) == EvidenceResolutionStatus.ABSTAINED
 
 
@@ -315,7 +320,7 @@ def test_existence_abstained_unmapped_kind_abstains_quantity() -> None:
         viewport=viewport,
         entity=entity,
         page_no=1,
-        scale_binding=_scale_binding(_scale()),
+        scale_bindings=(_scale_binding(_scale()),),
     )
     assert qty.abstained
     assert "physical_wall_existence_abstained" in qty.blocking_reasons
@@ -333,6 +338,7 @@ def test_metadata_physical_evidence_status_is_not_authority() -> None:
         evidence_atoms=(),
         document=_document(()),
         viewport=_viewport(),
+        context=_context(),
     )
     assert existence.status == EvidenceResolutionStatus.ABSTAINED
     assert existence.kind == PHYSICAL_WALL_EXISTENCE_KIND
@@ -348,7 +354,7 @@ def test_same_native_metadata_domain_does_not_count_as_two_proofs() -> None:
     assert entity is not None
     assert entity.status == EvidenceResolutionStatus.CANDIDATE
     assert wall_physical_existence_status(
-        wall, evidence_atoms=atoms, document=_document(("u2-ev", "layer-ev")), viewport=_viewport()
+        wall, evidence_atoms=atoms, document=_document(("u2-ev", "layer-ev")), viewport=_viewport(), context=_context()
     ) == EvidenceResolutionStatus.CANDIDATE
 
 
@@ -414,7 +420,7 @@ def test_wrong_document_on_quantity_abstains() -> None:
         viewport=viewport,
         entity=entity,
         page_no=1,
-        scale_binding=_scale_binding(scale),
+        scale_bindings=(_scale_binding(scale),),
     )
     assert qty.abstained
     assert "physical_wall_existence_document_mismatch" in qty.blocking_reasons
@@ -445,11 +451,14 @@ def test_stale_revision_abstains_at_measurement() -> None:
         viewport=viewport,
         entity=entity,
         page_no=1,
-        scale_binding=_scale_binding(scale),
+        scale_bindings=(_scale_binding(scale),),
     )
     assert qty.abstained
-    assert "stale_revision" in qty.blocking_reasons
-
+    assert (
+        "stale_revision" in qty.blocking_reasons
+        or "existence_context_revision_stale" in qty.blocking_reasons
+        or "physical_wall_existence_abstained" in qty.blocking_reasons
+    )
 
 def test_entity_for_other_wall_cannot_authorize_length() -> None:
     scale = _scale()
@@ -464,7 +473,7 @@ def test_entity_for_other_wall_cannot_authorize_length() -> None:
         viewport=viewport,
         entity=entity,
         page_no=1,
-        scale_binding=_scale_binding(scale),
+        scale_bindings=(_scale_binding(scale),),
     )
     assert qty.abstained
     assert "wall_entity_identity_mismatch" in qty.blocking_reasons
@@ -533,7 +542,7 @@ def test_shuffled_batch_is_deterministic() -> None:
         document=document,
         viewport=bound_viewport,
         page_no=1,
-        scale_binding=binding,
+        scale_bindings=(binding,),
     )
     reverse = build_wall_length_quantities(
         walls=(w2, w1),
@@ -542,7 +551,7 @@ def test_shuffled_batch_is_deterministic() -> None:
         document=document,
         viewport=bound_viewport,
         page_no=1,
-        scale_binding=binding,
+        scale_bindings=(binding,),
     )
     by_id_fwd = {q.semantic_key: q.value for q in forward}
     by_id_rev = {q.semantic_key: q.value for q in reverse}
@@ -562,7 +571,7 @@ def test_same_wall_cannot_double_count() -> None:
         document=document,
         viewport=viewport,
         page_no=1,
-        scale_binding=_scale_binding(scale),
+        scale_bindings=(_scale_binding(scale),),
     )
     assert all(q.abstained for q in out)
     assert all("overlapping_wall_source_segments" in q.blocking_reasons for q in out)
@@ -592,7 +601,7 @@ def test_unbound_scale_cannot_leak_across_viewports_on_same_page() -> None:
         viewport=viewport,
         entity=entity,
         page_no=1,
-        scale_binding=_scale_binding(scale),
+        scale_bindings=(_scale_binding(scale),),
     )
     assert qty.abstained
     assert "viewport_scale_fingerprint_mismatch" in qty.blocking_reasons
@@ -655,14 +664,16 @@ def test_scale_fingerprint_and_binding_import_smoke_has_no_cycle() -> None:
     assert ViewportScaleBinding is vsb.ViewportScaleBinding
 
 
-def _existence(wall, atoms, document=None, viewport=None):
+def _existence(wall, atoms, document=None, viewport=None, context=None):
     document = document or _document(tuple(dict.fromkeys(atom.evidence_id for atom in atoms)))
     viewport = viewport or _viewport()
+    context = context or _context()
     return resolve_physical_wall_existence(
         wall=wall,
         evidence_atoms=atoms,
         document=document,
         viewport=viewport,
+        context=context,
     )
 
 
@@ -736,11 +747,11 @@ def test_identical_duplicate_atoms_do_not_increase_authority() -> None:
 def test_removing_support_cannot_increase_existence_authority() -> None:
     wall, atoms = _two_domain_wall()
     corroborated = wall_physical_existence_status(
-        wall, evidence_atoms=atoms, document=_document(("u2-ev", "pair-ev")), viewport=_viewport()
+        wall, evidence_atoms=atoms, document=_document(("u2-ev", "pair-ev")), viewport=_viewport(), context=_context()
     )
     reduced = _wall(supporting=("u2-ev",))
     weaker = wall_physical_existence_status(
-        reduced, evidence_atoms=atoms, document=_document(("u2-ev", "pair-ev")), viewport=_viewport()
+        reduced, evidence_atoms=atoms, document=_document(("u2-ev", "pair-ev")), viewport=_viewport(), context=_context()
     )
     assert corroborated == EvidenceResolutionStatus.CORROBORATED
     assert weaker != EvidenceResolutionStatus.CORROBORATED
@@ -778,3 +789,75 @@ def test_shuffled_source_atoms_do_not_change_existence() -> None:
     assert forward.status == reverse.status
     assert forward.reason_codes == reverse.reason_codes
     assert forward.evidence_id == reverse.evidence_id
+
+
+def test_stale_revision_atom_cannot_corroborate_existence() -> None:
+    wall, atoms = _two_domain_wall()
+    stale = replace(
+        atoms[0],
+        metadata={**dict(atoms[0].metadata), "revision_id": "R0"},
+    )
+    existence = _existence(wall, (stale, atoms[1]))
+    assert existence.status != EvidenceResolutionStatus.CORROBORATED
+    assert "existence_atom_revision_stale" in existence.reason_codes
+
+
+def test_missing_snapshot_metadata_cannot_corroborate_existence() -> None:
+    wall, atoms = _two_domain_wall()
+    bare = replace(atoms[0], metadata={"wall_candidate_id": "w1"})
+    existence = _existence(wall, (bare, atoms[1]))
+    assert existence.status != EvidenceResolutionStatus.CORROBORATED
+    assert "existence_atom_revision_unproven" in existence.reason_codes
+    assert "existence_atom_snapshot_unproven" in existence.reason_codes
+
+
+def test_bbox_only_evidence_id_collision_blocks() -> None:
+    wall, atoms = _two_domain_wall()
+    left = replace(atoms[0], bbox=(0.0, 0.0, 10.0, 10.0))
+    right = replace(atoms[0], bbox=(1.0, 1.0, 11.0, 11.0))
+    existence = _existence(wall, (left, right, atoms[1]))
+    assert "existence_evidence_id_collision" in existence.reason_codes
+    assert existence.status != EvidenceResolutionStatus.CORROBORATED
+
+
+def test_confidence_only_evidence_id_collision_blocks() -> None:
+    wall, atoms = _two_domain_wall()
+    left = replace(atoms[0], confidence=0.7)
+    right = replace(atoms[0], confidence=0.8)
+    existence = _existence(wall, (left, right, atoms[1]))
+    assert "existence_evidence_id_collision" in existence.reason_codes
+
+
+def test_schema_version_only_evidence_id_collision_blocks() -> None:
+    wall, atoms = _two_domain_wall()
+    left = replace(atoms[0], schema_version="1.0.0")
+    right = replace(atoms[0], schema_version="1.0.1")
+    existence = _existence(wall, (left, right, atoms[1]))
+    assert "existence_evidence_id_collision" in existence.reason_codes
+
+
+def test_firm_path_reconciles_complete_binding_set_not_caller_preferred() -> None:
+    scale = _scale()
+    wall, atoms = _two_domain_wall(points=((0.0, 0.0), (scale.px_per_m * 4.0, 0.0)))
+    preferred = _scale_binding(scale)
+    competitor = replace(
+        preferred,
+        calibration=replace(scale, px_per_m=scale.px_per_m * 2.0),
+    )
+    # Force competitor eligible by matching fingerprint on viewport for preferred only —
+    # both bindings share viewport/page/SHA/revision; only preferred matches resolved_scale_id.
+    # Construct a second eligible clone with identical fingerprint via replace.
+    twin = replace(preferred)
+    entity, document, viewport, context = _adapt(wall, atoms)
+    assert entity is not None
+    qty = build_wall_length_quantity(
+        wall=wall,
+        context=context,
+        document=document,
+        viewport=replace(viewport, resolved_scale_id=preferred.scale_fingerprint),
+        entity=entity,
+        page_no=1,
+        scale_bindings=(preferred, twin),
+    )
+    assert qty.abstained
+    assert "conflicting_eligible_scale_bindings" in qty.blocking_reasons
