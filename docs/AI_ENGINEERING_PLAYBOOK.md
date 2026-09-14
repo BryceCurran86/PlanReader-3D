@@ -127,6 +127,7 @@ PDF page
 - W10 copies into `CanonicalWall` / `CanonicalSpace` with `takeoff_eligible=False`, `deduction_authority=False`, `height_m=None`, `openings=[]`.
 - `build_wall_length_quantity` abstains unless `EntityEvidence.status` is `CORROBORATED` from the typed physical-existence adapter **and** `resolve_linear_measurement_input` returns a firm value. `WallCandidate.status` is not existence authority. Duplicate wall ids or overlapping source segments abstain in the batch builder.
 - `build_wall_height_quantity` accepts only owned explicit height kinds or a corroborated datum pair. Tokens such as `default` / `assumed` / `legacy_default` are forbidden.
+- W5 `extract_planar_faces` already walks directed half-edges and **discards** the unbounded face (`signed>0` only). It does not persist left/right face ids on `WallCandidate`. W6 `derive_room_wall_relationships` sets `interior_exterior` from room-count (1 vs 2) only — that is not wall-role authority. Viewport bbox is not a building face.
 
 **INFERRED:** there is no single production function that runs PDF → JobHub wall length today. `pb_wall_topology_diagnostics` is an observability harness, not live extraction.
 

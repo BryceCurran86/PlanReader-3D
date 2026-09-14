@@ -54,6 +54,7 @@ Only existing seams may raise firm measurement authority:
 - W7 `detect_opening_host_candidates` (always `ambiguous_host`)
 - `pb_hosted_opening_geometry` / `pb_hosted_opening_wall_binding` (unwired; diagnostic only)
 - W10 canonical translation
+- `pb_wall_boundary_role_authority` wall-role evidence (shadow; not a quantity)
 - Benchmark gold, mappings, scorer tolerances, or development-project scores
 
 ## Required tests for every geometric hypothesis
