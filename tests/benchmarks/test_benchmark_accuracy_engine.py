@@ -26,16 +26,24 @@ from pb_benchmark_accuracy_engine import (
     ItemMatchStatus,
     run_public_tender_benchmark,
 )
+from pb_benchmark_runner import resolve_file_path
 from pb_public_tender_benchmark import BOQLineCategory
 
-# Repository-committed source for the tenders_ke_kstvet_cbc_classroom benchmark
-# (see benchmarks/public_tenders/tenders_ke_kstvet_cbc_classroom/download_manifest.json,
-# sha256 6856bfa7...). This is the same file resolve_file_path() already finds via
-# KNOWN_LOCAL_SEARCH_ROOTS' first entry ("benchmarks/sources") -- referencing it
-# directly here removes the tests' dependency on any developer's personal machine path.
-_KSTVET_TENDER_PDF = (
-    Path(__file__).resolve().parents[2] / "benchmarks" / "sources" / "1727358888238-bq-nd-drawing.pdf"
-)
+# tenders_ke_kstvet_cbc_classroom's own declared source filename (see
+# benchmarks/public_tenders/tenders_ke_kstvet_cbc_classroom/download_manifest.json,
+# sha256 6856bfa7...). benchmarks/sources/ is gitignored (real procurement
+# documents are never committed), so this file is NOT present on a clean
+# checkout (CI included) unless a contributor has downloaded it locally.
+# resolve_file_path() is the exact same production lookup main()/evaluate_
+# benchmark() use via KNOWN_LOCAL_SEARCH_ROOTS -- calling it here (instead of
+# hardcoding any one location, personal or conventional) is what makes these
+# tests portable: they verify the real thing wherever it happens to be
+# available, and skip/predict correctly wherever it is not.
+_KSTVET_TENDER_PDF_FILENAME = "1727358888238-bq-nd-drawing.pdf"
+
+
+def _resolved_kstvet_tender_pdf() -> Path | None:
+    return resolve_file_path(_KSTVET_TENDER_PDF_FILENAME)
 
 
 @pytest.fixture
@@ -321,12 +329,22 @@ def test_convenience_runner(tmp_path):
 
 
 def test_native_pdf_extraction_and_evaluation(engine):
-    """Verify genuine independent extraction against the repo-committed tender PDF."""
-    assert _KSTVET_TENDER_PDF.exists(), f"repository-committed benchmark source missing: {_KSTVET_TENDER_PDF}"
+    """If the tender PDF has been locally downloaded, verify genuine independent extraction.
+
+    benchmarks/sources/ is gitignored -- real procurement documents are never
+    committed -- so this file is absent on a clean checkout (CI included)
+    unless a contributor has fetched it per download_manifest.json's own
+    source_url. Skipping in that case is correct, not a portability bug; the
+    portability fix is resolving through the same KNOWN_LOCAL_SEARCH_ROOTS
+    production lookup everywhere, rather than one developer's personal path.
+    """
+    pdf_path = _resolved_kstvet_tender_pdf()
+    if pdf_path is None:
+        pytest.skip(f"{_KSTVET_TENDER_PDF_FILENAME} not locally available in any known search root")
 
     report = engine.evaluate_benchmark(
         benchmark_id="tenders_ke_kstvet_cbc_classroom",
-        pdf_path=_KSTVET_TENDER_PDF,
+        pdf_path=pdf_path,
     )
     assert report.is_scored is True
     # Post-cleanup: genuine schedule extraction without hardcoded fallbacks finds scheduled W1 and chalkboard exactly.
@@ -342,14 +360,16 @@ def test_cli_main_entrypoint(monkeypatch, tmp_path):
     """Test main CLI entrypoint.
 
     ``main()`` is invoked with no explicit ``--pdf`` flag: with
-    ``--auto-extract`` (default True) it must resolve the benchmark's own
-    repository-committed source PDF via resolve_file_path()'s
-    "benchmarks/sources" search root and succeed regardless of any
-    developer's personal machine paths.
+    ``--auto-extract`` (default True) it resolves the benchmark's source PDF
+    through the same production KNOWN_LOCAL_SEARCH_ROOTS lookup regardless of
+    any developer's personal machine paths, and returns
+    ``0 if report.is_scored else 1``. Whether that source is locally present
+    varies by machine (benchmarks/sources/ is gitignored), so the expected
+    code is computed the same way main() computes it, rather than assumed.
     """
     from pb_benchmark_accuracy_engine import main
 
-    assert _KSTVET_TENDER_PDF.exists(), f"repository-committed benchmark source missing: {_KSTVET_TENDER_PDF}"
+    expected_code = 0 if _resolved_kstvet_tender_pdf() is not None else 1
 
     monkeypatch.setattr(
         "sys.argv",
@@ -362,7 +382,7 @@ def test_cli_main_entrypoint(monkeypatch, tmp_path):
         ],
     )
     code = main()
-    assert code == 0
+    assert code == expected_code
 
 
 def test_malformed_benchmark_fails_closed(engine):
