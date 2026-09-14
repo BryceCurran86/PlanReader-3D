@@ -21,6 +21,10 @@ from pb_authority_completeness import (
     verify_bound_resolution_fingerprint,
 )
 from pb_canonical_wall_room_evidence_model import FAMILY_PAIRED_WALL_FACES
+from pb_enumerator_snapshot_commitment import (
+    build_enumerator_snapshot_commitment,
+    immutable_snapshot_fingerprint,
+)
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_measurement_input_authority import scale_calibration_fingerprint
 from pb_migration_contracts import (
@@ -289,6 +293,61 @@ def _candidate_proof(
     return universe, manifest
 
 
+def _enumerator_proof(domain: str, universe: object, *, snapshot_tag: str):
+    members = tuple(
+        {
+            "candidate_id": item.candidate_id,
+            "provenance_fingerprint": item.provenance_fingerprint,
+        }
+        for item in sorted(universe.members, key=lambda item: item.candidate_id)
+    )
+    snapshot_id = f"{snapshot_tag}-snapshot-1"
+    snapshot_fingerprint = immutable_snapshot_fingerprint(
+        {
+            "domain": domain,
+            "scope": universe.scope.payload(),
+            "members": members,
+        }
+    )
+    commitment = build_enumerator_snapshot_commitment(
+        scope=universe.scope,
+        enumerator_id=f"test.{snapshot_tag}.enumerator",
+        enumerator_version="1",
+        upstream_snapshot_id=snapshot_id,
+        upstream_snapshot_fingerprint=snapshot_fingerprint,
+        candidate_universe=universe,
+    )
+    return commitment, snapshot_id, snapshot_fingerprint, universe
+
+
+def _install_scale_enumerator(kwargs: dict, universe) -> None:
+    commitment, snapshot_id, snapshot_fp, current = _enumerator_proof(
+        DOMAIN_WALL_LENGTH_SCALE,
+        universe,
+        snapshot_tag="scale",
+    )
+    kwargs.update(
+        scale_enumerator_commitment=commitment,
+        scale_upstream_snapshot_id=snapshot_id,
+        scale_upstream_snapshot_fingerprint=snapshot_fp,
+        scale_enumerated_universe=current,
+    )
+
+
+def _install_candidate_enumerator(kwargs: dict, universe) -> None:
+    commitment, snapshot_id, snapshot_fp, current = _enumerator_proof(
+        DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+        universe,
+        snapshot_tag="physical-wall",
+    )
+    kwargs.update(
+        candidate_enumerator_commitment=commitment,
+        candidate_upstream_snapshot_id=snapshot_id,
+        candidate_upstream_snapshot_fingerprint=snapshot_fp,
+        candidate_enumerated_universe=current,
+    )
+
+
 def _equivalence_bundle(walls, identities, candidate_universe, *, scope=None):
     walls_by_id = {wall.candidate_id: wall for wall in walls}
     resolution = resolve_physical_wall_equivalence(
@@ -318,7 +377,7 @@ def _firm_single_kwargs(wall: WallCandidate | None = None):
         (identity,),
         candidate_universe,
     )
-    return dict(
+    kwargs = dict(
         wall=resolved_wall,
         context=_context(),
         document=document,
@@ -336,6 +395,9 @@ def _firm_single_kwargs(wall: WallCandidate | None = None):
         physical_walls_by_id={resolved_wall.candidate_id: resolved_wall},
         equivalence_binding=equivalence_binding,
     )
+    _install_scale_enumerator(kwargs, scale_universe)
+    _install_candidate_enumerator(kwargs, candidate_universe)
+    return kwargs
 
 
 def _assert_blocked(qty, reason: str) -> None:
@@ -359,7 +421,8 @@ def test_c1_hidden_same_viewport_scale_competitor_cannot_leave_firm() -> None:
     hidden = _binding(50.0, label="A102")
     universe, manifest = _scale_proof((admitted, hidden))
     kwargs.update(scale_universe=universe, scale_manifest=manifest, scale_bindings=(admitted,))
-    _assert_blocked(build_wall_length_quantity(**kwargs), "scale_universe_completeness_mismatch")
+    _install_scale_enumerator(kwargs, universe)
+    _assert_blocked(build_wall_length_quantity(**kwargs), "scale_enumerator_commitment_mismatch")
 
 
 def test_c1_two_agreeing_scale_candidates_remain_fail_closed_until_reconciled() -> None:
@@ -373,6 +436,7 @@ def test_c1_two_agreeing_scale_candidates_remain_fail_closed_until_reconciled() 
         scale_universe=universe,
         scale_manifest=manifest,
     )
+    _install_scale_enumerator(kwargs, universe)
     assert build_wall_length_quantity(**kwargs).abstained is True
 
 
@@ -387,6 +451,7 @@ def test_c1_two_conflicting_scales_block() -> None:
         scale_universe=universe,
         scale_manifest=manifest,
     )
+    _install_scale_enumerator(kwargs, universe)
     assert build_wall_length_quantity(**kwargs).abstained is True
 
 
@@ -396,7 +461,8 @@ def test_c1_omitted_admitted_scale_candidate_blocks() -> None:
     second = _binding(75.0, label="A103")
     universe, manifest = _scale_proof((first, second))
     kwargs.update(scale_bindings=(first,), scale_universe=universe, scale_manifest=manifest)
-    _assert_blocked(build_wall_length_quantity(**kwargs), "scale_universe_completeness_mismatch")
+    _install_scale_enumerator(kwargs, universe)
+    _assert_blocked(build_wall_length_quantity(**kwargs), "scale_enumerator_commitment_mismatch")
 
 
 def test_c1_unresolved_scale_candidate_blocks() -> None:
@@ -410,7 +476,8 @@ def test_c1_unresolved_scale_candidate_blocks() -> None:
         unresolved_ids=("scale-unresolved",),
     )
     kwargs.update(scale_universe=universe, scale_manifest=manifest)
-    _assert_blocked(build_wall_length_quantity(**kwargs), "scale_universe_completeness_mismatch")
+    _install_scale_enumerator(kwargs, universe)
+    assert build_wall_length_quantity(**kwargs).abstained is True
 
 
 def test_c1_explicit_evidenced_scale_exclusion_allows_remaining_proven_scale() -> None:
@@ -424,6 +491,7 @@ def test_c1_explicit_evidenced_scale_exclusion_allows_remaining_proven_scale() -
         exclusions=(ExplicitExclusion(excluded_id, "wrong_view_type", ("ev-exclusion",)),),
     )
     kwargs.update(scale_bindings=(first,), scale_universe=universe, scale_manifest=manifest)
+    _install_scale_enumerator(kwargs, universe)
     assert build_wall_length_quantity(**kwargs).abstained is False
 
 
@@ -444,6 +512,7 @@ def test_c1_stale_or_wrong_scale_scope_blocks(field: str, value: str) -> None:
     stale_scope = replace(_scope(DOMAIN_WALL_LENGTH_SCALE), **{field: value})
     universe, manifest = _scale_proof((binding,), scope=stale_scope)
     kwargs.update(scale_universe=universe, scale_manifest=manifest)
+    _install_scale_enumerator(kwargs, universe)
     assert build_wall_length_quantity(**kwargs).abstained is True
 
 
@@ -458,6 +527,7 @@ def test_c1_conflict_added_after_manifest_creation_invalidates_manifest() -> Non
     )
     assert current_universe.fingerprint != old_universe.fingerprint
     kwargs.update(scale_universe=current_universe, scale_manifest=old_manifest)
+    kwargs["scale_enumerated_universe"] = current_universe
     assert build_wall_length_quantity(**kwargs).abstained is True
 
 
@@ -474,6 +544,7 @@ def test_c1_conflict_monotonicity_never_strengthens_authority() -> None:
         unresolved_ids=("late-scale",),
     )
     kwargs.update(scale_universe=universe, scale_manifest=manifest)
+    _install_scale_enumerator(kwargs, universe)
     assert build_wall_length_quantity(**kwargs).abstained is True
 
 
@@ -624,7 +695,7 @@ def _batch_inputs(walls: tuple[WallCandidate, ...], identities=None):
     scale_binding = _binding(100.0)
     scale_universe, scale_manifest = _scale_proof((scale_binding,))
     candidate_universe, candidate_manifest = _candidate_proof(resolved_identities)
-    return dict(
+    kwargs = dict(
         walls=walls,
         entities_by_wall_id=entities,
         evidence_atoms=atoms,
@@ -640,6 +711,9 @@ def _batch_inputs(walls: tuple[WallCandidate, ...], identities=None):
         candidate_universe=candidate_universe,
         candidate_manifest=candidate_manifest,
     )
+    _install_scale_enumerator(kwargs, scale_universe)
+    _install_candidate_enumerator(kwargs, candidate_universe)
+    return kwargs
 
 
 def test_c5_hidden_competing_wall_blocks() -> None:
@@ -654,8 +728,9 @@ def test_c5_hidden_competing_wall_blocks() -> None:
         candidate_manifest=manifest,
         physical_identity_universe=identities,
     )
+    _install_candidate_enumerator(kwargs, universe)
     out = build_wall_length_quantities(**kwargs)
-    _assert_blocked(out[0], "physical_candidate_universe_completeness_unproven")
+    assert out[0].abstained is True
 
 
 def test_c5_omitted_duplicate_candidate_blocks() -> None:
@@ -670,6 +745,7 @@ def test_c5_omitted_duplicate_candidate_blocks() -> None:
         candidate_manifest=manifest,
         physical_identity_universe=identities,
     )
+    _install_candidate_enumerator(kwargs, universe)
     assert build_wall_length_quantities(**kwargs)[0].abstained is True
 
 
@@ -685,6 +761,7 @@ def test_c5_unresolved_candidate_blocks() -> None:
         unresolved_ids=("w-unresolved",),
     )
     kwargs.update(candidate_universe=universe, candidate_manifest=manifest)
+    _install_candidate_enumerator(kwargs, universe)
     assert build_wall_length_quantities(**kwargs)[0].abstained is True
 
 
@@ -711,6 +788,7 @@ def test_c5_explicit_evidenced_exclusion_allows_unrelated_admitted_wall() -> Non
         exclusions=(ExplicitExclusion("w2", "outside_local_wall_scope", ("scope-ev",)),),
     )
     kwargs.update(candidate_universe=universe, candidate_manifest=manifest)
+    _install_candidate_enumerator(kwargs, universe)
     out = build_wall_length_quantities(**kwargs)
     assert out[0].abstained is False
 
@@ -726,6 +804,7 @@ def test_c5_candidate_added_after_manifest_creation_blocks() -> None:
         (physical_wall_identity_member(identity), physical_wall_identity_member(late)),
     )
     kwargs.update(candidate_universe=current_universe, candidate_manifest=old_manifest)
+    kwargs["candidate_enumerated_universe"] = current_universe
     assert build_wall_length_quantities(**kwargs)[0].abstained is True
 
 
@@ -741,6 +820,17 @@ def test_c5_candidate_removed_after_manifest_creation_blocks() -> None:
     )
     assert current_universe.fingerprint != old_universe.fingerprint
     kwargs.update(candidate_universe=current_universe, candidate_manifest=old_manifest)
+    full_commitment, sid, sfp, _ = _enumerator_proof(
+        DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES,
+        old_universe,
+        snapshot_tag="physical-wall-old",
+    )
+    kwargs.update(
+        candidate_enumerator_commitment=full_commitment,
+        candidate_upstream_snapshot_id=sid,
+        candidate_upstream_snapshot_fingerprint=sfp,
+        candidate_enumerated_universe=current_universe,
+    )
     assert build_wall_length_quantities(**kwargs)[0].abstained is True
 
 
@@ -760,6 +850,7 @@ def test_c5_stale_or_wrong_candidate_scope_blocks(field: str, value: str) -> Non
     scope = replace(_scope(DOMAIN_WALL_LENGTH_PHYSICAL_CANDIDATES), **{field: value})
     universe, manifest = _candidate_proof((identity,), scope=scope)
     kwargs.update(candidate_universe=universe, candidate_manifest=manifest)
+    _install_candidate_enumerator(kwargs, universe)
     assert build_wall_length_quantities(**kwargs)[0].abstained is True
 
 
@@ -795,6 +886,7 @@ def test_c5_scope_domain_mismatch_blocks() -> None:
     wrong_scope = _scope(DOMAIN_WALL_LENGTH_SCALE)
     universe, manifest = _candidate_proof((identity,), scope=wrong_scope)
     kwargs.update(candidate_universe=universe, candidate_manifest=manifest)
+    _install_candidate_enumerator(kwargs, universe)
     assert build_wall_length_quantities(**kwargs)[0].abstained is True
 
 
@@ -823,6 +915,7 @@ def test_c5_conflict_addition_monotonicity_never_strengthens() -> None:
         unresolved_ids=("w-late",),
     )
     kwargs.update(candidate_universe=universe, candidate_manifest=manifest)
+    _install_candidate_enumerator(kwargs, universe)
     assert build_wall_length_quantities(**kwargs)[0].abstained is True
 
 
