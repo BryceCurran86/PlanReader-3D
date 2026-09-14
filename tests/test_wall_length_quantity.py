@@ -18,7 +18,10 @@ from pb_enumerator_snapshot_commitment import (
     immutable_snapshot_fingerprint,
 )
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
-from pb_measurement_input_authority import scale_calibration_fingerprint
+from pb_measurement_input_authority import (
+    resolve_linear_measurement_input,
+    scale_calibration_fingerprint,
+)
 from pb_migration_contracts import (
     DocumentEvidence,
     EvidenceAtom,
@@ -40,7 +43,12 @@ from pb_physical_wall_identity import (
     resolve_physical_wall_identity,
 )
 from pb_viewport_scale_binding import ViewportScaleBinding
-from pb_wall_length_quantity import build_wall_length_quantities, build_wall_length_quantity
+from pb_wall_length_quantity import (
+    FIGURED_DIMENSION_WALL_LENGTH_DISABLED_REASON,
+    _downgrade_figured_dimension_result,
+    build_wall_length_quantities,
+    build_wall_length_quantity,
+)
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 from pb_wall_room_topology_typed_negative_evidence import KIND_PHYSICAL_WALL
 
@@ -370,55 +378,82 @@ def _qty_kwargs(wall: WallCandidate, extra_atoms: tuple[EvidenceAtom, ...] = (),
     return kwargs
 
 
-def test_scaled_wall_length_emits_firm_quantity() -> None:
+def _page_length(wall: WallCandidate) -> float:
+    return sum(
+        math.hypot(b[0] - a[0], b[1] - a[1])
+        for a, b in zip(wall.centerline_pts, wall.centerline_pts[1:])
+    )
+
+
+def _resolve_scaled_wall(wall: WallCandidate, scale):
+    entity, document, _atoms_seen = _bind(wall)
+    binding = _scale_binding(scale)
+    viewport = _viewport(resolved_scale_id=binding.scale_fingerprint)
+    return resolve_linear_measurement_input(
+        context=_context(),
+        document=document,
+        viewport=viewport,
+        entity=entity,
+        page_no=1,
+        scaled_length_page_units=_page_length(wall),
+        scale_bindings=(binding,),
+        wall_viewport_id=wall.viewport_id,
+    )
+
+
+def test_scaled_wall_length_publication_blocks_without_authoritative_snapshot_content() -> None:
     scale = _scale()
     wall = _wall(points=((0.0, 0.0), (scale.px_per_m * 5.0, 0.0)))
-    qty = build_wall_length_quantity(**_qty_kwargs(wall, scale=_scale()))
-    assert qty.abstained is False
-    assert math.isclose(qty.value or 0.0, 5.0, abs_tol=1e-6)
-    assert qty.family == "wall_length"
-    assert qty.semantic_key == "wall_length:w1"
-    assert qty.metadata["source_sha256"] == SHA
-    assert qty.metadata["viewport_id"] == "vp"
-    assert qty.metadata["thickness_authority"] == MeasurementAuthorityType.PROVISIONAL.value
-    assert qty.metadata["thickness_m"] is None
-    assert qty.metadata["wall_status"] == EvidenceResolutionStatus.CANDIDATE.value
-    assert qty.metadata["entity_status"] == EvidenceResolutionStatus.CORROBORATED.value
+    qty = build_wall_length_quantity(**_qty_kwargs(wall, scale=scale))
+    assert qty.abstained is True
+    assert qty.value is None
+    assert "physical_candidate_enumerator_commitment_unavailable" in qty.blocking_reasons
+    assert "scale_enumerator_commitment_unavailable" in qty.blocking_reasons
+    assert "authoritative_upstream_snapshot_content_unavailable" in qty.blocking_reasons
 
 
-def test_translation_is_metamorphically_invariant() -> None:
+def test_translation_is_metamorphically_invariant_below_publication_boundary() -> None:
     scale = _scale()
     length = scale.px_per_m * 7.25
     a = _wall(points=((0.0, 0.0), (length, 0.0)))
     b = _wall(points=((500.0, -200.0), (500.0 + length, -200.0)))
-    assert build_wall_length_quantity(**_qty_kwargs(a, scale=scale)).value == 7.25
-    assert build_wall_length_quantity(**_qty_kwargs(b, scale=scale)).value == 7.25
+    left = _resolve_scaled_wall(a, scale)
+    right = _resolve_scaled_wall(b, scale)
+    assert left.abstained is False and right.abstained is False
+    assert left.value_m == right.value_m == 7.25
 
 
-def test_rotation_is_metamorphically_invariant() -> None:
+def test_rotation_is_metamorphically_invariant_below_publication_boundary() -> None:
     scale = _scale()
     length = scale.px_per_m * 3.0
     horizontal = _wall(points=((0.0, 0.0), (length, 0.0)))
     vertical = _wall(points=((0.0, 0.0), (0.0, length)))
-    assert build_wall_length_quantity(**_qty_kwargs(horizontal, scale=scale)).value == 3.0
-    assert build_wall_length_quantity(**_qty_kwargs(vertical, scale=scale)).value == 3.0
+    left = _resolve_scaled_wall(horizontal, scale)
+    right = _resolve_scaled_wall(vertical, scale)
+    assert left.abstained is False and right.abstained is False
+    assert left.value_m == right.value_m == 3.0
 
 
-def test_figured_dimension_is_authoritative_when_scale_absent() -> None:
+def test_figured_dimension_route_is_disabled_after_lower_level_resolution() -> None:
     wall = _wall()
-    qty = build_wall_length_quantity(
-        **_qty_kwargs(
-            wall,
-            extra_atoms=(_figured("5000"),),
-            scale_bindings=(),
-            figured_evidence=_figured("5000"),
-        )
+    figured = _figured("5000")
+    entity, document, _atoms_seen = _bind(wall, extra_atoms=(figured,))
+    resolved = resolve_linear_measurement_input(
+        context=_context(),
+        document=document,
+        viewport=_viewport(),
+        entity=entity,
+        page_no=1,
+        figured_evidence=figured,
+        wall_viewport_id=wall.viewport_id,
     )
-    assert qty.abstained is True
-    assert qty.value is None
-    from pb_wall_length_quantity import FIGURED_DIMENSION_WALL_LENGTH_DISABLED_REASON
-
-    assert FIGURED_DIMENSION_WALL_LENGTH_DISABLED_REASON in qty.blocking_reasons
+    assert resolved.abstained is False
+    assert resolved.value_m == 5.0
+    downgraded = _downgrade_figured_dimension_result(resolved)
+    assert downgraded.abstained is False
+    assert downgraded.value_m is None
+    assert downgraded.authority_status == AuthorityStatus.BLOCKED.value
+    assert FIGURED_DIMENSION_WALL_LENGTH_DISABLED_REASON in downgraded.blocking_reasons
 
 
 def test_untrusted_physical_existence_abstains() -> None:
@@ -468,12 +503,23 @@ def test_overlapping_source_segments_fail_closed_instead_of_double_counting() ->
     assert all("overlapping_wall_source_segments" in q.blocking_reasons for q in out)
 
 
-def test_stale_scale_causes_abstention_not_old_length_reuse() -> None:
+def test_stale_scale_is_rejected_by_measurement_resolver() -> None:
     scale = _scale(revision="R0")
     wall = _wall(points=((0.0, 0.0), (scale.px_per_m * 4.0, 0.0)))
-    qty = build_wall_length_quantity(**_qty_kwargs(wall, scale=scale))
-    assert qty.abstained
-    assert "scale_binding_revision_mismatch" in qty.blocking_reasons
+    entity, document, _atoms_seen = _bind(wall)
+    binding = _scale_binding(scale)
+    resolved = resolve_linear_measurement_input(
+        context=_context(),
+        document=document,
+        viewport=_viewport(resolved_scale_id=binding.scale_fingerprint),
+        entity=entity,
+        page_no=1,
+        scaled_length_page_units=_page_length(wall),
+        scale_bindings=(binding,),
+        wall_viewport_id=wall.viewport_id,
+    )
+    assert resolved.abstained is True
+    assert "scale_binding_revision_mismatch" in resolved.blocking_reasons
 
 
 def test_bare_scale_calibration_cannot_reach_quantity_builder() -> None:
@@ -573,7 +619,7 @@ def _batch_with_identities(walls, identities):
     )
 
 
-def test_reversed_and_rechunked_walls_cannot_publish_two_physical_quantities() -> None:
+def test_reversed_and_rechunked_walls_reconcile_to_one_representative() -> None:
     from pb_physical_wall_identity import collect_physical_wall_identities
 
     length = 100.0
@@ -593,14 +639,15 @@ def test_reversed_and_rechunked_walls_cannot_publish_two_physical_quantities() -
         ]
     }
     identities = collect_physical_wall_identities((forward, reversed_wall, rechunked), graph)
-    out = _batch_with_identities((forward, reversed_wall, rechunked), identities)
-    firm = [qty for qty in out if not qty.abstained]
-    assert len(firm) == 1
-    abstained = [qty for qty in out if qty.abstained]
-    assert len(abstained) == 2
+    resolution = resolve_physical_wall_equivalence(
+        tuple(identities.values()),
+        walls_by_id={wall.candidate_id: wall for wall in (forward, reversed_wall, rechunked)},
+    )
+    assert len(resolution.representative_wall_ids) == 1
+    assert len(resolution.abstained_wall_ids) == 2
     assert all(
-        any(reason.startswith("equivalent_physical_wall_represented_by:") for reason in qty.blocking_reasons)
-        for qty in abstained
+        any(reason.startswith("equivalent_physical_wall_represented_by:") for reason in resolution.blockers_for(wall_id))
+        for wall_id in resolution.abstained_wall_ids
     )
 
 
@@ -708,7 +755,7 @@ def test_missing_lineage_or_edges_abstains_identity_instead_of_endpoint_hash() -
     assert "physical_identity_edge_geometry_unavailable" in no_coords.blocking_reasons
 
 
-def test_paired_face_and_centerline_cannot_both_publish() -> None:
+def test_paired_face_and_centerline_reconcile_as_ambiguous() -> None:
     from pb_physical_wall_identity import (
         PhysicalEquivalenceClass,
         classify_physical_wall_pair,
@@ -728,13 +775,19 @@ def test_paired_face_and_centerline_cannot_both_publish() -> None:
         classify_physical_wall_pair(identities["w1"], identities["w2"])
         == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
     )
-    out = _batch_with_identities((center, face), identities)
-    firm = [qty for qty in out if not qty.abstained]
-    assert len(firm) == 0
-    assert all("ambiguous_physical_wall_equivalence" in qty.blocking_reasons for qty in out)
+    resolution = resolve_physical_wall_equivalence(
+        tuple(identities.values()),
+        walls_by_id={"w1": center, "w2": face},
+    )
+    assert resolution.representative_wall_ids == ()
+    assert set(resolution.ambiguous_wall_ids) == {"w1", "w2"}
+    assert all(
+        "ambiguous_physical_wall_equivalence" in resolution.blockers_for(wall_id)
+        for wall_id in ("w1", "w2")
+    )
 
 
-def test_same_path_different_duplicated_native_ids_cannot_publish_twice() -> None:
+def test_same_path_different_duplicated_native_ids_reconcile_as_ambiguous() -> None:
     from pb_physical_wall_identity import (
         PhysicalEquivalenceClass,
         classify_physical_wall_pair,
@@ -757,12 +810,16 @@ def test_same_path_different_duplicated_native_ids_cannot_publish_twice() -> Non
         classify_physical_wall_pair(identities["w1"], identities["w2"])
         == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
     )
-    resolution = resolve_physical_wall_equivalence(tuple(identities.values()))
+    resolution = resolve_physical_wall_equivalence(
+        tuple(identities.values()),
+        walls_by_id={"w1": a, "w2": b},
+    )
     assert set(resolution.ambiguous_wall_ids) == {"w1", "w2"}
-    out = _batch_with_identities((a, b), identities)
-    firm = [qty for qty in out if not qty.abstained]
-    assert len(firm) == 0
-    assert all("ambiguous_physical_wall_equivalence" in qty.blocking_reasons for qty in out)
+    assert resolution.representative_wall_ids == ()
+    assert all(
+        "ambiguous_physical_wall_equivalence" in resolution.blockers_for(wall_id)
+        for wall_id in ("w1", "w2")
+    )
 
 
 def test_slight_offset_candidate_is_ambiguous_without_positive_distinctness() -> None:
@@ -789,7 +846,7 @@ def test_slight_offset_candidate_is_ambiguous_without_positive_distinctness() ->
     assert resolution.representative_wall_ids == ()
 
 
-def test_rechunk_equivalent_geometry_keeps_one_physical_quantity_count() -> None:
+def test_rechunk_equivalent_geometry_reconciles_to_one_representative() -> None:
     from pb_physical_wall_identity import collect_physical_wall_identities
 
     length = 100.0
@@ -807,15 +864,15 @@ def test_rechunk_equivalent_geometry_keeps_one_physical_quantity_count() -> None
         ]
     }
     identities = collect_physical_wall_identities((forward, rechunked), graph)
-    out = _batch_with_identities((forward, rechunked), identities)
-    firm = [qty for qty in out if not qty.abstained]
-    assert len(firm) == 1
-    assert len(out) == 2
-    abstained = [qty for qty in out if qty.abstained]
-    assert len(abstained) == 1
+    resolution = resolve_physical_wall_equivalence(
+        tuple(identities.values()),
+        walls_by_id={"w1": forward, "w2": rechunked},
+    )
+    assert len(resolution.representative_wall_ids) == 1
+    assert len(resolution.abstained_wall_ids) == 1
     assert any(
         reason.startswith("equivalent_physical_wall_represented_by:")
-        for reason in abstained[0].blocking_reasons
+        for reason in resolution.blockers_for(resolution.abstained_wall_ids[0])
     )
 
 
