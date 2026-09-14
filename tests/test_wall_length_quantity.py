@@ -13,10 +13,12 @@ from pb_migration_contracts import (
 )
 from pb_migration_provider_envelope import ProviderContext
 from pb_page_scale_calibration_authority import ScaleSourceReading, ScaleSourceType, resolve_page_scale_calibration
+from pb_physical_wall_existence_authority import PHYSICAL_WALL_EXISTENCE_KIND
 from pb_wall_length_quantity import build_wall_length_quantities, build_wall_length_quantity
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 
 SHA = "c" * 64
+EXIST_ID = "exist-ev"
 
 
 def _context() -> ProviderContext:
@@ -38,7 +40,7 @@ def _context() -> ProviderContext:
     )
 
 
-def _document(ids=("wall-ev", "dim-ev")) -> DocumentEvidence:
+def _document(ids=(EXIST_ID, "dim-ev")) -> DocumentEvidence:
     return DocumentEvidence(
         document_id="doc",
         source_sha256=SHA,
@@ -56,12 +58,12 @@ def _viewport() -> ViewportEvidence:
         bbox=(0.0, 0.0, 1000.0, 1000.0),
         view_type="floor_plan",
         status=ViewportResolutionStatus.RESOLVED,
-        evidence_ids=("wall-ev",),
+        evidence_ids=(EXIST_ID,),
         confidence=1.0,
     )
 
 
-def _entity(wall_id="w1", ids=("wall-ev", "dim-ev")) -> EntityEvidence:
+def _entity(wall_id="w1", ids=(EXIST_ID, "dim-ev")) -> EntityEvidence:
     return EntityEvidence(
         candidate_entity_id=wall_id,
         candidate_type="wall",
@@ -71,12 +73,27 @@ def _entity(wall_id="w1", ids=("wall-ev", "dim-ev")) -> EntityEvidence:
     )
 
 
+def _existence(wall_id="w1", *, status=EvidenceResolutionStatus.CORROBORATED, evidence_id=EXIST_ID) -> EvidenceAtom:
+    return EvidenceAtom(
+        evidence_id=evidence_id,
+        document_id="doc",
+        page_id="page-1",
+        viewport_id="vp",
+        kind=PHYSICAL_WALL_EXISTENCE_KIND,
+        method="test",
+        confidence=0.8,
+        status=status,
+        metadata={"wall_candidate_id": wall_id},
+    )
+
+
 def _wall(
     wall_id="w1",
     points=((0.0, 0.0), (100.0, 0.0)),
     face_ids=("seg-1",),
     *,
-    status=EvidenceResolutionStatus.CORROBORATED,
+    status=EvidenceResolutionStatus.CANDIDATE,
+    thickness_authority=MeasurementAuthorityType.PROVISIONAL,
 ) -> WallCandidate:
     return WallCandidate(
         candidate_id=wall_id,
@@ -88,7 +105,7 @@ def _wall(
         is_curved=False,
         curve_control_pts=None,
         thickness_m=None,
-        thickness_authority=MeasurementAuthorityType.EXCLUDED,
+        thickness_authority=thickness_authority,
         length_m=None,
         end_node_ids=(f"{wall_id}-n1", f"{wall_id}-n2"),
         junction_types=(JunctionType.ENDPOINT, JunctionType.ENDPOINT),
@@ -123,24 +140,33 @@ def _figured(text="5000") -> EvidenceAtom:
     )
 
 
+def _qty_kwargs(**overrides):
+    kwargs = dict(
+        context=_context(),
+        document=_document(ids=(EXIST_ID,)),
+        viewport=_viewport(),
+        entity=_entity(ids=(EXIST_ID,)),
+        existence_evidence=_existence(),
+        page_no=1,
+        scale_calibration=_scale(),
+    )
+    kwargs.update(overrides)
+    return kwargs
+
+
 def test_scaled_wall_length_emits_firm_quantity() -> None:
     scale = _scale()
     wall = _wall(points=((0.0, 0.0), (scale.px_per_m * 5.0, 0.0)))
-    qty = build_wall_length_quantity(
-        wall=wall,
-        context=_context(),
-        document=_document(ids=("wall-ev",)),
-        viewport=_viewport(),
-        entity=_entity(ids=("wall-ev",)),
-        page_no=1,
-        scale_calibration=scale,
-    )
+    qty = build_wall_length_quantity(wall=wall, **_qty_kwargs(scale_calibration=scale))
     assert qty.abstained is False
     assert math.isclose(qty.value or 0.0, 5.0, abs_tol=1e-6)
     assert qty.family == "wall_length"
     assert qty.semantic_key == "wall_length:w1"
     assert qty.metadata["source_sha256"] == SHA
     assert qty.metadata["viewport_id"] == "vp"
+    assert qty.metadata["thickness_authority"] == MeasurementAuthorityType.PROVISIONAL.value
+    assert qty.metadata["thickness_m"] is None
+    assert qty.metadata["wall_status"] == EvidenceResolutionStatus.CANDIDATE.value
 
 
 def test_translation_is_metamorphically_invariant() -> None:
@@ -148,14 +174,7 @@ def test_translation_is_metamorphically_invariant() -> None:
     length = scale.px_per_m * 7.25
     a = _wall(points=((0.0, 0.0), (length, 0.0)))
     b = _wall(points=((500.0, -200.0), (500.0 + length, -200.0)))
-    kwargs = dict(
-        context=_context(),
-        document=_document(ids=("wall-ev",)),
-        viewport=_viewport(),
-        entity=_entity(ids=("wall-ev",)),
-        page_no=1,
-        scale_calibration=scale,
-    )
+    kwargs = _qty_kwargs(scale_calibration=scale)
     qa = build_wall_length_quantity(wall=a, **kwargs)
     qb = build_wall_length_quantity(wall=b, **kwargs)
     assert qa.value == qb.value == 7.25
@@ -166,14 +185,7 @@ def test_rotation_is_metamorphically_invariant() -> None:
     length = scale.px_per_m * 3.0
     horizontal = _wall(points=((0.0, 0.0), (length, 0.0)))
     vertical = _wall(points=((0.0, 0.0), (0.0, length)))
-    kwargs = dict(
-        context=_context(),
-        document=_document(ids=("wall-ev",)),
-        viewport=_viewport(),
-        entity=_entity(ids=("wall-ev",)),
-        page_no=1,
-        scale_calibration=scale,
-    )
+    kwargs = _qty_kwargs(scale_calibration=scale)
     assert build_wall_length_quantity(wall=horizontal, **kwargs).value == 3.0
     assert build_wall_length_quantity(wall=vertical, **kwargs).value == 3.0
 
@@ -181,39 +193,36 @@ def test_rotation_is_metamorphically_invariant() -> None:
 def test_figured_dimension_is_authoritative_when_scale_absent() -> None:
     qty = build_wall_length_quantity(
         wall=_wall(),
-        context=_context(),
-        document=_document(),
-        viewport=_viewport(),
-        entity=_entity(),
-        page_no=1,
-        figured_evidence=_figured("5000"),
+        **_qty_kwargs(
+            document=_document(),
+            entity=_entity(),
+            scale_calibration=None,
+            figured_evidence=_figured("5000"),
+        ),
     )
     assert qty.abstained is False
     assert qty.value == 5.0
     assert qty.authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
 
 
-def test_non_corroborated_topology_abstains() -> None:
+def test_untrusted_physical_existence_abstains() -> None:
     qty = build_wall_length_quantity(
-        wall=_wall(status=EvidenceResolutionStatus.CANDIDATE),
-        context=_context(),
-        document=_document(ids=("wall-ev",)),
-        viewport=_viewport(),
-        entity=_entity(ids=("wall-ev",)),
-        page_no=1,
-        scale_calibration=_scale(),
+        wall=_wall(),
+        **_qty_kwargs(existence_evidence=_existence(status=EvidenceResolutionStatus.CANDIDATE)),
     )
     assert qty.abstained
-    assert "wall_topology_not_corroborated" in qty.blocking_reasons
+    assert "physical_wall_existence_not_corroborated" in qty.blocking_reasons
 
 
 def test_duplicate_candidate_identity_fails_closed() -> None:
     walls = (_wall("w1", face_ids=("seg-1",)), _wall("w1", face_ids=("seg-2",)))
+    existence = _existence("w1")
     out = build_wall_length_quantities(
         walls=walls,
-        entities_by_wall_id={"w1": _entity("w1", ids=("wall-ev",))},
+        entities_by_wall_id={"w1": _entity("w1", ids=(EXIST_ID,))},
+        existence_evidence_by_wall_id={"w1": existence},
         context=_context(),
-        document=_document(ids=("wall-ev",)),
+        document=_document(ids=(EXIST_ID,)),
         viewport=_viewport(),
         page_no=1,
         scale_calibration=_scale(),
@@ -229,11 +238,12 @@ def test_overlapping_source_segments_fail_closed_instead_of_double_counting() ->
     out = build_wall_length_quantities(
         walls=(w1, w2),
         entities_by_wall_id={
-            "w1": _entity("w1", ids=("wall-ev",)),
-            "w2": _entity("w2", ids=("wall-ev",)),
+            "w1": _entity("w1", ids=(EXIST_ID,)),
+            "w2": _entity("w2", ids=(EXIST_ID,)),
         },
+        existence_evidence_by_wall_id={"w1": _existence("w1"), "w2": _existence("w2")},
         context=_context(),
-        document=_document(ids=("wall-ev",)),
+        document=_document(ids=(EXIST_ID,)),
         viewport=_viewport(),
         page_no=1,
         scale_calibration=_scale(),
@@ -246,14 +256,6 @@ def test_overlapping_source_segments_fail_closed_instead_of_double_counting() ->
 def test_stale_scale_causes_abstention_not_old_length_reuse() -> None:
     scale = _scale(revision="R0")
     wall = _wall(points=((0.0, 0.0), (scale.px_per_m * 4.0, 0.0)))
-    qty = build_wall_length_quantity(
-        wall=wall,
-        context=_context(),
-        document=_document(ids=("wall-ev",)),
-        viewport=_viewport(),
-        entity=_entity(ids=("wall-ev",)),
-        page_no=1,
-        scale_calibration=scale,
-    )
+    qty = build_wall_length_quantity(wall=wall, **_qty_kwargs(scale_calibration=scale))
     assert qty.abstained
     assert "scale_not_firm" in qty.blocking_reasons

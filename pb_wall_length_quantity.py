@@ -1,8 +1,13 @@
 """Deterministic wall-length QuantityEvidence from W1-W10 topology.
 
-This module consumes existing WallCandidate topology plus the trusted measurement
-input seam. It does not read benchmark gold, does not publish commercial takeoff,
-and does not introduce a migration family authority state.
+Linear wall length requires physical-wall existence, a measurable centerline,
+and firm scale or a documented dimension. It does not require thickness or
+height. ``WallCandidate.status`` is not existence authority: that field is
+coupled to thickness by the WallCandidate invariant.
+
+This module does not read ``metadata["physical_evidence_status"]``, does not
+invent thickness, does not publish commercial takeoff, and does not guess
+external/internal scope.
 """
 from __future__ import annotations
 
@@ -21,10 +26,11 @@ from pb_migration_contracts import (
     stable_contract_id,
 )
 from pb_migration_provider_envelope import ProviderContext
+from pb_physical_wall_existence_authority import PHYSICAL_WALL_EXISTENCE_KIND
 from pb_wall_room_topology_contracts import WallCandidate
 
 WALL_LENGTH_FAMILY = "wall_length"
-WALL_LENGTH_FORMULA_VERSION = "1.0.0"
+WALL_LENGTH_FORMULA_VERSION = "1.1.0"
 
 
 def _polyline_length(points: Sequence[tuple[float, float]]) -> float:
@@ -39,6 +45,42 @@ def _wall_source_segment_ids(wall: WallCandidate) -> frozenset[str]:
     if wall.face_b_segment_ids:
         ids.update(wall.face_b_segment_ids)
     return frozenset(ids)
+
+
+def _existence_blockers(
+    *,
+    wall: WallCandidate,
+    existence_evidence: EvidenceAtom,
+    context: ProviderContext,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+    entity: EntityEvidence,
+) -> tuple[str, ...]:
+    blockers: list[str] = []
+    if existence_evidence.kind != PHYSICAL_WALL_EXISTENCE_KIND:
+        blockers.append("physical_wall_existence_kind_invalid")
+    if existence_evidence.document_id != document.document_id or document.document_id != context.document_id:
+        blockers.append("physical_wall_existence_document_mismatch")
+    if document.source_sha256 != context.source_sha256:
+        blockers.append("physical_wall_existence_source_sha_mismatch")
+    if existence_evidence.page_id != viewport.page_id:
+        blockers.append("physical_wall_existence_page_mismatch")
+    if existence_evidence.viewport_id not in (None, viewport.viewport_id):
+        blockers.append("physical_wall_existence_viewport_mismatch")
+    if existence_evidence.evidence_id not in document.evidence_ids:
+        blockers.append("physical_wall_existence_not_owned_by_document")
+    if existence_evidence.evidence_id not in entity.evidence_ids:
+        blockers.append("physical_wall_existence_not_owned_by_entity")
+    metadata = existence_evidence.metadata if isinstance(existence_evidence.metadata, dict) else {}
+    if str(metadata.get("wall_candidate_id") or "") != wall.candidate_id:
+        blockers.append("physical_wall_existence_wall_mismatch")
+    if existence_evidence.status == EvidenceResolutionStatus.CONFLICT:
+        blockers.append("physical_wall_existence_conflict")
+    elif existence_evidence.status != EvidenceResolutionStatus.CORROBORATED:
+        blockers.append("physical_wall_existence_not_corroborated")
+    if wall.conflicting_evidence_ids:
+        blockers.append("physical_wall_conflict_evidence_present")
+    return tuple(dict.fromkeys(blockers))
 
 
 def _abstention(
@@ -87,14 +129,23 @@ def build_wall_length_quantity(
     document: DocumentEvidence,
     viewport: ViewportEvidence,
     entity: EntityEvidence,
+    existence_evidence: EvidenceAtom,
     page_no: int,
     scale_calibration: Optional[ScaleCalibration] = None,
     figured_evidence: Optional[EvidenceAtom] = None,
 ) -> QuantityEvidence:
-    """Build one wall-length quantity, abstaining unless topology+measurement are safe."""
+    """Build one wall-length quantity from existence + geometry + measurement."""
     topology_blockers: list[str] = []
-    if wall.status != EvidenceResolutionStatus.CORROBORATED:
-        topology_blockers.append("wall_topology_not_corroborated")
+    topology_blockers.extend(
+        _existence_blockers(
+            wall=wall,
+            existence_evidence=existence_evidence,
+            context=context,
+            document=document,
+            viewport=viewport,
+            entity=entity,
+        )
+    )
     if wall.viewport_id != viewport.viewport_id:
         topology_blockers.append("wall_viewport_mismatch")
     if wall.candidate_id != entity.candidate_entity_id:
@@ -111,6 +162,7 @@ def build_wall_length_quantity(
             context=context,
             page_no=page_no,
             blockers=tuple(topology_blockers),
+            metadata={"existence_evidence_id": existence_evidence.evidence_id},
         )
 
     resolved = resolve_linear_measurement_input(
@@ -146,9 +198,11 @@ def build_wall_length_quantity(
     payload = {
         "family": WALL_LENGTH_FAMILY,
         "wall_id": wall.candidate_id,
+        "existence_evidence_id": existence_evidence.evidence_id,
         "measurement_input_fingerprint": resolved.fingerprint(),
         "value_m": resolved.value_m,
     }
+    evidence_ids = tuple(dict.fromkeys((*entity.evidence_ids, existence_evidence.evidence_id)))
     return QuantityEvidence(
         quantity_id=stable_contract_id("qty", payload),
         family=WALL_LENGTH_FAMILY,
@@ -158,14 +212,15 @@ def build_wall_length_quantity(
         input_entity_ids=(wall.candidate_id,),
         formula="authoritative_figured_dimension" if resolved.source_type == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value else "polyline_length / trusted_px_per_m",
         formula_version=WALL_LENGTH_FORMULA_VERSION,
-        evidence_ids=tuple(entity.evidence_ids),
+        evidence_ids=evidence_ids,
         authority=resolved.source_type or "unresolved",
         status=AuthorityStatus.FIRM.value,
-        confidence=min(float(wall.confidence), float(entity.confidence)),
+        confidence=min(float(wall.confidence), float(entity.confidence), float(existence_evidence.confidence)),
         abstained=False,
         reason_codes=(),
         metadata={
             "measurement_input_fingerprint": resolved.fingerprint(),
+            "existence_evidence_id": existence_evidence.evidence_id,
             "source_sha256": resolved.source_sha256,
             "revision_id": resolved.revision_id,
             "page_no": resolved.page_no,
@@ -174,6 +229,9 @@ def build_wall_length_quantity(
             "figured_evidence_id": resolved.figured_evidence_id,
             "source_segment_ids": sorted(_wall_source_segment_ids(wall)),
             "topology_schema_version": wall.schema_version,
+            "thickness_authority": wall.thickness_authority.value,
+            "thickness_m": wall.thickness_m,
+            "wall_status": wall.status.value,
         },
     )
 
@@ -186,6 +244,7 @@ def build_wall_length_quantities(
     document: DocumentEvidence,
     viewport: ViewportEvidence,
     page_no: int,
+    existence_evidence_by_wall_id: dict[str, EvidenceAtom],
     scale_calibration: Optional[ScaleCalibration] = None,
     figured_evidence_by_wall_id: Optional[dict[str, EvidenceAtom]] = None,
 ) -> tuple[QuantityEvidence, ...]:
@@ -221,6 +280,9 @@ def build_wall_length_quantities(
             # Construct no synthetic entity: skip impossible binding as a deterministic
             # explicit error rather than fabricating provenance.
             raise ValueError(f"missing EntityEvidence for wall {wall.candidate_id!r}")
+        existence = existence_evidence_by_wall_id.get(wall.candidate_id)
+        if existence is None:
+            raise ValueError(f"missing physical-wall existence evidence for wall {wall.candidate_id!r}")
         blockers: list[str] = []
         if wall.candidate_id in duplicate_ids:
             blockers.append("duplicate_wall_identity")
@@ -245,6 +307,7 @@ def build_wall_length_quantities(
                 document=document,
                 viewport=viewport,
                 entity=entity,
+                existence_evidence=existence,
                 page_no=page_no,
                 scale_calibration=scale_calibration,
                 figured_evidence=figured.get(wall.candidate_id),
