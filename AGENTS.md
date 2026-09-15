@@ -52,7 +52,8 @@ Only existing seams may raise firm measurement authority:
 - AI / default / assumed / 2.8 m / empty-detector results
 - Legacy `pb_vector_geometry_v130.solve_scale` as a competing authority
 - W7 `detect_opening_host_candidates` (always `ambiguous_host`)
-- `pb_hosted_opening_geometry` / `pb_hosted_opening_wall_binding` (unwired; diagnostic only)
+- `bind_hosted_opening_to_walls` (unwired; diagnostic only)
+- `resolve_hosted_opening_spans` (shadow-collected by `extract_from_pdf` through `collect_hosted_opening_shadow_evidence`; never F.9 / W10 / commercial authority)
 - W10 canonical translation
 - Benchmark gold, mappings, scorer tolerances, or development-project scores
 
