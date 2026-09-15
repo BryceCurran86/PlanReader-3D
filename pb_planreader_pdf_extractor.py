@@ -37,7 +37,7 @@ class ExtractedPrediction:
     tag: str
     trade_type: str  # "doors", "windows", "walls", "finishes", "fixtures", "structure"
     description: str
-    quantity: float
+    quantity: Optional[float]
     unit: str  # "NO", "SM", "M", "M3"
     confidence: float
     source_page: int
@@ -62,6 +62,272 @@ class ExtractedPrediction:
         }
 
 
+def _prediction_dimension_pair(
+    dimensions: Optional[Sequence[float]],
+) -> Optional[Tuple[float, float]]:
+    if dimensions is None or len(dimensions) < 2:
+        return None
+    return (float(dimensions[0]), float(dimensions[1]))
+
+
+def _extracted_predictions_conflict(
+    existing: ExtractedPrediction,
+    incoming: ExtractedPrediction,
+) -> bool:
+    """True when authoritative quantity or dimensions disagree."""
+    if existing.quantity is not None and incoming.quantity is not None:
+        if abs(float(existing.quantity) - float(incoming.quantity)) > 1e-9:
+            return True
+    left = _prediction_dimension_pair(existing.dimensions)
+    right = _prediction_dimension_pair(incoming.dimensions)
+    if left is None or right is None:
+        return False
+    return left != right
+
+
+def _scoped_claim_snapshot(pred: ExtractedPrediction) -> Dict[str, Any]:
+    return {
+        "tag": pred.tag,
+        "source_page": pred.source_page,
+        "quantity": pred.quantity,
+        "dimensions": pred.dimensions,
+        "confidence": pred.confidence,
+        "description": pred.description,
+        "bounding_box": pred.bounding_box,
+        "merge_source": (pred.metadata or {}).get("merge_source"),
+        "raw_evidence_ref": (pred.metadata or {}).get("raw_evidence_ref"),
+    }
+
+
+def _bbox_tuple(bbox: Optional[Sequence[float]]) -> Optional[Tuple[float, ...]]:
+    if bbox is None or len(bbox) < 4:
+        return None
+    return tuple(float(v) for v in bbox[:4])
+
+
+def _type_claim_equivalence_key(pred: ExtractedPrediction) -> tuple[Any, ...]:
+    """Identity key for schedule/type claim equivalence — not physical instances.
+
+    PROVEN_SAME requires matching evidence identity (raw_evidence_ref and bbox).
+    Same tag + dimensions + page alone never proves physical-instance identity.
+    """
+    metadata = pred.metadata or {}
+    return (
+        pred.tag,
+        pred.source_page,
+        pred.quantity,
+        _prediction_dimension_pair(pred.dimensions),
+        metadata.get("raw_evidence_ref") or "",
+        _bbox_tuple(pred.bounding_box),
+    )
+
+
+def _predictions_are_proven_same_type_claim(
+    existing: ExtractedPrediction,
+    incoming: ExtractedPrediction,
+) -> bool:
+    """True only when both records share proven type/schedule claim identity.
+
+    Same tag + dimensions + page is never enough. Evidence identity must be
+    present and equal (raw_evidence_ref and/or bbox). Missing identity stays
+    unresolved rather than inventing PROVEN_SAME.
+    """
+    if _type_claim_equivalence_key(existing) != _type_claim_equivalence_key(incoming):
+        return False
+    existing_ref = (existing.metadata or {}).get("raw_evidence_ref") or ""
+    incoming_ref = (incoming.metadata or {}).get("raw_evidence_ref") or ""
+    existing_bbox = _bbox_tuple(existing.bounding_box)
+    incoming_bbox = _bbox_tuple(incoming.bounding_box)
+    has_evidence_identity = bool(existing_ref) or existing_bbox is not None
+    if not has_evidence_identity:
+        return False
+    return existing_ref == incoming_ref and existing_bbox == incoming_bbox
+
+
+def _scoped_claims_have_measurable_conflict(
+    claims: Sequence[Dict[str, Any]],
+) -> bool:
+    quantities = {
+        float(claim["quantity"])
+        for claim in claims
+        if claim.get("quantity") is not None
+    }
+    dim_pairs = {
+        pair
+        for claim in claims
+        if (pair := _prediction_dimension_pair(claim.get("dimensions"))) is not None
+    }
+    return len(quantities) > 1 or len(dim_pairs) > 1
+
+
+def extracted_prediction_publication_blocked(pred: ExtractedPrediction) -> bool:
+    """True when a prediction must not feed deductions or firm publication."""
+    metadata = pred.metadata or {}
+    if metadata.get("publication_blocked"):
+        return True
+    status = metadata.get("reconciliation_status")
+    if status in {"conflict_manual_review", "ambiguous_unresolved", "extraction_failed"}:
+        return True
+    if metadata.get("extraction_status") == "extraction_failed":
+        return True
+    if pred.quantity is None:
+        return True
+    return False
+
+
+def publishable_prediction_quantity(pred: ExtractedPrediction) -> Optional[float]:
+    """Return quantity only when publication is explicitly allowed."""
+    if extracted_prediction_publication_blocked(pred):
+        return None
+    return pred.quantity
+
+
+def _blocked_extracted_prediction(
+    *,
+    tag: str,
+    trade_type: str,
+    description: str,
+    unit: str,
+    reconciliation_status: str,
+    scoped_claims: Sequence[ExtractedPrediction],
+    merge_source: str = "",
+    blocking_reason: str = "",
+) -> ExtractedPrediction:
+    """Umbrella blocked record retaining scoped claims for diagnostics only."""
+    pages = sorted({claim.source_page for claim in scoped_claims})
+    metadata: Dict[str, Any] = {
+        "publication_blocked": True,
+        "reconciliation_status": reconciliation_status,
+        "merge_source": merge_source,
+        "scoped_claims": [_scoped_claim_snapshot(claim) for claim in scoped_claims],
+        "blocking_reason": blocking_reason,
+    }
+    return ExtractedPrediction(
+        tag=tag,
+        trade_type=trade_type,
+        description=description,
+        quantity=None,
+        unit=unit,
+        confidence=0.0,
+        source_page=pages[0] if pages else 1,
+        dimensions=None,
+        bounding_box=None,
+        metadata=metadata,
+    )
+
+
+def merge_extracted_prediction(
+    pred_dict: Dict[str, ExtractedPrediction],
+    incoming: ExtractedPrediction,
+    *,
+    merge_source: str = "",
+) -> None:
+    """Merge one prediction into ``pred_dict`` without confidence-as-authority.
+
+    Conflicting quantity or dimensions block publication. Diagnostic values are
+    retained in ``metadata.scoped_claims``; ``quantity=None`` blocks consumption.
+    Compatible claims on different pages/scopes remain ambiguous, not merged.
+    """
+    incoming_meta = dict(incoming.metadata or {})
+    incoming_meta.setdefault("merge_source", merge_source)
+    incoming = ExtractedPrediction(
+        tag=incoming.tag,
+        trade_type=incoming.trade_type,
+        description=incoming.description,
+        quantity=incoming.quantity,
+        unit=incoming.unit,
+        confidence=incoming.confidence,
+        source_page=incoming.source_page,
+        sheet_number=incoming.sheet_number,
+        dimensions=incoming.dimensions,
+        bounding_box=incoming.bounding_box,
+        metadata=incoming_meta,
+    )
+
+    existing = pred_dict.get(incoming.tag)
+    if existing is None:
+        pred_dict[incoming.tag] = incoming
+        return
+
+    if extracted_prediction_publication_blocked(existing):
+        metadata = dict(existing.metadata or {})
+        scoped_claims = list(metadata.get("scoped_claims") or [])
+        scoped_claims.append(_scoped_claim_snapshot(incoming))
+        metadata["scoped_claims"] = scoped_claims
+        if _scoped_claims_have_measurable_conflict(scoped_claims):
+            metadata["reconciliation_status"] = "conflict_manual_review"
+            metadata["blocking_reason"] = "conflicting_measurable_fields"
+            metadata["extraction_status"] = "evidence_conflict"
+        pred_dict[incoming.tag] = ExtractedPrediction(
+            tag=existing.tag,
+            trade_type=existing.trade_type,
+            description=existing.description,
+            quantity=None,
+            unit=existing.unit,
+            confidence=0.0,
+            source_page=existing.source_page,
+            sheet_number=existing.sheet_number,
+            dimensions=None,
+            bounding_box=existing.bounding_box,
+            metadata=metadata,
+        )
+        return
+
+    if _extracted_predictions_conflict(existing, incoming):
+        pred_dict[incoming.tag] = _blocked_extracted_prediction(
+            tag=existing.tag,
+            trade_type=existing.trade_type,
+            description=(
+                f"{existing.description} [dimension/quantity conflict retained; publication blocked]"
+            ),
+            unit=existing.unit,
+            reconciliation_status="conflict_manual_review",
+            scoped_claims=[existing, incoming],
+            merge_source=merge_source,
+            blocking_reason="conflicting_measurable_fields",
+        )
+        return
+
+    if existing.trade_type in ("windows", "doors") or incoming.trade_type in (
+        "windows",
+        "doors",
+    ):
+        if not _predictions_are_proven_same_type_claim(existing, incoming):
+            # Same tag/dims/page alone is not physical-instance identity.
+            # Distinct evidence refs or bboxes remain AMBIGUOUS.
+            pred_dict[incoming.tag] = _blocked_extracted_prediction(
+                tag=existing.tag,
+                trade_type=existing.trade_type,
+                description=(
+                    f"{existing.description} [instance/type identity unresolved; publication blocked]"
+                ),
+                unit=existing.unit,
+                reconciliation_status="ambiguous_unresolved",
+                scoped_claims=[existing, incoming],
+                merge_source=merge_source,
+                blocking_reason="instance_or_type_identity_unresolved",
+            )
+            return
+
+        # PROVEN_SAME type-claim equivalence: confidence may select representative.
+        if incoming.confidence > existing.confidence or (
+            abs(incoming.confidence - existing.confidence) < 1e-12
+            and (
+                (incoming.metadata or {}).get("raw_evidence_ref") or "",
+                incoming.description or "",
+            )
+            >= (
+                (existing.metadata or {}).get("raw_evidence_ref") or "",
+                existing.description or "",
+            )
+        ):
+            pred_dict[incoming.tag] = incoming
+        return
+
+    if incoming.confidence >= existing.confidence:
+        pred_dict[incoming.tag] = incoming
+
+
 class GenericPlanReaderExtractor:
     """Extracts physical building quantities from PDF drawing sets strictly from drawing evidence."""
 
@@ -82,6 +348,13 @@ class GenericPlanReaderExtractor:
             "resolutions": [],
             "conflicts": [],
         }
+        self.opening_authority_shadow: Dict[str, Any] = {
+            "status": "abstained",
+            "reason": "not_collected",
+            "openings": [],
+        }
+        # Live extraction visibility: distinguish absence from failure/conflict.
+        self.extraction_status: Dict[str, str] = {}
 
     def is_drawing_page(self, page_text: str, page: Optional[fitz.Page] = None) -> bool:
         """Heuristically determine if a PDF page contains architectural drawings."""
@@ -483,6 +756,7 @@ class GenericPlanReaderExtractor:
 
         doc = fitz.open(str(p_path))
         target_pages = list(pages) if pages else list(range(len(doc)))
+        self.extraction_status = {}
         self.hosted_opening_shadow = {
             "status": "abstained",
             "reason": "not_collected",
@@ -496,6 +770,11 @@ class GenericPlanReaderExtractor:
             "edges": [],
             "resolutions": [],
             "conflicts": [],
+        }
+        self.opening_authority_shadow = {
+            "status": "abstained",
+            "reason": "not_collected",
+            "openings": [],
         }
 
         # ------------------------------------------------------------------
@@ -1668,12 +1947,40 @@ class GenericPlanReaderExtractor:
             dwg_pages = [p for p in target_pages if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])]
             schedule_rows = schedule_extractor.extract_from_document(doc, pages=dwg_pages)
 
+            self.extraction_status["schedule"] = (
+                "no_evidence_found" if not schedule_rows else "evidence_present"
+            )
             for s_row in schedule_rows:
-                if s_row.is_provisional or s_row.quantity is None or s_row.quantity <= 0:
+                if s_row.is_provisional:
+                    if "schedule_conflict" in (s_row.evidence_text or "").lower():
+                        merge_extracted_prediction(
+                            pred_dict,
+                            ExtractedPrediction(
+                                tag=s_row.tag,
+                                trade_type=s_row.trade_type,
+                                description=s_row.description,
+                                quantity=None,
+                                unit=s_row.unit,
+                                confidence=0.0,
+                                source_page=s_row.source_page,
+                                sheet_number=s_row.sheet_number,
+                                dimensions=s_row.dimensions,
+                                bounding_box=list(s_row.bbox) if s_row.bbox else None,
+                                metadata={
+                                    "extraction_status": "evidence_conflict",
+                                    "publication_blocked": True,
+                                    "reconciliation_status": "conflict_manual_review",
+                                    "raw_evidence_ref": s_row.evidence_text,
+                                },
+                            ),
+                            merge_source="schedule_conflict_row",
+                        )
                     continue
-                # Merge into predictions if not already predicted with higher confidence
-                if s_row.tag not in pred_dict or s_row.confidence >= pred_dict[s_row.tag].confidence:
-                    pred_dict[s_row.tag] = ExtractedPrediction(
+                if s_row.quantity is None or s_row.quantity <= 0:
+                    continue
+                merge_extracted_prediction(
+                    pred_dict,
+                    ExtractedPrediction(
                         tag=s_row.tag,
                         trade_type=s_row.trade_type,
                         description=s_row.description,
@@ -1684,9 +1991,11 @@ class GenericPlanReaderExtractor:
                         sheet_number=s_row.sheet_number,
                         dimensions=s_row.dimensions,
                         bounding_box=list(s_row.bbox) if s_row.bbox else None,
-                    )
+                    ),
+                    merge_source="schedule_row",
+                )
         except Exception:
-            pass
+            self.extraction_status["schedule"] = "extraction_failed"
 
         # ------------------------------------------------------------------
         # Plan instance marks (hyphenated W-# / D-# stamps on scanned plans)
@@ -1726,7 +2035,7 @@ class GenericPlanReaderExtractor:
                         },
                     )
         except Exception:
-            pass
+            self.extraction_status["plan_instance_marks"] = "extraction_failed"
 
         # ------------------------------------------------------------------
         # Sole unlabeled floor-plan door swing (native quarter-circle cubic)
@@ -1941,8 +2250,9 @@ class GenericPlanReaderExtractor:
                     reconciled = EvidenceReconciler.reconcile(native_records, ocr_records)
                     for r in reconciled:
                         if r.status == EvidenceStatus.CONFIRMED.value and r.quantity is not None and r.quantity > 0:
-                            if r.tag not in pred_dict or r.confidence >= pred_dict[r.tag].confidence:
-                                pred_dict[r.tag] = ExtractedPrediction(
+                            merge_extracted_prediction(
+                                pred_dict,
+                                ExtractedPrediction(
                                     tag=r.tag,
                                     trade_type=r.trade_type,
                                     description=r.description,
@@ -1957,12 +2267,48 @@ class GenericPlanReaderExtractor:
                                         "raw_evidence_ref": r.raw_evidence_ref,
                                         "status": r.status,
                                     },
-                                )
-                        elif r.status == EvidenceStatus.CONFLICT_MANUAL_REVIEW.value:
-                            if r.tag in pred_dict:
-                                del pred_dict[r.tag]
+                                ),
+                                merge_source="ocr_reconcile",
+                            )
+                        elif r.status in (
+                            EvidenceStatus.CONFLICT_MANUAL_REVIEW.value,
+                            EvidenceStatus.UNRESOLVED.value,
+                        ):
+                            merge_extracted_prediction(
+                                pred_dict,
+                                ExtractedPrediction(
+                                    tag=r.tag,
+                                    trade_type=r.trade_type,
+                                    description=r.description or r.notes or r.tag,
+                                    quantity=None,
+                                    unit=r.unit,
+                                    confidence=0.0,
+                                    source_page=r.source_page,
+                                    dimensions=r.dimensions,
+                                    bounding_box=r.bounding_box,
+                                    metadata={
+                                        "extraction_status": (
+                                            "evidence_conflict"
+                                            if r.status
+                                            == EvidenceStatus.CONFLICT_MANUAL_REVIEW.value
+                                            else "evidence_present_unresolved"
+                                        ),
+                                        "publication_blocked": True,
+                                        "reconciliation_status": (
+                                            "conflict_manual_review"
+                                            if r.status
+                                            == EvidenceStatus.CONFLICT_MANUAL_REVIEW.value
+                                            else "ambiguous_unresolved"
+                                        ),
+                                        "raw_evidence_ref": r.raw_evidence_ref,
+                                        "status": r.status,
+                                    },
+                                ),
+                                merge_source="ocr_reconcile_blocked",
+                            )
+            self.extraction_status.setdefault("ocr_reconcile", "evidence_present")
         except Exception:
-            pass
+            self.extraction_status["ocr_reconcile"] = "extraction_failed"
 
         # ------------------------------------------------------------------
         # Unique door WxH callout → already identified dimensionless D#
@@ -2004,8 +2350,7 @@ class GenericPlanReaderExtractor:
                 opening_instances: List[OpeningInstance] = []
                 for p_tag, p_obj in list(pred_dict.items()):
                     if p_obj.trade_type in ("windows", "doors"):
-                        # Fail closed: do not deduct conflicted openings
-                        if p_obj.metadata and p_obj.metadata.get("reconciliation_status") == "conflict_manual_review":
+                        if extracted_prediction_publication_blocked(p_obj):
                             continue
                         w_m = None
                         h_m = None
@@ -2016,7 +2361,9 @@ class GenericPlanReaderExtractor:
                             if h_raw is not None and h_raw > 0:
                                 h_m = h_raw / 1000.0 if h_raw > 50.0 else h_raw
 
-                        qty = p_obj.quantity if (p_obj.quantity and p_obj.quantity > 0) else 1.0
+                        qty = publishable_prediction_quantity(p_obj)
+                        if qty is None or qty <= 0:
+                            continue
 
                         opening_instances.append(
                             OpeningInstance(
@@ -2037,7 +2384,7 @@ class GenericPlanReaderExtractor:
                     preds_list = pipeline.propagate_to_predictions(list(pred_dict.values()), wall_results)
                     pred_dict = {p.tag: p for p in preds_list}
         except Exception:
-            pass
+            self.extraction_status["opening_deduction"] = "extraction_failed"
 
         # Hosted-opening SHADOW only. Never appended to F.9 live openings.
         # Collection requires an F.07 RESOLVED floor-plan viewport bbox.
@@ -2070,6 +2417,19 @@ class GenericPlanReaderExtractor:
             self.opening_provenance_shadow = empty_opening_provenance_shadow(
                 reason="provenance_exception"
             )
+
+        try:
+            from pb_live_extractor_authority_shadow import collect_opening_authority_shadow
+
+            self.opening_authority_shadow = collect_opening_authority_shadow(
+                list(pred_dict.values())
+            )
+        except Exception:
+            self.opening_authority_shadow = {
+                "status": "abstained",
+                "reason": "shadow_exception",
+                "openings": [],
+            }
 
         doc.close()
         return list(pred_dict.values())
