@@ -22,6 +22,7 @@ import pytest
 from pb_benchmark_accuracy_engine import (
     BenchmarkAccuracyEngine,
     BenchmarkAccuracyReport,
+    HeadlineAccuracyDashboard,
     ItemComparisonResult,
     ItemMatchStatus,
     run_public_tender_benchmark,
@@ -73,6 +74,114 @@ def test_unscored_benchmark_returns_none(engine):
     assert report.is_scored is False
     assert report.status == "candidate_unscored"
     assert report.overall_accuracy_percentage is None
+
+
+def test_zero_extraction_attempt_scores_all_measurable_as_misses(
+    engine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verified benchmark + attempted extraction + zero predictions must not be unscored."""
+    pdf_path = tmp_path / "attempted.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 minimal")
+    monkeypatch.setattr(engine, "extract_quantities_from_pdf", lambda *_a, **_k: [])
+
+    report = engine.evaluate_benchmark(
+        benchmark_id="tenders_ke_kstvet_cbc_classroom",
+        pdf_path=pdf_path,
+    )
+
+    assert report.is_scored is True
+    assert report.status == "scored"
+    assert report.total_items_compared == report.total_measurable_expected
+    assert report.missed_items == report.total_measurable_expected
+    assert report.exact_matches == 0
+    assert report.overall_accuracy_percentage == 0.0
+
+
+def test_explicit_empty_predictions_scores_all_measurable_as_misses(engine) -> None:
+    """predictions=[] is an evaluation result, not candidate_unscored."""
+    report = engine.evaluate_benchmark(
+        benchmark_id="tenders_ke_kstvet_cbc_classroom",
+        predictions=[],
+    )
+    assert report.is_scored is True
+    assert report.status == "scored"
+    assert report.missed_items == report.total_measurable_expected
+    assert report.overall_accuracy_percentage == 0.0
+
+
+def test_required_source_unavailable_is_not_extractor_zero(engine) -> None:
+    """Requested PDF evaluation with unresolvable source must fail closed explicitly."""
+    report = engine.evaluate_benchmark(
+        benchmark_id="tenders_ke_kstvet_cbc_classroom",
+        pdf_path="definitely/missing/source.pdf",
+        auto_extract=False,
+    )
+    assert report.is_scored is False
+    assert report.status == "source_unavailable"
+    assert report.overall_accuracy_percentage is None
+    assert "required_source_unavailable_or_unresolvable" in report.errors
+    assert report.missed_items == 0
+
+
+def test_partial_predictions_mark_absent_measurable_as_misses(engine) -> None:
+    report = engine.evaluate_benchmark(
+        benchmark_id="tenders_ke_kstvet_cbc_classroom",
+        predictions=[{"item_id": "BOQ-C36-A", "quantity": 58.0}],
+    )
+    assert report.is_scored is True
+    assert report.exact_matches == 1
+    assert report.missed_items == report.total_measurable_expected - 1
+    assert report.total_items_compared == report.total_measurable_expected
+
+
+def test_headline_incomplete_coverage_when_source_unavailable(engine) -> None:
+    """Headline must not present an apparently complete official percentage."""
+    unavailable = BenchmarkAccuracyReport(
+        benchmark_id="tenders_ke_kstvet_cbc_classroom",
+        timestamp="2026-01-01T00:00:00Z",
+        project_name="KSTVET",
+        organization="x",
+        tender_reference="y",
+        status="source_unavailable",
+        is_scored=False,
+        is_headline_eligible=True,
+        total_measurable_expected=13,
+        errors=["required_source_unavailable_or_unresolvable"],
+    )
+    scored = engine.evaluate_benchmark(
+        benchmark_id="tenders_ke_kstvet_cbc_classroom",
+        predictions=[{"item_id": "BOQ-C36-A", "quantity": 58.0}],
+    )
+    dashboard = HeadlineAccuracyDashboard(
+        timestamp="2026-01-01T00:00:00Z",
+        headline_overall_accuracy=None,
+        headline_strict_exact_accuracy=None,
+        total_headline_benchmarks=2,
+        total_headline_measurable_expected=scored.total_measurable_expected,
+        total_headline_items_compared=scored.total_items_compared,
+        total_headline_exact_matches=scored.exact_matches,
+        total_headline_within_5_percent=0,
+        total_headline_within_10_percent=0,
+        total_headline_within_20_percent=0,
+        total_headline_gross_mismatches=0,
+        total_headline_missed_items=scored.missed_items,
+        total_headline_hallucinated_items=0,
+        total_preliminaries_excluded=0,
+        total_provisional_sums_excluded=0,
+        total_non_architectural_excluded=0,
+        total_stress_test_benchmarks=0,
+        total_candidate_seeds=0,
+        incomplete_headline_benchmarks=1,
+        headline_coverage_complete=False,
+        incomplete_headline_benchmark_ids=["tenders_ke_kstvet_cbc_classroom"],
+        headline_reports=[scored, unavailable],
+    )
+    payload = dashboard.to_dict()
+    assert payload["summary_counts"]["headline_coverage_complete"] is False
+    assert payload["summary_counts"]["incomplete_headline_benchmarks"] == 1
+    assert payload["headline_metrics"]["overall_accuracy_percentage"] is None
 
 
 def test_exact_matches_evaluation(engine):

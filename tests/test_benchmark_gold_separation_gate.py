@@ -84,3 +84,19 @@ def test_manifest_and_source_definition_files_are_protected() -> None:
     assert is_benchmark_defining_file("benchmarks/public_tenders/manifest.json")
     assert is_benchmark_defining_file("benchmarks/public_tenders/example/source_manifest.json")
     assert is_benchmark_defining_file("benchmarks/public_tenders/example/benchmark_rules.json")
+
+
+def test_frozen_holdout_defining_file_plus_production_fails() -> None:
+    with pytest.raises(SystemExit):
+        check_paths([
+            "benchmarks/frozen_holdout/example/source_manifest.json",
+            "pb_planreader_pdf_extractor.py",
+        ])
+
+
+def test_frozen_holdout_lock_plus_production_fails() -> None:
+    with pytest.raises(SystemExit):
+        check_paths([
+            "benchmarks/frozen_holdout/example/.holdout_lock.json",
+            "pb_planreader_pdf_extractor.py",
+        ])

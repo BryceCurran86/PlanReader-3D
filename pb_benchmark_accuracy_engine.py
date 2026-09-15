@@ -319,6 +319,9 @@ class HeadlineAccuracyDashboard:
     total_non_architectural_excluded: int
     total_stress_test_benchmarks: int
     total_candidate_seeds: int
+    incomplete_headline_benchmarks: int = 0
+    headline_coverage_complete: bool = True
+    incomplete_headline_benchmark_ids: List[str] = field(default_factory=list)
     headline_reports: List[BenchmarkAccuracyReport] = field(default_factory=list)
     stress_test_reports: List[BenchmarkAccuracyReport] = field(default_factory=list)
     candidate_seed_reports: List[BenchmarkAccuracyReport] = field(default_factory=list)
@@ -350,6 +353,11 @@ class HeadlineAccuracyDashboard:
                 "headline_benchmarks": self.total_headline_benchmarks,
                 "stress_test_benchmarks": self.total_stress_test_benchmarks,
                 "candidate_seeds": self.total_candidate_seeds,
+                "incomplete_headline_benchmarks": self.incomplete_headline_benchmarks,
+                "headline_coverage_complete": self.headline_coverage_complete,
+                "incomplete_headline_benchmark_ids": list(
+                    self.incomplete_headline_benchmark_ids
+                ),
                 "total_registered": (
                     self.total_headline_benchmarks
                     + self.total_stress_test_benchmarks
@@ -390,6 +398,17 @@ class HeadlineAccuracyDashboard:
             f"> **Strict Exact Accuracy** (zero-tolerance): **`{exact_str}`**."
         )
         lines.append("")
+        if not self.headline_coverage_complete:
+            incomplete_ids = ", ".join(
+                f"`{bid}`" for bid in self.incomplete_headline_benchmark_ids
+            ) or "(unlisted)"
+            lines.append(
+                f"> **Incomplete headline coverage**: `{self.incomplete_headline_benchmarks}` "
+                f"headline-eligible benchmark(s) could not be evaluated "
+                f"(required source unavailable): {incomplete_ids}.  \n"
+                "> Official percentage is withheld until coverage is complete."
+            )
+            lines.append("")
 
         lines.append("## 1. Executive Headline Metrics (1:1 Material Scope Packages)")
         lines.append("")
@@ -645,23 +664,65 @@ class BenchmarkAccuracyEngine:
 
         # 3. Resolve predictions: either supplied directly or extracted from PDF
         active_predictions: List[Dict[str, Any]] = []
+        evaluation_requested = False
+        extraction_attempted = False
+        source_unavailable = False
+
         if predictions is not None:
+            # Explicit prediction list (including []) means evaluation occurred.
+            evaluation_requested = True
             active_predictions.extend(predictions)
-        elif (pdf_path or auto_extract) and resolved_pdf and resolved_pdf.exists():
-            target_pages = None
-            for doc in bench.download_manifest.get("documents", []):
-                if doc.get("role") in ("architectural_drawings", "drawings", "tender_drawings"):
-                    dp = doc.get("drawing_pages")
-                    if dp and len(dp) == 2:
-                        target_pages = list(range(dp[0] - 1, dp[1]))
-                        break
-            active_predictions.extend(self.extract_quantities_from_pdf(resolved_pdf, pages=target_pages))
+        elif pdf_path or auto_extract:
+            evaluation_requested = True
+            if resolved_pdf and resolved_pdf.exists():
+                extraction_attempted = True
+                target_pages = None
+                for doc in bench.download_manifest.get("documents", []):
+                    if doc.get("role") in ("architectural_drawings", "drawings", "tender_drawings"):
+                        dp = doc.get("drawing_pages")
+                        if dp and len(dp) == 2:
+                            target_pages = list(range(dp[0] - 1, dp[1]))
+                            break
+                active_predictions.extend(
+                    self.extract_quantities_from_pdf(resolved_pdf, pages=target_pages)
+                )
+            else:
+                source_unavailable = True
 
         if hallucinated_predictions:
             active_predictions.extend(hallucinated_predictions)
 
-        # If still no predictions, return candidate_unscored
-        if not active_predictions:
+        if source_unavailable:
+            return BenchmarkAccuracyReport(
+                benchmark_id=benchmark_id,
+                timestamp=now_ts,
+                project_name=bench.project_name,
+                organization=bench.organization,
+                tender_reference=bench.tender_reference,
+                status="source_unavailable",
+                is_scored=False,
+                is_headline_eligible=bench.is_headline_eligible,
+                source_pdf=str(resolved_pdf) if resolved_pdf else None,
+                total_boq_items=bench.expected_boq_summary.get("total_line_items", 0),
+                total_measurable_expected=bench.expected_boq_summary.get("measurable_items_count", 0),
+                total_items_compared=0,
+                exact_matches=0,
+                within_5_percent=0,
+                within_10_percent=0,
+                within_20_percent=0,
+                gross_mismatches=0,
+                missed_items=0,
+                hallucinated_items=0,
+                preliminaries_excluded=bench.expected_boq_summary.get("preliminaries_excluded_count", 0),
+                provisional_sums_excluded=bench.expected_boq_summary.get("provisional_sums_count", 0),
+                non_architectural_excluded=0,
+                overall_accuracy_percentage=None,
+                strict_exact_accuracy_percentage=None,
+                errors=["required_source_unavailable_or_unresolvable"],
+            )
+
+        # No evaluation requested and no predictions: remain unscored inventory.
+        if not evaluation_requested and not active_predictions:
             return BenchmarkAccuracyReport(
                 benchmark_id=benchmark_id,
                 timestamp=now_ts,
@@ -689,6 +750,9 @@ class BenchmarkAccuracyEngine:
                 strict_exact_accuracy_percentage=None,
                 errors=[],
             )
+
+        # evaluation_requested with empty predictions (or zero extraction output)
+        # falls through: every measurable expected item is scored as MISSED.
 
         # 4. Perform Comparison against expected sample measurable items
         sample_items = bench.expected_boq_summary.get("sample_measurable_items", [])
@@ -1046,7 +1110,14 @@ class BenchmarkAccuracyEngine:
                 )
                 candidate_seed_reports.append(rep)
 
-        # Aggregate headline metrics across headline-eligible benchmarks only
+        # Aggregate headline metrics. Accuracy uses successfully scored reports only.
+        # Inventory expected counts include every headline-eligible package.
+        # Source-unavailable evaluations never contribute extractor 0% and withhold
+        # the official percentage until coverage is complete.
+        scored_headline = [r for r in headline_reports if r.is_scored]
+        incomplete_headline = [
+            r for r in headline_reports if r.status == "source_unavailable"
+        ]
         tot_exact = sum(r.exact_matches for r in headline_reports)
         tot_w5 = sum(r.within_5_percent for r in headline_reports)
         tot_w10 = sum(r.within_10_percent for r in headline_reports)
@@ -1067,13 +1138,18 @@ class BenchmarkAccuracyEngine:
             r.non_architectural_excluded for r in stress_test_reports
         )
 
-        accepted = tot_exact + tot_w5
-        overall_acc = (
-            round((accepted / tot_compared) * 100.0, 2) if tot_compared > 0 else 0.0
-        )
-        strict_acc = (
-            round((tot_exact / tot_compared) * 100.0, 2) if tot_compared > 0 else 0.0
-        )
+        coverage_complete = len(incomplete_headline) == 0
+        if not scored_headline or tot_compared <= 0:
+            overall_acc = None if not scored_headline else 0.0
+            strict_acc = None if not scored_headline else 0.0
+        else:
+            accepted = tot_exact + tot_w5
+            overall_acc = round((accepted / tot_compared) * 100.0, 2)
+            strict_acc = round((tot_exact / tot_compared) * 100.0, 2)
+        if not coverage_complete:
+            # Incomplete coverage must not look like a complete official percentage.
+            overall_acc = None
+            strict_acc = None
 
         dashboard = HeadlineAccuracyDashboard(
             timestamp=now_ts,
@@ -1094,6 +1170,11 @@ class BenchmarkAccuracyEngine:
             total_non_architectural_excluded=tot_non_arch,
             total_stress_test_benchmarks=len(stress_test_reports),
             total_candidate_seeds=len(candidate_seed_reports),
+            incomplete_headline_benchmarks=len(incomplete_headline),
+            headline_coverage_complete=coverage_complete,
+            incomplete_headline_benchmark_ids=[
+                r.benchmark_id for r in incomplete_headline
+            ],
             headline_reports=headline_reports,
             stress_test_reports=stress_test_reports,
             candidate_seed_reports=candidate_seed_reports,
