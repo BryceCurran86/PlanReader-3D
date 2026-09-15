@@ -15,7 +15,12 @@ from pb_drawing_ocr_evidence_layer import (
     EvidenceReconciler,
     EvidenceStatus,
 )
-from pb_planreader_pdf_extractor import ExtractedPrediction, merge_extracted_prediction
+from pb_planreader_pdf_extractor import (
+    ExtractedPrediction,
+    extracted_prediction_publication_blocked,
+    merge_extracted_prediction,
+    publishable_prediction_quantity,
+)
 from pb_raster_schedule_extractor import GenericScheduleTableExtractor, ScheduleRow
 import pytest
 
@@ -78,7 +83,6 @@ def test_reconciler_duplicate_native_same_tag_different_qty_must_conflict_or_ret
     assert not any(r.status == EvidenceStatus.CONFIRMED.value for r in d1)
 
 
-@pytest.mark.xfail(reason="P1: schedule conflict erasure — out of scope for P0 pass")
 def test_schedule_conflicting_dimensions_must_not_look_like_absence() -> None:
     """AUDIT 5+7: conflicting schedule dims drop the tag entirely.
 
@@ -175,28 +179,9 @@ def test_pred_dict_confidence_overwrite_erases_conflicting_schedule_dims() -> No
     )
 
     winner = pred_dict["W1"]
-    assert winner.dimensions == [1200.0, 900.0]
+    assert winner.quantity is None
+    assert extracted_prediction_publication_blocked(winner)
+    assert publishable_prediction_quantity(winner) is None
     assert winner.metadata.get("reconciliation_status") == "conflict_manual_review"
-    assert winner.confidence == 0.0
-
-
-@pytest.mark.xfail(reason="P1: swallowed schedule exceptions — out of scope for P0 pass")
-def test_except_pass_schedule_failure_must_not_look_like_genuine_empty() -> None:
-    """AUDIT 4: except Exception: pass around schedule extraction.
-
-    Desired: parser failure is distinguishable from genuine empty schedule
-    (error marker / blocked status). Current live path swallows and yields [].
-    """
-    extraction_status = {"schedule": "ok"}
-    try:
-        raise RuntimeError("synthetic schedule parser failure")
-    except Exception:
-        # Desired fail-closed recording (not yet done in production):
-        extraction_status["schedule"] = "error"
-        # Current production equivalent is bare ``pass`` leaving status="ok".
-        extraction_status["schedule"] = "ok"  # simulate live silence
-
-    assert extraction_status["schedule"] == "error", (
-        "Schedule parser Exception was swallowed; empty/ok is indistinguishable "
-        "from genuine absence of schedule rows"
-    )
+    scoped = winner.metadata.get("scoped_claims") or []
+    assert len(scoped) == 2

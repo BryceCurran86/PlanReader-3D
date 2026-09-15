@@ -422,22 +422,58 @@ def _blocked_native_conflict_record(
     )
 
 
+def _blocked_native_ambiguous_record(
+    record: DrawingEvidenceRecord,
+    *,
+    reason: str,
+) -> DrawingEvidenceRecord:
+    """Retain scoped claims when tag/type identity is unresolved."""
+    return DrawingEvidenceRecord(
+        tag=record.tag,
+        trade_type=record.trade_type,
+        description=record.description,
+        quantity=None,
+        unit=record.unit,
+        dimensions=record.dimensions,
+        source_page=record.source_page,
+        bounding_box=record.bounding_box,
+        extracted_text=record.extracted_text,
+        extracted_value=None,
+        confidence=0.0,
+        extraction_method=record.extraction_method,
+        raw_evidence_ref=record.raw_evidence_ref,
+        status=EvidenceStatus.UNRESOLVED.value,
+        notes=(
+            f"Ambiguous native claim retained (tag={record.tag}, page={record.source_page}); "
+            f"identity/scope not resolved ({reason}); CONFIRM forbidden."
+        ),
+    )
+
+
 def _analyze_native_groups(
     native_records: Sequence[DrawingEvidenceRecord],
-) -> tuple[Dict[str, DrawingEvidenceRecord], List[DrawingEvidenceRecord], Set[str]]:
-    """Group native records by tag without last-write-wins collapse.
+) -> tuple[Dict[str, DrawingEvidenceRecord], List[DrawingEvidenceRecord], Set[str], Set[str]]:
+    """Group native tag claims without last-write-wins collapse.
 
-    Multiple natives for one tag are kept distinct until quantity, dimension,
-    and source-page scope are all compatible. Different pages with the same tag
-    text are never merged merely because the tag matches.
+    Operates on **schedule/type tag claims**, not physical instance identity.
+    Confidence never establishes equivalence; it may only select a
+    representative after PROVEN_SAME.
+
+    Equivalence classes under one tag:
+    - PROVEN_SAME: one dedupe key (page, quantity, dimensions, raw_evidence_ref).
+    - PROVEN_DISTINCT: contradictory quantity or dimension pairs → CONFLICT.
+    - AMBIGUOUS: compatible measurable fields but multiple distinct evidence
+      refs and/or pages → retain all; block CONFIRM. Different pages alone
+      are not treated as contradiction (e.g. Level 1 vs Level 2 D01).
     """
     grouped: Dict[str, List[DrawingEvidenceRecord]] = defaultdict(list)
     for record in native_records:
         grouped[record.tag].append(record)
 
     by_tag: Dict[str, DrawingEvidenceRecord] = {}
-    conflict_records: List[DrawingEvidenceRecord] = []
+    retained_records: List[DrawingEvidenceRecord] = []
     conflict_tags: Set[str] = set()
+    ambiguous_tags: Set[str] = set()
 
     for tag in sorted(grouped.keys()):
         deduped: Dict[tuple[Any, ...], DrawingEvidenceRecord] = {}
@@ -457,27 +493,31 @@ def _analyze_native_groups(
             for record in unique
             if (pair := _dimension_pair(record.dimensions)) is not None
         }
-        pages = {record.source_page for record in unique}
-        reasons: list[str] = []
-        if len(quantities) > 1:
-            reasons.append("quantity")
-        if len(dim_pairs) > 1:
-            reasons.append("dimensions")
-        if len(pages) > 1:
-            reasons.append("source_page")
 
-        if reasons:
+        if len(quantities) > 1 or len(dim_pairs) > 1:
             conflict_tags.add(tag)
+            reasons: list[str] = []
+            if len(quantities) > 1:
+                reasons.append("quantity")
+            if len(dim_pairs) > 1:
+                reasons.append("dimensions")
             reason = ",".join(reasons)
             for record in unique:
-                conflict_records.append(
+                retained_records.append(
                     _blocked_native_conflict_record(record, reason=reason)
                 )
             continue
 
-        by_tag[tag] = max(unique, key=lambda record: record.confidence)
+        ambiguous_tags.add(tag)
+        for record in unique:
+            retained_records.append(
+                _blocked_native_ambiguous_record(
+                    record,
+                    reason="instance_or_scope_unresolved",
+                )
+            )
 
-    return by_tag, conflict_records, conflict_tags
+    return by_tag, retained_records, conflict_tags, ambiguous_tags
 
 
 class EvidenceReconciler:
@@ -497,10 +537,18 @@ class EvidenceReconciler:
         4. If native has zero or incomplete rows and OCR provides complete evidence -> RASTER_OCR.
         5. Clipped or unevidenced counts remain UNRESOLVED.
         6. Multiple native records for one tag are never last-write-wins collapsed.
+        7. Native grouping resolves tag/type claims only; physical instance identity
+           is not inferred from tag + dimensions + page alone.
+        8. Compatible claims across pages or evidence refs stay AMBIGUOUS (UNRESOLVED),
+           not CONFLICT; contradictory quantity/dimension pairs stay CONFLICT.
         """
-        by_tag_native, native_conflict_records, native_conflict_tags = _analyze_native_groups(
-            native_records
-        )
+        (
+            by_tag_native,
+            native_retained_records,
+            native_conflict_tags,
+            native_ambiguous_tags,
+        ) = _analyze_native_groups(native_records)
+        native_blocked_tags = native_conflict_tags | native_ambiguous_tags
         # Normalize generic OCR tags (DOOR, WINDOW, DOOR_ITEM, WINDOW_ITEM)
         # to match existing native indexed tags with identical dimensions
         normalized_ocr_records = []
@@ -522,14 +570,14 @@ class EvidenceReconciler:
                 [
                     *sorted(by_tag_native.keys()),
                     *sorted(by_tag_ocr.keys()),
-                    *sorted(native_conflict_tags),
+                    *sorted(native_blocked_tags),
                 ]
             )
         )
-        reconciled: List[DrawingEvidenceRecord] = list(native_conflict_records)
+        reconciled: List[DrawingEvidenceRecord] = list(native_retained_records)
 
         for tag in all_tags:
-            if tag in native_conflict_tags:
+            if tag in native_blocked_tags:
                 continue
             r_nat = by_tag_native.get(tag)
             r_ocr = by_tag_ocr.get(tag)
