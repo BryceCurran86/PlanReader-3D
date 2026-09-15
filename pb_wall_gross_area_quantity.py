@@ -1,21 +1,22 @@
 """Dependency-safe gross wall-area QuantityEvidence.
 
-Consumes existing FIRM wall-length and wall-height QuantityEvidence for the same
-physical wall. This module is a deterministic quantity derivation only: it does
-not resolve scale, infer height, bind openings, read benchmark gold, or enable
-commercial/migration authority.
+Consumes FIRM wall-length and wall-height QuantityEvidence for the same physical
+wall. Gross publication is context-bound so a stale-but-mutually-consistent
+height/length pair from an older evidence or graph snapshot cannot be replayed as
+current FIRM area.
 """
 from __future__ import annotations
 
 import hashlib
 import math
-from typing import Mapping, Optional
+from typing import Mapping
 
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_migration_contracts import QuantityEvidence, canonical_contract_json, stable_contract_id
+from pb_migration_provider_envelope import ProviderContext
 
 GROSS_WALL_AREA_FAMILY = "wall_gross_area"
-GROSS_WALL_AREA_FORMULA_VERSION = "1.0.0"
+GROSS_WALL_AREA_FORMULA_VERSION = "1.1.0"
 _LENGTH_FAMILY = "wall_length"
 _HEIGHT_FAMILY = "wall_height"
 
@@ -30,7 +31,7 @@ def _metadata(quantity: QuantityEvidence) -> Mapping[str, object]:
     return quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
 
 
-def _single_wall_id(quantity: QuantityEvidence) -> Optional[str]:
+def _single_wall_id(quantity: QuantityEvidence) -> str | None:
     if len(quantity.input_entity_ids) != 1:
         return None
     return str(quantity.input_entity_ids[0])
@@ -92,8 +93,9 @@ def build_gross_wall_area_quantity(
     wall_id: str,
     wall_length: QuantityEvidence,
     wall_height: QuantityEvidence,
+    context: ProviderContext,
 ) -> QuantityEvidence:
-    """Multiply only mutually consistent FIRM wall length and wall height evidence."""
+    """Multiply only current, mutually consistent FIRM wall measurements."""
     blockers: list[str] = []
 
     if wall_length.family != _LENGTH_FAMILY:
@@ -145,6 +147,46 @@ def build_gross_wall_area_quantity(
         blockers.append("dependency_revision_mismatch")
     if length_source[2] != height_source[2]:
         blockers.append("dependency_viewport_mismatch")
+    if height_source[0] != context.source_sha256:
+        blockers.append("wall_height_source_sha_stale")
+    if height_source[1] != context.current_revision_id:
+        blockers.append("wall_height_revision_stale")
+    if height_source[2] not in context.trusted_viewport_ids():
+        blockers.append("wall_height_viewport_stale")
+    if length_source[0] != context.source_sha256:
+        blockers.append("wall_length_source_sha_stale")
+    if length_source[1] != context.current_revision_id:
+        blockers.append("wall_length_revision_stale")
+    if length_source[2] not in context.trusted_viewport_ids():
+        blockers.append("wall_length_viewport_stale")
+
+    length_meta = _metadata(wall_length)
+    height_meta = _metadata(wall_height)
+    height_snapshot = height_meta.get("evidence_snapshot_id")
+    height_graph = height_meta.get("canonical_graph_snapshot_id")
+    if height_snapshot != context.evidence_snapshot_id:
+        blockers.append("dependency_evidence_snapshot_stale")
+    if context.canonical_graph_snapshot_id is not None and height_graph != context.canonical_graph_snapshot_id:
+        blockers.append("dependency_graph_snapshot_stale")
+
+    # Wall length predates mandatory snapshot metadata. If it carries those
+    # bindings, they must be current; absence does not downgrade otherwise-FIRM
+    # lower-dimensional length authority merely because height/area needs richer
+    # provenance.
+    length_snapshot = length_meta.get("evidence_snapshot_id")
+    if length_snapshot is not None and length_snapshot != context.evidence_snapshot_id:
+        blockers.append("dependency_evidence_snapshot_stale")
+    length_graph = length_meta.get("canonical_graph_snapshot_id")
+    if (
+        context.canonical_graph_snapshot_id is not None
+        and length_graph is not None
+        and length_graph != context.canonical_graph_snapshot_id
+    ):
+        blockers.append("dependency_graph_snapshot_stale")
+    if length_snapshot is not None and height_snapshot is not None and length_snapshot != height_snapshot:
+        blockers.append("dependency_evidence_snapshot_mismatch")
+    if length_graph is not None and height_graph is not None and length_graph != height_graph:
+        blockers.append("dependency_graph_snapshot_mismatch")
 
     for quantity, prefix in ((wall_length, "wall_length"), (wall_height, "wall_height")):
         if quantity.value is not None:
@@ -180,9 +222,9 @@ def build_gross_wall_area_quantity(
         "height_quantity_id": wall_height.quantity_id,
         "length_fingerprint": length_fp,
         "height_fingerprint": height_fp,
+        "context_fingerprint": context.fingerprint(),
     }
     evidence_ids = tuple(dict.fromkeys((*wall_length.evidence_ids, *wall_height.evidence_ids)))
-    length_meta = _metadata(wall_length)
     return QuantityEvidence(
         quantity_id=stable_contract_id("qty", payload),
         family=GROSS_WALL_AREA_FAMILY,
@@ -198,11 +240,15 @@ def build_gross_wall_area_quantity(
         confidence=min(float(wall_length.confidence), float(wall_height.confidence)),
         abstained=False,
         metadata={
-            "source_sha256": length_meta.get("source_sha256"),
-            "revision_id": length_meta.get("revision_id"),
-            "viewport_id": length_meta.get("viewport_id"),
-            "page_no": length_meta.get("page_no"),
+            "source_sha256": context.source_sha256,
+            "revision_id": context.current_revision_id,
+            "evidence_snapshot_id": context.evidence_snapshot_id,
+            "canonical_graph_snapshot_id": context.canonical_graph_snapshot_id,
+            "viewport_id": height_meta.get("viewport_id"),
+            "page_id": height_meta.get("page_id"),
+            "page_no": height_meta.get("page_no") or length_meta.get("page_no"),
             "dependency_quantity_ids": [wall_length.quantity_id, wall_height.quantity_id],
             "dependency_fingerprints": [length_fp, height_fp],
+            "context_fingerprint": context.fingerprint(),
         },
     )
