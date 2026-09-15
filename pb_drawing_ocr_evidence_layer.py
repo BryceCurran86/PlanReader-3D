@@ -21,12 +21,13 @@ CRITICAL ARCHITECTURAL RULES:
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 import math
 from pathlib import Path
 import re
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import fitz  # PyMuPDF
 from PIL import Image, ImageFilter, ImageStat
@@ -376,6 +377,109 @@ class DrawingEvidenceParser:
         )
 
 
+def _dimension_pair(
+    dimensions: Optional[Sequence[float]],
+) -> Optional[Tuple[float, float]]:
+    if dimensions is None or len(dimensions) < 2:
+        return None
+    return (float(dimensions[0]), float(dimensions[1]))
+
+
+def _native_dedupe_key(record: DrawingEvidenceRecord) -> tuple[Any, ...]:
+    return (
+        record.source_page,
+        record.quantity,
+        _dimension_pair(record.dimensions),
+        record.raw_evidence_ref or "",
+    )
+
+
+def _blocked_native_conflict_record(
+    record: DrawingEvidenceRecord,
+    *,
+    reason: str,
+) -> DrawingEvidenceRecord:
+    """Retain proven scope and dimensions while blocking firm publication."""
+    return DrawingEvidenceRecord(
+        tag=record.tag,
+        trade_type=record.trade_type,
+        description=record.description,
+        quantity=None,
+        unit=record.unit,
+        dimensions=record.dimensions,
+        source_page=record.source_page,
+        bounding_box=record.bounding_box,
+        extracted_text=record.extracted_text,
+        extracted_value=None,
+        confidence=0.0,
+        extraction_method=record.extraction_method,
+        raw_evidence_ref=record.raw_evidence_ref,
+        status=EvidenceStatus.CONFLICT_MANUAL_REVIEW.value,
+        notes=(
+            f"Conflicting native claim retained (tag={record.tag}, page={record.source_page}); "
+            f"CONFIRM forbidden ({reason})."
+        ),
+    )
+
+
+def _analyze_native_groups(
+    native_records: Sequence[DrawingEvidenceRecord],
+) -> tuple[Dict[str, DrawingEvidenceRecord], List[DrawingEvidenceRecord], Set[str]]:
+    """Group native records by tag without last-write-wins collapse.
+
+    Multiple natives for one tag are kept distinct until quantity, dimension,
+    and source-page scope are all compatible. Different pages with the same tag
+    text are never merged merely because the tag matches.
+    """
+    grouped: Dict[str, List[DrawingEvidenceRecord]] = defaultdict(list)
+    for record in native_records:
+        grouped[record.tag].append(record)
+
+    by_tag: Dict[str, DrawingEvidenceRecord] = {}
+    conflict_records: List[DrawingEvidenceRecord] = []
+    conflict_tags: Set[str] = set()
+
+    for tag in sorted(grouped.keys()):
+        deduped: Dict[tuple[Any, ...], DrawingEvidenceRecord] = {}
+        for record in grouped[tag]:
+            deduped[_native_dedupe_key(record)] = record
+        unique = sorted(
+            deduped.values(),
+            key=lambda record: (record.source_page, record.raw_evidence_ref or ""),
+        )
+        if len(unique) == 1:
+            by_tag[tag] = unique[0]
+            continue
+
+        quantities = {record.quantity for record in unique if record.quantity is not None}
+        dim_pairs = {
+            pair
+            for record in unique
+            if (pair := _dimension_pair(record.dimensions)) is not None
+        }
+        pages = {record.source_page for record in unique}
+        reasons: list[str] = []
+        if len(quantities) > 1:
+            reasons.append("quantity")
+        if len(dim_pairs) > 1:
+            reasons.append("dimensions")
+        if len(pages) > 1:
+            reasons.append("source_page")
+
+        if reasons:
+            conflict_tags.add(tag)
+            reason = ",".join(reasons)
+            for record in unique:
+                conflict_records.append(
+                    _blocked_native_conflict_record(record, reason=reason)
+                )
+            continue
+
+        by_tag[tag] = max(unique, key=lambda record: record.confidence)
+
+    return by_tag, conflict_records, conflict_tags
+
+
 class EvidenceReconciler:
     """Reconciles native and OCR drawing evidence following strict fail-closed and conflict rules."""
 
@@ -392,8 +496,11 @@ class EvidenceReconciler:
         3. If native and OCR disagree -> CONFLICT_MANUAL_REVIEW, quantity=None, blocked.
         4. If native has zero or incomplete rows and OCR provides complete evidence -> RASTER_OCR.
         5. Clipped or unevidenced counts remain UNRESOLVED.
+        6. Multiple native records for one tag are never last-write-wins collapsed.
         """
-        by_tag_native: Dict[str, DrawingEvidenceRecord] = {r.tag: r for r in native_records}
+        by_tag_native, native_conflict_records, native_conflict_tags = _analyze_native_groups(
+            native_records
+        )
         # Normalize generic OCR tags (DOOR, WINDOW, DOOR_ITEM, WINDOW_ITEM)
         # to match existing native indexed tags with identical dimensions
         normalized_ocr_records = []
@@ -410,10 +517,20 @@ class EvidenceReconciler:
 
         by_tag_ocr: Dict[str, DrawingEvidenceRecord] = {r.tag: r for r in normalized_ocr_records}
 
-        all_tags = list(dict.fromkeys(list(by_tag_native.keys()) + list(by_tag_ocr.keys())))
-        reconciled: List[DrawingEvidenceRecord] = []
+        all_tags = list(
+            dict.fromkeys(
+                [
+                    *sorted(by_tag_native.keys()),
+                    *sorted(by_tag_ocr.keys()),
+                    *sorted(native_conflict_tags),
+                ]
+            )
+        )
+        reconciled: List[DrawingEvidenceRecord] = list(native_conflict_records)
 
         for tag in all_tags:
+            if tag in native_conflict_tags:
+                continue
             r_nat = by_tag_native.get(tag)
             r_ocr = by_tag_ocr.get(tag)
 

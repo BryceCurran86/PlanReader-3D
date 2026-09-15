@@ -62,6 +62,75 @@ class ExtractedPrediction:
         }
 
 
+def _prediction_dimension_pair(
+    dimensions: Optional[Sequence[float]],
+) -> Optional[Tuple[float, float]]:
+    if dimensions is None or len(dimensions) < 2:
+        return None
+    return (float(dimensions[0]), float(dimensions[1]))
+
+
+def _extracted_predictions_conflict(
+    existing: ExtractedPrediction,
+    incoming: ExtractedPrediction,
+) -> bool:
+    """True when authoritative quantity or dimensions disagree."""
+    if abs(float(existing.quantity) - float(incoming.quantity)) > 1e-9:
+        return True
+    left = _prediction_dimension_pair(existing.dimensions)
+    right = _prediction_dimension_pair(incoming.dimensions)
+    if left is None or right is None:
+        return False
+    return left != right
+
+
+def merge_extracted_prediction(
+    pred_dict: Dict[str, ExtractedPrediction],
+    incoming: ExtractedPrediction,
+    *,
+    merge_source: str = "",
+) -> None:
+    """Merge one prediction into ``pred_dict`` without confidence-as-authority.
+
+    Conflicting quantity or dimensions block publication and retain the prior
+    claim with ``reconciliation_status=conflict_manual_review``.
+    """
+    existing = pred_dict.get(incoming.tag)
+    if existing is None:
+        pred_dict[incoming.tag] = incoming
+        return
+
+    if _extracted_predictions_conflict(existing, incoming):
+        metadata = dict(existing.metadata or {})
+        metadata.update(
+            {
+                "reconciliation_status": "conflict_manual_review",
+                "conflict_incoming_source_page": incoming.source_page,
+                "conflict_incoming_dimensions": incoming.dimensions,
+                "conflict_incoming_quantity": incoming.quantity,
+                "conflict_incoming_confidence": incoming.confidence,
+                "merge_source": merge_source,
+            }
+        )
+        pred_dict[incoming.tag] = ExtractedPrediction(
+            tag=existing.tag,
+            trade_type=existing.trade_type,
+            description=existing.description,
+            quantity=existing.quantity,
+            unit=existing.unit,
+            confidence=0.0,
+            source_page=existing.source_page,
+            sheet_number=existing.sheet_number,
+            dimensions=existing.dimensions,
+            bounding_box=existing.bounding_box,
+            metadata=metadata,
+        )
+        return
+
+    if incoming.confidence >= existing.confidence:
+        pred_dict[incoming.tag] = incoming
+
+
 class GenericPlanReaderExtractor:
     """Extracts physical building quantities from PDF drawing sets strictly from drawing evidence."""
 
@@ -1671,9 +1740,9 @@ class GenericPlanReaderExtractor:
             for s_row in schedule_rows:
                 if s_row.is_provisional or s_row.quantity is None or s_row.quantity <= 0:
                     continue
-                # Merge into predictions if not already predicted with higher confidence
-                if s_row.tag not in pred_dict or s_row.confidence >= pred_dict[s_row.tag].confidence:
-                    pred_dict[s_row.tag] = ExtractedPrediction(
+                merge_extracted_prediction(
+                    pred_dict,
+                    ExtractedPrediction(
                         tag=s_row.tag,
                         trade_type=s_row.trade_type,
                         description=s_row.description,
@@ -1684,7 +1753,9 @@ class GenericPlanReaderExtractor:
                         sheet_number=s_row.sheet_number,
                         dimensions=s_row.dimensions,
                         bounding_box=list(s_row.bbox) if s_row.bbox else None,
-                    )
+                    ),
+                    merge_source="schedule_row",
+                )
         except Exception:
             pass
 
@@ -1941,8 +2012,9 @@ class GenericPlanReaderExtractor:
                     reconciled = EvidenceReconciler.reconcile(native_records, ocr_records)
                     for r in reconciled:
                         if r.status == EvidenceStatus.CONFIRMED.value and r.quantity is not None and r.quantity > 0:
-                            if r.tag not in pred_dict or r.confidence >= pred_dict[r.tag].confidence:
-                                pred_dict[r.tag] = ExtractedPrediction(
+                            merge_extracted_prediction(
+                                pred_dict,
+                                ExtractedPrediction(
                                     tag=r.tag,
                                     trade_type=r.trade_type,
                                     description=r.description,
@@ -1957,7 +2029,9 @@ class GenericPlanReaderExtractor:
                                         "raw_evidence_ref": r.raw_evidence_ref,
                                         "status": r.status,
                                     },
-                                )
+                                ),
+                                merge_source="ocr_reconcile",
+                            )
                         elif r.status == EvidenceStatus.CONFLICT_MANUAL_REVIEW.value:
                             if r.tag in pred_dict:
                                 del pred_dict[r.tag]
