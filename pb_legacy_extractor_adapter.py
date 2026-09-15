@@ -46,7 +46,7 @@ class LegacyPredictionSnapshot:
     tag: str
     trade_type: str
     description: str
-    quantity: float
+    quantity: Optional[float]
     unit: str
     confidence: float
     source_page: int
@@ -62,8 +62,10 @@ class LegacyPredictionSnapshot:
             raise ValueError("legacy prediction trade_type must be non-empty")
         if not str(self.unit or "").strip():
             raise ValueError("legacy prediction unit must be non-empty")
-        if not math.isfinite(float(self.quantity)):
-            raise ValueError("legacy prediction quantity must be finite")
+        # Match ExtractedPrediction: blocked rows may carry quantity=None.
+        # Never coerce missing quantity to 0.0 or any fabricated numeric.
+        if self.quantity is not None and not math.isfinite(float(self.quantity)):
+            raise ValueError("legacy prediction quantity must be finite when present")
         if not math.isfinite(float(self.confidence)) or not 0.0 <= float(self.confidence) <= 1.0:
             raise ValueError("legacy prediction confidence must be within [0, 1]")
         if isinstance(self.source_page, bool) or int(self.source_page) <= 0:
@@ -72,7 +74,11 @@ class LegacyPredictionSnapshot:
             raise ValueError("legacy prediction dimensions must be finite")
         if self.bounding_box is not None and not all(math.isfinite(float(v)) for v in self.bounding_box):
             raise ValueError("legacy prediction bounding_box values must be finite")
-        object.__setattr__(self, "quantity", float(self.quantity))
+        object.__setattr__(
+            self,
+            "quantity",
+            float(self.quantity) if self.quantity is not None else None,
+        )
         object.__setattr__(self, "confidence", float(self.confidence))
         object.__setattr__(self, "source_page", int(self.source_page))
         object.__setattr__(self, "metadata", _json_copy(self.metadata or {}))
