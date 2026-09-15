@@ -33,8 +33,15 @@ def build_publishing_package_from_workspace(
     mode: PublishingMode = PublishingMode.COMMERCIAL,
     benchmark_status: Optional[BenchmarkStatusPayload] = None,
     preflight_fingerprint: str = "",
+    acting_user: Optional[str] = None,
 ) -> PublishingPackagePayload:
-    """Build a standard PublishingPackagePayload from an active PlanReader SQLite database."""
+    """Build a standard PublishingPackagePayload from an active PlanReader SQLite database.
+
+    Attribution must be explicit:
+    - ``estimator`` comes from workspace metadata when present (never a named default).
+    - ``created_by`` comes from ``acting_user`` when provided, before payload fingerprinting.
+    Missing commercial attribution remains missing and is blocked by the publishing gate.
+    """
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
@@ -54,7 +61,10 @@ def build_publishing_package_from_workspace(
     job_name = str(ws_row["job_name"] or "")
     site_address = str(ws_row["site_address"] or "")
     builder_client = str(ws_row["builder_client"] or "")
-    estimator = str(ws_row["estimator"] or "Bryce Curran")
+    raw_estimator = ws_row["estimator"]
+    estimator = str(raw_estimator).strip() if raw_estimator else None
+    if estimator == "":
+        estimator = None
     target_job_id = int(ws_row["jobhub_job_id"]) if ws_row["jobhub_job_id"] else None
 
     project_identity = ProjectIdentityPayload(
@@ -174,6 +184,8 @@ def build_publishing_package_from_workspace(
             )
         )
 
+    created_by = acting_user.strip() if acting_user and str(acting_user).strip() else None
+
     pkg = PublishingPackagePayload(
         workspace_id=workspace_id,
         mode=mode.value,
@@ -184,6 +196,7 @@ def build_publishing_package_from_workspace(
         warnings=warnings,
         benchmark_status=benchmark_status,
         preflight_fingerprint=preflight_fingerprint,
+        created_by=created_by,
     )
     pkg.payload_hash = pkg.compute_payload_hash()
     return pkg

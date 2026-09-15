@@ -153,8 +153,11 @@ def test_e2e_commercial_publishing(test_dbs):
         workspace_id=1,
         mode=PublishingMode.COMMERCIAL,
         preflight_fingerprint="fp_abc123456789",
+        acting_user="Bryce Curran",
     )
     assert len(pkg.quantities) == 2
+    assert pkg.created_by == "Bryce Curran"
+    assert pkg.project_identity.estimator == "Bryce Curran"
 
     receipt = execute_jobhub_publishing(
         package=pkg,
@@ -232,6 +235,7 @@ def test_duplicate_publishing_rejected(test_dbs):
         conn=pr_conn,
         workspace_id=1,
         mode=PublishingMode.COMMERCIAL,
+        acting_user="Bryce Curran",
     )
 
     # First publish succeeds
