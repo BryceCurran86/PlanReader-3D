@@ -1,10 +1,14 @@
 """Fail-closed wall-height QuantityEvidence authority.
 
-Accepts only explicit, provenance-bound wall-height evidence or a base/top datum
-pair whose exact relationship to the requested wall segment is independently
-inspectable. Room/ceiling/storey heights, nearby datums, labels, confidence and
-stale evidence never become wall-height authority merely because their numeric
-value is plausible.
+Direct documented wall-height evidence may establish FIRM authority when its
+normal provenance checks pass. Datum subtraction is stricter: current main has
+no independently inspectable producer that can certify that a specific datum
+observation governs a specific wall segment. Caller-supplied relationship
+records therefore remain diagnostic claims only and cannot mint authority.
+
+Room/ceiling/storey heights, nearby datums, labels, confidence, caller metadata,
+and stale evidence never become wall-height authority merely because their
+numeric value is plausible.
 """
 from __future__ import annotations
 
@@ -26,7 +30,10 @@ from pb_migration_contracts import (
 from pb_migration_provider_envelope import ProviderContext
 
 WALL_HEIGHT_FAMILY = "wall_height"
-WALL_HEIGHT_FORMULA_VERSION = "1.3.0"
+WALL_HEIGHT_FORMULA_VERSION = "1.4.0"
+AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE = (
+    "authoritative_wall_datum_relationship_unavailable"
+)
 
 _ALLOWED_DIRECT_KINDS = {
     "wall_height_dimension",
@@ -53,12 +60,13 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 @dataclass(frozen=True)
 class WallDatumRelationshipProof:
-    """Inspectable proof that one datum governs one exact wall segment.
+    """Future-facing diagnostic claim for an exact datum-to-segment relation.
 
-    The proof is deliberately not a boolean or caller-created self-hash. It is a
-    typed reference to corroborated relationship evidence owned by the current
-    document/graph snapshot. A separate cross-view relationship is required when
-    the datum observation lives outside the target viewport.
+    This record is caller-constructible. It intentionally does *not* establish
+    authority on current main, even when every field and referenced EvidenceAtom
+    appears valid. A future trusted producer must independently emit/attest the
+    relation from an authoritative upstream graph/source universe before datum
+    subtraction may become FIRM.
     """
 
     proof_id: str
@@ -140,7 +148,6 @@ def _validate_owned_evidence(
     entity: EntityEvidence,
     allow_cross_view: bool = False,
 ) -> tuple[str, ...]:
-    """Validate ownership plus freshness for the exact wall target."""
     blockers: list[str] = []
     meta = _metadata(evidence)
     if evidence.document_id != document.document_id or document.document_id != context.document_id:
@@ -203,8 +210,7 @@ def _validate_owned_evidence(
 
 
 def _entity_height_profile_blockers(entity: EntityEvidence) -> tuple[str, ...]:
-    meta = _metadata(entity)
-    profile = str(meta.get("height_profile") or "").strip().lower()
+    profile = str(_metadata(entity).get("height_profile") or "").strip().lower()
     if profile in {"variable", "sloped", "stepped", "nonuniform"}:
         return ("variable_height_requires_profile_authority",)
     return ()
@@ -368,7 +374,7 @@ def _resolve_datum_relationship(
     document: DocumentEvidence,
     viewport: ViewportEvidence,
     entity: EntityEvidence,
-) -> tuple[Optional[WallDatumRelationshipProof], tuple[str, ...], bool]:
+) -> tuple[tuple[str, ...], bool]:
     label = "wall_base" if role == "wall_base" else "wall_top"
     claims = tuple(
         proof
@@ -378,7 +384,7 @@ def _resolve_datum_relationship(
         and proof.datum_role == role
     )
     if not claims:
-        return None, (f"{label}_relation_unproven",), False
+        return (f"{label}_relation_unproven",), False
 
     valid: list[WallDatumRelationshipProof] = []
     unresolved = False
@@ -401,8 +407,7 @@ def _resolve_datum_relationship(
             valid.append(proof)
 
     blockers: list[str] = []
-    distinct_datum_ids = {proof.datum_evidence_id for proof in valid}
-    if len(distinct_datum_ids) > 1:
+    if len({proof.datum_evidence_id for proof in valid}) > 1:
         blockers.append(f"{label}_relation_ambiguous")
     selected_valid = [proof for proof in valid if proof.datum_evidence_id == selected_datum.evidence_id]
     if not selected_valid:
@@ -410,17 +415,17 @@ def _resolve_datum_relationship(
     if unresolved:
         blockers.append(f"{label}_relation_unresolved")
         blockers.extend(detailed)
-    if blockers:
-        cross_reason = "datum_cross_view_relation_unproven"
-        if cross_reason in blockers:
-            blockers.append(f"{label}_cross_view_relation_unproven")
-        elif cross_reason in detailed:
-            blockers.append(f"{label}_cross_view_relation_unproven")
-        return None, tuple(dict.fromkeys(blockers)), False
+    if "datum_cross_view_relation_unproven" in detailed:
+        blockers.append(f"{label}_cross_view_relation_unproven")
 
-    selected = selected_valid[0]
-    allow_cross_view = selected.datum_viewport_id != viewport.viewport_id or selected.datum_page_id != viewport.page_id
-    return selected, (), allow_cross_view
+    allow_cross_view = False
+    if selected_valid and not blockers:
+        selected = selected_valid[0]
+        allow_cross_view = (
+            selected.datum_viewport_id != viewport.viewport_id
+            or selected.datum_page_id != viewport.page_id
+        )
+    return tuple(dict.fromkeys(blockers)), allow_cross_view
 
 
 def _abstain(
@@ -449,7 +454,7 @@ def _abstain(
         value=None,
         unit="m",
         input_entity_ids=(wall_id,),
-        formula="explicit_wall_height OR proven_wall_top_datum - proven_wall_base_datum",
+        formula="explicit_wall_height OR trusted_wall_top_datum - trusted_wall_base_datum",
         formula_version=WALL_HEIGHT_FORMULA_VERSION,
         evidence_ids=evidence_ids or tuple(entity.evidence_ids),
         authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
@@ -489,7 +494,7 @@ def build_wall_height_quantity(
     datum_relationship_proofs: tuple[WallDatumRelationshipProof, ...] = (),
     relationship_evidence: Optional[Mapping[str, EvidenceAtom]] = None,
 ) -> QuantityEvidence:
-    """Resolve explicit height or an exact-segment, relationship-proven datum difference."""
+    """Resolve direct height; keep datum-derived height fail-closed on current main."""
     if entity.candidate_entity_id != wall_id:
         return _abstain(
             wall_id=wall_id,
@@ -597,7 +602,7 @@ def build_wall_height_quantity(
         )
 
     relationship_evidence = relationship_evidence or {}
-    lower_proof, lower_relation_blockers, lower_cross_view = _resolve_datum_relationship(
+    lower_relation_blockers, lower_cross_view = _resolve_datum_relationship(
         role="wall_base",
         selected_datum=lower_datum_evidence,
         wall_id=wall_id,
@@ -609,7 +614,7 @@ def build_wall_height_quantity(
         viewport=viewport,
         entity=entity,
     )
-    upper_proof, upper_relation_blockers, upper_cross_view = _resolve_datum_relationship(
+    upper_relation_blockers, upper_cross_view = _resolve_datum_relationship(
         role="wall_top",
         selected_datum=upper_datum_evidence,
         wall_id=wall_id,
@@ -654,72 +659,27 @@ def build_wall_height_quantity(
     )
     if lower_m is None or upper_m is None:
         blockers.append("invalid_datum_units_or_values")
-        height_m = None
     else:
         height_m = upper_m - lower_m
         if not math.isfinite(height_m) or height_m <= 0.0:
             blockers.append("nonpositive_or_invalid_datum_height")
 
-    if blockers:
-        return _abstain(
-            wall_id=wall_id,
-            entity=entity,
-            context=context,
-            blockers=tuple(dict.fromkeys(blockers)),
-            evidence_ids=(lower_datum_evidence.evidence_id, upper_datum_evidence.evidence_id),
-        )
-
-    assert height_m is not None
-    assert lower_proof is not None
-    assert upper_proof is not None
-    value = round(height_m, 6)
-    payload = {
-        "wall_id": wall_id,
-        "wall_segment_id": wall_segment_id,
-        "value_m": value,
-        "lower": lower_datum_evidence.evidence_id,
-        "upper": upper_datum_evidence.evidence_id,
-        "lower_relationship_proof": lower_proof.proof_id,
-        "upper_relationship_proof": upper_proof.proof_id,
-        "source_sha256": context.source_sha256,
-        "revision_id": context.current_revision_id,
-        "evidence_snapshot_id": context.evidence_snapshot_id,
-        "canonical_graph_snapshot_id": context.canonical_graph_snapshot_id,
-    }
-    metadata = _firm_metadata(context=context, viewport=viewport, wall_id=wall_id)
-    metadata.update(
-        {
+    # Critical authority boundary: every object above is caller-constructible on
+    # current main. Matching metadata and a plausible graph snapshot identifier
+    # can support diagnostics but cannot prove the graph edge actually exists.
+    # Until an independent upstream relationship producer is wired here, datum
+    # subtraction can never publish FIRM wall height.
+    blockers.append(AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE)
+    return _abstain(
+        wall_id=wall_id,
+        entity=entity,
+        context=context,
+        blockers=tuple(dict.fromkeys(blockers)),
+        evidence_ids=(lower_datum_evidence.evidence_id, upper_datum_evidence.evidence_id),
+        metadata={
             "wall_segment_id": wall_segment_id,
-            "lower_datum_kind": lower_datum_evidence.kind,
-            "upper_datum_kind": upper_datum_evidence.kind,
-            "lower_datum_relationship_proof_id": lower_proof.proof_id,
-            "upper_datum_relationship_proof_id": upper_proof.proof_id,
-        }
-    )
-    return QuantityEvidence(
-        quantity_id=stable_contract_id("qty", payload),
-        family=WALL_HEIGHT_FAMILY,
-        semantic_key=f"wall_height:{wall_id}",
-        value=value,
-        unit="m",
-        input_entity_ids=(wall_id,),
-        formula="wall_top_datum - wall_base_datum",
-        formula_version=WALL_HEIGHT_FORMULA_VERSION,
-        evidence_ids=(
-            lower_datum_evidence.evidence_id,
-            upper_datum_evidence.evidence_id,
-            *lower_proof.relationship_evidence_ids,
-            *upper_proof.relationship_evidence_ids,
-            *lower_proof.cross_view_evidence_ids,
-            *upper_proof.cross_view_evidence_ids,
-        ),
-        authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
-        status=AuthorityStatus.FIRM.value,
-        confidence=min(
-            float(entity.confidence),
-            float(lower_datum_evidence.confidence),
-            float(upper_datum_evidence.confidence),
-        ),
-        abstained=False,
-        metadata=metadata,
+            "missing_upstream_capability": (
+                "independent datum-to-exact-wall-segment relationship producer"
+            ),
+        },
     )
