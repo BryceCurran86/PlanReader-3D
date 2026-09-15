@@ -28,6 +28,7 @@ def _ctx() -> ProviderContext:
         selected_pages=(0,),
         owned_viewport_ids=("VP-1",),
         evidence_snapshot_id="evsnap",
+        canonical_graph_snapshot_id="graphsnap",
         owned_page_numbers=(1,),
         viewport_page_ownership=(("VP-1", 1),),
     )
@@ -56,7 +57,23 @@ def _doc(*ids: str) -> DocumentEvidence:
     )
 
 
-def _ev(eid: str, kind: str, value: float, unit: str = "mm") -> EvidenceAtom:
+def _meta(opening_id: str, **extra):
+    out = {
+        "source_sha256": "a" * 64,
+        "revision_id": "R1",
+        "evidence_snapshot_id": "evsnap",
+        "canonical_graph_snapshot_id": "graphsnap",
+        "target_entity_id": opening_id,
+        "physical_opening_id": opening_id,
+        "physical_identity_status": "proven",
+        "phase": "new",
+        "commercial_applicability": "applicable",
+    }
+    out.update(extra)
+    return out
+
+
+def _ev(eid: str, kind: str, value: float, unit: str = "mm", *, opening_id: str = "OP-1") -> EvidenceAtom:
     return EvidenceAtom(
         evidence_id=eid,
         document_id="doc-1",
@@ -68,6 +85,7 @@ def _ev(eid: str, kind: str, value: float, unit: str = "mm") -> EvidenceAtom:
         unit=unit,
         status=EvidenceResolutionStatus.CORROBORATED,
         confidence=0.99,
+        metadata=_meta(opening_id),
     )
 
 
@@ -78,6 +96,7 @@ def _entity(opening_id: str, ids=("ev-w", "ev-h")) -> EntityEvidence:
         evidence_ids=tuple(ids),
         status=EvidenceResolutionStatus.CORROBORATED,
         confidence=0.95,
+        metadata=_meta(opening_id),
     )
 
 
@@ -88,8 +107,10 @@ def _host(
     walls=("WALL-1",),
     wall_id: str = "WALL-1",
     gap_width_m: float | None = None,
+    reason_codes=(),
 ) -> OpeningHostCandidate:
-    reason_codes = ("multiple_candidate_walls",) if status == "ambiguous_host" else ()
+    if status == "ambiguous_host" and not reason_codes:
+        reason_codes = ("multiple_candidate_walls",)
     return OpeningHostCandidate(
         host_candidate_id=opening_id,
         wall_candidate_id=wall_id,
@@ -98,7 +119,7 @@ def _host(
         host_status=status,
         candidate_wall_ids_considered=tuple(walls),
         confidence=0.9,
-        reason_codes=reason_codes,
+        reason_codes=tuple(reason_codes),
     )
 
 
@@ -118,7 +139,7 @@ def test_current_w7_ambiguous_host_must_abstain() -> None:
     assert "opening_host_candidate_cardinality_not_one" in result.blocking_reasons
 
 
-def test_synthetic_uniquely_hosted_dimensioned_opening_is_ready() -> None:
+def test_synthetic_uniquely_hosted_record_cannot_self_certify_host_universe() -> None:
     result = build_opening_deduction_quantity(
         host=_host(),
         wall_id="WALL-1",
@@ -129,10 +150,9 @@ def test_synthetic_uniquely_hosted_dimensioned_opening_is_ready() -> None:
         width_evidence=_ev("ev-w", "door_width_dimension", 900.0),
         height_evidence=_ev("ev-h", "door_height_dimension", 2100.0),
     )
-    assert not result.abstained
-    assert result.value == 1.89
-    assert result.metadata["wall_id"] == "WALL-1"
-    assert result.metadata["host_status"] == "hosted"
+    assert result.abstained
+    assert result.value is None
+    assert "opening_host_universe_completeness_not_authenticated" in result.blocking_reasons
 
 
 def test_w7_gap_width_is_never_used_as_authoritative_dimension() -> None:
@@ -170,7 +190,17 @@ def test_opening_count_evidence_cannot_pose_as_dimension() -> None:
 def test_noncorroborated_dimension_abstains() -> None:
     width = _ev("ev-w", "opening_width_dimension", 900.0)
     width = EvidenceAtom(
-        **{**width.to_dict(), "status": EvidenceResolutionStatus.CANDIDATE}
+        evidence_id=width.evidence_id,
+        document_id=width.document_id,
+        page_id=width.page_id,
+        viewport_id=width.viewport_id,
+        kind=width.kind,
+        method=width.method,
+        normalized_value=width.normalized_value,
+        unit=width.unit,
+        confidence=width.confidence,
+        status=EvidenceResolutionStatus.CANDIDATE,
+        metadata=width.metadata,
     )
     result = build_opening_deduction_quantity(
         host=_host(),
@@ -190,8 +220,8 @@ def test_shared_dimension_evidence_across_opening_identities_fails_closed() -> N
     host1 = _host("OP-1")
     host2 = _host("OP-2")
     shared_width = _ev("ev-w", "opening_width_dimension", 900.0)
-    h1 = _ev("ev-h1", "opening_height_dimension", 2100.0)
-    h2 = _ev("ev-h2", "opening_height_dimension", 1200.0)
+    h1 = _ev("ev-h1", "opening_height_dimension", 2100.0, opening_id="OP-1")
+    h2 = _ev("ev-h2", "opening_height_dimension", 1200.0, opening_id="OP-2")
     results = build_opening_deduction_quantities(
         hosts=(host1, host2),
         wall_id="WALL-1",

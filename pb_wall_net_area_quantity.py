@@ -1,16 +1,12 @@
 """Fail-closed net wall-area readiness.
 
-Net wall area is derived only after every dependency is authoritative:
-FIRM gross wall area, a corroborated/owned declaration of the complete physical
-opening set for that wall, and one FIRM uniquely-hosted opening deduction for
-every declared opening. Any unresolved W7 opening-host candidate blocks the
-result.
+Net wall area is derived only after every dependency is authoritative. Current
+main does not have an independent authenticated producer for the complete
+physical opening universe, so a caller-supplied ``opening_set_complete`` atom is
+diagnostic evidence only and cannot promote net wall area to FIRM.
 
-The completion evidence is an ordinary M1 ``EvidenceAtom`` (no new evidence
-schema). Its metadata must identify the wall and the exact physical opening ids
-it certifies. This module does not discover openings, does not infer missing
-dimensions, and does not treat an empty detector result as proof that a wall has
-no openings.
+This module does not discover openings, infer missing dimensions, or interpret
+an empty detector result as proof that a wall has no openings.
 """
 from __future__ import annotations
 
@@ -33,7 +29,7 @@ from pb_migration_provider_envelope import ProviderContext
 from pb_wall_gross_area_quantity import quantity_evidence_fingerprint
 
 NET_WALL_AREA_FAMILY = "wall_net_area"
-NET_WALL_AREA_FORMULA_VERSION = "1.0.0"
+NET_WALL_AREA_FORMULA_VERSION = "1.1.0"
 _GROSS_FAMILY = "wall_gross_area"
 _DEDUCTION_FAMILY = "opening_deduction_area"
 _OPENING_SET_KIND = "opening_set_complete"
@@ -123,7 +119,12 @@ def build_net_wall_area_quantity(
     wall_entity: EntityEvidence,
     unresolved_opening_host_ids: Sequence[str] = (),
 ) -> QuantityEvidence:
-    """Build net area only when the opening set is explicitly complete."""
+    """Build net area only when the opening universe is independently complete.
+
+    No such authenticated producer exists on current main, so caller-supplied
+    completion evidence is validated for diagnostics but remains insufficient for
+    FIRM publication.
+    """
     blockers: list[str] = []
     gross_meta = _meta(gross_wall_area.metadata)
 
@@ -158,6 +159,12 @@ def build_net_wall_area_quantity(
         blockers.append("gross_revision_mismatch")
     if gross_meta.get("viewport_id") != viewport.viewport_id:
         blockers.append("gross_viewport_mismatch")
+    if gross_meta.get("evidence_snapshot_id") != context.evidence_snapshot_id:
+        blockers.append("gross_evidence_snapshot_mismatch")
+    if context.canonical_graph_snapshot_id is not None and (
+        gross_meta.get("canonical_graph_snapshot_id") != context.canonical_graph_snapshot_id
+    ):
+        blockers.append("gross_graph_snapshot_mismatch")
 
     unresolved_ids = tuple(str(v) for v in unresolved_opening_host_ids if str(v))
     if unresolved_ids:
@@ -177,7 +184,7 @@ def build_net_wall_area_quantity(
             blockers.append("opening_set_completion_document_mismatch")
         if ev.page_id != viewport.page_id:
             blockers.append("opening_set_completion_page_mismatch")
-        if ev.viewport_id not in (None, viewport.viewport_id):
+        if ev.viewport_id != viewport.viewport_id:
             blockers.append("opening_set_completion_viewport_mismatch")
         if ev.evidence_id not in document.evidence_ids:
             blockers.append("opening_set_completion_not_owned_by_document")
@@ -185,6 +192,18 @@ def build_net_wall_area_quantity(
             blockers.append("opening_set_completion_not_owned_by_wall")
         if str(ev_meta.get("wall_id") or "") != wall_id:
             blockers.append("opening_set_completion_wall_mismatch")
+        if str(ev_meta.get("target_entity_id") or "") != wall_id:
+            blockers.append("opening_set_completion_target_mismatch")
+        if str(ev_meta.get("source_sha256") or "") != context.source_sha256:
+            blockers.append("opening_set_completion_source_sha_mismatch")
+        if ev_meta.get("revision_id") != context.current_revision_id:
+            blockers.append("opening_set_completion_revision_mismatch")
+        if ev_meta.get("evidence_snapshot_id") != context.evidence_snapshot_id:
+            blockers.append("opening_set_completion_evidence_snapshot_mismatch")
+        if context.canonical_graph_snapshot_id is not None and (
+            ev_meta.get("canonical_graph_snapshot_id") != context.canonical_graph_snapshot_id
+        ):
+            blockers.append("opening_set_completion_graph_snapshot_mismatch")
         raw_ids = ev_meta.get("opening_ids")
         if not isinstance(raw_ids, (list, tuple)):
             blockers.append("opening_set_completion_ids_missing")
@@ -194,6 +213,10 @@ def build_net_wall_area_quantity(
                 blockers.append("opening_set_completion_id_empty")
             if len(set(declared_opening_ids)) != len(declared_opening_ids):
                 blockers.append("opening_set_completion_ids_duplicate")
+
+        # Critical fail-closed boundary: an ordinary EvidenceAtom and a caller
+        # declared list cannot prove that omitted physical openings do not exist.
+        blockers.append("opening_universe_completeness_not_authenticated")
 
     observed_opening_ids: list[str] = []
     total_deduction = 0.0
@@ -216,6 +239,12 @@ def build_net_wall_area_quantity(
             blockers.append("opening_deduction_source_sha_mismatch")
         if dmeta.get("revision_id") != context.current_revision_id:
             blockers.append("opening_deduction_revision_mismatch")
+        if dmeta.get("evidence_snapshot_id") != context.evidence_snapshot_id:
+            blockers.append("opening_deduction_evidence_snapshot_mismatch")
+        if context.canonical_graph_snapshot_id is not None and (
+            dmeta.get("canonical_graph_snapshot_id") != context.canonical_graph_snapshot_id
+        ):
+            blockers.append("opening_deduction_graph_snapshot_mismatch")
         if dmeta.get("viewport_id") != viewport.viewport_id:
             blockers.append("opening_deduction_viewport_mismatch")
         if dmeta.get("wall_id") != wall_id:
@@ -248,10 +277,13 @@ def build_net_wall_area_quantity(
             completion_evidence=opening_set_complete_evidence,
         )
 
+    # Unreachable until an independent authenticated opening-universe producer is
+    # introduced. Retained so the derivation stays explicit for that future seam.
     assert gross_wall_area.value is not None
     value_m2 = round(float(gross_wall_area.value) - total_deduction, 6)
     gross_fp = quantity_evidence_fingerprint(gross_wall_area)
     deduction_fps = [quantity_evidence_fingerprint(q) for q in opening_deductions]
+    assert opening_set_complete_evidence is not None
     completion_fp = _completion_fingerprint(opening_set_complete_evidence)
     payload = {
         "family": NET_WALL_AREA_FAMILY,
@@ -284,6 +316,8 @@ def build_net_wall_area_quantity(
         metadata={
             "source_sha256": context.source_sha256,
             "revision_id": context.current_revision_id,
+            "evidence_snapshot_id": context.evidence_snapshot_id,
+            "canonical_graph_snapshot_id": context.canonical_graph_snapshot_id,
             "viewport_id": viewport.viewport_id,
             "gross_dependency_fingerprint": gross_fp,
             "deduction_dependency_fingerprints": deduction_fps,
