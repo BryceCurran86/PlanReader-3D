@@ -1903,7 +1903,17 @@ class GenericPlanReaderExtractor:
                 pt_norm,
                 re.I,
             )
-            standalone_bb = self._standalone_chalkboard_label_count(page_text)
+            line_standalone_bb = self._standalone_chalkboard_label_count(page_text)
+            native_standalone_bb = 0
+            try:
+                from pb_native_fixture_label_evidence import count_standalone_chalkboard_spans
+
+                native_standalone_bb = count_standalone_chalkboard_spans(
+                    page.get_text("dict")
+                )
+            except Exception:
+                native_standalone_bb = 0
+            standalone_bb = max(line_standalone_bb, native_standalone_bb)
 
             if bb_matches or bb_count_m or standalone_bb:
                 if bb_count_m:
