@@ -1,4 +1,4 @@
-"""Verify registered frozen holdout projects remain untouched.
+﻿"""Verify registered frozen holdout projects remain untouched.
 
 Two checks are required:
 
@@ -7,6 +7,10 @@ Two checks are required:
 2. An *already-registered* lock at the repository base/merge-base must not be
    rewritten or deleted at HEAD. Regenerating ``.holdout_lock.json`` after
    editing expected files must not self-certify the change.
+
+Authoritative established locks are enumerated from BASE via ``git ls-tree``,
+not from directories that happen to exist at HEAD. Deleting or renaming an
+entire registered holdout project therefore fails.
 
 First-time registration (no lock at base, lock created at HEAD) is allowed by
 this script, but CI gold/production separation still forbids bundling that
@@ -45,6 +49,32 @@ def _normalize(path: str) -> str:
     return path.replace("\\", "/").lstrip("./")
 
 
+def list_established_lock_paths_at(sha: str, holdout_root: Path = _HOLDOUT_ROOT) -> list[str]:
+    """Return lock paths under holdout_root that exist at ``sha``.
+
+    Uses ``git ls-tree`` so deleted HEAD projects remain visible when inspecting
+    BASE. Never trusts HEAD directory listing to define which BASE locks were
+    authoritative.
+    """
+    root = _normalize(str(holdout_root)).rstrip("/") + "/"
+    completed = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", sha, root],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return []
+    locks: list[str] = []
+    for line in completed.stdout.splitlines():
+        path = _normalize(line.strip())
+        if path.endswith("/" + _LOCK_NAME) or path.endswith(_LOCK_NAME):
+            # Only locks under the holdout root tree.
+            if path.startswith(root) and Path(path).name == _LOCK_NAME:
+                locks.append(path)
+    return sorted(set(locks))
+
+
 def find_established_lock_rewrites(
     *,
     base_sha: str,
@@ -52,18 +82,16 @@ def find_established_lock_rewrites(
     holdout_root: Path = _HOLDOUT_ROOT,
 ) -> list[str]:
     """Fail when an established base lock is changed or deleted at HEAD."""
-    if not holdout_root.is_dir():
-        return []
-
     failures: list[str] = []
-    for child in sorted(holdout_root.iterdir()):
-        if not child.is_dir():
-            continue
-        project_id = child.name
-        lock_rel = _normalize(str(child / _LOCK_NAME))
+    for lock_rel in list_established_lock_paths_at(base_sha, holdout_root=holdout_root):
+        project_id = Path(lock_rel).parent.name
         base_lock = _git_show(base_sha, lock_rel)
         if base_lock is None:
-            # First-time registration path — no established lock to protect.
+            # Defensive: ls-tree listed it, but show failed.
+            failures.append(
+                f"{project_id}: established {_LOCK_NAME} unreadable at "
+                f"{base_sha[:12]}"
+            )
             continue
         head_lock = _git_show(head_sha, lock_rel)
         if head_lock is None:
@@ -86,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
     holdout_root = _HOLDOUT_ROOT
     failures: list[str] = []
 
+    # HEAD-side checksum verification for projects that still exist.
     registered = list_registered_holdout_projects(holdout_root)
     for project_id in registered:
         result = verify_holdout_untouched(holdout_root / project_id)
