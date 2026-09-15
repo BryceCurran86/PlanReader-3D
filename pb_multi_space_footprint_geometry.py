@@ -106,6 +106,89 @@ class FootprintGeometryResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ExternalEnvelopePerimeterResolution:
+    """Diagnostic resolution of external envelope perimeter for DPC / envelope consumers.
+
+    Distinguishes compound external envelope from hatch-reduced solid-wall length.
+    Never invents a numeric when evidence is absent.
+    """
+
+    perimeter_m: Optional[float]
+    status: str
+    reason: str
+    source: str
+
+
+def resolve_external_envelope_perimeter_m(
+    *,
+    external_perimeter_m: Optional[float],
+    footprint_status: Optional[str],
+    fallback_wall_perimeter_m: Optional[float] = None,
+) -> ExternalEnvelopePerimeterResolution:
+    """Prefer confirmed compound external envelope over hatch-reduced wall length.
+
+    OBSERVED live bug: DPC inherited ``perimeter_walling.dimensions[0]`` after
+    F.32 hatch open-length subtraction, discarding ``external_perimeter_m``
+    already computed by ``MultiSpaceFootprintEngine``.
+
+    Rules:
+    - CONFIRMED + finite positive ``external_perimeter_m`` → use it.
+    - PARTIAL / provisional / missing → do not promote incomplete compound
+      geometry; fall back to wall perimeter only when that value is finite > 0.
+    - Both missing / non-finite → abstain (``perimeter_m=None``).
+    - Never chooses among candidates by closeness to an expected BOQ value.
+    """
+    ext: Optional[float] = None
+    if external_perimeter_m is not None:
+        try:
+            candidate = float(external_perimeter_m)
+        except (TypeError, ValueError):
+            candidate = float("nan")
+        if math.isfinite(candidate) and candidate > 0.0:
+            ext = candidate
+
+    status = str(footprint_status or "").strip().lower()
+    if ext is not None and status == FootprintStatus.CONFIRMED.value:
+        return ExternalEnvelopePerimeterResolution(
+            perimeter_m=round(ext, 2),
+            status="confirmed_external",
+            reason="confirmed_compound_external_envelope",
+            source="footprint_external_perimeter_m",
+        )
+
+    fallback: Optional[float] = None
+    if fallback_wall_perimeter_m is not None:
+        try:
+            fb = float(fallback_wall_perimeter_m)
+        except (TypeError, ValueError):
+            fb = float("nan")
+        if math.isfinite(fb) and fb > 0.0:
+            fallback = round(fb, 2)
+
+    if fallback is not None:
+        reason = "fallback_wall_perimeter"
+        if status == FootprintStatus.PARTIAL_MISSING_COMPONENTS.value:
+            reason = "partial_footprint_fallback_wall_perimeter"
+        elif status == FootprintStatus.PROVISIONAL.value:
+            reason = "provisional_footprint_fallback_wall_perimeter"
+        elif ext is not None and status != FootprintStatus.CONFIRMED.value:
+            reason = "unconfirmed_external_ignored_fallback_wall_perimeter"
+        return ExternalEnvelopePerimeterResolution(
+            perimeter_m=fallback,
+            status="fallback_wall",
+            reason=reason,
+            source="wall_perimeter_fallback",
+        )
+
+    return ExternalEnvelopePerimeterResolution(
+        perimeter_m=None,
+        status="abstained",
+        reason="no_evidenced_external_or_wall_perimeter",
+        source="none",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Core Polygon Geometry Algorithms
 # ---------------------------------------------------------------------------
