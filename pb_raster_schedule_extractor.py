@@ -1002,6 +1002,7 @@ class GenericScheduleTableExtractor:
             opening_groups.setdefault(norm.tag, []).append(candidate)
 
         conflicting_opening_tags = set()
+        conflict_retained_rows: List[ScheduleRow] = []
         resolved_opening_rows: Dict[str, ScheduleRow] = {}
         for tag, group in opening_groups.items():
             quantities = {float(r.quantity) for r in group if r.quantity is not None}
@@ -1012,6 +1013,25 @@ class GenericScheduleTableExtractor:
             }
             if len(quantities) > 1 or len(dimensions) > 1:
                 conflicting_opening_tags.add(tag)
+                for retained in group:
+                    conflict_retained_rows.append(
+                        ScheduleRow(
+                            tag=retained.tag,
+                            trade_type=retained.trade_type,
+                            description=f"{retained.description} [schedule conflict retained]",
+                            quantity=None,
+                            unit=retained.unit,
+                            dimensions=retained.dimensions,
+                            source_page=retained.source_page,
+                            bbox=retained.bbox,
+                            sheet_number=retained.sheet_number,
+                            confidence=0.0,
+                            is_provisional=True,
+                            evidence_text=(
+                                f"SCHEDULE_CONFLICT retained: {retained.evidence_text}"
+                            ),
+                        )
+                    )
                 continue
 
             # Multiple generic detectors may observe the same explicit W/D row.
@@ -1088,7 +1108,7 @@ class GenericScheduleTableExtractor:
                 )
             )
 
-        return result
+        return conflict_retained_rows + result
 
     def _parse_quantity_string(self, text: str) -> Optional[float]:
         """Parse count / quantity strictly from string, returning None if unevidenced."""

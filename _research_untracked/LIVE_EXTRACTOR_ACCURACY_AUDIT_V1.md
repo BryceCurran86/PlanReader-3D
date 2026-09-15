@@ -5,7 +5,27 @@
 **Audit commit:** `483e16a` (tests + report only)  
 **Worktree:** `C:\Users\bryce\Documents\worktrees\live-extractor-accuracy-audit-v1`  
 **Date:** 2026-09-15  
-**Stop:** before merge. Benchmark gold untouched. No production fixes in this pass. Not pushed.
+**Stop:** before merge. Benchmark gold untouched. P0 fixes landed @ `c327146`; P0 safety tightening (equivalence semantics) follows on same branch. Not pushed.
+
+---
+
+## P0 reconciler contract (post safety check)
+
+`EvidenceReconciler` resolves **schedule/type tag claims**, not physical instance identity.
+
+| Class | Condition | Action |
+|---|---|---|
+| **PROVEN_SAME** | Identical dedupe key: `(source_page, quantity, dimensions, raw_evidence_ref)` | Single representative (exact replay of same observation) |
+| **PROVEN_DISTINCT** | Same tag, contradictory quantity or dimension pairs | `CONFLICT_MANUAL_REVIEW`; retain each scoped claim; block CONFIRM |
+| **AMBIGUOUS** | Compatible measurable fields but multiple distinct evidence refs and/or pages | `UNRESOLVED`; retain all claims; block CONFIRM |
+
+Rules enforced:
+
+- Confidence **never** establishes PROVEN_SAME; it may only select after PROVEN_SAME (currently a no-op when dedupe key is unique).
+- Same tag + same dimensions + same page **alone** does **not** prove physical-instance identity.
+- Different pages/scopes **prevent unsafe collapse** but are **not** automatic contradiction (e.g. Level 1 D01 vs Level 2 D01 → AMBIGUOUS, not CONFLICT).
+
+Adversarial coverage: `tests/test_live_extractor_p0_adversarial.py` (A1–A6, A2b).
 
 ---
 
