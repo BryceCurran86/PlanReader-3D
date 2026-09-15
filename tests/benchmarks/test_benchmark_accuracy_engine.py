@@ -75,6 +75,29 @@ def test_unscored_benchmark_returns_none(engine):
     assert report.overall_accuracy_percentage is None
 
 
+def test_zero_extraction_attempt_scores_all_measurable_as_misses(
+    engine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verified benchmark + attempted extraction + zero predictions must not be unscored."""
+    pdf_path = tmp_path / "attempted.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 minimal")
+    monkeypatch.setattr(engine, "extract_quantities_from_pdf", lambda *_a, **_k: [])
+
+    report = engine.evaluate_benchmark(
+        benchmark_id="tenders_ke_kstvet_cbc_classroom",
+        pdf_path=pdf_path,
+    )
+
+    assert report.is_scored is True
+    assert report.status == "scored"
+    assert report.total_items_compared == report.total_measurable_expected
+    assert report.missed_items == report.total_measurable_expected
+    assert report.exact_matches == 0
+    assert report.overall_accuracy_percentage == 0.0
+
+
 def test_exact_matches_evaluation(engine):
     """Exact match predictions yield 100% accuracy and exact match counts."""
     predictions = [

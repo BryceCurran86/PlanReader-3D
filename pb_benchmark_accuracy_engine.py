@@ -645,9 +645,11 @@ class BenchmarkAccuracyEngine:
 
         # 3. Resolve predictions: either supplied directly or extracted from PDF
         active_predictions: List[Dict[str, Any]] = []
+        extraction_attempted = False
         if predictions is not None:
             active_predictions.extend(predictions)
         elif (pdf_path or auto_extract) and resolved_pdf and resolved_pdf.exists():
+            extraction_attempted = True
             target_pages = None
             for doc in bench.download_manifest.get("documents", []):
                 if doc.get("role") in ("architectural_drawings", "drawings", "tender_drawings"):
@@ -660,8 +662,8 @@ class BenchmarkAccuracyEngine:
         if hallucinated_predictions:
             active_predictions.extend(hallucinated_predictions)
 
-        # If still no predictions, return candidate_unscored
-        if not active_predictions:
+        # No extraction attempt and no predictions: remain unscored inventory.
+        if not active_predictions and not extraction_attempted:
             return BenchmarkAccuracyReport(
                 benchmark_id=benchmark_id,
                 timestamp=now_ts,
