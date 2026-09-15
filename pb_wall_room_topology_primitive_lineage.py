@@ -138,7 +138,6 @@ def source_record_from_segment(segment: Mapping[str, Any]) -> Dict[str, Any]:
     coords_available = all(field in segment for field in _PAGE_COORD_FIELDS)
     page_coords_present = False
     if coords_available:
-        finite_coords: Dict[str, float] = {}
         all_finite = True
         for field in _PAGE_COORD_FIELDS:
             try:
@@ -152,9 +151,7 @@ def source_record_from_segment(segment: Mapping[str, Any]) -> Dict[str, Any]:
             record[field] = value
             if not math.isfinite(value):
                 all_finite = False
-            else:
-                finite_coords[field] = value
-        page_coords_present = all_finite and len(finite_coords) == len(_PAGE_COORD_FIELDS)
+        page_coords_present = all_finite
     record["page_coords_present"] = page_coords_present
     for field in _OWNERSHIP_FIELDS:
         if field in segment:
