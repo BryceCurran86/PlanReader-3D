@@ -120,6 +120,13 @@ def source_record_from_segment(segment: Mapping[str, Any]) -> Dict[str, Any]:
         "clip": copy.deepcopy(segment.get("clip")) if "clip" in segment else None,
         "clip_present": field_is_present(segment, "clip"),
     }
+    # clip_known is additive and independent of clip_present: known-absent
+    # (matched association, no active scissor) must not equal unknown
+    # (extended API unavailable / missing / unmatched seqno).
+    if "clip_known" in segment:
+        record["clip_known"] = bool(segment["clip_known"])
+    elif record["clip_present"]:
+        record["clip_known"] = True
     # Priority-1: retain structured path indices and native page coordinates on
     # the source record so later snap/merge cannot erase native span provenance.
     for field in _PATH_INDEX_FIELDS:
@@ -128,15 +135,27 @@ def source_record_from_segment(segment: Mapping[str, Any]) -> Dict[str, Any]:
                 record[field] = int(segment[field])
             except (TypeError, ValueError):
                 record[field] = segment[field]
-    page_coords_present = all(field in segment for field in _PAGE_COORD_FIELDS)
-    record["page_coords_present"] = page_coords_present
-    if page_coords_present:
+    coords_available = all(field in segment for field in _PAGE_COORD_FIELDS)
+    page_coords_present = False
+    if coords_available:
+        finite_coords: Dict[str, float] = {}
+        all_finite = True
         for field in _PAGE_COORD_FIELDS:
             try:
-                record[field] = float(segment[field])
+                value = float(segment[field])
             except (TypeError, ValueError):
                 record[field] = segment[field]
-                record["page_coords_present"] = False
+                all_finite = False
+                continue
+            # Never coerce non-finite geometry to zero; retain the value for
+            # diagnostics but refuse page_coords_present authority.
+            record[field] = value
+            if not math.isfinite(value):
+                all_finite = False
+            else:
+                finite_coords[field] = value
+        page_coords_present = all_finite and len(finite_coords) == len(_PAGE_COORD_FIELDS)
+    record["page_coords_present"] = page_coords_present
     for field in _OWNERSHIP_FIELDS:
         if field in segment:
             record[field] = copy.deepcopy(segment[field])

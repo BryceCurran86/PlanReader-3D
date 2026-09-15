@@ -80,17 +80,31 @@ def _normalize_scissor(scissor: Any) -> Optional[Tuple[float, float, float, floa
     return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
 
 
-def _clip_scissor_by_seqno(pdf_page: Any) -> Dict[int, Optional[Tuple[float, float, float, float]]]:
-    """Map non-extended drawing ``seqno`` values to the active clip scissor.
+@dataclass(frozen=True)
+class _ClipAssociationTable:
+    """Extended-drawing clip association result.
+
+    ``available`` is False when the extended API failed. ``by_seqno`` maps a
+    *matched* drawing ``seqno`` to the active scissor, or to ``None`` when
+    association succeeded and no clip is active. Absence from ``by_seqno`` is
+    unknown (unmatched / missing seqno), distinct from matched ``None``.
+    """
+
+    available: bool
+    by_seqno: Dict[int, Optional[Tuple[float, float, float, float]]]
+
+
+def _clip_scissor_by_seqno(pdf_page: Any) -> _ClipAssociationTable:
+    """Map non-extended drawing ``seqno`` values to active clip scissors.
 
     Uses a separate ``get_drawings(extended=True)`` pass so the primary
     non-extended enumeration (and therefore historical ``d{{path}}i{{item}}``
-    ids) stays bit-identical. Missing / unavailable clips map to ``None``.
+    ids) stays bit-identical.
     """
     try:
         extended = pdf_page.get_drawings(extended=True) or []
     except Exception:
-        return {}
+        return _ClipAssociationTable(available=False, by_seqno={})
 
     # Nesting stack: index == clip nesting level from PyMuPDF.
     stack: List[Optional[Tuple[float, float, float, float]]] = []
@@ -132,7 +146,21 @@ def _clip_scissor_by_seqno(pdf_page: Any) -> Dict[int, Optional[Tuple[float, flo
             if stack[idx] is not None:
                 active = stack[idx]
         by_seqno[seq_key] = active
-    return by_seqno
+    return _ClipAssociationTable(available=True, by_seqno=by_seqno)
+
+
+def _resolve_clip_fields(
+    *,
+    clip_table: _ClipAssociationTable,
+    seq_key: Optional[int],
+) -> Tuple[bool, bool, Optional[Tuple[float, float, float, float]]]:
+    """Return ``(clip_known, clip_present, clip)`` without conflating states."""
+    if not clip_table.available or seq_key is None or seq_key not in clip_table.by_seqno:
+        return False, False, None
+    clip = clip_table.by_seqno[seq_key]
+    if clip is None:
+        return True, False, None
+    return True, True, clip
 
 
 def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
@@ -148,13 +176,28 @@ def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
     Priority-1 additive provenance (does not change historical ``id`` values):
     ``path_index``, ``item_index``, optional ``edge_index``, explicit
     ``*_present`` flags, native page coordinates retained as fields already
-    present, and ``clip`` / ``clip_present`` from a separate extended drawings
-    association keyed by ``seqno``.
+    present, and ``clip`` / ``clip_present`` / ``clip_known`` from a separate
+    extended drawings association keyed by ``seqno`` (never invents clip).
+
+    Clip ternary (A1): ``clip_known=True, clip_present=False`` means the
+    extended association matched the drawing ``seqno`` and no active clip
+    exists. ``clip_known=False`` means association unavailable, seqno missing,
+    or unmatched — never evidence of “unclipped”.
+
+    Other graphic presence flags (A3 audit): PyMuPDF ``get_drawings()`` dicts
+    always include ``color``, ``fill``, ``width``, ``dashes``, and ``layer``.
+    Known absence is ``None`` (or ``""`` for layer); there is no separate
+    upstream “field not supplied” state to preserve beyond the existing
+    ``*_present`` flags. Clip is the exception because it depends on a
+    fallible extended association pass.
+
+    Non-finite native coordinates (A2) are skipped at emission — never
+    coerced to zero and never claimed present.
     """
     segments: List[Dict[str, Any]] = []
     rects: List[Dict[str, Any]] = []   # ADDITIVE: closed native rectangles
     drawings = pdf_page.get_drawings() or []
-    clip_by_seqno = _clip_scissor_by_seqno(pdf_page)
+    clip_table = _clip_scissor_by_seqno(pdf_page)
     for draw_index, drawing in enumerate(drawings):
         width = _num(drawing.get("width"), 0.0) if isinstance(drawing, dict) else 0.0
         stroke = drawing.get("color") if isinstance(drawing, dict) else None
@@ -171,13 +214,9 @@ def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
             seq_key = int(seqno) if seqno is not None else None
         except (TypeError, ValueError):
             seq_key = None
-        if seq_key is not None and seq_key in clip_by_seqno:
-            clip = clip_by_seqno[seq_key]
-            clip_present = clip is not None
-        else:
-            # Extended association unavailable or seqno unmatched — do not invent a clip.
-            clip = None
-            clip_present = False
+        clip_known, clip_present, clip = _resolve_clip_fields(
+            clip_table=clip_table, seq_key=seq_key
+        )
 
         def _graphic_fields() -> Dict[str, Any]:
             return {
@@ -193,6 +232,7 @@ def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
                 "dashes_present": dashes_present,
                 "clip": list(clip) if clip is not None else None,
                 "clip_present": clip_present,
+                "clip_known": clip_known,
                 "path_index": int(draw_index),
             }
 
@@ -209,6 +249,8 @@ def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
                         x1, y1, x2, y2 = float(p1[0]), float(p1[1]), float(p2[0]), float(p2[1])
                     except Exception:
                         continue
+                if not all(math.isfinite(v) for v in (x1, y1, x2, y2)):
+                    continue
                 if math.hypot(x2 - x1, y2 - y1) < 0.5:
                     continue
                 payload = {
@@ -227,6 +269,8 @@ def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
                 try:
                     x0, y0, x1, y1 = map(float, (rect.x0, rect.y0, rect.x1, rect.y1))
                 except Exception:
+                    continue
+                if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
                     continue
                 pts = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
                 # ADDITIVE: retain the closed native rectangle identity too.
@@ -257,6 +301,8 @@ def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
         try:
             x0, y0, x1, y1 = map(float, word[:4])
         except Exception:
+            continue
+        if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
             continue
         text = str(word[4]).strip()
         if text:
