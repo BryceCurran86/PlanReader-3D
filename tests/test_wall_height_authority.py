@@ -109,9 +109,9 @@ def test_assumed_height_metadata_is_never_authority() -> None:
     assert "default_or_assumed_height_forbidden" in qty.blocking_reasons
 
 
-def test_explicit_wall_bound_roof_floor_pair_derives_height() -> None:
+def test_intrinsically_wall_bound_top_floor_pair_derives_height() -> None:
     lower = _ev("d1", "floor_level_datum", 12.4, "m", role="wall_base")
-    upper = _ev("d2", "roof_level_datum", 15.2, "m", role="wall_top")
+    upper = _ev("d2", "wall_top_level_datum", 15.2, "m", role="wall_top")
     qty = build_wall_height_quantity(
         wall_id="w1", context=_context(), document=_document(("d1", "d2")), viewport=_viewport(),
         entity=_entity(("d1", "d2")), lower_datum_evidence=lower, upper_datum_evidence=upper,
@@ -119,6 +119,17 @@ def test_explicit_wall_bound_roof_floor_pair_derives_height() -> None:
     assert qty.abstained is False
     assert qty.value == 2.8
     assert qty.formula == "wall_top_datum - wall_base_datum"
+
+
+def test_roof_metadata_label_cannot_establish_wall_top() -> None:
+    lower = _ev("d1", "floor_level_datum", 12.4, "m", role="wall_base")
+    upper = _ev("d2", "roof_level_datum", 15.2, "m", role="wall_top")
+    qty = build_wall_height_quantity(
+        wall_id="w1", context=_context(), document=_document(("d1", "d2")), viewport=_viewport(),
+        entity=_entity(("d1", "d2")), lower_datum_evidence=lower, upper_datum_evidence=upper,
+    )
+    assert qty.abstained
+    assert "unsupported_upper_datum_kind" in qty.blocking_reasons
 
 
 def test_ceiling_datum_pair_does_not_establish_wall_top() -> None:
@@ -158,7 +169,7 @@ def test_unresolved_height_evidence_abstains() -> None:
 
 def test_nonpositive_datum_difference_abstains() -> None:
     lower = _ev("d1", "floor_level_datum", 15.2, "m", role="wall_base")
-    upper = _ev("d2", "roof_level_datum", 12.4, "m", role="wall_top")
+    upper = _ev("d2", "wall_top_level_datum", 12.4, "m", role="wall_top")
     qty = build_wall_height_quantity(
         wall_id="w1", context=_context(), document=_document(("d1", "d2")), viewport=_viewport(),
         entity=_entity(("d1", "d2")), lower_datum_evidence=lower, upper_datum_evidence=upper,
