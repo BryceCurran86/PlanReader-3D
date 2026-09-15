@@ -1,9 +1,9 @@
 """Dependency-safe gross wall-area QuantityEvidence.
 
 Consumes FIRM wall-length and wall-height QuantityEvidence for the same physical
-wall. Gross publication is context-bound so a stale-but-mutually-consistent
-height/length pair from an older evidence or graph snapshot cannot be replayed as
-current FIRM area.
+wall. Gross publication is context-bound so stale or incompletely provenance-bound
+dependencies cannot be replayed as current FIRM area. Lower-dimensional authority
+is not downgraded merely because a derived area claim must fail closed.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from pb_migration_contracts import QuantityEvidence, canonical_contract_json, st
 from pb_migration_provider_envelope import ProviderContext
 
 GROSS_WALL_AREA_FAMILY = "wall_gross_area"
-GROSS_WALL_AREA_FORMULA_VERSION = "1.1.0"
+GROSS_WALL_AREA_FORMULA_VERSION = "1.2.0"
 _LENGTH_FAMILY = "wall_length"
 _HEIGHT_FAMILY = "wall_height"
 
@@ -88,6 +88,45 @@ def _abstain(
     )
 
 
+def _validate_snapshot_binding(
+    *,
+    meta: Mapping[str, object],
+    prefix: str,
+    context: ProviderContext,
+    blockers: list[str],
+) -> None:
+    evidence_snapshot = meta.get("evidence_snapshot_id")
+    if evidence_snapshot in (None, ""):
+        blockers.append(f"{prefix}_evidence_snapshot_missing")
+    elif evidence_snapshot != context.evidence_snapshot_id:
+        blockers.append(f"{prefix}_evidence_snapshot_stale")
+        blockers.append("dependency_evidence_snapshot_stale")
+
+    if context.canonical_graph_snapshot_id is not None:
+        graph_snapshot = meta.get("canonical_graph_snapshot_id")
+        if graph_snapshot in (None, ""):
+            blockers.append(f"{prefix}_graph_snapshot_missing")
+        elif graph_snapshot != context.canonical_graph_snapshot_id:
+            blockers.append(f"{prefix}_graph_snapshot_stale")
+            blockers.append("dependency_graph_snapshot_stale")
+
+
+def _validate_page_binding(
+    *,
+    meta: Mapping[str, object],
+    prefix: str,
+    context: ProviderContext,
+    blockers: list[str],
+) -> None:
+    viewport_id = meta.get("viewport_id")
+    expected_page = context.page_for_viewport(str(viewport_id)) if viewport_id else None
+    page_no = meta.get("page_no")
+    if page_no in (None, ""):
+        blockers.append(f"{prefix}_page_missing")
+    elif expected_page is not None and page_no != expected_page:
+        blockers.append(f"{prefix}_page_mismatch")
+
+
 def build_gross_wall_area_quantity(
     *,
     wall_id: str,
@@ -95,7 +134,7 @@ def build_gross_wall_area_quantity(
     wall_height: QuantityEvidence,
     context: ProviderContext,
 ) -> QuantityEvidence:
-    """Multiply only current, mutually consistent FIRM wall measurements."""
+    """Multiply only current, fully provenance-bound FIRM wall measurements."""
     blockers: list[str] = []
 
     if wall_length.family != _LENGTH_FAMILY:
@@ -162,30 +201,46 @@ def build_gross_wall_area_quantity(
 
     length_meta = _metadata(wall_length)
     height_meta = _metadata(wall_height)
-    height_snapshot = height_meta.get("evidence_snapshot_id")
-    height_graph = height_meta.get("canonical_graph_snapshot_id")
-    if height_snapshot != context.evidence_snapshot_id:
-        blockers.append("dependency_evidence_snapshot_stale")
-    if context.canonical_graph_snapshot_id is not None and height_graph != context.canonical_graph_snapshot_id:
-        blockers.append("dependency_graph_snapshot_stale")
+    _validate_snapshot_binding(
+        meta=length_meta,
+        prefix="wall_length",
+        context=context,
+        blockers=blockers,
+    )
+    _validate_snapshot_binding(
+        meta=height_meta,
+        prefix="wall_height",
+        context=context,
+        blockers=blockers,
+    )
+    _validate_page_binding(
+        meta=length_meta,
+        prefix="wall_length",
+        context=context,
+        blockers=blockers,
+    )
+    _validate_page_binding(
+        meta=height_meta,
+        prefix="wall_height",
+        context=context,
+        blockers=blockers,
+    )
 
-    # Wall length predates mandatory snapshot metadata. If it carries those
-    # bindings, they must be current; absence does not downgrade otherwise-FIRM
-    # lower-dimensional length authority merely because height/area needs richer
-    # provenance.
     length_snapshot = length_meta.get("evidence_snapshot_id")
-    if length_snapshot is not None and length_snapshot != context.evidence_snapshot_id:
-        blockers.append("dependency_evidence_snapshot_stale")
-    length_graph = length_meta.get("canonical_graph_snapshot_id")
+    height_snapshot = height_meta.get("evidence_snapshot_id")
     if (
-        context.canonical_graph_snapshot_id is not None
-        and length_graph is not None
-        and length_graph != context.canonical_graph_snapshot_id
+        length_snapshot not in (None, "")
+        and height_snapshot not in (None, "")
+        and length_snapshot != height_snapshot
     ):
-        blockers.append("dependency_graph_snapshot_stale")
-    if length_snapshot is not None and height_snapshot is not None and length_snapshot != height_snapshot:
         blockers.append("dependency_evidence_snapshot_mismatch")
-    if length_graph is not None and height_graph is not None and length_graph != height_graph:
+    length_graph = length_meta.get("canonical_graph_snapshot_id")
+    height_graph = height_meta.get("canonical_graph_snapshot_id")
+    if (
+        length_graph not in (None, "")
+        and height_graph not in (None, "")
+        and length_graph != height_graph
+    ):
         blockers.append("dependency_graph_snapshot_mismatch")
 
     for quantity, prefix in ((wall_length, "wall_length"), (wall_height, "wall_height")):
