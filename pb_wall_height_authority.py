@@ -230,6 +230,14 @@ def build_wall_height_quantity(
             blockers=("wall_height_entity_identity_mismatch",),
             evidence_ids=tuple(entity.evidence_ids),
         )
+    if entity.status == EvidenceResolutionStatus.CONFLICT or entity.conflict_evidence_ids:
+        return _abstain(
+            wall_id=wall_id,
+            entity=entity,
+            context=context,
+            blockers=("wall_height_entity_conflict",),
+            evidence_ids=tuple(entity.evidence_ids),
+        )
     if entity.status != EvidenceResolutionStatus.CORROBORATED:
         return _abstain(
             wall_id=wall_id,
