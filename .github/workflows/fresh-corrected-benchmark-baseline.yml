@@ -1,0 +1,142 @@
+name: Fresh Corrected Benchmark Baseline
+
+on:
+  push:
+    branches:
+      - chatgpt/fresh-corrected-benchmark-baseline
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Pin execution to merged main under test
+        run: |
+          git checkout --detach 9e6083d1758384dcbc640351d2fd14de8522b4c9
+          test "$(git rev-parse HEAD)" = "9e6083d1758384dcbc640351d2fd14de8522b4c9"
+
+      - name: Download and verify verified-scored benchmark sources
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+          import hashlib
+          import json
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+
+          root = Path('benchmarks/public_tenders')
+          index = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
+          sources_dir = Path('benchmarks/sources')
+          sources_dir.mkdir(parents=True, exist_ok=True)
+
+          verified = [b for b in index['benchmarks'] if b.get('status') == 'verified_scored_benchmark']
+          print('Verified headline benchmarks:', [b['benchmark_id'] for b in verified])
+
+          for bench in verified:
+              bid = bench['benchmark_id']
+              bdir = root / bid
+              src = json.loads((bdir / 'source_manifest.json').read_text(encoding='utf-8'))
+              dl = json.loads((bdir / 'download_manifest.json').read_text(encoding='utf-8'))
+              filename = src['source_pdf']
+              url = dl['source_url']
+              expected_sha = dl['documents'][0]['sha256'].lower()
+              dest = sources_dir / filename
+              print(f'Downloading {bid}: {url} -> {dest}')
+              req = Request(url, headers={'User-Agent': 'Mozilla/5.0 PlanReaderBenchmark/1.0'})
+              with urlopen(req, timeout=120) as response, dest.open('wb') as out:
+                  while True:
+                      chunk = response.read(1024 * 1024)
+                      if not chunk:
+                          break
+                      out.write(chunk)
+              actual_sha = hashlib.sha256(dest.read_bytes()).hexdigest().lower()
+              if actual_sha != expected_sha:
+                  raise SystemExit(f'{bid}: SHA mismatch expected={expected_sha} actual={actual_sha}')
+              print(f'{bid}: SHA256 OK {actual_sha} ({dest.stat().st_size} bytes)')
+          PY
+
+      - name: Run corrected full headline benchmark
+        run: |
+          rm -rf /tmp/planreader_corrected_baseline
+          PYTHONPATH=. python pb_benchmark_accuracy_engine.py \
+            --all \
+            --auto-extract \
+            --require-local-sources \
+            --output-dir /tmp/planreader_corrected_baseline
+
+      - name: Print machine-readable baseline summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('/tmp/planreader_corrected_baseline/headline_accuracy_dashboard.json')
+          if not p.exists():
+              print('NO_DASHBOARD_GENERATED')
+              raise SystemExit(0)
+          d = json.loads(p.read_text(encoding='utf-8'))
+          keys = [
+              'evaluated_commit_sha',
+              'generated_at',
+              'headline_overall_accuracy',
+              'headline_strict_exact_accuracy',
+              'total_headline_benchmarks',
+              'total_headline_measurable_expected',
+              'total_headline_items_compared',
+              'total_headline_exact_matches',
+              'total_headline_within_5_percent',
+              'total_headline_within_10_percent',
+              'total_headline_within_20_percent',
+              'total_headline_gross_mismatches',
+              'total_headline_missed_items',
+              'total_headline_hallucinated_items',
+              'incomplete_headline_benchmarks',
+              'headline_coverage_complete',
+              'incomplete_headline_benchmark_ids',
+          ]
+          print('BASELINE_SUMMARY_START')
+          for k in keys:
+              print(f'{k}={d.get(k)}')
+          print('PER_BENCHMARK_START')
+          for r in d.get('headline_reports', []):
+              s = r.get('summary', {})
+              print(json.dumps({
+                  'benchmark_id': r.get('benchmark_id'),
+                  'status': r.get('status'),
+                  'is_scored': r.get('is_scored'),
+                  'source_pdf': r.get('source_pdf'),
+                  'overall_accuracy_percentage': s.get('overall_accuracy_percentage'),
+                  'strict_exact_accuracy_percentage': s.get('strict_exact_accuracy_percentage'),
+                  'total_measurable_expected': s.get('total_measurable_expected'),
+                  'total_items_compared': s.get('total_items_compared'),
+                  'exact_matches': s.get('exact_matches'),
+                  'within_5_percent': s.get('within_5_percent'),
+                  'gross_mismatches': s.get('gross_mismatches'),
+                  'missed_items': s.get('missed_items'),
+                  'hallucinated_items': s.get('hallucinated_items'),
+                  'errors': r.get('errors'),
+              }, sort_keys=True))
+          print('BASELINE_SUMMARY_END')
+          PY
+
+      - name: Upload diagnostic results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corrected-benchmark-baseline-9e6083d
+          path: /tmp/planreader_corrected_baseline
+          if-no-files-found: warn
