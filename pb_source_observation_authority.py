@@ -1,40 +1,32 @@
-"""G17 phase-1 producer-owned source-observation authority.
+"""G17 phase-1 producer-owned source observation and immutable lineage boundary.
 
-This module intentionally establishes only the proposition that a producer-owned
-source observation exists with immutable lineage to an exact source revision and
-published producer snapshot.
-
-It does *not* establish physical-opening existence, opening identity, universe
-completeness, opening dimensions, host binding, physical void, or net wall area.
-Heuristic, OCR, CV, schedule, reconstructed, and derived observations therefore
-remain ``PHYSICAL_OPENING_EXISTENCE_UNRESOLVED`` even when their source
-observation existence is corroborated.
-
-The producer/consumer split is structural in this in-process implementation.  It
-is not claimed as a security boundary against equally privileged same-process
-code; the merged G17 architecture requires a separate process/credential/store
-boundary for that stronger threat model.
+The strongest positive proposition here is ``SOURCE_OBSERVATION_EXISTS``.
+Physical-opening existence, identity, semantic enumeration completeness,
+decision-complete scope, dimensions, host binding, physical voids and net wall
+area remain unavailable.  The in-process producer/query split prevents ordinary
+consumer self-certification structurally; it is not a security boundary against
+equal-privilege Python code.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import hashlib
 import math
-import re
-from typing import Iterable, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
+
+import fitz
 
 from pb_migration_contracts import (
     EvidenceResolutionStatus,
     canonical_contract_json,
     stable_contract_id,
 )
+from pb_vector_geometry_v130 import extract_native_page
 
 
 SOURCE_OBSERVATION_AUTHORITY_SCHEMA_VERSION = "1.0.0"
-
 SOURCE_OBSERVATION_EXISTS = "source_observation_exists"
 PHYSICAL_OPENING_EXISTENCE_UNRESOLVED = "physical_opening_existence_unresolved"
-
 SOURCE_UNAVAILABLE = "source_unavailable"
 OBSERVATION_UNAVAILABLE = "observation_unavailable"
 STALE_REVISION = "stale_revision"
@@ -42,9 +34,6 @@ SOURCE_HASH_MISMATCH = "source_hash_mismatch"
 SNAPSHOT_MISMATCH = "snapshot_mismatch"
 LINEAGE_UNAVAILABLE = "lineage_unavailable"
 PRODUCER_INTEGRITY_FAILURE = "producer_integrity_failure"
-
-_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-_DERIVED_ORIGIN_KINDS = frozenset({"derived", "normalized"})
 
 
 class ProducerIntegrityError(RuntimeError):
@@ -58,31 +47,11 @@ def _nonempty(value: str, field_name: str) -> str:
     return clean
 
 
-def _optional_nonempty(value: Optional[str], field_name: str) -> Optional[str]:
-    if value is None:
-        return None
-    return _nonempty(value, field_name)
-
-
-def _sha256_hex(value: str, field_name: str) -> str:
-    clean = str(value or "").strip().lower()
-    if not _SHA256_RE.fullmatch(clean):
-        raise ValueError(f"{field_name} must be a 64-character lowercase SHA-256 digest")
-    return clean
-
-
-def _geometry_tuple(values: Iterable[float]) -> tuple[float, ...]:
-    result = tuple(float(value) for value in values)
-    if not all(math.isfinite(value) for value in result):
-        raise ValueError("geometry coordinates must be finite")
+def _finite_tuple(values: Sequence[float]) -> tuple[float, ...]:
+    result = tuple(float(v) for v in values)
+    if not all(math.isfinite(v) for v in result):
+        raise ValueError("geometry values must be finite")
     return result
-
-
-def _unique_nonempty(values: Sequence[str], field_name: str) -> tuple[str, ...]:
-    cleaned = tuple(_nonempty(value, field_name) for value in values)
-    if len(set(cleaned)) != len(cleaned):
-        raise ValueError(f"{field_name} values must be unique")
-    return cleaned
 
 
 def _content_sha256(payload: object) -> str:
@@ -91,80 +60,46 @@ def _content_sha256(payload: object) -> str:
 
 @dataclass(frozen=True)
 class SourceRevisionRecord:
-    """Immutable producer-owned identity for exact ingested source bytes."""
-
     document_id: str
     revision_id: str
     source_sha256: str
     source_locator: str
     partition_ids: tuple[str, ...]
-    ingestion_id: str
     producer_method: str
     producer_version: str
     producer_generation: int
     supersedes_revision_id: Optional[str] = None
-    invalidation_conditions: tuple[str, ...] = (
-        "source_bytes_change",
-        "source_partition_inventory_change",
-        "producer_method_or_version_change",
-    )
     status: EvidenceResolutionStatus = EvidenceResolutionStatus.CORROBORATED
     schema_version: str = SOURCE_OBSERVATION_AUTHORITY_SCHEMA_VERSION
 
-    def __post_init__(self) -> None:
-        _nonempty(self.document_id, "document_id")
-        _nonempty(self.revision_id, "revision_id")
-        object.__setattr__(self, "source_sha256", _sha256_hex(self.source_sha256, "source_sha256"))
-        _nonempty(self.source_locator, "source_locator")
-        object.__setattr__(self, "partition_ids", _unique_nonempty(self.partition_ids, "partition_id"))
-        _nonempty(self.ingestion_id, "ingestion_id")
-        _nonempty(self.producer_method, "producer_method")
-        _nonempty(self.producer_version, "producer_version")
-        if int(self.producer_generation) < 1:
-            raise ValueError("producer_generation must be >= 1")
-        object.__setattr__(self, "producer_generation", int(self.producer_generation))
-        object.__setattr__(
-            self,
-            "supersedes_revision_id",
-            _optional_nonempty(self.supersedes_revision_id, "supersedes_revision_id"),
-        )
+
+@dataclass(frozen=True)
+class SourceDecodeCoverageRecord:
+    document_id: str
+    revision_id: str
+    total_pages: int
+    decoded_pages: tuple[int, ...]
+    failed_pages: tuple[int, ...]
+    state: str
 
 
 @dataclass(frozen=True)
-class SourceObservationInput:
-    """Trusted producer-ingestion input, never accepted by the consumer API."""
-
-    source_partition_id: str
-    page_id: str
-    observation_kind: str
-    source_primitive_ref: str
-    raw_text: str = ""
-    geometry: tuple[float, ...] = ()
-    viewport_id: Optional[str] = None
-    origin_kind: str = "native"
-    derivation_parent_ids: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        _nonempty(self.source_partition_id, "source_partition_id")
-        _nonempty(self.page_id, "page_id")
-        _nonempty(self.observation_kind, "observation_kind")
-        _nonempty(self.source_primitive_ref, "source_primitive_ref")
-        object.__setattr__(self, "viewport_id", _optional_nonempty(self.viewport_id, "viewport_id"))
-        object.__setattr__(self, "origin_kind", _nonempty(self.origin_kind, "origin_kind").lower())
-        object.__setattr__(self, "geometry", _geometry_tuple(self.geometry))
-        object.__setattr__(
-            self,
-            "derivation_parent_ids",
-            _unique_nonempty(self.derivation_parent_ids, "derivation_parent_id"),
-        )
-        if self.origin_kind in _DERIVED_ORIGIN_KINDS and not self.derivation_parent_ids:
-            raise ValueError("derived/normalized observation requires at least one lineage parent")
+class ProducerSnapshotRecord:
+    snapshot_id: str
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    observation_ids: tuple[str, ...]
+    producer_method: str
+    producer_version: str
+    producer_generation: int
+    parent_snapshot_id: Optional[str] = None
+    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CORROBORATED
+    schema_version: str = SOURCE_OBSERVATION_AUTHORITY_SCHEMA_VERSION
 
 
 @dataclass(frozen=True)
 class SourceObservationRecord:
-    """Immutable published producer observation bound to revision and snapshot."""
-
     observation_id: str
     document_id: str
     revision_id: str
@@ -183,81 +118,13 @@ class SourceObservationRecord:
     producer_generation: int
     snapshot_id: str
     observation_payload_sha256: str
-    invalidation_conditions: tuple[str, ...] = (
-        "source_revision_changes",
-        "producer_snapshot_changes",
-        "source_primitive_changes",
-        "lineage_parent_unavailable",
-    )
     status: EvidenceResolutionStatus = EvidenceResolutionStatus.RAW
     schema_version: str = SOURCE_OBSERVATION_AUTHORITY_SCHEMA_VERSION
-
-    def __post_init__(self) -> None:
-        _nonempty(self.observation_id, "observation_id")
-        _nonempty(self.document_id, "document_id")
-        _nonempty(self.revision_id, "revision_id")
-        object.__setattr__(self, "source_sha256", _sha256_hex(self.source_sha256, "source_sha256"))
-        _nonempty(self.source_partition_id, "source_partition_id")
-        _nonempty(self.page_id, "page_id")
-        object.__setattr__(self, "viewport_id", _optional_nonempty(self.viewport_id, "viewport_id"))
-        _nonempty(self.observation_kind, "observation_kind")
-        _nonempty(self.source_primitive_ref, "source_primitive_ref")
-        object.__setattr__(self, "geometry", _geometry_tuple(self.geometry))
-        object.__setattr__(self, "origin_kind", _nonempty(self.origin_kind, "origin_kind").lower())
-        object.__setattr__(
-            self,
-            "derivation_parent_ids",
-            _unique_nonempty(self.derivation_parent_ids, "derivation_parent_id"),
-        )
-        _nonempty(self.producer_method, "producer_method")
-        _nonempty(self.producer_version, "producer_version")
-        if int(self.producer_generation) < 1:
-            raise ValueError("producer_generation must be >= 1")
-        object.__setattr__(self, "producer_generation", int(self.producer_generation))
-        _nonempty(self.snapshot_id, "snapshot_id")
-        object.__setattr__(
-            self,
-            "observation_payload_sha256",
-            _sha256_hex(self.observation_payload_sha256, "observation_payload_sha256"),
-        )
-
-
-@dataclass(frozen=True)
-class ProducerSnapshotRecord:
-    """Immutable producer publication boundary for one exact source revision."""
-
-    snapshot_id: str
-    document_id: str
-    revision_id: str
-    source_sha256: str
-    observation_ids: tuple[str, ...]
-    producer_method: str
-    producer_version: str
-    producer_generation: int
-    invalidation_conditions: tuple[str, ...] = (
-        "source_revision_changes",
-        "observation_identity_collision",
-        "producer_integrity_failure",
-    )
-    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CORROBORATED
-    schema_version: str = SOURCE_OBSERVATION_AUTHORITY_SCHEMA_VERSION
-
-    def __post_init__(self) -> None:
-        _nonempty(self.snapshot_id, "snapshot_id")
-        _nonempty(self.document_id, "document_id")
-        _nonempty(self.revision_id, "revision_id")
-        object.__setattr__(self, "source_sha256", _sha256_hex(self.source_sha256, "source_sha256"))
-        object.__setattr__(self, "observation_ids", _unique_nonempty(self.observation_ids, "observation_id"))
-        _nonempty(self.producer_method, "producer_method")
-        _nonempty(self.producer_version, "producer_version")
-        if int(self.producer_generation) < 1:
-            raise ValueError("producer_generation must be >= 1")
-        object.__setattr__(self, "producer_generation", int(self.producer_generation))
 
 
 @dataclass(frozen=True)
 class ObservationSelector:
-    """Consumer-supplied lookup selector; contains no authority record body."""
+    """Consumer selector only; never an authoritative observation body."""
 
     document_id: str
     revision_id: str
@@ -265,18 +132,9 @@ class ObservationSelector:
     snapshot_id: str
     observation_id: str
 
-    def __post_init__(self) -> None:
-        _nonempty(self.document_id, "document_id")
-        _nonempty(self.revision_id, "revision_id")
-        object.__setattr__(self, "source_sha256", _sha256_hex(self.source_sha256, "source_sha256"))
-        _nonempty(self.snapshot_id, "snapshot_id")
-        _nonempty(self.observation_id, "observation_id")
-
 
 @dataclass(frozen=True)
 class SourceObservationAuthorityResult:
-    """Typed Phase-1 authority result.  Never proves physical-opening existence."""
-
     status: EvidenceResolutionStatus
     proposition: Optional[str]
     physical_opening_existence: str
@@ -284,69 +142,45 @@ class SourceObservationAuthorityResult:
     source_revision: Optional[SourceRevisionRecord] = None
     snapshot: Optional[ProducerSnapshotRecord] = None
     observation: Optional[SourceObservationRecord] = None
+    semantic_enumeration_complete: Optional[bool] = None
+    decision_scope_complete: Optional[bool] = None
+
+
+@dataclass(frozen=True)
+class PublishedSourceSnapshot:
+    revision: SourceRevisionRecord
+    coverage: SourceDecodeCoverageRecord
+    snapshot: ProducerSnapshotRecord
 
 
 class _SourceObservationStore:
-    """Producer-owned mutable backing state; consumers receive read access only."""
-
     def __init__(self) -> None:
+        self.generation = 0
         self.revisions: dict[str, SourceRevisionRecord] = {}
-        self.source_bytes_by_revision: dict[str, bytes] = {}
         self.current_revision_by_document: dict[str, str] = {}
+        self.source_bytes_by_revision: dict[str, bytes] = {}
+        self.coverage_by_revision: dict[str, SourceDecodeCoverageRecord] = {}
         self.snapshots: dict[str, ProducerSnapshotRecord] = {}
-        self.observations_by_snapshot: dict[tuple[str, str], SourceObservationRecord] = {}
-        self.observation_fingerprint_by_id: dict[str, str] = {}
-        self.observation_revision_by_id: dict[str, str] = {}
-        self.snapshot_payload_fingerprint: dict[str, str] = {}
-        self._next_generation = 1
+        self.source_snapshot_by_revision: dict[str, str] = {}
+        self.observations: dict[tuple[str, str], SourceObservationRecord] = {}
+        self.record_fingerprints: dict[tuple[str, str], str] = {}
 
-    def allocate_generation(self) -> int:
-        generation = self._next_generation
-        self._next_generation += 1
-        return generation
+    def next_generation(self) -> int:
+        self.generation += 1
+        return self.generation
 
 
-def _observation_identity_payload(revision: SourceRevisionRecord, value: SourceObservationInput) -> dict[str, object]:
+def _record_payload(record: SourceObservationRecord) -> dict[str, object]:
     return {
-        "document_id": revision.document_id,
-        "revision_id": revision.revision_id,
-        "source_partition_id": value.source_partition_id,
-        "page_id": value.page_id,
-        "viewport_id": value.viewport_id,
-        "observation_kind": value.observation_kind,
-        "source_primitive_ref": value.source_primitive_ref,
-    }
-
-
-def _observation_content_payload(
-    revision: SourceRevisionRecord,
-    value: SourceObservationInput,
-    *,
-    producer_method: str,
-    producer_version: str,
-) -> dict[str, object]:
-    return {
-        **_observation_identity_payload(revision, value),
-        "source_sha256": revision.source_sha256,
-        "raw_text": value.raw_text,
-        "geometry": value.geometry,
-        "origin_kind": value.origin_kind,
-        "derivation_parent_ids": value.derivation_parent_ids,
-        "producer_method": producer_method,
-        "producer_version": producer_version,
-    }
-
-
-def _record_content_payload(record: SourceObservationRecord) -> dict[str, object]:
-    return {
+        "observation_id": record.observation_id,
         "document_id": record.document_id,
         "revision_id": record.revision_id,
+        "source_sha256": record.source_sha256,
         "source_partition_id": record.source_partition_id,
         "page_id": record.page_id,
         "viewport_id": record.viewport_id,
         "observation_kind": record.observation_kind,
         "source_primitive_ref": record.source_primitive_ref,
-        "source_sha256": record.source_sha256,
         "raw_text": record.raw_text,
         "geometry": record.geometry,
         "origin_kind": record.origin_kind,
@@ -357,230 +191,376 @@ def _record_content_payload(record: SourceObservationRecord) -> dict[str, object
 
 
 class SourceObservationProducer:
-    """Trusted writer side of the G17 phase-1 source-observation boundary."""
+    """Trusted writer. Ordinary consumers should receive only ``authority()``."""
 
     def __init__(self, *, producer_method: str, producer_version: str) -> None:
         self._producer_method = _nonempty(producer_method, "producer_method")
         self._producer_version = _nonempty(producer_version, "producer_version")
         self._store = _SourceObservationStore()
 
-    def current_revision_id(self, document_id: str) -> Optional[str]:
-        return self._store.current_revision_by_document.get(_nonempty(document_id, "document_id"))
-
     def authority(self) -> "SourceObservationAuthority":
         return SourceObservationAuthority(self._store)
 
-    def ingest_source(
+    def current_revision_id(self, document_id: str) -> Optional[str]:
+        return self._store.current_revision_by_document.get(str(document_id))
+
+    def ingest_native_pdf_bytes(
         self,
         *,
         document_id: str,
         source_bytes: bytes | bytearray | memoryview,
         source_locator: str,
-        partition_ids: Sequence[str],
-    ) -> SourceRevisionRecord:
-        """Ingest exact bytes once and publish their immutable source revision.
+    ) -> PublishedSourceSnapshot:
+        """Hash and decode the exact same immutable PDF byte buffer.
 
-        ``bytes(...)`` deliberately detaches producer state from a mutable caller
-        buffer before hashing and storage, preventing a hash/decode time-of-check
-        versus time-of-use gap inside this phase-1 store.
+        Page partitions and native observations are producer-derived from the PDF;
+        a caller cannot supply authoritative page inventories or observation bodies.
         """
 
         document_id = _nonempty(document_id, "document_id")
         source_locator = _nonempty(source_locator, "source_locator")
-        partitions = _unique_nonempty(partition_ids, "partition_id")
-        if not partitions:
-            raise ValueError("partition_ids must contain at least one producer-owned partition")
         if not isinstance(source_bytes, (bytes, bytearray, memoryview)):
             raise TypeError("source_bytes must be bytes-like")
         immutable_bytes = bytes(source_bytes)
         if not immutable_bytes:
-            raise ValueError("source_bytes must not be empty")
+            raise ValueError(f"{SOURCE_UNAVAILABLE}: empty source bytes")
 
-        source_sha256 = hashlib.sha256(immutable_bytes).hexdigest()
+        digest = hashlib.sha256(immutable_bytes).hexdigest()
         revision_id = stable_contract_id(
             "source_revision",
-            {"document_id": document_id, "source_sha256": source_sha256},
+            {"document_id": document_id, "source_sha256": digest},
             digest_chars=32,
         )
-        ingestion_id = stable_contract_id(
-            "source_ingestion",
+        existing_snapshot_id = self._store.source_snapshot_by_revision.get(revision_id)
+        if existing_snapshot_id is not None:
+            return PublishedSourceSnapshot(
+                revision=replace(self._store.revisions[revision_id]),
+                coverage=replace(self._store.coverage_by_revision[revision_id]),
+                snapshot=replace(self._store.snapshots[existing_snapshot_id]),
+            )
+
+        try:
+            pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
+        except Exception as exc:
+            raise ValueError(f"{SOURCE_UNAVAILABLE}: PDF decode failed") from exc
+
+        pending: list[dict[str, Any]] = []
+        decoded_pages: list[int] = []
+        failed_pages: list[int] = []
+        try:
+            total_pages = int(pdf.page_count)
+            partition_ids = tuple(f"page:{i + 1}" for i in range(total_pages))
+            for page_index in range(total_pages):
+                page_number = page_index + 1
+                partition_id = f"page:{page_number}"
+                try:
+                    page = pdf.load_page(page_index)
+                    native = extract_native_page(page)
+                    decoded_pages.append(page_number)
+                    pending.append(
+                        {
+                            "page_id": str(page_number),
+                            "partition_id": partition_id,
+                            "kind": "native_pdf_page",
+                            "primitive_ref": f"page:{page_number}",
+                            "raw_text": "",
+                            "geometry": (float(native["width"]), float(native["height"])),
+                        }
+                    )
+                    for segment in native.get("segments") or []:
+                        pending.append(
+                            {
+                                "page_id": str(page_number),
+                                "partition_id": partition_id,
+                                "kind": "native_pdf_segment",
+                                "primitive_ref": f"segment:{segment.get('id')}",
+                                "raw_text": "",
+                                "geometry": (
+                                    float(segment["x1"]), float(segment["y1"]),
+                                    float(segment["x2"]), float(segment["y2"]),
+                                ),
+                            }
+                        )
+                    for word in native.get("words") or []:
+                        pending.append(
+                            {
+                                "page_id": str(page_number),
+                                "partition_id": partition_id,
+                                "kind": "native_pdf_word",
+                                "primitive_ref": f"word:{word.get('id')}",
+                                "raw_text": str(word.get("text") or ""),
+                                "geometry": _finite_tuple(word.get("bbox") or ()),
+                            }
+                        )
+                    for rect_index, rect in enumerate(native.get("rects") or []):
+                        pending.append(
+                            {
+                                "page_id": str(page_number),
+                                "partition_id": partition_id,
+                                "kind": "native_pdf_rect",
+                                "primitive_ref": f"rect:{rect_index}",
+                                "raw_text": "",
+                                "geometry": _finite_tuple(rect.get("bbox") or ()),
+                            }
+                        )
+                except Exception:
+                    failed_pages.append(page_number)
+        finally:
+            pdf.close()
+
+        previous_revision = self._store.current_revision_by_document.get(document_id)
+        generation = self._store.next_generation()
+        revision = SourceRevisionRecord(
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=digest,
+            source_locator=source_locator,
+            partition_ids=partition_ids,
+            producer_method=self._producer_method,
+            producer_version=self._producer_version,
+            producer_generation=generation,
+            supersedes_revision_id=previous_revision,
+        )
+        coverage = SourceDecodeCoverageRecord(
+            document_id=document_id,
+            revision_id=revision_id,
+            total_pages=total_pages,
+            decoded_pages=tuple(decoded_pages),
+            failed_pages=tuple(failed_pages),
+            state="complete" if not failed_pages else "partial",
+        )
+        snapshot_id = stable_contract_id(
+            "source_snapshot",
             {
                 "document_id": document_id,
                 "revision_id": revision_id,
-                "source_sha256": source_sha256,
-                "source_locator": source_locator,
-                "partition_ids": partitions,
+                "source_sha256": digest,
                 "producer_method": self._producer_method,
                 "producer_version": self._producer_version,
+                "kind": "native_pdf_ingestion",
             },
             digest_chars=32,
         )
 
-        existing = self._store.revisions.get(revision_id)
-        if existing is not None:
-            if (
-                self._store.source_bytes_by_revision.get(revision_id) != immutable_bytes
-                or existing.source_locator != source_locator
-                or existing.partition_ids != partitions
-                or existing.ingestion_id != ingestion_id
-            ):
-                raise ProducerIntegrityError(
-                    f"{PRODUCER_INTEGRITY_FAILURE}: source revision identity reused with different producer content"
-                )
-            self._store.current_revision_by_document[document_id] = revision_id
-            return replace(existing)
-
-        previous_revision_id = self._store.current_revision_by_document.get(document_id)
-        generation = self._store.allocate_generation()
-        record = SourceRevisionRecord(
-            document_id=document_id,
-            revision_id=revision_id,
-            source_sha256=source_sha256,
-            source_locator=source_locator,
-            partition_ids=partitions,
-            ingestion_id=ingestion_id,
-            producer_method=self._producer_method,
-            producer_version=self._producer_version,
-            producer_generation=generation,
-            supersedes_revision_id=previous_revision_id,
-        )
-        self._store.revisions[revision_id] = record
-        self._store.source_bytes_by_revision[revision_id] = immutable_bytes
-        self._store.current_revision_by_document[document_id] = revision_id
-        return replace(record)
-
-    def publish_snapshot(
-        self,
-        *,
-        revision_id: str,
-        observations: Sequence[SourceObservationInput],
-    ) -> ProducerSnapshotRecord:
-        """Publish producer observations atomically for one current revision.
-
-        This is a trusted producer-writer operation.  The consumer authority API
-        has no corresponding record-body argument and cannot call through this
-        method by holding only a ``SourceObservationAuthority``.
-        """
-
-        revision_id = _nonempty(revision_id, "revision_id")
-        revision = self._store.revisions.get(revision_id)
-        if revision is None:
-            raise ValueError(f"unknown source revision: {revision_id}")
-        if self._store.current_revision_by_document.get(revision.document_id) != revision_id:
-            raise ValueError("cannot publish observations for a stale source revision")
-
-        values = tuple(observations)
-        prepared: dict[str, tuple[SourceObservationInput, str]] = {}
-        for value in values:
-            if not isinstance(value, SourceObservationInput):
-                raise TypeError("observations must contain SourceObservationInput values")
-            if value.source_partition_id not in revision.partition_ids:
-                raise ValueError("source observation partition is not owned by the source revision")
-            observation_id = stable_contract_id(
-                "source_observation",
-                _observation_identity_payload(revision, value),
-                digest_chars=32,
-            )
-            fingerprint = _content_sha256(
-                _observation_content_payload(
-                    revision,
-                    value,
-                    producer_method=self._producer_method,
-                    producer_version=self._producer_version,
-                )
-            )
-            prior_prepared = prepared.get(observation_id)
-            if prior_prepared is not None and prior_prepared[1] != fingerprint:
-                raise ProducerIntegrityError(
-                    f"{PRODUCER_INTEGRITY_FAILURE}: duplicate observation id has different content"
-                )
-            prepared[observation_id] = (value, fingerprint)
-
-        available_parent_ids = set(self._store.observation_fingerprint_by_id) | set(prepared)
-        for observation_id, (value, _) in prepared.items():
-            for parent_id in value.derivation_parent_ids:
-                if parent_id == observation_id or parent_id not in available_parent_ids:
-                    raise ValueError(f"lineage parent is unavailable: {parent_id}")
-                parent_revision = self._store.observation_revision_by_id.get(parent_id)
-                if parent_revision is not None and parent_revision != revision_id:
-                    raise ValueError("lineage parent must belong to the same source revision")
-
-        for observation_id, (_, fingerprint) in prepared.items():
-            prior_fingerprint = self._store.observation_fingerprint_by_id.get(observation_id)
-            if prior_fingerprint is not None and prior_fingerprint != fingerprint:
-                raise ProducerIntegrityError(
-                    f"{PRODUCER_INTEGRITY_FAILURE}: duplicate observation id has different content"
-                )
-
-        observation_pairs = tuple(sorted((observation_id, fp) for observation_id, (_, fp) in prepared.items()))
-        snapshot_payload = {
-            "document_id": revision.document_id,
-            "revision_id": revision.revision_id,
-            "source_sha256": revision.source_sha256,
-            "producer_method": self._producer_method,
-            "producer_version": self._producer_version,
-            "observations": observation_pairs,
-        }
-        snapshot_id = stable_contract_id("source_snapshot", snapshot_payload, digest_chars=32)
-        snapshot_fingerprint = _content_sha256(snapshot_payload)
-
-        existing_snapshot = self._store.snapshots.get(snapshot_id)
-        if existing_snapshot is not None:
-            if self._store.snapshot_payload_fingerprint.get(snapshot_id) != snapshot_fingerprint:
-                raise ProducerIntegrityError(
-                    f"{PRODUCER_INTEGRITY_FAILURE}: snapshot id reused with different content"
-                )
-            return replace(existing_snapshot)
-
-        generation = self._store.allocate_generation()
-        snapshot = ProducerSnapshotRecord(
-            snapshot_id=snapshot_id,
-            document_id=revision.document_id,
-            revision_id=revision.revision_id,
-            source_sha256=revision.source_sha256,
-            observation_ids=tuple(observation_id for observation_id, _ in observation_pairs),
-            producer_method=self._producer_method,
-            producer_version=self._producer_version,
-            producer_generation=generation,
-        )
-
         records: list[SourceObservationRecord] = []
-        for observation_id in snapshot.observation_ids:
-            value, fingerprint = prepared[observation_id]
+        for item in pending:
+            identity = {
+                "document_id": document_id,
+                "revision_id": revision_id,
+                "partition_id": item["partition_id"],
+                "page_id": item["page_id"],
+                "kind": item["kind"],
+                "primitive_ref": item["primitive_ref"],
+                "raw_text": item["raw_text"],
+                "geometry": item["geometry"],
+            }
+            observation_id = stable_contract_id(
+                "source_observation", identity, digest_chars=32
+            )
             record = SourceObservationRecord(
                 observation_id=observation_id,
-                document_id=revision.document_id,
-                revision_id=revision.revision_id,
-                source_sha256=revision.source_sha256,
-                source_partition_id=value.source_partition_id,
-                page_id=value.page_id,
-                viewport_id=value.viewport_id,
-                observation_kind=value.observation_kind,
-                source_primitive_ref=value.source_primitive_ref,
-                raw_text=value.raw_text,
-                geometry=value.geometry,
-                origin_kind=value.origin_kind,
-                derivation_parent_ids=value.derivation_parent_ids,
+                document_id=document_id,
+                revision_id=revision_id,
+                source_sha256=digest,
+                source_partition_id=str(item["partition_id"]),
+                page_id=str(item["page_id"]),
+                viewport_id=None,
+                observation_kind=str(item["kind"]),
+                source_primitive_ref=str(item["primitive_ref"]),
+                raw_text=str(item["raw_text"]),
+                geometry=_finite_tuple(item["geometry"]),
+                origin_kind="native",
+                derivation_parent_ids=(),
                 producer_method=self._producer_method,
                 producer_version=self._producer_version,
                 producer_generation=generation,
                 snapshot_id=snapshot_id,
-                observation_payload_sha256=fingerprint,
+                observation_payload_sha256="",
             )
+            fingerprint = _content_sha256(_record_payload(record))
+            record = replace(record, observation_payload_sha256=fingerprint)
             records.append(record)
 
-        self._store.snapshots[snapshot_id] = snapshot
-        self._store.snapshot_payload_fingerprint[snapshot_id] = snapshot_fingerprint
-        for record in records:
-            self._store.observations_by_snapshot[(snapshot_id, record.observation_id)] = record
-            self._store.observation_fingerprint_by_id[record.observation_id] = record.observation_payload_sha256
-            self._store.observation_revision_by_id[record.observation_id] = record.revision_id
+        observation_ids = tuple(sorted(r.observation_id for r in records))
+        snapshot = ProducerSnapshotRecord(
+            snapshot_id=snapshot_id,
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=digest,
+            observation_ids=observation_ids,
+            producer_method=self._producer_method,
+            producer_version=self._producer_version,
+            producer_generation=generation,
+        )
+        self._commit(
+            revision=revision,
+            coverage=coverage,
+            snapshot=snapshot,
+            records=records,
+            source_bytes=immutable_bytes,
+            mark_source_snapshot=True,
+        )
+        return PublishedSourceSnapshot(
+            revision=replace(revision), coverage=replace(coverage), snapshot=replace(snapshot)
+        )
 
+    def publish_derived_observation(
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        base_snapshot_id: str,
+        page_id: str,
+        source_partition_id: str,
+        observation_kind: str,
+        source_primitive_ref: str,
+        origin_kind: str,
+        parent_observation_ids: Sequence[str],
+        raw_text: str = "",
+        geometry: Sequence[float] = (),
+        viewport_id: Optional[str] = None,
+        observation_id: Optional[str] = None,
+    ) -> ProducerSnapshotRecord:
+        """Trusted writer for derived evidence; parent lineage must be in base snapshot."""
+
+        current = self._store.current_revision_by_document.get(document_id)
+        if current != revision_id:
+            raise ValueError(f"{STALE_REVISION}: revision is not current")
+        base = self._store.snapshots.get(base_snapshot_id)
+        if base is None or base.revision_id != revision_id or base.document_id != document_id:
+            raise ValueError(f"{SNAPSHOT_MISMATCH}: base snapshot mismatch")
+        parents = tuple(str(p) for p in parent_observation_ids)
+        if not parents:
+            raise ValueError(f"{LINEAGE_UNAVAILABLE}: derived observation needs parent")
+        for parent_id in parents:
+            if (base_snapshot_id, parent_id) not in self._store.observations:
+                raise ValueError(f"{LINEAGE_UNAVAILABLE}: parent not in base snapshot")
+
+        revision = self._store.revisions[revision_id]
+        coverage = self._store.coverage_by_revision[revision_id]
+        generation = self._store.next_generation()
+        payload = {
+            "document_id": document_id,
+            "revision_id": revision_id,
+            "page_id": page_id,
+            "partition_id": source_partition_id,
+            "kind": observation_kind,
+            "primitive_ref": source_primitive_ref,
+            "origin_kind": origin_kind,
+            "parents": parents,
+            "raw_text": raw_text,
+            "geometry": _finite_tuple(geometry),
+        }
+        derived_id = observation_id or stable_contract_id(
+            "source_observation", payload, digest_chars=32
+        )
+        snapshot_id = stable_contract_id(
+            "source_snapshot",
+            {
+                "revision_id": revision_id,
+                "base_snapshot_id": base_snapshot_id,
+                "derived_observation_id": derived_id,
+                "generation": generation,
+            },
+            digest_chars=32,
+        )
+        cloned = [
+            replace(
+                self._store.observations[(base_snapshot_id, obs_id)],
+                snapshot_id=snapshot_id,
+                producer_generation=generation,
+            )
+            for obs_id in base.observation_ids
+        ]
+        derived = SourceObservationRecord(
+            observation_id=derived_id,
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=revision.source_sha256,
+            source_partition_id=_nonempty(source_partition_id, "source_partition_id"),
+            page_id=_nonempty(page_id, "page_id"),
+            viewport_id=str(viewport_id) if viewport_id is not None else None,
+            observation_kind=_nonempty(observation_kind, "observation_kind"),
+            source_primitive_ref=_nonempty(source_primitive_ref, "source_primitive_ref"),
+            raw_text=str(raw_text or ""),
+            geometry=_finite_tuple(geometry),
+            origin_kind=_nonempty(origin_kind, "origin_kind"),
+            derivation_parent_ids=parents,
+            producer_method=self._producer_method,
+            producer_version=self._producer_version,
+            producer_generation=generation,
+            snapshot_id=snapshot_id,
+            observation_payload_sha256="",
+        )
+        derived = replace(
+            derived, observation_payload_sha256=_content_sha256(_record_payload(derived))
+        )
+        records = [*cloned, derived]
+        ids = [r.observation_id for r in records]
+        if len(ids) != len(set(ids)):
+            by_id: dict[str, SourceObservationRecord] = {}
+            for record in records:
+                prior = by_id.get(record.observation_id)
+                if prior is not None and _record_payload(prior) != _record_payload(record):
+                    raise ProducerIntegrityError(
+                        f"{PRODUCER_INTEGRITY_FAILURE}: duplicate observation id differs"
+                    )
+                by_id[record.observation_id] = record
+            records = list(by_id.values())
+        snapshot = ProducerSnapshotRecord(
+            snapshot_id=snapshot_id,
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=revision.source_sha256,
+            observation_ids=tuple(sorted(r.observation_id for r in records)),
+            producer_method=self._producer_method,
+            producer_version=self._producer_version,
+            producer_generation=generation,
+            parent_snapshot_id=base_snapshot_id,
+        )
+        self._commit(
+            revision=revision,
+            coverage=coverage,
+            snapshot=snapshot,
+            records=records,
+            source_bytes=self._store.source_bytes_by_revision[revision_id],
+            mark_source_snapshot=False,
+        )
         return replace(snapshot)
+
+    def _commit(
+        self,
+        *,
+        revision: SourceRevisionRecord,
+        coverage: SourceDecodeCoverageRecord,
+        snapshot: ProducerSnapshotRecord,
+        records: Sequence[SourceObservationRecord],
+        source_bytes: bytes,
+        mark_source_snapshot: bool,
+    ) -> None:
+        staged: dict[tuple[str, str], SourceObservationRecord] = {}
+        for record in records:
+            key = (snapshot.snapshot_id, record.observation_id)
+            prior = staged.get(key)
+            if prior is not None and _record_payload(prior) != _record_payload(record):
+                raise ProducerIntegrityError(
+                    f"{PRODUCER_INTEGRITY_FAILURE}: duplicate observation id differs"
+                )
+            staged[key] = record
+        self._store.revisions[revision.revision_id] = revision
+        self._store.current_revision_by_document[revision.document_id] = revision.revision_id
+        self._store.source_bytes_by_revision[revision.revision_id] = bytes(source_bytes)
+        self._store.coverage_by_revision[revision.revision_id] = coverage
+        self._store.snapshots[snapshot.snapshot_id] = snapshot
+        for key, record in staged.items():
+            self._store.observations[key] = record
+            self._store.record_fingerprints[key] = record.observation_payload_sha256
+        if mark_source_snapshot:
+            self._store.source_snapshot_by_revision[revision.revision_id] = snapshot.snapshot_id
 
 
 class SourceObservationAuthority:
-    """Read-only consumer view over producer-owned phase-1 source observations."""
+    """Read-only consumer view over producer-owned records."""
 
     def __init__(self, store: _SourceObservationStore) -> None:
         self._store = store
@@ -602,72 +582,41 @@ class SourceObservationAuthority:
         )
 
     def resolve(self, selector: ObservationSelector) -> SourceObservationAuthorityResult:
-        """Resolve a selector against producer-owned records only.
-
-        No caller-created observation body, hash assertion, completeness boolean,
-        candidate list, ``CORROBORATED`` atom, or semantic relationship proof is
-        accepted by this API.
-        """
-
         if not isinstance(selector, ObservationSelector):
-            raise TypeError("selector must be an ObservationSelector")
-
-        current_revision_id = self._store.current_revision_by_document.get(selector.document_id)
-        if current_revision_id is None:
+            raise TypeError("selector must be ObservationSelector")
+        current = self._store.current_revision_by_document.get(selector.document_id)
+        if current is None:
             return self._blocked(SOURCE_UNAVAILABLE)
-        if current_revision_id != selector.revision_id:
+        if current != selector.revision_id:
             return self._blocked(STALE_REVISION)
-
         revision = self._store.revisions.get(selector.revision_id)
         source_bytes = self._store.source_bytes_by_revision.get(selector.revision_id)
-        if revision is None or source_bytes is None or revision.document_id != selector.document_id:
+        if revision is None or source_bytes is None:
             return self._integrity_failure()
-        actual_source_hash = hashlib.sha256(source_bytes).hexdigest()
-        if actual_source_hash != revision.source_sha256:
+        if hashlib.sha256(source_bytes).hexdigest() != revision.source_sha256:
             return self._integrity_failure()
         if selector.source_sha256 != revision.source_sha256:
             return self._blocked(SOURCE_HASH_MISMATCH)
-
         snapshot = self._store.snapshots.get(selector.snapshot_id)
-        if snapshot is None:
-            return self._blocked(SNAPSHOT_MISMATCH)
         if (
-            snapshot.document_id != revision.document_id
-            or snapshot.revision_id != revision.revision_id
-            or snapshot.source_sha256 != revision.source_sha256
-            or self._store.snapshot_payload_fingerprint.get(snapshot.snapshot_id) is None
+            snapshot is None
+            or snapshot.document_id != selector.document_id
+            or snapshot.revision_id != selector.revision_id
+            or snapshot.source_sha256 != selector.source_sha256
         ):
-            return self._integrity_failure()
-
-        record = self._store.observations_by_snapshot.get((snapshot.snapshot_id, selector.observation_id))
+            return self._blocked(SNAPSHOT_MISMATCH)
+        record = self._store.observations.get((selector.snapshot_id, selector.observation_id))
         if record is None:
-            if selector.observation_id in self._store.observation_fingerprint_by_id:
-                return self._blocked(SNAPSHOT_MISMATCH)
             return self._blocked(OBSERVATION_UNAVAILABLE)
-
         if selector.observation_id not in snapshot.observation_ids:
             return self._integrity_failure()
-        expected_fingerprint = self._store.observation_fingerprint_by_id.get(record.observation_id)
-        actual_fingerprint = _content_sha256(_record_content_payload(record))
-        if (
-            expected_fingerprint is None
-            or actual_fingerprint != expected_fingerprint
-            or record.observation_payload_sha256 != expected_fingerprint
-            or record.document_id != revision.document_id
-            or record.revision_id != revision.revision_id
-            or record.source_sha256 != revision.source_sha256
-            or record.snapshot_id != snapshot.snapshot_id
-            or record.producer_generation != snapshot.producer_generation
-        ):
+        expected = self._store.record_fingerprints.get((selector.snapshot_id, selector.observation_id))
+        actual = _content_sha256(_record_payload(record))
+        if expected is None or expected != actual or record.observation_payload_sha256 != actual:
             return self._integrity_failure()
-
         for parent_id in record.derivation_parent_ids:
-            if (
-                parent_id not in self._store.observation_fingerprint_by_id
-                or self._store.observation_revision_by_id.get(parent_id) != revision.revision_id
-            ):
+            if (selector.snapshot_id, parent_id) not in self._store.observations:
                 return self._blocked(LINEAGE_UNAVAILABLE)
-
         return SourceObservationAuthorityResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             proposition=SOURCE_OBSERVATION_EXISTS,
@@ -676,7 +625,17 @@ class SourceObservationAuthority:
             source_revision=replace(revision),
             snapshot=replace(snapshot),
             observation=replace(record),
+            semantic_enumeration_complete=None,
+            decision_scope_complete=None,
         )
+
+    def coverage(
+        self, *, document_id: str, revision_id: str
+    ) -> Optional[SourceDecodeCoverageRecord]:
+        coverage = self._store.coverage_by_revision.get(revision_id)
+        if coverage is None or coverage.document_id != document_id:
+            return None
+        return replace(coverage)
 
 
 __all__ = [
@@ -692,9 +651,10 @@ __all__ = [
     "ObservationSelector",
     "ProducerIntegrityError",
     "ProducerSnapshotRecord",
+    "PublishedSourceSnapshot",
+    "SourceDecodeCoverageRecord",
     "SourceObservationAuthority",
     "SourceObservationAuthorityResult",
-    "SourceObservationInput",
     "SourceObservationProducer",
     "SourceObservationRecord",
     "SourceRevisionRecord",
