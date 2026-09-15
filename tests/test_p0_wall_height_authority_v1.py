@@ -12,11 +12,16 @@ from pb_migration_contracts import (
 )
 from pb_migration_provider_envelope import ProviderContext
 from pb_wall_gross_area_quantity import build_gross_wall_area_quantity
-from pb_wall_height_authority import build_wall_height_quantity
+from pb_wall_height_authority import (
+    AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE,
+    WallDatumRelationshipProof,
+    build_wall_height_quantity,
+)
 from pb_wall_net_area_quantity import build_net_wall_area_quantity
 
 SHA = "c" * 64
 WALL = "WALL-H1"
+SEGMENT = "WALL-H1:segment:a"
 VP = "VP-H1"
 PAGE = "page-h1"
 
@@ -165,19 +170,50 @@ def _length() -> QuantityEvidence:
 
 
 def _datum_pair() -> tuple[EvidenceAtom, EvidenceAtom]:
-    lower = _ev(
-        "floor",
-        kind="floor_level_datum",
-        value=12.0,
-        role="wall_base",
-    )
-    upper = _ev(
-        "top",
-        kind="wall_top_level_datum",
-        value=15.2,
-        role="wall_top",
-    )
+    lower = _ev("floor", kind="floor_level_datum", value=12.0, role="wall_base")
+    upper = _ev("top", kind="wall_top_level_datum", value=15.2, role="wall_top")
     return lower, upper
+
+
+def _relation(eid: str, datum_id: str, role: str) -> EvidenceAtom:
+    return EvidenceAtom(
+        evidence_id=eid,
+        document_id="doc-height",
+        page_id=PAGE,
+        viewport_id=VP,
+        kind="wall_datum_segment_relationship",
+        method="canonical_graph_relation",
+        confidence=1.0,
+        status=EvidenceResolutionStatus.CORROBORATED,
+        metadata={
+            "source_sha256": SHA,
+            "revision_id": "R1",
+            "evidence_snapshot_id": "evsnap-1",
+            "canonical_graph_snapshot_id": "graphsnap-1",
+            "target_entity_id": WALL,
+            "target_wall_segment_id": SEGMENT,
+            "datum_evidence_id": datum_id,
+            "datum_role": role,
+        },
+    )
+
+
+def _proof(proof_id: str, datum_id: str, role: str, relation_id: str) -> WallDatumRelationshipProof:
+    return WallDatumRelationshipProof(
+        proof_id=proof_id,
+        wall_id=WALL,
+        wall_segment_id=SEGMENT,
+        datum_evidence_id=datum_id,
+        datum_role=role,
+        source_sha256=SHA,
+        revision_id="R1",
+        evidence_snapshot_id="evsnap-1",
+        canonical_graph_snapshot_id="graphsnap-1",
+        datum_page_id=PAGE,
+        datum_viewport_id=VP,
+        relationship_evidence_ids=(relation_id,),
+        status=EvidenceResolutionStatus.CORROBORATED,
+    )
 
 
 def _datum_height(
@@ -189,14 +225,23 @@ def _datum_height(
     low, high = _datum_pair()
     low = lower or low
     high = upper or high
+    lower_rel = _relation("rel-floor", low.evidence_id, "wall_base")
+    upper_rel = _relation("rel-top", high.evidence_id, "wall_top")
+    all_ids = (low.evidence_id, high.evidence_id, lower_rel.evidence_id, upper_rel.evidence_id)
     return build_wall_height_quantity(
         wall_id=WALL,
+        wall_segment_id=SEGMENT,
         context=_ctx(),
-        document=_doc((low.evidence_id, high.evidence_id)),
+        document=_doc(all_ids),
         viewport=_viewport(),
-        entity=entity or _entity((low.evidence_id, high.evidence_id)),
+        entity=entity or _entity(all_ids),
         lower_datum_evidence=low,
         upper_datum_evidence=high,
+        datum_relationship_proofs=(
+            _proof("proof-floor", low.evidence_id, "wall_base", lower_rel.evidence_id),
+            _proof("proof-top", high.evidence_id, "wall_top", upper_rel.evidence_id),
+        ),
+        relationship_evidence={lower_rel.evidence_id: lower_rel, upper_rel.evidence_id: upper_rel},
     )
 
 
@@ -261,12 +306,13 @@ def test_h10_room_height_cannot_substitute_automatically() -> None:
     assert "unsupported_direct_height_semantics" in result.blocking_reasons
 
 
-def test_h11_fresh_wall_base_and_wall_top_positive_control() -> None:
+def test_h11_fresh_wall_base_and_wall_top_claims_fail_closed_without_producer() -> None:
     result = _datum_height()
-    assert result.status == AuthorityStatus.FIRM.value
-    assert result.abstained is False
-    assert result.value == 3.2
-    assert result.formula == "wall_top_datum - wall_base_datum"
+    assert result.status == AuthorityStatus.BLOCKED.value
+    assert result.abstained
+    assert result.value is None
+    assert AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE in result.blocking_reasons
+    assert result.metadata["wall_segment_id"] == SEGMENT
 
 
 def test_h12_irrelevant_stale_evidence_does_not_poison_fresh_selected_height() -> None:
@@ -302,7 +348,7 @@ def test_h14_stale_conflicting_atom_cannot_override_fresh_height() -> None:
 
 def test_h15_removing_required_datum_support_cannot_strengthen_authority() -> None:
     lower, upper = _datum_pair()
-    supported = _datum_height(lower=lower, upper=upper)
+    claimed_supported = _datum_height(lower=lower, upper=upper)
     missing_upper = build_wall_height_quantity(
         wall_id=WALL,
         context=_ctx(),
@@ -312,7 +358,8 @@ def test_h15_removing_required_datum_support_cannot_strengthen_authority() -> No
         lower_datum_evidence=lower,
         upper_datum_evidence=None,
     )
-    assert supported.status == AuthorityStatus.FIRM.value
+    assert claimed_supported.status == AuthorityStatus.BLOCKED.value
+    assert AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE in claimed_supported.blocking_reasons
     assert missing_upper.status == AuthorityStatus.BLOCKED.value
     assert "no_authoritative_wall_height_evidence" in missing_upper.blocking_reasons
 
