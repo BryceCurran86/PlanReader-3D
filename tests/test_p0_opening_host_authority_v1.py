@@ -326,6 +326,8 @@ def test_a24_phase_conflict_blocks() -> None:
     assert "opening_phase_conflict" in result.blocking_reasons
 
 
-def test_a25_trade_specific_applicability_must_be_proven() -> None:
+def test_a25_commercial_applicability_does_not_gate_physical_void() -> None:
     result = _deduct(entity=_entity(commercial_applicability="unknown"))
-    assert "opening_commercial_applicability_unproven" in result.blocking_reasons
+    assert "opening_commercial_applicability_unproven" not in result.blocking_reasons
+    assert "opening_physical_identity_unproven" in result.blocking_reasons
+    assert "opening_host_universe_completeness_not_authenticated" in result.blocking_reasons
