@@ -9,7 +9,11 @@ from pb_migration_contracts import (
     ViewportResolutionStatus,
 )
 from pb_migration_provider_envelope import ProviderContext
-from pb_wall_height_authority import WallDatumRelationshipProof, build_wall_height_quantity
+from pb_wall_height_authority import (
+    AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE,
+    WallDatumRelationshipProof,
+    build_wall_height_quantity,
+)
 
 SHA = "e" * 64
 SEGMENT = "w1:segment:a"
@@ -109,7 +113,7 @@ def _proof(proof_id: str, datum_id: str, role: str, support_id: str) -> WallDatu
     )
 
 
-def _proven_datum_height(lower: EvidenceAtom, upper: EvidenceAtom):
+def _claimed_datum_height(lower: EvidenceAtom, upper: EvidenceAtom):
     lower_rel = _relation("rel-lower", lower.evidence_id, "wall_base")
     upper_rel = _relation("rel-upper", upper.evidence_id, "wall_top")
     ids = (lower.evidence_id, upper.evidence_id, lower_rel.evidence_id, upper_rel.evidence_id)
@@ -186,13 +190,13 @@ def test_assumed_height_metadata_is_never_authority() -> None:
     assert "default_or_assumed_height_forbidden" in qty.blocking_reasons
 
 
-def test_intrinsically_wall_bound_top_floor_pair_derives_height() -> None:
+def test_wall_bound_top_floor_claims_block_without_independent_relationship_producer() -> None:
     lower = _ev("d1", "floor_level_datum", 12.4, "m", role="wall_base")
     upper = _ev("d2", "wall_top_level_datum", 15.2, "m", role="wall_top")
-    qty = _proven_datum_height(lower, upper)
-    assert qty.abstained is False
-    assert qty.value == 2.8
-    assert qty.formula == "wall_top_datum - wall_base_datum"
+    qty = _claimed_datum_height(lower, upper)
+    assert qty.abstained
+    assert qty.value is None
+    assert AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE in qty.blocking_reasons
     assert qty.metadata["wall_segment_id"] == SEGMENT
 
 
@@ -244,3 +248,4 @@ def test_nonpositive_datum_difference_abstains() -> None:
     qty = _unproven_datum_height(lower, upper)
     assert qty.abstained
     assert "nonpositive_or_invalid_datum_height" in qty.blocking_reasons
+    assert AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE in qty.blocking_reasons
