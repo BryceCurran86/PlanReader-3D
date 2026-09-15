@@ -27,8 +27,10 @@ SNAP_COLLAPSE_REASON = "both_endpoints_snapped_to_same_node"
 # Intersection points are rounded to 8 decimals by the existing splitter.
 _CONTAINMENT_TOL_PT = 1e-5
 
-_ATTRIBUTE_FIELDS = ("width", "stroke", "fill", "layer", "dashes")
+_ATTRIBUTE_FIELDS = ("width", "stroke", "fill", "layer", "dashes", "clip")
 _OWNERSHIP_FIELDS = ("document_id", "page_id", "viewport_id")
+_PATH_INDEX_FIELDS = ("path_index", "item_index", "edge_index")
+_PAGE_COORD_FIELDS = ("x1", "y1", "x2", "y2")
 
 _ATTRIBUTE_UNKNOWN = "unknown"
 _ATTRIBUTE_AGREED = "agreed"
@@ -118,6 +120,23 @@ def source_record_from_segment(segment: Mapping[str, Any]) -> Dict[str, Any]:
         "clip": copy.deepcopy(segment.get("clip")) if "clip" in segment else None,
         "clip_present": field_is_present(segment, "clip"),
     }
+    # Priority-1: retain structured path indices and native page coordinates on
+    # the source record so later snap/merge cannot erase native span provenance.
+    for field in _PATH_INDEX_FIELDS:
+        if field in segment and segment.get(field) is not None:
+            try:
+                record[field] = int(segment[field])
+            except (TypeError, ValueError):
+                record[field] = segment[field]
+    page_coords_present = all(field in segment for field in _PAGE_COORD_FIELDS)
+    record["page_coords_present"] = page_coords_present
+    if page_coords_present:
+        for field in _PAGE_COORD_FIELDS:
+            try:
+                record[field] = float(segment[field])
+            except (TypeError, ValueError):
+                record[field] = segment[field]
+                record["page_coords_present"] = False
     for field in _OWNERSHIP_FIELDS:
         if field in segment:
             record[field] = copy.deepcopy(segment[field])
