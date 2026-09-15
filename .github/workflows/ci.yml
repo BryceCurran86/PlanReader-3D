@@ -55,6 +55,9 @@ jobs:
       - name: Enforce production-provider transitive gold isolation
         run: PYTHONPATH=. python scripts/check_provider_gold_isolation.py
 
+      - name: Verify registered frozen holdout integrity
+        run: PYTHONPATH=. python scripts/check_frozen_holdout_integrity.py
+
       - name: Compile all Python code
         run: python -m compileall -q .
 

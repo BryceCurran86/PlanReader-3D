@@ -20,6 +20,7 @@ from typing import Iterable, Sequence
 _BENCHMARK_ROOTS = (
     "benchmarks/public_tenders/",
     "benchmarks/plans/",
+    "benchmarks/frozen_holdout/",
 )
 _BENCHMARK_DEFINING_FILENAMES = {
     "source_manifest.json",
