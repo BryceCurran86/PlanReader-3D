@@ -162,13 +162,20 @@ def test_mutation_3_synthetic_unknown_project_produces_exact_new_values(tmp_path
 
     # Room: 24 x 12 = 288. Verandah: 24 x 2.0 = 48. Total: 336.0 SM
     assert preds["floor_screed"].quantity == 336.0
-    # Perimeter: 2 * (24 + 12) = 72.0m. Gross wall: 72 * 2.8 = 201.6 SM
+    # Wall length still uses the main-room rectangle 2*(24+12)=72 until a
+    # separate wall-perimeter compound fix; gross wall: 72 * 2.8 = 201.6 SM.
     # Deductions: 3 * (3.0 * 1.2) + 2 * (1.0 * 2.1) = 10.8 + 4.2 = 15.0 m². Net wall: 186.6 SM
     assert preds["perimeter_walling"].quantity == 186.6
     assert preds["perimeter_walling"].metadata["gross_area_m2"] == 201.6
     assert preds["perimeter_walling"].metadata["total_deducted_opening_area_m2"] == 15.0
-    # DPC: exactly perimeter 72.0m (NO 67.0 fallback)
-    assert preds["damp_proof_course"].quantity == 72.0
+    assert preds["perimeter_walling"].dimensions[0] == 72.0
+    # DPC follows confirmed compound external envelope (main 24x12 + verandah
+    # 24x2 → outer 24x14 → 2*(24+14)=76), not the main-only wall rectangle.
+    # No project-specific fallback (e.g. 67.0).
+    assert preds["damp_proof_course"].quantity == 76.0
+    assert preds["damp_proof_course"].metadata["dpc_envelope_resolution"] == "confirmed_external"
+    assert preds["damp_proof_course"].metadata["external_perimeter_m"] == 76.0
+    assert preds["damp_proof_course"].metadata["enclosed_wall_perimeter_m"] == 72.0
     # DPM & Mesh: exactly floor area 336.0 SM (NO 1.06 multiplier)
     assert preds["substructure_bed_dpm"].quantity == 336.0
     assert preds["substructure_a142_mesh"].quantity == 336.0

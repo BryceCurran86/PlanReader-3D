@@ -42,13 +42,57 @@ def test_l_shape_true_boundary_not_bounding_box_area_confusion() -> None:
 def test_confirmed_external_not_replaced_by_hatch_reduced_wall_length() -> None:
     """Opening/hatch-reduced wall length must not become DPC envelope base."""
     res = resolve_external_envelope_perimeter_m(
-        external_perimeter_m=52.3,
+        external_perimeter_m=52.0,
         footprint_status=FootprintStatus.CONFIRMED.value,
-        fallback_wall_perimeter_m=48.3,
+        fallback_wall_perimeter_m=48.0,
     )
-    assert res.perimeter_m == 52.3
+    assert res.perimeter_m == 52.0
     assert res.source == "footprint_external_perimeter_m"
-    assert res.perimeter_m != 48.3
+    assert res.perimeter_m != 48.0
+
+
+def test_evidenced_verandah_compound_external_differs_from_main_only_wall_rect() -> None:
+    """Drawing-evidenced verandah width grows compound external; wall rect stays main-only.
+
+    Gold-free dimensions: main 16x8 + full-width verandah depth 2
+    → compound outer 16x10 → external 52; main-only 2*(16+8)=48.
+    """
+    b = MultiSpaceFootprintBuilder()
+    b.add_main_room(length_m=16.0, width_m=8.0)
+    b.add_verandah(length_m=16.0, width_m=2.0, adjacency="front")
+    r = b.build()
+    assert r.status == FootprintStatus.CONFIRMED.value
+    assert r.component_areas["main_space_1"] == pytest.approx(128.0)
+    assert r.component_areas["verandah_2"] == pytest.approx(32.0)
+    assert r.shared_edge_length_m == pytest.approx(16.0)
+    assert r.external_perimeter_m == pytest.approx(52.0)
+    main_only_wall_rect = round(2 * (16.0 + 8.0), 2)
+    assert main_only_wall_rect == 48.0
+    assert r.external_perimeter_m - main_only_wall_rect == pytest.approx(4.0)  # two side returns
+    res = resolve_external_envelope_perimeter_m(
+        external_perimeter_m=r.external_perimeter_m,
+        footprint_status=r.status,
+        fallback_wall_perimeter_m=main_only_wall_rect,
+    )
+    assert res.status == "confirmed_external"
+    assert res.perimeter_m == 52.0
+
+
+def test_exterior_opening_gap_does_not_erase_confirmed_compound_envelope() -> None:
+    """F.32 open-edge subtraction is a wall-length concern; DPC base keeps compound external."""
+    b = MultiSpaceFootprintBuilder()
+    b.add_main_room(length_m=20.0, width_m=10.0)
+    b.add_verandah(length_m=20.0, width_m=2.5, adjacency="front")
+    r = b.build()
+    wall_after_open_gap = round(2 * (20.0 + 10.0) - 20.0, 2)  # naive main minus open front
+    res = resolve_external_envelope_perimeter_m(
+        external_perimeter_m=r.external_perimeter_m,
+        footprint_status=r.status,
+        fallback_wall_perimeter_m=wall_after_open_gap,
+    )
+    assert r.external_perimeter_m == pytest.approx(65.0)  # 2*(20+12.5)
+    assert res.perimeter_m == 65.0
+    assert res.perimeter_m != wall_after_open_gap
 
 
 def test_disconnected_segments_do_not_auto_bridge_between_buildings() -> None:
@@ -191,17 +235,17 @@ def test_adding_contradictory_unconfirmed_cannot_strengthen() -> None:
 
 def test_removing_confirmed_support_cannot_strengthen() -> None:
     with_ext = resolve_external_envelope_perimeter_m(
-        external_perimeter_m=52.3,
+        external_perimeter_m=52.0,
         footprint_status=FootprintStatus.CONFIRMED.value,
-        fallback_wall_perimeter_m=48.3,
+        fallback_wall_perimeter_m=48.0,
     )
     without_ext = resolve_external_envelope_perimeter_m(
         external_perimeter_m=None,
         footprint_status=FootprintStatus.CONFIRMED.value,
-        fallback_wall_perimeter_m=48.3,
+        fallback_wall_perimeter_m=48.0,
     )
-    assert with_ext.perimeter_m == 52.3
-    assert without_ext.perimeter_m == 48.3
+    assert with_ext.perimeter_m == 52.0
+    assert without_ext.perimeter_m == 48.0
     assert without_ext.perimeter_m <= with_ext.perimeter_m
 
 
