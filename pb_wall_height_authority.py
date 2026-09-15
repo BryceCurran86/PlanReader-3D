@@ -23,22 +23,24 @@ from pb_migration_contracts import (
 from pb_migration_provider_envelope import ProviderContext
 
 WALL_HEIGHT_FAMILY = "wall_height"
-WALL_HEIGHT_FORMULA_VERSION = "1.1.0"
+WALL_HEIGHT_FORMULA_VERSION = "1.2.0"
 
+# Only evidence kinds whose resolved contract already carries wall-height
+# semantics may directly establish height. A metadata label cannot promote an
+# otherwise-generic value into structural wall-height authority.
 _ALLOWED_DIRECT_KINDS = {
     "wall_height_dimension",
     "wall_height_schedule",
-    "explicit_wall_height",
 }
+
+# Generic level/elevation/roof datums require an independent relationship proving
+# they are this wall's base/top. No such relationship object is supplied to this
+# function today, so only intrinsically wall-specific/floor-specific datum kinds
+# are eligible here.
 _ALLOWED_LOWER_DATUM_KINDS = {
-    "level_datum",
-    "elevation_datum",
     "floor_level_datum",
 }
 _ALLOWED_UPPER_DATUM_KINDS = {
-    "level_datum",
-    "elevation_datum",
-    "roof_level_datum",
     "wall_top_level_datum",
 }
 _FORBIDDEN_DEFAULT_METHOD_TOKENS = {
@@ -151,9 +153,10 @@ def _validate_owned_evidence(
 def _entity_height_profile_blockers(entity: EntityEvidence) -> tuple[str, ...]:
     meta = _metadata(entity)
     profile = str(meta.get("height_profile") or "").strip().lower()
-    if profile in {"variable", "sloped", "stepped", "nonuniform"} and not bool(
-        meta.get("scalar_height_representative_proven")
-    ):
+    if profile in {"variable", "sloped", "stepped", "nonuniform"}:
+        # ``scalar_height_representative_proven=True`` is only caller metadata.
+        # This API has no independently inspectable representativeness evidence,
+        # so variable-profile scalar authority must remain fail-closed.
         return ("variable_height_requires_profile_authority",)
     return ()
 
@@ -267,8 +270,7 @@ def build_wall_height_quantity(
                 entity=entity,
             )
         )
-        meta = _metadata(direct_height_evidence)
-        if direct_height_evidence.kind not in _ALLOWED_DIRECT_KINDS or meta.get("height_semantic_role") != "wall_height":
+        if direct_height_evidence.kind not in _ALLOWED_DIRECT_KINDS:
             blockers.append("unsupported_direct_height_semantics")
         value_m = None
         if direct_height_evidence.normalized_value is not None:
@@ -321,9 +323,9 @@ def build_wall_height_quantity(
         )
 
     blockers: list[str] = []
-    for evidence, label, allowed_kinds, required_role in (
-        (lower_datum_evidence, "lower", _ALLOWED_LOWER_DATUM_KINDS, "wall_base"),
-        (upper_datum_evidence, "upper", _ALLOWED_UPPER_DATUM_KINDS, "wall_top"),
+    for evidence, label, allowed_kinds in (
+        (lower_datum_evidence, "lower", _ALLOWED_LOWER_DATUM_KINDS),
+        (upper_datum_evidence, "upper", _ALLOWED_UPPER_DATUM_KINDS),
     ):
         blockers.extend(
             _validate_owned_evidence(
@@ -336,8 +338,6 @@ def build_wall_height_quantity(
         )
         if evidence.kind not in allowed_kinds:
             blockers.append(f"unsupported_{label}_datum_kind")
-        if _metadata(evidence).get("height_semantic_role") != required_role:
-            blockers.append(f"{label}_datum_not_bound_to_{required_role}")
         if evidence.normalized_value is None:
             blockers.append(f"missing_{label}_datum_value")
 
