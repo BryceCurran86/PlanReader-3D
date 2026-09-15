@@ -2,16 +2,20 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_migration_contracts import (
     DocumentEvidence,
     EntityEvidence,
     EvidenceAtom,
     EvidenceResolutionStatus,
+    QuantityEvidence,
     ViewportEvidence,
     ViewportResolutionStatus,
 )
 from pb_migration_provider_envelope import ProviderContext
+from pb_wall_gross_area_quantity import build_gross_wall_area_quantity
 from pb_wall_height_authority import (
+    AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE,
     WallDatumRelationshipProof,
     build_wall_height_quantity,
 )
@@ -199,6 +203,16 @@ def _resolve(
     )
 
 
+def _apparently_complete_claims(base: EvidenceAtom, top: EvidenceAtom):
+    rb = _relationship_support("rel-base", datum_evidence_id=base.evidence_id, role="wall_base")
+    rt = _relationship_support("rel-top", datum_evidence_id=top.evidence_id, role="wall_top")
+    proofs = (
+        _proof("p-base", datum_evidence_id=base.evidence_id, role="wall_base", support_evidence_id=rb.evidence_id),
+        _proof("p-top", datum_evidence_id=top.evidence_id, role="wall_top", support_evidence_id=rt.evidence_id),
+    )
+    return proofs, (rb, rt)
+
+
 def test_attack_1_two_plausible_base_slabs_block_scalar_height() -> None:
     base_00 = _datum("base-00", "floor_level_datum", 0.0)
     base_mezz = _datum("base-mezz", "floor_level_datum", 1.5)
@@ -222,32 +236,30 @@ def test_attack_1_two_plausible_base_slabs_block_scalar_height() -> None:
     assert qty.abstained
     assert qty.value is None
     assert "wall_base_relation_ambiguous" in qty.blocking_reasons
+    assert AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE in qty.blocking_reasons
 
 
 def test_attack_2_correct_top_wrong_unbound_base_is_blocked() -> None:
-    base_a = _datum("base-a", "floor_level_datum", 0.0)
+    base = _datum("base-a", "floor_level_datum", 0.0)
     top = _datum("top", "wall_top_level_datum", 4.2)
     rt = _relationship_support("rel-top", datum_evidence_id="top", role="wall_top")
-
     qty = _resolve(
-        lower=base_a,
+        lower=base,
         upper=top,
         proofs=(_proof("p-top", datum_evidence_id="top", role="wall_top", support_evidence_id="rel-top"),),
         support=(rt,),
         entity_ids=("base-a", "top", "rel-top"),
     )
-
     assert qty.abstained
     assert qty.value is None
     assert "wall_base_relation_unproven" in qty.blocking_reasons
 
 
-def test_attack_3_generic_soffit_or_ceiling_cannot_authorize_structural_wall_top() -> None:
+def test_attack_3_generic_soffit_cannot_authorize_structural_wall_top() -> None:
     base = _datum("base", "floor_level_datum", 0.0)
     soffit = _datum("soffit", "soffit_level_datum", 3.0)
     rb = _relationship_support("rel-base", datum_evidence_id="base", role="wall_base")
     rs = _relationship_support("rel-soffit", datum_evidence_id="soffit", role="wall_top")
-
     qty = _resolve(
         lower=base,
         upper=soffit,
@@ -257,7 +269,6 @@ def test_attack_3_generic_soffit_or_ceiling_cannot_authorize_structural_wall_top
         ),
         support=(rb, rs),
     )
-
     assert qty.abstained
     assert "unsupported_upper_datum_kind" in qty.blocking_reasons
 
@@ -265,20 +276,14 @@ def test_attack_3_generic_soffit_or_ceiling_cannot_authorize_structural_wall_top
 def test_attack_4_wall_spanning_step_cannot_publish_scalar_by_average_or_selection() -> None:
     base = _datum("base", "floor_level_datum", 0.0)
     top = _datum("top", "wall_top_level_datum", 4.0)
-    rb = _relationship_support("rel-base", datum_evidence_id="base", role="wall_base")
-    rt = _relationship_support("rel-top", datum_evidence_id="top", role="wall_top")
-
+    proofs, support = _apparently_complete_claims(base, top)
     qty = _resolve(
         lower=base,
         upper=top,
-        proofs=(
-            _proof("p-base", datum_evidence_id="base", role="wall_base", support_evidence_id="rel-base"),
-            _proof("p-top", datum_evidence_id="top", role="wall_top", support_evidence_id="rel-top"),
-        ),
-        support=(rb, rt),
+        proofs=proofs,
+        support=support,
         entity_metadata={"height_profile": "stepped", "scalar_height_representative_proven": True},
     )
-
     assert qty.abstained
     assert "variable_height_requires_profile_authority" in qty.blocking_reasons
 
@@ -286,52 +291,32 @@ def test_attack_4_wall_spanning_step_cannot_publish_scalar_by_average_or_selecti
 def test_attack_5_adjacent_wall_relationship_does_not_leak_to_target_wall() -> None:
     base = _datum("base", "floor_level_datum", 0.0)
     top = _datum("top", "wall_top_level_datum", 4.2)
-    rb_w2 = _relationship_support(
-        "rel-base-w2", wall_id="w2", datum_evidence_id="base", role="wall_base"
-    )
-    rt_w2 = _relationship_support(
-        "rel-top-w2", wall_id="w2", datum_evidence_id="top", role="wall_top"
-    )
-
+    rb_w2 = _relationship_support("rel-base-w2", wall_id="w2", datum_evidence_id="base", role="wall_base")
+    rt_w2 = _relationship_support("rel-top-w2", wall_id="w2", datum_evidence_id="top", role="wall_top")
     qty = _resolve(
         lower=base,
         upper=top,
         proofs=(
-            _proof(
-                "p-base-w2", wall_id="w2", datum_evidence_id="base", role="wall_base",
-                support_evidence_id="rel-base-w2"
-            ),
-            _proof(
-                "p-top-w2", wall_id="w2", datum_evidence_id="top", role="wall_top",
-                support_evidence_id="rel-top-w2"
-            ),
+            _proof("p-base-w2", wall_id="w2", datum_evidence_id="base", role="wall_base", support_evidence_id="rel-base-w2"),
+            _proof("p-top-w2", wall_id="w2", datum_evidence_id="top", role="wall_top", support_evidence_id="rel-top-w2"),
         ),
         support=(rb_w2, rt_w2),
     )
-
     assert qty.abstained
     assert "wall_base_relation_unproven" in qty.blocking_reasons
     assert "wall_top_relation_unproven" in qty.blocking_reasons
 
 
 def test_attack_6_storey_label_equality_does_not_establish_datum_identity() -> None:
-    base = _datum(
-        "base-level-1-a", "floor_level_datum", 0.0,
-        metadata={"level_label": "LEVEL 1"},
-    )
-    top = _datum(
-        "top", "wall_top_level_datum", 4.0,
-        metadata={"level_label": "LEVEL 1"},
-    )
-
+    base = _datum("base-level-1-a", "floor_level_datum", 0.0, metadata={"level_label": "LEVEL 1"})
+    top = _datum("top", "wall_top_level_datum", 4.0, metadata={"level_label": "LEVEL 1"})
     qty = _resolve(lower=base, upper=top, proofs=(), support=())
-
     assert qty.abstained
     assert "wall_base_relation_unproven" in qty.blocking_reasons
     assert "wall_top_relation_unproven" in qty.blocking_reasons
 
 
-def test_attack_7_added_valid_contradictory_base_cannot_leave_height_firm() -> None:
+def test_attack_7_added_contradictory_claim_cannot_strengthen_authority() -> None:
     base = _datum("base", "floor_level_datum", 0.0)
     base_conflict = _datum("base-conflict", "floor_level_datum", 1.2)
     top = _datum("top", "wall_top_level_datum", 4.2)
@@ -341,14 +326,9 @@ def test_attack_7_added_valid_contradictory_base_cannot_leave_height_firm() -> N
     base_proof = _proof("p-base", datum_evidence_id="base", role="wall_base", support_evidence_id="rel-base")
     top_proof = _proof("p-top", datum_evidence_id="top", role="wall_top", support_evidence_id="rel-top")
 
-    firm = _resolve(
-        lower=base,
-        upper=top,
-        proofs=(base_proof, top_proof),
-        support=(rb, rt),
-    )
-    assert firm.abstained is False
-    assert firm.value == 4.2
+    baseline = _resolve(lower=base, upper=top, proofs=(base_proof, top_proof), support=(rb, rt))
+    assert baseline.abstained
+    assert AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE in baseline.blocking_reasons
 
     ambiguous = _resolve(
         lower=base,
@@ -356,10 +336,7 @@ def test_attack_7_added_valid_contradictory_base_cannot_leave_height_firm() -> N
         proofs=(
             base_proof,
             top_proof,
-            _proof(
-                "p-base-conflict", datum_evidence_id="base-conflict", role="wall_base",
-                support_evidence_id="rel-base-conflict"
-            ),
+            _proof("p-base-conflict", datum_evidence_id="base-conflict", role="wall_base", support_evidence_id="rel-base-conflict"),
         ),
         support=(rb, rt, rbc),
         entity_ids=("base", "base-conflict", "top", "rel-base", "rel-top", "rel-base-conflict"),
@@ -367,6 +344,7 @@ def test_attack_7_added_valid_contradictory_base_cannot_leave_height_firm() -> N
     assert ambiguous.abstained
     assert ambiguous.value is None
     assert "wall_base_relation_ambiguous" in ambiguous.blocking_reasons
+    assert AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE in ambiguous.blocking_reasons
 
 
 def test_removing_relationship_provenance_cannot_strengthen_height() -> None:
@@ -377,63 +355,98 @@ def test_removing_relationship_provenance_cannot_strengthen_height() -> None:
     valid_base = _proof("p-base", datum_evidence_id="base", role="wall_base", support_evidence_id="rel-base")
     valid_top = _proof("p-top", datum_evidence_id="top", role="wall_top", support_evidence_id="rel-top")
 
-    firm = _resolve(lower=base, upper=top, proofs=(valid_base, valid_top), support=(rb, rt))
-    assert firm.abstained is False
+    baseline = _resolve(lower=base, upper=top, proofs=(valid_base, valid_top), support=(rb, rt))
+    assert baseline.abstained
+    assert AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE in baseline.blocking_reasons
 
     missing_support = replace(valid_base, relationship_evidence_ids=("missing-rel",))
-    blocked = _resolve(
-        lower=base,
-        upper=top,
-        proofs=(missing_support, valid_top),
-        support=(rb, rt),
-    )
+    blocked = _resolve(lower=base, upper=top, proofs=(missing_support, valid_top), support=(rb, rt))
     assert blocked.abstained
     assert "wall_base_relation_unproven" in blocked.blocking_reasons
+    assert AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE in blocked.blocking_reasons
 
 
-def test_cross_view_datum_requires_explicit_cross_view_relationship_support() -> None:
+def test_cross_view_datum_requires_independent_cross_view_relationship_support() -> None:
     base = _datum("base", "floor_level_datum", 0.0)
     top = _datum("top-section", "wall_top_level_datum", 4.2, viewport_id="vp-section")
     rb = _relationship_support("rel-base", datum_evidence_id="base", role="wall_base")
-    rt = _relationship_support(
-        "rel-top-section", datum_evidence_id="top-section", role="wall_top", viewport_id="vp-section"
-    )
-
+    rt = _relationship_support("rel-top-section", datum_evidence_id="top-section", role="wall_top", viewport_id="vp-section")
     qty = _resolve(
         lower=base,
         upper=top,
         proofs=(
             _proof("p-base", datum_evidence_id="base", role="wall_base", support_evidence_id="rel-base"),
-            _proof(
-                "p-top", datum_evidence_id="top-section", role="wall_top",
-                support_evidence_id="rel-top-section", datum_viewport_id="vp-section"
-            ),
+            _proof("p-top", datum_evidence_id="top-section", role="wall_top", support_evidence_id="rel-top-section", datum_viewport_id="vp-section"),
         ),
         support=(rb, rt),
     )
-
     assert qty.abstained
     assert "wall_top_cross_view_relation_unproven" in qty.blocking_reasons
+    assert AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE in qty.blocking_reasons
 
 
-def test_fully_proven_exact_segment_datum_relationships_can_be_firm() -> None:
+def test_fabricated_exact_segment_relation_records_cannot_mint_firm_height() -> None:
     base = _datum("base", "floor_level_datum", 1.2)
     top = _datum("top", "wall_top_level_datum", 4.5)
-    rb = _relationship_support("rel-base", datum_evidence_id="base", role="wall_base")
-    rt = _relationship_support("rel-top", datum_evidence_id="top", role="wall_top")
-
-    qty = _resolve(
-        lower=base,
-        upper=top,
-        proofs=(
-            _proof("p-base", datum_evidence_id="base", role="wall_base", support_evidence_id="rel-base"),
-            _proof("p-top", datum_evidence_id="top", role="wall_top", support_evidence_id="rel-top"),
-        ),
-        support=(rb, rt),
-    )
-
-    assert qty.abstained is False
-    assert qty.value == 3.3
+    proofs, support = _apparently_complete_claims(base, top)
+    qty = _resolve(lower=base, upper=top, proofs=proofs, support=support)
+    assert qty.abstained
+    assert qty.value is None
+    assert AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE in qty.blocking_reasons
     assert qty.metadata["wall_segment_id"] == SEGMENT
-    assert qty.metadata["lower_datum_relationship_proof_id"] == "p-base"
-    assert qty.metadata["upper_datum_relationship_proof_id"] == "p-top"
+
+
+def test_direct_documented_wall_height_remains_independently_firm() -> None:
+    direct = _datum("direct", "wall_height_dimension", 3.3)
+    qty = build_wall_height_quantity(
+        wall_id="w1",
+        context=_context(),
+        document=_document(("direct",)),
+        viewport=_viewport(),
+        entity=_entity(("direct",)),
+        direct_height_evidence=direct,
+    )
+    assert qty.abstained is False
+    assert qty.status == AuthorityStatus.FIRM.value
+    assert qty.value == 3.3
+
+
+def test_blocked_datum_height_does_not_downgrade_length_but_blocks_gross_area() -> None:
+    base = _datum("base", "floor_level_datum", 0.0)
+    top = _datum("top", "wall_top_level_datum", 3.0)
+    proofs, support = _apparently_complete_claims(base, top)
+    height = _resolve(lower=base, upper=top, proofs=proofs, support=support)
+    length = QuantityEvidence(
+        quantity_id="length",
+        family="wall_length",
+        semantic_key="wall_length:w1",
+        value=4.0,
+        unit="m",
+        input_entity_ids=("w1",),
+        formula="documented_length",
+        formula_version="test",
+        evidence_ids=("length-evidence",),
+        authority=MeasurementAuthorityType.PDF_SCALED.value,
+        status=AuthorityStatus.FIRM.value,
+        confidence=1.0,
+        metadata={
+            "source_sha256": SHA,
+            "revision_id": "R1",
+            "evidence_snapshot_id": "evsnap",
+            "canonical_graph_snapshot_id": "graphsnap",
+            "viewport_id": "vp-plan",
+            "page_no": 1,
+        },
+    )
+    gross = build_gross_wall_area_quantity(
+        wall_id="w1",
+        wall_length=length,
+        wall_height=height,
+        context=_context(),
+    )
+    assert length.status == AuthorityStatus.FIRM.value
+    assert length.value == 4.0
+    assert height.status == AuthorityStatus.BLOCKED.value
+    assert AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE in height.blocking_reasons
+    assert gross.status == AuthorityStatus.BLOCKED.value
+    assert "wall_height_abstained" in gross.blocking_reasons
