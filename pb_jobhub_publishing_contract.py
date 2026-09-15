@@ -48,7 +48,7 @@ class ProjectIdentityPayload:
     job_name: str
     site_address: str
     builder_client: str
-    estimator: str = "Bryce Curran"
+    estimator: Optional[str] = None
     target_jobhub_job_id: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -146,7 +146,7 @@ class PublishingPackagePayload:
     benchmark_status: Optional[BenchmarkStatusPayload] = None
     preflight_fingerprint: str = ""
     payload_hash: str = ""
-    created_by: str = "Bryce Curran"
+    created_by: Optional[str] = None
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> Dict[str, Any]:
@@ -241,6 +241,11 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
         blocking_reasons.append("Missing project job number in publishing payload")
     if not ident.job_name or not ident.job_name.strip():
         blocking_reasons.append("Missing project job name in publishing payload")
+    if is_commercial:
+        if not ident.estimator or not str(ident.estimator).strip():
+            blocking_reasons.append("Missing estimator attribution for commercial publishing")
+        if not package.created_by or not str(package.created_by).strip():
+            blocking_reasons.append("Missing created_by attribution for commercial publishing")
 
     # Check for known conflicting site mismatch patterns
     norm_name = re.sub(r"[^a-z0-9]", "", ident.job_name.lower())

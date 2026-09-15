@@ -20,6 +20,7 @@ def _base_package(job_no="26-017", job_name="60-62 School Rd Maroochydore", addr
         job_name=job_name,
         site_address=address,
         builder_client="OneLife Property Group",
+        estimator="Lead Estimator",
     )
     rev = DrawingRevisionPayload(
         drawing_issue="BA",
@@ -48,6 +49,7 @@ def _base_package(job_no="26-017", job_name="60-62 School Rd Maroochydore", addr
         project_identity=ident,
         drawing_revision=rev,
         quantities=[q],
+        created_by="Lead Estimator",
     )
     pkg.payload_hash = pkg.compute_payload_hash()
     return pkg
