@@ -27,6 +27,7 @@ _BENCHMARK_DEFINING_FILENAMES = {
     "benchmark_rules.json",
     "tolerances.json",
     "manifest.json",
+    ".holdout_lock.json",
 }
 _PRODUCTION_SUFFIXES = {".py", ".js", ".html"}
 _PRODUCTION_EXCLUDED_PREFIXES = (
