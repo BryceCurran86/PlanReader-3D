@@ -38,10 +38,15 @@ def _draw_vertical_depth(
     y1: float,
     text: str,
     fontsize: float,
+    include_witness_at_y0: bool = True,
+    include_witness_at_y1: bool = True,
 ) -> None:
+    """Vertical depth line. For bottom-edge verandah, y0=main / y1=outer."""
     page.draw_line((x, y0), (x, y1))
-    page.draw_line((x - 18, y0), (x + 18, y0))
-    page.draw_line((x - 18, y1), (x + 18, y1))
+    if include_witness_at_y0:
+        page.draw_line((x - 18, y0), (x + 18, y0))
+    if include_witness_at_y1:
+        page.draw_line((x - 18, y1), (x + 18, y1))
     page.insert_text((x + 5, (y0 + y1) / 2.0), text, fontsize=fontsize, rotate=90)
 
 
@@ -53,10 +58,15 @@ def _draw_horizontal_depth(
     x1: float,
     text: str,
     fontsize: float,
+    include_witness_at_x0: bool = True,
+    include_witness_at_x1: bool = True,
 ) -> None:
+    """Horizontal depth line. For left-edge verandah, x0=main / x1=outer."""
     page.draw_line((x0, y), (x1, y))
-    page.draw_line((x0, y - 18), (x0, y + 18))
-    page.draw_line((x1, y - 18), (x1, y + 18))
+    if include_witness_at_x0:
+        page.draw_line((x0, y - 18), (x0, y + 18))
+    if include_witness_at_x1:
+        page.draw_line((x1, y - 18), (x1, y + 18))
     page.insert_text(((x0 + x1) / 2.0 - 12, y - 4), text, fontsize=fontsize)
 
 
@@ -76,6 +86,8 @@ def _build_plan_with_orthogonal_depth(
     depth_offset_along: float = 0.0,
     second_label: bool = False,
     omit_witnesses: bool = False,
+    omit_main_boundary_witness: bool = False,
+    omit_outer_boundary_witness: bool = False,
     omit_frame: bool = False,
     add_elevation_trap: bool = False,
 ) -> fitz.Document:
@@ -118,7 +130,24 @@ def _build_plan_with_orthogonal_depth(
             page.draw_line((x, y0), (x, y1))
             page.insert_text((x + 5, (y0 + y1) / 2.0), depth_text, fontsize=fs, rotate=90)
         else:
-            _draw_vertical_depth(page, x=x, y0=y0, y1=y1, text=depth_text, fontsize=fs)
+            # For bottom: y0=main (inward), y1=outer (label side).
+            # For top: y0=outer (label side), y1=main (inward).
+            if edge == "bottom":
+                include_y0 = not omit_main_boundary_witness
+                include_y1 = not omit_outer_boundary_witness
+            else:
+                include_y0 = not omit_outer_boundary_witness
+                include_y1 = not omit_main_boundary_witness
+            _draw_vertical_depth(
+                page,
+                x=x,
+                y0=y0,
+                y1=y1,
+                text=depth_text,
+                fontsize=fs,
+                include_witness_at_y0=include_y0,
+                include_witness_at_y1=include_y1,
+            )
         if second_depth_text is not None:
             _draw_vertical_depth(
                 page,
@@ -149,7 +178,23 @@ def _build_plan_with_orthogonal_depth(
             page.draw_line((x0, y), (x1, y))
             page.insert_text(((x0 + x1) / 2.0 - 10, y - 4), depth_text, fontsize=fs)
         else:
-            _draw_horizontal_depth(page, y=y, x0=x0, x1=x1, text=depth_text, fontsize=fs)
+            # For left: x0=main (inward), x1=outer. For right: reversed.
+            if edge == "left":
+                include_x0 = not omit_main_boundary_witness
+                include_x1 = not omit_outer_boundary_witness
+            else:
+                include_x0 = not omit_outer_boundary_witness
+                include_x1 = not omit_main_boundary_witness
+            _draw_horizontal_depth(
+                page,
+                y=y,
+                x0=x0,
+                x1=x1,
+                text=depth_text,
+                fontsize=fs,
+                include_witness_at_x0=include_x0,
+                include_witness_at_x1=include_x1,
+            )
         if second_depth_text is not None:
             _draw_horizontal_depth(
                 page,
@@ -264,11 +309,42 @@ def test_true_depth_farther_than_thickness_mark_still_wins():
 
 
 def test_missing_witness_anchor_support_fails_closed():
-    # Dimension line without witnesses → not an accepted binding for depth.
+    # Dimension line without witnesses → not WITNESS_BOUND.
     result = _resolve(
         _build_plan_with_orthogonal_depth(edge="bottom", depth_text="1800", omit_witnesses=True)
     )
     assert result is None
+
+
+def test_missing_main_boundary_witness_fails_closed():
+    """One-sided binding (outer only) is PARTIAL_WITNESS — must not resolve depth."""
+    result = _resolve(
+        _build_plan_with_orthogonal_depth(
+            edge="bottom",
+            depth_text="1800",
+            omit_main_boundary_witness=True,
+        )
+    )
+    assert result is None
+
+
+def test_missing_outer_boundary_witness_fails_closed():
+    """One-sided binding (main only) is PARTIAL_WITNESS — must not resolve depth."""
+    result = _resolve(
+        _build_plan_with_orthogonal_depth(
+            edge="bottom",
+            depth_text="1800",
+            omit_outer_boundary_witness=True,
+        )
+    )
+    assert result is None
+
+
+def test_full_witness_bound_still_resolves():
+    result = _resolve(_build_plan_with_orthogonal_depth(edge="bottom", depth_text="1800"))
+    assert result is not None
+    assert result.binding_status == "witness_bound"
+    assert result.width_m == pytest.approx(1.8)
 
 
 def test_conflicting_orthogonal_depths_fail_closed():

@@ -4,9 +4,11 @@ Resolves a secondary strip width (e.g. verandah depth) only when:
 
 * a unique secondary-space label sits in one F.07 floor-plan viewport;
 * the label is adjacent to one viewport edge (not plan interior);
-* a figured dimension is vector-anchor-bound (line/witness) inside that
+* a figured dimension is **fully witness-bound** (both endpoints) inside that
   viewport with orientation **orthogonal to that adjoining edge**;
 * no competing orthogonal depth values remain.
+* one-sided / partial witness bindings fail closed — depth needs both the
+  main-building boundary witness and the outer verandah boundary witness.
 
 Top/bottom verandah → vertical depth evidence.
 Left/right verandah → horizontal depth evidence.
@@ -49,13 +51,9 @@ _DEPTH_ORIENTATION_FOR_EDGE = {
     "right": DimensionOrientation.HORIZONTAL.value,
 }
 
-# Depth requires vector endpoint support, not a bare dimension-line association.
-_ACCEPTED_BINDINGS = frozenset(
-    {
-        BindingStatus.WITNESS_BOUND.value,
-        BindingStatus.PARTIAL_WITNESS.value,
-    }
-)
+# Depth requires both witness endpoints (main-boundary + outer-boundary).
+# PARTIAL_WITNESS / LINE_BOUND alone are not enough for secondary footprint.
+_ACCEPTED_BINDINGS = frozenset({BindingStatus.WITNESS_BOUND.value})
 
 
 def _bbox_center(bbox: Sequence[float]) -> Tuple[float, float]:
