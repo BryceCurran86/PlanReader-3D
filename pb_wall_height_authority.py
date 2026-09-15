@@ -1,13 +1,16 @@
 """Fail-closed wall-height QuantityEvidence authority.
 
-Accepts only explicit, provenance-bound wall-height evidence or an explicitly
-wall-bound base/top datum pair. Room/ceiling/storey heights and stale evidence
-never become wall-height measurement authority merely because their numeric
+Accepts only explicit, provenance-bound wall-height evidence or a base/top datum
+pair whose exact relationship to the requested wall segment is independently
+inspectable. Room/ceiling/storey heights, nearby datums, labels, confidence and
+stale evidence never become wall-height authority merely because their numeric
 value is plausible.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 import math
+import re
 from typing import Mapping, Optional
 
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
@@ -23,20 +26,12 @@ from pb_migration_contracts import (
 from pb_migration_provider_envelope import ProviderContext
 
 WALL_HEIGHT_FAMILY = "wall_height"
-WALL_HEIGHT_FORMULA_VERSION = "1.2.0"
+WALL_HEIGHT_FORMULA_VERSION = "1.3.0"
 
-# Only evidence kinds whose resolved contract already carries wall-height
-# semantics may directly establish height. A metadata label cannot promote an
-# otherwise-generic value into structural wall-height authority.
 _ALLOWED_DIRECT_KINDS = {
     "wall_height_dimension",
     "wall_height_schedule",
 }
-
-# Generic level/elevation/roof datums require an independent relationship proving
-# they are this wall's base/top. No such relationship object is supplied to this
-# function today, so only intrinsically wall-specific/floor-specific datum kinds
-# are eligible here.
 _ALLOWED_LOWER_DATUM_KINDS = {
     "floor_level_datum",
 }
@@ -50,6 +45,63 @@ _FORBIDDEN_DEFAULT_METHOD_TOKENS = {
     "legacy_default",
     "model_default",
 }
+_RELATIONSHIP_KIND = "wall_datum_segment_relationship"
+_CROSS_VIEW_RELATIONSHIP_KIND = "wall_datum_cross_view_relationship"
+_RELATIONSHIP_METHOD = "canonical_graph_relation"
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+@dataclass(frozen=True)
+class WallDatumRelationshipProof:
+    """Inspectable proof that one datum governs one exact wall segment.
+
+    The proof is deliberately not a boolean or caller-created self-hash. It is a
+    typed reference to corroborated relationship evidence owned by the current
+    document/graph snapshot. A separate cross-view relationship is required when
+    the datum observation lives outside the target viewport.
+    """
+
+    proof_id: str
+    wall_id: str
+    wall_segment_id: str
+    datum_evidence_id: str
+    datum_role: str
+    source_sha256: str
+    revision_id: str
+    evidence_snapshot_id: str
+    canonical_graph_snapshot_id: str
+    datum_page_id: str
+    datum_viewport_id: str
+    relationship_evidence_ids: tuple[str, ...]
+    cross_view_evidence_ids: tuple[str, ...] = ()
+    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
+
+    def __post_init__(self) -> None:
+        for value, name in (
+            (self.proof_id, "proof_id"),
+            (self.wall_id, "wall_id"),
+            (self.wall_segment_id, "wall_segment_id"),
+            (self.datum_evidence_id, "datum_evidence_id"),
+            (self.revision_id, "revision_id"),
+            (self.evidence_snapshot_id, "evidence_snapshot_id"),
+            (self.canonical_graph_snapshot_id, "canonical_graph_snapshot_id"),
+            (self.datum_page_id, "datum_page_id"),
+            (self.datum_viewport_id, "datum_viewport_id"),
+        ):
+            if not str(value or "").strip():
+                raise ValueError(f"{name} must be a non-empty string")
+        if self.datum_role not in {"wall_base", "wall_top"}:
+            raise ValueError("datum_role must be wall_base or wall_top")
+        source_hash = str(self.source_sha256 or "").strip().lower()
+        if not _SHA256_RE.fullmatch(source_hash):
+            raise ValueError("source_sha256 must be a 64-character lowercase SHA-256 hex digest")
+        object.__setattr__(self, "source_sha256", source_hash)
+        if not self.relationship_evidence_ids:
+            raise ValueError("relationship_evidence_ids must contain inspectable support")
+        if len(set(self.relationship_evidence_ids)) != len(self.relationship_evidence_ids):
+            raise ValueError("relationship_evidence_ids must be unique")
+        if len(set(self.cross_view_evidence_ids)) != len(self.cross_view_evidence_ids):
+            raise ValueError("cross_view_evidence_ids must be unique")
 
 
 def _numeric_to_m(value: float, unit: Optional[str]) -> Optional[float]:
@@ -86,14 +138,9 @@ def _validate_owned_evidence(
     document: DocumentEvidence,
     viewport: ViewportEvidence,
     entity: EntityEvidence,
+    allow_cross_view: bool = False,
 ) -> tuple[str, ...]:
-    """Validate ownership plus freshness for the exact wall target.
-
-    EvidenceAtom predates first-class revision/snapshot fields, so these bindings
-    are carried in its immutable metadata. Absence is fail-closed: a caller cannot
-    manufacture freshness merely by echoing the current ProviderContext into the
-    output QuantityEvidence after the fact.
-    """
+    """Validate ownership plus freshness for the exact wall target."""
     blockers: list[str] = []
     meta = _metadata(evidence)
     if evidence.document_id != document.document_id or document.document_id != context.document_id:
@@ -127,12 +174,17 @@ def _validate_owned_evidence(
         elif graph_snapshot_id != expected_graph:
             blockers.append("height_graph_snapshot_mismatch")
 
-    if evidence.page_id != viewport.page_id:
-        blockers.append("height_page_mismatch")
-    if evidence.viewport_id != viewport.viewport_id:
-        blockers.append("height_viewport_mismatch")
-    if viewport.viewport_id not in context.trusted_viewport_ids():
-        blockers.append("height_viewport_not_owned")
+    if allow_cross_view:
+        if evidence.viewport_id not in context.trusted_viewport_ids():
+            blockers.append("height_viewport_not_owned")
+    else:
+        if evidence.page_id != viewport.page_id:
+            blockers.append("height_page_mismatch")
+        if evidence.viewport_id != viewport.viewport_id:
+            blockers.append("height_viewport_mismatch")
+        if viewport.viewport_id not in context.trusted_viewport_ids():
+            blockers.append("height_viewport_not_owned")
+
     if evidence.evidence_id not in document.evidence_ids:
         blockers.append("height_evidence_not_owned_by_document")
     if evidence.evidence_id not in entity.evidence_ids:
@@ -154,11 +206,221 @@ def _entity_height_profile_blockers(entity: EntityEvidence) -> tuple[str, ...]:
     meta = _metadata(entity)
     profile = str(meta.get("height_profile") or "").strip().lower()
     if profile in {"variable", "sloped", "stepped", "nonuniform"}:
-        # ``scalar_height_representative_proven=True`` is only caller metadata.
-        # This API has no independently inspectable representativeness evidence,
-        # so variable-profile scalar authority must remain fail-closed.
         return ("variable_height_requires_profile_authority",)
     return ()
+
+
+def _relation_support_atom_blockers(
+    atom: EvidenceAtom,
+    *,
+    proof: WallDatumRelationshipProof,
+    context: ProviderContext,
+    document: DocumentEvidence,
+    entity: EntityEvidence,
+) -> tuple[str, ...]:
+    blockers: list[str] = []
+    meta = _metadata(atom)
+    if atom.evidence_id not in document.evidence_ids:
+        blockers.append("datum_relation_support_not_owned_by_document")
+    if atom.evidence_id not in entity.evidence_ids:
+        blockers.append("datum_relation_support_not_owned_by_entity")
+    if atom.document_id != document.document_id or document.document_id != context.document_id:
+        blockers.append("datum_relation_document_mismatch")
+    if atom.kind != _RELATIONSHIP_KIND or atom.method != _RELATIONSHIP_METHOD:
+        blockers.append("datum_relation_support_semantics_invalid")
+    if atom.status != EvidenceResolutionStatus.CORROBORATED:
+        blockers.append("datum_relation_support_not_corroborated")
+    expected = {
+        "source_sha256": context.source_sha256,
+        "revision_id": context.current_revision_id,
+        "evidence_snapshot_id": context.evidence_snapshot_id,
+        "canonical_graph_snapshot_id": context.canonical_graph_snapshot_id,
+        "target_entity_id": proof.wall_id,
+        "target_wall_segment_id": proof.wall_segment_id,
+        "datum_evidence_id": proof.datum_evidence_id,
+        "datum_role": proof.datum_role,
+    }
+    for key, value in expected.items():
+        if meta.get(key) != value:
+            blockers.append(f"datum_relation_{key}_mismatch")
+    return tuple(dict.fromkeys(blockers))
+
+
+def _cross_view_support_atom_blockers(
+    atom: EvidenceAtom,
+    *,
+    proof: WallDatumRelationshipProof,
+    target_viewport: ViewportEvidence,
+    context: ProviderContext,
+    document: DocumentEvidence,
+    entity: EntityEvidence,
+) -> tuple[str, ...]:
+    blockers: list[str] = []
+    meta = _metadata(atom)
+    if atom.evidence_id not in document.evidence_ids:
+        blockers.append("datum_cross_view_support_not_owned_by_document")
+    if atom.evidence_id not in entity.evidence_ids:
+        blockers.append("datum_cross_view_support_not_owned_by_entity")
+    if atom.document_id != document.document_id or document.document_id != context.document_id:
+        blockers.append("datum_cross_view_document_mismatch")
+    if atom.kind != _CROSS_VIEW_RELATIONSHIP_KIND or atom.method != _RELATIONSHIP_METHOD:
+        blockers.append("datum_cross_view_support_semantics_invalid")
+    if atom.status != EvidenceResolutionStatus.CORROBORATED:
+        blockers.append("datum_cross_view_support_not_corroborated")
+    expected = {
+        "source_sha256": context.source_sha256,
+        "revision_id": context.current_revision_id,
+        "evidence_snapshot_id": context.evidence_snapshot_id,
+        "canonical_graph_snapshot_id": context.canonical_graph_snapshot_id,
+        "target_entity_id": proof.wall_id,
+        "target_wall_segment_id": proof.wall_segment_id,
+        "source_viewport_id": proof.datum_viewport_id,
+        "target_viewport_id": target_viewport.viewport_id,
+    }
+    for key, value in expected.items():
+        if meta.get(key) != value:
+            blockers.append(f"datum_cross_view_{key}_mismatch")
+    return tuple(dict.fromkeys(blockers))
+
+
+def _relationship_proof_blockers(
+    proof: WallDatumRelationshipProof,
+    *,
+    datum: Optional[EvidenceAtom],
+    context: ProviderContext,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+    entity: EntityEvidence,
+    relationship_evidence: Mapping[str, EvidenceAtom],
+) -> tuple[str, ...]:
+    blockers: list[str] = []
+    if proof.status != EvidenceResolutionStatus.CORROBORATED:
+        blockers.append("datum_relation_proof_not_corroborated")
+    if proof.source_sha256 != context.source_sha256 or document.source_sha256 != context.source_sha256:
+        blockers.append("datum_relation_source_sha256_mismatch")
+    if proof.revision_id != context.current_revision_id:
+        blockers.append("datum_relation_revision_mismatch")
+    if proof.evidence_snapshot_id != context.evidence_snapshot_id:
+        blockers.append("datum_relation_evidence_snapshot_mismatch")
+    if not context.canonical_graph_snapshot_id:
+        blockers.append("datum_relation_graph_snapshot_required")
+    elif proof.canonical_graph_snapshot_id != context.canonical_graph_snapshot_id:
+        blockers.append("datum_relation_graph_snapshot_mismatch")
+    if proof.datum_evidence_id not in document.evidence_ids:
+        blockers.append("datum_relation_datum_not_owned_by_document")
+    if proof.datum_evidence_id not in entity.evidence_ids:
+        blockers.append("datum_relation_datum_not_owned_by_entity")
+
+    if datum is not None:
+        if datum.evidence_id != proof.datum_evidence_id:
+            blockers.append("datum_relation_selected_datum_mismatch")
+        if datum.page_id != proof.datum_page_id:
+            blockers.append("datum_relation_page_mismatch")
+        if datum.viewport_id != proof.datum_viewport_id:
+            blockers.append("datum_relation_viewport_mismatch")
+
+    for support_id in proof.relationship_evidence_ids:
+        atom = relationship_evidence.get(support_id)
+        if atom is None:
+            blockers.append("datum_relation_support_missing")
+            continue
+        blockers.extend(
+            _relation_support_atom_blockers(
+                atom,
+                proof=proof,
+                context=context,
+                document=document,
+                entity=entity,
+            )
+        )
+
+    is_cross_view = proof.datum_viewport_id != viewport.viewport_id or proof.datum_page_id != viewport.page_id
+    if is_cross_view:
+        if not proof.cross_view_evidence_ids:
+            blockers.append("datum_cross_view_relation_unproven")
+        for support_id in proof.cross_view_evidence_ids:
+            atom = relationship_evidence.get(support_id)
+            if atom is None:
+                blockers.append("datum_cross_view_support_missing")
+                continue
+            blockers.extend(
+                _cross_view_support_atom_blockers(
+                    atom,
+                    proof=proof,
+                    target_viewport=viewport,
+                    context=context,
+                    document=document,
+                    entity=entity,
+                )
+            )
+    return tuple(dict.fromkeys(blockers))
+
+
+def _resolve_datum_relationship(
+    *,
+    role: str,
+    selected_datum: EvidenceAtom,
+    wall_id: str,
+    wall_segment_id: str,
+    proofs: tuple[WallDatumRelationshipProof, ...],
+    relationship_evidence: Mapping[str, EvidenceAtom],
+    context: ProviderContext,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+    entity: EntityEvidence,
+) -> tuple[Optional[WallDatumRelationshipProof], tuple[str, ...], bool]:
+    label = "wall_base" if role == "wall_base" else "wall_top"
+    claims = tuple(
+        proof
+        for proof in proofs
+        if proof.wall_id == wall_id
+        and proof.wall_segment_id == wall_segment_id
+        and proof.datum_role == role
+    )
+    if not claims:
+        return None, (f"{label}_relation_unproven",), False
+
+    valid: list[WallDatumRelationshipProof] = []
+    unresolved = False
+    detailed: list[str] = []
+    for proof in claims:
+        datum = selected_datum if proof.datum_evidence_id == selected_datum.evidence_id else None
+        proof_blockers = _relationship_proof_blockers(
+            proof,
+            datum=datum,
+            context=context,
+            document=document,
+            viewport=viewport,
+            entity=entity,
+            relationship_evidence=relationship_evidence,
+        )
+        if proof_blockers:
+            unresolved = True
+            detailed.extend(proof_blockers)
+        else:
+            valid.append(proof)
+
+    blockers: list[str] = []
+    distinct_datum_ids = {proof.datum_evidence_id for proof in valid}
+    if len(distinct_datum_ids) > 1:
+        blockers.append(f"{label}_relation_ambiguous")
+    selected_valid = [proof for proof in valid if proof.datum_evidence_id == selected_datum.evidence_id]
+    if not selected_valid:
+        blockers.append(f"{label}_relation_unproven")
+    if unresolved:
+        blockers.append(f"{label}_relation_unresolved")
+        blockers.extend(detailed)
+    if blockers:
+        cross_reason = "datum_cross_view_relation_unproven"
+        if cross_reason in blockers:
+            blockers.append(f"{label}_cross_view_relation_unproven")
+        elif cross_reason in detailed:
+            blockers.append(f"{label}_cross_view_relation_unproven")
+        return None, tuple(dict.fromkeys(blockers)), False
+
+    selected = selected_valid[0]
+    allow_cross_view = selected.datum_viewport_id != viewport.viewport_id or selected.datum_page_id != viewport.page_id
+    return selected, (), allow_cross_view
 
 
 def _abstain(
@@ -187,7 +449,7 @@ def _abstain(
         value=None,
         unit="m",
         input_entity_ids=(wall_id,),
-        formula="explicit_wall_height OR wall_top_datum - wall_base_datum",
+        formula="explicit_wall_height OR proven_wall_top_datum - proven_wall_base_datum",
         formula_version=WALL_HEIGHT_FORMULA_VERSION,
         evidence_ids=evidence_ids or tuple(entity.evidence_ids),
         authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
@@ -223,8 +485,11 @@ def build_wall_height_quantity(
     direct_height_evidence: Optional[EvidenceAtom] = None,
     lower_datum_evidence: Optional[EvidenceAtom] = None,
     upper_datum_evidence: Optional[EvidenceAtom] = None,
+    wall_segment_id: Optional[str] = None,
+    datum_relationship_proofs: tuple[WallDatumRelationshipProof, ...] = (),
+    relationship_evidence: Optional[Mapping[str, EvidenceAtom]] = None,
 ) -> QuantityEvidence:
-    """Resolve explicit wall height or an explicitly wall-bound datum difference."""
+    """Resolve explicit height or an exact-segment, relationship-proven datum difference."""
     if entity.candidate_entity_id != wall_id:
         return _abstain(
             wall_id=wall_id,
@@ -322,10 +587,45 @@ def build_wall_height_quantity(
             evidence_ids=tuple(entity.evidence_ids),
         )
 
-    blockers: list[str] = []
-    for evidence, label, allowed_kinds in (
-        (lower_datum_evidence, "lower", _ALLOWED_LOWER_DATUM_KINDS),
-        (upper_datum_evidence, "upper", _ALLOWED_UPPER_DATUM_KINDS),
+    if not str(wall_segment_id or "").strip():
+        return _abstain(
+            wall_id=wall_id,
+            entity=entity,
+            context=context,
+            blockers=("wall_segment_scope_missing",),
+            evidence_ids=(lower_datum_evidence.evidence_id, upper_datum_evidence.evidence_id),
+        )
+
+    relationship_evidence = relationship_evidence or {}
+    lower_proof, lower_relation_blockers, lower_cross_view = _resolve_datum_relationship(
+        role="wall_base",
+        selected_datum=lower_datum_evidence,
+        wall_id=wall_id,
+        wall_segment_id=wall_segment_id,
+        proofs=datum_relationship_proofs,
+        relationship_evidence=relationship_evidence,
+        context=context,
+        document=document,
+        viewport=viewport,
+        entity=entity,
+    )
+    upper_proof, upper_relation_blockers, upper_cross_view = _resolve_datum_relationship(
+        role="wall_top",
+        selected_datum=upper_datum_evidence,
+        wall_id=wall_id,
+        wall_segment_id=wall_segment_id,
+        proofs=datum_relationship_proofs,
+        relationship_evidence=relationship_evidence,
+        context=context,
+        document=document,
+        viewport=viewport,
+        entity=entity,
+    )
+
+    blockers: list[str] = [*lower_relation_blockers, *upper_relation_blockers]
+    for evidence, label, allowed_kinds, allow_cross_view in (
+        (lower_datum_evidence, "lower", _ALLOWED_LOWER_DATUM_KINDS, lower_cross_view),
+        (upper_datum_evidence, "upper", _ALLOWED_UPPER_DATUM_KINDS, upper_cross_view),
     ):
         blockers.extend(
             _validate_owned_evidence(
@@ -334,6 +634,7 @@ def build_wall_height_quantity(
                 document=document,
                 viewport=viewport,
                 entity=entity,
+                allow_cross_view=allow_cross_view,
             )
         )
         if evidence.kind not in allowed_kinds:
@@ -369,12 +670,17 @@ def build_wall_height_quantity(
         )
 
     assert height_m is not None
+    assert lower_proof is not None
+    assert upper_proof is not None
     value = round(height_m, 6)
     payload = {
         "wall_id": wall_id,
+        "wall_segment_id": wall_segment_id,
         "value_m": value,
         "lower": lower_datum_evidence.evidence_id,
         "upper": upper_datum_evidence.evidence_id,
+        "lower_relationship_proof": lower_proof.proof_id,
+        "upper_relationship_proof": upper_proof.proof_id,
         "source_sha256": context.source_sha256,
         "revision_id": context.current_revision_id,
         "evidence_snapshot_id": context.evidence_snapshot_id,
@@ -383,8 +689,11 @@ def build_wall_height_quantity(
     metadata = _firm_metadata(context=context, viewport=viewport, wall_id=wall_id)
     metadata.update(
         {
+            "wall_segment_id": wall_segment_id,
             "lower_datum_kind": lower_datum_evidence.kind,
             "upper_datum_kind": upper_datum_evidence.kind,
+            "lower_datum_relationship_proof_id": lower_proof.proof_id,
+            "upper_datum_relationship_proof_id": upper_proof.proof_id,
         }
     )
     return QuantityEvidence(
@@ -396,7 +705,14 @@ def build_wall_height_quantity(
         input_entity_ids=(wall_id,),
         formula="wall_top_datum - wall_base_datum",
         formula_version=WALL_HEIGHT_FORMULA_VERSION,
-        evidence_ids=(lower_datum_evidence.evidence_id, upper_datum_evidence.evidence_id),
+        evidence_ids=(
+            lower_datum_evidence.evidence_id,
+            upper_datum_evidence.evidence_id,
+            *lower_proof.relationship_evidence_ids,
+            *upper_proof.relationship_evidence_ids,
+            *lower_proof.cross_view_evidence_ids,
+            *upper_proof.cross_view_evidence_ids,
+        ),
         authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
         status=AuthorityStatus.FIRM.value,
         confidence=min(
