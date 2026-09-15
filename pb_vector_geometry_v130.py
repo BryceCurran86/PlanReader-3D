@@ -64,6 +64,77 @@ def _dimension_m(token: Any) -> Optional[float]:
     return value if 0.25 <= value <= 150.0 else None
 
 
+def _normalize_scissor(scissor: Any) -> Optional[Tuple[float, float, float, float]]:
+    """Return a stable page-space clip rectangle, or None when unknown."""
+    if scissor is None:
+        return None
+    try:
+        x0, y0, x1, y1 = map(float, (scissor.x0, scissor.y0, scissor.x1, scissor.y1))
+    except Exception:
+        try:
+            x0, y0, x1, y1 = map(float, scissor)
+        except Exception:
+            return None
+    if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
+        return None
+    return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+
+
+def _clip_scissor_by_seqno(pdf_page: Any) -> Dict[int, Optional[Tuple[float, float, float, float]]]:
+    """Map non-extended drawing ``seqno`` values to the active clip scissor.
+
+    Uses a separate ``get_drawings(extended=True)`` pass so the primary
+    non-extended enumeration (and therefore historical ``d{{path}}i{{item}}``
+    ids) stays bit-identical. Missing / unavailable clips map to ``None``.
+    """
+    try:
+        extended = pdf_page.get_drawings(extended=True) or []
+    except Exception:
+        return {}
+
+    # Nesting stack: index == clip nesting level from PyMuPDF.
+    stack: List[Optional[Tuple[float, float, float, float]]] = []
+    by_seqno: Dict[int, Optional[Tuple[float, float, float, float]]] = {}
+    for drawing in extended:
+        if not isinstance(drawing, dict):
+            continue
+        dtype = str(drawing.get("type") or "")
+        try:
+            level = int(drawing.get("level") or 0)
+        except (TypeError, ValueError):
+            level = 0
+        if level < 0:
+            level = 0
+
+        if dtype.startswith("clip"):
+            while len(stack) > level:
+                stack.pop()
+            while len(stack) < level:
+                stack.append(None)
+            scissor = _normalize_scissor(drawing.get("scissor"))
+            if len(stack) == level:
+                stack.append(scissor)
+            else:
+                stack[level] = scissor
+            continue
+
+        seqno = drawing.get("seqno")
+        if seqno is None:
+            continue
+        try:
+            seq_key = int(seqno)
+        except (TypeError, ValueError):
+            continue
+        active: Optional[Tuple[float, float, float, float]] = None
+        # Innermost declared clip below the stroke's nesting level.
+        limit = min(len(stack), max(level, 0))
+        for idx in range(limit):
+            if stack[idx] is not None:
+                active = stack[idx]
+        by_seqno[seq_key] = active
+    return by_seqno
+
+
 def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
     """Extract line primitives, text geometry and PDF layer hints from one page.
 
@@ -73,16 +144,58 @@ def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
     full ``bbox``.  ``rects`` is ADDITIVE metadata — it does not alter the
     existing ``segments`` output contract, so B1 (which consumes
     ``segments``) is unaffected.
+
+    Priority-1 additive provenance (does not change historical ``id`` values):
+    ``path_index``, ``item_index``, optional ``edge_index``, explicit
+    ``*_present`` flags, native page coordinates retained as fields already
+    present, and ``clip`` / ``clip_present`` from a separate extended drawings
+    association keyed by ``seqno``.
     """
     segments: List[Dict[str, Any]] = []
     rects: List[Dict[str, Any]] = []   # ADDITIVE: closed native rectangles
     drawings = pdf_page.get_drawings() or []
+    clip_by_seqno = _clip_scissor_by_seqno(pdf_page)
     for draw_index, drawing in enumerate(drawings):
         width = _num(drawing.get("width"), 0.0) if isinstance(drawing, dict) else 0.0
         stroke = drawing.get("color") if isinstance(drawing, dict) else None
         fill = drawing.get("fill") if isinstance(drawing, dict) else None
         layer = str(drawing.get("layer") or drawing.get("oc") or "") if isinstance(drawing, dict) else ""
         dashes = str(drawing.get("dashes") or "") if isinstance(drawing, dict) else ""
+        width_present = isinstance(drawing, dict) and "width" in drawing and drawing.get("width") is not None
+        stroke_present = isinstance(drawing, dict) and "color" in drawing and stroke is not None
+        fill_present = isinstance(drawing, dict) and "fill" in drawing and fill is not None
+        layer_present = bool(str(layer).strip())
+        dashes_present = bool(str(dashes).strip())
+        seqno = drawing.get("seqno") if isinstance(drawing, dict) else None
+        try:
+            seq_key = int(seqno) if seqno is not None else None
+        except (TypeError, ValueError):
+            seq_key = None
+        if seq_key is not None and seq_key in clip_by_seqno:
+            clip = clip_by_seqno[seq_key]
+            clip_present = clip is not None
+        else:
+            # Extended association unavailable or seqno unmatched — do not invent a clip.
+            clip = None
+            clip_present = False
+
+        def _graphic_fields() -> Dict[str, Any]:
+            return {
+                "width": width,
+                "width_present": width_present,
+                "stroke": stroke,
+                "stroke_present": stroke_present,
+                "fill": fill,
+                "fill_present": fill_present,
+                "layer": layer,
+                "layer_present": layer_present,
+                "dashes": dashes,
+                "dashes_present": dashes_present,
+                "clip": list(clip) if clip is not None else None,
+                "clip_present": clip_present,
+                "path_index": int(draw_index),
+            }
+
         for item_index, item in enumerate(drawing.get("items", []) if isinstance(drawing, dict) else []):
             if not item:
                 continue
@@ -98,12 +211,17 @@ def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
                         continue
                 if math.hypot(x2 - x1, y2 - y1) < 0.5:
                     continue
-                segments.append({
-                    "id": f"d{draw_index}i{item_index}", "kind": "line",
-                    "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-                    "width": width, "stroke": stroke, "fill": fill,
-                    "layer": layer, "dashes": dashes,
-                })
+                payload = {
+                    "id": f"d{draw_index}i{item_index}",
+                    "kind": "line",
+                    "x1": x1,
+                    "y1": y1,
+                    "x2": x2,
+                    "y2": y2,
+                    "item_index": int(item_index),
+                    **_graphic_fields(),
+                }
+                segments.append(payload)
             elif kind == "re" and len(item) >= 2:
                 rect = item[1]
                 try:
@@ -115,16 +233,21 @@ def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
                 rects.append({
                     "kind": "rect",
                     "bbox": [min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)],
-                    "width": width, "stroke": stroke, "fill": fill,
-                    "layer": layer, "dashes": dashes,
+                    "item_index": int(item_index),
+                    **_graphic_fields(),
                 })
                 for edge in range(4):
                     a, b = pts[edge], pts[(edge + 1) % 4]
                     segments.append({
-                        "id": f"d{draw_index}i{item_index}e{edge}", "kind": "rect_edge",
-                        "x1": a[0], "y1": a[1], "x2": b[0], "y2": b[1],
-                        "width": width, "stroke": stroke, "fill": fill,
-                        "layer": layer, "dashes": dashes,
+                        "id": f"d{draw_index}i{item_index}e{edge}",
+                        "kind": "rect_edge",
+                        "x1": a[0],
+                        "y1": a[1],
+                        "x2": b[0],
+                        "y2": b[1],
+                        "item_index": int(item_index),
+                        "edge_index": int(edge),
+                        **_graphic_fields(),
                     })
 
     words = []
