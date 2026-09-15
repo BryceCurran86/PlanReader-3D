@@ -476,11 +476,28 @@ def _analyze_native_groups(
     ambiguous_tags: Set[str] = set()
 
     for tag in sorted(grouped.keys()):
-        deduped: Dict[tuple[Any, ...], DrawingEvidenceRecord] = {}
+        by_key: Dict[tuple[Any, ...], List[DrawingEvidenceRecord]] = defaultdict(list)
         for record in grouped[tag]:
-            deduped[_native_dedupe_key(record)] = record
+            by_key[_native_dedupe_key(record)].append(record)
+
+        # PROVEN_SAME: identical dedupe keys. Confidence may select among
+        # already-equivalent claims only; selection is deterministic.
+        unique: List[DrawingEvidenceRecord] = []
+        for key in sorted(by_key.keys()):
+            equivalents = by_key[key]
+            representative = max(
+                equivalents,
+                key=lambda record: (
+                    float(record.confidence),
+                    -(record.source_page or 0),
+                    record.raw_evidence_ref or "",
+                    record.description or "",
+                    record.extracted_text or "",
+                ),
+            )
+            unique.append(representative)
         unique = sorted(
-            deduped.values(),
+            unique,
             key=lambda record: (record.source_page, record.raw_evidence_ref or ""),
         )
         if len(unique) == 1:

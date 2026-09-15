@@ -93,9 +93,55 @@ def _scoped_claim_snapshot(pred: ExtractedPrediction) -> Dict[str, Any]:
         "dimensions": pred.dimensions,
         "confidence": pred.confidence,
         "description": pred.description,
+        "bounding_box": pred.bounding_box,
         "merge_source": (pred.metadata or {}).get("merge_source"),
         "raw_evidence_ref": (pred.metadata or {}).get("raw_evidence_ref"),
     }
+
+
+def _bbox_tuple(bbox: Optional[Sequence[float]]) -> Optional[Tuple[float, ...]]:
+    if bbox is None or len(bbox) < 4:
+        return None
+    return tuple(float(v) for v in bbox[:4])
+
+
+def _type_claim_equivalence_key(pred: ExtractedPrediction) -> tuple[Any, ...]:
+    """Identity key for schedule/type claim equivalence — not physical instances.
+
+    PROVEN_SAME requires matching evidence identity (raw_evidence_ref and bbox).
+    Same tag + dimensions + page alone never proves physical-instance identity.
+    """
+    metadata = pred.metadata or {}
+    return (
+        pred.tag,
+        pred.source_page,
+        pred.quantity,
+        _prediction_dimension_pair(pred.dimensions),
+        metadata.get("raw_evidence_ref") or "",
+        _bbox_tuple(pred.bounding_box),
+    )
+
+
+def _predictions_are_proven_same_type_claim(
+    existing: ExtractedPrediction,
+    incoming: ExtractedPrediction,
+) -> bool:
+    """True only when both records share proven type/schedule claim identity.
+
+    Same tag + dimensions + page is never enough. Evidence identity must be
+    present and equal (raw_evidence_ref and/or bbox). Missing identity stays
+    unresolved rather than inventing PROVEN_SAME.
+    """
+    if _type_claim_equivalence_key(existing) != _type_claim_equivalence_key(incoming):
+        return False
+    existing_ref = (existing.metadata or {}).get("raw_evidence_ref") or ""
+    incoming_ref = (incoming.metadata or {}).get("raw_evidence_ref") or ""
+    existing_bbox = _bbox_tuple(existing.bounding_box)
+    incoming_bbox = _bbox_tuple(incoming.bounding_box)
+    has_evidence_identity = bool(existing_ref) or existing_bbox is not None
+    if not has_evidence_identity:
+        return False
+    return existing_ref == incoming_ref and existing_bbox == incoming_bbox
 
 
 def _scoped_claims_have_measurable_conflict(
@@ -242,22 +288,40 @@ def merge_extracted_prediction(
         )
         return
 
-    if (
-        existing.source_page != incoming.source_page
-        and existing.trade_type in ("windows", "doors")
+    if existing.trade_type in ("windows", "doors") or incoming.trade_type in (
+        "windows",
+        "doors",
     ):
-        pred_dict[incoming.tag] = _blocked_extracted_prediction(
-            tag=existing.tag,
-            trade_type=existing.trade_type,
-            description=(
-                f"{existing.description} [scope/instance unresolved across pages; publication blocked]"
-            ),
-            unit=existing.unit,
-            reconciliation_status="ambiguous_unresolved",
-            scoped_claims=[existing, incoming],
-            merge_source=merge_source,
-            blocking_reason="scope_collision_unresolved",
-        )
+        if not _predictions_are_proven_same_type_claim(existing, incoming):
+            # Same tag/dims/page alone is not physical-instance identity.
+            # Distinct evidence refs or bboxes remain AMBIGUOUS.
+            pred_dict[incoming.tag] = _blocked_extracted_prediction(
+                tag=existing.tag,
+                trade_type=existing.trade_type,
+                description=(
+                    f"{existing.description} [instance/type identity unresolved; publication blocked]"
+                ),
+                unit=existing.unit,
+                reconciliation_status="ambiguous_unresolved",
+                scoped_claims=[existing, incoming],
+                merge_source=merge_source,
+                blocking_reason="instance_or_type_identity_unresolved",
+            )
+            return
+
+        # PROVEN_SAME type-claim equivalence: confidence may select representative.
+        if incoming.confidence > existing.confidence or (
+            abs(incoming.confidence - existing.confidence) < 1e-12
+            and (
+                (incoming.metadata or {}).get("raw_evidence_ref") or "",
+                incoming.description or "",
+            )
+            >= (
+                (existing.metadata or {}).get("raw_evidence_ref") or "",
+                existing.description or "",
+            )
+        ):
+            pred_dict[incoming.tag] = incoming
         return
 
     if incoming.confidence >= existing.confidence:

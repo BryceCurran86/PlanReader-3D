@@ -451,3 +451,133 @@ def test_a12_scope_collision_across_pages_blocks_without_conflict_label() -> Non
     assert blocked.metadata.get("reconciliation_status") == "ambiguous_unresolved"
     assert blocked.quantity is None
     assert len(blocked.metadata.get("scoped_claims") or []) == 2
+
+
+def test_a13_same_page_compatible_claims_distinct_evidence_stay_ambiguous() -> None:
+    """Same tag+page+dims without PROVEN_SAME must not confidence-collapse."""
+    claim_a = ExtractedPrediction(
+        tag="D01",
+        trade_type="doors",
+        description="instance A",
+        quantity=1.0,
+        unit="NO",
+        confidence=0.70,
+        source_page=12,
+        dimensions=[900.0, 2100.0],
+        bounding_box=[10.0, 20.0, 30.0, 40.0],
+        metadata={"raw_evidence_ref": "instance-ref-A"},
+    )
+    claim_b = ExtractedPrediction(
+        tag="D01",
+        trade_type="doors",
+        description="instance B",
+        quantity=1.0,
+        unit="NO",
+        confidence=0.99,
+        source_page=12,
+        dimensions=[900.0, 2100.0],
+        bounding_box=[100.0, 120.0, 130.0, 140.0],
+        metadata={"raw_evidence_ref": "instance-ref-B"},
+    )
+
+    forward: dict[str, ExtractedPrediction] = {}
+    merge_extracted_prediction(forward, claim_a, merge_source="plan_callout")
+    merge_extracted_prediction(forward, claim_b, merge_source="plan_callout")
+
+    backward: dict[str, ExtractedPrediction] = {}
+    merge_extracted_prediction(backward, claim_b, merge_source="plan_callout")
+    merge_extracted_prediction(backward, claim_a, merge_source="plan_callout")
+
+    for pred_dict in (forward, backward):
+        blocked = pred_dict["D01"]
+        assert blocked.metadata.get("reconciliation_status") == "ambiguous_unresolved"
+        assert blocked.quantity is None
+        assert extracted_prediction_publication_blocked(blocked)
+        scoped = blocked.metadata.get("scoped_claims") or []
+        assert len(scoped) == 2
+        assert {c.get("raw_evidence_ref") for c in scoped} == {
+            "instance-ref-A",
+            "instance-ref-B",
+        }
+
+
+def test_a14_proven_same_type_claim_selects_deterministic_representative() -> None:
+    """Confidence may select only after PROVEN_SAME evidence identity."""
+    base_meta = {"raw_evidence_ref": "schedule-row-D01"}
+    bbox = [1.0, 2.0, 3.0, 4.0]
+    low = ExtractedPrediction(
+        tag="D01",
+        trade_type="doors",
+        description="type claim",
+        quantity=1.0,
+        unit="NO",
+        confidence=0.70,
+        source_page=12,
+        dimensions=[900.0, 2100.0],
+        bounding_box=bbox,
+        metadata=dict(base_meta),
+    )
+    high = ExtractedPrediction(
+        tag="D01",
+        trade_type="doors",
+        description="type claim",
+        quantity=1.0,
+        unit="NO",
+        confidence=0.95,
+        source_page=12,
+        dimensions=[900.0, 2100.0],
+        bounding_box=bbox,
+        metadata=dict(base_meta),
+    )
+
+    forward: dict[str, ExtractedPrediction] = {}
+    merge_extracted_prediction(forward, low, merge_source="schedule_row")
+    merge_extracted_prediction(forward, high, merge_source="schedule_row")
+    backward: dict[str, ExtractedPrediction] = {}
+    merge_extracted_prediction(backward, high, merge_source="schedule_row")
+    merge_extracted_prediction(backward, low, merge_source="schedule_row")
+
+    assert forward["D01"].confidence == 0.95
+    assert backward["D01"].confidence == 0.95
+    assert not extracted_prediction_publication_blocked(forward["D01"])
+    assert forward["D01"].quantity == 1.0
+
+
+def test_a15_proven_same_native_representative_is_input_order_invariant() -> None:
+    """Exact-key duplicates choose a stable representative regardless of order."""
+    low = _native(
+        "D01",
+        2.0,
+        page=3,
+        dims=[900.0, 2100.0],
+        conf=0.70,
+        raw_evidence_ref="same-observation",
+    )
+    high = DrawingEvidenceRecord(
+        tag=low.tag,
+        trade_type=low.trade_type,
+        description=low.description,
+        quantity=low.quantity,
+        unit=low.unit,
+        dimensions=low.dimensions,
+        source_page=low.source_page,
+        confidence=0.95,
+        extraction_method=low.extraction_method,
+        status=low.status,
+        extracted_text=low.extracted_text,
+        extracted_value=low.extracted_value,
+        raw_evidence_ref=low.raw_evidence_ref,
+    )
+
+    forward = EvidenceReconciler.reconcile([low, high], [])
+    backward = EvidenceReconciler.reconcile([high, low], [])
+    shuffled = [high, low]
+    random.Random(1).shuffle(shuffled)
+    permuted = EvidenceReconciler.reconcile(shuffled, [])
+
+    for out in (forward, backward, permuted):
+        d01 = [r for r in out if r.tag == "D01"]
+        assert len(d01) == 1
+        assert d01[0].status == EvidenceStatus.CONFIRMED.value
+        assert d01[0].confidence == 0.95
+        assert d01[0].quantity == 2.0
