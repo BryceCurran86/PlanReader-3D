@@ -1620,71 +1620,89 @@ class GenericPlanReaderExtractor:
                         },
                     )
 
-                # DPC from building perimeter: exactly equal to perimeter P
-                # NO hardcoded 67.0 fallback
+                # DPC from evidenced external envelope perimeter.
+                # Prefer confirmed compound external_perimeter_m (verandah /
+                # multi-space) over hatch-reduced wall length in dimensions[0].
+                # NO hardcoded project perimeter fallback; no missing→zero.
                 if global_has_dpc and cur_perim > 0:
-                    dpc_length_m = cur_perim
-                    internal_partition_dpc_length_m = None
-                    # F.33: only when THIS PAGE's own DPC note explicitly
-                    # extends scope to "all walls" (not just the external
-                    # envelope) does an evidenced internal partition's
-                    # length get added here. Deliberately page-local, not
-                    # document-global: a document-wide flag would let an
-                    # "all walls" note on one sheet leak into a DPC
-                    # quantity computed from a different page's geometry
-                    # that carries no such scope statement of its own.
-                    # Never applied to perimeter_walling/internal_plaster/
-                    # internal_paint -- DPC is a distinct linear quantity
-                    # and this partition-length evidence is only being
-                    # asserted for the specific case this page's own note
-                    # describes.
-                    page_dpc_scoped_to_all_walls = self._has_dpc_all_walls_scope(page_text)
-                    if page_dpc_scoped_to_all_walls:
-                        try:
-                            from pb_wall_fill_internal_partition_evidence import (
-                                resolve_internal_partition_length_m,
-                            )
+                    from pb_multi_space_footprint_geometry import (
+                        resolve_external_envelope_perimeter_m,
+                    )
 
-                            _partition_evidence = resolve_internal_partition_length_m(
-                                page.get_drawings(), length_m=length_m, width_m=width_m, page=page
-                            )
-                            if (
-                                _partition_evidence.status == "found"
-                                and _partition_evidence.total_length_m > 0
-                            ):
-                                internal_partition_dpc_length_m = _partition_evidence.total_length_m
-                                dpc_length_m = round(
-                                    cur_perim + internal_partition_dpc_length_m, 2
+                    _wall_meta_for_dpc = pred_dict["perimeter_walling"].metadata or {}
+                    _envelope = resolve_external_envelope_perimeter_m(
+                        external_perimeter_m=_wall_meta_for_dpc.get("external_perimeter_m"),
+                        footprint_status=_wall_meta_for_dpc.get("footprint_status"),
+                        fallback_wall_perimeter_m=cur_perim,
+                    )
+                    if _envelope.perimeter_m is not None and _envelope.perimeter_m > 0:
+                        dpc_length_m = float(_envelope.perimeter_m)
+                        dpc_envelope_base_m = dpc_length_m
+                        internal_partition_dpc_length_m = None
+                        # F.33: only when THIS PAGE's own DPC note explicitly
+                        # extends scope to "all walls" (not just the external
+                        # envelope) does an evidenced internal partition's
+                        # length get added here. Deliberately page-local, not
+                        # document-global: a document-wide flag would let an
+                        # "all walls" note on one sheet leak into a DPC
+                        # quantity computed from a different page's geometry
+                        # that carries no such scope statement of its own.
+                        # Never applied to perimeter_walling/internal_plaster/
+                        # internal_paint -- DPC is a distinct linear quantity
+                        # and this partition-length evidence is only being
+                        # asserted for the specific case this page's own note
+                        # describes.
+                        page_dpc_scoped_to_all_walls = self._has_dpc_all_walls_scope(page_text)
+                        if page_dpc_scoped_to_all_walls:
+                            try:
+                                from pb_wall_fill_internal_partition_evidence import (
+                                    resolve_internal_partition_length_m,
                                 )
-                        except Exception:
-                            internal_partition_dpc_length_m = None
-                            dpc_length_m = cur_perim
-                    dpc_qty = round(dpc_length_m, 1)
-                    dpc_meta = dict(pred_dict["floor_screed"].metadata or {})
-                    if internal_partition_dpc_length_m is not None:
-                        dpc_meta["internal_partition_length_m"] = internal_partition_dpc_length_m
-                        dpc_meta["dpc_scope"] = "external_perimeter_plus_evidenced_internal_partitions"
-                        dpc_description = (
-                            f"Bituminous damp proof course ({cur_perim:.1f}m external perimeter + "
-                            f"{internal_partition_dpc_length_m:.1f}m evidenced internal partition, "
-                            "per drawing's own \"under all walls\" note)"
-                        )
-                    else:
-                        dpc_description = f"Bituminous damp proof course ({dpc_qty:.1f}m perimeter)"
-                    if self._should_replace_slab_bound_quantity(
-                        pred_dict.get("damp_proof_course"), dpc_qty, dpc_meta
-                    ):
-                        pred_dict["damp_proof_course"] = ExtractedPrediction(
-                            tag="damp_proof_course",
-                            trade_type="finishes",
-                            description=dpc_description,
-                            quantity=dpc_qty,
-                            unit="M",
-                            confidence=0.90,
-                            source_page=page_num,
-                            sheet_number=sheet_no,
-                            metadata=dpc_meta,
-                        )
+
+                                _partition_evidence = resolve_internal_partition_length_m(
+                                    page.get_drawings(), length_m=length_m, width_m=width_m, page=page
+                                )
+                                if (
+                                    _partition_evidence.status == "found"
+                                    and _partition_evidence.total_length_m > 0
+                                ):
+                                    internal_partition_dpc_length_m = _partition_evidence.total_length_m
+                                    dpc_length_m = round(
+                                        dpc_envelope_base_m + internal_partition_dpc_length_m, 2
+                                    )
+                            except Exception:
+                                internal_partition_dpc_length_m = None
+                                dpc_length_m = dpc_envelope_base_m
+                        dpc_qty = round(dpc_length_m, 1)
+                        dpc_meta = dict(pred_dict["floor_screed"].metadata or {})
+                        dpc_meta["dpc_envelope_resolution"] = _envelope.status
+                        dpc_meta["dpc_envelope_reason"] = _envelope.reason
+                        dpc_meta["dpc_envelope_source"] = _envelope.source
+                        dpc_meta["dpc_envelope_base_m"] = dpc_envelope_base_m
+                        if internal_partition_dpc_length_m is not None:
+                            dpc_meta["internal_partition_length_m"] = internal_partition_dpc_length_m
+                            dpc_meta["dpc_scope"] = "external_perimeter_plus_evidenced_internal_partitions"
+                            dpc_description = (
+                                f"Bituminous damp proof course ({dpc_envelope_base_m:.1f}m external perimeter + "
+                                f"{internal_partition_dpc_length_m:.1f}m evidenced internal partition, "
+                                "per drawing's own \"under all walls\" note)"
+                            )
+                        else:
+                            dpc_description = f"Bituminous damp proof course ({dpc_qty:.1f}m perimeter)"
+                        if self._should_replace_slab_bound_quantity(
+                            pred_dict.get("damp_proof_course"), dpc_qty, dpc_meta
+                        ):
+                            pred_dict["damp_proof_course"] = ExtractedPrediction(
+                                tag="damp_proof_course",
+                                trade_type="finishes",
+                                description=dpc_description,
+                                quantity=dpc_qty,
+                                unit="M",
+                                confidence=0.90,
+                                source_page=page_num,
+                                sheet_number=sheet_no,
+                                metadata=dpc_meta,
+                            )
 
                 # Substructure DPM & mesh: exactly equal to floor slab area
                 # NO 1.06 magic multiplier
