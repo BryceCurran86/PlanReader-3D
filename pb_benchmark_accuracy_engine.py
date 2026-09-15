@@ -1110,21 +1110,23 @@ class BenchmarkAccuracyEngine:
                 )
                 candidate_seed_reports.append(rep)
 
-        # Aggregate headline metrics across successfully evaluated headline benchmarks only.
-        # Source-unavailable / incomplete evaluations never contribute as extractor 0%.
+        # Aggregate headline metrics. Accuracy uses successfully scored reports only.
+        # Inventory expected counts include every headline-eligible package.
+        # Source-unavailable evaluations never contribute extractor 0% and withhold
+        # the official percentage until coverage is complete.
         scored_headline = [r for r in headline_reports if r.is_scored]
         incomplete_headline = [
             r for r in headline_reports if r.status == "source_unavailable"
         ]
-        tot_exact = sum(r.exact_matches for r in scored_headline)
-        tot_w5 = sum(r.within_5_percent for r in scored_headline)
-        tot_w10 = sum(r.within_10_percent for r in scored_headline)
-        tot_w20 = sum(r.within_20_percent for r in scored_headline)
-        tot_gross = sum(r.gross_mismatches for r in scored_headline)
-        tot_missed = sum(r.missed_items for r in scored_headline)
-        tot_halluc = sum(r.hallucinated_items for r in scored_headline)
-        tot_expected = sum(r.total_measurable_expected for r in scored_headline)
-        tot_compared = sum(r.total_items_compared for r in scored_headline)
+        tot_exact = sum(r.exact_matches for r in headline_reports)
+        tot_w5 = sum(r.within_5_percent for r in headline_reports)
+        tot_w10 = sum(r.within_10_percent for r in headline_reports)
+        tot_w20 = sum(r.within_20_percent for r in headline_reports)
+        tot_gross = sum(r.gross_mismatches for r in headline_reports)
+        tot_missed = sum(r.missed_items for r in headline_reports)
+        tot_halluc = sum(r.hallucinated_items for r in headline_reports)
+        tot_expected = sum(r.total_measurable_expected for r in headline_reports)
+        tot_compared = sum(r.total_items_compared for r in headline_reports)
 
         tot_prelim = sum(r.preliminaries_excluded for r in headline_reports) + sum(
             r.preliminaries_excluded for r in stress_test_reports
@@ -1137,17 +1139,13 @@ class BenchmarkAccuracyEngine:
         )
 
         coverage_complete = len(incomplete_headline) == 0
-        if not scored_headline:
-            overall_acc = None
-            strict_acc = None
+        if not scored_headline or tot_compared <= 0:
+            overall_acc = None if not scored_headline else 0.0
+            strict_acc = None if not scored_headline else 0.0
         else:
             accepted = tot_exact + tot_w5
-            overall_acc = (
-                round((accepted / tot_compared) * 100.0, 2) if tot_compared > 0 else 0.0
-            )
-            strict_acc = (
-                round((tot_exact / tot_compared) * 100.0, 2) if tot_compared > 0 else 0.0
-            )
+            overall_acc = round((accepted / tot_compared) * 100.0, 2)
+            strict_acc = round((tot_exact / tot_compared) * 100.0, 2)
         if not coverage_complete:
             # Incomplete coverage must not look like a complete official percentage.
             overall_acc = None
