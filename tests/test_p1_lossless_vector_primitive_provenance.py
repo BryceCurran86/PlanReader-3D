@@ -1,17 +1,25 @@
 """Priority 1 residual: lossless vector-primitive provenance enrichment.
 
-Gold-free. Proves additive path_index / clip / native page-coordinate retention
-through extract_native_page → lineage source records, without inventing geometry
-or changing live ExtractedPrediction tags.
+Gold-free. Proves additive path_index / clip ternary / native page-coordinate
+retention through extract_native_page → lineage source records, without
+inventing geometry or changing live ExtractedPrediction tags.
 """
 from __future__ import annotations
 
+import json
+import math
 from pathlib import Path
+from typing import Any, Dict, List
+from unittest.mock import MagicMock
 
 import fitz
 
 from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
-from pb_vector_geometry_v130 import extract_native_page
+from pb_vector_geometry_v130 import (
+    _ClipAssociationTable,
+    _resolve_clip_fields,
+    extract_native_page,
+)
 from pb_wall_room_topology_primitive_lineage import (
     LINEAGE_KEY,
     lineage_from_source_segments,
@@ -30,6 +38,10 @@ def _page_with_clip_line() -> fitz.Page:
     # Keep doc alive via page.parent
     page._p1_doc = doc  # type: ignore[attr-defined]
     return page
+
+
+def _record_fingerprint(record: Dict[str, Any]) -> str:
+    return json.dumps(record, sort_keys=True, default=str, separators=(",", ":"))
 
 
 def test_extract_native_page_emits_structured_path_indices_without_changing_ids() -> None:
@@ -58,25 +70,309 @@ def test_extract_native_page_emits_structured_path_indices_without_changing_ids(
         assert edge["edge_index"] in {0, 1, 2, 3}
 
 
-def test_extract_native_page_associates_clip_scissor_without_inventing_when_absent() -> None:
+def test_a1_matched_seqno_known_no_active_clip() -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.draw_line((10, 10), (50, 10), color=(0, 0, 0), width=1)
+    native = extract_native_page(page)
+    doc.close()
+    seg = native["segments"][0]
+    assert seg["clip_known"] is True
+    assert seg["clip_present"] is False
+    assert seg["clip"] is None
+    record = source_record_from_segment(seg)
+    assert record["clip_known"] is True
+    assert record["clip_present"] is False
+
+
+def test_a1_active_rectangular_clip() -> None:
     page = _page_with_clip_line()
     native = extract_native_page(page)
     assert len(native["segments"]) == 1
     seg = native["segments"][0]
+    assert seg["clip_known"] is True
     assert seg["clip_present"] is True
     assert seg["clip"] is not None
     assert len(seg["clip"]) == 4
     # Clip association must not invent geometry endpoints.
     assert (seg["x1"], seg["y1"], seg["x2"], seg["y2"]) == (60.0, 60.0, 140.0, 140.0)
+    record = source_record_from_segment(seg)
+    assert record["clip_known"] is True
+    assert record["clip_present"] is True
 
+
+def test_a1_extended_drawing_api_unavailable() -> None:
+    page = MagicMock()
+    page.rect = fitz.Rect(0, 0, 100, 100)
+
+    def _get_drawings(*args: Any, **kwargs: Any) -> List[Dict[str, Any]]:
+        if kwargs.get("extended"):
+            raise RuntimeError("extended drawings unavailable")
+        return [
+            {
+                "width": 1.0,
+                "color": (0, 0, 0),
+                "fill": None,
+                "layer": "",
+                "dashes": "[] 0",
+                "seqno": 7,
+                "items": [("l", fitz.Point(0, 0), fitz.Point(40, 0))],
+            }
+        ]
+
+    page.get_drawings.side_effect = _get_drawings
+    page.get_text.return_value = []
+    native = extract_native_page(page)
+    seg = native["segments"][0]
+    assert seg["id"] == "d0i0"
+    assert seg["clip_known"] is False
+    assert seg["clip_present"] is False
+    assert seg["clip"] is None
+    # Unknown must never become evidence of unclipped.
+    record = source_record_from_segment(seg)
+    assert record["clip_known"] is False
+    assert record["clip_present"] is False
+
+
+def test_a1_missing_seqno() -> None:
+    page = MagicMock()
+    page.rect = fitz.Rect(0, 0, 100, 100)
+
+    def _get_drawings(*args: Any, **kwargs: Any) -> List[Dict[str, Any]]:
+        if kwargs.get("extended"):
+            return [
+                {
+                    "type": "s",
+                    "level": 0,
+                    "seqno": 1,
+                    "items": [],
+                }
+            ]
+        return [
+            {
+                "width": 1.0,
+                "color": (0, 0, 0),
+                "fill": None,
+                "layer": "",
+                "dashes": "[] 0",
+                # seqno intentionally absent
+                "items": [("l", fitz.Point(0, 0), fitz.Point(40, 0))],
+            }
+        ]
+
+    page.get_drawings.side_effect = _get_drawings
+    page.get_text.return_value = []
+    native = extract_native_page(page)
+    seg = native["segments"][0]
+    assert seg["clip_known"] is False
+    assert seg["clip_present"] is False
+    assert seg["clip"] is None
+
+
+def test_a1_unmatched_seqno() -> None:
+    page = MagicMock()
+    page.rect = fitz.Rect(0, 0, 100, 100)
+
+    def _get_drawings(*args: Any, **kwargs: Any) -> List[Dict[str, Any]]:
+        if kwargs.get("extended"):
+            return [
+                {
+                    "type": "s",
+                    "level": 0,
+                    "seqno": 99,
+                    "items": [],
+                }
+            ]
+        return [
+            {
+                "width": 1.0,
+                "color": (0, 0, 0),
+                "fill": None,
+                "layer": "",
+                "dashes": "[] 0",
+                "seqno": 3,
+                "items": [("l", fitz.Point(0, 0), fitz.Point(40, 0))],
+            }
+        ]
+
+    page.get_drawings.side_effect = _get_drawings
+    page.get_text.return_value = []
+    native = extract_native_page(page)
+    seg = native["segments"][0]
+    assert seg["clip_known"] is False
+    assert seg["clip_present"] is False
+    assert seg["clip"] is None
+
+
+def test_a1_clip_states_serialize_to_different_provenance_records() -> None:
+    known_none = source_record_from_segment(
+        {
+            "id": "d0i0",
+            "kind": "line",
+            "x1": 0.0,
+            "y1": 0.0,
+            "x2": 10.0,
+            "y2": 0.0,
+            "clip": None,
+            "clip_present": False,
+            "clip_known": True,
+            "path_index": 0,
+            "item_index": 0,
+        }
+    )
+    active = source_record_from_segment(
+        {
+            "id": "d0i0",
+            "kind": "line",
+            "x1": 0.0,
+            "y1": 0.0,
+            "x2": 10.0,
+            "y2": 0.0,
+            "clip": [0.0, 0.0, 50.0, 50.0],
+            "clip_present": True,
+            "clip_known": True,
+            "path_index": 0,
+            "item_index": 0,
+        }
+    )
+    unknown = source_record_from_segment(
+        {
+            "id": "d0i0",
+            "kind": "line",
+            "x1": 0.0,
+            "y1": 0.0,
+            "x2": 10.0,
+            "y2": 0.0,
+            "clip": None,
+            "clip_present": False,
+            "clip_known": False,
+            "path_index": 0,
+            "item_index": 0,
+        }
+    )
+    fingerprints = {
+        _record_fingerprint(known_none),
+        _record_fingerprint(active),
+        _record_fingerprint(unknown),
+    }
+    assert len(fingerprints) == 3
+    # known-no-clip must not equal unknown
+    assert known_none["clip_known"] is True
+    assert unknown["clip_known"] is False
+    assert known_none["clip_present"] is False
+    assert unknown["clip_present"] is False
+
+
+def test_resolve_clip_fields_table_contract() -> None:
+    table = _ClipAssociationTable(
+        available=True,
+        by_seqno={1: None, 2: (0.0, 0.0, 10.0, 10.0)},
+    )
+    assert _resolve_clip_fields(clip_table=table, seq_key=1) == (True, False, None)
+    assert _resolve_clip_fields(clip_table=table, seq_key=2) == (
+        True,
+        True,
+        (0.0, 0.0, 10.0, 10.0),
+    )
+    assert _resolve_clip_fields(clip_table=table, seq_key=3) == (False, False, None)
+    assert _resolve_clip_fields(clip_table=table, seq_key=None) == (False, False, None)
+    unavailable = _ClipAssociationTable(available=False, by_seqno={})
+    assert _resolve_clip_fields(clip_table=unavailable, seq_key=1) == (False, False, None)
+
+
+def test_a2_non_finite_page_coords_are_not_claimed_present() -> None:
+    base = {
+        "id": "d0i0",
+        "kind": "line",
+        "path_index": 0,
+        "item_index": 0,
+        "clip_known": True,
+        "clip_present": False,
+        "clip": None,
+    }
+    cases = [
+        {"x1": math.nan, "y1": 0.0, "x2": 10.0, "y2": 0.0},
+        {"x1": 0.0, "y1": math.inf, "x2": 10.0, "y2": 0.0},
+        {"x1": 0.0, "y1": 0.0, "x2": -math.inf, "y2": 0.0},
+        {"x1": math.nan, "y1": math.inf, "x2": -math.inf, "y2": math.nan},
+    ]
+    for coords in cases:
+        record = source_record_from_segment({**base, **coords})
+        assert record["page_coords_present"] is False
+        # Must not silently coerce non-finite geometry to zero.
+        for field, raw in coords.items():
+            assert field in record
+            if math.isnan(raw):
+                assert math.isnan(record[field])
+            else:
+                assert record[field] == raw
+
+
+def test_a2_extract_native_page_skips_non_finite_line_geometry() -> None:
+    page = MagicMock()
+    page.rect = fitz.Rect(0, 0, 100, 100)
+
+    class _BadPoint:
+        def __init__(self, x: float, y: float) -> None:
+            self.x = x
+            self.y = y
+
+    def _get_drawings(*args: Any, **kwargs: Any) -> List[Dict[str, Any]]:
+        if kwargs.get("extended"):
+            return [{"type": "s", "level": 0, "seqno": 0, "items": []}]
+        return [
+            {
+                "width": 1.0,
+                "color": (0, 0, 0),
+                "fill": None,
+                "layer": "",
+                "dashes": "[] 0",
+                "seqno": 0,
+                "items": [
+                    ("l", _BadPoint(math.nan, 0.0), _BadPoint(10.0, 0.0)),
+                    ("l", _BadPoint(0.0, math.inf), _BadPoint(10.0, 0.0)),
+                    ("l", _BadPoint(0.0, 0.0), _BadPoint(-math.inf, 0.0)),
+                    ("l", _BadPoint(0.0, 0.0), _BadPoint(40.0, 0.0)),
+                ],
+            }
+        ]
+
+    page.get_drawings.side_effect = _get_drawings
+    page.get_text.return_value = []
+    native = extract_native_page(page)
+    assert len(native["segments"]) == 1
+    seg = native["segments"][0]
+    assert seg["id"] == "d0i3"
+    assert all(math.isfinite(seg[f]) for f in ("x1", "y1", "x2", "y2"))
+
+
+def test_a3_presence_flags_follow_pymupdf_key_contract() -> None:
+    """A3 audit: stroke/fill/width/dashes/layer keys are always on drawings.
+
+    PyMuPDF ``get_drawings()`` emits those keys on every dict observed in the
+    contract probe. Known absence is ``None`` (or ``\"\"`` for layer); there is
+    no separate upstream “not supplied” state requiring new ``*_known`` flags.
+    Clip remains the fallible association that needs ``clip_known``.
+    """
     doc = fitz.open()
-    plain = doc.new_page()
-    plain.draw_line((10, 10), (50, 10), color=(0, 0, 0), width=1)
-    plain_native = extract_native_page(plain)
+    page = doc.new_page()
+    page.draw_line((10, 10), (50, 10), color=(0, 0, 0), width=1.5)
+    page.draw_rect(fitz.Rect(30, 30, 40, 40), color=None, fill=(1, 0, 0), width=0)
+    drawings = page.get_drawings()
+    required = {"color", "fill", "width", "dashes", "layer"}
+    for drawing in drawings:
+        assert required.issubset(drawing.keys())
+    native = extract_native_page(page)
     doc.close()
-    plain_seg = plain_native["segments"][0]
-    assert plain_seg["clip_present"] is False
-    assert plain_seg["clip"] is None
+    stroke_seg = next(s for s in native["segments"] if s["kind"] == "line")
+    assert stroke_seg["stroke_present"] is True
+    assert stroke_seg["fill_present"] is False
+    assert stroke_seg["width_present"] is True
+    assert "clip_known" in stroke_seg
+    fill_edges = [s for s in native["segments"] if s["kind"] == "rect_edge"]
+    assert fill_edges
+    assert fill_edges[0]["stroke_present"] is False
+    assert fill_edges[0]["fill_present"] is True
 
 
 def test_source_record_retains_path_indices_page_coords_and_clip_status() -> None:
@@ -93,6 +389,7 @@ def test_source_record_retains_path_indices_page_coords_and_clip_status() -> Non
         seg["y2"],
     )
     assert record["clip_present"] is True
+    assert record["clip_known"] is True
     lineage = lineage_from_source_segments([seg])
     assert lineage["attribute_status"]["clip"] == "agreed"
     assert "clip" in lineage["attribute_status"]
@@ -108,6 +405,7 @@ def test_conflicting_clips_mark_attribute_conflict() -> None:
         "y2": 0.0,
         "clip": [0.0, 0.0, 50.0, 50.0],
         "clip_present": True,
+        "clip_known": True,
         "path_index": 0,
         "item_index": 0,
     }
@@ -120,6 +418,7 @@ def test_conflicting_clips_mark_attribute_conflict() -> None:
         "y2": 0.0,
         "clip": [10.0, 10.0, 60.0, 60.0],
         "clip_present": True,
+        "clip_known": True,
         "path_index": 1,
         "item_index": 0,
     }
