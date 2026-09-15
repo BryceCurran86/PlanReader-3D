@@ -13,6 +13,7 @@ from pb_customer_benchmark_authority_parity import (
     SHADOW_AUTHORITY_PROVISIONAL_LIVE_ONLY,
     collect_parity_shadow_for_pdf,
     decide_parity,
+    diagnostic_claim_quantity_id,
     publication_decision_for_prediction,
     takeoff_row_candidate_from_prediction,
 )
@@ -126,6 +127,62 @@ def test_unblocked_live_prediction_never_becomes_firm() -> None:
     assert decision.takeoff_row.authority_status != AuthorityStatus.FIRM.value
     assert decision.takeoff_row.is_publishable is False
     assert decision.takeoff_row.authority_status == AuthorityStatus.PROVISIONAL.value
+
+
+def test_same_tag_same_page_distinct_evidence_keeps_distinct_shadow_ids() -> None:
+    """Same tag + page must never collapse distinct physical/extractor claims."""
+    left = _pred(
+        tag="D1",
+        quantity=1.0,
+        source_page=1,
+        bounding_box=[10.0, 20.0, 30.0, 40.0],
+        metadata={"raw_evidence_ref": "door_instance_a"},
+    )
+    right = _pred(
+        tag="D1",
+        quantity=1.0,
+        source_page=1,
+        bounding_box=[100.0, 200.0, 130.0, 240.0],
+        metadata={"raw_evidence_ref": "door_instance_b"},
+    )
+    left_id = diagnostic_claim_quantity_id(left)
+    right_id = diagnostic_claim_quantity_id(right)
+    assert left_id != right_id
+    assert not left_id.endswith(":1")
+    assert "parity-shadow:D1:1" not in (left_id, right_id)
+
+    left_row = takeoff_row_candidate_from_prediction(left)
+    right_row = takeoff_row_candidate_from_prediction(right)
+    assert left_row is not None and right_row is not None
+    assert left_row.quantity_id == left_id
+    assert right_row.quantity_id == right_id
+    assert left_row.quantity_id != right_row.quantity_id
+
+    # Distinct scoped-claim provenance also must not collapse.
+    scoped_a = _pred(
+        tag="W1",
+        trade_type="windows",
+        quantity=2.0,
+        source_page=3,
+        bounding_box=None,
+        metadata={
+            "scoped_claims": [{"tag": "W1", "quantity": 2.0, "source_page": 3, "ref": "a"}],
+        },
+    )
+    scoped_b = _pred(
+        tag="W1",
+        trade_type="windows",
+        quantity=2.0,
+        source_page=3,
+        bounding_box=None,
+        metadata={
+            "scoped_claims": [{"tag": "W1", "quantity": 2.0, "source_page": 3, "ref": "b"}],
+        },
+    )
+    assert diagnostic_claim_quantity_id(scoped_a) != diagnostic_claim_quantity_id(scoped_b)
+
+    # Replay is deterministic for the same claim content.
+    assert diagnostic_claim_quantity_id(left) == diagnostic_claim_quantity_id(left)
 
 
 def test_same_prediction_matches_extractor_publication_gates() -> None:

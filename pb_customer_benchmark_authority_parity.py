@@ -13,6 +13,7 @@ from typing import Any, Mapping, Optional, Sequence
 
 from pb_geometry_takeoff_model import AuthorityStatus
 from pb_legacy_extractor_adapter import LegacyExtractorAdapter, LegacyPredictionSnapshot
+from pb_migration_contracts import stable_contract_id
 from pb_planreader_pdf_extractor import (
     ExtractedPrediction,
     extracted_prediction_publication_blocked,
@@ -130,6 +131,51 @@ def parity_claim_from_prediction(prediction: ExtractedPrediction) -> ParityClaim
     )
 
 
+def diagnostic_claim_quantity_id(prediction: ExtractedPrediction) -> str:
+    """Deterministic diagnostic identity for a shadow takeoff projection.
+
+    Same tag + page alone never collapses distinct claims. The payload mirrors
+    extractor claim/evidence discriminators (quantity, dimensions, bbox,
+    ``raw_evidence_ref``, scoped claims / provenance) and is hashed with
+    ``stable_contract_id``. This is diagnostic shadow identity only — not
+    physical-instance authority, commercial quantity authority, or PROVEN_SAME.
+    Confidence is intentionally excluded (detection is not identity).
+    """
+    metadata = prediction.metadata or {}
+    dimensions = (
+        [float(v) for v in prediction.dimensions]
+        if prediction.dimensions is not None
+        else None
+    )
+    bounding_box = None
+    if prediction.bounding_box is not None:
+        bounding_box = [float(v) for v in prediction.bounding_box]
+    payload = {
+        "kind": "parity_shadow_claim",
+        "tag": prediction.tag,
+        "trade_type": prediction.trade_type,
+        "unit": prediction.unit,
+        "description": prediction.description,
+        "source_page": int(prediction.source_page),
+        "sheet_number": prediction.sheet_number,
+        "quantity": prediction.quantity,
+        "dimensions": dimensions,
+        "bounding_box": bounding_box,
+        "raw_evidence_ref": metadata.get("raw_evidence_ref") or "",
+        "scoped_claims": metadata.get("scoped_claims"),
+        "merge_source": metadata.get("merge_source") or "",
+        "reconciliation_status": metadata.get("reconciliation_status") or "",
+        "extraction_status": metadata.get("extraction_status") or "",
+        "blocking_reason": metadata.get("blocking_reason") or "",
+        "opening_instance_id": (
+            metadata.get("opening_instance_id")
+            or metadata.get("instance_id")
+            or ""
+        ),
+    }
+    return stable_contract_id("parity_shadow", payload)
+
+
 def takeoff_row_candidate_from_prediction(
     prediction: ExtractedPrediction,
 ) -> Optional[TakeoffOutputRow]:
@@ -140,7 +186,7 @@ def takeoff_row_candidate_from_prediction(
     3. Publication gate allows quantity → still SHADOW / non-FIRM / non-publishable.
     """
     blocked, publishable = publication_decision_for_prediction(prediction)
-    quantity_id = f"parity-shadow:{prediction.tag}:{int(prediction.source_page)}"
+    quantity_id = diagnostic_claim_quantity_id(prediction)
     reasons = list(blocking_reasons_for_prediction(prediction))
 
     if blocked:
