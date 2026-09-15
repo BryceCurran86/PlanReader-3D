@@ -53,7 +53,6 @@ _KIND_TO_FAMILY = {
     FAMILY_VALID_JUNCTION_BEHAVIOR: FAMILY_VALID_JUNCTION_BEHAVIOR,
 }
 
-# Same corroborating-domain set as #286: junction/graph topology is contextual only.
 _CORROBORATING_DOMAINS = frozenset(
     {
         EvidenceDomain.NATIVE_METADATA,
@@ -89,12 +88,7 @@ def _atom_status_value(atom: _AtomLike) -> str:
 
 
 def _atom_content_key(atom: _AtomLike) -> str:
-    """Fingerprint the complete immutable EvidenceAtom contract.
-
-    Prefer canonical serialization of ``EvidenceAtom.to_dict()`` so every
-    immutable field (including bbox, confidence, schema_version) participates.
-    Mapping inputs are fingerprinted as their full plain mapping.
-    """
+    """Fingerprint the complete immutable EvidenceAtom contract."""
     if isinstance(atom, EvidenceAtom):
         return canonical_contract_json(atom.to_dict())
     if isinstance(atom, Mapping):
@@ -103,12 +97,7 @@ def _atom_content_key(atom: _AtomLike) -> str:
 
 
 def _index_atoms(atoms: Sequence[_AtomLike]) -> tuple[dict[str, _AtomLike], frozenset[str]]:
-    """Index atoms without last-write-wins.
-
-    Identical same-id copies collapse to one observation. Same-id atoms with
-    differing content are removed and reported as collisions. Order cannot
-    change which content wins because conflicting content never wins.
-    """
+    """Index atoms without last-write-wins."""
     first: dict[str, _AtomLike] = {}
     content_by_id: dict[str, str] = {}
     collisions: set[str] = set()
@@ -166,12 +155,7 @@ def _atom_snapshot_ownership_reasons(
     context: ProviderContext,
     document: DocumentEvidence,
 ) -> tuple[str, ...]:
-    """Prove atom belongs to the current source SHA / revision / evidence snapshot.
-
-    EvidenceAtom has no revision field; ownership uses existing metadata seams
-    ``revision_id``, ``evidence_snapshot_id``, and ``source_sha256``. Missing
-    proof abstains rather than trusting document/page/viewport alone.
-    """
+    """Prove atom belongs to the current source SHA / revision / evidence snapshot."""
     reasons: list[str] = []
     if not context.revision_id or not context.current_revision_id:
         return ("existence_context_revision_unbound",)
@@ -218,10 +202,50 @@ def _atom_target_ownership_reasons(
         reasons.append("existence_atom_viewport_mismatch")
     if not _atom_bound_to_wall(atom, wall):
         reasons.append("existence_atom_not_bound_to_wall")
-    reasons.extend(
-        _atom_snapshot_ownership_reasons(atom, context=context, document=document)
-    )
+    reasons.extend(_atom_snapshot_ownership_reasons(atom, context=context, document=document))
     return tuple(dict.fromkeys(reasons))
+
+
+def _discover_owned_opposing_ids(
+    *,
+    catalog: Mapping[str, _AtomLike],
+    wall: WallCandidate,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+    context: ProviderContext,
+) -> tuple[str, ...]:
+    """Discover current target-bound opposing atoms from the supplied catalog.
+
+    Caller-curated ``wall.conflicting_evidence_ids`` is not a complete
+    authority universe.  Typed negative evidence carries explicit
+    ``metadata['polarity'] == 'opposing'``; if such an atom is document-owned,
+    current, and bound to this wall, its existence cannot be hidden by
+    omitting its id from the WallCandidate.
+    """
+    owned_document_ids = set(document.evidence_ids)
+    discovered: list[str] = []
+    for evidence_id, atom in catalog.items():
+        if evidence_id not in owned_document_ids:
+            continue
+        if str(_atom_metadata(atom).get("polarity") or "").strip().lower() != "opposing":
+            continue
+        if _atom_status_value(atom) not in {
+            EvidenceResolutionStatus.CANDIDATE.value,
+            EvidenceResolutionStatus.CORROBORATED.value,
+        }:
+            continue
+        if not _atom_bound_to_wall(atom, wall):
+            continue
+        if _atom_target_ownership_reasons(
+            atom,
+            wall=wall,
+            document=document,
+            viewport=viewport,
+            context=context,
+        ):
+            continue
+        discovered.append(evidence_id)
+    return tuple(sorted(set(discovered)))
 
 
 def bind_additional_wall_owned_evidence(
@@ -257,14 +281,23 @@ def resolve_physical_wall_existence(
 ) -> EvidenceAtom:
     """Mint one existence atom from owned supporting/opposing source atoms.
 
-    Existence is CORROBORATED only when two or more *independent causal
-    domains* support the wall and no opposing atoms are present. Thickness,
-    height, scale, and scope are out of scope. Source atoms must prove current
-    revision/snapshot ownership; document/page/viewport alone is insufficient.
+    Existence is CORROBORATED only when two or more independent causal
+    domains provide admissible support and no current owned opposing atom is
+    present.  Opposition is discovered from the supplied evidence catalog as
+    well as the caller-carried WallCandidate ids, so omission cannot strengthen
+    authority.
     """
     catalog, collided_ids = _index_atoms(evidence_atoms)
     supporting_ids = tuple(wall.supporting_evidence_ids)
-    opposing_ids = tuple(wall.conflicting_evidence_ids)
+    declared_opposing_ids = tuple(wall.conflicting_evidence_ids)
+    discovered_opposing_ids = _discover_owned_opposing_ids(
+        catalog=catalog,
+        wall=wall,
+        document=document,
+        viewport=viewport,
+        context=context,
+    )
+    opposing_ids = tuple(dict.fromkeys((*declared_opposing_ids, *discovered_opposing_ids)))
 
     blockers: list[str] = []
     families_present: set[str] = set()
@@ -292,6 +325,13 @@ def resolve_physical_wall_existence(
         )
         if ownership:
             blockers.extend(ownership)
+            continue
+        source_status = _atom_status_value(atom)
+        if source_status in {
+            EvidenceResolutionStatus.CONFLICT.value,
+            EvidenceResolutionStatus.ABSTAINED.value,
+        }:
+            blockers.append(f"existence_support_atom_status_{source_status}")
             continue
         family = _family_for_kind(str(_atom_field(atom, "kind") or ""))
         if family is None:
@@ -424,14 +464,7 @@ def adapt_wall_candidate_to_entity_evidence(
     context: ProviderContext,
     additional_owned_evidence_ids: Sequence[str] = (),
 ) -> Optional[EntityEvidence]:
-    """WallCandidate → EntityEvidence using typed existence, not wall.status.
-
-    ``evidence_ids`` are the wall's real supporting/conflicting ids plus any
-    extra ids that pass ``bind_additional_wall_owned_evidence`` (figured
-    dimension, document-owned, and bound to this wall). Raw document-owned
-    IDs are not authority. Existence status never consults extras.
-    Missing ownership or empty real provenance returns None (abstain).
-    """
+    """WallCandidate → EntityEvidence using typed existence, not wall.status."""
     if wall.viewport_id != viewport.viewport_id:
         return None
     if document.document_id != context.document_id:
@@ -451,7 +484,16 @@ def adapt_wall_candidate_to_entity_evidence(
         viewport=viewport,
         context=context,
     )
-    real_ids = tuple(dict.fromkeys((*wall.supporting_evidence_ids, *wall.conflicting_evidence_ids)))
+    existence_opposing_ids = tuple(existence.metadata.get("opposing_evidence_ids") or ())
+    real_ids = tuple(
+        dict.fromkeys(
+            (
+                *wall.supporting_evidence_ids,
+                *wall.conflicting_evidence_ids,
+                *existence_opposing_ids,
+            )
+        )
+    )
     extra_ids: list[str] = []
     for raw_id in additional_owned_evidence_ids:
         evidence_id = str(raw_id or "").strip()
@@ -475,7 +517,7 @@ def adapt_wall_candidate_to_entity_evidence(
     if not set(evidence_ids).issubset(set(document.evidence_ids)):
         return None
 
-    conflict_ids = tuple(wall.conflicting_evidence_ids)
+    conflict_ids = existence_opposing_ids
     status = existence.status
     if status == EvidenceResolutionStatus.CORROBORATED:
         conflict_ids = ()
