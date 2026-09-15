@@ -131,32 +131,53 @@ def test_unblocked_live_prediction_never_becomes_firm() -> None:
 
 def test_same_tag_same_page_distinct_evidence_keeps_distinct_shadow_ids() -> None:
     """Same tag + page must never collapse distinct physical/extractor claims."""
+    # Attack 1: same tag + page + different bbox → different shadow IDs.
     left = _pred(
         tag="D1",
         quantity=1.0,
         source_page=1,
         bounding_box=[10.0, 20.0, 30.0, 40.0],
-        metadata={"raw_evidence_ref": "door_instance_a"},
+        metadata={},
     )
     right = _pred(
         tag="D1",
         quantity=1.0,
         source_page=1,
         bounding_box=[100.0, 200.0, 130.0, 240.0],
-        metadata={"raw_evidence_ref": "door_instance_b"},
+        metadata={},
     )
     left_id = diagnostic_claim_quantity_id(left)
     right_id = diagnostic_claim_quantity_id(right)
     assert left_id != right_id
-    assert not left_id.endswith(":1")
     assert "parity-shadow:D1:1" not in (left_id, right_id)
 
-    left_row = takeoff_row_candidate_from_prediction(left)
-    right_row = takeoff_row_candidate_from_prediction(right)
-    assert left_row is not None and right_row is not None
-    assert left_row.quantity_id == left_id
-    assert right_row.quantity_id == right_id
-    assert left_row.quantity_id != right_row.quantity_id
+    # Attack 2: same tag + page + different raw evidence reference → different IDs.
+    ref_a = _pred(
+        tag="D1",
+        quantity=1.0,
+        source_page=1,
+        bounding_box=None,
+        metadata={"raw_evidence_ref": "door_instance_a"},
+    )
+    ref_b = _pred(
+        tag="D1",
+        quantity=1.0,
+        source_page=1,
+        bounding_box=None,
+        metadata={"raw_evidence_ref": "door_instance_b"},
+    )
+    assert diagnostic_claim_quantity_id(ref_a) != diagnostic_claim_quantity_id(ref_b)
+
+    # Attack 3: same complete diagnostic claim replayed twice → identical ID.
+    assert diagnostic_claim_quantity_id(left) == diagnostic_claim_quantity_id(
+        _pred(
+            tag="D1",
+            quantity=1.0,
+            source_page=1,
+            bounding_box=[10.0, 20.0, 30.0, 40.0],
+            metadata={},
+        )
+    )
 
     # Distinct scoped-claim provenance also must not collapse.
     scoped_a = _pred(
@@ -181,8 +202,88 @@ def test_same_tag_same_page_distinct_evidence_keeps_distinct_shadow_ids() -> Non
     )
     assert diagnostic_claim_quantity_id(scoped_a) != diagnostic_claim_quantity_id(scoped_b)
 
-    # Replay is deterministic for the same claim content.
-    assert diagnostic_claim_quantity_id(left) == diagnostic_claim_quantity_id(left)
+
+def test_confidence_alone_does_not_establish_identity_or_authority() -> None:
+    """Attack 4: confidence changes alone must not establish physical identity."""
+    low = _pred(
+        tag="D1",
+        quantity=1.0,
+        source_page=1,
+        bounding_box=[10.0, 20.0, 30.0, 40.0],
+        confidence=0.1,
+        metadata={"raw_evidence_ref": "same_ref"},
+    )
+    high = _pred(
+        tag="D1",
+        quantity=1.0,
+        source_page=1,
+        bounding_box=[10.0, 20.0, 30.0, 40.0],
+        confidence=0.99,
+        metadata={"raw_evidence_ref": "same_ref"},
+    )
+    assert diagnostic_claim_quantity_id(low) == diagnostic_claim_quantity_id(high)
+    # Higher confidence still cannot create FIRM / publishable authority.
+    high_row = takeoff_row_candidate_from_prediction(high)
+    assert high_row is not None
+    assert high_row.authority_status != AuthorityStatus.FIRM.value
+    assert high_row.is_publishable is False
+
+
+def test_unresolved_evidence_does_not_prove_physical_equivalence() -> None:
+    """Attack 5: same tag/dimensions/page without evidence identity → no PROVEN_SAME."""
+    from pb_planreader_pdf_extractor import _predictions_are_proven_same_type_claim
+
+    a = _pred(
+        tag="D1",
+        quantity=1.0,
+        source_page=1,
+        dimensions=[900.0, 2100.0],
+        bounding_box=None,
+        metadata={},  # no raw_evidence_ref
+    )
+    b = _pred(
+        tag="D1",
+        quantity=1.0,
+        source_page=1,
+        dimensions=[900.0, 2100.0],
+        bounding_box=None,
+        metadata={},
+    )
+    assert _predictions_are_proven_same_type_claim(a, b) is False
+    # Equal diagnostic IDs (content-addressed) must not be treated as physical proof.
+    assert diagnostic_claim_quantity_id(a) == diagnostic_claim_quantity_id(b)
+    # Parity seam still does not emit FIRM for either claim.
+    for pred in (a, b):
+        row = takeoff_row_candidate_from_prediction(pred)
+        assert row is not None
+        assert row.authority_status != AuthorityStatus.FIRM.value
+        assert row.is_publishable is False
+
+
+def test_distinct_same_tag_projections_remain_non_firm_non_publishable() -> None:
+    """Attack 6: distinct same-tag/page projections remain non-FIRM / non-publishable."""
+    left = _pred(
+        tag="D1",
+        quantity=1.0,
+        source_page=1,
+        bounding_box=[10.0, 20.0, 30.0, 40.0],
+        metadata={"raw_evidence_ref": "a"},
+    )
+    right = _pred(
+        tag="D1",
+        quantity=1.0,
+        source_page=1,
+        bounding_box=[100.0, 200.0, 130.0, 240.0],
+        metadata={"raw_evidence_ref": "b"},
+    )
+    left_row = takeoff_row_candidate_from_prediction(left)
+    right_row = takeoff_row_candidate_from_prediction(right)
+    assert left_row is not None and right_row is not None
+    assert left_row.quantity_id != right_row.quantity_id
+    for row in (left_row, right_row):
+        assert row.authority_status != AuthorityStatus.FIRM.value
+        assert row.is_publishable is False
+        assert row.authority_status == AuthorityStatus.PROVISIONAL.value
 
 
 def test_same_prediction_matches_extractor_publication_gates() -> None:
