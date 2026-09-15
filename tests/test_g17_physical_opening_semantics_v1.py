@@ -382,7 +382,7 @@ def test_absence_of_opening_like_observation_is_not_zero_physical_openings() -> 
 def test_phase2_does_not_claim_universe_dimensions_host_or_void_authority() -> None:
     fields = PhysicalOpeningAuthority.capabilities()
     assert fields == {
-        "physical_opening_existence": False,
+        "physical_opening_existence": True,
         "physical_opening_identity": False,
         "opening_universe_complete": False,
         "opening_dimensions": False,
