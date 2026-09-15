@@ -1,23 +1,24 @@
 """Canonical opening identity/universe authority contracts.
 
-This module deliberately does *not* manufacture authority from local query results or
-caller metadata.  At the current main-line trust boundary there is no independently
-queryable immutable source-atom/graph universe, and there is no independently
-inspectable opening-observation lineage producer.  The canonical implementation
-therefore exposes that absence as a typed fail-closed state.
+This module deliberately does not manufacture authority from local query results or
+caller metadata.  Current main has provenance identifiers, but no independently
+queryable immutable source-atom/graph universe and no independently inspectable
+opening-observation lineage producer.  The canonical implementation therefore
+exposes that absence as a typed fail-closed state.
 
 The missing upstream capability is a producer which can, for a provenance-bound
-scope, independently inspect the immutable source evidence and:
+scope, independently inspect immutable source evidence and:
 
-* enumerate every eligible opening/source atom before local radius/filtering;
-* enumerate every eligible host candidate before local radius/filtering; and
-* resolve observation lineage/identity from traceable evidence IDs.
+* prove an opening observation exists in that source scope;
+* resolve observation lineage/physical identity from traceable evidence IDs;
+* enumerate every eligible opening before local radius/filtering;
+* enumerate every eligible host before local radius/filtering; and
+* prove host identity and host binding independently of spatial nomination.
 
-The producer must bind source SHA, revision, evidence snapshot, graph snapshot,
-page, viewport and target evidence/observation IDs.  A local candidate list,
-``complete=True`` flag, tag, dimensions, proximity, bbox overlap, confidence,
-schedule row, caller identity flag, self-hash or caller lineage claim is not such a
-producer.
+It must bind source SHA, revision, evidence snapshot, graph snapshot, page, viewport,
+evidence IDs and target observations.  A local candidate list, ``complete=True``,
+tag, dimensions, proximity, bbox overlap, confidence, schedule row, caller identity
+flag, caller lineage claim or caller-created self-hash is not authority.
 """
 
 from __future__ import annotations
@@ -33,16 +34,12 @@ AUTHORITATIVE_UPSTREAM_UNIVERSE_UNAVAILABLE = (
 
 
 class IdentityRelation(str, Enum):
-    """Authoritative relation between two physical-opening observations."""
-
     PROVEN_SAME = "PROVEN_SAME"
     PROVEN_DISTINCT = "PROVEN_DISTINCT"
     AMBIGUOUS = "AMBIGUOUS"
 
 
 class UpstreamUniverseState(str, Enum):
-    """Availability of an independently bounded canonical candidate universe."""
-
     AVAILABLE = "AVAILABLE"
     AUTHORITATIVE_UPSTREAM_UNIVERSE_UNAVAILABLE = (
         AUTHORITATIVE_UPSTREAM_UNIVERSE_UNAVAILABLE
@@ -50,8 +47,6 @@ class UpstreamUniverseState(str, Enum):
 
 
 class HostBindingRelation(str, Enum):
-    """Authoritative physical relation between an opening and a host."""
-
     PROVEN_BOUND = "PROVEN_BOUND"
     PROVEN_NOT_BOUND = "PROVEN_NOT_BOUND"
     AMBIGUOUS = "AMBIGUOUS"
@@ -59,8 +54,6 @@ class HostBindingRelation(str, Enum):
 
 @dataclass(frozen=True)
 class AuthorityScope:
-    """Provenance boundary required for identity/universe decisions."""
-
     source_sha256: str
     source_revision_id: str
     evidence_snapshot_id: str
@@ -82,7 +75,7 @@ class AuthorityScope:
 
 @dataclass(frozen=True)
 class OpeningObservation:
-    """Observation descriptor; caller correlation fields are non-authoritative."""
+    """Observation descriptor; correlation fields remain non-authoritative."""
 
     observation_id: str
     scope: AuthorityScope
@@ -108,13 +101,21 @@ class OpeningObservation:
 
 @dataclass(frozen=True)
 class LocalCandidateQuery:
-    """Diagnostic/local query result that is explicitly not a completeness proof."""
+    """Diagnostic/local query result; never a completeness proof."""
 
     scope: AuthorityScope
     candidate_ids: tuple[str, ...]
     caller_complete: bool = False
     radius_mm: float | None = None
     filters: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class OpeningExistenceDecision:
+    proven: bool
+    authoritative_observation_id: str | None = None
+    evidence_ids: tuple[str, ...] = ()
+    blockers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -136,6 +137,7 @@ class CandidateUniverseDecision:
 @dataclass(frozen=True)
 class HostAuthorityDecision:
     universe: CandidateUniverseDecision
+    host_identity: IdentityRelation
     binding: HostBindingRelation
     authoritative_host_id: str | None
     authoritative: bool
@@ -161,14 +163,22 @@ class CanonicalOpeningAuthorityProducer(Protocol):
     """Required future trust-boundary interface.
 
     A conforming implementation must inspect an upstream immutable evidence/graph
-    source itself.  Implementations must not derive completeness from a list supplied
-    by the local caller which is asking the completeness question.
+    source itself.  It must not derive completeness or identity from the local caller
+    asking the question.
     """
+
+    def prove_opening_existence(
+        self, observation: OpeningObservation
+    ) -> OpeningExistenceDecision:
+        """Prove the observation exists in the independently bounded source scope."""
+
+    def identify_opening(self, observation: OpeningObservation) -> IdentityDecision:
+        """Relate the observation to a canonical physical opening using lineage."""
 
     def resolve_identity(
         self, left: OpeningObservation, right: OpeningObservation
     ) -> IdentityDecision:
-        """Resolve physical identity from independently inspectable lineage evidence."""
+        """Resolve SAME/DISTINCT/AMBIGUOUS from independently inspected evidence."""
 
     def enumerate_openings(self, scope: AuthorityScope) -> CandidateUniverseDecision:
         """Enumerate all eligible openings in the independently bounded scope."""
@@ -181,13 +191,31 @@ class CanonicalOpeningAuthorityProducer(Protocol):
     def bind_host(
         self, opening: OpeningObservation, host_id: str, scope: AuthorityScope
     ) -> HostAuthorityDecision:
-        """Prove or reject a host relation from upstream evidence."""
+        """Prove host identity and physical binding from upstream evidence."""
 
 
 class _UnavailableCanonicalOpeningAuthorityProducer:
-    """Current-main implementation: expose the missing trust source, fail closed."""
+    """Current-main producer: expose missing upstream authority and fail closed."""
 
     _unavailable = (AUTHORITATIVE_UPSTREAM_UNIVERSE_UNAVAILABLE,)
+
+    def prove_opening_existence(
+        self, observation: OpeningObservation
+    ) -> OpeningExistenceDecision:
+        blockers = list(self._unavailable)
+        if not observation.provenance_complete:
+            blockers.append("opening_existence_provenance_incomplete")
+        return OpeningExistenceDecision(proven=False, blockers=tuple(blockers))
+
+    def identify_opening(self, observation: OpeningObservation) -> IdentityDecision:
+        blockers = list(self._unavailable)
+        if not observation.provenance_complete:
+            blockers.append("opening_identity_provenance_incomplete")
+        return IdentityDecision(
+            relation=IdentityRelation.AMBIGUOUS,
+            authoritative=False,
+            blockers=tuple(blockers),
+        )
 
     def resolve_identity(
         self, left: OpeningObservation, right: OpeningObservation
@@ -228,9 +256,11 @@ class _UnavailableCanonicalOpeningAuthorityProducer:
     def bind_host(
         self, opening: OpeningObservation, host_id: str, scope: AuthorityScope
     ) -> HostAuthorityDecision:
+        del host_id
         universe = self.enumerate_hosts(opening, scope)
         return HostAuthorityDecision(
             universe=universe,
+            host_identity=IdentityRelation.AMBIGUOUS,
             binding=HostBindingRelation.AMBIGUOUS,
             authoritative_host_id=None,
             authoritative=False,
@@ -238,8 +268,8 @@ class _UnavailableCanonicalOpeningAuthorityProducer:
         )
 
 
-# Intentionally module-owned.  Public quantity/readiness callers cannot inject a
-# caller-created producer and thereby move the trust boundary back into themselves.
+# Module-owned on purpose: public quantity callers cannot inject a caller-created
+# producer and thereby move the trust boundary back into themselves.
 _CURRENT_CANONICAL_PRODUCER: CanonicalOpeningAuthorityProducer = (
     _UnavailableCanonicalOpeningAuthorityProducer()
 )
@@ -248,11 +278,7 @@ _CURRENT_CANONICAL_PRODUCER: CanonicalOpeningAuthorityProducer = (
 def combine_identity_relations(
     relations: tuple[IdentityRelation, ...],
 ) -> IdentityRelation:
-    """Combine independently obtained identity relations monotonically.
-
-    Ambiguity or contradiction is absorbing.  Adding evidence therefore cannot turn
-    an already ambiguous/contradictory relation into PROVEN_SAME.
-    """
+    """Combine relations monotonically; ambiguity/contradiction is absorbing."""
 
     if not relations or IdentityRelation.AMBIGUOUS in relations:
         return IdentityRelation.AMBIGUOUS
@@ -267,35 +293,50 @@ def combine_identity_relations(
 def resolve_current_opening_identity(
     left: OpeningObservation, right: OpeningObservation
 ) -> IdentityDecision:
-    """Resolve identity using only the canonical current-main trust source."""
-
     return _CURRENT_CANONICAL_PRODUCER.resolve_identity(left, right)
 
 
 def assess_current_opening_universe(
     query: LocalCandidateQuery,
 ) -> CandidateUniverseDecision:
-    """Assess completeness without trusting the local candidate query itself."""
-
+    # candidate_ids, filters, radius and caller_complete are intentionally not fed
+    # into the canonical producer as proof inputs.
     return _CURRENT_CANONICAL_PRODUCER.enumerate_openings(query.scope)
 
 
 def assess_current_host_authority(
     opening: OpeningObservation, query: LocalCandidateQuery
 ) -> HostAuthorityDecision:
-    """Assess host universe/binding; local spatial candidates remain nominations."""
+    """Keep nomination, universe, identity and binding as separate authority axes."""
 
     universe = _CURRENT_CANONICAL_PRODUCER.enumerate_hosts(opening, query.scope)
     blockers = list(universe.blockers)
     if not universe.complete:
         blockers.append("opening_host_universe_incomplete")
-    return HostAuthorityDecision(
-        universe=universe,
-        binding=HostBindingRelation.AMBIGUOUS,
-        authoritative_host_id=None,
-        authoritative=False,
-        blockers=tuple(dict.fromkeys(blockers)),
-    )
+        return HostAuthorityDecision(
+            universe=universe,
+            host_identity=IdentityRelation.AMBIGUOUS,
+            binding=HostBindingRelation.AMBIGUOUS,
+            authoritative_host_id=None,
+            authoritative=False,
+            blockers=tuple(dict.fromkeys(blockers)),
+        )
+
+    if len(universe.authoritative_candidate_ids) != 1:
+        blockers.append("opening_host_not_unique")
+        return HostAuthorityDecision(
+            universe=universe,
+            host_identity=IdentityRelation.AMBIGUOUS,
+            binding=HostBindingRelation.AMBIGUOUS,
+            authoritative_host_id=None,
+            authoritative=False,
+            blockers=tuple(dict.fromkeys(blockers)),
+        )
+
+    # Only an independently enumerated candidate may proceed to the producer's
+    # separate host-identity/binding proof.  A local nearest/bbox nomination cannot.
+    host_id = universe.authoritative_candidate_ids[0]
+    return _CURRENT_CANONICAL_PRODUCER.bind_host(opening, host_id, query.scope)
 
 
 def assess_current_physical_void_authority(
@@ -306,24 +347,25 @@ def assess_current_physical_void_authority(
     host_query: LocalCandidateQuery,
     commercial_applicability: bool | None = None,
 ) -> PhysicalVoidAuthorityDecision:
-    """Fail-closed physical-void gate for the current canonical producer.
-
-    ``commercial_applicability`` is accepted solely to make the separation explicit;
-    it never participates in physical-geometry authority.
-    """
+    """Physical geometry gate; commercial applicability is deliberately downstream."""
 
     del commercial_applicability
     blockers: list[str] = []
 
-    if not opening.provenance_complete:
-        blockers.append("opening_existence_provenance_incomplete")
+    existence = _CURRENT_CANONICAL_PRODUCER.prove_opening_existence(opening)
+    blockers.extend(existence.blockers)
+    if not existence.proven:
+        blockers.append("opening_existence_unproven")
 
-    # A physical-identity producer is absent.  Caller identity flags/hashes/lineage
-    # metadata on ``opening`` cannot replace it.
-    blockers.append("opening_physical_identity_unproven")
+    identity = _CURRENT_CANONICAL_PRODUCER.identify_opening(opening)
+    blockers.extend(identity.blockers)
+    if not identity.authoritative or identity.relation is not IdentityRelation.PROVEN_SAME:
+        blockers.append("opening_physical_identity_unproven")
 
     host = assess_current_host_authority(opening, host_query)
     blockers.extend(host.blockers)
+    if host.host_identity is not IdentityRelation.PROVEN_SAME:
+        blockers.append("opening_host_identity_unproven")
     if host.binding is not HostBindingRelation.PROVEN_BOUND:
         blockers.append("opening_host_binding_unproven")
 
@@ -332,20 +374,13 @@ def assess_current_physical_void_authority(
 
     blockers = list(dict.fromkeys(blockers))
     if blockers:
-        return PhysicalVoidAuthorityDecision(
-            firm=False,
-            area_m2=None,
-            blockers=tuple(blockers),
-        )
+        return PhysicalVoidAuthorityDecision(False, None, tuple(blockers))
 
-    # Unreachable with the current canonical producer.  Kept as the dimensional
-    # formula only; reaching it requires replacing the module-owned producer with a
-    # genuinely independent upstream implementation in a future scoped workstream.
     assert width_mm is not None and height_mm is not None
     return PhysicalVoidAuthorityDecision(
-        firm=True,
-        area_m2=(width_mm / 1000.0) * (height_mm / 1000.0),
-        blockers=(),
+        True,
+        (width_mm / 1000.0) * (height_mm / 1000.0),
+        (),
     )
 
 
@@ -356,7 +391,7 @@ def assess_current_physical_net_authority(
     opening_query: LocalCandidateQuery,
     resolved_void_areas_m2: tuple[float, ...],
 ) -> PhysicalNetAuthorityDecision:
-    """Fail closed until the relevant opening universe is independently complete."""
+    """Preserve FIRM gross while net fails closed on incomplete opening authority."""
 
     blockers: list[str] = []
     if not gross_is_firm or gross_area_m2 is None or gross_area_m2 < 0:
@@ -370,27 +405,18 @@ def assess_current_physical_net_authority(
     if any(area < 0 for area in resolved_void_areas_m2):
         blockers.append("invalid_physical_void_area")
 
-    blockers = list(dict.fromkeys(blockers))
-    if blockers:
-        return PhysicalNetAuthorityDecision(
-            firm=False,
-            net_area_m2=None,
-            gross_preserved=bool(gross_is_firm and gross_area_m2 is not None),
-            blockers=tuple(blockers),
-        )
+    # Even if a future producer makes the universe available, a safe positive net
+    # path also needs authoritative opening-id -> FIRM-void coverage, not just a tuple
+    # of caller-provided areas.  Do not infer that mapping here.
+    if universe.complete:
+        blockers.append("authoritative_void_coverage_mapping_unavailable")
 
-    assert gross_area_m2 is not None
-    net_area = gross_area_m2 - sum(resolved_void_areas_m2)
-    if net_area < 0:
-        return PhysicalNetAuthorityDecision(
-            firm=False,
-            net_area_m2=None,
-            gross_preserved=True,
-            blockers=("physical_voids_exceed_gross_wall_area",),
-        )
+    blockers = list(dict.fromkeys(blockers))
     return PhysicalNetAuthorityDecision(
-        firm=True,
-        net_area_m2=net_area,
-        gross_preserved=True,
-        blockers=(),
+        firm=False,
+        net_area_m2=None,
+        gross_preserved=bool(
+            gross_is_firm and gross_area_m2 is not None and gross_area_m2 >= 0
+        ),
+        blockers=tuple(blockers),
     )
