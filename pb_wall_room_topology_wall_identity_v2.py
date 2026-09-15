@@ -1,77 +1,40 @@
-"""W4 identity, revisited now that U1 primitive lineage exists (research only).
+"""W4 path fingerprint + hybrid candidate identity helpers.
 
-``pb_wall_room_topology_wall_assembly._canonical_wall_candidate_id`` hashes a
-chain's two *boundary endpoint coordinates* only. That is correct for the
-narrow guarantee it was built for (a wall's id survives re-chunking, since
-the boundary points do not move when a straight run is re-split into more or
-fewer collinear fragments), but it has a real blind spot the U1 review
-foreshadowed: two GEOMETRICALLY AND TOPOLOGICALLY DIFFERENT walls that happen
-to start and end at the same two points -- e.g. a straight connector versus
-an L-shaped detour between the identical pair of corners -- collide onto the
-same id, because the hash never looks at what happens *between* the
-endpoints.
+``pb_wall_room_topology_wall_assembly._canonical_wall_candidate_id`` now hashes
+the direction-canonical, collinear-collapsed centerline
+(``canonical_path_fingerprint``) so geometrically different chains that share
+outer endpoints no longer collide. Assembly identity is geometry-only;
+provenance is intentionally excluded there so legitimate re-chunking of one
+physical path stays stable when fragment source ids differ.
 
-This module is a side-by-side research comparison, not a replacement:
-nothing here is imported by ``pb_wall_room_topology_wall_assembly.py`` or any
-other production/shadow-authority module. Per the standing instruction, a new
-identity function is not wired into production until tests prove it superior
-across the adversarial matrix -- see
-``tests/test_canonical_wall_room_model.py::TestWallIdentityV2``.
+``canonical_wall_candidate_id_v2`` remains the HYBRID (geometry + U1 provenance)
+candidate-identity helper used by the physical-wall identity sidecar. It is
+candidate identity only — not publication authority. Quantity publication
+must continue to use physical equivalence separately and must not treat
+``different V2 ID ⇒ different physical wall``.
 
-REVISED after an independent GPT-2 review: the FIRST version of this module
-made provenance take over ENTIRELY whenever lineage was present, dropping
-geometry from the hash altogether -- meaning two genuinely disjoint physical
-spans sharing the same native ancestor (e.g. two different derived wall
-candidates split from one native primitive) collided onto the SAME id,
-which is a real regression relative to even the old geometry-only scheme.
-Confirmed and reproduced independently via GPT-2's own regression test
-before this fix.
+DESIGN: path fingerprint (shared)
+---------------------------------
+``canonical_path_fingerprint``:
+1. Round every vertex to a fixed precision (quantization — ordinary
+   floating-point replay noise must not change identity).
+2. Collapse redundant collinear interior vertices (three consecutive points
+   where the middle one lies on the straight line through its neighbours
+   are reduced to the two endpoints) — this is what makes the fingerprint
+   insensitive to simple collinear re-chunking.
+3. Canonical orientation: compare the point sequence forward against
+   reversed, keep whichever sorts smaller — direction-invariant.
 
-DESIGN: HYBRID identity -- geometry AND provenance, always combined
----------------------------------------------------------------------
-Never provenance-ALONE and never geometry-ALONE. The id hashes:
+DESIGN: HYBRID identity (v2 sidecar only)
+-----------------------------------------
+Never provenance-ALONE and never geometry-ALONE. The v2 id hashes:
 
     (viewport_id, canonical_path_fingerprint(centerline), sorted
      provenance_ids_or_empty)
 
-``canonical_path_fingerprint``:
-1. Round every vertex to a fixed precision (quantization -- ordinary
-   floating-point replay noise must not change identity).
-2. Collapse redundant collinear interior vertices (three consecutive points
-   where the middle one lies on the straight line through its neighbours
-   are reduced to the two endpoints) -- this is what makes the fingerprint
-   insensitive to simple collinear re-chunking: a straight run split into
-   more or fewer fragments by the splitter, or re-merged by chain assembly,
-   reduces to the identical vertex sequence either way. Every WallCandidate
-   this repository's own assemble_wall_candidates can currently produce is
-   already a single straight chain (L_CORNER never merges two edges into
-   one chain -- see wall_assembly.py's own docstring), so for the walls
-   this system actually builds today this step is usually a no-op beyond
-   the two boundary points; it is still implemented generally (not just for
-   2-point input) so a future non-simple/fallback chain (the "non_simple_
-   chain_topology_fallback_ordering" case ``assemble_wall_candidates`` can
-   flag) fingerprints correctly too, rather than only "working by
-   accident" for the straight-chain case.
-3. Canonical orientation: compare the point sequence forward against
-   reversed, keep whichever sorts smaller -- direction-invariant (walking a
-   chain start-to-end or end-to-start gives the identical fingerprint).
-
 Provenance ids (sorted, deduped U1 ``source_primitive_ids`` unioned across
 every contributing edge) are combined WITH this fingerprint, never used to
-replace it. Two chains sharing every native ancestor but occupying disjoint
-geometric spans (split descendants of one native primitive) now correctly
-receive different ids, because their path fingerprints differ even though
-their provenance sets are identical.
-
-Required properties, each proven by a dedicated test in
-``tests/test_canonical_wall_room_model.py::TestWallIdentityV2``:
-- same native source + disjoint spans -> DIFFERENT ids (fingerprint differs)
-- same source + same physical wall after splitter re-chunk -> SAME id
-  (fingerprint's collinear-collapse + quantization absorbs re-chunking)
-- same endpoints + different interior path -> DIFFERENT ids (fingerprint
-  differs even without relying on provenance to do all the work)
-- reversed direction -> SAME id (canonical orientation)
-- viewport change -> DIFFERENT id (viewport_id is part of the hash)
+replace it.
 """
 from __future__ import annotations
 
@@ -147,19 +110,9 @@ def _path_from_edges(
 ) -> Tuple[Tuple[float, float], ...]:
     """Reconstruct the chain's own actual interior polyline from its
     contributing edges' own coordinates, walking shared endpoints -- NOT
-    just the two boundary points. This is the fix for a real, independently
-    found defect: the first version of this module always fingerprinted
-    only (p1, p2), so two chains with identical endpoints and identical
-    provenance but a genuinely different interior route (e.g. a straight
-    run versus a detour via an intermediate point) collided, because the
-    "hybrid" fingerprint was never actually shown the interior geometry it
-    was named for. Falls back to (p1, p2) when edge coordinates are
-    unavailable (a caller with no geometry, e.g. a unit test exercising
-    identity in isolation) or when the edges do not form one clean simple
-    path (a degenerate/closed-loop input, which assemble_wall_candidates'
-    own "non_simple_chain_topology_fallback_ordering" reason code already
-    flags elsewhere as an existing, documented edge case) -- never guesses
-    a partial reconstruction.
+    just the two boundary points. Falls back to (p1, p2) when edge
+    coordinates are unavailable or when the edges do not form one clean
+    simple path — never guesses a partial reconstruction.
     """
     raw_segments: List[Tuple[Tuple[float, float], Tuple[float, float]]] = []
     for edge_id in edge_ids:
@@ -217,15 +170,8 @@ def canonical_wall_candidate_id_v2(
 ) -> str:
     """HYBRID wall identity: geometry AND provenance, always both.
 
-    ``edge_ids`` are the Stage-A edge ids assembled into this one chain
-    (``assemble_wall_candidates``'s own per-group ``edge_ids`` set);
-    ``edges_by_id`` is that same function's already-built lookup; ``p1``/
-    ``p2`` are the chain's two boundary endpoints, used as a fallback path
-    when the contributing edges' own coordinates are unavailable. The
-    ACTUAL interior path is reconstructed from the edges themselves via
-    ``_path_from_edges`` -- this is what makes the fingerprint genuinely
-    path-sensitive rather than only endpoint-sensitive (see that function's
-    docstring for the defect this fixes).
+    Used by the physical-wall identity sidecar. Assembly uses the
+    geometry-only path fingerprint via ``canonical_path_fingerprint``.
     """
     source_primitive_ids = _chain_source_primitive_ids(edge_ids, edges_by_id)
     path = _path_from_edges(edge_ids, edges_by_id, p1, p2)
