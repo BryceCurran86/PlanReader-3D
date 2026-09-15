@@ -28,7 +28,7 @@ from pb_migration_provider_envelope import ProviderContext
 from pb_wall_room_topology_contracts import OpeningHostCandidate
 
 OPENING_DEDUCTION_FAMILY = "opening_deduction_area"
-OPENING_DEDUCTION_FORMULA_VERSION = "1.1.0"
+OPENING_DEDUCTION_FORMULA_VERSION = "1.2.0"
 
 _WIDTH_KINDS = frozenset({
     "opening_width_dimension",
@@ -82,9 +82,11 @@ def _validate_opening_entity(
     if opening_entity.status != EvidenceResolutionStatus.CORROBORATED:
         blockers.append("opening_entity_not_corroborated")
 
-    physical_id = str(meta.get("physical_opening_id") or "")
-    if str(meta.get("physical_identity_status") or "") != "proven" or physical_id != opening_id:
-        blockers.append("opening_physical_identity_unproven")
+    # ``physical_opening_id`` and ``physical_identity_status`` are caller metadata,
+    # not an independently resolved identity proof. This function currently has no
+    # first-class physical-identity evidence input to inspect, so identity must fail
+    # closed even when those metadata fields say "proven".
+    blockers.append("opening_physical_identity_unproven")
 
     source_sha = str(meta.get("source_sha256") or "")
     if source_sha and source_sha != context.source_sha256:
@@ -104,8 +106,9 @@ def _validate_opening_entity(
         blockers.append("opening_phase_conflict")
     if str(meta.get("phase") or "").lower() in {"conflict", "unknown", "unresolved"}:
         blockers.append("opening_phase_unresolved")
-    if str(meta.get("commercial_applicability") or "").lower() not in {"applicable", "proven_applicable"}:
-        blockers.append("opening_commercial_applicability_unproven")
+
+    # Commercial/trade applicability is deliberately not a physical-void gate.
+    # It belongs to a later commercial measurement-rule decision, outside this PR.
     return tuple(dict.fromkeys(blockers))
 
 
@@ -261,8 +264,8 @@ def build_opening_deduction_quantity(
 ) -> QuantityEvidence:
     """Return opening area only for a fully authoritative physical opening.
 
-    On current main this intentionally cannot reach FIRM because host-universe
-    completeness has no independent authenticated producer yet.
+    On current main this intentionally cannot reach FIRM because physical-opening
+    identity and host-universe completeness have no independent proof inputs here.
     """
     opening_id = host.host_candidate_id
     blockers: list[str] = []
@@ -328,9 +331,8 @@ def build_opening_deduction_quantity(
             },
         )
 
-    # Unreachable until an independently authenticated host-universe proof is
-    # introduced. Kept as the deterministic quantity construction for that future
-    # proof path; no caller flags or self-hashes are accepted here.
+    # Unreachable until independently resolved physical-identity and host-universe
+    # proofs are introduced. No caller flags or self-hashes are accepted here.
     assert width_evidence is not None and height_evidence is not None
     width_m = _value_m(width_evidence)
     height_m = _value_m(height_evidence)
