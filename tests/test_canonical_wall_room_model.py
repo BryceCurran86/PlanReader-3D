@@ -401,9 +401,13 @@ class TestWallIdentityV2:
             "e2": {"id": "e2", "primitive_lineage": {"source_primitive_ids": ["native_detour_b"]}},
         }
 
-        old_straight = _canonical_wall_candidate_id("v1", p1, p2)
-        old_detour = _canonical_wall_candidate_id("v1", p1, p2)
-        assert old_straight == old_detour  # by construction: old scheme is a pure function of (viewport_id, p1, p2)
+        old_straight = _canonical_wall_candidate_id("v1", (p1, p2))
+        old_detour = _canonical_wall_candidate_id("v1", (p1, p2))
+        assert old_straight == old_detour  # straight endpoint-only paths still collide by geometry
+        # Path-sensitive assembly id distinguishes a detour centerline.
+        path_straight = _canonical_wall_candidate_id("v1", (p1, p2))
+        path_detour = _canonical_wall_candidate_id("v1", (p1, (50.0, 40.0), p2))
+        assert path_straight != path_detour
 
         new_straight = canonical_wall_candidate_id_v2("v1", ["e0"], edges_straight, p1, p2)
         new_detour = canonical_wall_candidate_id_v2("v1", ["e1", "e2"], edges_detour, p1, p2)

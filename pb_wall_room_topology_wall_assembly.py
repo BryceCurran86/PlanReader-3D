@@ -72,6 +72,7 @@ from pb_wall_room_topology_contracts import (
     TopologyRelationshipType,
     WallCandidate,
 )
+from pb_wall_room_topology_wall_identity_v2 import canonical_path_fingerprint
 
 # Junction types through which chain assembly is permitted to merge two
 # edges into one WallCandidate. Deliberately does not include L_CORNER (by
@@ -210,27 +211,32 @@ def _order_chain_path(
 
 
 def _canonical_wall_candidate_id(
-    viewport_id: str, p1: Tuple[float, float], p2: Tuple[float, float]
+    viewport_id: str, points: Sequence[Tuple[float, float]]
 ) -> str:
-    """Content-derived, direction- and order-invariant wall candidate id.
+    """Content-derived, direction-invariant, path-sensitive wall candidate id.
 
-    Deliberately hashes the chain's two *boundary endpoint coordinates*
-    (canonically ordered), never the contributing Stage-A edge id strings --
-    those are themselves order-dependent artifacts of
-    ``split_segments_at_intersections``' internal enumeration and so are not
-    a valid basis for a stable id. This is also why two representations of
-    the same overall wall span -- one drawn as a single segment, another as
-    three fragments merged back into one chain -- receive the *identical*
-    candidate id: this is semantic topology invariance (the physical wall is
-    the same), not source-evidence identity invariance (its
-    ``face_a_segment_ids`` provenance list will correctly differ between the
-    two cases -- see module docstring).
+    Priority-2 fix: the previous endpoint-only hash collided for geometrically
+    different chains that shared the same outer endpoints. Identity now hashes
+    the direction-canonical, collinear-collapsed centerline fingerprint so:
+
+    - reversed traversal keeps the same id;
+    - collinear re-chunking of one physical path keeps the same id;
+    - genuinely different interior paths get different ids;
+    - input list order never participates (fingerprint is geometric).
+
+    Provenance / U1 source-primitive ids are intentionally NOT part of this
+    assembly id. They remain in the physical-wall identity sidecar
+    (``canonical_wall_candidate_id_v2``), which separates candidate identity
+    from publication equivalence. Mixing provenance into assembly ids would
+    break legitimate re-chunking when fragment source ids differ while the
+    physical centerline is unchanged.
+
+    This module still does not publish quantities or raise firm authority.
     """
-    ordered = sorted(
-        (tuple(round(c, 6) for c in p1), tuple(round(c, 6) for c in p2))
-    )
+    fingerprint = canonical_path_fingerprint(points)
     return stable_contract_id(
-        "wall", {"viewport_id": viewport_id, "p1": ordered[0], "p2": ordered[1]}
+        "wall",
+        {"viewport_id": viewport_id, "path_fingerprint": fingerprint},
     )
 
 
@@ -285,7 +291,7 @@ def assemble_wall_candidates(
         points, start_idx, end_idx, is_simple_path = _order_chain_path(
             edge_ids, edges_by_id, node_lookup
         )
-        candidate_id = _canonical_wall_candidate_id(viewport_id, points[0], points[-1])
+        candidate_id = _canonical_wall_candidate_id(viewport_id, points)
 
         start_junction = junction_by_node_idx.get(start_idx)
         end_junction = junction_by_node_idx.get(end_idx)
