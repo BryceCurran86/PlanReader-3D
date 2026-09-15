@@ -152,20 +152,13 @@ def test_stale_revision_after_source_bytes_change() -> None:
 
 
 def test_snapshot_mismatch_cannot_rebind_observation() -> None:
-    producer, authority, published, selector, _source = _published("doc-snapshot")
-    derived = producer.publish_derived_observation(
-        document_id="doc-snapshot",
-        revision_id=published.revision.revision_id,
-        base_snapshot_id=published.snapshot.snapshot_id,
-        page_id="1",
-        source_partition_id="page:1",
-        observation_kind="ocr_text_candidate",
-        source_primitive_ref="ocr:1",
-        origin_kind="ocr",
-        parent_observation_ids=(published.snapshot.observation_ids[0],),
-        raw_text="D01",
+    producer, authority, _published_obj, selector, _source = _published("doc-snapshot")
+    other = producer.ingest_native_pdf_bytes(
+        document_id="doc-other",
+        source_bytes=_pdf_bytes(text="OTHER"),
+        source_locator="memory://doc-other.pdf",
     )
-    result = authority.resolve(replace(selector, snapshot_id=derived.snapshot_id))
+    result = authority.resolve(replace(selector, snapshot_id=other.snapshot.snapshot_id))
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert SNAPSHOT_MISMATCH in result.reason_codes
 
