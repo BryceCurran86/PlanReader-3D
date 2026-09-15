@@ -1,9 +1,9 @@
 """Canonical opening identity/universe authority contracts.
 
 This module deliberately does not manufacture authority from local query results or
-caller metadata.  Current main has provenance identifiers, but no independently
+caller metadata. Current main has provenance identifiers, but no independently
 queryable immutable source-atom/graph universe and no independently inspectable
-opening-observation lineage producer.  The canonical implementation therefore
+opening-observation lineage producer. The canonical implementation therefore
 exposes that absence as a typed fail-closed state.
 
 The missing upstream capability is a producer which can, for a provenance-bound
@@ -11,12 +11,13 @@ scope, independently inspect immutable source evidence and:
 
 * prove an opening observation exists in that source scope;
 * resolve observation lineage/physical identity from traceable evidence IDs;
+* prove opening dimensions from traceable source evidence;
 * enumerate every eligible opening before local radius/filtering;
 * enumerate every eligible host before local radius/filtering; and
 * prove host identity and host binding independently of spatial nomination.
 
 It must bind source SHA, revision, evidence snapshot, graph snapshot, page, viewport,
-evidence IDs and target observations.  A local candidate list, ``complete=True``,
+evidence IDs and target observations. A local candidate list, ``complete=True``,
 tag, dimensions, proximity, bbox overlap, confidence, schedule row, caller identity
 flag, caller lineage claim or caller-created self-hash is not authority.
 """
@@ -119,6 +120,15 @@ class OpeningExistenceDecision:
 
 
 @dataclass(frozen=True)
+class OpeningDimensionsDecision:
+    proven: bool
+    width_mm: float | None = None
+    height_mm: float | None = None
+    evidence_ids: tuple[str, ...] = ()
+    blockers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class IdentityDecision:
     relation: IdentityRelation
     authoritative: bool
@@ -163,8 +173,8 @@ class CanonicalOpeningAuthorityProducer(Protocol):
     """Required future trust-boundary interface.
 
     A conforming implementation must inspect an upstream immutable evidence/graph
-    source itself.  It must not derive completeness or identity from the local caller
-    asking the question.
+    source itself. It must not derive completeness, identity, existence or dimensions
+    from the local caller asking the question.
     """
 
     def prove_opening_existence(
@@ -179,6 +189,14 @@ class CanonicalOpeningAuthorityProducer(Protocol):
         self, left: OpeningObservation, right: OpeningObservation
     ) -> IdentityDecision:
         """Resolve SAME/DISTINCT/AMBIGUOUS from independently inspected evidence."""
+
+    def prove_opening_dimensions(
+        self,
+        observation: OpeningObservation,
+        claimed_width_mm: float | None,
+        claimed_height_mm: float | None,
+    ) -> OpeningDimensionsDecision:
+        """Resolve dimensions from independent evidence, not caller numbers alone."""
 
     def enumerate_openings(self, scope: AuthorityScope) -> CandidateUniverseDecision:
         """Enumerate all eligible openings in the independently bounded scope."""
@@ -229,6 +247,24 @@ class _UnavailableCanonicalOpeningAuthorityProducer:
             blockers=tuple(blockers),
         )
 
+    def prove_opening_dimensions(
+        self,
+        observation: OpeningObservation,
+        claimed_width_mm: float | None,
+        claimed_height_mm: float | None,
+    ) -> OpeningDimensionsDecision:
+        blockers = list(self._unavailable)
+        if not observation.provenance_complete:
+            blockers.append("opening_dimension_provenance_incomplete")
+        if (
+            claimed_width_mm is None
+            or claimed_height_mm is None
+            or claimed_width_mm <= 0
+            or claimed_height_mm <= 0
+        ):
+            blockers.append("opening_dimensions_missing_or_invalid")
+        return OpeningDimensionsDecision(proven=False, blockers=tuple(blockers))
+
     def enumerate_openings(self, scope: AuthorityScope) -> CandidateUniverseDecision:
         blockers = list(self._unavailable)
         if not scope.provenance_complete:
@@ -278,7 +314,7 @@ _CURRENT_CANONICAL_PRODUCER: CanonicalOpeningAuthorityProducer = (
 def combine_identity_relations(
     relations: tuple[IdentityRelation, ...],
 ) -> IdentityRelation:
-    """Combine relations monotonically; ambiguity/contradiction is absorbing."""
+    """Combine independently proven relations; ambiguity/contradiction is absorbing."""
 
     if not relations or IdentityRelation.AMBIGUOUS in relations:
         return IdentityRelation.AMBIGUOUS
@@ -299,8 +335,8 @@ def resolve_current_opening_identity(
 def assess_current_opening_universe(
     query: LocalCandidateQuery,
 ) -> CandidateUniverseDecision:
-    # candidate_ids, filters, radius and caller_complete are intentionally not fed
-    # into the canonical producer as proof inputs.
+    # Local candidates, filters, radius and caller_complete are deliberately excluded
+    # from the canonical producer's proof inputs.
     return _CURRENT_CANONICAL_PRODUCER.enumerate_openings(query.scope)
 
 
@@ -333,8 +369,6 @@ def assess_current_host_authority(
             blockers=tuple(dict.fromkeys(blockers)),
         )
 
-    # Only an independently enumerated candidate may proceed to the producer's
-    # separate host-identity/binding proof.  A local nearest/bbox nomination cannot.
     host_id = universe.authoritative_candidate_ids[0]
     return _CURRENT_CANONICAL_PRODUCER.bind_host(opening, host_id, query.scope)
 
@@ -351,6 +385,11 @@ def assess_current_physical_void_authority(
 
     del commercial_applicability
     blockers: list[str] = []
+
+    opening_universe = _CURRENT_CANONICAL_PRODUCER.enumerate_openings(opening.scope)
+    blockers.extend(opening_universe.blockers)
+    if not opening_universe.complete:
+        blockers.append("relevant_opening_universe_incomplete")
 
     existence = _CURRENT_CANONICAL_PRODUCER.prove_opening_existence(opening)
     blockers.extend(existence.blockers)
@@ -369,17 +408,23 @@ def assess_current_physical_void_authority(
     if host.binding is not HostBindingRelation.PROVEN_BOUND:
         blockers.append("opening_host_binding_unproven")
 
-    if width_mm is None or height_mm is None or width_mm <= 0 or height_mm <= 0:
+    dimensions = _CURRENT_CANONICAL_PRODUCER.prove_opening_dimensions(
+        opening,
+        width_mm,
+        height_mm,
+    )
+    blockers.extend(dimensions.blockers)
+    if not dimensions.proven:
         blockers.append("opening_dimensions_unproven")
 
     blockers = list(dict.fromkeys(blockers))
     if blockers:
         return PhysicalVoidAuthorityDecision(False, None, tuple(blockers))
 
-    assert width_mm is not None and height_mm is not None
+    assert dimensions.width_mm is not None and dimensions.height_mm is not None
     return PhysicalVoidAuthorityDecision(
         True,
-        (width_mm / 1000.0) * (height_mm / 1000.0),
+        (dimensions.width_mm / 1000.0) * (dimensions.height_mm / 1000.0),
         (),
     )
 
@@ -405,9 +450,9 @@ def assess_current_physical_net_authority(
     if any(area < 0 for area in resolved_void_areas_m2):
         blockers.append("invalid_physical_void_area")
 
-    # Even if a future producer makes the universe available, a safe positive net
-    # path also needs authoritative opening-id -> FIRM-void coverage, not just a tuple
-    # of caller-provided areas.  Do not infer that mapping here.
+    # A safe positive net path also needs authoritative opening-id -> FIRM-void
+    # coverage. A caller tuple of areas cannot prove that every material opening was
+    # resolved, even after an upstream universe producer becomes available.
     if universe.complete:
         blockers.append("authoritative_void_coverage_mapping_unavailable")
 
