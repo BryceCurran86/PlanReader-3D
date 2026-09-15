@@ -1,65 +1,59 @@
 """Viewport-scoped secondary-footprint width evidence (PlanReader F.23).
 
-The legacy verandah-width parser (``pb_planreader_pdf_extractor``'s
-``global_verandah_width``) matches a page-wide regex such as
-``"1,800mm wide verandah"``. That works when the label and its width sit in
-one sentence, but it has no notion of *viewport* — on a composite sheet it
-would just as happily bind a number from an unrelated elevation or section
-if the wording ever lined up, and it cannot recover a width that is spelled
-out as a separate dimension-chain segment near an unrelated label instead of
-inline prose.
+Resolves a secondary strip width (e.g. verandah depth) only when:
 
-This module adds a stricter, additive alternative: resolve a secondary
-footprint component's (e.g. a verandah's) width only from a real horizontal
-figured-dimension chain that shares the *same* F.07-resolved floor-plan
-viewport as the component's own text label, sits adjacent to one edge of
-that viewport (a secondary space runs along one side of the building, not
-through its interior), and is not contradicted by any other candidate.
+* a unique secondary-space label sits in one F.07 floor-plan viewport;
+* the label is adjacent to one viewport edge (not plan interior);
+* a figured dimension is **fully witness-bound** (both endpoints) inside that
+  viewport with orientation **orthogonal to that adjoining edge**;
+* no competing orthogonal depth values remain.
+* one-sided / partial witness bindings fail closed — depth needs both the
+  main-building boundary witness and the outer verandah boundary witness.
 
-Explicitly out of scope, by design:
-- OCR / raster evidence. A scanned plan sheet with no extractable vector
-  text or vector dimension geometry yields no evidence here, and this
-  module must not guess from pixels to manufacture a result.
-- Vertical, section, elevation, schedule, detail or title-block dimensions.
-  Only observations inside a viewport already classified
-  ``DrawingViewType.FLOOR_PLAN`` are ever considered, and only horizontal
-  chains are ever produced by ``extract_dimension_chains_from_page``.
-- Guessing across multiple plausible candidates. Any ambiguity (the label
-  in more than one viewport, more than one label instance in one viewport,
-  more than one nearby chain with disagreeing values, a label not adjacent
-  to any viewport edge) fails closed to ``None`` rather than picking one.
+Top/bottom verandah → vertical depth evidence.
+Left/right verandah → horizontal depth evidence.
 
-Callers combine this with the existing page-wide regex as a fallback, never
-a replacement: this module can only add evidence when it is confident, it
-never disproves the legacy path's own findings.
+Parallel-to-edge figures (typical wall-thickness marks along a verandah
+front) are rejected by orientation/role, never by a hardcoded magnitude
+blacklist.
+
+Does **not** broaden F.15's horizontal-chain extractor. Depth uses
+``pb_figured_dimension_evidence.extract_dimension_evidence_bundle``.
+
+OCR / raster-only pages fail closed. Ambiguity fails closed.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from pb_dimension_chain_evidence_extractor import extract_dimension_chains_from_page
-from pb_dimension_graph_constraint_engine import DimensionChain, classify_chain_segments
+from pb_dimension_graph_constraint_engine import DimensionOrientation
 from pb_drawing_evidence_binding import DrawingViewType
-from pb_figured_dimension_evidence import calibrate_dimension_layout
+from pb_figured_dimension_evidence import (
+    BindingStatus,
+    calibrate_dimension_layout,
+    extract_dimension_evidence_bundle,
+)
 from pb_viewport_segmentation import (
     SegmentedViewport,
     ViewportSegmentationStatus,
     segment_page_viewports,
 )
 
-# Generic secondary-space vocabulary. Deliberately narrow (matches the exact
-# vocabulary the legacy page-wide parser already recognizes) -- this module's
-# job is to make *existing* evidence safer to bind, not to invent new object
-# types to search for.
 _SECONDARY_SPACE_LABELS = ("verandah", "veranda")
-
-# A secondary space runs along one side of the building: its label must sit
-# within this fraction of the viewport's span from the nearest edge. This is
-# a generic geometric proxy for "adjacent to the main footprint", not a
-# per-document tuning constant -- it is evaluated against the viewport's own
-# resolved extent, never an absolute coordinate.
 _EDGE_BAND_FRACTION = 0.25
+
+# Depth must be perpendicular to the verandah's adjoining building edge.
+_DEPTH_ORIENTATION_FOR_EDGE = {
+    "top": DimensionOrientation.VERTICAL.value,
+    "bottom": DimensionOrientation.VERTICAL.value,
+    "left": DimensionOrientation.HORIZONTAL.value,
+    "right": DimensionOrientation.HORIZONTAL.value,
+}
+
+# Depth requires both witness endpoints (main-boundary + outer-boundary).
+# PARTIAL_WITNESS / LINE_BOUND alone are not enough for secondary footprint.
+_ACCEPTED_BINDINGS = frozenset({BindingStatus.WITNESS_BOUND.value})
 
 
 def _bbox_center(bbox: Sequence[float]) -> Tuple[float, float]:
@@ -85,9 +79,11 @@ class SecondaryFootprintEvidence:
     view_status: str
     source_page: int
     edge: str  # "top" | "bottom" | "left" | "right"
-    chain_id: str
+    chain_id: str  # evidence id (figured dimension_id)
     label_bbox: Tuple[float, float, float, float]
     notes: Tuple[str, ...] = field(default_factory=tuple)
+    depth_orientation: str = ""
+    binding_status: str = ""
 
 
 def _label_words(page: Any) -> List[Tuple[Tuple[float, float, float, float], str]]:
@@ -114,12 +110,142 @@ def _eligible_plan_viewports(
     ]
 
 
-def _chain_row_center(chain: DimensionChain) -> Optional[Tuple[float, float]]:
-    boxes = [o.bbox for o in chain.observations if o.bbox is not None]
-    if not boxes:
+def _label_edge(
+    label_center: Tuple[float, float],
+    viewport_bbox: Sequence[float],
+) -> Optional[Tuple[str, float]]:
+    vx0, vy0, vx1, vy1 = (float(v) for v in viewport_bbox)
+    v_width = vx1 - vx0
+    v_height = vy1 - vy0
+    if v_width <= 0 or v_height <= 0:
         return None
-    centers = [_bbox_center(b) for b in boxes]
-    return (sum(c[0] for c in centers) / len(centers), sum(c[1] for c in centers) / len(centers))
+    edge_fractions: Dict[str, float] = {
+        "top": (label_center[1] - vy0) / v_height,
+        "bottom": (vy1 - label_center[1]) / v_height,
+        "left": (label_center[0] - vx0) / v_width,
+        "right": (vx1 - label_center[0]) / v_width,
+    }
+    edge, fraction = min(edge_fractions.items(), key=lambda item: item[1])
+    if fraction > _EDGE_BAND_FRACTION:
+        return None
+    return edge, fraction
+
+
+def _observation_orientation(observation: Any) -> str:
+    """Prefer endpoint-derived span axis when vector anchors exist."""
+    endpoints = getattr(observation, "endpoints", None)
+    if endpoints is not None and len(endpoints) == 2:
+        (x0, y0), (x1, y1) = endpoints
+        if abs(x1 - x0) >= abs(y1 - y0):
+            return DimensionOrientation.HORIZONTAL.value
+        return DimensionOrientation.VERTICAL.value
+    return str(getattr(observation, "orientation", DimensionOrientation.UNKNOWN.value))
+
+
+def _spatially_associated_with_edge(
+    *,
+    edge: str,
+    label_center: Tuple[float, float],
+    obs_center: Tuple[float, float],
+    viewport_bbox: Sequence[float],
+    along_tolerance_pt: float,
+    depth_tolerance_pt: float,
+) -> bool:
+    """Require along-edge alignment and proximity in the depth direction."""
+    vx0, vy0, vx1, vy1 = (float(v) for v in viewport_bbox)
+    if edge in ("top", "bottom"):
+        if abs(obs_center[0] - label_center[0]) > along_tolerance_pt:
+            return False
+        if abs(obs_center[1] - label_center[1]) > depth_tolerance_pt:
+            return False
+        # Stay inside the plan viewport (no title-block leakage below frame).
+        if not (vy0 - depth_tolerance_pt <= obs_center[1] <= vy1 + depth_tolerance_pt):
+            return False
+        if not (vx0 <= obs_center[0] <= vx1):
+            return False
+        return True
+
+    if abs(obs_center[1] - label_center[1]) > along_tolerance_pt:
+        return False
+    if abs(obs_center[0] - label_center[0]) > depth_tolerance_pt:
+        return False
+    if not (vx0 - depth_tolerance_pt <= obs_center[0] <= vx1 + depth_tolerance_pt):
+        return False
+    if not (vy0 <= obs_center[1] <= vy1):
+        return False
+    return True
+
+
+def _resolve_orthogonal_depth(
+    page: Any,
+    *,
+    page_num: int,
+    viewport: SegmentedViewport,
+    label_bbox: Tuple[float, float, float, float],
+    edge: str,
+) -> Optional[Tuple[float, str, str, Tuple[str, ...]]]:
+    """Return (width_m, dimension_id, binding_status, notes) or None."""
+    assert viewport.bounding_box is not None
+    required_orientation = _DEPTH_ORIENTATION_FOR_EDGE[edge]
+    layout = calibrate_dimension_layout(page)
+    along_tol = max(layout.median_word_height_pt * 8.0, layout.chain_axis_tolerance_pt * 4.0)
+    depth_tol = max(layout.median_word_height_pt * 10.0, layout.line_search_distance_pt)
+
+    bundle = extract_dimension_evidence_bundle(
+        page,
+        page_num=page_num,
+        view_id=viewport.view_id,
+        view_type=viewport.view_type,
+    )
+    binding_by_id = {b.observation_id: b.status for b in bundle.bindings}
+
+    label_center = _bbox_center(label_bbox)
+    candidates: List[Tuple[float, str, str]] = []
+    for observation in bundle.observations:
+        if observation.bbox is None:
+            continue
+        if not _bbox_fully_inside(observation.bbox, viewport.bounding_box, tolerance=layout.median_word_height_pt):
+            continue
+        status = binding_by_id.get(observation.dimension_id, BindingStatus.UNSUPPORTED.value)
+        if status not in _ACCEPTED_BINDINGS:
+            continue
+        orientation = _observation_orientation(observation)
+        if orientation != required_orientation:
+            # Parallel-to-edge / unknown figures (e.g. wall-thickness marks
+            # along a verandah front) cannot become depth.
+            continue
+        obs_center = _bbox_center(observation.bbox)
+        if not _spatially_associated_with_edge(
+            edge=edge,
+            label_center=label_center,
+            obs_center=obs_center,
+            viewport_bbox=viewport.bounding_box,
+            along_tolerance_pt=along_tol,
+            depth_tolerance_pt=depth_tol,
+        ):
+            continue
+        try:
+            width_m = float(observation.value_m)
+        except (TypeError, ValueError):
+            continue
+        if not (width_m > 0.0):
+            continue
+        candidates.append((width_m, observation.dimension_id, status))
+
+    if not candidates:
+        return None
+
+    distinct = {round(w, 3) for w, _id, _st in candidates}
+    if len(distinct) > 1:
+        return None  # conflicting orthogonal depths
+
+    width_m, dimension_id, status = min(candidates, key=lambda c: (round(c[0], 3), c[1]))
+    notes = (
+        f"orthogonal_depth edge={edge} orientation={required_orientation} "
+        f"binding={status} via {dimension_id}",
+        f"viewport {viewport.view_id} status={viewport.status}",
+    )
+    return round(width_m, 3), dimension_id, status, notes
 
 
 def _resolve_for_viewports(
@@ -140,88 +266,47 @@ def _resolve_for_viewports(
         owners = [v for v in plan_viewports if _bbox_fully_inside(label_bbox, v.bounding_box)]
         if len(owners) == 1:
             anchors.append((label_bbox, label_text, owners[0]))
-        # 0 owners: label is outside every trustworthy plan viewport (e.g. in
-        # an elevation, or in an unresolved/ambiguous region) -- not usable.
-        # >1 owners cannot happen for non-overlapping viewports, but would be
-        # itself ambiguous if it ever did; excluding it here is deliberate.
 
     if not anchors:
         return None
 
     distinct_view_ids = {viewport.view_id for _bbox, _text, viewport in anchors}
     if len(distinct_view_ids) > 1:
-        return None  # ambiguous: label evidenced in more than one plan viewport
+        return None
     if len(anchors) > 1:
-        return None  # ambiguous: more than one label instance in the same viewport
+        return None
 
     label_bbox, label_text, viewport = anchors[0]
     assert viewport.bounding_box is not None
+    label_center = _bbox_center(label_bbox)
+    edge_info = _label_edge(label_center, viewport.bounding_box)
+    if edge_info is None:
+        return None
+    edge, _fraction = edge_info
 
-    chains = extract_dimension_chains_from_page(
+    resolved = _resolve_orthogonal_depth(
         page,
         page_num=page_num,
-        view_id=viewport.view_id,
-        viewport_bbox=viewport.bounding_box,
-        view_type=viewport.view_type,
+        viewport=viewport,
+        label_bbox=label_bbox,
+        edge=edge,
     )
-    if not chains:
+    if resolved is None:
         return None
-
-    layout = calibrate_dimension_layout(page)
-    row_tolerance = max(layout.median_word_height_pt * 3.0, layout.chain_axis_tolerance_pt)
-    label_center = _bbox_center(label_bbox)
-
-    nearby: List[DimensionChain] = []
-    for chain in chains:
-        center = _chain_row_center(chain)
-        if center is not None and abs(center[1] - label_center[1]) <= row_tolerance:
-            nearby.append(chain)
-    if not nearby:
-        return None  # the label exists but nothing corroborates its width
-
-    resolved: List[Tuple[DimensionChain, float]] = []
-    for chain in nearby:
-        span_m = classify_chain_segments(chain).get("internal_span_m")
-        if span_m is not None and span_m > 0:
-            resolved.append((chain, float(span_m)))
-    if not resolved:
-        return None
-
-    distinct_spans = {round(value, 3) for _chain, value in resolved}
-    if len(distinct_spans) > 1:
-        return None  # disagreeing candidate widths near the same label
-
-    chain, width_m = resolved[0]
-
-    vx0, vy0, vx1, vy1 = viewport.bounding_box
-    v_width = vx1 - vx0
-    v_height = vy1 - vy0
-    if v_width <= 0 or v_height <= 0:
-        return None
-
-    edge_fractions: Dict[str, float] = {
-        "top": (label_center[1] - vy0) / v_height,
-        "bottom": (vy1 - label_center[1]) / v_height,
-        "left": (label_center[0] - vx0) / v_width,
-        "right": (vx1 - label_center[0]) / v_width,
-    }
-    edge, fraction = min(edge_fractions.items(), key=lambda item: item[1])
-    if fraction > _EDGE_BAND_FRACTION:
-        return None  # label sits in the plan's interior, not adjacent to an edge
+    width_m, evidence_id, binding_status, notes = resolved
 
     return SecondaryFootprintEvidence(
         label_text=label_text,
-        width_m=round(width_m, 3),
+        width_m=width_m,
         view_id=viewport.view_id,
         view_status=viewport.status,
         source_page=page_num,
         edge=edge,
-        chain_id=chain.chain_id,
+        chain_id=evidence_id,
         label_bbox=label_bbox,
-        notes=(
-            f"resolved from viewport {viewport.view_id} "
-            f"(status={viewport.status}, view_type={viewport.view_type})",
-        ),
+        notes=notes,
+        depth_orientation=_DEPTH_ORIENTATION_FOR_EDGE[edge],
+        binding_status=binding_status,
     )
 
 
@@ -230,20 +315,11 @@ def resolve_secondary_footprint_width_m(
     *,
     page_num: int,
 ) -> Optional[SecondaryFootprintEvidence]:
-    """Resolve one secondary-footprint width from same-viewport evidence.
+    """Resolve one secondary-footprint width from orthogonal depth evidence.
 
-    Tries only ``RESOLVED`` (vector-frame-backed) floor-plan viewports first.
-    Only if that finds no usable anchor does it retry against ``DERIVED``
-    (title-partition) floor-plan viewports too -- mirroring
-    ``pb_viewport_dimension_binding``'s own conservative-by-default,
-    opt-in-wider-second-pass pattern. A result anchored to a ``DERIVED``
-    viewport is real evidence, just lower authority than one anchored to a
-    ``RESOLVED`` one; the returned ``view_status`` records which applied.
-
-    Returns ``None`` on any ambiguity or missing evidence -- callers must
-    treat that as "no additional evidence found", not as an error, and must
-    keep their own existing (weaker) evidence path as a fallback rather than
-    have this function's absence of a result erase it.
+    Tries ``RESOLVED`` floor-plan viewports first, then ``DERIVED``. Returns
+    ``None`` on ambiguity or missing evidence — callers keep their legacy
+    regex fallback rather than treating absence as erasure.
     """
     viewports = segment_page_viewports(page, page_number=page_num)
 
