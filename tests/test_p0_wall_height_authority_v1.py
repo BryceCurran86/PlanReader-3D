@@ -156,6 +156,8 @@ def _length() -> QuantityEvidence:
         metadata={
             "source_sha256": SHA,
             "revision_id": "R1",
+            "evidence_snapshot_id": "evsnap-1",
+            "canonical_graph_snapshot_id": "graphsnap-1",
             "viewport_id": VP,
             "page_no": 1,
         },
