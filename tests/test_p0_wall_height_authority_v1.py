@@ -12,11 +12,12 @@ from pb_migration_contracts import (
 )
 from pb_migration_provider_envelope import ProviderContext
 from pb_wall_gross_area_quantity import build_gross_wall_area_quantity
-from pb_wall_height_authority import build_wall_height_quantity
+from pb_wall_height_authority import WallDatumRelationshipProof, build_wall_height_quantity
 from pb_wall_net_area_quantity import build_net_wall_area_quantity
 
 SHA = "c" * 64
 WALL = "WALL-H1"
+SEGMENT = "WALL-H1:segment:a"
 VP = "VP-H1"
 PAGE = "page-h1"
 
@@ -180,6 +181,47 @@ def _datum_pair() -> tuple[EvidenceAtom, EvidenceAtom]:
     return lower, upper
 
 
+def _relation(eid: str, datum_id: str, role: str) -> EvidenceAtom:
+    return EvidenceAtom(
+        evidence_id=eid,
+        document_id="doc-height",
+        page_id=PAGE,
+        viewport_id=VP,
+        kind="wall_datum_segment_relationship",
+        method="canonical_graph_relation",
+        confidence=1.0,
+        status=EvidenceResolutionStatus.CORROBORATED,
+        metadata={
+            "source_sha256": SHA,
+            "revision_id": "R1",
+            "evidence_snapshot_id": "evsnap-1",
+            "canonical_graph_snapshot_id": "graphsnap-1",
+            "target_entity_id": WALL,
+            "target_wall_segment_id": SEGMENT,
+            "datum_evidence_id": datum_id,
+            "datum_role": role,
+        },
+    )
+
+
+def _proof(proof_id: str, datum_id: str, role: str, relation_id: str) -> WallDatumRelationshipProof:
+    return WallDatumRelationshipProof(
+        proof_id=proof_id,
+        wall_id=WALL,
+        wall_segment_id=SEGMENT,
+        datum_evidence_id=datum_id,
+        datum_role=role,
+        source_sha256=SHA,
+        revision_id="R1",
+        evidence_snapshot_id="evsnap-1",
+        canonical_graph_snapshot_id="graphsnap-1",
+        datum_page_id=PAGE,
+        datum_viewport_id=VP,
+        relationship_evidence_ids=(relation_id,),
+        status=EvidenceResolutionStatus.CORROBORATED,
+    )
+
+
 def _datum_height(
     *,
     lower: EvidenceAtom | None = None,
@@ -189,14 +231,23 @@ def _datum_height(
     low, high = _datum_pair()
     low = lower or low
     high = upper or high
+    lower_rel = _relation("rel-floor", low.evidence_id, "wall_base")
+    upper_rel = _relation("rel-top", high.evidence_id, "wall_top")
+    all_ids = (low.evidence_id, high.evidence_id, lower_rel.evidence_id, upper_rel.evidence_id)
     return build_wall_height_quantity(
         wall_id=WALL,
+        wall_segment_id=SEGMENT,
         context=_ctx(),
-        document=_doc((low.evidence_id, high.evidence_id)),
+        document=_doc(all_ids),
         viewport=_viewport(),
-        entity=entity or _entity((low.evidence_id, high.evidence_id)),
+        entity=entity or _entity(all_ids),
         lower_datum_evidence=low,
         upper_datum_evidence=high,
+        datum_relationship_proofs=(
+            _proof("proof-floor", low.evidence_id, "wall_base", lower_rel.evidence_id),
+            _proof("proof-top", high.evidence_id, "wall_top", upper_rel.evidence_id),
+        ),
+        relationship_evidence={lower_rel.evidence_id: lower_rel, upper_rel.evidence_id: upper_rel},
     )
 
 
@@ -267,6 +318,7 @@ def test_h11_fresh_wall_base_and_wall_top_positive_control() -> None:
     assert result.abstained is False
     assert result.value == 3.2
     assert result.formula == "wall_top_datum - wall_base_datum"
+    assert result.metadata["wall_segment_id"] == SEGMENT
 
 
 def test_h12_irrelevant_stale_evidence_does_not_poison_fresh_selected_height() -> None:
