@@ -19,6 +19,7 @@ def _make_valid_commercial_package():
         job_name="60-62 School Rd Maroochydore",
         site_address="60-62 School Rd, Maroochydore QLD 4558",
         builder_client="Balleo Pty Ltd",
+        estimator="Jane Estimator",
     )
     rev = DrawingRevisionPayload(
         drawing_issue="BA",
@@ -47,6 +48,7 @@ def _make_valid_commercial_package():
         project_identity=ident,
         drawing_revision=rev,
         quantities=[q],
+        created_by="Jane Estimator",
     )
     pkg.payload_hash = pkg.compute_payload_hash()
     return pkg
