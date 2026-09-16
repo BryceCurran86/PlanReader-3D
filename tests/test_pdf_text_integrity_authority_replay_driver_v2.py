@@ -1,13 +1,15 @@
 """Replay-only driver for the frozen executable text-integrity validator.
 
-Direct function calls intentionally ignore the validator functions' pytest xfail
-marks, equivalent to replaying them with --runxfail. This file is never merged.
+The exact frozen validator blob is stored under a non-``test_`` filename so
+pytest does not auto-collect its strict-xfail baseline profile. Direct function
+calls below intentionally ignore those xfail marks, equivalent to production
+replay with ``--runxfail``. This file is never merged.
 """
 from __future__ import annotations
 
 import pytest
 
-from tests import test_pdf_text_integrity_authority_replay_v2 as validator
+from tests import pdf_text_integrity_authority_replay_contract_v2 as validator
 
 
 ATTACKS = tuple(
