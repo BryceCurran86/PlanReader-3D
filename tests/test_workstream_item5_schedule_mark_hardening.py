@@ -216,10 +216,9 @@ def test_schedule_continuation_across_pages() -> None:
     sel = _opening_selector(published, src.authority())
     result = _bind(src, sel)
     
-    # Let's assert what happens. 
     # If the parser supports headless rows, it might CORROBORATE.
     # Otherwise it might ABSTAIN (BINDING_NO_MATCHING_ROW).
-    assert result.status in (EvidenceResolutionStatus.CORROBORATED, EvidenceResolutionStatus.ABSTAINED)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
 
 def test_headless_page_without_inherited_header_rejects_masquerading_note() -> None:
     doc = fitz.open()
