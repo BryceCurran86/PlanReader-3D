@@ -891,7 +891,36 @@ class BenchmarkAccuracyEngine:
             matched_pred_keys.add(pred_key)
             matched_pred_keys.add(iid)
             pred_obj = pred_map[pred_key]
-            act_val = float(pred_obj.get("value", pred_obj.get("quantity", pred_obj.get("actual", 0.0))))
+            raw_val = pred_obj.get("value", pred_obj.get("quantity", pred_obj.get("actual", 0.0)))
+            if raw_val is None:
+                # A matched prediction can carry an explicit quantity=None
+                # (publication blocked / genuinely unresolved -- see
+                # extracted_prediction_publication_blocked and
+                # pb_opening_deduction_pipeline.py's net_area_evidence).
+                # That is a different state from "no quantity field at all"
+                # (which the .get() chain above already defaults to 0.0) and
+                # must not be silently treated as an evidenced zero either --
+                # score it exactly like an unmatched item rather than crash.
+                missed_items += 1
+                item_results.append(
+                    ItemComparisonResult(
+                        item_id=iid,
+                        description=desc,
+                        category=cat,
+                        expected_quantity=exp_val,
+                        extracted_quantity=None,
+                        unit=unit,
+                        delta=None,
+                        pct_error=None,
+                        status=ItemMatchStatus.MISSED_IN_EXTRACTION,
+                        tolerance_tier="missed",
+                        drawing_sheet=dwg_sheet,
+                        drawing_page=dwg_page,
+                        notes="Matched extraction prediction carries no publishable quantity (blocked/unresolved)",
+                    )
+                )
+                continue
+            act_val = float(raw_val)
             delta = round(act_val - exp_val, 4)
             pct_err = round((abs(delta) / exp_val * 100.0) if exp_val != 0.0 else 0.0, 2)
 
