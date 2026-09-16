@@ -361,24 +361,20 @@ def _opening_aperture(records: Sequence[SourceObservationRecord]) -> _OpeningApe
 def _aperture_contains_bbox(aperture: _OpeningAperture, bbox: BBox) -> bool:
     """Return True if the text bounding box overlaps the opening aperture.
 
-    Uses bbox overlap (not centroid) so that tags whose text extends slightly
-    past a jamb are still counted as contained.  This is the conservative
-    direction: it is safer to surface an ambiguous CONFLICT than to silently
-    discard a real tag whose centroid happens to land just outside the aperture.
-
-    Along-axis: the bbox must overlap [along_min, along_max].
-    Normal-axis: the bbox must overlap [normal_min, normal_max].
+    Both the along-axis centroid and normal-axis centroid of the bbox must
+    lie strictly within the authenticated jamb-bounded aperture.
     """
     x0, y0, x1, y1 = bbox
     corners = ((x0, y0), (x0, y1), (x1, y0), (x1, y1))
     along_vals = [_dot(c, aperture.axis) for c in corners]
     normal_vals = [_dot(c, aperture.normal) for c in corners]
-    bbox_along_min = min(along_vals)
-
+    
+    bbox_along_center = sum(along_vals) / 4.0
     along_overlap = (
-        bbox_along_min >= aperture.along_min - _COORD_TOL
-        and bbox_along_min <= aperture.along_max + _COORD_TOL
+        bbox_along_center >= aperture.along_min - _COORD_TOL
+        and bbox_along_center <= aperture.along_max + _COORD_TOL
     )
+    
     bbox_normal_center = sum(normal_vals) / 4.0
     normal_overlap = (
         bbox_normal_center >= aperture.normal_min - _COORD_TOL
@@ -463,9 +459,6 @@ def _schedule_entries_for_page(
 
     result: list[tuple[ScheduleEntry, tuple[str, ...]]] = []
     if header_index < 0:
-        for row, ids in page_rows:
-            for entry in parse_schedule_rows([row], page_no=page_no):
-                result.append((entry, ids))
         return result
 
     header_row = page_rows[header_index][0]
