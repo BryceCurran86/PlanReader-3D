@@ -19,6 +19,7 @@ import pytest
 from pb_geometry_takeoff_model import MeasurementAuthorityType
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import (
+    PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION,
     PhysicalWallCandidateProducer,
     PhysicalWallCandidateSelector,
 )
@@ -34,6 +35,7 @@ from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 
 BASE_SHA = "76c7882b1c4b28764d1e6a6f467d72bb276c2e01"
 EXPECTED_RED = pytest.mark.xfail(
+    PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION == "1.0.0",
     strict=True,
     reason="Item 4B source-backed physical-wall equivalence prerequisite is absent",
 )
