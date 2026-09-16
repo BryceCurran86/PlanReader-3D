@@ -2,9 +2,9 @@
 
 TEST-ONLY / EXPECTED-RED / SELF-AUTHORED / NOT FROZEN / DO NOT MERGE.
 
-Current production-safe scale helpers must remain fail-closed.  The future sealed
-physical-scale authority is intentionally absent until a real source-native FIRM
-scale producer exists.
+Current production-safe text-scale helpers must remain fail-closed.  The future
+sealed physical-scale authority may become positive only from authenticated
+source-native graphic scale-bar geometry plus explicit physical labels.
 """
 from __future__ import annotations
 
@@ -13,21 +13,23 @@ import importlib
 import importlib.util
 import inspect
 
+import fitz
 import pytest
 
 from pb_geometry_takeoff_model import AuthorityStatus, ScaleCalibration
+from pb_migration_contracts import EvidenceResolutionStatus
 from pb_page_scale_calibration_authority import (
     ScaleCalibrationStatus,
     ScaleSourceType,
     measurement_authority_for_page_scale,
 )
+from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_viewport_scale_binding import bind_viewport_scale
 from pb_viewport_segmentation import (
     SegmentedViewport,
     ViewportBoundarySource,
     ViewportSegmentationStatus,
 )
-
 
 MODULE_NAME = "pb_physical_scale_authority"
 HAS_PHYSICAL_SCALE_AUTHORITY = importlib.util.find_spec(MODULE_NAME) is not None
@@ -45,6 +47,47 @@ _FORBIDDEN_PUBLIC = {
     "complete", "claimed_complete", "count", "fingerprint", "nearest", "first",
     "radius", "graphic_scale_bar", "bar_start", "bar_end", "labelled_length",
 }
+
+
+def _graphic_scale_pdf(
+    bars: tuple[tuple[float, str], ...] = ((100.0, "1m"),),
+    *,
+    include_ratio_text: bool = False,
+) -> bytes:
+    """Real native PDF vectors + native text, not mocked scale evidence."""
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=500.0, height=360.0)
+        for index, (span_pt, end_label) in enumerate(bars):
+            y = 90.0 + index * 100.0
+            x0 = 60.0
+            x1 = x0 + float(span_pt)
+            shape = page.new_shape()
+            shape.draw_line(fitz.Point(x0, y), fitz.Point(x1, y))
+            shape.draw_line(fitz.Point(x0, y - 8.0), fitz.Point(x0, y + 8.0))
+            shape.draw_line(fitz.Point(x1, y - 8.0), fitz.Point(x1, y + 8.0))
+            shape.finish(width=1.0)
+            shape.commit()
+            page.insert_text(fitz.Point(x0 - 2.0, y + 24.0), "0")
+            page.insert_text(fitz.Point(x1 - 4.0, y + 24.0), end_label)
+        if include_ratio_text:
+            page.insert_text(fitz.Point(300.0, 40.0), "SCALE 1:100")
+        return bytes(doc.tobytes(garbage=4, deflate=True))
+    finally:
+        doc.close()
+
+
+def _source_fixture(payload: bytes):
+    producer = SourceVisibilityProducer(
+        producer_method="physical-scale-validator",
+        producer_version="1.0",
+    )
+    published = producer.ingest_native_pdf_bytes(
+        document_id="physical-scale-validator-doc",
+        source_bytes=payload,
+        source_locator="memory://physical-scale-validator.pdf",
+    )
+    return producer, published
 
 
 def test_title_block_only_scale_remains_provisional_not_firm() -> None:
@@ -100,8 +143,6 @@ def test_plain_scale_calibration_is_constructible_and_therefore_not_a_sealed_sou
         status=ScaleCalibrationStatus.VALID.value,
     )
     assert calibration.is_usable_for_firm_measurement() is True
-    # This test documents the seam: future physical-void authority must not accept
-    # this ordinary data object as producer authentication.
     assert is_dataclass(calibration)
 
 
@@ -130,16 +171,81 @@ def test_future_physical_scale_api_is_sealed_and_selector_only() -> None:
 def test_future_scale_producer_does_not_accept_caller_calibration_or_ratio_truth() -> None:
     mod = importlib.import_module(MODULE_NAME)
     params = set(inspect.signature(mod.PhysicalScaleProducer.publish_scope).parameters)
-    assert params <= {
-        "self", "selector",
-    }
+    assert params <= {"self", "selector"}
     assert not (params & _FORBIDDEN_PUBLIC)
 
 
 @EXPECTED_RED
-def test_future_scale_authority_requires_source_native_positive_capability() -> None:
+def test_native_graphic_scale_bar_with_explicit_1m_label_may_publish_firm_mapping() -> None:
+    mod = importlib.import_module(MODULE_NAME)
+    src, published = _source_fixture(_graphic_scale_pdf(include_ratio_text=True))
+    producer = mod.PhysicalScaleProducer.from_source_visibility_producer(src)
+    selector = mod.PhysicalScaleSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id="1",
+    )
+    result = producer.publish_scope(selector)
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.evidence is not None
+    assert result.evidence.source_kind == "native_graphic_scale_bar"
+    assert abs(result.evidence.source_span_pt - 100.0) <= 1e-6
+    assert result.evidence.physical_span_mm == 1000.0
+    assert abs(result.evidence.points_per_mm - 0.1) <= 1e-9
+    assert abs(result.evidence.mm_per_point - 10.0) <= 1e-9
+    assert producer.authority().resolve(selector) == result
+
+
+@EXPECTED_RED
+def test_text_ratio_without_native_graphic_bar_cannot_publish_physical_scale() -> None:
+    mod = importlib.import_module(MODULE_NAME)
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=400.0, height=250.0)
+        page.insert_text(fitz.Point(60.0, 80.0), "SCALE 1:100")
+        payload = bytes(doc.tobytes(garbage=4, deflate=True))
+    finally:
+        doc.close()
+    src, published = _source_fixture(payload)
+    producer = mod.PhysicalScaleProducer.from_source_visibility_producer(src)
+    selector = mod.PhysicalScaleSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id="1",
+    )
+    result = producer.publish_scope(selector)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.evidence is None
+
+
+@EXPECTED_RED
+def test_conflicting_native_graphic_bars_fail_closed() -> None:
+    mod = importlib.import_module(MODULE_NAME)
+    src, published = _source_fixture(
+        _graphic_scale_pdf(bars=((100.0, "1m"), (100.0, "500mm")))
+    )
+    producer = mod.PhysicalScaleProducer.from_source_visibility_producer(src)
+    selector = mod.PhysicalScaleSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id="1",
+    )
+    result = producer.publish_scope(selector)
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.evidence is None
+
+
+@EXPECTED_RED
+def test_future_scale_authority_capabilities_are_narrow() -> None:
     mod = importlib.import_module(MODULE_NAME)
     capabilities = mod.PhysicalScaleProducer.capabilities()
-    assert capabilities["source_native_firm_scale"] is False
+    assert capabilities["source_native_graphic_scale_bar"] is True
     assert capabilities["title_block_text_can_mint_firm"] is False
     assert capabilities["caller_calibration_can_mint_firm"] is False
+    assert capabilities["inferred_scale_can_mint_firm"] is False
