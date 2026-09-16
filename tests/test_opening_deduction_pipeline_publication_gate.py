@@ -10,6 +10,13 @@ exactly -- internal_plaster and internal_paint reported the identical
 (undeducted) 84.336 SM, and perimeter_walling/external_key_pointing reported
 the identical 87.7 SM, because two windows' missing dimensions were silently
 excluded from the deduction rather than blocking publication.
+
+Second correction (same file, later pass): an incomplete deduction is an
+UNKNOWN net area, not an evidenced zero one (see WallDeductionResult.
+net_area_evidence). quantity must become None, not a silently-retained
+guess -- the guess moves to metadata["provisional_net_area_m2"] for
+diagnostics only. See test_opening_deduction_authenticated_binding.py for
+coverage of bind_openings_to_walls itself (no heuristic binding).
 """
 from __future__ import annotations
 
@@ -42,16 +49,20 @@ def test_incomplete_deduction_blocks_publication_across_all_dependent_prediction
     wall-finish prediction sharing that wall -- not just the wall itself,
     and not silently propagate an undeducted number as final."""
     wall = _wall(gross_area_m2=100.0)
-    resolved_window = OpeningInstance(
-        opening_id="W1", width_m=1.2, height_m=1.5, quantity=2.0, bound_wall_id="perimeter_walling"
-    )
-    unresolved_window = OpeningInstance(
-        opening_id="W2", width_m=None, height_m=None, quantity=1.0, bound_wall_id="perimeter_walling"
-    )
+    resolved_window = OpeningInstance(opening_id="W1", width_m=1.2, height_m=1.5, quantity=2.0)
+    unresolved_window = OpeningInstance(opening_id="W2", width_m=None, height_m=None, quantity=1.0)
 
     pipeline = GenericOpeningDeductionPipeline()
-    results = pipeline.deduct_openings_for_all_walls([wall], [resolved_window, unresolved_window])
-    assert results["perimeter_walling"].unresolved_openings  # sanity: fixture exercises the gap
+    # W1's binding is independently authenticated (simulating a reconciled
+    # host-binding authority); W2 has no such proof and no dimensions either.
+    results = pipeline.deduct_openings_for_all_walls(
+        [wall],
+        [resolved_window, unresolved_window],
+        authenticated_host_bindings={"W1": "perimeter_walling"},
+    )
+    assert results["perimeter_walling"].unbound_openings  # W2: no authenticated binding at all
+    assert results["perimeter_walling"].net_area_evidence.abstained is True
+    assert results["perimeter_walling"].net_area_evidence.value is None
 
     predictions = [
         _Prediction(tag="perimeter_walling", trade_type="walls", quantity=100.0),
@@ -62,42 +73,47 @@ def test_incomplete_deduction_blocks_publication_across_all_dependent_prediction
     by_tag = {p.tag: p for p in out}
 
     for tag in ("perimeter_walling", "internal_plaster", "internal_paint"):
-        assert by_tag[tag].metadata.get("publication_blocked") is True, (
-            f"{tag} must be blocked from publication when a bound opening's "
-            "dimensions are unresolved"
+        assert by_tag[tag].quantity is None, (
+            f"{tag} must publish quantity=None, not a silently-retained "
+            "undeducted number, when the shared opening universe is incomplete"
         )
-        assert by_tag[tag].metadata.get("unresolved_openings"), (
-            f"{tag} metadata must retain the unresolved-opening record for diagnostics"
+        assert by_tag[tag].metadata.get("publication_blocked") is True
+        assert by_tag[tag].metadata.get("net_area_m2") is None
+        # W1 (1.2 x 1.5 x qty2 = 3.6 m2) is authenticated and resolved, so
+        # the provisional estimate reflects its real deduction (100 - 3.6);
+        # W2 stays fully excluded since it's unbound -- that gap is exactly
+        # why this must stay provisional/blocked rather than final.
+        assert by_tag[tag].metadata.get("provisional_net_area_m2") == 96.4, (
+            "the best-known (unreliable) estimate is retained for diagnostics "
+            "under a clearly provisional-only key, never under quantity/net_area_m2"
         )
 
 
-def test_unbound_opening_also_blocks_publication() -> None:
-    # bind_openings_to_walls' single-wall shortcut auto-binds everything to
-    # the one wall present, so a genuinely unbound opening requires 2+ walls
-    # and no bounding-box overlap for the fallback (provisional-unbound) path
-    # to actually fire.
+def test_unbound_opening_with_no_authenticated_binding_blocks_publication() -> None:
     wall = _wall(gross_area_m2=50.0)
-    other_wall = WallInstance(wall_id="internal_walling", gross_area_m2=30.0)
-    unbound_door = OpeningInstance(
-        opening_id="D1", width_m=0.9, height_m=2.1, quantity=1.0, bound_wall_id=None
-    )
+    door = OpeningInstance(opening_id="D1", width_m=0.9, height_m=2.1, quantity=1.0)
     pipeline = GenericOpeningDeductionPipeline()
-    results = pipeline.deduct_openings_for_all_walls([wall, other_wall], [unbound_door])
-    assert unbound_door.bound_wall_id is None  # sanity: fixture exercises the gap
+    # No authenticated_host_bindings supplied at all -- current live reality.
+    results = pipeline.deduct_openings_for_all_walls([wall], [door])
+    assert door.bound_wall_id is None
+    assert results["perimeter_walling"].unbound_openings
     predictions = [_Prediction(tag="perimeter_walling", trade_type="walls", quantity=50.0)]
     out = pipeline.propagate_to_predictions(predictions, results)
+    assert out[0].quantity is None
     assert out[0].metadata.get("publication_blocked") is True
 
 
 def test_complete_deduction_publishes_normally_without_blocking() -> None:
-    """The happy path must be unaffected: no unresolved/unbound openings ->
-    no publication_blocked marker, and the correct net area is published."""
+    """The happy path must be unaffected: an authenticated binding plus
+    resolved dimensions -> no publication_blocked marker, real quantity
+    published, no unknown/None state."""
     wall = _wall(gross_area_m2=100.0)
-    window = OpeningInstance(
-        opening_id="W1", width_m=1.0, height_m=1.5, quantity=2.0, bound_wall_id="perimeter_walling"
-    )
+    window = OpeningInstance(opening_id="W1", width_m=1.0, height_m=1.5, quantity=2.0)
     pipeline = GenericOpeningDeductionPipeline()
-    results = pipeline.deduct_openings_for_all_walls([wall], [window])
+    results = pipeline.deduct_openings_for_all_walls(
+        [wall], [window], authenticated_host_bindings={"W1": "perimeter_walling"}
+    )
+    assert results["perimeter_walling"].net_area_evidence.abstained is False
     predictions = [
         _Prediction(tag="perimeter_walling", trade_type="walls", quantity=100.0),
         _Prediction(tag="internal_plaster", trade_type="wall_finish", quantity=100.0),
@@ -108,6 +124,7 @@ def test_complete_deduction_publishes_normally_without_blocking() -> None:
     expected_net = 100.0 - (1.0 * 1.5 * 2.0)
     for tag in ("perimeter_walling", "internal_plaster"):
         assert "publication_blocked" not in by_tag[tag].metadata
+        assert "provisional_net_area_m2" not in by_tag[tag].metadata
         assert by_tag[tag].quantity == expected_net
         assert by_tag[tag].metadata["net_area_m2"] == expected_net
 
@@ -117,9 +134,7 @@ def test_independent_gross_wall_finish_still_gated_by_shared_openings() -> None:
     must still be blocked when the SHARED openings are incomplete -- the gate
     is about the openings, not about which gross value is being netted."""
     wall = _wall(gross_area_m2=100.0)
-    unresolved_window = OpeningInstance(
-        opening_id="W1", width_m=None, height_m=None, quantity=1.0, bound_wall_id="perimeter_walling"
-    )
+    unresolved_window = OpeningInstance(opening_id="W1", width_m=None, height_m=None, quantity=1.0)
     pipeline = GenericOpeningDeductionPipeline()
     results = pipeline.deduct_openings_for_all_walls([wall], [unresolved_window])
     predictions = [
@@ -131,4 +146,6 @@ def test_independent_gross_wall_finish_still_gated_by_shared_openings() -> None:
         ),
     ]
     out = pipeline.propagate_to_predictions(predictions, results)
+    assert out[0].quantity is None
     assert out[0].metadata.get("publication_blocked") is True
+    assert out[0].metadata.get("provisional_net_area_m2") == 90.0

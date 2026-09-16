@@ -266,7 +266,12 @@ def test_mutation_i_three_reconciled_openings_integrated_into_f9():
 
     wall = WallInstance(wall_id="perimeter_walling", gross_area_m2=100.0)
     pipeline = GenericOpeningDeductionPipeline()
-    results = pipeline.deduct_openings_for_all_walls([wall], instances)
+    # bind_openings_to_walls performs no heuristic binding -- simulate an
+    # independently authenticated host-binding result for each opening
+    # rather than relying on build_opening_instances_from_physical_openings'
+    # own default_wall_id fallback (which no longer carries any authority).
+    bindings = {inst.opening_id: "perimeter_walling" for inst in instances}
+    results = pipeline.deduct_openings_for_all_walls([wall], instances, authenticated_host_bindings=bindings)
 
     res = results["perimeter_walling"]
     assert res.total_deducted_area_m2 == pytest.approx(10.44, rel=1e-3)
@@ -290,7 +295,10 @@ def test_mutation_j_change_one_physical_opening_dimension():
     inst_base = build_opening_instances_from_physical_openings(openings_base)
     wall = WallInstance(wall_id="perimeter_walling", gross_area_m2=100.0)
     pipeline = GenericOpeningDeductionPipeline()
-    res_base = pipeline.deduct_openings_for_all_walls([wall], inst_base)["perimeter_walling"]
+    bindings = {f"W_phys_{i}": "perimeter_walling" for i in range(3)}
+    res_base = pipeline.deduct_openings_for_all_walls(
+        [wall], inst_base, authenticated_host_bindings=bindings
+    )["perimeter_walling"]
     assert res_base.total_deducted_area_m2 == pytest.approx(6.0, rel=1e-3)
 
     # Change only opening 0 to 3.0m width (area becomes 3.0 m², diff is +1.0 m²)
@@ -307,7 +315,9 @@ def test_mutation_j_change_one_physical_opening_dimension():
         openings_base[2],
     ]
     inst_mod = build_opening_instances_from_physical_openings(openings_mod)
-    res_mod = pipeline.deduct_openings_for_all_walls([wall], inst_mod)["perimeter_walling"]
+    res_mod = pipeline.deduct_openings_for_all_walls(
+        [wall], inst_mod, authenticated_host_bindings=bindings
+    )["perimeter_walling"]
     assert res_mod.total_deducted_area_m2 == pytest.approx(7.0, rel=1e-3)
 
 

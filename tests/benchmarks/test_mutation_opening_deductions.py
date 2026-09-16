@@ -190,9 +190,14 @@ def test_propagation_to_predictions_metadata() -> None:
         width_m=2.0,
         height_m=1.5,
         quantity=2.0,  # 2 * 2.0 * 1.5 = 6.0 m²
-        bound_wall_id="perimeter_walling",
     )
-    results = pipeline.deduct_openings_for_all_walls([wall], [window])
+    # bind_openings_to_walls performs no heuristic binding -- simulate an
+    # independently authenticated host-binding result (see
+    # pb_opening_host_binding_authority.py) rather than trusting a
+    # caller-populated bound_wall_id.
+    results = pipeline.deduct_openings_for_all_walls(
+        [wall], [window], authenticated_host_bindings={"W1": "perimeter_walling"}
+    )
 
     preds = [
         ExtractedPrediction(
@@ -263,9 +268,10 @@ def test_propagation_respects_independent_gross_area_for_wall_finishes() -> None
         width_m=2.0,
         height_m=1.5,
         quantity=2.0,  # 2 * 2.0 * 1.5 = 6.0 m2 deducted
-        bound_wall_id="perimeter_walling",
     )
-    results = pipeline.deduct_openings_for_all_walls([wall], [window])
+    results = pipeline.deduct_openings_for_all_walls(
+        [wall], [window], authenticated_host_bindings={"W1": "perimeter_walling"}
+    )
 
     preds = [
         ExtractedPrediction(

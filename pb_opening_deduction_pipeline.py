@@ -12,16 +12,27 @@ CRITICAL ARCHITECTURAL BOUNDARY:
   4. wall/opening spatial binding or envelope membership
   5. valid drawing scale.
 - FAIL CLOSED:
-  1. If opening height or width is unknown: deduction is 0.0, marked unresolved. Do not guess.
-  2. If opening cannot be bound to a wall: deduction is 0.0, marked provisional/unbound.
-  3. Zero generic fenestration percentages (never assume 10%, 15%, etc.).
+  1. If opening height or width is unknown: that opening's own deduction is
+     0.0, marked unresolved. Do not guess.
+  2. Opening-to-wall binding is accepted ONLY from an independently
+     authenticated source (see bind_openings_to_walls); nothing here
+     performs heuristic binding, so until a reconciled host-binding
+     authority supplies one, every opening is provisional/unbound.
+  3. A wall whose deduction is incomplete (any unresolved or unbound
+     opening) has an UNKNOWN net area, not an evidenced zero-deduction net
+     area -- see WallDeductionResult.net_area_evidence. Publication is
+     blocked (quantity=None) rather than silently treating the unknown as
+     the gross value.
+  4. Zero generic fenestration percentages (never assume 10%, 15%, etc.).
 """
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 import math
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+from pb_migration_contracts import QuantityEvidence, stable_contract_id
 
 
 class OpeningDeductionStatus(str, Enum):
@@ -121,12 +132,23 @@ class WallInstance:
 
 @dataclass
 class WallDeductionResult:
-    """Comprehensive deduction result for a wall, including audit breakdown."""
+    """Comprehensive deduction result for a wall, including audit breakdown.
+
+    ``net_area_m2`` is retained for backward compatibility and always carries
+    the best-known numeric estimate (gross minus whatever WAS deductible),
+    even when incomplete -- it must never be treated as final on its own.
+    ``net_area_evidence`` is the authoritative proposition: a true evidenced
+    zero (``abstained=False, value=0.0``) is a different state from an
+    unknown/incomplete deduction (``abstained=True, value=None``). Consumers
+    that care whether net area is actually final must check
+    ``net_area_evidence.abstained``, not just read ``net_area_m2``.
+    """
 
     wall_id: str
     gross_area_m2: float
     total_deducted_area_m2: float
     net_area_m2: float
+    net_area_evidence: Optional[QuantityEvidence] = None
     applied_openings: List[Dict[str, Any]] = field(default_factory=list)
     unresolved_openings: List[Dict[str, Any]] = field(default_factory=list)
     unbound_openings: List[Dict[str, Any]] = field(default_factory=list)
@@ -137,6 +159,7 @@ class WallDeductionResult:
             "gross_area_m2": round(self.gross_area_m2, 2),
             "total_deducted_area_m2": round(self.total_deducted_area_m2, 2),
             "net_area_m2": round(self.net_area_m2, 2),
+            "net_area_evidence": asdict(self.net_area_evidence) if self.net_area_evidence else None,
             "applied_openings": self.applied_openings,
             "unresolved_openings": self.unresolved_openings,
             "unbound_openings": self.unbound_openings,
@@ -153,42 +176,45 @@ class GenericOpeningDeductionPipeline:
         self,
         openings: Sequence[OpeningInstance],
         walls: Sequence[WallInstance],
+        *,
+        authenticated_host_bindings: Optional[Mapping[str, str]] = None,
     ) -> None:
-        """Bind openings to walls based on explicit target ID, envelope context, or spatial proximity.
+        """Bind openings to walls ONLY from an independently authenticated source.
 
-        Mutates opening.bound_wall_id and opening.status.
+        No heuristic binding is performed here. Specifically REMOVED, and not
+        replaced with any new heuristic:
+        - trusting a caller-populated ``opening.bound_wall_id`` at face value
+          (a caller asserting a binding is not proof of one);
+        - the "exactly one wall exists" shortcut (co-incidentally binding
+          every opening to the sole wall is not evidence that opening
+          actually pierces that wall);
+        - bounding-box intersection as a proxy for physical hosting;
+        - any nearest/first/proximity fallback.
+
+        ``authenticated_host_bindings`` is the ONLY trusted source: a mapping
+        of ``opening_id -> wall_id`` where each entry has already been
+        independently proven by a reconciled host-binding authority (see
+        pb_opening_host_binding_authority.py) elsewhere, before this method
+        is ever called. Until that authority is wired up here, no caller
+        supplies this mapping, so every opening is correctly
+        PROVISIONAL_UNBOUND -- fail closed rather than guess. Mutates
+        opening.bound_wall_id and opening.status.
         """
         wall_ids = {w.wall_id for w in walls}
+        bindings = authenticated_host_bindings or {}
 
         for op in openings:
-            # 1. Explicit valid binding
-            if op.bound_wall_id and op.bound_wall_id in wall_ids:
+            candidate_wall_id = bindings.get(op.opening_id)
+            if candidate_wall_id and candidate_wall_id in wall_ids:
+                op.bound_wall_id = candidate_wall_id
                 continue
 
-            # 2. Envelope binding: if exactly one external/perimeter wall exists and opening is external
-            if len(walls) == 1:
-                op.bound_wall_id = walls[0].wall_id
-                continue
-
-            # 3. Spatial bounding box containment if both have valid bboxes
-            if op.bounding_box and len(op.bounding_box) == 4:
-                ox0, oy0, ox1, oy1 = op.bounding_box
-                best_wall = None
-                for w in walls:
-                    if w.bounding_box and len(w.bounding_box) == 4:
-                        wx0, wy0, wx1, wy1 = w.bounding_box
-                        # Bounding box intersection check
-                        if not (ox1 < wx0 or ox0 > wx1 or oy1 < wy0 or oy0 > wy1):
-                            best_wall = w.wall_id
-                            break
-                if best_wall:
-                    op.bound_wall_id = best_wall
-                    continue
-
-            # 4. Fallback: fail-closed provisional unbound
             op.bound_wall_id = None
             op.status = OpeningDeductionStatus.PROVISIONAL_UNBOUND
-            op.notes = "Opening could not be deterministically bound to any wall instance."
+            op.notes = (
+                "No independently authenticated host-wall binding available "
+                "for this opening; refusing heuristic binding."
+            )
 
     def calculate_wall_deductions(
         self,
@@ -237,11 +263,40 @@ class GenericOpeningDeductionPipeline:
         total_deduction = round(total_deduction, 2)
         net_area = round(max(0.0, wall.gross_area_m2 - total_deduction), 2)
 
+        abstained = bool(unresolved) or bool(unbound)
+        blocking_reasons = tuple(
+            f"unresolved_dimensions:{entry['opening_id']}" for entry in unresolved
+        ) + tuple(f"unbound:{entry['opening_id']}" for entry in unbound)
+        net_area_evidence = QuantityEvidence(
+            quantity_id=stable_contract_id(
+                "wall_net_area",
+                {
+                    "wall_id": wall.wall_id,
+                    "gross_area_m2": wall.gross_area_m2,
+                    "applied_openings": applied,
+                    "unresolved_openings": unresolved,
+                    "unbound_openings": unbound,
+                },
+            ),
+            family="wall_net_area",
+            semantic_key=wall.wall_id,
+            value=None if abstained else net_area,
+            unit="m2",
+            input_entity_ids=(wall.wall_id,) + tuple(op.opening_id for op in openings),
+            formula="gross_area_m2 - sum(applied_opening_areas)",
+            authority="pb_opening_deduction_pipeline.calculate_wall_deductions",
+            status="abstained" if abstained else "corroborated",
+            abstained=abstained,
+            blocking_reasons=blocking_reasons,
+            reason_codes=("opening_deduction_incomplete",) if abstained else ("opening_deduction_complete",),
+        )
+
         return WallDeductionResult(
             wall_id=wall.wall_id,
             gross_area_m2=round(wall.gross_area_m2, 2),
             total_deducted_area_m2=total_deduction,
             net_area_m2=net_area,
+            net_area_evidence=net_area_evidence,
             applied_openings=applied,
             unresolved_openings=unresolved,
             unbound_openings=unbound,
@@ -251,9 +306,13 @@ class GenericOpeningDeductionPipeline:
         self,
         walls: Sequence[WallInstance],
         openings: Sequence[OpeningInstance],
+        *,
+        authenticated_host_bindings: Optional[Mapping[str, str]] = None,
     ) -> Dict[str, WallDeductionResult]:
         """Perform opening-to-wall binding and compute deduction results for all walls."""
-        self.bind_openings_to_walls(openings, walls)
+        self.bind_openings_to_walls(
+            openings, walls, authenticated_host_bindings=authenticated_host_bindings
+        )
         results: Dict[str, WallDeductionResult] = {}
         for w in walls:
             results[w.wall_id] = self.calculate_wall_deductions(w, openings)
@@ -286,15 +345,23 @@ class GenericOpeningDeductionPipeline:
         # An unresolved or unbound opening contributes zero to
         # total_deducted_area_m2 (see calculate_wall_deductions), so
         # net_area_m2 is only the gross area minus whatever COULD be
-        # deducted, not minus everything that SHOULD be. Publishing that
-        # number as final would silently understate deductions (overstate
-        # net area) for every walling and wall-finish prediction sharing
-        # this wall's openings. Block publication instead, retaining the
-        # best-known figures for diagnostics only -- mirrors the
-        # publication_blocked / reconciliation_status convention used
-        # elsewhere in the live extractor (pb_planreader_pdf_extractor.py's
-        # extracted_prediction_publication_blocked).
-        deduction_incomplete = bool(primary_res.unresolved_openings) or bool(primary_res.unbound_openings)
+        # deducted, not minus everything that SHOULD be -- an unknown
+        # deduction, not an evidenced zero one. net_area_evidence.abstained
+        # is the authoritative signal (see WallDeductionResult docstring);
+        # a bare numeric net_area_m2 must never be trusted as final on its
+        # own. When abstained, publish quantity=None rather than silently
+        # converting the unknown back to a number -- this is itself already
+        # a recognized block signal (see extracted_prediction_publication_blocked's
+        # own `pred.quantity is None` check in pb_planreader_pdf_extractor.py),
+        # and is reinforced with the same publication_blocked/
+        # reconciliation_status convention used elsewhere in that file. The
+        # best-known (unreliable) figure is retained under a clearly
+        # provisional-only key for diagnostics, never under net_area_m2 or
+        # quantity.
+        evidence = primary_res.net_area_evidence
+        abstained = evidence.abstained if evidence is not None else (
+            bool(primary_res.unresolved_openings) or bool(primary_res.unbound_openings)
+        )
 
         out_preds = []
         for p in predictions:
@@ -322,24 +389,31 @@ class GenericOpeningDeductionPipeline:
                 # with the external wall's net_area_m2 as if it were a copy.
                 independent_gross = meta.get("independent_gross_area_m2")
                 if independent_gross is not None:
-                    net_val = round(independent_gross - primary_res.total_deducted_area_m2, 4)
+                    provisional_net = round(independent_gross - primary_res.total_deducted_area_m2, 4)
                 else:
-                    net_val = primary_res.net_area_m2
+                    provisional_net = primary_res.net_area_m2
 
                 meta["gross_area_m2"] = independent_gross if independent_gross is not None else primary_res.gross_area_m2
                 meta["total_deducted_opening_area_m2"] = primary_res.total_deducted_area_m2
-                meta["net_area_m2"] = net_val
                 meta["applied_openings"] = primary_res.applied_openings
                 meta["unresolved_openings"] = primary_res.unresolved_openings
                 meta["unbound_openings"] = primary_res.unbound_openings
-                if deduction_incomplete:
+
+                if abstained:
+                    net_val = None
+                    meta["net_area_m2"] = None
+                    meta["provisional_net_area_m2"] = provisional_net
                     meta["publication_blocked"] = True
                     meta["reconciliation_status"] = "ambiguous_unresolved"
                     meta["blocking_reason"] = (
                         "opening_deduction_incomplete: one or more openings on this "
-                        "wall are unresolved or unbound, so net_area_m2 excludes their "
-                        "area rather than reflecting a complete deduction"
+                        "wall are unresolved or unbound, so the true net area is "
+                        "unknown, not zero -- provisional_net_area_m2 is a diagnostic "
+                        "estimate only, never a final quantity"
                     )
+                else:
+                    net_val = provisional_net
+                    meta["net_area_m2"] = net_val
 
                 if hasattr(p, "quantity"):
                     p.quantity = net_val
