@@ -15,6 +15,7 @@ from pb_hosted_opening_geometry import HostedOpeningSpan
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_opening_authority import PhysicalOpeningAuthority
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
+from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
 from pb_wall_room_topology_wall_identity_v2 import canonical_path_fingerprint
 
 
@@ -212,7 +213,7 @@ def edge_records_for(
                 "y1": float(start[1]),
                 "x2": float(end[0]),
                 "y2": float(end[1]),
-                "source_primitive_ids": (source_id,),
+                LINEAGE_KEY: {"source_primitive_ids": (source_id,)},
             }
     return records
 
