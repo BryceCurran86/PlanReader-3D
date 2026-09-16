@@ -3,9 +3,9 @@
 Rebuild of the parked #316 wiring with mandatory authority corrections:
 
 1. Finish collection is unscoped (``collect_unscoped_ceiling_finish_candidates``).
-2. Room ownership is resolved only from owned ``RoomCandidate`` topology via
-   ``resolve_ceiling_finish_scope_proofs`` (sealed proofs; no caller-built
-   proof objects or arbitrary polygon maps).
+2. Room ownership is resolved only from a collector-produced
+   ``TopologySnapshot`` sealed into ``OwnedTopologyRoomIndex`` — never from
+   caller-supplied ``RoomCandidate`` bodies, polygon maps, or free-form proofs.
 3. Final contract is ``ProviderResult`` via the standard migration envelope.
 
 Shadow-only: no live ExtractedPrediction, no commercial/JobHub publication,
@@ -26,6 +26,7 @@ from pb_ceiling_lining_quantity import (
 )
 from pb_ceiling_lining_scope_binder import (
     bind_unscoped_finish_candidates_to_room,
+    build_owned_topology_room_index,
     resolve_ceiling_finish_scope_proofs,
 )
 from pb_geometry_takeoff_model import AuthorityStatus
@@ -44,11 +45,11 @@ from pb_migration_provider_envelope import (
     fingerprint_source_files,
 )
 from pb_provider_gold_isolation import assert_provider_gold_free
-from pb_wall_room_topology_contracts import RoomCandidate
+from pb_wall_topology_diagnostics import TopologySnapshot
 
 PROVIDER_ENGINE_ID = "shadow_ceiling_lining"
-PROVIDER_ENGINE_VERSION = "2.1.0"
-PROVIDER_OUTPUT_SCHEMA_VERSION = "1.1.0"
+PROVIDER_ENGINE_VERSION = "2.2.0"
+PROVIDER_OUTPUT_SCHEMA_VERSION = "1.2.0"
 PROVIDER_FAMILY = CEILING_LINING_FAMILY
 
 _CODE_MODULES = (
@@ -90,8 +91,9 @@ def ceiling_lining_descriptor() -> ProviderDescriptor:
 class CeilingLiningShadowInputs:
     """Injected shadow inputs for the provider (tests / shadow harness).
 
-    Scope proofs are never accepted from the caller. Binding is resolved
-    internally from ``RoomCandidate`` topology evidence only.
+    Scope proofs and ``RoomCandidate`` bodies are never accepted from the
+    caller. Binding resolves rooms only from a collector-produced
+    ``TopologySnapshot`` via ``build_owned_topology_room_index``.
     """
 
     document: DocumentEvidence
@@ -99,7 +101,7 @@ class CeilingLiningShadowInputs:
     page_no: int
     authoritative_area_quantities: tuple[QuantityEvidence, ...]
     unscoped_finish_candidates: tuple[EvidenceAtom, ...]
-    rooms: tuple[RoomCandidate, ...] = ()
+    topology_snapshot: Optional[TopologySnapshot] = None
 
 
 def _scope_of_area(area: QuantityEvidence) -> str:
@@ -216,15 +218,19 @@ class CeilingLiningShadowProvider:
             )
 
         inputs = self._inputs
-        # Resolve sealed proofs once from canonical RoomCandidate geometry.
-        # Callers cannot inject free-form proofs.
+        room_index = None
+        if inputs.topology_snapshot is not None:
+            room_index = build_owned_topology_room_index(
+                snapshot=inputs.topology_snapshot,
+                context=context,
+            )
+        # Resolve sealed proofs from producer-owned room index only.
+        # Callers cannot inject RoomCandidate bodies or free-form proofs.
         resolved_proofs = resolve_ceiling_finish_scope_proofs(
             candidates=inputs.unscoped_finish_candidates,
-            rooms=inputs.rooms,
-            context=context,
+            room_index=room_index,
             document=inputs.document,
             viewport=inputs.viewport,
-            page_no=inputs.page_no,
         )
         areas = tuple(
             sorted(
@@ -257,15 +263,17 @@ class CeilingLiningShadowProvider:
                 )
                 continue
 
-            scoped_finish = bind_unscoped_finish_candidates_to_room(
-                candidates=inputs.unscoped_finish_candidates,
-                queried_room_ref=scope,
-                proofs=resolved_proofs,
-                context=context,
-                document=inputs.document,
-                viewport=inputs.viewport,
-                page_no=inputs.page_no,
-            )
+            if room_index is None or not room_index.is_producer_owned:
+                scoped_finish: tuple[EvidenceAtom, ...] = ()
+            else:
+                scoped_finish = bind_unscoped_finish_candidates_to_room(
+                    candidates=inputs.unscoped_finish_candidates,
+                    queried_room_ref=scope,
+                    proofs=resolved_proofs,
+                    room_index=room_index,
+                    document=inputs.document,
+                    viewport=inputs.viewport,
+                )
             owned_ids = set(inputs.document.evidence_ids)
             owned_ids.update(atom.evidence_id for atom in scoped_finish)
             owned_ids.update(scoped_areas[0].evidence_ids)

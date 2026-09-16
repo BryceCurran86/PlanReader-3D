@@ -48,8 +48,76 @@ from pb_wall_room_topology_wall_assembly import assemble_wall_candidates, rekey_
 DIAGNOSTIC_SCHEMA_VERSION = "1.0.0"
 FLOAT_DIGITS = 6
 UNKNOWN = "UNKNOWN"
+
+# Only ``collect_topology_from_segments`` / ``collect_topology_from_page`` may
+# mint this seal. Free-constructed ``TopologySnapshot(...)`` records stay
+# unsealed and are not topology authority for C15 binding.
+# Seal is content-bound: ``dataclasses.replace(rooms=...)`` on a sealed
+# snapshot invalidates ``is_collector_produced`` because the token must match
+# the recomputed room/wall fingerprint.
+_TOPOLOGY_COLLECTOR_SEAL = object()
 UNAVAILABLE = "unavailable"
 NOT_EVALUATED = "not_evaluated"
+
+
+def _topology_producer_seal_token(
+    *,
+    document_id: str,
+    page_id: str,
+    page_number: int,
+    viewport_id: str,
+    rooms: Sequence[RoomCandidate],
+    walls: Sequence[WallCandidate],
+    fail_closed_reason: Optional[str],
+) -> str:
+    """Content fingerprint bound into the collector seal."""
+    return stable_contract_id(
+        "topsnap_seal",
+        {
+            "document_id": document_id,
+            "page_id": page_id,
+            "page_number": int(page_number),
+            "viewport_id": viewport_id,
+            "fail_closed_reason": fail_closed_reason,
+            "rooms": [
+                {
+                    "room_ref": room.room_ref,
+                    "document_id": room.document_id,
+                    "viewport_id": room.viewport_id,
+                    "source_page": int(room.source_page),
+                    "status": room.status.value,
+                    "polygon_pdf_pts": [list(pt) for pt in room.polygon_pdf_pts],
+                    "evidence": list(room.evidence),
+                }
+                for room in rooms
+            ],
+            "walls": [wall.candidate_id for wall in walls],
+        },
+    )
+
+
+def _mint_topology_producer_seal(
+    *,
+    document_id: str,
+    page_id: str,
+    page_number: int,
+    viewport_id: str,
+    rooms: Sequence[RoomCandidate],
+    walls: Sequence[WallCandidate],
+    fail_closed_reason: Optional[str],
+) -> tuple[object, str]:
+    return (
+        _TOPOLOGY_COLLECTOR_SEAL,
+        _topology_producer_seal_token(
+            document_id=document_id,
+            page_id=page_id,
+            page_number=page_number,
+            viewport_id=viewport_id,
+            rooms=rooms,
+            walls=walls,
+            fail_closed_reason=fail_closed_reason,
+        ),
+    )
 
 _HORIZONTAL_DEG = 15.0
 _VERTICAL_LOW_DEG = 75.0
@@ -259,6 +327,12 @@ class TopologySnapshot:
     """Immutable bag of existing W1-W10 outputs for one viewport.
 
     Diagnostic code must not mutate any nested object the caller supplied.
+
+    ``is_collector_produced`` is True only for snapshots minted by
+    ``collect_topology_from_*`` whose room/wall content still matches the
+    seal token. A free-constructed snapshot, or a sealed snapshot whose
+    rooms/walls were swapped via ``replace``, is diagnostic only — not
+    producer-owned topology authority for quantity binding.
     """
 
     document_id: str
@@ -280,6 +354,28 @@ class TopologySnapshot:
     opening_host_evaluated: bool = False
     reconciliation: Optional[TopologyReconciliationSummary] = None
     fail_closed_reason: Optional[str] = None
+    _producer_seal: object = field(default=None, repr=False, compare=False)
+
+    def _expected_producer_seal_token(self) -> str:
+        return _topology_producer_seal_token(
+            document_id=self.document_id,
+            page_id=self.page_id,
+            page_number=self.page_number,
+            viewport_id=self.viewport_id,
+            rooms=self.rooms,
+            walls=self.walls,
+            fail_closed_reason=self.fail_closed_reason,
+        )
+
+    @property
+    def is_collector_produced(self) -> bool:
+        seal = self._producer_seal
+        if not isinstance(seal, tuple) or len(seal) != 2:
+            return False
+        marker, token = seal
+        if marker is not _TOPOLOGY_COLLECTOR_SEAL:
+            return False
+        return token == self._expected_producer_seal_token()
 
     def with_reconciliation(self) -> "TopologySnapshot":
         summary = reconcile_topology(
@@ -290,6 +386,7 @@ class TopologySnapshot:
             room_relationships=self.room_relationships,
             opening_hosts=self.opening_hosts,
         )
+        # Reconciliation does not alter room/wall geometry; preserve seal.
         return replace(self, reconciliation=summary)
 
 
@@ -363,6 +460,15 @@ def collect_topology_from_segments(
         room_relationships=tuple(room_rels),
         opening_hosts=tuple(hosts),
         opening_host_evaluated=evaluate_opening_hosts,
+        _producer_seal=_mint_topology_producer_seal(
+            document_id=document_id,
+            page_id=page_id,
+            page_number=page_number,
+            viewport_id=viewport_id,
+            rooms=tuple(rooms),
+            walls=tuple(walls),
+            fail_closed_reason=None,
+        ),
     )
     return snapshot.with_reconciliation()
 
@@ -453,6 +559,15 @@ def collect_topology_from_page(
             view_type=None,
             raw_primitive_count=raw_count,
             fail_closed_reason=reason,
+            _producer_seal=_mint_topology_producer_seal(
+                document_id=document_id,
+                page_id=page_id,
+                page_number=page_number,
+                viewport_id=viewport_id or "",
+                rooms=(),
+                walls=(),
+                fail_closed_reason=reason,
+            ),
         )
 
     chosen = sorted(eligible, key=lambda item: (item.view_id, item.title_bbox))[0]
