@@ -160,11 +160,6 @@ def _geometry_points(geometry: Sequence[float]) -> tuple[Point, ...]:
     return tuple((coords[index], coords[index + 1]) for index in range(0, len(coords), 2))
 
 
-def _centroid(bbox: BBox) -> Point:
-    x0, y0, x1, y1 = bbox
-    return ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
-
-
 def _line(record: SourceObservationRecord) -> Optional[Line]:
     if len(record.geometry) != 4:
         return None
@@ -360,13 +355,32 @@ def _opening_aperture(records: Sequence[SourceObservationRecord]) -> Optional[_O
     return next(iter(unique.values()))
 
 
-def _aperture_contains(aperture: _OpeningAperture, point: Point) -> bool:
-    along = _dot(point, aperture.axis)
-    normal = _dot(point, aperture.normal)
-    return (
-        aperture.along_min - _COORD_TOL <= along <= aperture.along_max + _COORD_TOL
-        and aperture.normal_min - _COORD_TOL <= normal <= aperture.normal_max + _COORD_TOL
+def _aperture_contains_bbox(aperture: _OpeningAperture, bbox: BBox) -> bool:
+    """Return True if the text bounding box overlaps the opening aperture.
+
+    Uses bbox overlap (not centroid) so that tags whose text extends slightly
+    past a jamb are still counted as contained.  This is the conservative
+    direction: it is safer to surface an ambiguous CONFLICT than to silently
+    discard a real tag whose centroid happens to land just outside the aperture.
+
+    Along-axis: the bbox must overlap [along_min, along_max].
+    Normal-axis: the bbox must overlap [normal_min, normal_max].
+    """
+    x0, y0, x1, y1 = bbox
+    corners = ((x0, y0), (x0, y1), (x1, y0), (x1, y1))
+    along_vals = [_dot(c, aperture.axis) for c in corners]
+    normal_vals = [_dot(c, aperture.normal) for c in corners]
+    bbox_along_min, bbox_along_max = min(along_vals), max(along_vals)
+    bbox_normal_min, bbox_normal_max = min(normal_vals), max(normal_vals)
+    along_overlap = (
+        bbox_along_max >= aperture.along_min - _COORD_TOL
+        and bbox_along_min <= aperture.along_max + _COORD_TOL
     )
+    normal_overlap = (
+        bbox_normal_max >= aperture.normal_min - _COORD_TOL
+        and bbox_normal_min <= aperture.normal_max + _COORD_TOL
+    )
+    return along_overlap and normal_overlap
 
 
 def _row_groups_for_page(
@@ -631,7 +645,7 @@ class ScheduleOpeningInstanceBindingProducer:
         contained_tags: list[tuple[str, str]] = []
         for observation_id, text, geometry in trusted_by_page.get(opening.page_id, []):
             bbox = _bbox_of_points(_geometry_points(geometry))
-            if bbox is None or not _aperture_contains(aperture, _centroid(bbox)):
+            if bbox is None or not _aperture_contains_bbox(aperture, bbox):
                 continue
             normalized = normalize_opening_tag(text)
             if normalized is not None:
