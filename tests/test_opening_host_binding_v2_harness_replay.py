@@ -6,6 +6,7 @@ from tools.validator_replay_harness import LaneType, ReplayConfig, run_replay
 
 BASE_SHA = "36a1f49ad92f553102101f8a2bf1d01ee45b2f52"
 VALIDATOR_REF = "gpt2/opening-host-binding-post-completeness-v2"
+VALIDATOR_COMMIT = "bb89a264b1bdd0b945c05814370d23656109ea51"
 VALIDATOR_PATH = "tests/test_opening_host_binding_authority_redteam_v2.py"
 VALIDATOR_BLOB = "55b2b3e87bc5263aa1693dce672c0d26aa94636b"
 
@@ -23,6 +24,7 @@ def test_frozen_host_validator_is_clean_behavioral_red_on_current_main() -> None
         )
     )
 
+    assert report.validator_commit == VALIDATOR_COMMIT
     assert report.verdict == "expected_behavioral_red"
     assert report.preflight.passed is True
     assert report.sha_match is True
