@@ -60,6 +60,7 @@ FORBIDDEN_PATH_PREFIXES = (
 REGISTERED_PRODUCTION_PROVIDERS = {
     "shadow_opening_count": "pb_shadow_opening_count_provider",
     "opening_count_control_adapter": "pb_opening_count_control_adapter",
+    "shadow_ceiling_lining": "pb_ceiling_lining_shadow_provider",
 }
 
 _ISOLATION_CACHE: dict[str, ProviderIsolationReport] = {}

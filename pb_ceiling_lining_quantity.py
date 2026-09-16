@@ -105,6 +105,28 @@ def _finish_descriptor(raw_text: str) -> Optional[str]:
     return _norm(descriptor)
 
 
+def explicit_ceiling_finish_descriptor(raw_text: str) -> Optional[str]:
+    """Public wrapper: canonical explicit finish descriptor, or None."""
+    return _finish_descriptor(raw_text)
+
+
+def iter_explicit_ceiling_finish_matches(page_text: str) -> tuple[str, ...]:
+    """Return raw explicit ceiling-finish / lining match strings from page text."""
+    text = " ".join(_clean(page_text).replace("\u00a0", " ").split())
+    if not text:
+        return ()
+    matches: list[str] = []
+    seen: set[str] = set()
+    for match in _EXPLICIT_CEILING_FINISH_RE.finditer(text):
+        raw = match.group(0)
+        descriptor = _finish_descriptor(raw)
+        if descriptor is None or descriptor in seen:
+            continue
+        seen.add(descriptor)
+        matches.append(raw)
+    return tuple(matches)
+
+
 def _base_context_blockers(
     *,
     context: ProviderContext,
