@@ -108,14 +108,31 @@ def _fixture(payload: bytes | None = None):
         decision_scope_id=binding.record.decision_scope_id,
         opening_identity_id=binding.record.opening_identity_id,
     )
-    return physical, opening_selector, opening_record, binding_producer, binding_selector, binding
+    return (
+        physical,
+        wall_authority,
+        opening_selector,
+        opening_record,
+        binding_producer,
+        binding_selector,
+        binding,
+    )
 
 
 def _frame(payload: bytes | None = None):
-    physical, opening_selector, opening, binding_producer, binding_selector, binding = _fixture(payload)
+    (
+        physical,
+        wall_authority,
+        opening_selector,
+        opening,
+        binding_producer,
+        binding_selector,
+        binding,
+    ) = _fixture(payload)
     producer = OpeningHostFrameProducer.from_authorities(
         physical_opening_authority=physical,
         host_binding_authority=binding_producer.authority(),
+        physical_wall_candidate_authority=wall_authority,
     )
     result = producer.publish(
         opening_selector=opening_selector,
@@ -125,11 +142,20 @@ def _frame(payload: bytes | None = None):
 
 
 def test_authority_and_producer_are_sealed_and_no_raw_geometry_surface() -> None:
-    physical, _opening_selector, _opening, binding_producer, _binding_selector, _binding = _fixture()
+    (
+        physical,
+        wall_authority,
+        _opening_selector,
+        _opening,
+        binding_producer,
+        _binding_selector,
+        _binding,
+    ) = _fixture()
     with pytest.raises(TypeError):
         OpeningHostFrameProducer(
             physical,
             binding_producer.authority(),
+            wall_authority,
         )
     with pytest.raises(ValueError):
         OpeningHostFrameAuthority({}, _seal=object())
@@ -150,7 +176,7 @@ def test_real_source_host_frame_resolves_and_replays() -> None:
     assert evidence.host_binding_record_id == binding.record.record_id
     assert evidence.host_wall_id == binding.record.host_wall_id
     assert evidence.coordinate_unit == "pdf_point"
-    # The frame is host-wall-local, not opening-local.  The authenticated host
+    # The frame is host-wall-local, not opening-local. The authenticated host
     # band runs x=20..280 around a 40-point aperture at x=120..160, so the
     # opening occupies u=100..140 in the common wall frame.
     assert evidence.origin_pt == (20.0, 90.0)
@@ -185,10 +211,19 @@ def test_reversing_source_primitive_directions_keeps_canonical_frame() -> None:
 
 
 def test_cross_wired_host_binding_selector_fails_closed() -> None:
-    physical, opening_selector, _opening, binding_producer, binding_selector, _binding = _fixture()
+    (
+        physical,
+        wall_authority,
+        opening_selector,
+        _opening,
+        binding_producer,
+        binding_selector,
+        _binding,
+    ) = _fixture()
     producer = OpeningHostFrameProducer.from_authorities(
         physical_opening_authority=physical,
         host_binding_authority=binding_producer.authority(),
+        physical_wall_candidate_authority=wall_authority,
     )
     wrong = dataclasses.replace(binding_selector, opening_identity_id="wrong-opening")
     result = producer.publish(
@@ -200,10 +235,19 @@ def test_cross_wired_host_binding_selector_fails_closed() -> None:
 
 
 def test_wrong_opening_observation_cannot_reuse_valid_host_binding() -> None:
-    physical, opening_selector, _opening, binding_producer, binding_selector, _binding = _fixture()
+    (
+        physical,
+        wall_authority,
+        opening_selector,
+        _opening,
+        binding_producer,
+        binding_selector,
+        _binding,
+    ) = _fixture()
     producer = OpeningHostFrameProducer.from_authorities(
         physical_opening_authority=physical,
         host_binding_authority=binding_producer.authority(),
+        physical_wall_candidate_authority=wall_authority,
     )
     wrong = dataclasses.replace(opening_selector, observation_id="not-a-real-observation")
     result = producer.publish(
