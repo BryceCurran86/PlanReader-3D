@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 
 from pb_migration_contracts import EvidenceResolutionStatus
-from pb_opening_schedule_v171 import detect_header
+from pb_opening_schedule_v171 import _infer_column_basis, detect_header
 from pb_schedule_opening_instance_binding_authority import (
     _row_groups_for_page,
     _schedule_entries_for_page,
@@ -269,8 +269,6 @@ class ScheduleRowHeightProducer:
         if target_row is None:
             return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_ROW_UNAVAILABLE))
 
-        if entry.dimension_basis != "rough_opening" or not entry.basis_source:
-            return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_BASIS_UNPROVEN))
         if entry.parse_source not in {"header_separate", "header_dims"}:
             return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_BASIS_UNPROVEN))
 
@@ -285,6 +283,15 @@ class ScheduleRowHeightProducer:
             return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_FIELD_UNAVAILABLE))
         if column_index >= len(header_cells) or column_index >= len(target_cells):
             return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_FIELD_UNAVAILABLE))
+
+        # Re-prove the physical measurement basis from the exact producer-owned
+        # source header that governs this height. The legacy schedule parser's
+        # convenience fields are intentionally not authoritative here: a valid
+        # explicit metre cell may be outside what that parser can normalize,
+        # while the trusted heading still explicitly states rough-opening basis.
+        dimension_basis, basis_source = _infer_column_basis(header_cells[column_index])
+        if dimension_basis != "rough_opening" or not basis_source:
+            return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_BASIS_UNPROVEN))
 
         unit_tokens = set(_unit_tokens(header_cells[column_index]))
         unit_tokens.update(_unit_tokens(target_cells[column_index]))
@@ -311,8 +318,8 @@ class ScheduleRowHeightProducer:
             raw_text=str(target_row.get("text", "")),
             units="mm",
             source_units=source_units,
-            dimension_basis=entry.dimension_basis,
-            basis_source=entry.basis_source,
+            dimension_basis=dimension_basis,
+            basis_source=basis_source,
         )
         return self._store(
             key,
