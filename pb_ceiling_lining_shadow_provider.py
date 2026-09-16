@@ -3,9 +3,10 @@
 Rebuild of the parked #316 wiring with mandatory authority corrections:
 
 1. Finish collection is unscoped (``collect_unscoped_ceiling_finish_candidates``).
-2. Room ownership requires an independent ``CeilingFinishScopeProof``.
-3. Final contract is ``ProviderResult`` via the standard migration envelope —
-   not an ad-hoc shadow dictionary.
+2. Room ownership is resolved only from owned ``RoomCandidate`` topology via
+   ``resolve_ceiling_finish_scope_proofs`` (sealed proofs; no caller-built
+   proof objects or arbitrary polygon maps).
+3. Final contract is ``ProviderResult`` via the standard migration envelope.
 
 Shadow-only: no live ExtractedPrediction, no commercial/JobHub publication,
 no FIRM promotion, no roof/perimeter/accessory/wastage claims.
@@ -24,8 +25,8 @@ from pb_ceiling_lining_quantity import (
     build_ceiling_lining_quantity,
 )
 from pb_ceiling_lining_scope_binder import (
-    CeilingFinishScopeProof,
     bind_unscoped_finish_candidates_to_room,
+    resolve_ceiling_finish_scope_proofs,
 )
 from pb_geometry_takeoff_model import AuthorityStatus
 from pb_migration_contracts import (
@@ -43,10 +44,11 @@ from pb_migration_provider_envelope import (
     fingerprint_source_files,
 )
 from pb_provider_gold_isolation import assert_provider_gold_free
+from pb_wall_room_topology_contracts import RoomCandidate
 
 PROVIDER_ENGINE_ID = "shadow_ceiling_lining"
-PROVIDER_ENGINE_VERSION = "2.0.0"
-PROVIDER_OUTPUT_SCHEMA_VERSION = "1.0.0"
+PROVIDER_ENGINE_VERSION = "2.1.0"
+PROVIDER_OUTPUT_SCHEMA_VERSION = "1.1.0"
 PROVIDER_FAMILY = CEILING_LINING_FAMILY
 
 _CODE_MODULES = (
@@ -88,9 +90,8 @@ def ceiling_lining_descriptor() -> ProviderDescriptor:
 class CeilingLiningShadowInputs:
     """Injected shadow inputs for the provider (tests / shadow harness).
 
-    Live PDF extraction is intentionally not wired: this provider consumes
-    already-finalized authoritative area quantities plus unscoped finish
-    candidates and independent scope proofs.
+    Scope proofs are never accepted from the caller. Binding is resolved
+    internally from ``RoomCandidate`` topology evidence only.
     """
 
     document: DocumentEvidence
@@ -98,7 +99,7 @@ class CeilingLiningShadowInputs:
     page_no: int
     authoritative_area_quantities: tuple[QuantityEvidence, ...]
     unscoped_finish_candidates: tuple[EvidenceAtom, ...]
-    scope_proofs: tuple[CeilingFinishScopeProof, ...] = ()
+    rooms: tuple[RoomCandidate, ...] = ()
 
 
 def _scope_of_area(area: QuantityEvidence) -> str:
@@ -215,6 +216,16 @@ class CeilingLiningShadowProvider:
             )
 
         inputs = self._inputs
+        # Resolve sealed proofs once from canonical RoomCandidate geometry.
+        # Callers cannot inject free-form proofs.
+        resolved_proofs = resolve_ceiling_finish_scope_proofs(
+            candidates=inputs.unscoped_finish_candidates,
+            rooms=inputs.rooms,
+            context=context,
+            document=inputs.document,
+            viewport=inputs.viewport,
+            page_no=inputs.page_no,
+        )
         areas = tuple(
             sorted(
                 inputs.authoritative_area_quantities,
@@ -248,8 +259,12 @@ class CeilingLiningShadowProvider:
 
             scoped_finish = bind_unscoped_finish_candidates_to_room(
                 candidates=inputs.unscoped_finish_candidates,
-                room_entity_id=scope,
-                proofs=inputs.scope_proofs,
+                queried_room_ref=scope,
+                proofs=resolved_proofs,
+                context=context,
+                document=inputs.document,
+                viewport=inputs.viewport,
+                page_no=inputs.page_no,
             )
             owned_ids = set(inputs.document.evidence_ids)
             owned_ids.update(atom.evidence_id for atom in scoped_finish)

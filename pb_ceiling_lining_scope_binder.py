@@ -1,25 +1,50 @@
-"""C15 independent ceiling-finish → room/scope binder.
+"""C15 ceiling-finish → room scope binder (authoritative proof resolution).
 
-Collection emits unscoped candidates. Only this binder may establish room
-ownership, and only from independent proof — never from a caller-supplied
-room id argument alone.
+Collection emits unscoped candidates. Binding may establish room ownership
+only by independently resolving against repository-owned ``RoomCandidate``
+topology evidence — never from a caller-supplied room id, polygon map, or
+free-form proof object.
 
-If ownership cannot be independently proved, binding fails closed (no scoped
-atoms). The same page-level note offered for Room A and Room B therefore
-cannot become authoritative for both merely by changing an argument.
+Chain:
+  unscoped finish candidates
+  → canonical RoomCandidate geometry (owned document/viewport/page)
+  → sealed CeilingFinishScopeProof (resolver-minted only)
+  → scoped finish atoms for a queried room_ref
+  → build_ceiling_lining_quantity
+
+If canonical room ownership cannot be resolved, binding fails closed.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Mapping, Optional, Sequence, Tuple
+import math
+from dataclasses import dataclass, field
+from typing import Optional, Sequence, Tuple
 
-from pb_migration_contracts import EvidenceAtom, EvidenceResolutionStatus, stable_contract_id
+from pb_migration_contracts import (
+    DocumentEvidence,
+    EvidenceAtom,
+    EvidenceResolutionStatus,
+    ViewportEvidence,
+    stable_contract_id,
+)
+from pb_migration_provider_envelope import ProviderContext
+from pb_wall_room_topology_contracts import RoomCandidate
 
 Point = Tuple[float, float]
 BBox = Tuple[float, float, float, float]
 
-PROOF_TEXT_BBOX_IN_UNIQUE_ROOM_FACE = "text_bbox_in_unique_room_face"
-PROOF_OWNED_SCOPE_LINK_ATOM = "owned_scope_link_atom"
+PROOF_TEXT_BBOX_IN_UNIQUE_ROOM_CANDIDATE = "text_bbox_in_unique_room_candidate"
+
+# Only the resolver may mint proofs. External ``CeilingFinishScopeProof(...)``
+# construction without this seal is rejected at bind time.
+_PROOF_SEAL = object()
+
+_BINDABLE_ROOM_STATUSES = frozenset(
+    {
+        EvidenceResolutionStatus.CANDIDATE,
+        EvidenceResolutionStatus.CORROBORATED,
+    }
+)
 
 
 def _clean(value: object) -> str:
@@ -50,89 +75,289 @@ def _point_in_polygon(point: Point, polygon: Sequence[Point]) -> bool:
 
 @dataclass(frozen=True)
 class CeilingFinishScopeProof:
-    """Independent proof that one finish candidate belongs to one room.
+    """Resolver-minted proof that one finish candidate belongs to one room.
 
-    ``room_entity_id`` here is the *proven* room from geometry/link evidence,
-    not a caller request stamp.
+    Must be created by ``resolve_ceiling_finish_scope_proofs``. Caller-built
+    instances lack the seal and are rejected by the binder.
     """
 
+    proof_id: str
     finish_evidence_id: str
     room_entity_id: str
     proof_kind: str
+    document_id: str
+    source_sha256: str
+    revision_id: str
+    page_id: str
+    page_no: int
+    viewport_id: str
     proof_evidence_ids: tuple[str, ...]
     reason_codes: tuple[str, ...] = ()
+    _seal: object = field(default=None, repr=False, compare=False)
 
-    def __post_init__(self) -> None:
-        if not _clean(self.finish_evidence_id):
-            raise ValueError("finish_evidence_id required")
-        if not _clean(self.room_entity_id):
-            raise ValueError("room_entity_id required")
-        if not _clean(self.proof_kind):
-            raise ValueError("proof_kind required")
-        if not self.proof_evidence_ids:
-            raise ValueError("proof_evidence_ids required")
+    @property
+    def is_resolver_minted(self) -> bool:
+        return self._seal is _PROOF_SEAL
 
 
-def prove_text_bbox_in_unique_room_face(
+def _mint_proof(
     *,
     finish_evidence_id: str,
-    finish_bbox: Optional[BBox],
-    room_faces: Mapping[str, Sequence[Point]],
-) -> Optional[CeilingFinishScopeProof]:
-    """Prove ownership when the finish bbox center lies in exactly one room face.
-
-    Zero or multiple containing rooms → no proof (ambiguous / unknown).
-    """
-    if finish_bbox is None:
-        return None
-    try:
-        bbox = (
-            float(finish_bbox[0]),
-            float(finish_bbox[1]),
-            float(finish_bbox[2]),
-            float(finish_bbox[3]),
-        )
-    except (TypeError, ValueError, IndexError):
-        return None
-    center = _bbox_center(bbox)
-    owners = [
-        _clean(room_id)
-        for room_id, polygon in room_faces.items()
-        if _clean(room_id) and _point_in_polygon(center, tuple(polygon))
-    ]
-    if len(owners) != 1:
-        return None
-    room_id = owners[0]
+    room: RoomCandidate,
+    context: ProviderContext,
+    page_id: str,
+    page_no: int,
+    proof_kind: str,
+    proof_evidence_ids: Sequence[str],
+    reason_codes: Sequence[str],
+) -> CeilingFinishScopeProof:
+    finish_id = _clean(finish_evidence_id)
+    room_id = _clean(room.room_ref)
+    payload = {
+        "proof_kind": proof_kind,
+        "finish_evidence_id": finish_id,
+        "room_entity_id": room_id,
+        "document_id": context.document_id,
+        "source_sha256": context.source_sha256,
+        "revision_id": context.current_revision_id,
+        "page_id": page_id,
+        "page_no": int(page_no),
+        "viewport_id": room.viewport_id,
+        "proof_evidence_ids": list(proof_evidence_ids),
+    }
     return CeilingFinishScopeProof(
-        finish_evidence_id=_clean(finish_evidence_id),
+        proof_id=stable_contract_id("cfsproof", payload),
+        finish_evidence_id=finish_id,
         room_entity_id=room_id,
-        proof_kind=PROOF_TEXT_BBOX_IN_UNIQUE_ROOM_FACE,
-        proof_evidence_ids=(f"room_face:{room_id}", _clean(finish_evidence_id)),
-        reason_codes=("unique_room_face_contains_finish_bbox_center",),
+        proof_kind=proof_kind,
+        document_id=_clean(context.document_id),
+        source_sha256=_clean(context.source_sha256).lower(),
+        revision_id=_clean(context.current_revision_id),
+        page_id=_clean(page_id),
+        page_no=int(page_no),
+        viewport_id=_clean(room.viewport_id),
+        proof_evidence_ids=tuple(_clean(eid) for eid in proof_evidence_ids if _clean(eid)),
+        reason_codes=tuple(_clean(code) for code in reason_codes if _clean(code)),
+        _seal=_PROOF_SEAL,
     )
+
+
+def _room_owned_by_context(
+    *,
+    room: RoomCandidate,
+    context: ProviderContext,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+    page_no: int,
+) -> tuple[str, ...]:
+    """Return blockers when a RoomCandidate is not usable for C15 binding."""
+    blockers: list[str] = []
+    if room.document_id != context.document_id or room.document_id != document.document_id:
+        blockers.append("room_document_mismatch")
+    if room.viewport_id != viewport.viewport_id:
+        blockers.append("room_viewport_mismatch")
+    if room.viewport_id not in context.trusted_viewport_ids():
+        blockers.append("room_viewport_not_owned")
+    if int(room.source_page) != int(page_no):
+        blockers.append("room_page_mismatch")
+    if int(page_no) not in context.trusted_page_numbers():
+        blockers.append("page_not_owned")
+    mapped = context.page_for_viewport(viewport.viewport_id)
+    if mapped is not None and int(mapped) != int(page_no):
+        blockers.append("viewport_page_mismatch")
+    if room.status not in _BINDABLE_ROOM_STATUSES:
+        blockers.append("room_status_not_bindable")
+    if len(room.polygon_pdf_pts) < 3:
+        blockers.append("room_polygon_unavailable")
+    return tuple(dict.fromkeys(blockers))
+
+
+def _candidate_owned_by_context(
+    *,
+    atom: EvidenceAtom,
+    context: ProviderContext,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+    page_no: int,
+) -> tuple[str, ...]:
+    blockers: list[str] = []
+    if atom.document_id != document.document_id or atom.document_id != context.document_id:
+        blockers.append("finish_document_mismatch")
+    if atom.evidence_id not in document.evidence_ids:
+        blockers.append("finish_evidence_not_owned_by_document")
+    if atom.page_id != viewport.page_id:
+        blockers.append("finish_page_mismatch")
+    meta = atom.metadata if isinstance(atom.metadata, dict) else {}
+    try:
+        atom_page = int(meta.get("page_no"))
+    except (TypeError, ValueError):
+        atom_page = None
+    if atom_page is None or atom_page != int(page_no):
+        blockers.append("finish_page_no_mismatch")
+    source = _clean(meta.get("source_sha256")).lower()
+    if source != context.source_sha256:
+        blockers.append("finish_source_sha256_mismatch")
+    revision = _clean(meta.get("revision_id"))
+    if revision != _clean(context.current_revision_id):
+        blockers.append("finish_revision_mismatch")
+    if atom.viewport_id not in (None, "", viewport.viewport_id):
+        blockers.append("finish_viewport_mismatch")
+    return tuple(dict.fromkeys(blockers))
+
+
+def resolve_ceiling_finish_scope_proofs(
+    *,
+    candidates: Sequence[EvidenceAtom],
+    rooms: Sequence[RoomCandidate],
+    context: ProviderContext,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+    page_no: int,
+) -> tuple[CeilingFinishScopeProof, ...]:
+    """Mint sealed proofs from unscoped finish candidates + RoomCandidates.
+
+    Uses only ``RoomCandidate.polygon_pdf_pts`` (canonical topology contract).
+    Caller-supplied bare polygon maps are not accepted. Zero or multiple
+    containing rooms → no proof for that finish (fail closed / ambiguous).
+    """
+    if not context.revision_id or not context.current_revision_id:
+        return ()
+    if context.revision_id != context.current_revision_id:
+        return ()
+    if document.document_id != context.document_id:
+        return ()
+    if document.source_sha256 != context.source_sha256:
+        return ()
+    if viewport.document_id != context.document_id:
+        return ()
+    if viewport.viewport_id not in context.trusted_viewport_ids():
+        return ()
+
+    usable_rooms: list[RoomCandidate] = []
+    for room in rooms:
+        if _room_owned_by_context(
+            room=room,
+            context=context,
+            document=document,
+            viewport=viewport,
+            page_no=page_no,
+        ):
+            continue
+        usable_rooms.append(room)
+    if not usable_rooms:
+        return ()
+
+    proofs: list[CeilingFinishScopeProof] = []
+    for atom in candidates:
+        if _candidate_owned_by_context(
+            atom=atom,
+            context=context,
+            document=document,
+            viewport=viewport,
+            page_no=page_no,
+        ):
+            continue
+        if atom.bbox is None:
+            continue
+        try:
+            bbox = (
+                float(atom.bbox[0]),
+                float(atom.bbox[1]),
+                float(atom.bbox[2]),
+                float(atom.bbox[3]),
+            )
+        except (TypeError, ValueError, IndexError):
+            continue
+        if not all(math.isfinite(v) for v in bbox):
+            continue
+        center = _bbox_center(bbox)
+        owners = [
+            room
+            for room in usable_rooms
+            if _point_in_polygon(center, room.polygon_pdf_pts)
+        ]
+        if len(owners) != 1:
+            continue
+        room = owners[0]
+        proofs.append(
+            _mint_proof(
+                finish_evidence_id=atom.evidence_id,
+                room=room,
+                context=context,
+                page_id=atom.page_id,
+                page_no=page_no,
+                proof_kind=PROOF_TEXT_BBOX_IN_UNIQUE_ROOM_CANDIDATE,
+                proof_evidence_ids=(
+                    f"room_candidate:{room.room_ref}",
+                    atom.evidence_id,
+                    *tuple(room.evidence),
+                ),
+                reason_codes=("unique_room_candidate_contains_finish_bbox_center",),
+            )
+        )
+    proofs.sort(key=lambda item: item.proof_id)
+    return tuple(proofs)
 
 
 def bind_unscoped_finish_candidates_to_room(
     *,
     candidates: Sequence[EvidenceAtom],
-    room_entity_id: str,
+    queried_room_ref: str,
     proofs: Sequence[CeilingFinishScopeProof],
+    context: ProviderContext,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+    page_no: int,
 ) -> tuple[EvidenceAtom, ...]:
-    """Materialize scoped finish atoms for ``room_entity_id`` from proofs only.
+    """Materialize scoped atoms for a queried room from resolver-minted proofs.
 
-    The ``room_entity_id`` argument selects *which proven bindings to apply*.
-    It is never itself treated as proof. Without a matching
-    ``CeilingFinishScopeProof`` for that room and candidate, nothing is
-    scoped and the caller must remain BLOCKED downstream.
+    ``queried_room_ref`` selects which resolved proofs to apply. It never
+    certifies ownership. Non-sealed / ownership-mismatched proofs are ignored.
     """
-    scope = _clean(room_entity_id)
+    scope = _clean(queried_room_ref)
     if not scope:
         return ()
 
+    trusted: list[CeilingFinishScopeProof] = []
+    for proof in proofs:
+        if not proof.is_resolver_minted:
+            continue
+        if _clean(proof.room_entity_id) != scope:
+            continue
+        if proof.document_id != context.document_id:
+            continue
+        if proof.source_sha256 != context.source_sha256:
+            continue
+        if proof.revision_id != _clean(context.current_revision_id):
+            continue
+        if int(proof.page_no) != int(page_no):
+            continue
+        if proof.viewport_id != viewport.viewport_id:
+            continue
+        if proof.page_id != viewport.page_id:
+            continue
+        # Re-derive proof_id; reject tampered field sets.
+        expected = stable_contract_id(
+            "cfsproof",
+            {
+                "proof_kind": proof.proof_kind,
+                "finish_evidence_id": proof.finish_evidence_id,
+                "room_entity_id": proof.room_entity_id,
+                "document_id": proof.document_id,
+                "source_sha256": proof.source_sha256,
+                "revision_id": proof.revision_id,
+                "page_id": proof.page_id,
+                "page_no": int(proof.page_no),
+                "viewport_id": proof.viewport_id,
+                "proof_evidence_ids": list(proof.proof_evidence_ids),
+            },
+        )
+        if proof.proof_id != expected:
+            continue
+        trusted.append(proof)
+
     proven_finish_ids = {
-        _clean(proof.finish_evidence_id)
-        for proof in proofs
-        if _clean(proof.room_entity_id) == scope and _clean(proof.finish_evidence_id)
+        _clean(proof.finish_evidence_id) for proof in trusted if _clean(proof.finish_evidence_id)
     }
     if not proven_finish_ids:
         return ()
@@ -141,19 +366,15 @@ def bind_unscoped_finish_candidates_to_room(
     for atom in candidates:
         if atom.evidence_id not in proven_finish_ids:
             continue
-        matching = [
-            proof
-            for proof in proofs
-            if _clean(proof.room_entity_id) == scope
-            and _clean(proof.finish_evidence_id) == atom.evidence_id
-        ]
+        if atom.evidence_id not in document.evidence_ids:
+            continue
+        matching = [proof for proof in trusted if proof.finish_evidence_id == atom.evidence_id]
         if not matching:
             continue
-        # Scope is stamped from the independent proof, not from a collect-time
-        # caller argument.
         meta = dict(atom.metadata or {})
         meta.pop("unscoped", None)
         meta["scope_entity_id"] = scope
+        meta["scope_binding_proof_ids"] = tuple(sorted(proof.proof_id for proof in matching))
         meta["scope_binding_proof_kinds"] = tuple(
             sorted({proof.proof_kind for proof in matching})
         )
@@ -177,6 +398,7 @@ def bind_unscoped_finish_candidates_to_room(
                 "document_id": atom.document_id,
                 "page_id": atom.page_id,
                 "viewport_id": atom.viewport_id,
+                "proof_ids": list(meta["scope_binding_proof_ids"]),
                 "descriptor": meta.get("finish_descriptor"),
             },
         )
@@ -199,3 +421,8 @@ def bind_unscoped_finish_candidates_to_room(
             )
         )
     return tuple(scoped)
+
+
+# Removed APIs (intentionally absent):
+# - prove_text_bbox_in_unique_room_face(room_faces=...) — caller polygon maps
+# - trusting externally constructed CeilingFinishScopeProof without seal
