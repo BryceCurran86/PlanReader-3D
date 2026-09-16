@@ -34,12 +34,15 @@ from tests.test_schedule_opening_instance_binding_authority_v1 import (
     _tag_pdf,
 )
 
+# Compact headings are deliberate: SourceVisibilityProducer exposes native words,
+# so one source token must carry the column meaning rather than tests relying on
+# caller-side phrase grouping. The schedule parser explicitly supports RO+WDTH/HT.
 VALID_MM_SCHEDULE = (
-    ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+    ("MARK", "ROWDTH-MM", "ROHT-MM"),
     ("W1", "900", "2100"),
 )
 VALID_EXPLICIT_M_SCHEDULE = (
-    ("MARK", "ROUGH OPENING WIDTH", "ROUGH OPENING HEIGHT"),
+    ("MARK", "ROWDTH-M", "ROHT-M"),
     ("W1", "0.9m", "2.1m"),
 )
 
@@ -171,7 +174,7 @@ def test_explicit_metres_are_normalized_only_when_source_states_metres() -> None
 
 def test_generic_width_height_headers_do_not_prove_physical_height_basis() -> None:
     src, _binding, binding_result, row_height, _selector = _fixture(
-        (("MARK", "WIDTH (MM)", "HEIGHT (MM)"), ("W1", "900", "2100"))
+        (("MARK", "WIDTH-MM", "HEIGHT-MM"), ("W1", "900", "2100"))
     )
     del src
     _row_selector, result = _publish_row(binding_result, row_height)
@@ -181,7 +184,7 @@ def test_generic_width_height_headers_do_not_prove_physical_height_basis() -> No
 
 def test_rough_opening_basis_without_explicit_units_abstains() -> None:
     _src, _binding, binding_result, row_height, _selector = _fixture(
-        (("MARK", "ROUGH OPENING WIDTH", "ROUGH OPENING HEIGHT"), ("W1", "900", "2100"))
+        (("MARK", "ROWDTH", "ROHT"), ("W1", "900", "2100"))
     )
     _row_selector, result = _publish_row(binding_result, row_height)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
@@ -190,7 +193,7 @@ def test_rough_opening_basis_without_explicit_units_abstains() -> None:
 
 def test_frame_height_is_not_wall_void_height() -> None:
     _src, _binding, binding_result, row_height, _selector = _fixture(
-        (("MARK", "FRAME WIDTH (MM)", "FRAME HEIGHT (MM)"), ("W1", "900", "2100"))
+        (("MARK", "FRAMEWDTH-MM", "FRAMEHT-MM"), ("W1", "900", "2100"))
     )
     _row_selector, result = _publish_row(binding_result, row_height)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
@@ -200,7 +203,7 @@ def test_frame_height_is_not_wall_void_height() -> None:
 def test_conflicting_header_and_row_units_fail_closed() -> None:
     _src, _binding, binding_result, row_height, _selector = _fixture(
         (
-            ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+            ("MARK", "ROWDTH-MM", "ROHT-MM"),
             ("W1", "0.9m", "2.1m"),
         )
     )
@@ -212,7 +215,7 @@ def test_conflicting_header_and_row_units_fail_closed() -> None:
 def test_missing_height_never_defaults_to_2040_or_2100() -> None:
     src, binding, binding_result, row_height, selector = _fixture(
         (
-            ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+            ("MARK", "ROWDTH-MM", "ROHT-MM"),
             ("W1", "900", ""),
         )
     )
@@ -230,7 +233,7 @@ def test_missing_height_never_defaults_to_2040_or_2100() -> None:
 def test_typical_text_does_not_become_height() -> None:
     _src, _binding, binding_result, row_height, _selector = _fixture(
         (
-            ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+            ("MARK", "ROWDTH-MM", "ROHT-MM"),
             ("W1", "900", "TYPICAL"),
         )
     )
@@ -242,7 +245,7 @@ def test_typical_text_does_not_become_height() -> None:
 def test_duplicate_matching_rows_remain_upstream_conflict() -> None:
     src, binding, binding_result, row_height, selector = _fixture(
         (
-            ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+            ("MARK", "ROWDTH-MM", "ROHT-MM"),
             ("W1", "900", "2100"),
             ("W1", "900", "2100"),
         )
