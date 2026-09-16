@@ -439,13 +439,16 @@ def test_legitimate_visible_existence_cannot_cross_downstream_firewall() -> None
             published.visible_observation_ids[1],
         ),
     )
-    assert identity.status is EvidenceResolutionStatus.ABSTAINED
-    assert identity.proven_same is False
+    # Same G17 existence record via two producer-owned visible supports:
+    # identity may corroborate. Downstream measurement/publication stays closed.
+    assert identity.status is EvidenceResolutionStatus.CORROBORATED
+    assert identity.proven_same is True
+    assert identity.physical_opening_identity == result.existence_record.record_id
 
     capabilities = physical.capabilities()
     assert capabilities["physical_opening_existence"] is True
+    assert capabilities["physical_opening_identity"] is True
     for capability in (
-        "physical_opening_identity",
         "opening_universe_complete",
         "opening_dimensions",
         "host_identity",
