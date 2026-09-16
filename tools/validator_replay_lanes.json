@@ -1,0 +1,36 @@
+{
+  "lanes": {
+    "dimensions": {
+      "validator_ref": "cursor/opening-dimensions-redteam-v1",
+      "validator_path": "tests/test_opening_dimension_authority_redteam_v1.py",
+      "expected_validator_blob_sha": null,
+      "base_sha": "62a161519e617cdf9ce23069820dbf7c68aaf521",
+      "status": "normalizing"
+    },
+    "completeness": {
+      "validator_ref": "cursor/opening-universe-completeness-redteam-v1",
+      "validator_path": "tests/test_opening_universe_completeness_authority_redteam_v1.py",
+      "expected_validator_blob_sha": null,
+      "base_sha": "62a161519e617cdf9ce23069820dbf7c68aaf521",
+      "status": "normalizing"
+    },
+    "host": {
+      "validator_ref": "cursor/opening-host-binding-redteam-v1",
+      "validator_path": "tests/test_opening_host_binding_authority_redteam_v1.py",
+      "expected_validator_blob_sha": null,
+      "base_sha": "62a161519e617cdf9ce23069820dbf7c68aaf521",
+      "status": "normalizing"
+    },
+    "identity": {
+      "validator_ref": "gpt2/opening-instance-identity-redteam-v1",
+      "validator_path": "tests/test_opening_instance_identity_redteam_v1.py",
+      "expected_validator_blob_sha": "b66fbc0701d498357642076688add4287f5e8a24",
+      "base_sha": "62a161519e617cdf9ce23069820dbf7c68aaf521",
+      "status": "frozen",
+      "known_result": "24 passed"
+    }
+  },
+  "production_authority": {
+    "merged_main": "507c57db16be515e2432c695341bdea1e71b3fd7"
+  }
+}
