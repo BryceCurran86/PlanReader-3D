@@ -3,6 +3,7 @@
 DRAFT / REPLAY ONLY / DO NOT MERGE.
 Pinned production: 8a9a08c8e74872c7bd007999d307c52eee397394.
 Frozen validator commit and blob remain byte-identical to #392.
+This documentation-only refresh triggers exact-head CI while targeting main.
 """
 from pathlib import Path
 import subprocess
