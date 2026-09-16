@@ -39,6 +39,20 @@ _Key = tuple[str, str, str, str, str, tuple[str, ...]]
 
 _MM_RE = re.compile(r"(?:\bmm\b|millimet(?:er|re)s?)", re.IGNORECASE)
 _M_RE = re.compile(r"(?:\bmet(?:er|re)s?\b|(?<![A-Za-z])m\b)", re.IGNORECASE)
+_NUMERIC = r"(?:\d+(?:\.\d+)?|\.\d+)"
+_UNIT_TEXT = r"(?:mm|millimet(?:er|re)s?|m|met(?:er|re)s?)"
+_SINGLE_HEIGHT_RE = re.compile(
+    rf"^\s*(?P<height>{_NUMERIC})\s*(?:{_UNIT_TEXT})?\s*$",
+    re.IGNORECASE,
+)
+_PAIR_HEIGHT_RE = re.compile(
+    rf"^\s*(?P<width>{_NUMERIC})\s*(?:{_UNIT_TEXT})?\s*"
+    rf"(?:[×xX]|[-–—]|/|[bBhH])\s*"
+    rf"(?P<height>{_NUMERIC})\s*(?:{_UNIT_TEXT})?\s*$",
+    re.IGNORECASE,
+)
+_MIN_PLAUSIBLE_HEIGHT_MM = 200.0
+_MAX_PLAUSIBLE_HEIGHT_MM = 6000.0
 
 
 def _require_nonempty(value: object, field_name: str) -> str:
@@ -55,6 +69,33 @@ def _unit_tokens(text: str) -> frozenset[str]:
     if _M_RE.search(text or ""):
         units.add("m")
     return frozenset(units)
+
+
+def _semantic_height_mm(cell_text: str, parse_source: str, source_units: str) -> float | None:
+    """Re-parse the governing source cell under its proven unit semantics.
+
+    The legacy schedule parser intentionally treats bare numerics as mm. That
+    behavior is useful for provisional extraction but cannot prove a semantic
+    height when the source says metres. The authority layer therefore derives
+    the numeric height directly from the trusted source cell, applies the
+    independently proven unit, and rejects implausible normalized values.
+    """
+    clean = (cell_text or "").replace(",", "").strip()
+    if not clean:
+        return None
+    if parse_source == "header_separate":
+        match = _SINGLE_HEIGHT_RE.fullmatch(clean)
+    elif parse_source == "header_dims":
+        match = _PAIR_HEIGHT_RE.fullmatch(clean)
+    else:
+        return None
+    if match is None:
+        return None
+    value = float(match.group("height"))
+    height_mm = value * 1000.0 if source_units == "m" else value
+    if not (_MIN_PLAUSIBLE_HEIGHT_MM <= height_mm <= _MAX_PLAUSIBLE_HEIGHT_MM):
+        return None
+    return height_mm
 
 
 @dataclasses.dataclass(frozen=True)
@@ -228,8 +269,6 @@ class ScheduleRowHeightProducer:
         if target_row is None:
             return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_ROW_UNAVAILABLE))
 
-        if entry.height_mm is None:
-            return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_FIELD_UNAVAILABLE))
         if entry.dimension_basis != "rough_opening" or not entry.basis_source:
             return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_BASIS_UNPROVEN))
         if entry.parse_source not in {"header_separate", "header_dims"}:
@@ -255,20 +294,20 @@ class ScheduleRowHeightProducer:
             return self._store(key, _blocked(EvidenceResolutionStatus.CONFLICT, HEIGHT_UNITS_CONFLICT))
         source_units = next(iter(unit_tokens))
 
-        # The legacy schedule parser treats a bare numeric cell as millimetres.
-        # Therefore a metre-labelled header cannot safely relabel the parser's
-        # existing numeric value unless the governing row cell itself explicitly
-        # carries metre semantics. Fail closed rather than publish a possible
-        # 1000x unit mismatch. Explicit metre cells (for example ``2.1m``) are
-        # already normalized by the upstream parser and remain valid.
-        if source_units == "m" and "m" not in _unit_tokens(target_cells[column_index]):
-            return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_UNITS_UNPROVEN))
+        height_mm = _semantic_height_mm(
+            target_cells[column_index],
+            entry.parse_source,
+            source_units,
+        )
+        if height_mm is None:
+            reason = HEIGHT_FIELD_UNAVAILABLE if not re.search(r"\d", target_cells[column_index]) else HEIGHT_UNITS_UNPROVEN
+            return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, reason))
 
         evidence = ScheduleRowHeightEvidence(
             schedule_page_id=selector.schedule_page_id,
             schedule_row_observation_ids=tuple(selector.schedule_row_observation_ids),
             header_observation_ids=tuple(header_ids),
-            height_mm=float(entry.height_mm),
+            height_mm=height_mm,
             raw_text=str(target_row.get("text", "")),
             units="mm",
             source_units=source_units,
