@@ -17,6 +17,8 @@ import re
 import unicodedata
 from typing import Mapping, Optional, Sequence
 
+import fitz
+
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_source_observation_authority import (
     PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
@@ -44,6 +46,8 @@ TEXT_DECODE_MISMATCH = "text_decode_mismatch"
 TEXT_TOUNICODE_MALFORMED = "text_tounicode_malformed"
 TEXT_TOUNICODE_OR_KNOWN_ENCODING_REQUIRED = "text_tounicode_or_known_encoding_required"
 TEXT_STANDARD_ENCODING_NON_ASCII_UNTRUSTED = "text_standard_encoding_non_ascii_untrusted"
+TEXT_GLYPH_UNICODE_MISMATCH = "text_glyph_unicode_mismatch"
+TEXT_GLYPH_MAPPING_UNVERIFIED = "text_glyph_mapping_unverified"
 
 # Imported by SourceVisibilityProducer only. This is a structural construction
 # seal, consistent with the existing visibility authority pattern; it is not a
@@ -292,6 +296,90 @@ def _font_binding(page: object, span: Mapping[str, object]) -> tuple[Optional[Se
     return next(iter(matches.values())), ()
 
 
+def _font_for_glyph_validation(page: object, font: Sequence[object]):
+    """Return a no-fallback font view suitable for glyph-id verification.
+
+    ``get_texttrace()`` exposes both decoded Unicode and the actual glyph id.
+    A structurally valid ToUnicode CMap is therefore insufficient by itself:
+    the decoded code point must also resolve to the glyph that was rendered.
+    If the font cannot be reconstructed independently, callers must fail closed.
+    """
+
+    try:
+        xref = int(font[0])
+    except (IndexError, TypeError, ValueError):
+        return None
+
+    try:
+        extracted = page.parent.extract_font(xref)  # type: ignore[attr-defined]
+        font_buffer = extracted[3] if len(extracted) >= 4 else b""
+    except Exception:
+        font_buffer = b""
+    if font_buffer:
+        try:
+            return fitz.Font(fontbuffer=font_buffer)
+        except Exception:
+            return None
+
+    try:
+        base_font = str(font[3] or "")
+    except (IndexError, TypeError):
+        return None
+    if _normalise_font_name(base_font) not in _BASE14_SIMPLE_FONTS:
+        return None
+    try:
+        return fitz.Font(fontname=base_font)
+    except Exception:
+        return None
+
+
+def _glyph_unicode_consistency_reasons(
+    page: object,
+    span: Mapping[str, object],
+    font: Sequence[object],
+) -> tuple[str, ...]:
+    """Verify trace Unicode against the glyph ids actually rendered.
+
+    PyMuPDF text traces expose each character as ``(unicode, glyph_id, ...)``.
+    The glyph id is font dependent and remains independent of a malicious or
+    incorrect ToUnicode remapping.  Compare it with the no-fallback glyph for
+    the decoded Unicode.  Unknown mappings abstain rather than guessing.
+    """
+
+    font_view = _font_for_glyph_validation(page, font)
+    if font_view is None:
+        return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+
+    chars = span.get("chars") or ()
+    checked = 0
+    for char in chars:  # type: ignore[assignment]
+        try:
+            unicode_codepoint = int(char[0])  # type: ignore[index]
+            actual_glyph_id = int(char[1])  # type: ignore[index]
+        except (IndexError, TypeError, ValueError):
+            return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+
+        # PyMuPDF uses -1 for continuation components of some ligatures.  The
+        # leading component still carries the real glyph and is checked.
+        if actual_glyph_id < 0:
+            continue
+        try:
+            expected_glyph_id = int(
+                font_view.has_glyph(unicode_codepoint, fallback=0)
+            )
+        except Exception:
+            return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+        if expected_glyph_id <= 0:
+            return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+        checked += 1
+        if actual_glyph_id != expected_glyph_id:
+            return (TEXT_GLYPH_UNICODE_MISMATCH,)
+
+    if checked == 0:
+        return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+    return ()
+
+
 def _decode_status(
     page: object,
     span: Mapping[str, object],
@@ -329,6 +417,14 @@ def _decode_status(
                 subtype,
                 base_font,
             )
+        glyph_reasons = _glyph_unicode_consistency_reasons(page, span, font)
+        if glyph_reasons:
+            decode_status = (
+                "tounicode_glyph_mismatch"
+                if TEXT_GLYPH_UNICODE_MISMATCH in glyph_reasons
+                else "tounicode_glyph_unverified"
+            )
+            return decode_status, glyph_reasons, xref, subtype, base_font
         return "validated_tounicode", (), xref, subtype, base_font
     if _known_standard_simple_font(font, raw_text):
         return "known_standard_encoding", (), xref, subtype, base_font
@@ -625,6 +721,8 @@ __all__ = [
     "TEXT_CLIP_STATE_UNRESOLVED",
     "TEXT_DECODE_MISMATCH",
     "TEXT_FONT_BINDING_AMBIGUOUS",
+    "TEXT_GLYPH_MAPPING_UNVERIFIED",
+    "TEXT_GLYPH_UNICODE_MISMATCH",
     "TEXT_INTEGRITY_RECEIPT_MISMATCH",
     "TEXT_INTEGRITY_RECEIPT_UNAVAILABLE",
     "TEXT_LOW_CONTRAST_DEFAULT_PAGE",
