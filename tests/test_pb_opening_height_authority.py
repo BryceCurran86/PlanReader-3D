@@ -1,6 +1,5 @@
-"""Opening Height Validator v1 (Test Scaffold)"""
+"""Production regressions for schedule-row and physical-opening height authority."""
 from __future__ import annotations
-from pb_physical_opening_authority import PhysicalOpeningAuthority
 
 import dataclasses
 import inspect
@@ -9,325 +8,281 @@ import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_opening_height_authority import (
+    OpeningHeightAuthority,
     OpeningHeightProducer,
     OpeningHeightSelector,
 )
+from pb_physical_opening_authority import PhysicalOpeningAuthority
 from pb_schedule_opening_instance_binding_authority import (
+    BINDING_AMBIGUOUS_ROWS,
     ScheduleOpeningInstanceBindingProducer,
 )
-from pb_schedule_row_height_authority import ScheduleRowHeightProducer, ScheduleRowHeightSelector
+from pb_schedule_row_height_authority import (
+    HEIGHT_BASIS_UNPROVEN,
+    HEIGHT_FIELD_UNAVAILABLE,
+    HEIGHT_ROW_UNAVAILABLE,
+    HEIGHT_UNITS_CONFLICT,
+    HEIGHT_UNITS_UNPROVEN,
+    ScheduleRowHeightAuthority,
+    ScheduleRowHeightProducer,
+    ScheduleRowHeightSelector,
+)
 from pb_source_visibility_authority import SourceVisibilityProducer
-
-# Import the exact #383 fixtures
 from tests.test_schedule_opening_instance_binding_authority_v1 import (
     _ingest,
     _opening_selector,
     _tag_pdf,
 )
 
+VALID_MM_SCHEDULE = (
+    ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+    ("W1", "900", "2100"),
+)
+VALID_EXPLICIT_M_SCHEDULE = (
+    ("MARK", "ROUGH OPENING WIDTH", "ROUGH OPENING HEIGHT"),
+    ("W1", "0.9m", "2.1m"),
+)
 
-def _setup_authorities(payload: bytes | None = None) -> tuple[SourceVisibilityProducer, ScheduleOpeningInstanceBindingProducer, ScheduleRowHeightProducer, OpeningHeightSelector]:
-    """Helper to set up the real source chain and extract a valid selector."""
-    if payload is None:
-        payload = _tag_pdf()  # default W1 900x2100 with valid physical opening
 
-    src = SourceVisibilityProducer(producer_method="height-validator", producer_version="1.0")
-    published = _ingest(src, payload, "height-val-doc")
-    
-    # 1. Physical Opening (ObservationSelector)
-    obs_selector = _opening_selector(published, src.authority())
-    
-    # 2. Schedule Binding Producer
-    binding_prod = ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(src)
-    bind_result = binding_prod.publish_scope(opening_selector=obs_selector, decision_scope_id="scope-1")
-    assert bind_result.status is EvidenceResolutionStatus.CORROBORATED, "Fixture binding must succeed"
-    assert bind_result.record is not None
-    
-    # 3. Schedule Row Height Producer
-    row_height_prod = ScheduleRowHeightProducer.from_source_visibility_producer(src)
-
-    # 4. Height Selector
-    height_selector = OpeningHeightSelector(
-        document_id=bind_result.record.document_id,
-        revision_id=bind_result.record.revision_id,
-        source_sha256=bind_result.record.source_sha256,
-        snapshot_id=bind_result.record.snapshot_id,
-        decision_scope_id=bind_result.record.decision_scope_id,
-        opening_record_id=bind_result.record.opening_record_id,
+def _fixture(schedule_rows=VALID_MM_SCHEDULE):
+    payload = _tag_pdf(schedule_rows=schedule_rows)
+    src = SourceVisibilityProducer(
+        producer_method="height-production-test",
+        producer_version="1.0",
     )
-    
-    # Actually run the producer so authority has data
-    if bind_result.record is not None:
-        row_height_selector = ScheduleRowHeightSelector(
-            document_id=bind_result.record.document_id,
-            revision_id=bind_result.record.revision_id,
-            source_sha256=bind_result.record.source_sha256,
-            snapshot_id=bind_result.record.snapshot_id,
-            schedule_page_id=bind_result.record.schedule_page_id,
-            schedule_row_observation_ids=bind_result.record.schedule_row_observation_ids,
-        )
-        row_height_prod.publish_scope(row_height_selector)
-    
-    return src, binding_prod, row_height_prod, height_selector
+    published = _ingest(src, payload, "height-production-test")
+    observation_selector = _opening_selector(published, src.authority())
+    physical = PhysicalOpeningAuthority(src.authority()).prove_existence(
+        observation_selector
+    )
+    assert physical.existence_record is not None
+
+    binding_producer = (
+        ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(src)
+    )
+    binding_result = binding_producer.publish_scope(
+        opening_selector=observation_selector,
+        decision_scope_id="height-scope",
+    )
+
+    height_selector = OpeningHeightSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        decision_scope_id="height-scope",
+        opening_record_id=physical.existence_record.record_id,
+    )
+    row_height_producer = ScheduleRowHeightProducer.from_source_visibility_producer(src)
+    return (
+        src,
+        binding_producer,
+        binding_result,
+        row_height_producer,
+        height_selector,
+    )
 
 
-def test_positive_height_evidence_requires_legitimate_instance_binding() -> None:
-    src, binding_prod, row_height_prod, height_selector = _setup_authorities()
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
-    
-    result = height_prod.publish_scope(height_selector)
-    
+def _publish_row(binding_result, row_height_producer):
+    assert binding_result.record is not None
+    selector = ScheduleRowHeightSelector(
+        document_id=binding_result.record.document_id,
+        revision_id=binding_result.record.revision_id,
+        source_sha256=binding_result.record.source_sha256,
+        snapshot_id=binding_result.record.snapshot_id,
+        schedule_page_id=binding_result.record.schedule_page_id,
+        schedule_row_observation_ids=binding_result.record.schedule_row_observation_ids,
+    )
+    return selector, row_height_producer.publish_scope(selector)
+
+
+def _height_producer(src, binding_producer, row_height_producer):
+    return OpeningHeightProducer.from_authorities(
+        src,
+        binding_producer.authority(),
+        row_height_producer.authority(),
+    )
+
+
+def test_producers_and_authorities_are_sealed() -> None:
+    src = SourceVisibilityProducer(producer_method="seal-test", producer_version="1.0")
+    with pytest.raises(TypeError):
+        ScheduleRowHeightProducer(src)
+    with pytest.raises(ValueError):
+        ScheduleRowHeightAuthority({}, _seal=object())
+    with pytest.raises(ValueError):
+        OpeningHeightAuthority({}, _seal=object())
+
+
+def test_opening_height_surface_has_no_caller_height_or_evidence_input() -> None:
+    params = set(inspect.signature(OpeningHeightProducer.publish_scope).parameters)
+    assert params == {"self", "selector"}
+    assert not ({"height", "height_mm", "evidence", "units", "basis"} & params)
+
+
+def test_fake_upstream_authorities_are_rejected_by_exact_type() -> None:
+    src, binding, binding_result, row_height, _selector = _fixture()
+    _publish_row(binding_result, row_height)
+    with pytest.raises(TypeError):
+        OpeningHeightProducer.from_authorities(src, object(), row_height.authority())  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        OpeningHeightProducer.from_authorities(src, binding.authority(), object())  # type: ignore[arg-type]
+
+
+def test_explicit_rough_opening_mm_height_resolves_and_replays() -> None:
+    src, binding, binding_result, row_height, selector = _fixture()
+    row_selector, row_result = _publish_row(binding_result, row_height)
+    assert row_result.status is EvidenceResolutionStatus.CORROBORATED
+    assert row_result.evidence is not None
+    assert row_result.evidence.height_mm == 2100.0
+    assert row_result.evidence.units == "mm"
+    assert row_result.evidence.source_units == "mm"
+    assert row_result.evidence.dimension_basis == "rough_opening"
+    assert row_result.evidence.header_observation_ids
+    assert row_height.authority().resolve(row_selector) == row_result
+
+    producer = _height_producer(src, binding, row_height)
+    result = producer.publish_scope(selector)
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.evidence is not None
     assert result.evidence.height_mm == 2100.0
-    assert result.evidence.document_id == height_selector.document_id
-    assert result.evidence.opening_record_id == height_selector.opening_record_id
+    assert result.evidence.units == "mm"
+    assert result.evidence.dimension_basis == "rough_opening"
+    assert result.evidence.schedule_header_observation_ids
+    assert producer.authority().resolve(selector) == result
 
 
-def test_attack_2040_default_is_rejected() -> None:
-    # No height provided
-    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "")))
-    src, binding_prod, row_height_prod, height_selector = _setup_authorities(payload)
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
-    result = height_prod.publish_scope(height_selector)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_missing_field" in result.reason_codes
-
-def test_attack_2100_default_is_rejected() -> None:
-    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "")))
-    src, binding_prod, row_height_prod, height_selector = _setup_authorities(payload)
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
-    result = height_prod.publish_scope(height_selector)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_missing_field" in result.reason_codes
-
-def test_attack_typical_height_rejected() -> None:
-    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "TYPICAL")))
-    src, binding_prod, row_height_prod, height_selector = _setup_authorities(payload)
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
-    result = height_prod.publish_scope(height_selector)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_missing_field" in result.reason_codes
-
-def test_attack_width_used_as_height() -> None:
-    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "")))
-    src, binding_prod, row_height_prod, height_selector = _setup_authorities(payload)
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
-    result = height_prod.publish_scope(height_selector)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_missing_field" in result.reason_codes
-
-def test_attack_caller_supplied_height_is_rejected() -> None:
-    params = set(inspect.signature(OpeningHeightProducer.publish_scope).parameters)
-    assert "height" not in params
-    assert "height_mm" not in params
-    assert "evidence" not in params
-    
-def test_attack_caller_authenticated_flags() -> None:
-    params = set(inspect.signature(OpeningHeightSelector).parameters)
-    assert "authenticated" not in params
-    assert "is_valid" not in params
-
-def test_attack_raw_schedule_text_without_binding() -> None:
-    # Structurally proved: Producer only accepts OpeningHeightSelector (no text payload)
-    params = set(inspect.signature(OpeningHeightProducer.publish_scope).parameters)
-    assert "text" not in params
-
-def test_attack_ocr_only_text_is_untrusted() -> None:
-    # Structurally proved: Upstream ScheduleOpeningInstanceBindingAuthority relies on trusted native text.
-    sig = inspect.signature(OpeningHeightProducer.from_authorities)
-    assert sig.parameters["binding_authority"].annotation == "ScheduleOpeningInstanceBindingAuthority"
-
-def test_attack_hidden_untrusted_text() -> None:
-    # Structurally proved: Upstream ScheduleOpeningInstanceBindingAuthority rejects hidden text.
-    sig = inspect.signature(OpeningHeightProducer.from_authorities)
-    assert sig.parameters["binding_authority"].annotation == "ScheduleOpeningInstanceBindingAuthority"
-
-def test_attack_nearest_dimension() -> None:
-    # Structurally proved: Upstream binding requires exact row, not spatial nearest search.
-    sig = inspect.signature(OpeningHeightProducer.from_authorities)
-    assert sig.parameters["binding_authority"].annotation == "ScheduleOpeningInstanceBindingAuthority"
-
-def test_attack_unrelated_elevation_text() -> None:
-    # Structurally proved: Upstream binding binds strictly to schedule rows.
-    sig = inspect.signature(OpeningHeightProducer.from_authorities)
-    assert sig.parameters["binding_authority"].annotation == "ScheduleOpeningInstanceBindingAuthority"
-
-def test_attack_wrong_physical_opening() -> None:
-    # Genuine condition: Provide an unregistered opening record ID
-    src, binding_prod, row_height_prod, height_selector = _setup_authorities()
-    tampered = dataclasses.replace(height_selector, opening_record_id="wrong_op")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
-    result = height_prod.publish_scope(tampered)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_upstream_abstained" in result.reason_codes
-
-def test_attack_wrong_schedule_row() -> None:
-    # Structurally proved: Upstream binding maps opening_record_id to EXACTLY one schedule row.
-    sig = inspect.signature(OpeningHeightProducer.from_authorities)
-    assert sig.parameters["binding_authority"].annotation == "ScheduleOpeningInstanceBindingAuthority"
-
-def test_attack_repeated_mark_without_exact_instance_binding() -> None:
-    # Structurally proved: Upstream binding rejects multiple instances without exact binding.
-    sig = inspect.signature(OpeningHeightProducer.from_authorities)
-    assert sig.parameters["binding_authority"].annotation == "ScheduleOpeningInstanceBindingAuthority"
-
-def test_attack_wrong_revision() -> None:
-    # Genuine condition: Provide a mismatched revision ID
-    src, binding_prod, row_height_prod, height_selector = _setup_authorities()
-    tampered = dataclasses.replace(height_selector, revision_id="wrong_rev")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
-    result = height_prod.publish_scope(tampered)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_upstream_abstained" in result.reason_codes
-
-def test_attack_wrong_sha() -> None:
-    # Genuine condition: Provide a mismatched source SHA
-    src, binding_prod, row_height_prod, height_selector = _setup_authorities()
-    tampered = dataclasses.replace(height_selector, source_sha256="wrong_sha")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
-    result = height_prod.publish_scope(tampered)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_upstream_abstained" in result.reason_codes
-
-def test_attack_wrong_snapshot() -> None:
-    # Genuine condition: Provide a mismatched snapshot ID
-    src, binding_prod, row_height_prod, height_selector = _setup_authorities()
-    tampered = dataclasses.replace(height_selector, snapshot_id="wrong_snap")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
-    result = height_prod.publish_scope(tampered)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_upstream_abstained" in result.reason_codes
-
-def test_attack_stale_schedule_snapshot() -> None:
-    # Genuine condition: Provide a mismatched (stale) snapshot ID
-    src, binding_prod, row_height_prod, height_selector = _setup_authorities()
-    tampered = dataclasses.replace(height_selector, snapshot_id="stale_snap")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
-    result = height_prod.publish_scope(tampered)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_upstream_abstained" in result.reason_codes
-
-def test_attack_duplicate_matching_schedule_rows() -> None:
-    # W1 900x2100 appears twice in the same schedule
-    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "2100"), ("W1", "900", "2100")))
-    src = SourceVisibilityProducer(producer_method="height-validator", producer_version="1.0")
-    published = _ingest(src, payload, "height-val-doc")
-    obs_selector = _opening_selector(published, src.authority())
-    binding_prod = ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(src)
-    bind_result = binding_prod.publish_scope(opening_selector=obs_selector, decision_scope_id="scope-1")
-    row_height_prod = ScheduleRowHeightProducer.from_source_visibility_producer(src)
-    if bind_result.record is not None:
-        row_height_selector = ScheduleRowHeightSelector(
-            document_id=bind_result.record.document_id,
-            revision_id=bind_result.record.revision_id,
-            source_sha256=bind_result.record.source_sha256,
-            snapshot_id=bind_result.record.snapshot_id,
-            schedule_page_id=bind_result.record.schedule_page_id,
-            schedule_row_observation_ids=bind_result.record.schedule_row_observation_ids,
-        )
-        row_height_prod.publish_scope(row_height_selector)
-    physical = PhysicalOpeningAuthority(src.authority())
-    opening_record_id = physical.prove_existence(obs_selector).existence_record.record_id
-    height_selector = OpeningHeightSelector(
-        document_id=obs_selector.document_id,
-        revision_id=obs_selector.revision_id,
-        source_sha256=obs_selector.source_sha256,
-        snapshot_id=obs_selector.snapshot_id,
-        decision_scope_id="scope-1",
-        opening_record_id=opening_record_id,
+def test_explicit_metres_are_normalized_only_when_source_states_metres() -> None:
+    src, binding, binding_result, row_height, selector = _fixture(
+        VALID_EXPLICIT_M_SCHEDULE
     )
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
-    result = height_prod.publish_scope(height_selector)
-    assert result.status is EvidenceResolutionStatus.CONFLICT
-    assert "opening_height_upstream_conflict" in result.reason_codes
+    _row_selector, row_result = _publish_row(binding_result, row_height)
+    assert row_result.status is EvidenceResolutionStatus.CORROBORATED
+    assert row_result.evidence is not None
+    assert row_result.evidence.height_mm == 2100.0
+    assert row_result.evidence.source_units == "m"
 
-def test_attack_conflicting_heights() -> None:
-    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "2100"), ("W1", "900", "2000")))
-    src = SourceVisibilityProducer(producer_method="height-validator", producer_version="1.0")
-    published = _ingest(src, payload, "height-val-doc")
-    obs_selector = _opening_selector(published, src.authority())
-    binding_prod = ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(src)
-    bind_result = binding_prod.publish_scope(opening_selector=obs_selector, decision_scope_id="scope-1")
-    row_height_prod = ScheduleRowHeightProducer.from_source_visibility_producer(src)
-    if bind_result.record is not None:
-        row_height_selector = ScheduleRowHeightSelector(
-            document_id=bind_result.record.document_id,
-            revision_id=bind_result.record.revision_id,
-            source_sha256=bind_result.record.source_sha256,
-            snapshot_id=bind_result.record.snapshot_id,
-            schedule_page_id=bind_result.record.schedule_page_id,
-            schedule_row_observation_ids=bind_result.record.schedule_row_observation_ids,
-        )
-        row_height_prod.publish_scope(row_height_selector)
-    physical = PhysicalOpeningAuthority(src.authority())
-    opening_record_id = physical.prove_existence(obs_selector).existence_record.record_id
-    height_selector = OpeningHeightSelector(
-        document_id=obs_selector.document_id,
-        revision_id=obs_selector.revision_id,
-        source_sha256=obs_selector.source_sha256,
-        snapshot_id=obs_selector.snapshot_id,
-        decision_scope_id="scope-1",
-        opening_record_id=opening_record_id,
+    producer = _height_producer(src, binding, row_height)
+    result = producer.publish_scope(selector)
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.evidence is not None
+    assert result.evidence.height_mm == 2100.0
+
+
+def test_generic_width_height_headers_do_not_prove_physical_height_basis() -> None:
+    src, _binding, binding_result, row_height, _selector = _fixture(
+        (("MARK", "WIDTH (MM)", "HEIGHT (MM)"), ("W1", "900", "2100"))
     )
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
-    result = height_prod.publish_scope(height_selector)
-    assert result.status is EvidenceResolutionStatus.CONFLICT
-    assert "opening_height_upstream_conflict" in result.reason_codes
-
-def test_attack_missing_height_field() -> None:
-    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "")))
-    src, binding_prod, row_height_prod, height_selector = _setup_authorities(payload)
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
-    result = height_prod.publish_scope(height_selector)
+    del src
+    _row_selector, result = _publish_row(binding_result, row_height)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_missing_field" in result.reason_codes
+    assert HEIGHT_BASIS_UNPROVEN in result.reason_codes
 
-def test_attack_ambiguous_units() -> None:
-    # Genuine condition: Schedule row text contains multiple conflicting units/dimensions
-    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "2100 / 2040")))
-    src, binding_prod, row_height_prod, height_selector = _setup_authorities(payload)
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
-    result = height_prod.publish_scope(height_selector)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_ambiguous_units" in result.reason_codes
 
-def test_attack_cross_sheet_elevation_assumption_without_registration() -> None:
-    # Structurally proved: Route B explicitly does not use cross-sheet elevations.
-    sig = inspect.signature(OpeningHeightProducer.from_authorities)
-    assert sig.parameters["binding_authority"].annotation == "ScheduleOpeningInstanceBindingAuthority"
-
-def test_attack_contradiction_monotonicity() -> None:
-    # We will trigger a CONFLICT by supplying conflicting schedule rows
-    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "2100"), ("W1", "900", "2000")))
-    src = SourceVisibilityProducer(producer_method="height-validator", producer_version="1.0")
-    published = _ingest(src, payload, "height-val-doc")
-    obs_selector = _opening_selector(published, src.authority())
-    binding_prod = ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(src)
-    bind_result = binding_prod.publish_scope(opening_selector=obs_selector, decision_scope_id="scope-1")
-    row_height_prod = ScheduleRowHeightProducer.from_source_visibility_producer(src)
-    if bind_result.record is not None:
-        row_height_selector = ScheduleRowHeightSelector(
-            document_id=bind_result.record.document_id,
-            revision_id=bind_result.record.revision_id,
-            source_sha256=bind_result.record.source_sha256,
-            snapshot_id=bind_result.record.snapshot_id,
-            schedule_page_id=bind_result.record.schedule_page_id,
-            schedule_row_observation_ids=bind_result.record.schedule_row_observation_ids,
-        )
-        row_height_prod.publish_scope(row_height_selector)
-    physical = PhysicalOpeningAuthority(src.authority())
-    opening_record_id = physical.prove_existence(obs_selector).existence_record.record_id
-    height_selector = OpeningHeightSelector(
-        document_id=obs_selector.document_id,
-        revision_id=obs_selector.revision_id,
-        source_sha256=obs_selector.source_sha256,
-        snapshot_id=obs_selector.snapshot_id,
-        decision_scope_id="scope-1",
-        opening_record_id=opening_record_id,
+def test_rough_opening_basis_without_explicit_units_abstains() -> None:
+    _src, _binding, binding_result, row_height, _selector = _fixture(
+        (("MARK", "ROUGH OPENING WIDTH", "ROUGH OPENING HEIGHT"), ("W1", "900", "2100"))
     )
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
-    result = height_prod.publish_scope(height_selector)
-    assert result.status is EvidenceResolutionStatus.CONFLICT
-    assert "opening_height_upstream_conflict" in result.reason_codes
+    _row_selector, result = _publish_row(binding_result, row_height)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert HEIGHT_UNITS_UNPROVEN in result.reason_codes
 
+
+def test_frame_height_is_not_wall_void_height() -> None:
+    _src, _binding, binding_result, row_height, _selector = _fixture(
+        (("MARK", "FRAME WIDTH (MM)", "FRAME HEIGHT (MM)"), ("W1", "900", "2100"))
+    )
+    _row_selector, result = _publish_row(binding_result, row_height)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert HEIGHT_BASIS_UNPROVEN in result.reason_codes
+
+
+def test_conflicting_header_and_row_units_fail_closed() -> None:
+    _src, _binding, binding_result, row_height, _selector = _fixture(
+        (
+            ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+            ("W1", "0.9m", "2.1m"),
+        )
+    )
+    _row_selector, result = _publish_row(binding_result, row_height)
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert HEIGHT_UNITS_CONFLICT in result.reason_codes
+
+
+def test_missing_height_never_defaults_to_2040_or_2100() -> None:
+    src, binding, binding_result, row_height, selector = _fixture(
+        (
+            ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+            ("W1", "900", ""),
+        )
+    )
+    _row_selector, row_result = _publish_row(binding_result, row_height)
+    assert row_result.status is EvidenceResolutionStatus.ABSTAINED
+    assert HEIGHT_FIELD_UNAVAILABLE in row_result.reason_codes
+
+    producer = _height_producer(src, binding, row_height)
+    result = producer.publish_scope(selector)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.evidence is None
+    assert HEIGHT_FIELD_UNAVAILABLE in result.reason_codes
+
+
+def test_typical_text_does_not_become_height() -> None:
+    _src, _binding, binding_result, row_height, _selector = _fixture(
+        (
+            ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+            ("W1", "900", "TYPICAL"),
+        )
+    )
+    _row_selector, result = _publish_row(binding_result, row_height)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert HEIGHT_FIELD_UNAVAILABLE in result.reason_codes
+
+
+def test_duplicate_matching_rows_remain_upstream_conflict() -> None:
+    src, binding, binding_result, row_height, selector = _fixture(
+        (
+            ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+            ("W1", "900", "2100"),
+            ("W1", "900", "2100"),
+        )
+    )
+    assert binding_result.status is EvidenceResolutionStatus.CONFLICT
+    producer = _height_producer(src, binding, row_height)
+    result = producer.publish_scope(selector)
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert BINDING_AMBIGUOUS_ROWS in result.reason_codes
+
+
+def test_wrong_lineage_abstains_without_reusing_valid_height() -> None:
+    src, binding, binding_result, row_height, selector = _fixture()
+    _publish_row(binding_result, row_height)
+    producer = _height_producer(src, binding, row_height)
+    valid = producer.publish_scope(selector)
+    assert valid.status is EvidenceResolutionStatus.CORROBORATED
+
+    for tampered in (
+        dataclasses.replace(selector, revision_id="wrong-revision"),
+        dataclasses.replace(selector, source_sha256="wrong-sha"),
+        dataclasses.replace(selector, snapshot_id="wrong-snapshot"),
+        dataclasses.replace(selector, opening_record_id="wrong-opening"),
+    ):
+        result = producer.publish_scope(tampered)
+        assert result.status is EvidenceResolutionStatus.ABSTAINED
+        assert result.evidence is None
+
+
+def test_unpublished_row_selector_cannot_mint_height() -> None:
+    _src, _binding, binding_result, row_height, _selector = _fixture()
+    assert binding_result.record is not None
+    wrong = ScheduleRowHeightSelector(
+        document_id=binding_result.record.document_id,
+        revision_id=binding_result.record.revision_id,
+        source_sha256=binding_result.record.source_sha256,
+        snapshot_id=binding_result.record.snapshot_id,
+        schedule_page_id=binding_result.record.schedule_page_id,
+        schedule_row_observation_ids=("caller-invented-row",),
+    )
+    result = row_height.publish_scope(wrong)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert HEIGHT_ROW_UNAVAILABLE in result.reason_codes
