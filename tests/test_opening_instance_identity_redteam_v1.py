@@ -15,12 +15,14 @@ from pb_physical_opening_authority import (
 )
 from pb_source_observation_authority import (
     ObservationSelector,
-    SNAPSHOT_MISMATCH,
     SOURCE_HASH_MISMATCH,
     STALE_REVISION,
     SourceObservationProducer,
 )
-from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_source_visibility_authority import (
+    VISIBILITY_RECEIPT_UNAVAILABLE,
+    SourceVisibilityProducer,
+)
 from tests.g17_phase2_test_support import make_resolved, selector as raw_selector
 
 
@@ -434,7 +436,7 @@ def test_attack_13_snapshot_laundering_fails_closed() -> None:
     result = physical.compare_identity(left, forged)
 
     _assert_unresolved(result)
-    assert SNAPSHOT_MISMATCH in result.reason_codes
+    assert VISIBILITY_RECEIPT_UNAVAILABLE in result.reason_codes
     assert _IDENTITY_EXISTENCE_REQUIRED in result.reason_codes
     assert _IDENTITY_SCOPE_MISMATCH not in result.reason_codes
 
@@ -687,5 +689,6 @@ def test_attack_23_identity_does_not_open_any_downstream_firewall() -> None:
         "jobhub_publish",
     ):
         assert not hasattr(physical, forbidden_method)
+
 
 
