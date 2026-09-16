@@ -255,6 +255,15 @@ class ScheduleRowHeightProducer:
             return self._store(key, _blocked(EvidenceResolutionStatus.CONFLICT, HEIGHT_UNITS_CONFLICT))
         source_units = next(iter(unit_tokens))
 
+        # The legacy schedule parser treats a bare numeric cell as millimetres.
+        # Therefore a metre-labelled header cannot safely relabel the parser's
+        # existing numeric value unless the governing row cell itself explicitly
+        # carries metre semantics. Fail closed rather than publish a possible
+        # 1000x unit mismatch. Explicit metre cells (for example ``2.1m``) are
+        # already normalized by the upstream parser and remain valid.
+        if source_units == "m" and "m" not in _unit_tokens(target_cells[column_index]):
+            return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_UNITS_UNPROVEN))
+
         evidence = ScheduleRowHeightEvidence(
             schedule_page_id=selector.schedule_page_id,
             schedule_row_observation_ids=tuple(selector.schedule_row_observation_ids),
