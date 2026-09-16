@@ -55,7 +55,10 @@ _PAIR_HEIGHT_RE = re.compile(
 )
 _MIN_PLAUSIBLE_HEIGHT_MM = 200.0
 _MAX_PLAUSIBLE_HEIGHT_MM = 6000.0
-_HEADER_WORD_JOIN_GAP = 16.0
+# PyMuPDF emits words from one text cell with a narrow ordinary-space gap.
+# Keep this deliberately conservative: over-splitting can only abstain, while
+# over-joining distinct schedule columns could assign the wrong semantics.
+_HEADER_WORD_JOIN_GAP = 4.0
 _COLUMN_COORD_TOL = 1e-6
 
 
