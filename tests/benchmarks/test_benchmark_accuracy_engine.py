@@ -136,6 +136,28 @@ def test_partial_predictions_mark_absent_measurable_as_misses(engine) -> None:
     assert report.total_items_compared == report.total_measurable_expected
 
 
+def test_matched_prediction_with_quantity_none_is_missed_not_a_crash(engine) -> None:
+    """A prediction can be present and tag-matched, yet carry an explicit
+    quantity=None (publication blocked / genuinely unresolved -- see
+    pb_planreader_pdf_extractor.extracted_prediction_publication_blocked and
+    pb_opening_deduction_pipeline.WallDeductionResult.net_area_evidence).
+    That must score exactly like an absent prediction (MISSED_IN_EXTRACTION),
+    never crash with float(None), and never be silently treated as an
+    evidenced 0.0."""
+    report = engine.evaluate_benchmark(
+        benchmark_id="tenders_ke_kstvet_cbc_classroom",
+        predictions=[{"item_id": "BOQ-C36-A", "quantity": None}],
+    )
+    assert report.is_scored is True
+    assert report.missed_items == report.total_measurable_expected
+    assert report.exact_matches == 0
+
+    matched = next(item for item in report.item_results if item.item_id == "BOQ-C36-A")
+    assert matched.status == ItemMatchStatus.MISSED_IN_EXTRACTION
+    assert matched.extracted_quantity is None
+    assert matched.delta is None
+
+
 def test_headline_incomplete_coverage_when_source_unavailable(engine) -> None:
     """Headline must not present an apparently complete official percentage."""
     unavailable = BenchmarkAccuracyReport(
