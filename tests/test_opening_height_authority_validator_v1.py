@@ -22,7 +22,6 @@ from pb_opening_height_authority import (
 from pb_physical_opening_authority import PhysicalOpeningAuthority
 from pb_schedule_opening_instance_binding_authority import (
     BINDING_AMBIGUOUS_ROWS,
-    ScheduleOpeningInstanceBindingAuthority,
     ScheduleOpeningInstanceBindingProducer,
 )
 from pb_schedule_row_height_authority import (
@@ -37,12 +36,15 @@ from tests.test_schedule_opening_instance_binding_authority_v1 import (
     _tag_pdf,
 )
 
+# Each semantic heading is one native source token. This avoids caller-side
+# phrase grouping and exercises the schedule parser's documented RO+WDTH/HT
+# vocabulary directly.
 VALID_MM_SCHEDULE = (
-    ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+    ("MARK", "ROWDTH-MM", "ROHT-MM"),
     ("W1", "900", "2100"),
 )
 VALID_M_SCHEDULE = (
-    ("MARK", "ROUGH OPENING WIDTH", "ROUGH OPENING HEIGHT"),
+    ("MARK", "ROWDTH-M", "ROHT-M"),
     ("W1", "0.9m", "2.1m"),
 )
 
@@ -221,7 +223,7 @@ def test_explicit_metres_may_normalize_to_mm_only_when_source_says_metres() -> N
 @pytest.mark.xfail(reason="schedule-row semantic production absent on frozen base")
 def test_generic_width_height_columns_do_not_prove_wall_void_basis() -> None:
     _src, _binding, binding_result, row, _selector = _fixture(
-        (("MARK", "WIDTH (MM)", "HEIGHT (MM)"), ("W1", "900", "2100"))
+        (("MARK", "WIDTH-MM", "HEIGHT-MM"), ("W1", "900", "2100"))
     )
     result = row.publish_scope(_row_selector(binding_result))
     assert result.status is EvidenceResolutionStatus.ABSTAINED
@@ -231,21 +233,28 @@ def test_generic_width_height_columns_do_not_prove_wall_void_basis() -> None:
 @pytest.mark.xfail(reason="schedule-row semantic production absent on frozen base")
 def test_rough_opening_columns_without_units_do_not_assume_mm() -> None:
     _src, _binding, binding_result, row, _selector = _fixture(
-        (("MARK", "ROUGH OPENING WIDTH", "ROUGH OPENING HEIGHT"), ("W1", "900", "2100"))
+        (("MARK", "ROWDTH", "ROHT"), ("W1", "900", "2100"))
     )
     result = row.publish_scope(_row_selector(binding_result))
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert "schedule_row_height_units_unproven" in result.reason_codes
 
 
-@pytest.mark.parametrize("basis", ["FRAME", "LEAF", "CLEAR OPENING"])
+@pytest.mark.parametrize(
+    "width_heading,height_heading",
+    [
+        ("FRAMEWDTH-MM", "FRAMEHT-MM"),
+        ("LEAFWDTH-MM", "LEAFHT-MM"),
+        ("CLEARWDTH-MM", "CLEARHT-MM"),
+    ],
+)
 @pytest.mark.xfail(reason="schedule-row semantic production absent on frozen base")
-def test_non_void_dimension_basis_cannot_become_physical_opening_height(basis: str) -> None:
+def test_non_void_dimension_basis_cannot_become_physical_opening_height(
+    width_heading: str,
+    height_heading: str,
+) -> None:
     _src, _binding, binding_result, row, _selector = _fixture(
-        (
-            ("MARK", f"{basis} WIDTH (MM)", f"{basis} HEIGHT (MM)"),
-            ("W1", "900", "2100"),
-        )
+        (("MARK", width_heading, height_heading), ("W1", "900", "2100"))
     )
     result = row.publish_scope(_row_selector(binding_result))
     assert result.status is EvidenceResolutionStatus.ABSTAINED
@@ -256,7 +265,7 @@ def test_non_void_dimension_basis_cannot_become_physical_opening_height(basis: s
 def test_missing_height_field_never_defaults_to_2040_or_2100() -> None:
     _src, _binding, binding_result, row, _selector = _fixture(
         (
-            ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+            ("MARK", "ROWDTH-MM", "ROHT-MM"),
             ("W1", "900", ""),
         )
     )
@@ -270,7 +279,7 @@ def test_missing_height_field_never_defaults_to_2040_or_2100() -> None:
 def test_typical_note_cannot_become_height() -> None:
     _src, _binding, binding_result, row, _selector = _fixture(
         (
-            ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+            ("MARK", "ROWDTH-MM", "ROHT-MM"),
             ("W1", "900", "TYPICAL"),
         )
     )
@@ -283,7 +292,7 @@ def test_typical_note_cannot_become_height() -> None:
 def test_conflicting_explicit_units_fail_closed() -> None:
     _src, _binding, binding_result, row, _selector = _fixture(
         (
-            ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+            ("MARK", "ROWDTH-MM", "ROHT-MM"),
             ("W1", "0.9m", "2.1m"),
         )
     )
@@ -311,7 +320,7 @@ def test_wrong_opening_revision_sha_and_snapshot_all_abstain() -> None:
 def test_duplicate_identical_schedule_rows_remain_conflict() -> None:
     src, binding, binding_result, row, selector = _fixture(
         (
-            ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+            ("MARK", "ROWDTH-MM", "ROHT-MM"),
             ("W1", "900", "2100"),
             ("W1", "900", "2100"),
         )
@@ -327,7 +336,7 @@ def test_duplicate_identical_schedule_rows_remain_conflict() -> None:
 def test_conflicting_height_rows_weaken_authority_monotonically() -> None:
     src, binding, binding_result, row, selector = _fixture(
         (
-            ("MARK", "ROUGH OPENING WIDTH (MM)", "ROUGH OPENING HEIGHT (MM)"),
+            ("MARK", "ROWDTH-MM", "ROHT-MM"),
             ("W1", "900", "2100"),
             ("W1", "900", "2000"),
         )
