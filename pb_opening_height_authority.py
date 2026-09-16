@@ -8,6 +8,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_schedule_opening_instance_binding_authority import (
     ScheduleOpeningInstanceBindingAuthority,
 )
+from pb_schedule_row_height_authority import ScheduleRowHeightAuthority
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -77,9 +78,11 @@ class OpeningHeightProducer:
         self,
         src: SourceVisibilityProducer,
         binding_authority: ScheduleOpeningInstanceBindingAuthority,
+        row_height_authority: ScheduleRowHeightAuthority,
     ) -> None:
         self._src = src
         self._binding_authority = binding_authority
+        self._row_height_authority = row_height_authority
         self._results: dict[tuple[str, str, str, str, str, str], OpeningHeightResult] = {}
 
     @classmethod
@@ -87,8 +90,9 @@ class OpeningHeightProducer:
         cls,
         src: SourceVisibilityProducer,
         binding_authority: ScheduleOpeningInstanceBindingAuthority,
+        row_height_authority: ScheduleRowHeightAuthority,
     ) -> OpeningHeightProducer:
-        return cls(src, binding_authority)
+        return cls(src, binding_authority, row_height_authority)
 
     def publish_scope(self, selector: OpeningHeightSelector) -> OpeningHeightResult:
         """Publishes the height of a specific physical opening instance."""

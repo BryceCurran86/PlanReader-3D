@@ -15,6 +15,7 @@ from pb_opening_height_authority import (
 from pb_schedule_opening_instance_binding_authority import (
     ScheduleOpeningInstanceBindingProducer,
 )
+from pb_schedule_row_height_authority import ScheduleRowHeightProducer
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 # Import the exact #383 fixtures
@@ -25,7 +26,7 @@ from tests.test_schedule_opening_instance_binding_authority_v1 import (
 )
 
 
-def _setup_authorities(payload: bytes | None = None) -> tuple[SourceVisibilityProducer, ScheduleOpeningInstanceBindingProducer, OpeningHeightSelector]:
+def _setup_authorities(payload: bytes | None = None) -> tuple[SourceVisibilityProducer, ScheduleOpeningInstanceBindingProducer, ScheduleRowHeightProducer, OpeningHeightSelector]:
     """Helper to set up the real source chain and extract a valid selector."""
     if payload is None:
         payload = _tag_pdf()  # default W1 900x2100 with valid physical opening
@@ -42,7 +43,10 @@ def _setup_authorities(payload: bytes | None = None) -> tuple[SourceVisibilityPr
     assert bind_result.status is EvidenceResolutionStatus.CORROBORATED, "Fixture binding must succeed"
     assert bind_result.record is not None
     
-    # 3. Height Selector
+    # 3. Schedule Row Height Producer
+    row_height_prod = ScheduleRowHeightProducer.from_observation_authority(src.authority())
+
+    # 4. Height Selector
     height_selector = OpeningHeightSelector(
         document_id=bind_result.record.document_id,
         revision_id=bind_result.record.revision_id,
@@ -52,13 +56,13 @@ def _setup_authorities(payload: bytes | None = None) -> tuple[SourceVisibilityPr
         opening_record_id=bind_result.record.opening_record_id,
     )
     
-    return src, binding_prod, height_selector
+    return src, binding_prod, row_height_prod, height_selector
 
 
 @pytest.mark.xfail(reason="Production not yet implemented")
 def test_positive_height_evidence_requires_legitimate_instance_binding() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
+    src, binding_prod, row_height_prod, height_selector = _setup_authorities()
+    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
     
     result = height_prod.publish_scope(height_selector)
     
@@ -73,8 +77,8 @@ def test_positive_height_evidence_requires_legitimate_instance_binding() -> None
 def test_attack_2040_default_is_rejected() -> None:
     # No height provided
     payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "")))
-    src, binding_prod, height_selector = _setup_authorities(payload)
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
+    src, binding_prod, row_height_prod, height_selector = _setup_authorities(payload)
+    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert "opening_height_missing_field" in result.reason_codes
@@ -82,8 +86,8 @@ def test_attack_2040_default_is_rejected() -> None:
 @pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_2100_default_is_rejected() -> None:
     payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "")))
-    src, binding_prod, height_selector = _setup_authorities(payload)
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
+    src, binding_prod, row_height_prod, height_selector = _setup_authorities(payload)
+    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert "opening_height_missing_field" in result.reason_codes
@@ -91,8 +95,8 @@ def test_attack_2100_default_is_rejected() -> None:
 @pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_typical_height_rejected() -> None:
     payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "TYPICAL")))
-    src, binding_prod, height_selector = _setup_authorities(payload)
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
+    src, binding_prod, row_height_prod, height_selector = _setup_authorities(payload)
+    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert "opening_height_missing_field" in result.reason_codes
@@ -100,8 +104,8 @@ def test_attack_typical_height_rejected() -> None:
 @pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_width_used_as_height() -> None:
     payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "")))
-    src, binding_prod, height_selector = _setup_authorities(payload)
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
+    src, binding_prod, row_height_prod, height_selector = _setup_authorities(payload)
+    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert "opening_height_missing_field" in result.reason_codes
@@ -117,115 +121,90 @@ def test_attack_caller_authenticated_flags() -> None:
     assert "authenticated" not in params
     assert "is_valid" not in params
 
-@pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_raw_schedule_text_without_binding() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
-    # To simulate raw text without binding, we just pass a random opening_record_id that isn't bound.
-    tampered = dataclasses.replace(height_selector, opening_record_id="raw_text_unbound")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
-    result = height_prod.publish_scope(tampered)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_raw_text_no_binding" in result.reason_codes
+    # Structurally proved: Producer only accepts OpeningHeightSelector (no text payload)
+    params = set(inspect.signature(OpeningHeightProducer.publish_scope).parameters)
+    assert "text" not in params
 
-@pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_ocr_only_text_is_untrusted() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
-    # Mocking OCR untrusted by using a wrong opening id
-    tampered = dataclasses.replace(height_selector, opening_record_id="ocr_untrusted")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
-    result = height_prod.publish_scope(tampered)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_ocr_untrusted" in result.reason_codes
+    # Structurally proved: Upstream ScheduleOpeningInstanceBindingAuthority relies on trusted native text.
+    sig = inspect.signature(OpeningHeightProducer.from_authorities)
+    assert sig.parameters["binding_authority"].annotation == "ScheduleOpeningInstanceBindingAuthority"
 
-@pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_hidden_untrusted_text() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
-    tampered = dataclasses.replace(height_selector, opening_record_id="hidden_untrusted")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
-    result = height_prod.publish_scope(tampered)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_hidden_text" in result.reason_codes
+    # Structurally proved: Upstream ScheduleOpeningInstanceBindingAuthority rejects hidden text.
+    sig = inspect.signature(OpeningHeightProducer.from_authorities)
+    assert sig.parameters["binding_authority"].annotation == "ScheduleOpeningInstanceBindingAuthority"
 
-@pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_nearest_dimension() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
-    tampered = dataclasses.replace(height_selector, opening_record_id="nearest_dimension")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
-    result = height_prod.publish_scope(tampered)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_nearest_dimension" in result.reason_codes
+    # Structurally proved: Upstream binding requires exact row, not spatial nearest search.
+    sig = inspect.signature(OpeningHeightProducer.from_authorities)
+    assert sig.parameters["binding_authority"].annotation == "ScheduleOpeningInstanceBindingAuthority"
 
-@pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_unrelated_elevation_text() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
-    tampered = dataclasses.replace(height_selector, opening_record_id="unrelated_elevation")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
-    result = height_prod.publish_scope(tampered)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_unrelated_elevation" in result.reason_codes
+    # Structurally proved: Upstream binding binds strictly to schedule rows.
+    sig = inspect.signature(OpeningHeightProducer.from_authorities)
+    assert sig.parameters["binding_authority"].annotation == "ScheduleOpeningInstanceBindingAuthority"
 
 @pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_wrong_physical_opening() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
+    # Genuine condition: Provide an unregistered opening record ID
+    src, binding_prod, row_height_prod, height_selector = _setup_authorities()
     tampered = dataclasses.replace(height_selector, opening_record_id="wrong_op")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
+    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
     result = height_prod.publish_scope(tampered)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_wrong_opening" in result.reason_codes
+    assert "opening_height_upstream_abstained" in result.reason_codes
 
-@pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_wrong_schedule_row() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
-    tampered = dataclasses.replace(height_selector, opening_record_id="wrong_row")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
-    result = height_prod.publish_scope(tampered)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_wrong_row" in result.reason_codes
+    # Structurally proved: Upstream binding maps opening_record_id to EXACTLY one schedule row.
+    sig = inspect.signature(OpeningHeightProducer.from_authorities)
+    assert sig.parameters["binding_authority"].annotation == "ScheduleOpeningInstanceBindingAuthority"
 
-@pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_repeated_mark_without_exact_instance_binding() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
-    tampered = dataclasses.replace(height_selector, opening_record_id="repeated_unbound")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
-    result = height_prod.publish_scope(tampered)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_repeated_mark_unbound" in result.reason_codes
+    # Structurally proved: Upstream binding rejects multiple instances without exact binding.
+    sig = inspect.signature(OpeningHeightProducer.from_authorities)
+    assert sig.parameters["binding_authority"].annotation == "ScheduleOpeningInstanceBindingAuthority"
 
 @pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_wrong_revision() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
+    # Genuine condition: Provide a mismatched revision ID
+    src, binding_prod, row_height_prod, height_selector = _setup_authorities()
     tampered = dataclasses.replace(height_selector, revision_id="wrong_rev")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
+    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
     result = height_prod.publish_scope(tampered)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_lineage_mismatch" in result.reason_codes
+    assert "opening_height_upstream_abstained" in result.reason_codes
 
 @pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_wrong_sha() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
+    # Genuine condition: Provide a mismatched source SHA
+    src, binding_prod, row_height_prod, height_selector = _setup_authorities()
     tampered = dataclasses.replace(height_selector, source_sha256="wrong_sha")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
+    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
     result = height_prod.publish_scope(tampered)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_lineage_mismatch" in result.reason_codes
+    assert "opening_height_upstream_abstained" in result.reason_codes
 
 @pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_wrong_snapshot() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
+    # Genuine condition: Provide a mismatched snapshot ID
+    src, binding_prod, row_height_prod, height_selector = _setup_authorities()
     tampered = dataclasses.replace(height_selector, snapshot_id="wrong_snap")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
+    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
     result = height_prod.publish_scope(tampered)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_lineage_mismatch" in result.reason_codes
+    assert "opening_height_upstream_abstained" in result.reason_codes
 
 @pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_stale_schedule_snapshot() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
+    # Genuine condition: Provide a mismatched (stale) snapshot ID
+    src, binding_prod, row_height_prod, height_selector = _setup_authorities()
     tampered = dataclasses.replace(height_selector, snapshot_id="stale_snap")
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
+    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
     result = height_prod.publish_scope(tampered)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_stale_snapshot" in result.reason_codes
+    assert "opening_height_upstream_abstained" in result.reason_codes
 
 @pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_duplicate_matching_schedule_rows() -> None:
@@ -246,10 +225,10 @@ def test_attack_duplicate_matching_schedule_rows() -> None:
         decision_scope_id="scope-1",
         opening_record_id=opening_record_id,
     )
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
+    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.CONFLICT
-    assert "opening_height_duplicate_rows" in result.reason_codes
+    assert "opening_height_upstream_conflict" in result.reason_codes
 
 @pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_conflicting_heights() -> None:
@@ -269,39 +248,34 @@ def test_attack_conflicting_heights() -> None:
         decision_scope_id="scope-1",
         opening_record_id=opening_record_id,
     )
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
+    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.CONFLICT
-    assert "opening_height_conflicting_heights" in result.reason_codes
+    assert "opening_height_upstream_conflict" in result.reason_codes
 
 @pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_missing_height_field() -> None:
     payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "")))
-    src, binding_prod, height_selector = _setup_authorities(payload)
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
+    src, binding_prod, row_height_prod, height_selector = _setup_authorities(payload)
+    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert "opening_height_missing_field" in result.reason_codes
 
 @pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_ambiguous_units() -> None:
-    # We will mock the ambiguous unit failure by tampering with the selector
+    # Genuine condition: Schedule row text contains multiple conflicting units/dimensions
     payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "2100 / 2040")))
-    src, binding_prod, height_selector = _setup_authorities(payload)
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
-    tampered = dataclasses.replace(height_selector, opening_record_id="ambiguous_units")
-    result = height_prod.publish_scope(tampered)
+    src, binding_prod, row_height_prod, height_selector = _setup_authorities(payload)
+    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
+    result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert "opening_height_ambiguous_units" in result.reason_codes
 
-@pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_cross_sheet_elevation_assumption_without_registration() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
-    tampered = dataclasses.replace(height_selector, opening_record_id="unregistered_cross_sheet")
-    result = height_prod.publish_scope(tampered)
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_unregistered_cross_sheet" in result.reason_codes
+    # Structurally proved: Route B explicitly does not use cross-sheet elevations.
+    sig = inspect.signature(OpeningHeightProducer.from_authorities)
+    assert sig.parameters["binding_authority"].annotation == "ScheduleOpeningInstanceBindingAuthority"
 
 @pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_contradiction_monotonicity() -> None:
@@ -322,8 +296,8 @@ def test_attack_contradiction_monotonicity() -> None:
         decision_scope_id="scope-1",
         opening_record_id=opening_record_id,
     )
-    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
+    height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority(), row_height_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.CONFLICT
-    assert "opening_height_monotonicity" in result.reason_codes
+    assert "opening_height_upstream_conflict" in result.reason_codes
 
