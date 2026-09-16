@@ -374,14 +374,15 @@ def _aperture_contains_bbox(aperture: _OpeningAperture, bbox: BBox) -> bool:
     along_vals = [_dot(c, aperture.axis) for c in corners]
     normal_vals = [_dot(c, aperture.normal) for c in corners]
     bbox_along_min = min(along_vals)
-    bbox_normal_min, bbox_normal_max = min(normal_vals), max(normal_vals)
+
     along_overlap = (
         bbox_along_min >= aperture.along_min - _COORD_TOL
         and bbox_along_min <= aperture.along_max + _COORD_TOL
     )
+    bbox_normal_center = sum(normal_vals) / 4.0
     normal_overlap = (
-        bbox_normal_max >= aperture.normal_min - _COORD_TOL
-        and bbox_normal_min <= aperture.normal_max + _COORD_TOL
+        bbox_normal_center >= aperture.normal_min - _COORD_TOL
+        and bbox_normal_center <= aperture.normal_max + _COORD_TOL
     )
     return along_overlap and normal_overlap
 
@@ -429,6 +430,7 @@ def _row_groups_for_page(
                 {
                     "text": "\t".join(item[4] for item in row),
                     "bounds": [(item[0], item[2]) for item in row],
+                    "center_y": sum((item[1] + item[3]) / 2.0 for item in row) / len(row),
                 },
                 tuple(item[5] for item in row),
             )
@@ -455,8 +457,8 @@ def _schedule_entries_for_page(
             header_index = index
             bounds = row.get("bounds", [])
             if bounds:
-                header_min_x = bounds[0][0] - 100.0
-                header_max_x = bounds[-1][1] + 100.0
+                header_min_x = bounds[0][0] - 20.0
+                header_max_x = bounds[-1][1] + 20.0
             break
 
     result: list[tuple[ScheduleEntry, tuple[str, ...]]] = []
@@ -467,10 +469,19 @@ def _schedule_entries_for_page(
         return result
 
     header_row = page_rows[header_index][0]
+    last_y = header_row.get("center_y", -math.inf)
+    max_y_gap = 50.0  # Require contiguous schedule region
+    
     for row, ids in page_rows[header_index + 1 :]:
+        current_y = row.get("center_y", math.inf)
+        if current_y - last_y > max_y_gap:
+            break  # Schedule table has ended
+
         bounds = row.get("bounds", [])
         if bounds and (bounds[-1][1] < header_min_x or bounds[0][0] > header_max_x):
             continue
+            
+        last_y = current_y
         for entry in parse_schedule_rows([header_row, row], page_no=page_no):
             result.append((entry, ids))
     return result

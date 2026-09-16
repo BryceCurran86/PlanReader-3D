@@ -271,6 +271,28 @@ def test_attack_bbox_overlap_barely_clipping_tag_is_not_contained() -> None:
     assert BINDING_NO_CONTAINED_TAG in result.reason_codes
 
 
+def test_attack_bbox_normal_grazing_tag_is_not_contained() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=700, height=650)
+    # normal_min=100, normal_max=110
+    _draw_opening(page, x0=20.0, gap0=100.0, gap1=140.0, x1=220.0, y0=100.0, y1=110.0)
+    
+    # Tag W1 inserted at y=112 (baseline). Normal center will be ~107-108.
+    # We want it to be > 110. Let's insert at y=118, which pushes centroid well outside [100, 110]
+    # but still has some overlap (since bbox min y is ~118 - 12 = 106, which is <= 110).
+    page.insert_text(fitz.Point(112, 118), "W1", color=(0, 0, 0))
+    _insert_schedule_table(page, (("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "2100")))
+    payload = doc.tobytes()
+    doc.close()
+
+    src = SourceVisibilityProducer(producer_method="sched-bind-test", producer_version="1.0")
+    published = _ingest(src, payload, "sched-overlap-normal-clip")
+    opening_selector = _opening_selector(published, src.authority())
+    result = _bind(src, opening_selector)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert BINDING_NO_CONTAINED_TAG in result.reason_codes
+
+
 def test_attack_b_omitted_conflicting_schedule_row_is_impossible_conflict() -> None:
     """B. Complete schedule has D1/W1 900x2100 AND 800x2000. There is no
     caller-side row grouping left to present only one with."""
