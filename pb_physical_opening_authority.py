@@ -1,17 +1,12 @@
-"""G17 phase-2 physical-opening semantic authority boundary.
+"""G17 physical-opening existence authority.
 
-Phase 1 proves immutable producer-owned source observations exist and are bound
-to exact PDF bytes.  Phase 2 remains deliberately narrower than opening
-identity, dimensions, host binding, universe completeness, physical voids or
-commercial deductions.
+A positive existence result is available only from producer-proven visible
+native PDF geometry.  Caller-published structural semantic labels remain useful
+for fail-closed diagnostics, but cannot self-certify a physical opening.
 
-A positive physical-opening-existence result is available only for one reviewed
-structural pattern: a producer-backed jamb-bounded interruption of two wall
-faces.  Candidate membership is rediscovered from the producer-owned snapshot;
-callers cannot supply candidate sets, corroboration flags, confidence thresholds
-or semantic labels.  Every structural support must trace to independent native
-source roots.  Weaker evidence remains candidate/blocked and identity remains
-fail-closed.
+This boundary remains deliberately narrower than physical-opening identity,
+dimensions, host binding, universe completeness, physical voids, deductions or
+commercial publication.
 """
 from __future__ import annotations
 
@@ -25,6 +20,11 @@ from pb_source_observation_authority import (
     SourceObservationAuthority,
     SourceObservationAuthorityResult,
     SourceObservationRecord,
+)
+from pb_source_visibility_authority import (
+    NATIVE_PDF_VISIBLE_SEGMENT,
+    VISIBILITY_RECEIPT_UNAVAILABLE,
+    SourceVisibilityAuthority,
 )
 
 
@@ -55,17 +55,18 @@ AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES = "ambiguous_physical_opening_candidates"
 INSUFFICIENT_INDEPENDENT_SOURCE_LINEAGE = "insufficient_independent_source_lineage"
 INVALID_STRUCTURAL_GEOMETRY = "invalid_structural_geometry"
 SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE = "snapshot_observation_integrity_failure"
+VISIBLE_WALL_CONTINUATION_REQUIRED = "visible_wall_continuation_required"
+VISIBLE_SOURCE_AUTHORITY_REQUIRED = "visible_source_authority_required"
 
-# This tolerance is only for deterministic equality of already-produced source
-# coordinates.  It is not a proximity/search radius and cannot create candidate
-# membership between otherwise unrelated primitives.
+# Numeric equality only. These are not proximity/search radii and cannot create
+# candidate membership between otherwise unrelated primitives.
 _COORD_EQ_ABS_TOL = 1e-6
 _PARALLEL_REL_TOL = 1e-9
 
 
 @dataclass(frozen=True)
 class CandidateSemanticOpening:
-    """Producer-snapshot-owned candidate, not yet a physical-opening fact."""
+    """Producer-snapshot-owned candidate, not yet a broader opening identity."""
 
     candidate_id: str
     source_observation_ids: tuple[str, ...]
@@ -133,6 +134,17 @@ class PhysicalOpeningIdentityResult:
     missing_upstream_capability: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class _FaceBreak:
+    first: SourceObservationRecord
+    second: SourceObservationRecord
+    gap_start: float
+    gap_end: float
+    start_point: tuple[float, float]
+    end_point: tuple[float, float]
+    direction: tuple[float, float]
+
+
 def _dedupe_reason_codes(*groups: tuple[str, ...]) -> tuple[str, ...]:
     result: list[str] = []
     for group in groups:
@@ -152,8 +164,8 @@ def _source_failure_status(*results: SourceObservationAuthorityResult) -> Eviden
 def _line_geometry(record: SourceObservationRecord) -> Optional[tuple[float, float, float, float]]:
     if len(record.geometry) != 4:
         return None
-    values = tuple(float(v) for v in record.geometry)
-    if not all(math.isfinite(v) for v in values):
+    values = tuple(float(value) for value in record.geometry)
+    if not all(math.isfinite(value) for value in values):
         return None
     x1, y1, x2, y2 = values
     if math.hypot(x2 - x1, y2 - y1) <= _COORD_EQ_ABS_TOL:
@@ -195,31 +207,144 @@ def _parallel(
     rlen = math.hypot(rdx, rdy)
     if llen <= _COORD_EQ_ABS_TOL or rlen <= _COORD_EQ_ABS_TOL:
         return False
-    cross = abs(ldx * rdy - ldy * rdx)
-    return cross <= _PARALLEL_REL_TOL * llen * rlen
+    return abs(ldx * rdy - ldy * rdx) <= _PARALLEL_REL_TOL * llen * rlen
 
 
-def _canonical_line(line: tuple[float, float, float, float]) -> tuple[tuple[float, float], tuple[float, float]]:
+def _canonical_direction(line: tuple[float, float, float, float]) -> tuple[float, float]:
+    dx, dy = line[2] - line[0], line[3] - line[1]
+    length = math.hypot(dx, dy)
+    ux, uy = dx / length, dy / length
+    if ux < -_COORD_EQ_ABS_TOL or (
+        abs(ux) <= _COORD_EQ_ABS_TOL and uy < 0.0
+    ):
+        ux, uy = -ux, -uy
+    return (ux, uy)
+
+
+def _projection(point: tuple[float, float], direction: tuple[float, float]) -> float:
+    return point[0] * direction[0] + point[1] * direction[1]
+
+
+def _cross(left: tuple[float, float], right: tuple[float, float]) -> float:
+    return left[0] * right[1] - left[1] * right[0]
+
+
+def _collinear(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+) -> bool:
+    if not _parallel(left, right):
+        return False
+    direction = _canonical_direction(left)
+    delta = (right[0] - left[0], right[1] - left[1])
+    return abs(_cross(direction, delta)) <= _COORD_EQ_ABS_TOL
+
+
+def _endpoint_at_projection(
+    line: tuple[float, float, float, float],
+    direction: tuple[float, float],
+    target: float,
+) -> Optional[tuple[float, float]]:
+    first = (line[0], line[1])
+    second = (line[2], line[3])
+    if abs(_projection(first, direction) - target) <= _COORD_EQ_ABS_TOL:
+        return first
+    if abs(_projection(second, direction) - target) <= _COORD_EQ_ABS_TOL:
+        return second
+    return None
+
+
+def _face_break(
+    first: SourceObservationRecord,
+    second: SourceObservationRecord,
+) -> Optional[_FaceBreak]:
+    first_line = _line_geometry(first)
+    second_line = _line_geometry(second)
+    if first_line is None or second_line is None or not _collinear(first_line, second_line):
+        return None
+    direction = _canonical_direction(first_line)
+    first_values = sorted(
+        (_projection((first_line[0], first_line[1]), direction),
+         _projection((first_line[2], first_line[3]), direction))
+    )
+    second_values = sorted(
+        (_projection((second_line[0], second_line[1]), direction),
+         _projection((second_line[2], second_line[3]), direction))
+    )
+    if first_values[0] <= second_values[0]:
+        left_record, left_line, left_values = first, first_line, first_values
+        right_record, right_line, right_values = second, second_line, second_values
+    else:
+        left_record, left_line, left_values = second, second_line, second_values
+        right_record, right_line, right_values = first, first_line, first_values
+    gap_start = left_values[1]
+    gap_end = right_values[0]
+    if gap_end - gap_start <= _COORD_EQ_ABS_TOL:
+        return None
+    start_point = _endpoint_at_projection(left_line, direction, gap_start)
+    end_point = _endpoint_at_projection(right_line, direction, gap_end)
+    if start_point is None or end_point is None:
+        return None
+    return _FaceBreak(
+        first=left_record,
+        second=right_record,
+        gap_start=gap_start,
+        gap_end=gap_end,
+        start_point=start_point,
+        end_point=end_point,
+        direction=direction,
+    )
+
+
+def _same_gap(left: _FaceBreak, right: _FaceBreak) -> bool:
+    if abs(left.gap_start - right.gap_start) > _COORD_EQ_ABS_TOL:
+        return False
+    if abs(left.gap_end - right.gap_end) > _COORD_EQ_ABS_TOL:
+        return False
+    dot = left.direction[0] * right.direction[0] + left.direction[1] * right.direction[1]
+    return abs(abs(dot) - 1.0) <= _PARALLEL_REL_TOL
+
+
+def _distinct_parallel_axes(left: _FaceBreak, right: _FaceBreak) -> bool:
+    delta = (
+        right.start_point[0] - left.start_point[0],
+        right.start_point[1] - left.start_point[1],
+    )
+    return abs(_cross(left.direction, delta)) > _COORD_EQ_ABS_TOL
+
+
+def _canonical_line(record: SourceObservationRecord) -> tuple[tuple[float, float], tuple[float, float]]:
+    line = _line_geometry(record)
+    if line is None:
+        return ((0.0, 0.0), (0.0, 0.0))
     first = (round(line[0], 6), round(line[1], 6))
     second = (round(line[2], 6), round(line[3], 6))
     return tuple(sorted((first, second)))  # type: ignore[return-value]
 
 
 class PhysicalOpeningAuthority:
-    """Read-only Phase-2 consumer over the concrete Phase-1 authority reader."""
+    """Read-only G17 authority over raw or visibility-proven source readers."""
 
-    def __init__(self, source_observation_authority: SourceObservationAuthority) -> None:
-        if type(source_observation_authority) is not SourceObservationAuthority:
+    def __init__(
+        self,
+        source_observation_authority: SourceObservationAuthority | SourceVisibilityAuthority,
+    ) -> None:
+        if type(source_observation_authority) is SourceObservationAuthority:
+            self._source_observation_authority: Optional[SourceObservationAuthority] = (
+                source_observation_authority
+            )
+            self._source_visibility_authority: Optional[SourceVisibilityAuthority] = None
+        elif type(source_observation_authority) is SourceVisibilityAuthority:
+            self._source_observation_authority = None
+            self._source_visibility_authority = source_observation_authority
+        else:
             raise TypeError(
                 "source_observation_authority must be the concrete producer-owned "
-                "SourceObservationAuthority reader"
+                "SourceObservationAuthority or SourceVisibilityAuthority reader"
             )
-        self._source_observation_authority = source_observation_authority
 
     @staticmethod
     def capabilities() -> dict[str, bool]:
-        """Declare propositions this Phase-2 slice can establish."""
-
         return {
             "physical_opening_existence": True,
             "physical_opening_identity": False,
@@ -231,237 +356,252 @@ class PhysicalOpeningAuthority:
             "net_wall_area": False,
         }
 
-    def _snapshot_records(
+    def _raw_snapshot_records(
         self,
         seed: SourceObservationAuthorityResult,
     ) -> tuple[tuple[SourceObservationRecord, ...], tuple[SourceObservationAuthorityResult, ...]]:
-        if seed.snapshot is None or seed.source_revision is None:
+        source = self._source_observation_authority
+        if source is None or seed.snapshot is None or seed.source_revision is None:
             return (), ()
         records: list[SourceObservationRecord] = []
         failures: list[SourceObservationAuthorityResult] = []
         for observation_id in seed.snapshot.observation_ids:
-            selector = ObservationSelector(
-                document_id=seed.snapshot.document_id,
-                revision_id=seed.snapshot.revision_id,
-                source_sha256=seed.snapshot.source_sha256,
-                snapshot_id=seed.snapshot.snapshot_id,
-                observation_id=observation_id,
+            result = source.resolve(
+                ObservationSelector(
+                    document_id=seed.snapshot.document_id,
+                    revision_id=seed.snapshot.revision_id,
+                    source_sha256=seed.snapshot.source_sha256,
+                    snapshot_id=seed.snapshot.snapshot_id,
+                    observation_id=observation_id,
+                )
             )
-            result = self._source_observation_authority.resolve(selector)
-            if (
-                result.status is not EvidenceResolutionStatus.CORROBORATED
-                or result.observation is None
-            ):
-                failures.append(result)
-            else:
+            if result.status is EvidenceResolutionStatus.CORROBORATED and result.observation:
                 records.append(result.observation)
+            else:
+                failures.append(result)
+        return tuple(records), tuple(failures)
+
+    def _visible_snapshot_records(
+        self,
+        seed: SourceObservationAuthorityResult,
+    ) -> tuple[tuple[SourceObservationRecord, ...], tuple[SourceObservationAuthorityResult, ...]]:
+        visibility = self._source_visibility_authority
+        if visibility is None or seed.snapshot is None or seed.source_revision is None:
+            return (), ()
+        records: list[SourceObservationRecord] = []
+        failures: list[SourceObservationAuthorityResult] = []
+        for observation_id in seed.snapshot.observation_ids:
+            result = visibility.resolve_visible(
+                ObservationSelector(
+                    document_id=seed.snapshot.document_id,
+                    revision_id=seed.snapshot.revision_id,
+                    source_sha256=seed.snapshot.source_sha256,
+                    snapshot_id=seed.snapshot.snapshot_id,
+                    observation_id=observation_id,
+                )
+            )
+            if result.status is EvidenceResolutionStatus.CORROBORATED and result.observation:
+                records.append(result.observation)
+            elif result.status is EvidenceResolutionStatus.CONFLICT:
+                failures.append(result)
+            elif VISIBILITY_RECEIPT_UNAVAILABLE not in result.reason_codes:
+                failures.append(result)
         return tuple(records), tuple(failures)
 
     @staticmethod
-    def _lineage_roots(
-        record: SourceObservationRecord,
-        records_by_id: dict[str, SourceObservationRecord],
-        memo: dict[str, Optional[frozenset[str]]],
-        visiting: Optional[set[str]] = None,
-    ) -> Optional[frozenset[str]]:
-        cached = memo.get(record.observation_id)
-        if cached is not None or record.observation_id in memo:
-            return cached
-        active = set() if visiting is None else set(visiting)
-        if record.observation_id in active:
-            memo[record.observation_id] = None
-            return None
-        active.add(record.observation_id)
-        if not record.derivation_parent_ids:
-            if record.origin_kind != "native":
-                memo[record.observation_id] = None
-                return None
-            roots = frozenset((record.observation_id,))
-            memo[record.observation_id] = roots
-            return roots
-        roots_set: set[str] = set()
-        for parent_id in record.derivation_parent_ids:
-            parent = records_by_id.get(parent_id)
-            if parent is None:
-                memo[record.observation_id] = None
-                return None
-            parent_roots = PhysicalOpeningAuthority._lineage_roots(
-                parent, records_by_id, memo, active
-            )
-            if not parent_roots:
-                memo[record.observation_id] = None
-                return None
-            roots_set.update(parent_roots)
-        roots = frozenset(roots_set)
-        memo[record.observation_id] = roots
-        return roots
-
-    @staticmethod
-    def _independent_roots(root_sets: tuple[frozenset[str], ...]) -> bool:
-        if any(not roots for roots in root_sets):
-            return False
-        for index, left in enumerate(root_sets):
-            for right in root_sets[index + 1 :]:
-                if left.intersection(right):
-                    return False
-        return True
-
-    def _discover_structural_candidates(
-        self,
-        *,
-        seed_observation: SourceObservationRecord,
+    def _raw_structural_candidates(
+        seed: SourceObservationRecord,
         records: tuple[SourceObservationRecord, ...],
     ) -> tuple[CandidateSemanticOpening, ...]:
         scoped = tuple(
             record
             for record in records
-            if record.document_id == seed_observation.document_id
-            and record.revision_id == seed_observation.revision_id
-            and record.source_sha256 == seed_observation.source_sha256
-            and record.snapshot_id == seed_observation.snapshot_id
-            and record.page_id == seed_observation.page_id
-            and record.viewport_id == seed_observation.viewport_id
+            if record.document_id == seed.document_id
+            and record.revision_id == seed.revision_id
+            and record.source_sha256 == seed.source_sha256
+            and record.snapshot_id == seed.snapshot_id
+            and record.page_id == seed.page_id
+            and record.viewport_id == seed.viewport_id
         )
-        records_by_id = {record.observation_id: record for record in records}
-        lineage_memo: dict[str, Optional[frozenset[str]]] = {}
         faces = tuple(
-            record
-            for record in scoped
+            record for record in scoped
             if record.observation_kind == WALL_FACE_INTERRUPTION_KIND
             and _line_geometry(record) is not None
         )
         jambs = tuple(
-            record
-            for record in scoped
+            record for record in scoped
             if record.observation_kind == OPENING_JAMB_BOUNDARY_KIND
             and _line_geometry(record) is not None
         )
-
-        # Equivalent duplicated detector observations are collapsed by immutable
-        # source-root support plus exact structural geometry, not by confidence.
-        discovered: dict[
-            tuple[object, ...],
-            tuple[set[str], set[str], tuple[str, ...]],
-        ] = {}
-        for face_index, first_face in enumerate(faces):
+        discovered: dict[tuple[object, ...], tuple[set[str], set[str]]] = {}
+        for index, first_face in enumerate(faces):
             first_line = _line_geometry(first_face)
             if first_line is None:
                 continue
-            for second_face in faces[face_index + 1 :]:
+            for second_face in faces[index + 1:]:
                 second_line = _line_geometry(second_face)
                 if second_line is None or not _parallel(first_line, second_line):
                     continue
                 orientations = (
-                    (
-                        (first_line[0], first_line[1]),
-                        (second_line[0], second_line[1]),
-                        (first_line[2], first_line[3]),
-                        (second_line[2], second_line[3]),
-                    ),
-                    (
-                        (first_line[0], first_line[1]),
-                        (second_line[2], second_line[3]),
-                        (first_line[2], first_line[3]),
-                        (second_line[0], second_line[1]),
-                    ),
+                    ((first_line[0], first_line[1]), (second_line[0], second_line[1]),
+                     (first_line[2], first_line[3]), (second_line[2], second_line[3])),
+                    ((first_line[0], first_line[1]), (second_line[2], second_line[3]),
+                     (first_line[2], first_line[3]), (second_line[0], second_line[1])),
                 )
                 for first_a, first_b, second_a, second_b in orientations:
-                    first_jambs = tuple(
-                        jamb for jamb in jambs if _segment_matches(jamb, first_a, first_b)
-                    )
-                    second_jambs = tuple(
-                        jamb for jamb in jambs if _segment_matches(jamb, second_a, second_b)
-                    )
-                    for first_jamb in first_jambs:
-                        for second_jamb in second_jambs:
-                            support = (first_face, second_face, first_jamb, second_jamb)
+                    left_jambs = tuple(j for j in jambs if _segment_matches(j, first_a, first_b))
+                    right_jambs = tuple(j for j in jambs if _segment_matches(j, second_a, second_b))
+                    for left_jamb in left_jambs:
+                        for right_jamb in right_jambs:
+                            support = (first_face, second_face, left_jamb, right_jamb)
                             if len({item.observation_id for item in support}) != 4:
                                 continue
-                            root_sets: list[frozenset[str]] = []
-                            invalid_lineage = False
-                            for item in support:
-                                roots = self._lineage_roots(item, records_by_id, lineage_memo)
-                                if not roots:
-                                    invalid_lineage = True
-                                    break
-                                root_sets.append(roots)
-                            if invalid_lineage or not self._independent_roots(tuple(root_sets)):
-                                continue
-                            all_roots = tuple(sorted(set().union(*root_sets)))
-                            geometry_key = tuple(
-                                sorted(
-                                    (
-                                        _canonical_line(first_line),
-                                        _canonical_line(second_line),
-                                        _canonical_line(_line_geometry(first_jamb)),  # type: ignore[arg-type]
-                                        _canonical_line(_line_geometry(second_jamb)),  # type: ignore[arg-type]
-                                    )
-                                )
-                            )
-                            key = (
-                                seed_observation.document_id,
-                                seed_observation.revision_id,
-                                seed_observation.source_sha256,
-                                seed_observation.snapshot_id,
-                                seed_observation.page_id,
-                                seed_observation.viewport_id,
-                                all_roots,
-                                geometry_key,
-                            )
-                            obs_ids = {item.observation_id for item in support}
+                            geometry_key = tuple(sorted(_canonical_line(item) for item in support))
+                            roots = {
+                                parent
+                                for item in support
+                                for parent in item.derivation_parent_ids
+                            }
+                            key = (seed.document_id, seed.revision_id, seed.source_sha256,
+                                   seed.snapshot_id, seed.page_id, seed.viewport_id, geometry_key)
                             if key in discovered:
-                                existing_obs, existing_roots, reasons = discovered[key]
-                                existing_obs.update(obs_ids)
-                                existing_roots.update(all_roots)
-                                discovered[key] = (existing_obs, existing_roots, reasons)
+                                discovered[key][0].update(item.observation_id for item in support)
+                                discovered[key][1].update(roots)
                             else:
                                 discovered[key] = (
-                                    obs_ids,
-                                    set(all_roots),
-                                    (JAMB_BOUNDED_TWO_FACE_INTERRUPTION,),
+                                    {item.observation_id for item in support}, set(roots)
                                 )
-
-        candidates: list[CandidateSemanticOpening] = []
+        result: list[CandidateSemanticOpening] = []
         for key in sorted(discovered, key=repr):
-            observation_ids, root_ids, reasons = discovered[key]
+            observation_ids, root_ids = discovered[key]
             payload = {
-                "document_id": seed_observation.document_id,
-                "revision_id": seed_observation.revision_id,
-                "source_sha256": seed_observation.source_sha256,
-                "snapshot_id": seed_observation.snapshot_id,
-                "page_id": seed_observation.page_id,
-                "viewport_id": seed_observation.viewport_id,
+                "document_id": seed.document_id,
+                "revision_id": seed.revision_id,
+                "source_sha256": seed.source_sha256,
+                "snapshot_id": seed.snapshot_id,
+                "page_id": seed.page_id,
+                "viewport_id": seed.viewport_id,
                 "structural_pattern": JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
                 "source_observation_ids": tuple(sorted(observation_ids)),
                 "source_lineage_root_ids": tuple(sorted(root_ids)),
             }
-            candidates.append(
-                CandidateSemanticOpening(
-                    candidate_id=stable_contract_id(
-                        "physical_opening_candidate", payload, digest_chars=32
-                    ),
-                    source_observation_ids=tuple(sorted(observation_ids)),
-                    source_lineage_root_ids=tuple(sorted(root_ids)),
-                    document_id=seed_observation.document_id,
-                    revision_id=seed_observation.revision_id,
-                    source_sha256=seed_observation.source_sha256,
-                    snapshot_id=seed_observation.snapshot_id,
-                    page_id=seed_observation.page_id,
-                    viewport_id=seed_observation.viewport_id,
-                    structural_pattern=JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
-                    status=EvidenceResolutionStatus.CANDIDATE,
-                    reason_codes=reasons,
+            result.append(CandidateSemanticOpening(
+                candidate_id=stable_contract_id("physical_opening_candidate", payload, digest_chars=32),
+                source_observation_ids=tuple(sorted(observation_ids)),
+                source_lineage_root_ids=tuple(sorted(root_ids)),
+                document_id=seed.document_id,
+                revision_id=seed.revision_id,
+                source_sha256=seed.source_sha256,
+                snapshot_id=seed.snapshot_id,
+                page_id=seed.page_id,
+                viewport_id=seed.viewport_id,
+                structural_pattern=JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
+                status=EvidenceResolutionStatus.CANDIDATE,
+                reason_codes=(STRUCTURAL_OPENING_CANDIDATE, VISIBLE_SOURCE_AUTHORITY_REQUIRED),
+            ))
+        return tuple(result)
+
+    @staticmethod
+    def _visible_structural_candidates(
+        seed: SourceObservationRecord,
+        records: tuple[SourceObservationRecord, ...],
+    ) -> tuple[CandidateSemanticOpening, ...]:
+        scoped = tuple(
+            record
+            for record in records
+            if record.observation_kind == NATIVE_PDF_VISIBLE_SEGMENT
+            and record.document_id == seed.document_id
+            and record.revision_id == seed.revision_id
+            and record.source_sha256 == seed.source_sha256
+            and record.snapshot_id == seed.snapshot_id
+            and record.page_id == seed.page_id
+            and record.viewport_id is None
+            and _line_geometry(record) is not None
+        )
+        breaks: list[_FaceBreak] = []
+        for index, first in enumerate(scoped):
+            for second in scoped[index + 1:]:
+                found = _face_break(first, second)
+                if found is not None:
+                    breaks.append(found)
+
+        discovered: dict[tuple[object, ...], tuple[SourceObservationRecord, ...]] = {}
+        for index, first_break in enumerate(breaks):
+            for second_break in breaks[index + 1:]:
+                if not _same_gap(first_break, second_break):
+                    continue
+                if not _distinct_parallel_axes(first_break, second_break):
+                    continue
+                left_jambs = tuple(
+                    record for record in scoped
+                    if _segment_matches(record, first_break.start_point, second_break.start_point)
                 )
-            )
+                right_jambs = tuple(
+                    record for record in scoped
+                    if _segment_matches(record, first_break.end_point, second_break.end_point)
+                )
+                for left_jamb in left_jambs:
+                    for right_jamb in right_jambs:
+                        support = (
+                            first_break.first, first_break.second,
+                            second_break.first, second_break.second,
+                            left_jamb, right_jamb,
+                        )
+                        if len({item.observation_id for item in support}) != 6:
+                            continue
+                        parent_ids: list[str] = []
+                        lineage_ok = True
+                        for item in support:
+                            if len(item.derivation_parent_ids) != 1:
+                                lineage_ok = False
+                                break
+                            parent_ids.append(item.derivation_parent_ids[0])
+                        if not lineage_ok or len(set(parent_ids)) != 6:
+                            continue
+                        geometry_key = tuple(sorted(_canonical_line(item) for item in support))
+                        key = (
+                            seed.document_id, seed.revision_id, seed.source_sha256,
+                            seed.snapshot_id, seed.page_id, geometry_key,
+                        )
+                        discovered[key] = support
+
+        candidates: list[CandidateSemanticOpening] = []
+        for key in sorted(discovered, key=repr):
+            support = discovered[key]
+            observation_ids = tuple(sorted(item.observation_id for item in support))
+            root_ids = tuple(sorted(item.derivation_parent_ids[0] for item in support))
+            payload = {
+                "document_id": seed.document_id,
+                "revision_id": seed.revision_id,
+                "source_sha256": seed.source_sha256,
+                "snapshot_id": seed.snapshot_id,
+                "page_id": seed.page_id,
+                "viewport_id": None,
+                "structural_pattern": JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
+                "source_observation_ids": observation_ids,
+                "source_lineage_root_ids": root_ids,
+            }
+            candidates.append(CandidateSemanticOpening(
+                candidate_id=stable_contract_id("physical_opening_candidate", payload, digest_chars=32),
+                source_observation_ids=observation_ids,
+                source_lineage_root_ids=root_ids,
+                document_id=seed.document_id,
+                revision_id=seed.revision_id,
+                source_sha256=seed.source_sha256,
+                snapshot_id=seed.snapshot_id,
+                page_id=seed.page_id,
+                viewport_id=None,
+                structural_pattern=JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
+                status=EvidenceResolutionStatus.CANDIDATE,
+                reason_codes=(JAMB_BOUNDED_TWO_FACE_INTERRUPTION, VISIBLE_WALL_CONTINUATION_REQUIRED),
+            ))
         return tuple(candidates)
 
-    def _single_observation_candidate(
-        self,
+    @staticmethod
+    def _single_raw_candidate(
         observation: SourceObservationRecord,
-        records: tuple[SourceObservationRecord, ...],
     ) -> CandidateSemanticOpening:
-        records_by_id = {record.observation_id: record for record in records}
-        roots = self._lineage_roots(observation, records_by_id, {}) or frozenset()
+        roots = tuple(sorted(observation.derivation_parent_ids))
         payload = {
             "document_id": observation.document_id,
             "revision_id": observation.revision_id,
@@ -470,23 +610,17 @@ class PhysicalOpeningAuthority:
             "page_id": observation.page_id,
             "viewport_id": observation.viewport_id,
             "source_observation_ids": (observation.observation_id,),
-            "source_lineage_root_ids": tuple(sorted(roots)),
+            "source_lineage_root_ids": roots,
             "structural_pattern": STRUCTURAL_OPENING_CANDIDATE,
         }
-        reasons = (STRUCTURAL_OPENING_CANDIDATE,)
-        if not roots:
-            reasons = _dedupe_reason_codes(reasons, (INSUFFICIENT_INDEPENDENT_SOURCE_LINEAGE,))
-        if observation.observation_kind in {
-            WALL_FACE_INTERRUPTION_KIND,
-            OPENING_JAMB_BOUNDARY_KIND,
-        } and _line_geometry(observation) is None:
+        reasons = (STRUCTURAL_OPENING_CANDIDATE, VISIBLE_SOURCE_AUTHORITY_REQUIRED)
+        if observation.observation_kind in {WALL_FACE_INTERRUPTION_KIND, OPENING_JAMB_BOUNDARY_KIND} \
+                and _line_geometry(observation) is None:
             reasons = _dedupe_reason_codes(reasons, (INVALID_STRUCTURAL_GEOMETRY,))
         return CandidateSemanticOpening(
-            candidate_id=stable_contract_id(
-                "physical_opening_candidate", payload, digest_chars=32
-            ),
+            candidate_id=stable_contract_id("physical_opening_candidate", payload, digest_chars=32),
             source_observation_ids=(observation.observation_id,),
-            source_lineage_root_ids=tuple(sorted(roots)),
+            source_lineage_root_ids=roots,
             document_id=observation.document_id,
             revision_id=observation.revision_id,
             source_sha256=observation.source_sha256,
@@ -499,144 +633,168 @@ class PhysicalOpeningAuthority:
         )
 
     def prove_existence(self, selector: ObservationSelector) -> PhysicalOpeningExistenceResult:
-        """Resolve one local physical opening only from independent structural roots."""
-
         if not isinstance(selector, ObservationSelector):
             raise TypeError("selector must be ObservationSelector")
 
-        source_result = self._source_observation_authority.resolve(selector)
-        if (
-            source_result.status is not EvidenceResolutionStatus.CORROBORATED
-            or source_result.observation is None
-        ):
+        if self._source_visibility_authority is None:
+            source = self._source_observation_authority
+            assert source is not None
+            source_result = source.resolve(selector)
+            if source_result.status is not EvidenceResolutionStatus.CORROBORATED or source_result.observation is None:
+                return PhysicalOpeningExistenceResult(
+                    status=_source_failure_status(source_result), proposition=None,
+                    physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                    reason_codes=_dedupe_reason_codes(source_result.reason_codes),
+                    source_observation=source_result,
+                    missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
+                )
+            records, failures = self._raw_snapshot_records(source_result)
+            if failures:
+                return PhysicalOpeningExistenceResult(
+                    status=_source_failure_status(*failures), proposition=None,
+                    physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                    reason_codes=_dedupe_reason_codes(
+                        (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),
+                        *tuple(result.reason_codes for result in failures),
+                    ), source_observation=source_result,
+                )
+            observation = source_result.observation
+            candidates = self._raw_structural_candidates(observation, records)
+            containing = tuple(
+                candidate for candidate in candidates
+                if observation.observation_id in candidate.source_observation_ids
+            )
+            if len(containing) > 1:
+                return PhysicalOpeningExistenceResult(
+                    status=EvidenceResolutionStatus.CONFLICT, proposition=None,
+                    physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                    reason_codes=(AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES,),
+                    source_observation=source_result,
+                )
+            if observation.observation_kind in {
+                WALL_FACE_INTERRUPTION_KIND, OPENING_JAMB_BOUNDARY_KIND,
+                *WEAK_PHYSICAL_OPENING_CANDIDATE_KINDS,
+            }:
+                candidate = containing[0] if containing else self._single_raw_candidate(observation)
+                return PhysicalOpeningExistenceResult(
+                    status=EvidenceResolutionStatus.CANDIDATE, proposition=None,
+                    physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                    reason_codes=candidate.reason_codes,
+                    source_observation=source_result, candidate=candidate,
+                    missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
+                )
             return PhysicalOpeningExistenceResult(
-                status=_source_failure_status(source_result),
-                proposition=None,
+                status=EvidenceResolutionStatus.ABSTAINED, proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=(AUTHORITATIVE_PHYSICAL_OPENING_SEMANTICS_UNAVAILABLE,),
+                source_observation=source_result,
+                missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
+            )
+
+        visibility = self._source_visibility_authority
+        source_result = visibility.resolve_visible(selector)
+        if source_result.status is not EvidenceResolutionStatus.CORROBORATED or source_result.observation is None:
+            return PhysicalOpeningExistenceResult(
+                status=_source_failure_status(source_result), proposition=None,
                 physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
                 reason_codes=_dedupe_reason_codes(source_result.reason_codes),
                 source_observation=source_result,
                 missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
             )
-
-        records, failures = self._snapshot_records(source_result)
+        records, failures = self._visible_snapshot_records(source_result)
         if failures:
             return PhysicalOpeningExistenceResult(
-                status=_source_failure_status(*failures),
-                proposition=None,
+                status=_source_failure_status(*failures), proposition=None,
                 physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
                 reason_codes=_dedupe_reason_codes(
                     (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),
                     *tuple(result.reason_codes for result in failures),
-                ),
-                source_observation=source_result,
+                ), source_observation=source_result,
             )
-
         observation = source_result.observation
-        candidates = self._discover_structural_candidates(
-            seed_observation=observation,
-            records=records,
-        )
+        candidates = self._visible_structural_candidates(observation, records)
         containing = tuple(
-            candidate
-            for candidate in candidates
+            candidate for candidate in candidates
             if observation.observation_id in candidate.source_observation_ids
         )
         if len(containing) > 1:
             return PhysicalOpeningExistenceResult(
-                status=EvidenceResolutionStatus.CONFLICT,
-                proposition=None,
+                status=EvidenceResolutionStatus.CONFLICT, proposition=None,
                 physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
                 reason_codes=(AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES,),
                 source_observation=source_result,
             )
-        if len(containing) == 1 and source_result.snapshot is not None:
-            candidate = containing[0]
-            record_payload = {
-                "document_id": candidate.document_id,
-                "revision_id": candidate.revision_id,
-                "source_sha256": candidate.source_sha256,
-                "snapshot_id": candidate.snapshot_id,
-                "page_id": candidate.page_id,
-                "viewport_id": candidate.viewport_id,
-                "semantic_class": "opening",
-                "structural_pattern": candidate.structural_pattern,
-                "source_observation_ids": candidate.source_observation_ids,
-                "source_lineage_root_ids": candidate.source_lineage_root_ids,
-            }
-            existence = PhysicalOpeningExistenceRecord(
-                record_id=stable_contract_id(
-                    "physical_opening_existence", record_payload, digest_chars=32
-                ),
-                source_observation_ids=candidate.source_observation_ids,
-                source_lineage_root_ids=candidate.source_lineage_root_ids,
-                document_id=candidate.document_id,
-                revision_id=candidate.revision_id,
-                source_sha256=candidate.source_sha256,
-                snapshot_id=candidate.snapshot_id,
-                page_id=candidate.page_id,
-                viewport_id=candidate.viewport_id,
-                semantic_class="opening",
-                status=EvidenceResolutionStatus.CORROBORATED,
-                proposition=PHYSICAL_OPENING_EXISTS,
-                structural_pattern=candidate.structural_pattern,
-                diagnostic_confidence=1.0,
-                blocking_reasons=(),
-                structural_reason_codes=(STRUCTURAL_OPENING_EXISTENCE_RESOLVED,),
-                producer_method=source_result.snapshot.producer_method,
-                producer_version=source_result.snapshot.producer_version,
-                producer_generation=source_result.snapshot.producer_generation,
-            )
+        if len(containing) != 1 or source_result.snapshot is None:
             return PhysicalOpeningExistenceResult(
-                status=EvidenceResolutionStatus.CORROBORATED,
-                proposition=PHYSICAL_OPENING_EXISTS,
-                physical_opening_existence=PHYSICAL_OPENING_EXISTS,
-                reason_codes=(STRUCTURAL_OPENING_EXISTENCE_RESOLVED,),
-                source_observation=source_result,
-                candidate=candidate,
-                existence_record=existence,
-            )
-
-        if observation.observation_kind in {
-            WALL_FACE_INTERRUPTION_KIND,
-            OPENING_JAMB_BOUNDARY_KIND,
-            *WEAK_PHYSICAL_OPENING_CANDIDATE_KINDS,
-        }:
-            candidate = self._single_observation_candidate(observation, records)
-            return PhysicalOpeningExistenceResult(
-                status=EvidenceResolutionStatus.CANDIDATE,
-                proposition=None,
+                status=EvidenceResolutionStatus.ABSTAINED, proposition=None,
                 physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
-                reason_codes=candidate.reason_codes,
+                reason_codes=(VISIBLE_WALL_CONTINUATION_REQUIRED,),
                 source_observation=source_result,
-                candidate=candidate,
+                missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
             )
 
-        # Tags, text, schedules, generic rectangles, CV/heuristic labels and other
-        # observations remain necessary-at-most provenance; none is a structural
-        # physical-opening existence proposition on its own.
-        return PhysicalOpeningExistenceResult(
-            status=EvidenceResolutionStatus.ABSTAINED,
-            proposition=None,
-            physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
-            reason_codes=(AUTHORITATIVE_PHYSICAL_OPENING_SEMANTICS_UNAVAILABLE,),
-            source_observation=source_result,
-            missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
+        candidate = containing[0]
+        record_payload = {
+            "document_id": candidate.document_id,
+            "revision_id": candidate.revision_id,
+            "source_sha256": candidate.source_sha256,
+            "snapshot_id": candidate.snapshot_id,
+            "page_id": candidate.page_id,
+            "viewport_id": candidate.viewport_id,
+            "semantic_class": "opening",
+            "structural_pattern": candidate.structural_pattern,
+            "source_observation_ids": candidate.source_observation_ids,
+            "source_lineage_root_ids": candidate.source_lineage_root_ids,
+        }
+        existence = PhysicalOpeningExistenceRecord(
+            record_id=stable_contract_id("physical_opening_existence", record_payload, digest_chars=32),
+            source_observation_ids=candidate.source_observation_ids,
+            source_lineage_root_ids=candidate.source_lineage_root_ids,
+            document_id=candidate.document_id,
+            revision_id=candidate.revision_id,
+            source_sha256=candidate.source_sha256,
+            snapshot_id=candidate.snapshot_id,
+            page_id=candidate.page_id,
+            viewport_id=None,
+            semantic_class="opening",
+            status=EvidenceResolutionStatus.CORROBORATED,
+            proposition=PHYSICAL_OPENING_EXISTS,
+            structural_pattern=candidate.structural_pattern,
+            diagnostic_confidence=1.0,
+            blocking_reasons=(),
+            structural_reason_codes=(STRUCTURAL_OPENING_EXISTENCE_RESOLVED,),
+            producer_method=source_result.snapshot.producer_method,
+            producer_version=source_result.snapshot.producer_version,
+            producer_generation=source_result.snapshot.producer_generation,
         )
+        return PhysicalOpeningExistenceResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            proposition=PHYSICAL_OPENING_EXISTS,
+            physical_opening_existence=PHYSICAL_OPENING_EXISTS,
+            reason_codes=(STRUCTURAL_OPENING_EXISTENCE_RESOLVED,),
+            source_observation=source_result,
+            candidate=candidate,
+            existence_record=existence,
+        )
+
+    def _resolve_for_identity(self, selector: ObservationSelector) -> SourceObservationAuthorityResult:
+        if self._source_visibility_authority is not None:
+            return self._source_visibility_authority.resolve_visible(selector)
+        assert self._source_observation_authority is not None
+        return self._source_observation_authority.resolve(selector)
 
     def compare_identity(
         self,
         left_selector: ObservationSelector,
         right_selector: ObservationSelector,
     ) -> PhysicalOpeningIdentityResult:
-        """Never infer physical identity from observation equality or similarity."""
-
+        """Identity remains closed until its separately reviewed post-G17 phase."""
         if not isinstance(left_selector, ObservationSelector):
             raise TypeError("left_selector must be ObservationSelector")
         if not isinstance(right_selector, ObservationSelector):
             raise TypeError("right_selector must be ObservationSelector")
-
-        left = self._source_observation_authority.resolve(left_selector)
-        right = self._source_observation_authority.resolve(right_selector)
+        left = self._resolve_for_identity(left_selector)
+        right = self._resolve_for_identity(right_selector)
         if (
             left.status is not EvidenceResolutionStatus.CORROBORATED
             or right.status is not EvidenceResolutionStatus.CORROBORATED
@@ -650,7 +808,6 @@ class PhysicalOpeningAuthority:
                 right_source_observation=right,
                 missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
             )
-
         return PhysicalOpeningIdentityResult(
             status=EvidenceResolutionStatus.ABSTAINED,
             physical_opening_identity=PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
@@ -682,6 +839,8 @@ __all__ = [
     "SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE",
     "STRUCTURAL_OPENING_CANDIDATE",
     "STRUCTURAL_OPENING_EXISTENCE_RESOLVED",
+    "VISIBLE_SOURCE_AUTHORITY_REQUIRED",
+    "VISIBLE_WALL_CONTINUATION_REQUIRED",
     "WALL_FACE_INTERRUPTION_KIND",
     "WEAK_PHYSICAL_OPENING_CANDIDATE_KINDS",
 ]
