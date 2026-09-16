@@ -62,6 +62,7 @@ def _placement_pdf(
     head_heading: str = "ROUGH-OPENING-HEAD-MM",
     sill_value: str = "900",
     head_value: str = "3000",
+    tag_text: str = "W1",
 ) -> bytes:
     doc = fitz.open()
     page = doc.new_page(width=760, height=650)
@@ -74,10 +75,10 @@ def _placement_pdf(
         y0=100.0,
         y1=110.0,
     )
-    page.insert_text(fitz.Point(112.0, 106.0), "W1")
+    page.insert_text(fitz.Point(112.0, 106.0), tag_text)
     xs = (50.0, 150.0, 250.0, 350.0, 520.0)
     header = ("MARK", "WIDTH", "HEIGHT", sill_heading, head_heading)
-    row = ("W1", "900", "2100", sill_value, head_value)
+    row = (tag_text, "900", "2100", sill_value, head_value)
     for text, x in zip(header, xs):
         page.insert_text(fitz.Point(x, 500.0), text)
     for text, x in zip(row, xs):
@@ -319,3 +320,57 @@ def test_caller_cannot_invent_row_observation_identity() -> None:
     result = producer.publish_scope(selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.evidence is None
+
+
+@EXPECTED_RED
+def test_door_type_does_not_imply_sill_zero() -> None:
+    """Door label must not stand in for missing sill evidence -- the same
+    'height only' abstention required for windows must hold for a door
+    mark too, not just for the window fixture used throughout the rest of
+    this file."""
+    mod = _module()
+    payload = _placement_pdf(
+        tag_text="D1",
+        sill_heading="NOTE",
+        head_heading="NOTE2",
+        sill_value="",
+        head_value="",
+    )
+    *_prefix, row_result = _publish_row(mod, payload)
+    assert row_result.status is EvidenceResolutionStatus.ABSTAINED
+    assert row_result.evidence is None
+
+
+@EXPECTED_RED
+def test_stale_source_lineage_cannot_reuse_valid_row_placement() -> None:
+    """A row selector's own document/revision/sha/snapshot lineage must be
+    re-verified, not merely its schedule_row_observation_ids -- pointing
+    the same real row ids at a foreign/fabricated source identity must
+    abstain rather than resolve against whichever real evidence happens
+    to share that snapshot_id."""
+    mod = _module()
+    src, _binder, binding = _binding_fixture()
+    record = binding.record
+    assert record is not None
+    producer = mod.ScheduleRowVerticalPlacementProducer.from_source_visibility_producer(src)
+    valid_selector = mod.ScheduleRowVerticalPlacementSelector(
+        document_id=record.document_id,
+        revision_id=record.revision_id,
+        source_sha256=record.source_sha256,
+        snapshot_id=record.snapshot_id,
+        schedule_page_id=record.schedule_page_id,
+        schedule_row_observation_ids=record.schedule_row_observation_ids,
+    )
+    valid = producer.publish_scope(valid_selector)
+    assert valid.status is EvidenceResolutionStatus.CORROBORATED
+
+    for field_name, tampered_value in (
+        ("document_id", "not-the-real-document"),
+        ("revision_id", "not-the-real-revision"),
+        ("source_sha256", "0" * 64),
+        ("snapshot_id", "not-the-real-snapshot"),
+    ):
+        tampered = dataclasses.replace(valid_selector, **{field_name: tampered_value})
+        blocked = producer.publish_scope(tampered)
+        assert blocked.status is EvidenceResolutionStatus.ABSTAINED, field_name
+        assert blocked.evidence is None, field_name
