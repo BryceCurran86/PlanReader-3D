@@ -7,9 +7,9 @@ from tools.validator_replay_harness import LaneType, ReplayConfig, run_replay
 BASE_SHA = "76c7882b1c4b28764d1e6a6f467d72bb276c2e01"
 PRODUCTION_SHA = BASE_SHA
 VALIDATOR_REF = "gpt2/physical-wall-equivalence-host-prerequisite-v1"
-VALIDATOR_COMMIT = "880d4ed0fc59807ad79707ef08250812d13db128"
+VALIDATOR_COMMIT = "bc51dfdf41a8af71c60c78070082c68c705596db"
 VALIDATOR_PATH = "tests/test_physical_wall_equivalence_host_prerequisite_v1.py"
-VALIDATOR_BLOB = "517b20e95b7129a913137fdcc1b9c69354f63182"
+VALIDATOR_BLOB = "e092acbf3c114d5dcfe54c8035e91780c8b0ccee"
 
 
 def test_item_4b_baseline_is_genuine_expected_red() -> None:
