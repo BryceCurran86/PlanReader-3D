@@ -11,24 +11,28 @@ Authority is fail-closed:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping, Optional, Sequence
+from typing import Any
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_opening_schedule_v171 import ScheduleEntry, detect_header, parse_schedule_rows
 from pb_opening_tag_normalization import normalize_opening_tag
-from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
+from pb_physical_opening_authority import (
+    PHYSICAL_OPENING_EXISTS,
+    PhysicalOpeningAuthority,
+)
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
 from pb_source_visibility_authority import SourceVisibilityProducer
-
 
 SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION = "2.1.0"
 
 BINDING_RESOLVED = "schedule_opening_instance_binding_resolved"
 BINDING_OPENING_UNRESOLVED = "schedule_opening_instance_binding_opening_unresolved"
 BINDING_SOURCE_SCOPE_UNAVAILABLE = "schedule_opening_instance_binding_source_scope_unavailable"
+BINDING_PARTIAL_SOURCE_COVERAGE = "schedule_opening_instance_binding_partial_source_coverage"
 BINDING_GEOMETRY_UNAVAILABLE = "schedule_opening_instance_binding_geometry_unavailable"
 BINDING_NO_CONTAINED_TAG = "schedule_opening_instance_binding_no_contained_tag"
 BINDING_AMBIGUOUS_TAGS = "schedule_opening_instance_binding_ambiguous_tags"
@@ -60,14 +64,13 @@ class ScheduleOpeningInstanceBindingSelector:
     revision_id: str
     source_sha256: str
     snapshot_id: str
-    page_id: str
     decision_scope_id: str
     opening_record_id: str
 
     def __post_init__(self) -> None:
         for name in (
             "document_id", "revision_id", "source_sha256", "snapshot_id",
-            "page_id", "decision_scope_id", "opening_record_id",
+            "decision_scope_id", "opening_record_id",
         ):
             _require_nonempty(getattr(self, name), name)
 
@@ -87,8 +90,8 @@ class ScheduleOpeningInstanceBindingRecord:
     schedule_page_id: str
     schedule_row_observation_ids: tuple[str, ...]
     schedule_row_type_mark: str
-    schedule_row_width_mm: Optional[int]
-    schedule_row_height_mm: Optional[int]
+    schedule_row_width_mm: int | None
+    schedule_row_height_mm: int | None
     schema_version: str = SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION
 
 
@@ -96,7 +99,7 @@ class ScheduleOpeningInstanceBindingRecord:
 class ScheduleOpeningInstanceBindingResult:
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
-    record: Optional[ScheduleOpeningInstanceBindingRecord] = None
+    record: ScheduleOpeningInstanceBindingRecord | None = None
     schema_version: str = SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION
 
 
@@ -145,7 +148,7 @@ def _blocked(
     )
 
 
-def _bbox_of_points(points: Sequence[Point]) -> Optional[BBox]:
+def _bbox_of_points(points: Sequence[Point]) -> BBox | None:
     if not points:
         return None
     xs = [point[0] for point in points]
@@ -160,7 +163,7 @@ def _geometry_points(geometry: Sequence[float]) -> tuple[Point, ...]:
     return tuple((coords[index], coords[index + 1]) for index in range(0, len(coords), 2))
 
 
-def _line(record: SourceObservationRecord) -> Optional[Line]:
+def _line(record: SourceObservationRecord) -> Line | None:
     if len(record.geometry) != 4:
         return None
     try:
@@ -178,7 +181,7 @@ def _endpoints(line: Sequence[float]) -> tuple[Point, Point]:
     return ((float(line[0]), float(line[1])), (float(line[2]), float(line[3])))
 
 
-def _canonical_unit(line: Sequence[float]) -> Optional[Point]:
+def _canonical_unit(line: Sequence[float]) -> Point | None:
     dx = float(line[2]) - float(line[0])
     dy = float(line[3]) - float(line[1])
     length = math.hypot(dx, dy)
@@ -222,7 +225,7 @@ def _scalar_interval(line: Sequence[float], axis: Point) -> tuple[float, float]:
     return (min(values), max(values))
 
 
-def _point_at_scalar(line: Sequence[float], axis: Point, target: float) -> Optional[Point]:
+def _point_at_scalar(line: Sequence[float], axis: Point, target: float) -> Point | None:
     for point in _endpoints(line):
         if abs(_dot(point, axis) - target) <= _COORD_TOL:
             return point
@@ -273,7 +276,7 @@ def _face_breaks(lines: Sequence[Line]) -> tuple[_FaceBreak, ...]:
     return tuple(found)
 
 
-def _opening_aperture(records: Sequence[SourceObservationRecord]) -> Optional[_OpeningAperture]:
+def _opening_aperture(records: Sequence[SourceObservationRecord]) -> _OpeningAperture | None:
     """Derive the actual jamb-bounded G17 opening aperture.
 
     The six G17 support segments include long wall continuations. Their overall
@@ -370,10 +373,10 @@ def _aperture_contains_bbox(aperture: _OpeningAperture, bbox: BBox) -> bool:
     corners = ((x0, y0), (x0, y1), (x1, y0), (x1, y1))
     along_vals = [_dot(c, aperture.axis) for c in corners]
     normal_vals = [_dot(c, aperture.normal) for c in corners]
-    bbox_along_min, bbox_along_max = min(along_vals), max(along_vals)
+    bbox_along_min = min(along_vals)
     bbox_normal_min, bbox_normal_max = min(normal_vals), max(normal_vals)
     along_overlap = (
-        bbox_along_max >= aperture.along_min - _COORD_TOL
+        bbox_along_min >= aperture.along_min - _COORD_TOL
         and bbox_along_min <= aperture.along_max + _COORD_TOL
     )
     normal_overlap = (
@@ -387,7 +390,7 @@ def _row_groups_for_page(
     words: Sequence[tuple[str, str, Sequence[float]]],
     *,
     tol: float = _ROW_Y_TOLERANCE,
-) -> list[tuple[dict[str, str], tuple[str, ...]]]:
+) -> list[tuple[dict[str, Any], tuple[str, ...]]]:
     usable: list[tuple[float, float, float, float, str, str]] = []
     for observation_id, text, geometry in words:
         bbox = _bbox_of_points(_geometry_points(geometry))
@@ -418,12 +421,15 @@ def _row_groups_for_page(
                 (row[1] + row[3]) / 2.0 for row in rows[best_index]
             ) / len(rows[best_index])
 
-    result: list[tuple[dict[str, str], tuple[str, ...]]] = []
+    result: list[tuple[dict[str, Any], tuple[str, ...]]] = []
     for row in rows:
         row.sort(key=lambda item: item[0])
         result.append(
             (
-                {"text": "\t".join(item[4] for item in row)},
+                {
+                    "text": "\t".join(item[4] for item in row),
+                    "bounds": [(item[0], item[2]) for item in row],
+                },
                 tuple(item[5] for item in row),
             )
         )
@@ -436,14 +442,21 @@ def _is_header_row(cells: Sequence[str]) -> bool:
 
 
 def _schedule_entries_for_page(
-    page_rows: Sequence[tuple[dict[str, str], tuple[str, ...]]],
+    page_rows: Sequence[tuple[dict[str, Any], tuple[str, ...]]],
     page_no: int,
 ) -> list[tuple[ScheduleEntry, tuple[str, ...]]]:
     header_index = -1
+    header_min_x = -math.inf
+    header_max_x = math.inf
+    
     for index, (row, _ids) in enumerate(page_rows):
         cells = [cell.strip() for cell in row["text"].split("\t")]
         if _is_header_row(cells):
             header_index = index
+            bounds = row.get("bounds", [])
+            if bounds:
+                header_min_x = bounds[0][0] - 100.0
+                header_max_x = bounds[-1][1] + 100.0
             break
 
     result: list[tuple[ScheduleEntry, tuple[str, ...]]] = []
@@ -455,6 +468,9 @@ def _schedule_entries_for_page(
 
     header_row = page_rows[header_index][0]
     for row, ids in page_rows[header_index + 1 :]:
+        bounds = row.get("bounds", [])
+        if bounds and (bounds[-1][1] < header_min_x or bounds[0][0] > header_max_x):
+            continue
         for entry in parse_schedule_rows([header_row, row], page_no=page_no):
             result.append((entry, ids))
     return result
@@ -516,7 +532,7 @@ class ScheduleOpeningInstanceBindingProducer:
     def from_source_visibility_producer(
         cls,
         source_visibility_producer: SourceVisibilityProducer,
-    ) -> "ScheduleOpeningInstanceBindingProducer":
+    ) -> ScheduleOpeningInstanceBindingProducer:
         return cls(source_visibility_producer, _seal=_BINDING_PRODUCER_SEAL)
 
     def publish_scope(
@@ -579,6 +595,15 @@ class ScheduleOpeningInstanceBindingProducer:
                 _blocked(
                     EvidenceResolutionStatus.ABSTAINED,
                     BINDING_SOURCE_SCOPE_UNAVAILABLE,
+                ),
+            )
+
+        if published.coverage.state != "complete" or published.coverage.failed_pages:
+            return self._store(
+                key,
+                _blocked(
+                    EvidenceResolutionStatus.ABSTAINED,
+                    BINDING_PARTIAL_SOURCE_COVERAGE,
                 ),
             )
 
@@ -772,15 +797,16 @@ class ScheduleOpeningInstanceBindingProducer:
 
 
 __all__ = [
-    "SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION",
-    "BINDING_RESOLVED",
-    "BINDING_OPENING_UNRESOLVED",
-    "BINDING_SOURCE_SCOPE_UNAVAILABLE",
+    "BINDING_AMBIGUOUS_ROWS",
+    "BINDING_AMBIGUOUS_TAGS",
     "BINDING_GEOMETRY_UNAVAILABLE",
     "BINDING_NO_CONTAINED_TAG",
-    "BINDING_AMBIGUOUS_TAGS",
     "BINDING_NO_MATCHING_ROW",
-    "BINDING_AMBIGUOUS_ROWS",
+    "BINDING_OPENING_UNRESOLVED",
+    "BINDING_PARTIAL_SOURCE_COVERAGE",
+    "BINDING_RESOLVED",
+    "BINDING_SOURCE_SCOPE_UNAVAILABLE",
+    "SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION",
     "ScheduleOpeningInstanceBindingAuthority",
     "ScheduleOpeningInstanceBindingProducer",
     "ScheduleOpeningInstanceBindingRecord",
