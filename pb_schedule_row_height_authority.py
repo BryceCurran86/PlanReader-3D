@@ -8,6 +8,7 @@ rough/structural-opening HEIGHT measurement with source-backed unit semantics.
 from __future__ import annotations
 
 import dataclasses
+import math
 import re
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
@@ -36,6 +37,7 @@ HEIGHT_UNITS_CONFLICT = "opening_height_ambiguous_units"
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
 _Key = tuple[str, str, str, str, str, tuple[str, ...]]
+_LogicalCell = tuple[str, float, float]
 
 _MM_RE = re.compile(r"(?:\bmm\b|millimet(?:er|re)s?)", re.IGNORECASE)
 _M_RE = re.compile(r"(?:\bmet(?:er|re)s?\b|(?<![A-Za-z])m\b)", re.IGNORECASE)
@@ -53,6 +55,8 @@ _PAIR_HEIGHT_RE = re.compile(
 )
 _MIN_PLAUSIBLE_HEIGHT_MM = 200.0
 _MAX_PLAUSIBLE_HEIGHT_MM = 6000.0
+_HEADER_WORD_JOIN_GAP = 16.0
+_COLUMN_COORD_TOL = 1e-6
 
 
 def _require_nonempty(value: object, field_name: str) -> str:
@@ -69,6 +73,94 @@ def _unit_tokens(text: str) -> frozenset[str]:
     if _M_RE.search(text or ""):
         units.add("m")
     return frozenset(units)
+
+
+def _row_words(row: Mapping[str, object]) -> tuple[tuple[str, float, float], ...]:
+    """Return trusted row words with their horizontal source geometry.
+
+    ``_row_groups_for_page`` intentionally preserves PDF word observations.
+    A visually single schedule cell such as ``RO SIZE-M`` can therefore be two
+    words.  Semantic authority must reconstruct columns from those authenticated
+    word positions rather than treating each word as an independent cell.
+    """
+    tokens = [token.strip() for token in str(row.get("text", "")).split("\t")]
+    bounds = row.get("bounds", ())
+    if not isinstance(bounds, Sequence) or isinstance(bounds, (str, bytes)):
+        return ()
+    if len(tokens) != len(bounds):
+        return ()
+
+    result: list[tuple[str, float, float]] = []
+    previous_left = -math.inf
+    for token, raw_bound in zip(tokens, bounds):
+        if not token:
+            return ()
+        if not isinstance(raw_bound, Sequence) or isinstance(raw_bound, (str, bytes)) or len(raw_bound) != 2:
+            return ()
+        try:
+            left, right = float(raw_bound[0]), float(raw_bound[1])
+        except (TypeError, ValueError):
+            return ()
+        if not math.isfinite(left) or not math.isfinite(right) or right < left:
+            return ()
+        if left + _COLUMN_COORD_TOL < previous_left:
+            return ()
+        result.append((token, left, right))
+        previous_left = left
+    return tuple(result)
+
+
+def _logical_header_cells(row: Mapping[str, object]) -> tuple[_LogicalCell, ...]:
+    """Cluster adjacent source words into logical schedule-header cells."""
+    words = _row_words(row)
+    if not words:
+        return ()
+
+    cells: list[_LogicalCell] = []
+    current_text, current_left, current_right = words[0]
+    for token, left, right in words[1:]:
+        gap = left - current_right
+        if gap <= _HEADER_WORD_JOIN_GAP:
+            current_text = f"{current_text} {token}"
+            current_right = max(current_right, right)
+            continue
+        cells.append((current_text, current_left, current_right))
+        current_text, current_left, current_right = token, left, right
+    cells.append((current_text, current_left, current_right))
+    return tuple(cells)
+
+
+def _logical_column_text(
+    row: Mapping[str, object],
+    header_cells: Sequence[_LogicalCell],
+    column_index: int,
+) -> str:
+    """Reconstruct one row cell beneath a logical authenticated header cell."""
+    words = _row_words(row)
+    if not words or not header_cells or column_index < 0 or column_index >= len(header_cells):
+        return ""
+
+    current = header_cells[column_index]
+    if column_index == 0:
+        left_boundary = -math.inf
+    else:
+        previous = header_cells[column_index - 1]
+        left_boundary = (previous[2] + current[1]) / 2.0
+    if column_index == len(header_cells) - 1:
+        right_boundary = math.inf
+    else:
+        following = header_cells[column_index + 1]
+        right_boundary = (current[2] + following[1]) / 2.0
+
+    selected: list[str] = []
+    for token, left, right in words:
+        center = (left + right) / 2.0
+        if center + _COLUMN_COORD_TOL < left_boundary:
+            continue
+        if center - _COLUMN_COORD_TOL > right_boundary:
+            continue
+        selected.append(token)
+    return " ".join(selected).strip()
 
 
 def _semantic_height_mm(cell_text: str, parse_source: str, source_units: str) -> float | None:
@@ -239,14 +331,18 @@ class ScheduleRowHeightProducer:
 
         header_index = -1
         header_mapping: dict[str, object] = {}
+        logical_header_cells: tuple[_LogicalCell, ...] = ()
         for index, (row, _ids) in enumerate(page_rows):
-            cells = [cell.strip() for cell in str(row.get("text", "")).split("\t")]
-            mapping = detect_header(cells)
+            logical_cells = _logical_header_cells(row)
+            if not logical_cells:
+                continue
+            mapping = detect_header([cell[0] for cell in logical_cells])
             if "mark" in mapping or "dims" in mapping:
                 header_index = index
                 header_mapping = mapping
+                logical_header_cells = logical_cells
                 break
-        if header_index < 0:
+        if header_index < 0 or not logical_header_cells:
             return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_ROW_UNAVAILABLE))
 
         target_ids = tuple(sorted(selector.schedule_row_observation_ids))
@@ -260,7 +356,6 @@ class ScheduleRowHeightProducer:
         if len(matches) != 1:
             return self._store(key, _blocked(EvidenceResolutionStatus.CONFLICT, HEIGHT_ROW_AMBIGUOUS))
 
-        entry, _entry_ids = matches[0]
         target_row: dict[str, object] | None = None
         for row, ids in page_rows[header_index + 1 :]:
             if tuple(sorted(ids)) == target_ids:
@@ -269,45 +364,43 @@ class ScheduleRowHeightProducer:
         if target_row is None:
             return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_ROW_UNAVAILABLE))
 
-        if entry.parse_source not in {"header_separate", "header_dims"}:
-            return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_BASIS_UNPROVEN))
+        height_column = header_mapping.get("height")
+        dims_column = header_mapping.get("dims")
+        if isinstance(height_column, int):
+            parse_source = "header_separate"
+            column_index = height_column
+        elif isinstance(dims_column, int):
+            parse_source = "header_dims"
+            column_index = dims_column
+        else:
+            return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_FIELD_UNAVAILABLE))
+        if column_index < 0 or column_index >= len(logical_header_cells):
+            return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_FIELD_UNAVAILABLE))
 
         header_row, header_ids = page_rows[header_index]
-        header_cells = [cell.strip() for cell in str(header_row.get("text", "")).split("\t")]
-        target_cells = [cell.strip() for cell in str(target_row.get("text", "")).split("\t")]
-        if entry.parse_source == "header_separate":
-            column_index = header_mapping.get("height")
-        else:
-            column_index = header_mapping.get("dims")
-        if not isinstance(column_index, int):
-            return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_FIELD_UNAVAILABLE))
-        if column_index >= len(header_cells) or column_index >= len(target_cells):
+        header_cell_text = logical_header_cells[column_index][0]
+        target_cell_text = _logical_column_text(target_row, logical_header_cells, column_index)
+        if not target_cell_text:
             return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_FIELD_UNAVAILABLE))
 
         # Re-prove the physical measurement basis from the exact producer-owned
         # source header that governs this height. The legacy schedule parser's
-        # convenience fields are intentionally not authoritative here: a valid
-        # explicit metre cell may be outside what that parser can normalize,
-        # while the trusted heading still explicitly states rough-opening basis.
-        dimension_basis, basis_source = _infer_column_basis(header_cells[column_index])
+        # convenience fields are intentionally not authoritative here.
+        dimension_basis, basis_source = _infer_column_basis(header_cell_text)
         if dimension_basis != "rough_opening" or not basis_source:
             return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_BASIS_UNPROVEN))
 
-        unit_tokens = set(_unit_tokens(header_cells[column_index]))
-        unit_tokens.update(_unit_tokens(target_cells[column_index]))
+        unit_tokens = set(_unit_tokens(header_cell_text))
+        unit_tokens.update(_unit_tokens(target_cell_text))
         if not unit_tokens:
             return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, HEIGHT_UNITS_UNPROVEN))
         if len(unit_tokens) != 1:
             return self._store(key, _blocked(EvidenceResolutionStatus.CONFLICT, HEIGHT_UNITS_CONFLICT))
         source_units = next(iter(unit_tokens))
 
-        height_mm = _semantic_height_mm(
-            target_cells[column_index],
-            entry.parse_source,
-            source_units,
-        )
+        height_mm = _semantic_height_mm(target_cell_text, parse_source, source_units)
         if height_mm is None:
-            reason = HEIGHT_FIELD_UNAVAILABLE if not re.search(r"\d", target_cells[column_index]) else HEIGHT_UNITS_UNPROVEN
+            reason = HEIGHT_FIELD_UNAVAILABLE if not re.search(r"\d", target_cell_text) else HEIGHT_UNITS_UNPROVEN
             return self._store(key, _blocked(EvidenceResolutionStatus.ABSTAINED, reason))
 
         evidence = ScheduleRowHeightEvidence(
