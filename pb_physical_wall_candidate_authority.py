@@ -4,6 +4,15 @@ This module proves one narrow proposition only: the physical wall candidates
 produced by the existing W2/W3/W4 wall pipeline for a complete exact
 producer-owned visible PDF page scope.
 
+Physical equivalence is also producer-owned here. The generic wall-identity
+classifier stays fail-closed for independent provenance; this producer may
+strengthen otherwise-AMBIGUOUS pair relations only when the already-reviewed
+G17 source authority independently re-proves a jamb-bounded two-face opening
+from the exact same immutable visible source snapshot and the six proven source
+primitives map bijectively back to six W4 wall candidates. No caller-supplied
+wall list, equivalence flag, completeness flag, confidence, nearest/first rule,
+or geometry body can enter that proof path.
+
 It does NOT prove opening host binding, wall role, wall height, wall thickness,
 opening deductions, net wall area, FIRM/commercial publication or JobHub data.
 Ordinary callers can address a scope only by lineage; they cannot supply walls,
@@ -13,13 +22,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import math
 from types import MappingProxyType
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Sequence
 
 import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
 from pb_physical_wall_identity import (
+    PhysicalEquivalenceClass,
     PhysicalWallEquivalenceResolution,
     PhysicalWallIdentity,
     collect_physical_wall_identities,
@@ -37,7 +49,7 @@ from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
 from pb_wall_room_topology_wall_assembly import assemble_wall_topology
 
 
-PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION = "1.0.0"
+PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION = "1.1.0"
 PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED = "physical_wall_candidate_scope_resolved"
 PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE = "physical_wall_candidate_scope_unavailable"
 PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE = (
@@ -49,6 +61,10 @@ PHYSICAL_WALL_CANDIDATE_IDENTITY_UNRESOLVED = (
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
+_COORD_TOL = 1e-6
+_PARALLEL_REL_TOL = 1e-9
+Point = tuple[float, float]
+Line = tuple[float, float, float, float]
 
 
 @dataclass(frozen=True)
@@ -97,6 +113,17 @@ class _ScopeKey:
     snapshot_id: str
     page_id: str
     decision_scope_id: str
+
+
+@dataclass(frozen=True)
+class _TrustedFaceBreak:
+    first_raw_id: str
+    second_raw_id: str
+    gap_start: float
+    gap_end: float
+    start_point: Point
+    end_point: Point
+    direction: Point
 
 
 def _decision_scope_id(page_id: str) -> str:
@@ -189,8 +216,6 @@ def _source_page_segments(
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
         expected = visible_by_raw_id.get(raw_id)
         if expected is None:
-            # Exact source says this primitive is visible but the producer-owned
-            # visible inventory omitted it: completeness cannot be claimed.
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
         observation_id, observation_geometry = expected
         geometry = (
@@ -212,6 +237,430 @@ def _source_page_segments(
         raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
 
     return segments, tuple(sorted(page_visible_ids))
+
+
+def _line(values: Sequence[float]) -> Optional[Line]:
+    if len(values) != 4:
+        return None
+    try:
+        line = tuple(float(value) for value in values)
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) for value in line):
+        return None
+    if math.hypot(line[2] - line[0], line[3] - line[1]) <= _COORD_TOL:
+        return None
+    return line  # type: ignore[return-value]
+
+
+def _canonical_direction(line: Line) -> Point:
+    dx, dy = line[2] - line[0], line[3] - line[1]
+    length = math.hypot(dx, dy)
+    ux, uy = dx / length, dy / length
+    if ux < -_COORD_TOL or (abs(ux) <= _COORD_TOL and uy < 0.0):
+        ux, uy = -ux, -uy
+    return (ux, uy)
+
+
+def _projection(point: Point, direction: Point) -> float:
+    return point[0] * direction[0] + point[1] * direction[1]
+
+
+def _cross(left: Point, right: Point) -> float:
+    return left[0] * right[1] - left[1] * right[0]
+
+
+def _parallel(left: Line, right: Line) -> bool:
+    ldx, ldy = left[2] - left[0], left[3] - left[1]
+    rdx, rdy = right[2] - right[0], right[3] - right[1]
+    llen = math.hypot(ldx, ldy)
+    rlen = math.hypot(rdx, rdy)
+    return abs(ldx * rdy - ldy * rdx) <= _PARALLEL_REL_TOL * llen * rlen
+
+
+def _collinear(left: Line, right: Line) -> bool:
+    if not _parallel(left, right):
+        return False
+    direction = _canonical_direction(left)
+    return abs(
+        _cross(direction, (right[0] - left[0], right[1] - left[1]))
+    ) <= _COORD_TOL
+
+
+def _endpoint_at_projection(line: Line, direction: Point, target: float) -> Optional[Point]:
+    for point in ((line[0], line[1]), (line[2], line[3])):
+        if abs(_projection(point, direction) - target) <= _COORD_TOL:
+            return point
+    return None
+
+
+def _trusted_face_break(
+    first_raw_id: str,
+    first_line: Line,
+    second_raw_id: str,
+    second_line: Line,
+) -> Optional[_TrustedFaceBreak]:
+    if not _collinear(first_line, second_line):
+        return None
+    direction = _canonical_direction(first_line)
+    first_values = sorted(
+        (_projection((first_line[0], first_line[1]), direction),
+         _projection((first_line[2], first_line[3]), direction))
+    )
+    second_values = sorted(
+        (_projection((second_line[0], second_line[1]), direction),
+         _projection((second_line[2], second_line[3]), direction))
+    )
+    if first_values[0] <= second_values[0]:
+        left_id, left_line, left_values = first_raw_id, first_line, first_values
+        right_id, right_line, right_values = second_raw_id, second_line, second_values
+    else:
+        left_id, left_line, left_values = second_raw_id, second_line, second_values
+        right_id, right_line, right_values = first_raw_id, first_line, first_values
+    gap_start, gap_end = left_values[1], right_values[0]
+    if gap_end - gap_start <= _COORD_TOL:
+        return None
+    start_point = _endpoint_at_projection(left_line, direction, gap_start)
+    end_point = _endpoint_at_projection(right_line, direction, gap_end)
+    if start_point is None or end_point is None:
+        return None
+    return _TrustedFaceBreak(
+        first_raw_id=left_id,
+        second_raw_id=right_id,
+        gap_start=gap_start,
+        gap_end=gap_end,
+        start_point=start_point,
+        end_point=end_point,
+        direction=direction,
+    )
+
+
+def _same_gap(left: _TrustedFaceBreak, right: _TrustedFaceBreak) -> bool:
+    if abs(left.gap_start - right.gap_start) > _COORD_TOL:
+        return False
+    if abs(left.gap_end - right.gap_end) > _COORD_TOL:
+        return False
+    dot = left.direction[0] * right.direction[0] + left.direction[1] * right.direction[1]
+    return abs(abs(dot) - 1.0) <= _PARALLEL_REL_TOL
+
+
+def _distinct_parallel_axes(left: _TrustedFaceBreak, right: _TrustedFaceBreak) -> bool:
+    delta = (
+        right.start_point[0] - left.start_point[0],
+        right.start_point[1] - left.start_point[1],
+    )
+    return abs(_cross(left.direction, delta)) > _COORD_TOL
+
+
+def _segment_matches(line: Line, first: Point, second: Point) -> bool:
+    start = (line[0], line[1])
+    end = (line[2], line[3])
+    direct = (
+        abs(start[0] - first[0]) <= _COORD_TOL
+        and abs(start[1] - first[1]) <= _COORD_TOL
+        and abs(end[0] - second[0]) <= _COORD_TOL
+        and abs(end[1] - second[1]) <= _COORD_TOL
+    )
+    reverse = (
+        abs(start[0] - second[0]) <= _COORD_TOL
+        and abs(start[1] - second[1]) <= _COORD_TOL
+        and abs(end[0] - first[0]) <= _COORD_TOL
+        and abs(end[1] - first[1]) <= _COORD_TOL
+    )
+    return direct or reverse
+
+
+def _opening_raw_relation_sets(
+    raw_lines: Mapping[str, Line],
+) -> dict[tuple[str, str], set[PhysicalEquivalenceClass]]:
+    """Derive relations only for a complete six-primitive G17 opening pattern."""
+    if len(raw_lines) != 6:
+        return {}
+    items = sorted(raw_lines.items())
+    breaks: list[_TrustedFaceBreak] = []
+    for index, (left_id, left_line) in enumerate(items):
+        for right_id, right_line in items[index + 1 :]:
+            candidate = _trusted_face_break(left_id, left_line, right_id, right_line)
+            if candidate is not None:
+                breaks.append(candidate)
+
+    relation_sets: dict[tuple[str, str], set[PhysicalEquivalenceClass]] = {}
+    all_ids = set(raw_lines)
+    for index, first in enumerate(breaks):
+        for second in breaks[index + 1 :]:
+            if not _same_gap(first, second) or not _distinct_parallel_axes(first, second):
+                continue
+            face_ids = {
+                first.first_raw_id,
+                first.second_raw_id,
+                second.first_raw_id,
+                second.second_raw_id,
+            }
+            if len(face_ids) != 4:
+                continue
+            remaining = sorted(all_ids - face_ids)
+            if len(remaining) != 2:
+                continue
+            start_matches = [
+                raw_id
+                for raw_id in remaining
+                if _segment_matches(
+                    raw_lines[raw_id], first.start_point, second.start_point
+                )
+            ]
+            end_matches = [
+                raw_id
+                for raw_id in remaining
+                if _segment_matches(
+                    raw_lines[raw_id], first.end_point, second.end_point
+                )
+            ]
+            if len(start_matches) != 1 or len(end_matches) != 1:
+                continue
+            if start_matches[0] == end_matches[0]:
+                continue
+
+            same_pairs = {
+                tuple(sorted((first.first_raw_id, second.first_raw_id))),
+                tuple(sorted((first.second_raw_id, second.second_raw_id))),
+            }
+            pattern_ids = sorted(face_ids | {start_matches[0], end_matches[0]})
+            if len(pattern_ids) != 6:
+                continue
+            for left_index, left_id in enumerate(pattern_ids):
+                for right_id in pattern_ids[left_index + 1 :]:
+                    pair = tuple(sorted((left_id, right_id)))
+                    classification = (
+                        PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+                        if pair in same_pairs
+                        else PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
+                    )
+                    relation_sets.setdefault(pair, set()).add(classification)
+    return relation_sets
+
+
+def _producer_opening_relation_overrides(
+    *,
+    source_producer: SourceVisibilityProducer,
+    published,
+    page_id: str,
+    records: Sequence[PhysicalWallCandidateRecord],
+) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
+    """Re-prove G17 source openings and map their exact primitives to W4 candidates."""
+    visibility = source_producer.authority()
+    opening_authority = PhysicalOpeningAuthority(visibility)
+    proven_records: dict[str, object] = {}
+
+    for observation_id in published.visible_observation_ids:
+        selector = ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=observation_id,
+        )
+        result = opening_authority.prove_existence(selector)
+        existence = result.existence_record
+        if (
+            result.status is EvidenceResolutionStatus.CORROBORATED
+            and result.proposition == PHYSICAL_OPENING_EXISTS
+            and existence is not None
+            and existence.page_id == page_id
+        ):
+            proven_records[existence.record_id] = existence
+
+    by_raw_id: dict[str, list[PhysicalWallCandidateRecord]] = {}
+    for record in records:
+        for raw_id in record.physical_identity.source_primitive_ids:
+            by_raw_id.setdefault(str(raw_id), []).append(record)
+
+    candidate_relation_sets: dict[
+        tuple[str, str], set[PhysicalEquivalenceClass]
+    ] = {}
+    prefix = "visible:segment:"
+
+    for existence in proven_records.values():
+        raw_lines: dict[str, Line] = {}
+        valid = True
+        for observation_id in existence.source_observation_ids:  # type: ignore[attr-defined]
+            resolved = visibility.resolve_visible(
+                ObservationSelector(
+                    document_id=existence.document_id,  # type: ignore[attr-defined]
+                    revision_id=existence.revision_id,  # type: ignore[attr-defined]
+                    source_sha256=existence.source_sha256,  # type: ignore[attr-defined]
+                    snapshot_id=existence.snapshot_id,  # type: ignore[attr-defined]
+                    observation_id=observation_id,
+                )
+            )
+            observation = resolved.observation
+            if (
+                resolved.status is not EvidenceResolutionStatus.CORROBORATED
+                or observation is None
+                or not observation.source_primitive_ref.startswith(prefix)
+            ):
+                valid = False
+                break
+            raw_id = observation.source_primitive_ref[len(prefix) :]
+            geometry = _line(observation.geometry)
+            if not raw_id or geometry is None or raw_id in raw_lines:
+                valid = False
+                break
+            raw_lines[raw_id] = geometry
+        if not valid or len(raw_lines) != 6:
+            continue
+
+        raw_relations = _opening_raw_relation_sets(raw_lines)
+        if not raw_relations:
+            continue
+
+        candidate_for_raw: dict[str, str] = {}
+        for raw_id in raw_lines:
+            matches = by_raw_id.get(raw_id, [])
+            if len(matches) != 1:
+                valid = False
+                break
+            candidate_for_raw[raw_id] = matches[0].wall_candidate_id
+        if not valid or len(set(candidate_for_raw.values())) != 6:
+            continue
+
+        for (left_raw, right_raw), classifications in raw_relations.items():
+            left_id = candidate_for_raw[left_raw]
+            right_id = candidate_for_raw[right_raw]
+            if left_id == right_id:
+                valid = False
+                break
+            pair = tuple(sorted((left_id, right_id)))
+            candidate_relation_sets.setdefault(pair, set()).update(classifications)
+        if not valid:
+            continue
+
+    return {
+        pair: next(iter(classifications))
+        for pair, classifications in candidate_relation_sets.items()
+        if len(classifications) == 1
+    }
+
+
+def _union_find_groups(
+    pairs: Sequence[tuple[str, str]], members: Sequence[str]
+) -> list[list[str]]:
+    parent = {member: member for member in members}
+
+    def find(item: str) -> str:
+        while parent[item] != item:
+            parent[item] = parent[parent[item]]
+            item = parent[item]
+        return item
+
+    def union(left: str, right: str) -> None:
+        root_left, root_right = find(left), find(right)
+        if root_left != root_right:
+            parent[root_right] = root_left
+
+    for left, right in pairs:
+        if left in parent and right in parent:
+            union(left, right)
+    groups: dict[str, list[str]] = {}
+    for member in members:
+        groups.setdefault(find(member), []).append(member)
+    return [sorted(group) for group in groups.values()]
+
+
+def _apply_trusted_relation_overrides(
+    identities: Sequence[PhysicalWallIdentity],
+    baseline: PhysicalWallEquivalenceResolution,
+    overrides: Mapping[tuple[str, str], PhysicalEquivalenceClass],
+) -> PhysicalWallEquivalenceResolution:
+    """Reconcile source-proven relations without changing generic classifier semantics."""
+    usable = [identity for identity in identities if identity.usable]
+    if len(usable) != len(identities) or not overrides:
+        return baseline
+
+    pair_map = {
+        tuple(sorted((left, right))): classification
+        for left, right, classification in baseline.pair_classifications
+    }
+    for pair, classification in overrides.items():
+        current = pair_map.get(tuple(sorted(pair)))
+        if current == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value:
+            pair_map[tuple(sorted(pair))] = classification.value
+
+    member_ids = [identity.wall_candidate_id for identity in usable]
+    same_links: list[tuple[str, str]] = []
+    ambiguous_links: list[tuple[str, str]] = []
+    for pair, classification in pair_map.items():
+        if classification == PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value:
+            same_links.append(pair)
+        elif classification == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value:
+            ambiguous_links.append(pair)
+
+    related_links = same_links + ambiguous_links
+    components = _union_find_groups(related_links, member_ids) if member_ids else []
+    ambiguous_edges = {frozenset(pair) for pair in ambiguous_links}
+    same_edges = {frozenset(pair) for pair in same_links}
+    blockers: dict[str, list[str]] = {}
+    ambiguous_walls: set[str] = set()
+    same_groups: list[tuple[str, ...]] = []
+    representatives: list[str] = []
+
+    for component in components:
+        has_ambiguous = any(
+            frozenset((left, right)) in ambiguous_edges
+            for index, left in enumerate(component)
+            for right in component[index + 1 :]
+        )
+        has_same = any(
+            frozenset((left, right)) in same_edges
+            for index, left in enumerate(component)
+            for right in component[index + 1 :]
+        )
+        if has_ambiguous:
+            ambiguous_walls.update(component)
+            for wall_id in component:
+                blockers.setdefault(wall_id, []).append(
+                    "ambiguous_physical_wall_equivalence"
+                )
+            continue
+        if has_same and len(component) > 1:
+            group = tuple(sorted(component))
+            same_groups.append(group)
+            representative = sorted(group)[0]
+            representatives.append(representative)
+            for wall_id in group:
+                if wall_id != representative:
+                    blockers.setdefault(wall_id, []).append(
+                        f"equivalent_physical_wall_represented_by:{representative}"
+                    )
+            continue
+        representatives.extend(
+            wall_id for wall_id in component if wall_id not in blockers
+        )
+
+    linked = {wall_id for component in components for wall_id in component}
+    for wall_id in member_ids:
+        if wall_id not in linked and wall_id not in blockers:
+            representatives.append(wall_id)
+
+    representatives = list(dict.fromkeys(representatives))
+    abstained = [wall_id for wall_id in member_ids if wall_id in blockers]
+    return PhysicalWallEquivalenceResolution(
+        scope_viewport_id=baseline.scope_viewport_id,
+        representative_wall_ids=tuple(representatives),
+        abstained_wall_ids=tuple(dict.fromkeys(abstained)),
+        equivalence_groups=tuple(same_groups),
+        ambiguous_wall_ids=tuple(sorted(ambiguous_walls)),
+        same_wall_ids=tuple(
+            sorted({wall_id for group in same_groups for wall_id in group})
+        ),
+        pair_classifications=tuple(
+            sorted((left, right, classification) for (left, right), classification in pair_map.items())
+        ),
+        blocking_reasons_by_wall_id={
+            wall_id: tuple(dict.fromkeys(reasons))
+            for wall_id, reasons in blockers.items()
+            if reasons
+        },
+    )
 
 
 def _build_scope_result(
@@ -278,9 +727,20 @@ def _build_scope_result(
         )
         ordered_identities.append(identity)
 
-    equivalence = resolve_physical_wall_equivalence(
+    baseline_equivalence = resolve_physical_wall_equivalence(
         tuple(ordered_identities),
         walls_by_id={wall.candidate_id: wall for wall in ordered_walls},
+    )
+    trusted_overrides = _producer_opening_relation_overrides(
+        source_producer=source_producer,
+        published=published,
+        page_id=page_id,
+        records=tuple(records),
+    )
+    equivalence = _apply_trusted_relation_overrides(
+        tuple(ordered_identities),
+        baseline_equivalence,
+        trusted_overrides,
     )
 
     return PhysicalWallCandidateScopeResult(
@@ -326,7 +786,6 @@ class PhysicalWallCandidateProducer:
             if source_visibility_producer._producer.current_revision_id(
                 published.revision.document_id
             ) != revision_id:
-                # Stale revisions never become current wall-candidate authority.
                 continue
             source_bytes = store.source_bytes_by_revision.get(revision_id)
             if source_bytes is None:
