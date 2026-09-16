@@ -19,6 +19,7 @@ import pytest
 from pb_geometry_takeoff_model import AuthorityStatus, ScaleCalibration
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_page_scale_calibration_authority import (
+    POINTS_PER_METRE_AT_1_1,
     ScaleCalibrationStatus,
     ScaleSourceType,
     measurement_authority_for_page_scale,
@@ -52,7 +53,7 @@ _FORBIDDEN_PUBLIC = {
 def _graphic_scale_pdf(
     bars: tuple[tuple[float, str], ...] = ((100.0, "1m"),),
     *,
-    include_ratio_text: bool = False,
+    ratio_text: str | None = None,
 ) -> bytes:
     """Real native PDF vectors + native text, not mocked scale evidence."""
     doc = fitz.open()
@@ -70,8 +71,8 @@ def _graphic_scale_pdf(
             shape.commit()
             page.insert_text(fitz.Point(x0 - 2.0, y + 24.0), "0")
             page.insert_text(fitz.Point(x1 - 4.0, y + 24.0), end_label)
-        if include_ratio_text:
-            page.insert_text(fitz.Point(300.0, 40.0), "SCALE 1:100")
+        if ratio_text:
+            page.insert_text(fitz.Point(300.0, 40.0), ratio_text)
         return bytes(doc.tobytes(garbage=4, deflate=True))
     finally:
         doc.close()
@@ -88,6 +89,16 @@ def _source_fixture(payload: bytes):
         source_locator="memory://physical-scale-validator.pdf",
     )
     return producer, published
+
+
+def _selector(mod, published):
+    return mod.PhysicalScaleSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id="1",
+    )
 
 
 def test_title_block_only_scale_remains_provisional_not_firm() -> None:
@@ -177,16 +188,11 @@ def test_future_scale_producer_does_not_accept_caller_calibration_or_ratio_truth
 
 @EXPECTED_RED
 def test_native_graphic_scale_bar_with_explicit_1m_label_may_publish_firm_mapping() -> None:
+    """A self-contained graphic bar is the narrow positive route; no ratio text is needed."""
     mod = importlib.import_module(MODULE_NAME)
-    src, published = _source_fixture(_graphic_scale_pdf(include_ratio_text=True))
+    src, published = _source_fixture(_graphic_scale_pdf())
     producer = mod.PhysicalScaleProducer.from_source_visibility_producer(src)
-    selector = mod.PhysicalScaleSelector(
-        document_id=published.revision.document_id,
-        revision_id=published.revision.revision_id,
-        source_sha256=published.revision.source_sha256,
-        snapshot_id=published.snapshot.snapshot_id,
-        page_id="1",
-    )
+    selector = _selector(mod, published)
     result = producer.publish_scope(selector)
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.evidence is not None
@@ -210,13 +216,7 @@ def test_text_ratio_without_native_graphic_bar_cannot_publish_physical_scale() -
         doc.close()
     src, published = _source_fixture(payload)
     producer = mod.PhysicalScaleProducer.from_source_visibility_producer(src)
-    selector = mod.PhysicalScaleSelector(
-        document_id=published.revision.document_id,
-        revision_id=published.revision.revision_id,
-        source_sha256=published.revision.source_sha256,
-        snapshot_id=published.snapshot.snapshot_id,
-        page_id="1",
-    )
+    selector = _selector(mod, published)
     result = producer.publish_scope(selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.evidence is None
@@ -229,16 +229,43 @@ def test_conflicting_native_graphic_bars_fail_closed() -> None:
         _graphic_scale_pdf(bars=((100.0, "1m"), (100.0, "500mm")))
     )
     producer = mod.PhysicalScaleProducer.from_source_visibility_producer(src)
-    selector = mod.PhysicalScaleSelector(
-        document_id=published.revision.document_id,
-        revision_id=published.revision.revision_id,
-        source_sha256=published.revision.source_sha256,
-        snapshot_id=published.snapshot.snapshot_id,
-        page_id="1",
-    )
+    selector = _selector(mod, published)
     result = producer.publish_scope(selector)
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert result.evidence is None
+
+
+@EXPECTED_RED
+def test_graphic_bar_conflicting_with_same_page_ratio_text_fails_closed() -> None:
+    """Adding contradictory explicit scale evidence must never preserve FIRM authority."""
+    mod = importlib.import_module(MODULE_NAME)
+    src, published = _source_fixture(
+        _graphic_scale_pdf(bars=((100.0, "1m"),), ratio_text="SCALE 1:100")
+    )
+    producer = mod.PhysicalScaleProducer.from_source_visibility_producer(src)
+    selector = _selector(mod, published)
+    result = producer.publish_scope(selector)
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.evidence is None
+
+
+@EXPECTED_RED
+def test_graphic_bar_agreeing_with_same_page_ratio_text_preserves_mapping() -> None:
+    """Corroborating ratio text may agree with, but cannot replace, source-native bar geometry."""
+    mod = importlib.import_module(MODULE_NAME)
+    span_pt = POINTS_PER_METRE_AT_1_1 / 100.0
+    src, published = _source_fixture(
+        _graphic_scale_pdf(bars=((span_pt, "1m"),), ratio_text="SCALE 1:100")
+    )
+    producer = mod.PhysicalScaleProducer.from_source_visibility_producer(src)
+    selector = _selector(mod, published)
+    result = producer.publish_scope(selector)
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.evidence is not None
+    assert abs(result.evidence.source_span_pt - span_pt) <= 1e-6
+    assert result.evidence.physical_span_mm == 1000.0
+    assert abs(result.evidence.points_per_mm - span_pt / 1000.0) <= 1e-9
+    assert abs(result.evidence.mm_per_point - 1000.0 / span_pt) <= 1e-9
 
 
 @EXPECTED_RED
