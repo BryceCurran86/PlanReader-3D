@@ -251,6 +251,19 @@ class SourceVisibilityProducer:
             _seal=_PDF_TEXT_AUTHORITY_SEAL,
         )
 
+    def opening_dimension_authority(self):
+        """Return the read-only dimension resolver bound to this producer."""
+        from pb_opening_dimension_authority import (
+            OpeningDimensionAuthority,
+            _OPENING_DIMENSION_AUTHORITY_SEAL,
+        )
+
+        return OpeningDimensionAuthority(
+            self.authority(),
+            self.text_integrity_authority(),
+            _seal=_OPENING_DIMENSION_AUTHORITY_SEAL,
+        )
+
     def ingest_native_pdf_bytes(
         self,
         *,
