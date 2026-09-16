@@ -1,6 +1,8 @@
 """Replay-only acceptance proof for frozen opening-height validator v1.
 
 DRAFT / REPLAY ONLY / DO NOT MERGE.
+The PR may temporarily target main only to execute repository CI; its pinned
+production SHA and validator blob remain the acceptance inputs below.
 """
 from pathlib import Path
 import subprocess
