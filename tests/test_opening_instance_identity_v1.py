@@ -197,17 +197,22 @@ def test_identical_geometry_across_different_source_revisions_does_not_self_merg
         source_bytes=_pdf_bytes(openings_by_page=((100.0,),), marker="revision-a"),
         source_locator="memory://identity-revision-a.pdf",
     )
+    first_physical = PhysicalOpeningAuthority(producer.authority())
+    first_groups, _ = _resolved_groups(first_physical, first)
+    assert len(first_groups) == 1
+    first_selector = next(iter(first_groups.values()))[0]
+
     second = producer.ingest_native_pdf_bytes(
         document_id="identity-revision-doc",
         source_bytes=_pdf_bytes(openings_by_page=((100.0,),), marker="revision-b"),
         source_locator="memory://identity-revision-b.pdf",
     )
     physical = PhysicalOpeningAuthority(producer.authority())
-    first_groups, _ = _resolved_groups(physical, first)
     second_groups, _ = _resolved_groups(physical, second)
+    assert len(second_groups) == 1
 
     result = physical.compare_identity(
-        next(iter(first_groups.values()))[0],
+        first_selector,
         next(iter(second_groups.values()))[0],
     )
 
