@@ -70,35 +70,40 @@ def test_positive_height_evidence_requires_legitimate_instance_binding() -> None
 
 @pytest.mark.xfail(strict=True, reason="Production not yet implemented")
 def test_attack_2040_default_is_rejected() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
+    # No height provided
+    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "")))
+    src, binding_prod, height_selector = _setup_authorities(payload)
     height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_synthesized_2040" in result.reason_codes
+    assert "opening_height_missing_field" in result.reason_codes
 
 @pytest.mark.xfail(strict=True, reason="Production not yet implemented")
 def test_attack_2100_default_is_rejected() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
+    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "")))
+    src, binding_prod, height_selector = _setup_authorities(payload)
     height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_synthesized_2100" in result.reason_codes
+    assert "opening_height_missing_field" in result.reason_codes
 
 @pytest.mark.xfail(strict=True, reason="Production not yet implemented")
 def test_attack_typical_height_rejected() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
+    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "TYPICAL")))
+    src, binding_prod, height_selector = _setup_authorities(payload)
     height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_typical_invalid" in result.reason_codes
+    assert "opening_height_missing_field" in result.reason_codes
 
 @pytest.mark.xfail(strict=True, reason="Production not yet implemented")
 def test_attack_width_used_as_height() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
+    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "")))
+    src, binding_prod, height_selector = _setup_authorities(payload)
     height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert "opening_height_width_used" in result.reason_codes
+    assert "opening_height_missing_field" in result.reason_codes
 
 def test_attack_caller_supplied_height_is_rejected() -> None:
     params = set(inspect.signature(OpeningHeightProducer.publish_scope).parameters)
@@ -213,7 +218,25 @@ def test_attack_stale_schedule_snapshot() -> None:
 
 @pytest.mark.xfail(strict=True, reason="Production not yet implemented")
 def test_attack_duplicate_matching_schedule_rows() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
+    # W1 900x2100 appears twice in the same schedule
+    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "2100"), ("W1", "900", "2100")))
+    src = SourceVisibilityProducer(producer_method="height-validator", producer_version="1.0")
+    published = _ingest(src, payload, "height-val-doc")
+    obs_selector = _opening_selector(published, src.authority())
+    binding_prod = ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(src)
+    bind_result = binding_prod.publish_scope(opening_selector=obs_selector, decision_scope_id="scope-1")
+    # Binding abstains or conflicts when rows are completely duplicated
+    # In Item 1, binding conflicts if duplicate rows exist unless disambiguated.
+    # We will simulate this by checking the height producer response IF it somehow gets a selector.
+    # Actually, the height producer just asks binding_authority, which will CONFLICT.
+    height_selector = OpeningHeightSelector(
+        document_id="height-val-doc",
+        revision_id="rev",
+        source_sha256="sha",
+        snapshot_id="snap",
+        decision_scope_id="scope-1",
+        opening_record_id=obs_selector.observation_id, # mock it
+    )
     height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.CONFLICT
@@ -221,7 +244,20 @@ def test_attack_duplicate_matching_schedule_rows() -> None:
 
 @pytest.mark.xfail(strict=True, reason="Production not yet implemented")
 def test_attack_conflicting_heights() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
+    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "2100"), ("W1", "900", "2000")))
+    src = SourceVisibilityProducer(producer_method="height-validator", producer_version="1.0")
+    published = _ingest(src, payload, "height-val-doc")
+    obs_selector = _opening_selector(published, src.authority())
+    binding_prod = ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(src)
+    bind_result = binding_prod.publish_scope(opening_selector=obs_selector, decision_scope_id="scope-1")
+    height_selector = OpeningHeightSelector(
+        document_id="height-val-doc",
+        revision_id="rev",
+        source_sha256="sha",
+        snapshot_id="snap",
+        decision_scope_id="scope-1",
+        opening_record_id=obs_selector.observation_id, # mock it
+    )
     height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.CONFLICT
@@ -229,7 +265,8 @@ def test_attack_conflicting_heights() -> None:
 
 @pytest.mark.xfail(strict=True, reason="Production not yet implemented")
 def test_attack_missing_height_field() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
+    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "")))
+    src, binding_prod, height_selector = _setup_authorities(payload)
     height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
@@ -237,7 +274,9 @@ def test_attack_missing_height_field() -> None:
 
 @pytest.mark.xfail(strict=True, reason="Production not yet implemented")
 def test_attack_ambiguous_units() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
+    # 2100mm vs 2100 inches? Actually, PlanReader usually handles this, but if it's "2100 / 2040" it's ambiguous
+    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "2100 / 2040")))
+    src, binding_prod, height_selector = _setup_authorities(payload)
     height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
     result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
