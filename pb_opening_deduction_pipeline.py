@@ -283,6 +283,19 @@ class GenericOpeningDeductionPipeline:
         if not primary_res:
             return list(predictions)
 
+        # An unresolved or unbound opening contributes zero to
+        # total_deducted_area_m2 (see calculate_wall_deductions), so
+        # net_area_m2 is only the gross area minus whatever COULD be
+        # deducted, not minus everything that SHOULD be. Publishing that
+        # number as final would silently understate deductions (overstate
+        # net area) for every walling and wall-finish prediction sharing
+        # this wall's openings. Block publication instead, retaining the
+        # best-known figures for diagnostics only -- mirrors the
+        # publication_blocked / reconciliation_status convention used
+        # elsewhere in the live extractor (pb_planreader_pdf_extractor.py's
+        # extracted_prediction_publication_blocked).
+        deduction_incomplete = bool(primary_res.unresolved_openings) or bool(primary_res.unbound_openings)
+
         out_preds = []
         for p in predictions:
             p_tag = p.tag if hasattr(p, "tag") else p.get("tag", "")
@@ -319,6 +332,14 @@ class GenericOpeningDeductionPipeline:
                 meta["applied_openings"] = primary_res.applied_openings
                 meta["unresolved_openings"] = primary_res.unresolved_openings
                 meta["unbound_openings"] = primary_res.unbound_openings
+                if deduction_incomplete:
+                    meta["publication_blocked"] = True
+                    meta["reconciliation_status"] = "ambiguous_unresolved"
+                    meta["blocking_reason"] = (
+                        "opening_deduction_incomplete: one or more openings on this "
+                        "wall are unresolved or unbound, so net_area_m2 excludes their "
+                        "area rather than reflecting a complete deduction"
+                    )
 
                 if hasattr(p, "quantity"):
                     p.quantity = net_val
