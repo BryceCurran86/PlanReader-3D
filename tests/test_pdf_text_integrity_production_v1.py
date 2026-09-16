@@ -47,7 +47,10 @@ def _pdf_bytes(objects: Mapping[int, str]) -> bytes:
 
 def _simple_text_pdf(*, color: str = "0 0 0 rg", fill_after: bool | None = None) -> bytes:
     text = f"{color} BT /F1 12 Tf 40 120 Td (900) Tj ET"
-    fill = "0 0 0 rg 35 112 45 18 re f"
+    # White opaque fill lets the test isolate paint order from text contrast:
+    # black text painted after it is visible; the same fill painted after text
+    # covers the text.
+    fill = "1 1 1 rg 35 112 45 18 re f"
     if fill_after is True:
         stream = f"{text} {fill}"
     elif fill_after is False:
