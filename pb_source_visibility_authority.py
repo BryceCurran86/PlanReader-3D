@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import math
-from typing import Mapping, Sequence
+from typing import Mapping, Optional, Sequence
 
 import fitz
 
@@ -250,6 +250,19 @@ class SourceVisibilityProducer:
             self._text_integrity_receipts,
             _seal=_PDF_TEXT_AUTHORITY_SEAL,
         )
+
+    def published_snapshot_for_revision(
+        self, revision_id: str
+    ) -> Optional[PublishedVisibleSourceSnapshot]:
+        """Producer-owned lookup of a prior ingestion's own complete snapshot.
+
+        Reads only this producer's own private cache -- there is no way for a
+        caller to inject or narrow an entry here. Downstream consumers that
+        need the COMPLETE, un-narrowable text-observation universe for a
+        revision (rather than a caller-curated subset) must go through this,
+        never accept an id list as an argument.
+        """
+        return self._published_by_revision.get(str(revision_id))
 
     def opening_dimension_authority(self):
         """Return the read-only dimension resolver bound to this producer."""
