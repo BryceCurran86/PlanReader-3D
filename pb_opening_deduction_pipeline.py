@@ -12,16 +12,29 @@ CRITICAL ARCHITECTURAL BOUNDARY:
   4. wall/opening spatial binding or envelope membership
   5. valid drawing scale.
 - FAIL CLOSED:
-  1. If opening height or width is unknown: deduction is 0.0, marked unresolved. Do not guess.
-  2. If opening cannot be bound to a wall: deduction is 0.0, marked provisional/unbound.
-  3. Zero generic fenestration percentages (never assume 10%, 15%, etc.).
+  1. If opening height or width is unknown: that opening's own deduction is
+     0.0, marked unresolved. Do not guess.
+  2. Opening-to-wall binding is accepted ONLY from an independently
+     authenticated source (see bind_openings_to_walls); nothing here
+     performs heuristic binding, so until a reconciled host-binding
+     authority supplies one, every opening is provisional/unbound.
+  3. Caller-populated ``bound_wall_id`` may be used by the explicitly
+     provisional arithmetic helper, but it can never establish authority.
+     The public authority-producing path abstains until producer-owned host
+     binding is wired.
+  4. A wall whose deduction authority is unavailable or incomplete has an
+     UNKNOWN net area, not an evidenced zero-deduction net area. Publication
+     is blocked (quantity=None) rather than silently treating a diagnostic
+     arithmetic result as final.
+  5. Zero generic fenestration percentages (never assume 10%, 15%, etc.).
 """
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-import math
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
+
+from pb_migration_contracts import QuantityEvidence, stable_contract_id
 
 
 class OpeningDeductionStatus(str, Enum):
@@ -38,7 +51,7 @@ class OpeningInstance:
     """An individual opening or opening group (e.g. W1, D1) from schedule/callouts."""
 
     opening_id: str
-    trade_type: str = "windows"  # "windows", "doors", "opening"
+    trade_type: str = "windows"
     width_m: Optional[float] = None
     height_m: Optional[float] = None
     quantity: float = 1.0
@@ -63,14 +76,14 @@ class OpeningInstance:
     @property
     def total_area_m2(self) -> Optional[float]:
         """Total area of this opening type across its quantity in square meters."""
-        s = self.single_area_m2
-        if s is not None and self.quantity > 0:
-            return round(s * self.quantity, 4)
+        single = self.single_area_m2
+        if single is not None and self.quantity > 0:
+            return round(single * self.quantity, 4)
         return None
 
     @property
     def is_valid_deduction(self) -> bool:
-        """True only if dimensions are strictly positive and wall binding exists."""
+        """Arithmetic eligibility only; this property does not prove host authority."""
         return (
             self.width_m is not None
             and self.height_m is not None
@@ -120,13 +133,38 @@ class WallInstance:
 
 
 @dataclass
-class WallDeductionResult:
-    """Comprehensive deduction result for a wall, including audit breakdown."""
+class ProvisionalWallDeductionArithmetic:
+    """Deterministic diagnostic arithmetic with deliberately no authority field.
+
+    Callers may supply synthetic ``bound_wall_id`` values to exercise arithmetic
+    mutations.  This object is not a quantity-evidence contract and cannot be
+    propagated as final net-wall authority.
+    """
 
     wall_id: str
     gross_area_m2: float
     total_deducted_area_m2: float
     net_area_m2: float
+    applied_openings: List[Dict[str, Any]] = field(default_factory=list)
+    unresolved_openings: List[Dict[str, Any]] = field(default_factory=list)
+    unbound_openings: List[Dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class WallDeductionResult:
+    """Wall deduction result plus an explicit authority proposition.
+
+    ``net_area_m2`` is always only the best-known arithmetic estimate.  It is
+    authoritative only when ``net_area_evidence`` says so.  On the current
+    architecture there is no producer-owned host-binding integration here, so
+    this public result always carries ABSTAINED evidence and ``value=None``.
+    """
+
+    wall_id: str
+    gross_area_m2: float
+    total_deducted_area_m2: float
+    net_area_m2: float
+    net_area_evidence: Optional[QuantityEvidence] = None
     applied_openings: List[Dict[str, Any]] = field(default_factory=list)
     unresolved_openings: List[Dict[str, Any]] = field(default_factory=list)
     unbound_openings: List[Dict[str, Any]] = field(default_factory=list)
@@ -137,6 +175,7 @@ class WallDeductionResult:
             "gross_area_m2": round(self.gross_area_m2, 2),
             "total_deducted_area_m2": round(self.total_deducted_area_m2, 2),
             "net_area_m2": round(self.net_area_m2, 2),
+            "net_area_evidence": asdict(self.net_area_evidence) if self.net_area_evidence else None,
             "applied_openings": self.applied_openings,
             "unresolved_openings": self.unresolved_openings,
             "unbound_openings": self.unbound_openings,
@@ -144,100 +183,69 @@ class WallDeductionResult:
 
 
 class GenericOpeningDeductionPipeline:
-    """Orchestrates opening-to-wall binding, opening area computation, and net wall area derivation."""
-
-    def __init__(self) -> None:
-        pass
+    """Orchestrates fail-closed opening deductions and publication gating."""
 
     def bind_openings_to_walls(
         self,
         openings: Sequence[OpeningInstance],
         walls: Sequence[WallInstance],
     ) -> None:
-        """Bind openings to walls based on explicit target ID, envelope context, or spatial proximity.
+        """Refuse every caller/heuristic host claim until host-binding v3 exists."""
+        del walls
+        for opening in openings:
+            opening.bound_wall_id = None
+            opening.status = OpeningDeductionStatus.PROVISIONAL_UNBOUND
+            opening.notes = (
+                "No producer-owned host-binding authority result available; "
+                "refusing self-certified or heuristic binding."
+            )
 
-        Mutates opening.bound_wall_id and opening.status.
-        """
-        wall_ids = {w.wall_id for w in walls}
-
-        for op in openings:
-            # 1. Explicit valid binding
-            if op.bound_wall_id and op.bound_wall_id in wall_ids:
-                continue
-
-            # 2. Envelope binding: if exactly one external/perimeter wall exists and opening is external
-            if len(walls) == 1:
-                op.bound_wall_id = walls[0].wall_id
-                continue
-
-            # 3. Spatial bounding box containment if both have valid bboxes
-            if op.bounding_box and len(op.bounding_box) == 4:
-                ox0, oy0, ox1, oy1 = op.bounding_box
-                best_wall = None
-                for w in walls:
-                    if w.bounding_box and len(w.bounding_box) == 4:
-                        wx0, wy0, wx1, wy1 = w.bounding_box
-                        # Bounding box intersection check
-                        if not (ox1 < wx0 or ox0 > wx1 or oy1 < wy0 or oy0 > wy1):
-                            best_wall = w.wall_id
-                            break
-                if best_wall:
-                    op.bound_wall_id = best_wall
-                    continue
-
-            # 4. Fallback: fail-closed provisional unbound
-            op.bound_wall_id = None
-            op.status = OpeningDeductionStatus.PROVISIONAL_UNBOUND
-            op.notes = "Opening could not be deterministically bound to any wall instance."
-
-    def calculate_wall_deductions(
+    def calculate_provisional_wall_deductions(
         self,
         wall: WallInstance,
         openings: Sequence[OpeningInstance],
-    ) -> WallDeductionResult:
-        """Calculate total opening deductions and net wall area for a specific wall.
+    ) -> ProvisionalWallDeductionArithmetic:
+        """Calculate arithmetic only; never mint quantity or host authority.
 
-        Enforces strict fail-closed behavior:
-        - Unknown width or height -> 0.0 deduction, recorded as UNRESOLVED_MISSING_DIMENSIONS.
-        - Non-positive dimensions -> 0.0 deduction, recorded as INVALID_DIMENSIONS.
-        - Unbound openings -> 0.0 deduction, recorded as PROVISIONAL_UNBOUND.
+        This helper intentionally permits synthetic ``bound_wall_id`` values so
+        deterministic arithmetic remains unit-testable.  A caller-provided
+        binding is treated only as an arithmetic routing instruction here.
         """
         applied: List[Dict[str, Any]] = []
         unresolved: List[Dict[str, Any]] = []
         unbound: List[Dict[str, Any]] = []
         total_deduction = 0.0
 
-        for op in openings:
-            if op.bound_wall_id != wall.wall_id:
-                if op.bound_wall_id is None:
-                    op.status = OpeningDeductionStatus.PROVISIONAL_UNBOUND
-                    unbound.append(op.to_dict())
+        for opening in openings:
+            if opening.bound_wall_id != wall.wall_id:
+                if opening.bound_wall_id is None:
+                    opening.status = OpeningDeductionStatus.PROVISIONAL_UNBOUND
+                    unbound.append(opening.to_dict())
                 continue
 
-            # Fail-closed check: missing dimensions
-            if op.width_m is None or op.height_m is None:
-                op.status = OpeningDeductionStatus.UNRESOLVED_MISSING_DIMENSIONS
-                op.notes = "Missing figured width or height; fail-closed without guessing deduction."
-                unresolved.append(op.to_dict())
+            if opening.width_m is None or opening.height_m is None:
+                opening.status = OpeningDeductionStatus.UNRESOLVED_MISSING_DIMENSIONS
+                opening.notes = "Missing figured width or height; fail-closed without guessing deduction."
+                unresolved.append(opening.to_dict())
                 continue
 
-            # Fail-closed check: non-positive dimensions
-            if op.width_m <= 0.0 or op.height_m <= 0.0 or op.quantity <= 0.0:
-                op.status = OpeningDeductionStatus.INVALID_DIMENSIONS
-                op.notes = "Non-positive dimension or quantity; deduction rejected."
-                unresolved.append(op.to_dict())
+            if opening.width_m <= 0.0 or opening.height_m <= 0.0 or opening.quantity <= 0.0:
+                opening.status = OpeningDeductionStatus.INVALID_DIMENSIONS
+                opening.notes = "Non-positive dimension or quantity; deduction rejected."
+                unresolved.append(opening.to_dict())
                 continue
 
-            # Valid evidenced opening
-            op.status = OpeningDeductionStatus.APPLIED
-            op_area = op.total_area_m2 or 0.0
-            total_deduction += op_area
-            applied.append(op.to_dict())
+            opening.status = OpeningDeductionStatus.APPLIED
+            opening.notes = (
+                "Applied to provisional arithmetic only; host authority has not been established."
+            )
+            opening_area = opening.total_area_m2 or 0.0
+            total_deduction += opening_area
+            applied.append(opening.to_dict())
 
         total_deduction = round(total_deduction, 2)
         net_area = round(max(0.0, wall.gross_area_m2 - total_deduction), 2)
-
-        return WallDeductionResult(
+        return ProvisionalWallDeductionArithmetic(
             wall_id=wall.wall_id,
             gross_area_m2=round(wall.gross_area_m2, 2),
             total_deducted_area_m2=total_deduction,
@@ -247,109 +255,150 @@ class GenericOpeningDeductionPipeline:
             unbound_openings=unbound,
         )
 
+    def calculate_wall_deductions(
+        self,
+        wall: WallInstance,
+        openings: Sequence[OpeningInstance],
+    ) -> WallDeductionResult:
+        """Public authority-producing calculation; currently always abstains.
+
+        The arithmetic is still exposed for diagnostics, but neither a
+        caller-populated ``bound_wall_id`` nor an empty/local opening set can
+        establish producer-owned host binding or opening-universe completeness.
+        A future integration may replace this blocker only with sealed
+        producer-owned host-binding v3 evidence.
+        """
+        provisional = self.calculate_provisional_wall_deductions(wall, openings)
+        blocking_reasons = (
+            "producer_owned_host_binding_authority_unavailable",
+            *(
+                f"unresolved_dimensions:{entry['opening_id']}"
+                for entry in provisional.unresolved_openings
+            ),
+            *(f"unbound:{entry['opening_id']}" for entry in provisional.unbound_openings),
+        )
+        evidence = QuantityEvidence(
+            quantity_id=stable_contract_id(
+                "wall_net_area",
+                {
+                    "wall_id": wall.wall_id,
+                    "gross_area_m2": wall.gross_area_m2,
+                    "provisional_total_deducted_area_m2": provisional.total_deducted_area_m2,
+                    "opening_ids": tuple(opening.opening_id for opening in openings),
+                    "authority_available": False,
+                },
+            ),
+            family="wall_net_area",
+            semantic_key=wall.wall_id,
+            value=None,
+            unit="m2",
+            input_entity_ids=(wall.wall_id,) + tuple(opening.opening_id for opening in openings),
+            formula="gross_area_m2 - sum(provisional_opening_areas)",
+            authority="pb_opening_deduction_pipeline.calculate_wall_deductions",
+            status="abstained",
+            abstained=True,
+            blocking_reasons=tuple(dict.fromkeys(blocking_reasons)),
+            reason_codes=("producer_owned_host_binding_required",),
+        )
+        return WallDeductionResult(
+            wall_id=provisional.wall_id,
+            gross_area_m2=provisional.gross_area_m2,
+            total_deducted_area_m2=provisional.total_deducted_area_m2,
+            net_area_m2=provisional.net_area_m2,
+            net_area_evidence=evidence,
+            applied_openings=provisional.applied_openings,
+            unresolved_openings=provisional.unresolved_openings,
+            unbound_openings=provisional.unbound_openings,
+        )
+
     def deduct_openings_for_all_walls(
         self,
         walls: Sequence[WallInstance],
         openings: Sequence[OpeningInstance],
     ) -> Dict[str, WallDeductionResult]:
-        """Perform opening-to-wall binding and compute deduction results for all walls."""
+        """Refuse host self-certification, then compute blocked diagnostics."""
         self.bind_openings_to_walls(openings, walls)
-        results: Dict[str, WallDeductionResult] = {}
-        for w in walls:
-            results[w.wall_id] = self.calculate_wall_deductions(w, openings)
-        return results
+        return {wall.wall_id: self.calculate_wall_deductions(wall, openings) for wall in walls}
 
     def propagate_to_predictions(
         self,
         predictions: Sequence[Any],
         results: Dict[str, WallDeductionResult],
     ) -> List[Any]:
-        """Propagate net wall area and audit metadata to walling and wall finish predictions.
+        """Propagate only authoritative net area; otherwise publish ``None``.
 
-        Propagates to:
-        - perimeter_walling (or masonry/block walling)
-        - internal_plaster
-        - internal_paint
-        - external_key_pointing
-        - external_render
+        Until host-binding v3 is integrated, results produced by this module
+        are ABSTAINED and only their provisional arithmetic is retained in
+        diagnostic metadata.
         """
-        # Collect primary envelope wall deduction result (if available)
         primary_res = (
             results.get("perimeter_walling")
             or results.get("external_walling")
             or (list(results.values())[0] if results else None)
         )
-
         if not primary_res:
             return list(predictions)
 
-        # An unresolved or unbound opening contributes zero to
-        # total_deducted_area_m2 (see calculate_wall_deductions), so
-        # net_area_m2 is only the gross area minus whatever COULD be
-        # deducted, not minus everything that SHOULD be. Publishing that
-        # number as final would silently understate deductions (overstate
-        # net area) for every walling and wall-finish prediction sharing
-        # this wall's openings. Block publication instead, retaining the
-        # best-known figures for diagnostics only -- mirrors the
-        # publication_blocked / reconciliation_status convention used
-        # elsewhere in the live extractor (pb_planreader_pdf_extractor.py's
-        # extracted_prediction_publication_blocked).
-        deduction_incomplete = bool(primary_res.unresolved_openings) or bool(primary_res.unbound_openings)
+        evidence = primary_res.net_area_evidence
+        abstained = evidence is None or evidence.abstained
 
         out_preds = []
-        for p in predictions:
-            p_tag = p.tag if hasattr(p, "tag") else p.get("tag", "")
-            p_trade = p.trade_type if hasattr(p, "trade_type") else p.get("trade_type", "")
-
-            is_walling = p_tag in ("perimeter_walling", "external_walling", "masonry_walling", "block_walling")
-            is_wall_finish = p_tag in (
+        for prediction in predictions:
+            tag = prediction.tag if hasattr(prediction, "tag") else prediction.get("tag", "")
+            is_walling = tag in (
+                "perimeter_walling",
+                "external_walling",
+                "masonry_walling",
+                "block_walling",
+            )
+            is_wall_finish = tag in (
                 "internal_plaster",
                 "internal_paint",
                 "external_key_pointing",
                 "external_render",
             )
+            if not (is_walling or is_wall_finish):
+                out_preds.append(prediction)
+                continue
 
-            if is_walling or is_wall_finish:
-                gross_val = p.quantity if hasattr(p, "quantity") else p.get("quantity", 0.0)
-                meta = p.metadata if hasattr(p, "metadata") else p.get("metadata", {})
-
-                # A wall-finish prediction with its own independently-derived
-                # gross area (e.g. a genuine internal-face area computed from
-                # real wall-thickness evidence, distinct from the external
-                # wall's gross area) still needs the SAME openings deducted
-                # -- they pierce the same wall regardless of which face is
-                # being measured -- but must not be silently overwritten
-                # with the external wall's net_area_m2 as if it were a copy.
-                independent_gross = meta.get("independent_gross_area_m2")
-                if independent_gross is not None:
-                    net_val = round(independent_gross - primary_res.total_deducted_area_m2, 4)
-                else:
-                    net_val = primary_res.net_area_m2
-
-                meta["gross_area_m2"] = independent_gross if independent_gross is not None else primary_res.gross_area_m2
-                meta["total_deducted_opening_area_m2"] = primary_res.total_deducted_area_m2
-                meta["net_area_m2"] = net_val
-                meta["applied_openings"] = primary_res.applied_openings
-                meta["unresolved_openings"] = primary_res.unresolved_openings
-                meta["unbound_openings"] = primary_res.unbound_openings
-                if deduction_incomplete:
-                    meta["publication_blocked"] = True
-                    meta["reconciliation_status"] = "ambiguous_unresolved"
-                    meta["blocking_reason"] = (
-                        "opening_deduction_incomplete: one or more openings on this "
-                        "wall are unresolved or unbound, so net_area_m2 excludes their "
-                        "area rather than reflecting a complete deduction"
-                    )
-
-                if hasattr(p, "quantity"):
-                    p.quantity = net_val
-                    p.metadata = meta
-                    out_preds.append(p)
-                else:
-                    p["quantity"] = net_val
-                    p["metadata"] = meta
-                    out_preds.append(p)
+            metadata = prediction.metadata if hasattr(prediction, "metadata") else prediction.get("metadata", {})
+            independent_gross = metadata.get("independent_gross_area_m2")
+            if independent_gross is not None:
+                provisional_net = round(
+                    independent_gross - primary_res.total_deducted_area_m2, 4
+                )
             else:
-                out_preds.append(p)
+                provisional_net = primary_res.net_area_m2
+
+            metadata["gross_area_m2"] = (
+                independent_gross if independent_gross is not None else primary_res.gross_area_m2
+            )
+            metadata["total_deducted_opening_area_m2"] = primary_res.total_deducted_area_m2
+            metadata["applied_openings"] = primary_res.applied_openings
+            metadata["unresolved_openings"] = primary_res.unresolved_openings
+            metadata["unbound_openings"] = primary_res.unbound_openings
+
+            if abstained:
+                net_value = None
+                metadata["net_area_m2"] = None
+                metadata["provisional_net_area_m2"] = provisional_net
+                metadata["publication_blocked"] = True
+                metadata["reconciliation_status"] = "ambiguous_unresolved"
+                metadata["blocking_reason"] = (
+                    "opening_deduction_authority_unavailable: producer-owned host binding "
+                    "and complete opening scope are not yet established; "
+                    "provisional_net_area_m2 is diagnostic only"
+                )
+            else:
+                net_value = provisional_net
+                metadata["net_area_m2"] = net_value
+
+            if hasattr(prediction, "quantity"):
+                prediction.quantity = net_value
+                prediction.metadata = metadata
+            else:
+                prediction["quantity"] = net_value
+                prediction["metadata"] = metadata
+            out_preds.append(prediction)
 
         return out_preds

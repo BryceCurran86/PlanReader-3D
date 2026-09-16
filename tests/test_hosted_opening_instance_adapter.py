@@ -191,9 +191,19 @@ def test_propagation_does_not_mutate_quantities_or_create_wd_tags() -> None:
     ]
     updated = {item.tag: item for item in pipeline.propagate_to_predictions(preds, results)}
 
-    assert updated["perimeter_walling"].quantity == 87.7
-    assert updated["internal_plaster"].quantity == 84.336
-    assert updated["internal_paint"].quantity == 84.336
+    # The hosted shadow span is never bound (by design -- see
+    # test_adapter_never_defaults_bound_wall_to_perimeter_walling), so this
+    # wall's deduction is genuinely incomplete: perimeter_walling and its
+    # wall-finishes correctly publish quantity=None rather than silently
+    # keeping their original (undeducted) numbers. Trades this pipeline
+    # never touches (damp_proof_course, D1) are unaffected -- that is the
+    # "does not mutate" this test is actually named for.
+    assert updated["perimeter_walling"].quantity is None
+    assert updated["perimeter_walling"].metadata["provisional_net_area_m2"] == 87.7
+    assert updated["internal_plaster"].quantity is None
+    assert updated["internal_plaster"].metadata["provisional_net_area_m2"] == 84.336
+    assert updated["internal_paint"].quantity is None
+    assert updated["internal_paint"].metadata["provisional_net_area_m2"] == 84.336
     assert updated["damp_proof_course"].quantity == 54.5
     assert updated["D1"].quantity == 1.0
     assert "W1" not in updated
