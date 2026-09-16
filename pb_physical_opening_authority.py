@@ -1,12 +1,14 @@
-"""G17 physical-opening existence authority.
+"""G17 physical-opening existence and local instance identity authority.
 
 A positive existence result is available only from producer-proven visible
-native PDF geometry.  Caller-published structural semantic labels remain useful
+native PDF geometry. Caller-published structural semantic labels remain useful
 for fail-closed diagnostics, but cannot self-certify a physical opening.
 
-This boundary remains deliberately narrower than physical-opening identity,
-dimensions, host binding, universe completeness, physical voids, deductions or
-commercial publication.
+Physical-opening identity is deliberately local to one authenticated source
+scope. It is resolved only by independently re-proving G17 existence for both
+selectors and comparing the producer-owned existence records. Dimensions,
+host binding, universe completeness, physical voids, deductions and commercial
+publication remain separate downstream authorities.
 """
 from __future__ import annotations
 
@@ -31,6 +33,10 @@ from pb_source_visibility_authority import (
 PHYSICAL_OPENING_EXISTS = "physical_opening_exists"
 PHYSICAL_OPENING_EXISTENCE_UNRESOLVED = "physical_opening_existence_unresolved"
 PHYSICAL_OPENING_IDENTITY_UNRESOLVED = "physical_opening_identity_unresolved"
+PHYSICAL_OPENING_IDENTITIES_DISTINCT = "physical_opening_identities_distinct"
+PHYSICAL_OPENING_IDENTITY_SCOPE_MISMATCH = "physical_opening_identity_scope_mismatch"
+PHYSICAL_OPENING_IDENTITY_EXISTENCE_REQUIRED = "physical_opening_identity_existence_required"
+PHYSICAL_OPENING_IDENTITY_RESOLVED = "physical_opening_identity_resolved"
 
 AUTHORITATIVE_PHYSICAL_OPENING_SEMANTICS_UNAVAILABLE = (
     "authoritative_physical_opening_semantics_unavailable"
@@ -323,7 +329,7 @@ def _canonical_line(record: SourceObservationRecord) -> tuple[tuple[float, float
 
 
 class PhysicalOpeningAuthority:
-    """Read-only G17 authority over raw or visibility-proven source readers."""
+    """Read-only authority over source-proven opening existence and local identity."""
 
     def __init__(
         self,
@@ -347,7 +353,7 @@ class PhysicalOpeningAuthority:
     def capabilities() -> dict[str, bool]:
         return {
             "physical_opening_existence": True,
-            "physical_opening_identity": False,
+            "physical_opening_identity": True,
             "opening_universe_complete": False,
             "opening_dimensions": False,
             "host_identity": False,
@@ -777,45 +783,94 @@ class PhysicalOpeningAuthority:
             existence_record=existence,
         )
 
-    def _resolve_for_identity(self, selector: ObservationSelector) -> SourceObservationAuthorityResult:
-        if self._source_visibility_authority is not None:
-            return self._source_visibility_authority.resolve_visible(selector)
-        assert self._source_observation_authority is not None
-        return self._source_observation_authority.resolve(selector)
+    @staticmethod
+    def _identity_scope(record: PhysicalOpeningExistenceRecord) -> tuple[str, str, str, str, str]:
+        return (
+            record.document_id,
+            record.revision_id,
+            record.source_sha256,
+            record.snapshot_id,
+            record.page_id,
+        )
 
     def compare_identity(
         self,
         left_selector: ObservationSelector,
         right_selector: ObservationSelector,
     ) -> PhysicalOpeningIdentityResult:
-        """Identity remains closed until its separately reviewed post-G17 phase."""
+        """Compare two selectors using independently re-proven G17 existence only."""
         if not isinstance(left_selector, ObservationSelector):
             raise TypeError("left_selector must be ObservationSelector")
         if not isinstance(right_selector, ObservationSelector):
             raise TypeError("right_selector must be ObservationSelector")
-        left = self._resolve_for_identity(left_selector)
-        right = self._resolve_for_identity(right_selector)
+
+        left_existence = self.prove_existence(left_selector)
+        right_existence = self.prove_existence(right_selector)
+        left_source = left_existence.source_observation
+        right_source = right_existence.source_observation
+
         if (
-            left.status is not EvidenceResolutionStatus.CORROBORATED
-            or right.status is not EvidenceResolutionStatus.CORROBORATED
+            left_existence.status is not EvidenceResolutionStatus.CORROBORATED
+            or right_existence.status is not EvidenceResolutionStatus.CORROBORATED
+            or left_existence.existence_record is None
+            or right_existence.existence_record is None
+            or left_existence.proposition != PHYSICAL_OPENING_EXISTS
+            or right_existence.proposition != PHYSICAL_OPENING_EXISTS
         ):
+            status = (
+                EvidenceResolutionStatus.CONFLICT
+                if (
+                    left_existence.status is EvidenceResolutionStatus.CONFLICT
+                    or right_existence.status is EvidenceResolutionStatus.CONFLICT
+                )
+                else EvidenceResolutionStatus.ABSTAINED
+            )
             return PhysicalOpeningIdentityResult(
-                status=_source_failure_status(left, right),
+                status=status,
                 physical_opening_identity=PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
                 proven_same=False,
-                reason_codes=_dedupe_reason_codes(left.reason_codes, right.reason_codes),
-                left_source_observation=left,
-                right_source_observation=right,
+                reason_codes=_dedupe_reason_codes(
+                    (PHYSICAL_OPENING_IDENTITY_EXISTENCE_REQUIRED,),
+                    left_existence.reason_codes,
+                    right_existence.reason_codes,
+                ),
+                left_source_observation=left_source,
+                right_source_observation=right_source,
                 missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
             )
+
+        left_record = left_existence.existence_record
+        right_record = right_existence.existence_record
+        if self._identity_scope(left_record) != self._identity_scope(right_record):
+            return PhysicalOpeningIdentityResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                physical_opening_identity=PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
+                proven_same=False,
+                reason_codes=(PHYSICAL_OPENING_IDENTITY_SCOPE_MISMATCH,),
+                left_source_observation=left_source,
+                right_source_observation=right_source,
+                missing_upstream_capability=(
+                    "independent cross-scope physical opening equivalence authority"
+                ),
+            )
+
+        if left_record.record_id == right_record.record_id:
+            return PhysicalOpeningIdentityResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                physical_opening_identity=left_record.record_id,
+                proven_same=True,
+                reason_codes=(PHYSICAL_OPENING_IDENTITY_RESOLVED,),
+                left_source_observation=left_source,
+                right_source_observation=right_source,
+            )
+
         return PhysicalOpeningIdentityResult(
-            status=EvidenceResolutionStatus.ABSTAINED,
-            physical_opening_identity=PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
+            status=EvidenceResolutionStatus.CORROBORATED,
+            physical_opening_identity=PHYSICAL_OPENING_IDENTITIES_DISTINCT,
             proven_same=False,
-            reason_codes=(AUTHORITATIVE_PHYSICAL_OPENING_IDENTITY_UNAVAILABLE,),
-            left_source_observation=left,
-            right_source_observation=right,
-            missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
+            reason_codes=(PHYSICAL_OPENING_IDENTITY_RESOLVED,),
+            left_source_observation=left_source,
+            right_source_observation=right_source,
         )
 
 
@@ -831,6 +886,10 @@ __all__ = [
     "OPENING_JAMB_BOUNDARY_KIND",
     "PHYSICAL_OPENING_EXISTS",
     "PHYSICAL_OPENING_EXISTENCE_UNRESOLVED",
+    "PHYSICAL_OPENING_IDENTITIES_DISTINCT",
+    "PHYSICAL_OPENING_IDENTITY_EXISTENCE_REQUIRED",
+    "PHYSICAL_OPENING_IDENTITY_RESOLVED",
+    "PHYSICAL_OPENING_IDENTITY_SCOPE_MISMATCH",
     "PHYSICAL_OPENING_IDENTITY_UNRESOLVED",
     "PhysicalOpeningAuthority",
     "PhysicalOpeningExistenceRecord",
