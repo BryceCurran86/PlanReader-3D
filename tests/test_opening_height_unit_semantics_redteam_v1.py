@@ -1,7 +1,8 @@
 """Independent red-team coverage for opening-height unit application.
 
-TEST ONLY / REPLAY against production head 5217504851ef... / DO NOT MERGE.
+TEST ONLY / REPLAY against production head 8a9a08c8e748... / DO NOT MERGE.
 Assertions and adversarial fixtures are unchanged from the prior replay.
+This documentation-only refresh triggers exact-head CI while the PR targets main.
 
 The production proposition requires explicit source units to govern the
 published physical-opening height. A metre-labelled source must never allow a
