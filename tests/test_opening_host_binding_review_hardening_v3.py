@@ -190,4 +190,13 @@ def test_off_center_band_remains_visible_as_competitor_when_centered_host_exists
     records = centered + competitor
     result = host._resolve_host_bands(records, OPENING, _equivalence(records))
     assert result.status is EvidenceResolutionStatus.CORROBORATED
-    assert len(result.bands) == 2
+    # The complete geometry can also form a mixed face pairing whose thickness
+    # matches the opening. Without independent physical proof that this mixed
+    # pairing is impossible, fail-closed host authority must retain it rather
+    # than delete it by center/nearest/first preference. All we require here is
+    # that the genuine centered and off-centre competitors both remain visible,
+    # which guarantees publish() cannot manufacture a unique host.
+    assert len(result.bands) >= 2
+    centers = tuple(band.center_offset for band in result.bands)
+    assert any(abs(center) <= 1e-9 for center in centers)
+    assert any(abs(center - 20.0) <= 1e-9 for center in centers)
