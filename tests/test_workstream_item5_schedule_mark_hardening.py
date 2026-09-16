@@ -220,3 +220,23 @@ def test_schedule_continuation_across_pages() -> None:
     # If the parser supports headless rows, it might CORROBORATE.
     # Otherwise it might ABSTAIN (BINDING_NO_MATCHING_ROW).
     assert result.status in (EvidenceResolutionStatus.CORROBORATED, EvidenceResolutionStatus.ABSTAINED)
+
+def test_headless_page_without_inherited_header_rejects_masquerading_note() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=700, height=800)
+    _draw_opening(page, x0=20.0, gap0=100.0, gap1=140.0, x1=220.0, y0=50.0, y1=60.0)
+    page.insert_text(fitz.Point(112, 56.0), "W1", color=(0, 0, 0))
+
+    page.insert_text(fitz.Point(50, 400), "W1", color=(0, 0, 0))
+    page.insert_text(fitz.Point(150, 400), "900", color=(0, 0, 0))
+    page.insert_text(fitz.Point(250, 400), "2100", color=(0, 0, 0))
+
+    payload = doc.tobytes()
+    doc.close()
+
+    src = SourceVisibilityProducer(producer_method="test", producer_version="1.0")
+    published = _ingest(src, payload, "note-masquerading")
+    sel = _opening_selector(published, src.authority())
+    result = _bind(src, sel)
+    
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
