@@ -15,7 +15,7 @@ from __future__ import annotations
 import dataclasses
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -52,10 +52,16 @@ _OPENING_AUTHORITY_SEAL = object()
 
 _RowKey = tuple[str, str, str, str, str, tuple[str, ...]]
 _OpeningKey = tuple[str, str, str, str, str, str]
+_LogicalCell = tuple[str, float, float]
 
 _MM_RE = re.compile(r"(?:\bmm\b|millimet(?:er|re)s?)", re.IGNORECASE)
 _M_RE = re.compile(r"(?:\bmet(?:er|re)s?\b|(?<![A-Za-z])m\b)", re.IGNORECASE)
 _NUMBER_RE = re.compile(r"(?<![\d.])[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?![\d.])")
+# Authenticated words belonging to one printed schedule cell have the ordinary
+# inter-word gap. Keep this conservative: over-splitting only abstains, whereas
+# over-joining adjacent columns could assign the wrong physical semantics.
+_HEADER_WORD_JOIN_GAP = 4.0
+_COLUMN_COORD_TOL = 1e-6
 
 
 def _require_nonempty(value: object, field_name: str) -> str:
@@ -122,6 +128,91 @@ def _parse_position_mm(header_text: str, cell_text: str) -> tuple[str, float | N
     if not math.isfinite(value_mm):
         return ROW_VERTICAL_FIELD_UNAVAILABLE, None, source_units
     return ROW_VERTICAL_PLACEMENT_RESOLVED, value_mm, source_units
+
+
+def _row_words(row: Mapping[str, object]) -> tuple[tuple[str, float, float], ...]:
+    """Return authenticated row words paired with their horizontal geometry."""
+    tokens = [token.strip() for token in str(row.get("text", "")).split("\t")]
+    bounds = row.get("bounds", ())
+    if not isinstance(bounds, Sequence) or isinstance(bounds, (str, bytes)):
+        return ()
+    if len(tokens) != len(bounds):
+        return ()
+
+    words: list[tuple[str, float, float]] = []
+    previous_left = -math.inf
+    for token, raw_bound in zip(tokens, bounds):
+        if not token:
+            return ()
+        if (
+            not isinstance(raw_bound, Sequence)
+            or isinstance(raw_bound, (str, bytes))
+            or len(raw_bound) != 2
+        ):
+            return ()
+        try:
+            left, right = float(raw_bound[0]), float(raw_bound[1])
+        except (TypeError, ValueError):
+            return ()
+        if not math.isfinite(left) or not math.isfinite(right) or right < left:
+            return ()
+        if left + _COLUMN_COORD_TOL < previous_left:
+            return ()
+        words.append((token, left, right))
+        previous_left = left
+    return tuple(words)
+
+
+def _logical_header_cells(row: Mapping[str, object]) -> tuple[_LogicalCell, ...]:
+    """Reconstruct printed schedule header cells from trusted word geometry."""
+    words = _row_words(row)
+    if not words:
+        return ()
+
+    cells: list[_LogicalCell] = []
+    current_text, current_left, current_right = words[0]
+    for token, left, right in words[1:]:
+        if left - current_right <= _HEADER_WORD_JOIN_GAP:
+            current_text = f"{current_text} {token}"
+            current_right = max(current_right, right)
+            continue
+        cells.append((current_text, current_left, current_right))
+        current_text, current_left, current_right = token, left, right
+    cells.append((current_text, current_left, current_right))
+    return tuple(cells)
+
+
+def _logical_column_text(
+    row: Mapping[str, object],
+    header_cells: Sequence[_LogicalCell],
+    column_index: int,
+) -> str:
+    """Reconstruct one data cell beneath the authenticated logical header."""
+    words = _row_words(row)
+    if not words or not header_cells or column_index < 0 or column_index >= len(header_cells):
+        return ""
+
+    current = header_cells[column_index]
+    if column_index == 0:
+        left_boundary = -math.inf
+    else:
+        previous = header_cells[column_index - 1]
+        left_boundary = (previous[2] + current[1]) / 2.0
+    if column_index == len(header_cells) - 1:
+        right_boundary = math.inf
+    else:
+        following = header_cells[column_index + 1]
+        right_boundary = (current[2] + following[1]) / 2.0
+
+    selected: list[str] = []
+    for token, left, right in words:
+        center = (left + right) / 2.0
+        if center + _COLUMN_COORD_TOL < left_boundary:
+            continue
+        if center - _COLUMN_COORD_TOL > right_boundary:
+            continue
+        selected.append(token)
+    return " ".join(selected).strip()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -322,11 +413,16 @@ class ScheduleRowVerticalPlacementProducer:
         target_index, target_row, _ = target_matches[0]
 
         # Re-prove that the exact target row belongs to exactly one contiguous native
-        # schedule region. We do not accept a caller-authored header or a remote note.
-        header_candidates: list[tuple[int, dict[str, object], tuple[str, ...]]] = []
+        # schedule region. Header words are reconstructed into logical source columns;
+        # caller-authored text and remote notes are never accepted.
+        header_candidates: list[
+            tuple[int, dict[str, object], tuple[str, ...], tuple[_LogicalCell, ...]]
+        ] = []
         for index, (row, ids) in enumerate(page_rows[:target_index]):
-            cells = [cell.strip() for cell in str(row.get("text", "")).split("\t")]
-            mapping = detect_header(cells)
+            logical_cells = _logical_header_cells(row)
+            if not logical_cells:
+                continue
+            mapping = detect_header([cell[0] for cell in logical_cells])
             if "mark" not in mapping and "dims" not in mapping:
                 continue
             contiguous = True
@@ -346,7 +442,7 @@ class ScheduleRowVerticalPlacementProducer:
                 header_max_x = header_bounds[-1][1] + 20.0
                 if target_bounds[-1][1] < header_min_x or target_bounds[0][0] > header_max_x:
                     continue
-            header_candidates.append((index, row, tuple(ids)))
+            header_candidates.append((index, row, tuple(ids), logical_cells))
 
         # If nested/duplicate headers can both govern this exact row, fail closed.
         if len(header_candidates) != 1:
@@ -354,17 +450,9 @@ class ScheduleRowVerticalPlacementProducer:
             status = EvidenceResolutionStatus.ABSTAINED if not header_candidates else EvidenceResolutionStatus.CONFLICT
             return self._store(key, _row_blocked(status, reason))
 
-        _header_index, header_row, header_ids = header_candidates[0]
-        header_cells = [cell.strip() for cell in str(header_row.get("text", "")).split("\t")]
-        target_cells = [cell.strip() for cell in str(target_row.get("text", "")).split("\t")]
-        if len(target_cells) < len(header_cells):
-            return self._store(
-                key,
-                _row_blocked(EvidenceResolutionStatus.ABSTAINED, ROW_VERTICAL_FIELD_UNAVAILABLE),
-            )
-
+        _header_index, header_row, header_ids, header_cells = header_candidates[0]
         semantic_columns: dict[str, list[int]] = {"bottom": [], "top": []}
-        for index, heading in enumerate(header_cells):
+        for index, (heading, _left, _right) in enumerate(header_cells):
             kind = _placement_kind(heading)
             if kind is not None:
                 semantic_columns[kind].append(index)
@@ -376,17 +464,21 @@ class ScheduleRowVerticalPlacementProducer:
 
         bottom_index = semantic_columns["bottom"][0]
         top_index = semantic_columns["top"][0]
-        if bottom_index >= len(target_cells) or top_index >= len(target_cells):
+        bottom_heading = header_cells[bottom_index][0]
+        top_heading = header_cells[top_index][0]
+        bottom_cell = _logical_column_text(target_row, header_cells, bottom_index)
+        top_cell = _logical_column_text(target_row, header_cells, top_index)
+        if not bottom_cell or not top_cell:
             return self._store(
                 key,
                 _row_blocked(EvidenceResolutionStatus.ABSTAINED, ROW_VERTICAL_FIELD_UNAVAILABLE),
             )
 
         bottom_reason, z0_mm, bottom_units = _parse_position_mm(
-            header_cells[bottom_index], target_cells[bottom_index]
+            bottom_heading, bottom_cell
         )
         top_reason, z1_mm, top_units = _parse_position_mm(
-            header_cells[top_index], target_cells[top_index]
+            top_heading, top_cell
         )
         if z0_mm is None:
             status = EvidenceResolutionStatus.CONFLICT if bottom_reason == ROW_VERTICAL_UNITS_CONFLICT else EvidenceResolutionStatus.ABSTAINED
@@ -413,8 +505,8 @@ class ScheduleRowVerticalPlacementProducer:
             units="mm",
             bottom_source_units=str(bottom_units),
             top_source_units=str(top_units),
-            bottom_basis_source=header_cells[bottom_index],
-            top_basis_source=header_cells[top_index],
+            bottom_basis_source=bottom_heading,
+            top_basis_source=top_heading,
             raw_text=str(target_row.get("text", "")),
         )
         return self._store(
