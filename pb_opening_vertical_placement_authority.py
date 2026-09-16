@@ -56,7 +56,11 @@ _LogicalCell = tuple[str, float, float]
 
 _MM_RE = re.compile(r"(?:\bmm\b|millimet(?:er|re)s?)", re.IGNORECASE)
 _M_RE = re.compile(r"(?:\bmet(?:er|re)s?\b|(?<![A-Za-z])m\b)", re.IGNORECASE)
-_NUMBER_RE = re.compile(r"(?<![\d.])[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?![\d.])")
+_POSITION_RE = re.compile(
+    r"^\s*(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*"
+    r"(?:(?:mm|millimet(?:er|re)s?|m|met(?:er|re)s?))?\s*$",
+    re.IGNORECASE,
+)
 # Authenticated words belonging to one printed schedule cell have the ordinary
 # inter-word gap. Keep this conservative: over-splitting only abstains, whereas
 # over-joining adjacent columns could assign the wrong physical semantics.
@@ -115,11 +119,12 @@ def _parse_position_mm(header_text: str, cell_text: str) -> tuple[str, float | N
     if len(units) != 1:
         return ROW_VERTICAL_UNITS_CONFLICT, None, None
     source_units = next(iter(units))
-    numbers = _NUMBER_RE.findall(str(cell_text or "").replace(",", ""))
-    if len(numbers) != 1:
+    clean = str(cell_text or "").replace(",", "").strip()
+    match = _POSITION_RE.fullmatch(clean)
+    if match is None:
         return ROW_VERTICAL_FIELD_UNAVAILABLE, None, source_units
     try:
-        raw = float(numbers[0])
+        raw = float(match.group("value"))
     except ValueError:
         return ROW_VERTICAL_FIELD_UNAVAILABLE, None, source_units
     if not math.isfinite(raw):
