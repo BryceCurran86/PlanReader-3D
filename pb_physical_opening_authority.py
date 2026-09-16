@@ -349,6 +349,15 @@ class PhysicalOpeningAuthority:
                 "SourceObservationAuthority or SourceVisibilityAuthority reader"
             )
 
+    def source_visibility_authority(self) -> Optional[SourceVisibilityAuthority]:
+        """Return the producer-owned visibility reader when this authority is visibility-backed.
+
+        Raw diagnostic mode deliberately returns ``None``. Downstream authorities
+        that require source-visible geometry can therefore fail closed without
+        reaching through this class's private storage.
+        """
+        return self._source_visibility_authority
+
     @staticmethod
     def capabilities() -> dict[str, bool]:
         return {
