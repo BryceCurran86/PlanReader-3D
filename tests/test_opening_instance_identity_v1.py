@@ -8,7 +8,11 @@ from pb_physical_opening_authority import (
     PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
     PhysicalOpeningAuthority,
 )
-from pb_source_observation_authority import ObservationSelector, SourceObservationProducer
+from pb_source_observation_authority import (
+    STALE_REVISION,
+    ObservationSelector,
+    SourceObservationProducer,
+)
 from pb_source_visibility_authority import SourceVisibilityProducer
 from tests.g17_phase2_test_support import make_resolved, selector as raw_selector
 
@@ -216,9 +220,14 @@ def test_identical_geometry_across_different_source_revisions_does_not_self_merg
         next(iter(second_groups.values()))[0],
     )
 
+    # Older revision becomes STALE before producer-owned existence can be
+    # re-proven. Do not invent SCOPE_MISMATCH from caller selector fields;
+    # fail closed on the stronger upstream existence prerequisite.
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.proven_same is False
-    assert IDENTITY_SCOPE_MISMATCH in result.reason_codes
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert IDENTITY_EXISTENCE_REQUIRED in result.reason_codes
+    assert STALE_REVISION in result.reason_codes
 
 
 def test_raw_native_geometry_cannot_establish_instance_identity() -> None:

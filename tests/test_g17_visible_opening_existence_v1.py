@@ -159,7 +159,7 @@ def test_visible_existence_does_not_unlock_downstream_capabilities() -> None:
     assert result.proposition == PHYSICAL_OPENING_EXISTS
     assert physical.capabilities() == {
         "physical_opening_existence": True,
-        "physical_opening_identity": False,
+        "physical_opening_identity": True,
         "opening_universe_complete": False,
         "opening_dimensions": False,
         "host_identity": False,

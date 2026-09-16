@@ -36,7 +36,7 @@ def test_g17_existence_contract_exposes_no_downstream_measurement_authority() ->
 
     assert physical.capabilities() == {
         "physical_opening_existence": True,
-        "physical_opening_identity": False,
+        "physical_opening_identity": True,
         "opening_universe_complete": False,
         "opening_dimensions": False,
         "host_identity": False,

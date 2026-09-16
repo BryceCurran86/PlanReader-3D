@@ -8,10 +8,10 @@ import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_opening_authority import (
-    AUTHORITATIVE_PHYSICAL_OPENING_IDENTITY_UNAVAILABLE,
     AUTHORITATIVE_PHYSICAL_OPENING_SEMANTICS_UNAVAILABLE,
     MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
     PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+    PHYSICAL_OPENING_IDENTITY_EXISTENCE_REQUIRED,
     PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
     PhysicalOpeningAuthority,
 )
@@ -265,7 +265,9 @@ def test_exact_same_source_observation_still_does_not_establish_physical_opening
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
     assert result.proven_same is False
-    assert AUTHORITATIVE_PHYSICAL_OPENING_IDENTITY_UNAVAILABLE in result.reason_codes
+    # Fixture is not producer-owned G17 visible existence; identity stays closed.
+    assert PHYSICAL_OPENING_IDENTITY_EXISTENCE_REQUIRED in result.reason_codes
+    assert AUTHORITATIVE_PHYSICAL_OPENING_SEMANTICS_UNAVAILABLE in result.reason_codes
 
 
 def test_same_tag_text_and_geometry_across_distinct_observations_cannot_prove_same_physical_opening() -> None:
@@ -383,7 +385,7 @@ def test_phase2_does_not_claim_universe_dimensions_host_or_void_authority() -> N
     fields = PhysicalOpeningAuthority.capabilities()
     assert fields == {
         "physical_opening_existence": True,
-        "physical_opening_identity": False,
+        "physical_opening_identity": True,
         "opening_universe_complete": False,
         "opening_dimensions": False,
         "host_identity": False,
