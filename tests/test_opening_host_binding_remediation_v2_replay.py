@@ -1,0 +1,58 @@
+"""Replay-only proof for opening host-binding remediation v2.
+
+This file is not part of the frozen validator or production remediation. It
+uses the merged replay harness to overlay the exact frozen validator onto the
+exact production head and requires all frozen attacks to turn fully green.
+"""
+from pathlib import Path
+
+from tools.validator_replay_harness import (
+    FailureClassification,
+    LaneType,
+    ReplayConfig,
+    run_replay,
+)
+
+
+PRODUCTION_SHA = "56c2ef3cb25e98a7fe93163b5daa300e44c9f44f"
+BASE_SHA = "36a1f49ad92f553102101f8a2bf1d01ee45b2f52"
+VALIDATOR_REF = "gpt2/opening-host-binding-post-completeness-v2"
+VALIDATOR_COMMIT = "4231222348c9d575232097b9c4072ac3a83cfcba"
+VALIDATOR_PATH = "tests/test_opening_host_binding_authority_redteam_v2.py"
+FROZEN_BLOB = "d985d552cb67998d470570353dc0a35461266221"
+
+
+def test_frozen_host_binding_validator_is_green_on_remediation_v2() -> None:
+    report = run_replay(
+        ReplayConfig(
+            lane=LaneType.HOST,
+            repo_path=Path.cwd(),
+            production_sha=PRODUCTION_SHA,
+            base_sha=BASE_SHA,
+            validator_ref=VALIDATOR_REF,
+            validator_path=VALIDATOR_PATH,
+            expected_validator_blob_sha=FROZEN_BLOB,
+        )
+    )
+
+    assert report.validator_commit == VALIDATOR_COMMIT
+    assert report.verdict == FailureClassification.VALIDATOR_GREEN.value
+    assert report.preflight.passed is True
+    assert report.sha_match is True
+    assert report.actual_validator_blob_sha == FROZEN_BLOB
+    assert report.overlay_blob_sha == FROZEN_BLOB
+    assert report.production_file_count == 0
+    assert report.benchmark_touched is False
+    assert report.gold_touched is False
+    assert report.holdout_touched is False
+
+    assert report.pytest_normal.returncode == 0
+    assert report.pytest_normal.passed == 28
+    assert report.pytest_normal.failed == 0
+    assert report.pytest_normal.xfailed == 0
+    assert report.pytest_normal.errors == 0
+
+    assert report.pytest_runxfail.returncode == 0
+    assert report.pytest_runxfail.passed == 28
+    assert report.pytest_runxfail.failed == 0
+    assert report.pytest_runxfail.errors == 0
