@@ -421,7 +421,12 @@ class OpeningDimensionAuthority:
             if record.observation_id in support_ids:
                 continue
             geometry = _line(record)
-            if geometry is None or not _matches_endpoint_set(geometry, jambs, axis):
+            if geometry is None:
+                continue
+            dimension_axis = _unit(*_endpoints(geometry))
+            if dimension_axis is None or abs(_cross(dimension_axis, axis)) > _PARALLEL_TOL:
+                continue
+            if not _matches_endpoint_set(geometry, jambs, axis):
                 continue
             associations = _endpoint_associations(geometry, jambs)
             if associations is None:
