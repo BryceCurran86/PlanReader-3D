@@ -1,5 +1,6 @@
 """Opening Height Validator v1 (Test Scaffold)"""
 from __future__ import annotations
+from pb_physical_opening_authority import PhysicalOpeningAuthority
 
 import dataclasses
 import inspect
@@ -235,19 +236,18 @@ def test_attack_duplicate_matching_schedule_rows() -> None:
     obs_selector = _opening_selector(published, src.authority())
     binding_prod = ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(src)
     bind_result = binding_prod.publish_scope(opening_selector=obs_selector, decision_scope_id="scope-1")
+    physical = PhysicalOpeningAuthority(src.authority())
+    opening_record_id = physical.prove_existence(obs_selector).existence_record.record_id
     height_selector = OpeningHeightSelector(
-        document_id="height-val-doc",
-        revision_id="rev",
-        source_sha256="sha",
-        snapshot_id="snap",
+        document_id=obs_selector.document_id,
+        revision_id=obs_selector.revision_id,
+        source_sha256=obs_selector.source_sha256,
+        snapshot_id=obs_selector.snapshot_id,
         decision_scope_id="scope-1",
-        opening_record_id=obs_selector.observation_id, # mock it
+        opening_record_id=opening_record_id,
     )
     height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
-    
-    # We will force a CONFLICT by replacing opening_record_id with "duplicate_rows" to mock the failure
-    tampered = dataclasses.replace(height_selector, opening_record_id="duplicate_rows")
-    result = height_prod.publish_scope(tampered)
+    result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert "opening_height_duplicate_rows" in result.reason_codes
 
@@ -259,17 +259,18 @@ def test_attack_conflicting_heights() -> None:
     obs_selector = _opening_selector(published, src.authority())
     binding_prod = ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(src)
     bind_result = binding_prod.publish_scope(opening_selector=obs_selector, decision_scope_id="scope-1")
+    physical = PhysicalOpeningAuthority(src.authority())
+    opening_record_id = physical.prove_existence(obs_selector).existence_record.record_id
     height_selector = OpeningHeightSelector(
-        document_id="height-val-doc",
-        revision_id="rev",
-        source_sha256="sha",
-        snapshot_id="snap",
+        document_id=obs_selector.document_id,
+        revision_id=obs_selector.revision_id,
+        source_sha256=obs_selector.source_sha256,
+        snapshot_id=obs_selector.snapshot_id,
         decision_scope_id="scope-1",
-        opening_record_id=obs_selector.observation_id, # mock it
+        opening_record_id=opening_record_id,
     )
     height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
-    tampered = dataclasses.replace(height_selector, opening_record_id="conflicting_heights")
-    result = height_prod.publish_scope(tampered)
+    result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert "opening_height_conflicting_heights" in result.reason_codes
 
@@ -304,10 +305,25 @@ def test_attack_cross_sheet_elevation_assumption_without_registration() -> None:
 
 @pytest.mark.xfail(reason="Production not yet implemented")
 def test_attack_contradiction_monotonicity() -> None:
-    src, binding_prod, height_selector = _setup_authorities()
+    # We will trigger a CONFLICT by supplying conflicting schedule rows
+    payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "2100"), ("W1", "900", "2000")))
+    src = SourceVisibilityProducer(producer_method="height-validator", producer_version="1.0")
+    published = _ingest(src, payload, "height-val-doc")
+    obs_selector = _opening_selector(published, src.authority())
+    binding_prod = ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(src)
+    bind_result = binding_prod.publish_scope(opening_selector=obs_selector, decision_scope_id="scope-1")
+    physical = PhysicalOpeningAuthority(src.authority())
+    opening_record_id = physical.prove_existence(obs_selector).existence_record.record_id
+    height_selector = OpeningHeightSelector(
+        document_id=obs_selector.document_id,
+        revision_id=obs_selector.revision_id,
+        source_sha256=obs_selector.source_sha256,
+        snapshot_id=obs_selector.snapshot_id,
+        decision_scope_id="scope-1",
+        opening_record_id=opening_record_id,
+    )
     height_prod = OpeningHeightProducer.from_authorities(src, binding_prod.authority())
-    tampered = dataclasses.replace(height_selector, opening_record_id="monotonicity")
-    result = height_prod.publish_scope(tampered)
+    result = height_prod.publish_scope(height_selector)
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert "opening_height_monotonicity" in result.reason_codes
 
