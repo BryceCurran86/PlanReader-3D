@@ -215,6 +215,7 @@ def test_attack_duplicate_matching_schedule_rows() -> None:
     obs_selector = _opening_selector(published, src.authority())
     binding_prod = ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(src)
     bind_result = binding_prod.publish_scope(opening_selector=obs_selector, decision_scope_id="scope-1")
+    row_height_prod = ScheduleRowHeightProducer.from_observation_authority(src.authority())
     physical = PhysicalOpeningAuthority(src.authority())
     opening_record_id = physical.prove_existence(obs_selector).existence_record.record_id
     height_selector = OpeningHeightSelector(
@@ -238,6 +239,7 @@ def test_attack_conflicting_heights() -> None:
     obs_selector = _opening_selector(published, src.authority())
     binding_prod = ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(src)
     bind_result = binding_prod.publish_scope(opening_selector=obs_selector, decision_scope_id="scope-1")
+    row_height_prod = ScheduleRowHeightProducer.from_observation_authority(src.authority())
     physical = PhysicalOpeningAuthority(src.authority())
     opening_record_id = physical.prove_existence(obs_selector).existence_record.record_id
     height_selector = OpeningHeightSelector(
@@ -286,6 +288,7 @@ def test_attack_contradiction_monotonicity() -> None:
     obs_selector = _opening_selector(published, src.authority())
     binding_prod = ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(src)
     bind_result = binding_prod.publish_scope(opening_selector=obs_selector, decision_scope_id="scope-1")
+    row_height_prod = ScheduleRowHeightProducer.from_observation_authority(src.authority())
     physical = PhysicalOpeningAuthority(src.authority())
     opening_record_id = physical.prove_existence(obs_selector).existence_record.record_id
     height_selector = OpeningHeightSelector(
