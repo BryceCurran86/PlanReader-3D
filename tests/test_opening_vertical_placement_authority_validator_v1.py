@@ -29,7 +29,6 @@ from tests.test_schedule_opening_instance_binding_authority_v1 import (
     _opening_selector,
 )
 
-
 MODULE_NAME = "pb_opening_vertical_placement_authority"
 HAS_VERTICAL_AUTHORITY = importlib.util.find_spec(MODULE_NAME) is not None
 EXPECTED_RED = pytest.mark.xfail(
@@ -38,7 +37,6 @@ EXPECTED_RED = pytest.mark.xfail(
     reason="opening vertical-placement production authority is intentionally absent",
 )
 SCOPE = "opening-vertical-placement:page-1"
-
 
 _FORBIDDEN_PUBLIC = {
     "z0", "z1", "z0_mm", "z1_mm", "sill", "head", "sill_height",
@@ -109,10 +107,10 @@ def _binding_fixture(payload: bytes | None = None):
 def _row_texts(src: SourceVisibilityProducer, binding) -> tuple[str, ...]:
     record = binding.record
     assert record is not None
-    visibility = src.authority()
+    text_integrity = src.text_integrity_authority()
     texts: list[str] = []
     for observation_id in record.schedule_row_observation_ids:
-        resolved = visibility.resolve_visible(
+        resolved = text_integrity.resolve_text(
             ObservationSelector(
                 document_id=record.document_id,
                 revision_id=record.revision_id,
@@ -122,8 +120,8 @@ def _row_texts(src: SourceVisibilityProducer, binding) -> tuple[str, ...]:
             )
         )
         assert resolved.status is EvidenceResolutionStatus.CORROBORATED
-        assert resolved.observation is not None
-        texts.append(str(resolved.observation.text))
+        assert resolved.trusted_text is not None
+        texts.append(str(resolved.trusted_text))
     return tuple(texts)
 
 
@@ -150,14 +148,12 @@ def test_public_types_are_sealed_selector_only_authorities() -> None:
         "OpeningVerticalPlacementSelector",
     }
     assert required <= set(dir(mod))
-
     row_selector = mod.ScheduleRowVerticalPlacementSelector
     opening_selector = mod.OpeningVerticalPlacementSelector
     assert is_dataclass(row_selector)
     assert is_dataclass(opening_selector)
     assert not ({item.name for item in fields(row_selector)} & _FORBIDDEN_PUBLIC)
     assert not ({item.name for item in fields(opening_selector)} & _FORBIDDEN_PUBLIC)
-
     for callable_obj in (
         mod.ScheduleRowVerticalPlacementProducer.publish_scope,
         mod.OpeningVerticalPlacementProducer.publish_scope,
@@ -212,7 +208,6 @@ def test_explicit_rough_opening_sill_and_head_mm_produce_exact_instance_placemen
     assert row_result.evidence is not None
     assert row_result.evidence.z0_mm == 900.0
     assert row_result.evidence.z1_mm == 3000.0
-
     opening_producer, selector, result = _publish_opening(
         mod, src, binder, binding, row_producer
     )
@@ -221,9 +216,7 @@ def test_explicit_rough_opening_sill_and_head_mm_produce_exact_instance_placemen
     assert result.evidence.opening_record_id == selector.opening_record_id
     assert result.evidence.z0_mm == 900.0
     assert result.evidence.z1_mm == 3000.0
-
-    replay = opening_producer.authority().resolve(selector)
-    assert replay == result
+    assert opening_producer.authority().resolve(selector) == result
 
 
 @pytest.mark.parametrize(
@@ -266,7 +259,12 @@ def test_rough_opening_headings_without_units_do_not_assume_mm() -> None:
 @EXPECTED_RED
 def test_height_only_does_not_imply_sill_zero_or_head_height() -> None:
     mod = _module()
-    payload = _placement_pdf(sill_heading="NOTE", head_heading="NOTE2", sill_value="", head_value="")
+    payload = _placement_pdf(
+        sill_heading="NOTE",
+        head_heading="NOTE2",
+        sill_value="",
+        head_value="",
+    )
     *_prefix, row_result = _publish_row(mod, payload)
     assert row_result.status is EvidenceResolutionStatus.ABSTAINED
     assert row_result.evidence is None
@@ -297,7 +295,6 @@ def test_wrong_opening_lineage_cannot_reuse_valid_placement() -> None:
         mod, src, binder, binding, row_producer
     )
     assert valid.status is EvidenceResolutionStatus.CORROBORATED
-
     tampered = dataclasses.replace(selector, opening_record_id="not-the-bound-opening")
     blocked = opening_producer.publish_scope(tampered)
     assert blocked.status is EvidenceResolutionStatus.ABSTAINED
