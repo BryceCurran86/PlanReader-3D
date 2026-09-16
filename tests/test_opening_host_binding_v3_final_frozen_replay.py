@@ -3,10 +3,12 @@
 DRAFT / REPLAY ONLY / DO NOT MERGE. Frozen validator #372 is consumed unchanged.
 """
 from pathlib import Path
+import subprocess
 
 from tools.validator_replay_harness import LaneType, ReplayConfig, run_replay
 
 
+CURRENT_MAIN_SHA = "e00ec09c9a24f898fdd5fb8e24b0cb5587fb49c9"
 VALIDATOR_BASE_SHA = "76c7882b1c4b28764d1e6a6f467d72bb276c2e01"
 PRODUCTION_SHA = "31bb026e6fb7ca8b267e05f7d3e9479b2c7b5116"
 VALIDATOR_REF = "gpt2/opening-host-binding-authenticated-prerequisite-v3"
@@ -16,6 +18,18 @@ VALIDATOR_BLOB = "c5c55ab81c249cab9cde1b9a2c07fff26b624b7e"
 
 
 def test_frozen_host_binding_v3_accepts_exact_final_production() -> None:
+    ancestry = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", CURRENT_MAIN_SHA, PRODUCTION_SHA],
+        cwd=Path.cwd(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert ancestry.returncode == 0, (
+        "pinned host production must descend from the pinned current main: "
+        f"{ancestry.stderr.strip()}"
+    )
+
     report = run_replay(
         ReplayConfig(
             lane=LaneType.HOST,
