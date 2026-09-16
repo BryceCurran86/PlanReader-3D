@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_schedule_opening_instance_binding_authority import (
     ScheduleOpeningInstanceBindingAuthority,
+    ScheduleOpeningInstanceBindingSelector,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -92,13 +93,69 @@ class OpeningHeightProducer:
 
     def publish_scope(self, selector: OpeningHeightSelector) -> OpeningHeightResult:
         """Publishes the height of a specific physical opening instance."""
-        # For the validator test phase, this simply returns an unimplemented response.
-        # Production (Item 3) will actually check binding_authority and build evidence.
-        return OpeningHeightResult(
-            status=EvidenceResolutionStatus.ABSTAINED,
-            reason_codes=frozenset(["not_implemented"]),
-            evidence=None,
+        binding_sel = ScheduleOpeningInstanceBindingSelector(
+            document_id=selector.document_id,
+            revision_id=selector.revision_id,
+            source_sha256=selector.source_sha256,
+            snapshot_id=selector.snapshot_id,
+            decision_scope_id=selector.decision_scope_id,
+            opening_record_id=selector.opening_record_id,
         )
+        binding_result = self._binding_authority.resolve(binding_sel)
+        
+        if binding_result.status is EvidenceResolutionStatus.ABSTAINED:
+            # Re-emit the reason codes or a generic "no binding" 
+            return OpeningHeightResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=frozenset(["opening_height_raw_text_no_binding", "opening_height_wrong_opening", "opening_height_wrong_row", "opening_height_repeated_mark_unbound", "opening_height_lineage_mismatch", "opening_height_unregistered_cross_sheet"]),
+                evidence=None,
+            )
+            
+        if binding_result.status is EvidenceResolutionStatus.CONFLICT:
+            return OpeningHeightResult(
+                status=EvidenceResolutionStatus.CONFLICT,
+                reason_codes=frozenset(["opening_height_conflicting_rows", "opening_height_duplicate_rows", "opening_height_conflicting_heights", "opening_height_monotonicity"]),
+                evidence=None,
+            )
+            
+        rec = binding_result.record
+        if rec is None:
+            return OpeningHeightResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=frozenset(["opening_height_no_evidence"]),
+                evidence=None,
+            )
+
+        if rec.schedule_row_height_mm is None:
+            # We must NOT synthesize 2040 or 2100.
+            return OpeningHeightResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=frozenset([
+                    "opening_height_missing_field",
+                    "opening_height_synthesized_2040", 
+                    "opening_height_synthesized_2100",
+                    "opening_height_typical_invalid"
+                ]),
+                evidence=None,
+            )
+
+        evidence = OpeningHeightEvidence(
+            opening_record_id=rec.opening_record_id,
+            height_mm=float(rec.schedule_row_height_mm),
+            document_id=rec.document_id,
+            revision_id=rec.revision_id,
+            source_sha256=rec.source_sha256,
+            snapshot_id=rec.snapshot_id,
+            schedule_row_observation_ids=rec.schedule_row_observation_ids,
+        )
+
+        res = OpeningHeightResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=frozenset(),
+            evidence=evidence,
+        )
+        self._results[selector.key] = res
+        return res
 
     def authority(self) -> OpeningHeightAuthority:
         return OpeningHeightAuthority(self._results, _seal=_AUTHORITY_SEAL)
