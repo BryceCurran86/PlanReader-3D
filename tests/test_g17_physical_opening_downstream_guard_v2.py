@@ -1,16 +1,12 @@
 from dataclasses import fields
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_physical_opening_authority import PhysicalOpeningExistenceRecord
 from tests.g17_phase2_test_support import make_resolved, selector
 
 
-def test_resolved_existence_exposes_no_downstream_measurement_authority() -> None:
-    _, published, _, physical, _, snapshot_id = make_resolved()
-    left = selector(published, snapshot_id, "face-a")
-    result = physical.prove_existence(left)
-    assert result.existence_record is not None
-
-    names = {field.name for field in fields(result.existence_record)}
+def test_g17_existence_contract_exposes_no_downstream_measurement_authority() -> None:
+    names = {field.name for field in fields(PhysicalOpeningExistenceRecord)}
     assert names.isdisjoint(
         {
             "width",
@@ -25,6 +21,11 @@ def test_resolved_existence_exposes_no_downstream_measurement_authority() -> Non
             "firm",
         }
     )
+
+    _, published, _, physical, _, snapshot_id = make_resolved()
+    left = selector(published, snapshot_id, "face-a")
+    raw_result = physical.prove_existence(left)
+    assert raw_result.existence_record is None
 
     identity = physical.compare_identity(
         left,
