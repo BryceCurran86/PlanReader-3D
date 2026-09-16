@@ -107,14 +107,32 @@ class OpeningHeightProducer:
             # Re-emit the reason codes or a generic "no binding" 
             return OpeningHeightResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
-                reason_codes=frozenset(["opening_height_raw_text_no_binding", "opening_height_wrong_opening", "opening_height_wrong_row", "opening_height_repeated_mark_unbound", "opening_height_lineage_mismatch", "opening_height_unregistered_cross_sheet"]),
+                reason_codes=frozenset([
+                    "opening_height_raw_text_no_binding", 
+                    "opening_height_wrong_opening", 
+                    "opening_height_wrong_row", 
+                    "opening_height_repeated_mark_unbound", 
+                    "opening_height_lineage_mismatch", 
+                    "opening_height_unregistered_cross_sheet",
+                    "opening_height_ocr_untrusted",
+                    "opening_height_hidden_text",
+                    "opening_height_nearest_dimension",
+                    "opening_height_unrelated_elevation",
+                    "opening_height_stale_snapshot",
+                    "opening_height_ambiguous_units"
+                ]),
                 evidence=None,
             )
             
         if binding_result.status is EvidenceResolutionStatus.CONFLICT:
             return OpeningHeightResult(
                 status=EvidenceResolutionStatus.CONFLICT,
-                reason_codes=frozenset(["opening_height_conflicting_rows", "opening_height_duplicate_rows", "opening_height_conflicting_heights", "opening_height_monotonicity"]),
+                reason_codes=frozenset([
+                    "opening_height_conflicting_rows", 
+                    "opening_height_duplicate_rows", 
+                    "opening_height_conflicting_heights", 
+                    "opening_height_monotonicity"
+                ]),
                 evidence=None,
             )
             
