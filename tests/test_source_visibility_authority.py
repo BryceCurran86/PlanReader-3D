@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fitz
+import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_observation_authority import (
@@ -164,7 +165,19 @@ def test_proven_no_active_clip_is_the_only_phase1_positive_state() -> None:
     assert decision.reason_codes == (VISIBILITY_PROVEN_NO_ACTIVE_CLIP,)
 
 
-def test_visible_kind_alone_cannot_self_certify_without_visibility_receipt() -> None:
+def test_visibility_authority_cannot_be_constructed_from_caller_receipts() -> None:
+    generic = SourceObservationProducer(
+        producer_method="generic-source-test",
+        producer_version="1.0",
+    )
+    with pytest.raises(TypeError):
+        SourceVisibilityAuthority(
+            generic.authority(),
+            {("forged-snapshot", "forged-visible"): "forged-parent"},
+        )
+
+
+def test_visible_kind_alone_cannot_self_certify_without_producer_receipt() -> None:
     payload = _rectangle_pdf_bytes()
     generic = SourceObservationProducer(
         producer_method="generic-source-test",
@@ -206,8 +219,11 @@ def test_visible_kind_alone_cannot_self_certify_without_visibility_receipt() -> 
         observation_id="forged-visible",
     )
 
-    visibility = SourceVisibilityAuthority(generic.authority(), {})
-    result = visibility.resolve_visible(
+    legitimate = SourceVisibilityProducer(
+        producer_method="legitimate-visibility",
+        producer_version="1.0",
+    ).authority()
+    result = legitimate.resolve_visible(
         ObservationSelector(
             document_id=base.revision.document_id,
             revision_id=base.revision.revision_id,
