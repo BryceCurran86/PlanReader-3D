@@ -808,16 +808,19 @@ def _normalize_role_candidates(
     equivalence: PhysicalWallEquivalenceResolution,
     axis_tol: float,
 ) -> tuple[EvidenceResolutionStatus, tuple[_RoleCandidate, ...], tuple[str, ...]]:
-    """Collapse only upstream-proven SAME alternatives for one host role.
+    """Normalize alternatives competing for one geometric host role.
 
-    Geometry is used only to identify representations competing for the same
-    left/right face role. It never decides physical sameness. Every competing
-    pair is taken from the producer-owned equivalence result. AMBIGUOUS blocks;
-    SAME collapses through the upstream equivalence group/representative; and
-    DISTINCT remains independently represented.
+    A producer-owned SAME group may legitimately span *different* structural
+    roles (for example the two authenticated faces of one physical wall band).
+    The global group therefore travels with each role member; it is not a
+    command to delete every non-global representative from host geometry.
+
+    Within one offset cluster, pairwise upstream equivalence still controls
+    authority: AMBIGUOUS blocks, DISTINCT stays separate, and only members of
+    the same positively proven SAME group may be reduced to one deterministic
+    local representation. Geometry never establishes sameness by itself.
     """
     pair_lookup = _pair_lookup(equivalence)
-    representatives = set(equivalence.representative_wall_ids)
     normalized: list[_RoleCandidate] = []
 
     for cluster in _clusters_by_offset(candidates, axis_tol):
@@ -845,32 +848,15 @@ def _normalize_role_candidates(
             by_group.setdefault(group, []).append((offset, record))
 
         for group, members in sorted(by_group.items()):
-            if len(group) == 1:
-                offset, record = members[0]
-                normalized.append(
-                    _RoleCandidate(offset=offset, record=record, candidate_group=group)
-                )
-                continue
-
-            upstream_reps = [wall_id for wall_id in group if wall_id in representatives]
-            if len(upstream_reps) != 1:
-                return (
-                    EvidenceResolutionStatus.ABSTAINED,
-                    (),
-                    (HOST_EQUIVALENCE_UNAVAILABLE,),
-                )
-            rep_id = upstream_reps[0]
-            representative = next(
-                ((offset, record) for offset, record in members if record.wall_candidate_id == rep_id),
-                None,
-            )
-            if representative is None:
-                return (
-                    EvidenceResolutionStatus.ABSTAINED,
-                    (),
-                    (HOST_EQUIVALENCE_UNAVAILABLE,),
-                )
-            offset, record = representative
+            # If a SAME group spans other structural roles, only the member(s)
+            # present in this local role cluster are eligible for its geometry.
+            # When several proven-SAME representations compete in the same role,
+            # choose a deterministic local representation only after that SAME
+            # proof exists; this is not an identity heuristic.
+            offset, record = sorted(
+                members,
+                key=lambda item: (item[0], item[1].wall_candidate_id),
+            )[0]
             normalized.append(
                 _RoleCandidate(offset=offset, record=record, candidate_group=group)
             )
