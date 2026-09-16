@@ -151,6 +151,22 @@ def test_explicit_rough_opening_mm_placement_resolves_and_replays() -> None:
     assert producer.authority().resolve(opening_selector) == result
 
 
+def test_spaced_rough_opening_headings_resolve_from_authenticated_words() -> None:
+    _src, binder, _binding, row_producer, row_selector, opening_selector = _fixture(
+        _pdf(
+            sill_heading="ROUGH OPENING SILL-MM",
+            head_heading="ROUGH OPENING HEAD-MM",
+        )
+    )
+    row_result = row_producer.publish_scope(row_selector)
+    assert row_result.status is EvidenceResolutionStatus.CORROBORATED
+    assert row_result.evidence is not None
+    assert row_result.evidence.z0_mm == 900.0
+    assert row_result.evidence.z1_mm == 3000.0
+    producer = _opening_producer(binder, row_producer)
+    assert producer.publish_scope(opening_selector).status is EvidenceResolutionStatus.CORROBORATED
+
+
 def test_explicit_metres_normalize_only_when_source_states_metres() -> None:
     _src, binder, _binding, row_producer, row_selector, opening_selector = _fixture(
         _pdf(
@@ -176,6 +192,7 @@ def test_explicit_metres_normalize_only_when_source_states_metres() -> None:
         ("FRAME-SILL-MM", "FRAME-HEAD-MM"),
         ("LEAF-SILL-MM", "LEAF-HEAD-MM"),
         ("CLEAR-OPENING-SILL-MM", "CLEAR-OPENING-HEAD-MM"),
+        ("CLEAR OPENING SILL-MM", "CLEAR OPENING HEAD-MM"),
     ],
 )
 def test_non_structural_vertical_semantics_abstain(
