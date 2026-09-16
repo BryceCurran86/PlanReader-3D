@@ -2,9 +2,10 @@
 
 TEST-ONLY / EXPECTED-RED / SELF-AUTHORED / NOT FROZEN / DO NOT MERGE.
 
-The future authority may expose authenticated *source-space* wall-local geometry
-only after both G17 physical-opening existence and merged #381 host binding are
-re-proved.  It does not establish physical units.
+The future authority may expose authenticated *source-space* shared host-wall
+geometry only after G17 physical-opening existence, merged #381 host binding,
+and the complete producer-owned physical-wall candidate scope are re-proved.
+It does not establish physical units.
 """
 from __future__ import annotations
 
@@ -138,11 +139,19 @@ def _fixture(payload: bytes | None = None):
         opening_identity_id=binding.record.opening_identity_id,
     )
     assert binding_producer.authority().resolve(binding_selector) == binding
-    return physical, opening_selector, opening_record, binding_producer, binding_selector, binding
+    return (
+        physical,
+        wall_authority,
+        opening_selector,
+        opening_record,
+        binding_producer,
+        binding_selector,
+        binding,
+    )
 
 
 def test_merged_host_binding_real_source_fixture_is_positive() -> None:
-    physical, _selector, opening, _producer, _binding_selector, binding = _fixture()
+    physical, _walls, _selector, opening, _producer, _binding_selector, binding = _fixture()
     geometry = host._opening_geometry(physical, opening)
     assert geometry is not None
     assert abs(geometry.length - 40.0) <= 1e-6
@@ -169,6 +178,7 @@ def test_future_host_frame_api_is_sealed_selector_only() -> None:
     assert is_dataclass(mod.OpeningHostFrameSelector)
     assert not ({field.name for field in fields(mod.OpeningHostFrameSelector)} & _FORBIDDEN_PUBLIC)
     for callable_obj in (
+        mod.OpeningHostFrameProducer.from_authorities,
         mod.OpeningHostFrameProducer.publish,
         mod.OpeningHostFrameAuthority.resolve,
     ):
@@ -176,12 +186,13 @@ def test_future_host_frame_api_is_sealed_selector_only() -> None:
 
 
 @EXPECTED_RED
-def test_real_source_opening_and_host_publish_source_space_frame() -> None:
+def test_real_source_opening_and_host_publish_shared_source_space_frame() -> None:
     mod = importlib.import_module(MODULE_NAME)
-    physical, opening_selector, opening, binding_producer, binding_selector, binding = _fixture()
+    physical, walls, opening_selector, opening, binding_producer, binding_selector, binding = _fixture()
     producer = mod.OpeningHostFrameProducer.from_authorities(
         physical_opening_authority=physical,
         host_binding_authority=binding_producer.authority(),
+        physical_wall_candidate_authority=walls,
     )
     result = producer.publish(
         opening_selector=opening_selector,
@@ -194,21 +205,32 @@ def test_real_source_opening_and_host_publish_source_space_frame() -> None:
     assert evidence.host_binding_record_id == binding.record.record_id
     assert evidence.host_wall_id == binding.record.host_wall_id
     assert evidence.coordinate_unit == "pdf_point"
-    assert abs(evidence.u0_pt - 0.0) <= 1e-9
-    assert abs(evidence.u1_pt - 40.0) <= 1e-6
+    assert evidence.origin_pt == (20.0, 90.0)
+    assert evidence.axis_unit == (1.0, 0.0)
+    assert abs(evidence.u0_pt - 100.0) <= 1e-6
+    assert abs(evidence.u1_pt - 140.0) <= 1e-6
     assert abs(evidence.wall_thickness_pt - 20.0) <= 1e-6
     assert producer.authority().resolve(evidence.selector) == result
 
 
 @EXPECTED_RED
-def test_translation_changes_origin_only_not_local_span() -> None:
+def test_translation_changes_host_origin_only_not_shared_wall_coordinates() -> None:
     mod = importlib.import_module(MODULE_NAME)
     results = []
     for payload in (_pdf(), _pdf(dx=50.0, dy=40.0)):
-        physical, opening_selector, _opening, binding_producer, binding_selector, _binding = _fixture(payload)
+        (
+            physical,
+            walls,
+            opening_selector,
+            _opening,
+            binding_producer,
+            binding_selector,
+            _binding,
+        ) = _fixture(payload)
         producer = mod.OpeningHostFrameProducer.from_authorities(
             physical_opening_authority=physical,
             host_binding_authority=binding_producer.authority(),
+            physical_wall_candidate_authority=walls,
         )
         result = producer.publish(
             opening_selector=opening_selector,
@@ -218,21 +240,31 @@ def test_translation_changes_origin_only_not_local_span() -> None:
         results.append(result.evidence)
     first, translated = results
     assert first is not None and translated is not None
-    assert first.u0_pt == translated.u0_pt == 0.0
+    assert first.origin_pt == (20.0, 90.0)
+    assert translated.origin_pt == (70.0, 130.0)
+    assert first.u0_pt == translated.u0_pt == 100.0
     assert abs(first.u1_pt - translated.u1_pt) <= 1e-6
     assert abs(first.wall_thickness_pt - translated.wall_thickness_pt) <= 1e-6
-    assert first.origin_pt != translated.origin_pt
 
 
 @EXPECTED_RED
-def test_reversing_all_source_segment_directions_does_not_reverse_local_frame() -> None:
+def test_reversing_all_source_segment_directions_does_not_reverse_shared_frame() -> None:
     mod = importlib.import_module(MODULE_NAME)
     frames = []
     for payload in (_pdf(), _pdf(reverse=True)):
-        physical, opening_selector, _opening, binding_producer, binding_selector, _binding = _fixture(payload)
+        (
+            physical,
+            walls,
+            opening_selector,
+            _opening,
+            binding_producer,
+            binding_selector,
+            _binding,
+        ) = _fixture(payload)
         producer = mod.OpeningHostFrameProducer.from_authorities(
             physical_opening_authority=physical,
             host_binding_authority=binding_producer.authority(),
+            physical_wall_candidate_authority=walls,
         )
         result = producer.publish(
             opening_selector=opening_selector,
@@ -243,17 +275,28 @@ def test_reversing_all_source_segment_directions_does_not_reverse_local_frame() 
     first, reversed_frame = frames
     assert first is not None and reversed_frame is not None
     assert first.axis_unit == reversed_frame.axis_unit
+    assert first.normal_unit == reversed_frame.normal_unit
     assert first.origin_pt == reversed_frame.origin_pt
+    assert first.u0_pt == reversed_frame.u0_pt
     assert abs(first.u1_pt - reversed_frame.u1_pt) <= 1e-6
 
 
 @EXPECTED_RED
 def test_cross_wired_host_binding_selector_fails_closed() -> None:
     mod = importlib.import_module(MODULE_NAME)
-    physical, opening_selector, _opening, binding_producer, binding_selector, _binding = _fixture()
+    (
+        physical,
+        walls,
+        opening_selector,
+        _opening,
+        binding_producer,
+        binding_selector,
+        _binding,
+    ) = _fixture()
     producer = mod.OpeningHostFrameProducer.from_authorities(
         physical_opening_authority=physical,
         host_binding_authority=binding_producer.authority(),
+        physical_wall_candidate_authority=walls,
     )
     wrong = dataclasses.replace(binding_selector, opening_identity_id="different-opening")
     result = producer.publish(
