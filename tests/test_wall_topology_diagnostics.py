@@ -279,6 +279,7 @@ class TestDeterminism:
             opening_hosts=snapshot.opening_hosts,
             opening_host_evaluated=snapshot.opening_host_evaluated,
             reconciliation=snapshot.reconciliation,
+            geometry_source=snapshot.geometry_source,
         )
         assert report_to_canonical_json(diagnose_wall_topology(shuffled)) == baseline
 

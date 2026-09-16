@@ -1,9 +1,11 @@
-"""C15 Phase C remediation: producer-owned topology index, not caller rooms.
+"""C15 Phase C remediation: authenticated topology only; caller segments BLOCKED.
 
-Gold-free. Proves caller-built proofs, free ``RoomCandidate`` bodies, and
-unsealed / mutated ``TopologySnapshot`` records cannot establish
-ceiling-finish ownership. Binding requires resolver-minted proofs from an
-``OwnedTopologyRoomIndex`` sealed from collector-produced topology.
+Gold-free. Proves:
+- caller-built proofs / RoomCandidate bodies cannot establish ownership
+- diagnostic ``collect_topology_from_segments`` (caller-supplied segments) is
+  explicitly non-authoritative for C15 even when collector-sealed
+- without an authenticated/source-owned geometry seam listed in
+  ``C15_ROOM_INDEX_GEOMETRY_SOURCES``, binding stays fail-closed (BLOCKED)
 """
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ import pytest
 from pb_ceiling_lining_finish_evidence import collect_unscoped_ceiling_finish_candidates
 from pb_ceiling_lining_quantity import build_ceiling_lining_quantity
 from pb_ceiling_lining_scope_binder import (
+    C15_ROOM_INDEX_GEOMETRY_SOURCES,
     CeilingFinishScopeProof,
     OwnedTopologyRoomIndex,
     bind_unscoped_finish_candidates_to_room,
@@ -43,6 +46,8 @@ from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
 from pb_provider_gold_isolation import assert_provider_gold_free
 from pb_wall_room_topology_contracts import RoomCandidate
 from pb_wall_topology_diagnostics import (
+    GEOMETRY_SOURCE_CALLER_SUPPLIED_SEGMENTS,
+    GEOMETRY_SOURCE_PAGE_NATIVE_EXTRACT,
     TopologySnapshot,
     collect_topology_from_segments,
 )
@@ -132,7 +137,7 @@ def _rectangle(origin=(0.0, 0.0), width=100.0, height=100.0, prefix="r"):
     ]
 
 
-def _sealed_snapshot(segments) -> TopologySnapshot:
+def _caller_segment_snapshot(segments=_rectangle()) -> TopologySnapshot:
     snapshot = collect_topology_from_segments(
         segments,
         document_id=DOC_ID,
@@ -143,24 +148,13 @@ def _sealed_snapshot(segments) -> TopologySnapshot:
         bind_room_labels=False,
     )
     assert snapshot.is_collector_produced is True
+    assert snapshot.geometry_source == GEOMETRY_SOURCE_CALLER_SUPPLIED_SEGMENTS
     return snapshot
-
-
-def _owned_index(snapshot: TopologySnapshot) -> OwnedTopologyRoomIndex:
-    index = build_owned_topology_room_index(snapshot=snapshot, context=_context())
-    assert index is not None
-    assert index.is_producer_owned is True
-    return index
 
 
 def _synthetic_room(
     room_ref: str,
     polygon_pdf_pts: tuple[tuple[float, float], ...],
-    *,
-    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE,
-    source_page: int = 1,
-    document_id: str = DOC_ID,
-    viewport_id: str = VIEWPORT_ID,
 ) -> RoomCandidate:
     return RoomCandidate(
         room_ref=room_ref,
@@ -172,14 +166,14 @@ def _synthetic_room(
         perimeter_m=None,
         geometry_confidence=0.9,
         evidence=(f"ev-room-{room_ref}",),
-        source_page=source_page,
+        source_page=1,
         drawing_number="",
         scale_source="topology",
         calibration_confidence=0.0,
         has_voids=False,
-        document_id=document_id,
-        viewport_id=viewport_id,
-        status=status,
+        document_id=DOC_ID,
+        viewport_id=VIEWPORT_ID,
+        status=EvidenceResolutionStatus.CANDIDATE,
     )
 
 
@@ -234,7 +228,39 @@ def test_collection_is_unscoped_and_preserves_ownership() -> None:
     assert atom.bbox == (100.0, 100.0, 220.0, 120.0)
 
 
-def test_adversarial_same_note_blocked_without_producer_topology() -> None:
+def test_c15_geometry_sources_exclude_caller_segments_until_auth_seam() -> None:
+    assert GEOMETRY_SOURCE_CALLER_SUPPLIED_SEGMENTS not in C15_ROOM_INDEX_GEOMETRY_SOURCES
+    # Fail closed until an authenticated document/source-bound seam is wired.
+    assert C15_ROOM_INDEX_GEOMETRY_SOURCES == frozenset()
+
+
+def test_caller_segment_collector_snapshot_cannot_mint_room_index() -> None:
+    snapshot = _caller_segment_snapshot()
+    assert snapshot.is_collector_produced is True
+    assert len(snapshot.rooms) >= 1
+    assert build_owned_topology_room_index(snapshot=snapshot, context=_context()) is None
+
+
+def test_page_native_tagged_snapshot_still_blocked_without_eligible_source() -> None:
+    """Page-native tag alone is not enough until C15 lists that source."""
+    snapshot = collect_topology_from_segments(
+        _rectangle(),
+        document_id=DOC_ID,
+        page_id=PAGE_ID,
+        page_number=1,
+        viewport_id=VIEWPORT_ID,
+        viewport_authority="resolved_floor_plan",
+        evaluate_opening_hosts=False,
+        bind_room_labels=False,
+        geometry_source=GEOMETRY_SOURCE_PAGE_NATIVE_EXTRACT,
+    )
+    assert snapshot.geometry_source == GEOMETRY_SOURCE_PAGE_NATIVE_EXTRACT
+    assert snapshot.is_collector_produced is True
+    # Eligible set empty → still fail closed (no trust shortcut).
+    assert build_owned_topology_room_index(snapshot=snapshot, context=_context()) is None
+
+
+def test_adversarial_same_note_blocked_without_authenticated_topology() -> None:
     candidates = _unscoped_candidates(
         text_geometry=({"raw_text": PAGE_NOTE, "bbox": (40.0, 40.0, 80.0, 60.0)},)
     )
@@ -248,7 +274,6 @@ def test_adversarial_same_note_blocked_without_producer_topology() -> None:
     )
     assert proofs == ()
 
-    # No producer-owned index: cannot bind even with a queried room_ref.
     forged_index = OwnedTopologyRoomIndex(
         index_id="forged-index",
         document_id=DOC_ID,
@@ -258,6 +283,7 @@ def test_adversarial_same_note_blocked_without_producer_topology() -> None:
         page_no=1,
         viewport_id=VIEWPORT_ID,
         topology_snapshot_fingerprint="forged",
+        geometry_source=GEOMETRY_SOURCE_CALLER_SUPPLIED_SEGMENTS,
         _rooms_by_ref={},
     )
     assert forged_index.is_producer_owned is False
@@ -304,15 +330,22 @@ def test_caller_constructed_proof_is_rejected() -> None:
     candidates = _unscoped_candidates(
         text_geometry=({"raw_text": PAGE_NOTE, "bbox": (40.0, 40.0, 80.0, 60.0)},)
     )
-    snapshot = _sealed_snapshot(_rectangle())
-    room_index = _owned_index(snapshot)
-    room_ref = room_index.rooms()[0].room_ref
-    viewport = _viewport()
-    doc = _document(*(atom.evidence_id for atom in candidates))
+    forged_index = OwnedTopologyRoomIndex(
+        index_id="forged-index",
+        document_id=DOC_ID,
+        source_sha256=SOURCE_SHA,
+        revision_id=REVISION_ID,
+        page_id=PAGE_ID,
+        page_no=1,
+        viewport_id=VIEWPORT_ID,
+        topology_snapshot_fingerprint="forged",
+        geometry_source="page_native_extract",
+        _rooms_by_ref={},
+    )
     forged = CeilingFinishScopeProof(
         proof_id="forged",
         finish_evidence_id=candidates[0].evidence_id,
-        room_entity_id=room_ref,
+        room_entity_id="room-A",
         proof_kind="owned_scope_link_atom",
         document_id=DOC_ID,
         source_sha256=SOURCE_SHA,
@@ -320,23 +353,22 @@ def test_caller_constructed_proof_is_rejected() -> None:
         page_id=PAGE_ID,
         page_no=1,
         viewport_id=VIEWPORT_ID,
-        topology_index_id=room_index.index_id,
+        topology_index_id=forged_index.index_id,
         proof_evidence_ids=("link:forged", candidates[0].evidence_id),
     )
     assert forged.is_resolver_minted is False
     scoped = bind_unscoped_finish_candidates_to_room(
         candidates=candidates,
-        queried_room_ref=room_ref,
+        queried_room_ref="room-A",
         proofs=(forged,),
-        room_index=room_index,
-        document=doc,
-        viewport=viewport,
+        room_index=forged_index,
+        document=_document(*(atom.evidence_id for atom in candidates)),
+        viewport=_viewport(),
     )
     assert scoped == ()
 
 
 def test_caller_constructed_room_candidate_cannot_mint_index() -> None:
-    """Synthetic RoomCandidate bodies are not producer-owned topology."""
     synthetic = _synthetic_room(
         "caller-room",
         ((0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)),
@@ -348,13 +380,12 @@ def test_caller_constructed_room_candidate_cannot_mint_index() -> None:
         viewport_id=VIEWPORT_ID,
         viewport_authority="caller_supplied",
         rooms=(synthetic,),
+        geometry_source=GEOMETRY_SOURCE_CALLER_SUPPLIED_SEGMENTS,
     )
     assert free_snapshot.is_collector_produced is False
     assert build_owned_topology_room_index(snapshot=free_snapshot, context=_context()) is None
 
-    # Even replacing rooms onto a sealed snapshot invalidates the seal.
-    sealed = _sealed_snapshot(_rectangle())
-    assert sealed.is_collector_produced is True
+    sealed = _caller_segment_snapshot()
     mutated = replace(sealed, rooms=(synthetic,))
     assert mutated.is_collector_produced is False
     assert build_owned_topology_room_index(snapshot=mutated, context=_context()) is None
@@ -382,79 +413,9 @@ def test_provider_inputs_reject_rooms_kwarg() -> None:
         )
 
 
-def test_owned_topology_binds_only_owning_room() -> None:
-    # Two disjoint rooms; finish bbox center sits only in room A.
-    snapshot = _sealed_snapshot(
-        _rectangle((0.0, 0.0), 100.0, 100.0, "a")
-        + _rectangle((200.0, 0.0), 100.0, 100.0, "b")
-    )
-    room_index = _owned_index(snapshot)
-    rooms = room_index.rooms()
-    assert len(rooms) == 2
-    room_a = next(r for r in rooms if any(pt[0] < 150 for pt in r.polygon_pdf_pts))
-    room_b = next(r for r in rooms if r.room_ref != room_a.room_ref)
-
-    candidates = _unscoped_candidates(
-        text_geometry=({"raw_text": PAGE_NOTE, "bbox": (40.0, 40.0, 80.0, 60.0)},)
-    )
-    viewport = _viewport()
-    doc = _document(*(atom.evidence_id for atom in candidates))
-    proofs = resolve_ceiling_finish_scope_proofs(
-        candidates=candidates,
-        room_index=room_index,
-        document=doc,
-        viewport=viewport,
-    )
-    assert len(proofs) == 1
-    assert proofs[0].is_resolver_minted is True
-    assert proofs[0].room_entity_id == room_a.room_ref
-    assert proofs[0].topology_index_id == room_index.index_id
-    assert proofs[0].document_id == DOC_ID
-    assert proofs[0].source_sha256 == SOURCE_SHA
-    assert proofs[0].revision_id == REVISION_ID
-    assert proofs[0].viewport_id == VIEWPORT_ID
-
-    scoped_a = bind_unscoped_finish_candidates_to_room(
-        candidates=candidates,
-        queried_room_ref=room_a.room_ref,
-        proofs=proofs,
-        room_index=room_index,
-        document=doc,
-        viewport=viewport,
-    )
-    scoped_b = bind_unscoped_finish_candidates_to_room(
-        candidates=candidates,
-        queried_room_ref=room_b.room_ref,
-        proofs=proofs,
-        room_index=room_index,
-        document=doc,
-        viewport=viewport,
-    )
-    assert len(scoped_a) == 1
-    assert scoped_a[0].metadata["scope_entity_id"] == room_a.room_ref
-    assert scoped_a[0].metadata["topology_index_id"] == room_index.index_id
-    assert scoped_b == ()
-
-
-def test_finish_outside_all_owned_rooms_yields_no_proof() -> None:
-    snapshot = _sealed_snapshot(_rectangle((0.0, 0.0), 100.0, 100.0, "a"))
-    room_index = _owned_index(snapshot)
-    candidates = _unscoped_candidates(
-        text_geometry=({"raw_text": PAGE_NOTE, "bbox": (400.0, 400.0, 440.0, 420.0)},)
-    )
-    proofs = resolve_ceiling_finish_scope_proofs(
-        candidates=candidates,
-        room_index=room_index,
-        document=_document(*(atom.evidence_id for atom in candidates)),
-        viewport=_viewport(),
-    )
-    assert proofs == ()
-
-
-def test_provider_positive_path_via_owned_topology() -> None:
-    snapshot = _sealed_snapshot(_rectangle((0.0, 0.0), 100.0, 100.0, "a"))
-    room_index = _owned_index(snapshot)
-    room_ref = room_index.rooms()[0].room_ref
+def test_provider_blocks_on_caller_segment_topology_snapshot() -> None:
+    snapshot = _caller_segment_snapshot()
+    room_ref = snapshot.rooms[0].room_ref if snapshot.rooms else "room-A"
     candidates = _unscoped_candidates(
         text_geometry=({"raw_text": PAGE_NOTE, "bbox": (40.0, 40.0, 80.0, 60.0)},)
     )
@@ -470,15 +431,13 @@ def test_provider_positive_path_via_owned_topology() -> None:
             topology_snapshot=snapshot,
         )
     )
-    context = _context()
-    result = provider.extract(context)
-    assert_provider_result_binding(result, provider.descriptor(), context)
+    result = provider.extract(_context())
+    assert_provider_result_binding(result, provider.descriptor(), _context())
     assert len(result.quantities) == 1
     qty = result.quantities[0]
-    assert qty.abstained is False
-    assert qty.value == area.value
-    assert qty.status == AuthorityStatus.PROVISIONAL.value
-    assert qty.metadata["shadow_only"] is True
+    assert qty.abstained is True
+    assert qty.status == AuthorityStatus.BLOCKED.value
+    assert "missing_explicit_ceiling_finish" in qty.blocking_reasons
 
 
 def test_provider_blocks_without_topology_snapshot() -> None:
@@ -510,40 +469,6 @@ def test_provider_blocks_without_topology_snapshot() -> None:
         assert qty.abstained is True
         assert qty.status == AuthorityStatus.BLOCKED.value
         assert "missing_explicit_ceiling_finish" in qty.blocking_reasons
-
-
-def test_provider_blocks_on_unsealed_snapshot_with_synthetic_room() -> None:
-    synthetic = _synthetic_room(
-        "caller-room",
-        ((0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)),
-    )
-    free_snapshot = TopologySnapshot(
-        document_id=DOC_ID,
-        page_id=PAGE_ID,
-        page_number=1,
-        viewport_id=VIEWPORT_ID,
-        viewport_authority="caller_supplied",
-        rooms=(synthetic,),
-    )
-    candidates = _unscoped_candidates(
-        text_geometry=({"raw_text": PAGE_NOTE, "bbox": (40.0, 40.0, 80.0, 60.0)},)
-    )
-    area = _area(scope_id=synthetic.room_ref)
-    doc = _document(*(area.evidence_ids + (candidates[0].evidence_id,)))
-    provider = CeilingLiningShadowProvider(
-        inputs=CeilingLiningShadowInputs(
-            document=doc,
-            viewport=_viewport(),
-            page_no=1,
-            authoritative_area_quantities=(area,),
-            unscoped_finish_candidates=candidates,
-            topology_snapshot=free_snapshot,
-        )
-    )
-    result = provider.extract(_context())
-    assert len(result.quantities) == 1
-    assert result.quantities[0].abstained is True
-    assert "missing_explicit_ceiling_finish" in result.quantities[0].blocking_reasons
 
 
 def test_provider_inputs_reject_scope_proofs_kwarg() -> None:

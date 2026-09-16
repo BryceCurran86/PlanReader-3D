@@ -3,10 +3,13 @@
 Rebuild of the parked #316 wiring with mandatory authority corrections:
 
 1. Finish collection is unscoped (``collect_unscoped_ceiling_finish_candidates``).
-2. Room ownership is resolved only from a collector-produced
-   ``TopologySnapshot`` sealed into ``OwnedTopologyRoomIndex`` — never from
-   caller-supplied ``RoomCandidate`` bodies, polygon maps, or free-form proofs.
-3. Final contract is ``ProviderResult`` via the standard migration envelope.
+2. Room ownership resolves only from authenticated/source-owned topology via
+   ``build_owned_topology_room_index`` — never from caller ``RoomCandidate``
+   bodies, free proofs, or diagnostic caller-segment collector snapshots.
+3. Until that authenticated geometry seam is wired into
+   ``C15_ROOM_INDEX_GEOMETRY_SOURCES``, scope binding stays fail-closed
+   (quantities BLOCKED for missing finish ownership).
+4. Final contract is ``ProviderResult`` via the standard migration envelope.
 
 Shadow-only: no live ExtractedPrediction, no commercial/JobHub publication,
 no FIRM promotion, no roof/perimeter/accessory/wastage claims.
@@ -48,8 +51,8 @@ from pb_provider_gold_isolation import assert_provider_gold_free
 from pb_wall_topology_diagnostics import TopologySnapshot
 
 PROVIDER_ENGINE_ID = "shadow_ceiling_lining"
-PROVIDER_ENGINE_VERSION = "2.2.0"
-PROVIDER_OUTPUT_SCHEMA_VERSION = "1.2.0"
+PROVIDER_ENGINE_VERSION = "2.3.0"
+PROVIDER_OUTPUT_SCHEMA_VERSION = "1.3.0"
 PROVIDER_FAMILY = CEILING_LINING_FAMILY
 
 _CODE_MODULES = (
@@ -92,8 +95,9 @@ class CeilingLiningShadowInputs:
     """Injected shadow inputs for the provider (tests / shadow harness).
 
     Scope proofs and ``RoomCandidate`` bodies are never accepted from the
-    caller. Binding resolves rooms only from a collector-produced
-    ``TopologySnapshot`` via ``build_owned_topology_room_index``.
+    caller. Binding resolves rooms only from an authenticated/source-owned
+    ``TopologySnapshot`` via ``build_owned_topology_room_index``. Diagnostic
+    caller-segment collector output is not eligible and yields BLOCKED.
     """
 
     document: DocumentEvidence

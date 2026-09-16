@@ -59,6 +59,13 @@ _TOPOLOGY_COLLECTOR_SEAL = object()
 UNAVAILABLE = "unavailable"
 NOT_EVALUATED = "not_evaluated"
 
+# Geometry provenance for TopologySnapshot. Distinguishes diagnostic
+# caller-segment orchestration from page-native extract. Collector-produced
+# does NOT by itself mean C15-authoritative — see C15 binder eligibility.
+GEOMETRY_SOURCE_UNKNOWN = ""
+GEOMETRY_SOURCE_CALLER_SUPPLIED_SEGMENTS = "caller_supplied_segments"
+GEOMETRY_SOURCE_PAGE_NATIVE_EXTRACT = "page_native_extract"
+
 
 def _topology_producer_seal_token(
     *,
@@ -66,6 +73,8 @@ def _topology_producer_seal_token(
     page_id: str,
     page_number: int,
     viewport_id: str,
+    viewport_authority: str,
+    geometry_source: str,
     rooms: Sequence[RoomCandidate],
     walls: Sequence[WallCandidate],
     fail_closed_reason: Optional[str],
@@ -78,6 +87,8 @@ def _topology_producer_seal_token(
             "page_id": page_id,
             "page_number": int(page_number),
             "viewport_id": viewport_id,
+            "viewport_authority": viewport_authority,
+            "geometry_source": geometry_source,
             "fail_closed_reason": fail_closed_reason,
             "rooms": [
                 {
@@ -102,6 +113,8 @@ def _mint_topology_producer_seal(
     page_id: str,
     page_number: int,
     viewport_id: str,
+    viewport_authority: str,
+    geometry_source: str,
     rooms: Sequence[RoomCandidate],
     walls: Sequence[WallCandidate],
     fail_closed_reason: Optional[str],
@@ -113,6 +126,8 @@ def _mint_topology_producer_seal(
             page_id=page_id,
             page_number=page_number,
             viewport_id=viewport_id,
+            viewport_authority=viewport_authority,
+            geometry_source=geometry_source,
             rooms=rooms,
             walls=walls,
             fail_closed_reason=fail_closed_reason,
@@ -333,6 +348,10 @@ class TopologySnapshot:
     seal token. A free-constructed snapshot, or a sealed snapshot whose
     rooms/walls were swapped via ``replace``, is diagnostic only — not
     producer-owned topology authority for quantity binding.
+
+    ``geometry_source`` records where segments came from. Collector-produced
+    from caller-supplied segments is still diagnostic-only for C15: sealing
+    does not turn arbitrary segment dicts into authenticated geometry.
     """
 
     document_id: str
@@ -354,6 +373,7 @@ class TopologySnapshot:
     opening_host_evaluated: bool = False
     reconciliation: Optional[TopologyReconciliationSummary] = None
     fail_closed_reason: Optional[str] = None
+    geometry_source: str = GEOMETRY_SOURCE_UNKNOWN
     _producer_seal: object = field(default=None, repr=False, compare=False)
 
     def _expected_producer_seal_token(self) -> str:
@@ -362,6 +382,8 @@ class TopologySnapshot:
             page_id=self.page_id,
             page_number=self.page_number,
             viewport_id=self.viewport_id,
+            viewport_authority=self.viewport_authority,
+            geometry_source=self.geometry_source,
             rooms=self.rooms,
             walls=self.walls,
             fail_closed_reason=self.fail_closed_reason,
@@ -403,12 +425,19 @@ def collect_topology_from_segments(
     raw_primitive_count: Optional[int] = None,
     evaluate_opening_hosts: bool = True,
     bind_room_labels: bool = True,
+    geometry_source: str = GEOMETRY_SOURCE_CALLER_SUPPLIED_SEGMENTS,
 ) -> TopologySnapshot:
     """Run the existing W2-W10 APIs on already-scoped segments.
 
-    This is an orchestrator, not a second reconstruction algorithm.
+    This is a diagnostic orchestrator, not a second reconstruction algorithm.
+    Default ``geometry_source`` is caller-supplied segments: the collector seal
+    proves orchestration ran, not that segments are authenticated/source-owned.
+    C15 room binding must not treat this path as topology authority.
     """
     segment_list = [dict(segment) for segment in segments]
+    source = str(geometry_source or GEOMETRY_SOURCE_CALLER_SUPPLIED_SEGMENTS).strip()
+    if not source:
+        source = GEOMETRY_SOURCE_CALLER_SUPPLIED_SEGMENTS
     graph = build_wall_graph_for_viewport(segment_list)
     graph = attach_typed_semantic_evidence(
         graph,
@@ -460,11 +489,14 @@ def collect_topology_from_segments(
         room_relationships=tuple(room_rels),
         opening_hosts=tuple(hosts),
         opening_host_evaluated=evaluate_opening_hosts,
+        geometry_source=source,
         _producer_seal=_mint_topology_producer_seal(
             document_id=document_id,
             page_id=page_id,
             page_number=page_number,
             viewport_id=viewport_id,
+            viewport_authority=viewport_authority,
+            geometry_source=source,
             rooms=tuple(rooms),
             walls=tuple(walls),
             fail_closed_reason=None,
@@ -540,6 +572,7 @@ def collect_topology_from_page(
             view_type=None,
             words=scoped_words,
             raw_primitive_count=raw_count,
+            geometry_source=GEOMETRY_SOURCE_PAGE_NATIVE_EXTRACT,
         )
 
     viewports = segment_page_viewports(page, page_number=page_number)
@@ -559,11 +592,14 @@ def collect_topology_from_page(
             view_type=None,
             raw_primitive_count=raw_count,
             fail_closed_reason=reason,
+            geometry_source=GEOMETRY_SOURCE_PAGE_NATIVE_EXTRACT,
             _producer_seal=_mint_topology_producer_seal(
                 document_id=document_id,
                 page_id=page_id,
                 page_number=page_number,
                 viewport_id=viewport_id or "",
+                viewport_authority="unavailable",
+                geometry_source=GEOMETRY_SOURCE_PAGE_NATIVE_EXTRACT,
                 rooms=(),
                 walls=(),
                 fail_closed_reason=reason,
@@ -591,6 +627,7 @@ def collect_topology_from_page(
         view_type=chosen.view_type,
         words=scoped_words,
         raw_primitive_count=raw_count,
+        geometry_source=GEOMETRY_SOURCE_PAGE_NATIVE_EXTRACT,
     )
 
 
@@ -797,6 +834,7 @@ def diagnose_wall_topology(snapshot: TopologySnapshot) -> Dict[str, Any]:
             "page_number": snapshot.page_number,
             "viewport_id": snapshot.viewport_id,
             "viewport_authority": snapshot.viewport_authority,
+            "geometry_source": snapshot.geometry_source,
             "view_type": snapshot.view_type,
             "fail_closed_reason": snapshot.fail_closed_reason,
         },

@@ -1,19 +1,21 @@
-"""C15 ceiling-finish → room scope binder (producer-owned topology only).
+"""C15 ceiling-finish → room scope binder (authenticated topology only).
 
 Collection emits unscoped candidates. Binding may establish room ownership
-only by resolving rooms from a collector-produced ``TopologySnapshot`` sealed
-into an ``OwnedTopologyRoomIndex`` — never from caller-supplied
-``RoomCandidate`` bodies, polygon maps, or free-form proof objects.
+only by resolving rooms from a collector-produced ``TopologySnapshot`` whose
+``geometry_source`` is an authenticated/source-owned seam, sealed into an
+``OwnedTopologyRoomIndex`` — never from caller-supplied ``RoomCandidate``
+bodies, polygon maps, free-form proof objects, or diagnostic
+``collect_topology_from_segments`` caller-segment bags.
 
 Chain:
   unscoped finish candidates
-  → collector-produced TopologySnapshot (sealed)
+  → authenticated/source-owned TopologySnapshot (sealed)
   → OwnedTopologyRoomIndex (immutable index_id + rooms by room_ref)
   → sealed CeilingFinishScopeProof
   → scoped finish atoms for a queried room_ref
   → build_ceiling_lining_quantity
 
-If producer-owned topology cannot be resolved, binding fails closed.
+If authenticated topology cannot be resolved, binding fails closed (BLOCKED).
 """
 from __future__ import annotations
 
@@ -30,7 +32,10 @@ from pb_migration_contracts import (
 )
 from pb_migration_provider_envelope import ProviderContext
 from pb_wall_room_topology_contracts import RoomCandidate
-from pb_wall_topology_diagnostics import TopologySnapshot
+from pb_wall_topology_diagnostics import (
+    GEOMETRY_SOURCE_CALLER_SUPPLIED_SEGMENTS,
+    TopologySnapshot,
+)
 
 Point = Tuple[float, float]
 BBox = Tuple[float, float, float, float]
@@ -46,6 +51,14 @@ _BINDABLE_ROOM_STATUSES = frozenset(
         EvidenceResolutionStatus.CORROBORATED,
     }
 )
+
+# C15 room-index authority requires authenticated/source-owned geometry.
+# Diagnostic ``collect_topology_from_segments`` (caller-supplied segments) is
+# never eligible — collector seal alone is not authentication.
+# Page-native extract becomes eligible only once an authenticated
+# document/source-bound page→topology seam is wired into this path.
+# Until that seam exists, this frozenset stays empty and C15 stays BLOCKED.
+C15_ROOM_INDEX_GEOMETRY_SOURCES: frozenset[str] = frozenset()
 
 
 def _clean(value: object) -> str:
@@ -75,11 +88,11 @@ def _point_in_polygon(point: Point, polygon: Sequence[Point]) -> bool:
 
 @dataclass(frozen=True)
 class OwnedTopologyRoomIndex:
-    """Immutable room lookup sealed from a collector-produced topology snapshot.
+    """Immutable room lookup sealed from authenticated topology.
 
     Callers may hold and pass ``index_id`` / this object, but cannot mint it
-    from free-constructed ``RoomCandidate`` tuples. Use
-    ``build_owned_topology_room_index``.
+    from free-constructed ``RoomCandidate`` tuples or caller-segment
+    diagnostic snapshots. Use ``build_owned_topology_room_index``.
     """
 
     index_id: str
@@ -90,6 +103,7 @@ class OwnedTopologyRoomIndex:
     page_no: int
     viewport_id: str
     topology_snapshot_fingerprint: str
+    geometry_source: str
     _rooms_by_ref: Mapping[str, RoomCandidate] = field(repr=False, compare=False)
     _seal: object = field(default=None, repr=False, compare=False)
 
@@ -113,12 +127,23 @@ def build_owned_topology_room_index(
     snapshot: TopologySnapshot,
     context: ProviderContext,
 ) -> Optional[OwnedTopologyRoomIndex]:
-    """Seal rooms from a collector-produced snapshot under ProviderContext ownership.
+    """Seal rooms from authenticated/source-owned topology under ProviderContext.
 
-    Returns None (fail closed) when the snapshot is not collector-produced or
-    ownership fields disagree with context.
+    Returns None (fail closed) when:
+    - the snapshot is not collector-produced,
+    - geometry came from diagnostic caller-supplied segments,
+    - geometry_source is not in ``C15_ROOM_INDEX_GEOMETRY_SOURCES``,
+    - or ownership fields disagree with context.
+
+    Until an authenticated page→topology seam is listed in
+    ``C15_ROOM_INDEX_GEOMETRY_SOURCES``, this always returns None.
     """
     if not snapshot.is_collector_produced:
+        return None
+    # Explicit: diagnostic collector over caller segments is never C15 authority.
+    if snapshot.geometry_source == GEOMETRY_SOURCE_CALLER_SUPPLIED_SEGMENTS:
+        return None
+    if snapshot.geometry_source not in C15_ROOM_INDEX_GEOMETRY_SOURCES:
         return None
     if not context.revision_id or not context.current_revision_id:
         return None
@@ -173,6 +198,8 @@ def build_owned_topology_room_index(
             "page_id": snapshot.page_id,
             "page_number": int(snapshot.page_number),
             "viewport_id": snapshot.viewport_id,
+            "geometry_source": snapshot.geometry_source,
+            "viewport_authority": snapshot.viewport_authority,
             "rooms": room_fingerprints,
         },
     )
@@ -186,6 +213,7 @@ def build_owned_topology_room_index(
             "page_id": snapshot.page_id,
             "page_no": int(snapshot.page_number),
             "viewport_id": snapshot.viewport_id,
+            "geometry_source": snapshot.geometry_source,
         },
     )
     return OwnedTopologyRoomIndex(
@@ -197,6 +225,7 @@ def build_owned_topology_room_index(
         page_no=int(snapshot.page_number),
         viewport_id=_clean(snapshot.viewport_id),
         topology_snapshot_fingerprint=snapshot_fp,
+        geometry_source=_clean(snapshot.geometry_source),
         _rooms_by_ref=dict(rooms_by_ref),
         _seal=_INDEX_SEAL,
     )
