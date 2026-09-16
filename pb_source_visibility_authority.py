@@ -23,6 +23,13 @@ from typing import Mapping, Sequence
 import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_pdf_text_integrity_authority import (
+    PdfTextIntegrityAuthority,
+    PdfTextIntegrityReceipt,
+    _PDF_TEXT_AUTHORITY_SEAL,
+    build_pdf_text_integrity_receipt,
+    classify_native_word_integrity,
+)
 from pb_source_observation_authority import (
     OBSERVATION_UNAVAILABLE,
     PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
@@ -72,6 +79,7 @@ class PublishedVisibleSourceSnapshot:
     snapshot: ProducerSnapshotRecord
     base_source_snapshot_id: str
     visible_observation_ids: tuple[str, ...]
+    text_observation_ids: tuple[str, ...] = ()
     schema_version: str = SOURCE_VISIBILITY_SCHEMA_VERSION
 
 
@@ -163,6 +171,29 @@ def _native_parent_observation_id(
     return stable_contract_id("source_observation", identity, digest_chars=32)
 
 
+def _native_word_observation_id(
+    *,
+    document_id: str,
+    revision_id: str,
+    page_id: str,
+    partition_id: str,
+    primitive_ref: str,
+    raw_text: str,
+    geometry: Sequence[float],
+) -> str:
+    identity = {
+        "document_id": document_id,
+        "revision_id": revision_id,
+        "partition_id": partition_id,
+        "page_id": page_id,
+        "kind": "native_pdf_word",
+        "primitive_ref": primitive_ref,
+        "raw_text": raw_text,
+        "geometry": tuple(float(value) for value in geometry),
+    }
+    return stable_contract_id("source_observation", identity, digest_chars=32)
+
+
 def _visible_observation_id(
     *,
     document_id: str,
@@ -192,7 +223,7 @@ class SourceVisibilityProducer:
     """Trusted producer wrapper that mints visibility receipts from PDF bytes.
 
     The underlying generic ``SourceObservationProducer`` is deliberately not
-    exposed. Ordinary consumers receive ``SourceVisibilityAuthority`` only.
+    exposed. Ordinary consumers receive read-only producer-owned authorities.
     """
 
     def __init__(self, *, producer_method: str, producer_version: str) -> None:
@@ -201,6 +232,9 @@ class SourceVisibilityProducer:
             producer_version=producer_version,
         )
         self._visibility_receipts: dict[tuple[str, str], str] = {}
+        self._text_integrity_receipts: dict[
+            tuple[str, str], PdfTextIntegrityReceipt
+        ] = {}
         self._published_by_revision: dict[str, PublishedVisibleSourceSnapshot] = {}
 
     def authority(self) -> "SourceVisibilityAuthority":
@@ -208,6 +242,13 @@ class SourceVisibilityProducer:
             self._producer.authority(),
             self._visibility_receipts,
             _seal=_VISIBILITY_AUTHORITY_SEAL,
+        )
+
+    def text_integrity_authority(self) -> PdfTextIntegrityAuthority:
+        return PdfTextIntegrityAuthority(
+            self._producer.authority(),
+            self._text_integrity_receipts,
+            _seal=_PDF_TEXT_AUTHORITY_SEAL,
         )
 
     def ingest_native_pdf_bytes(
@@ -229,13 +270,44 @@ class SourceVisibilityProducer:
 
         snapshot = base.snapshot
         visible_ids: list[str] = []
+        text_receipts: list[tuple[str, PdfTextIntegrityReceipt]] = []
         pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
         try:
             for page_index in range(int(pdf.page_count)):
                 page_number = page_index + 1
                 page_id = str(page_number)
                 partition_id = f"page:{page_number}"
-                native = extract_native_page(pdf.load_page(page_index))
+                page = pdf.load_page(page_index)
+                native = extract_native_page(page)
+                for word in native.get("words") or ():
+                    raw_text = str(word.get("text") or "")
+                    geometry = tuple(float(value) for value in (word.get("bbox") or ()))
+                    primitive_ref = f"word:{word.get('id')}"
+                    parent_id = _native_word_observation_id(
+                        document_id=base.revision.document_id,
+                        revision_id=base.revision.revision_id,
+                        page_id=page_id,
+                        partition_id=partition_id,
+                        primitive_ref=primitive_ref,
+                        raw_text=raw_text,
+                        geometry=geometry,
+                    )
+                    decision = classify_native_word_integrity(page, word)
+                    text_receipts.append(
+                        (
+                            parent_id,
+                            build_pdf_text_integrity_receipt(
+                                parent_observation_id=parent_id,
+                                document_id=base.revision.document_id,
+                                revision_id=base.revision.revision_id,
+                                source_sha256=base.revision.source_sha256,
+                                page_id=page_id,
+                                source_partition_id=partition_id,
+                                geometry=geometry,
+                                decision=decision,
+                            ),
+                        )
+                    )
                 for segment in native.get("segments") or ():
                     decision = classify_native_segment_visibility(segment)
                     if not decision.visible:
@@ -287,9 +359,11 @@ class SourceVisibilityProducer:
             snapshot=replace(snapshot),
             base_source_snapshot_id=base.snapshot.snapshot_id,
             visible_observation_ids=tuple(sorted(set(visible_ids))),
+            text_observation_ids=tuple(sorted({item[0] for item in text_receipts})),
         )
+        source_authority = self._producer.authority()
         for visible_id in published.visible_observation_ids:
-            result = self._producer.authority().resolve(
+            result = source_authority.resolve(
                 ObservationSelector(
                     document_id=published.revision.document_id,
                     revision_id=published.revision.revision_id,
@@ -303,6 +377,43 @@ class SourceVisibilityProducer:
             self._visibility_receipts[
                 (published.snapshot.snapshot_id, visible_id)
             ] = result.observation.derivation_parent_ids[0]
+
+        for observation_id, receipt in text_receipts:
+            result = source_authority.resolve(
+                ObservationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    observation_id=observation_id,
+                )
+            )
+            observation = result.observation
+            if (
+                observation is None
+                or result.status != EvidenceResolutionStatus.CORROBORATED
+                or observation.observation_kind != "native_pdf_word"
+                or observation.origin_kind != "native"
+                or observation.observation_id != receipt.parent_observation_id
+                or observation.document_id != receipt.document_id
+                or observation.revision_id != receipt.revision_id
+                or observation.source_sha256 != receipt.source_sha256
+                or observation.page_id != receipt.page_id
+                or observation.source_partition_id != receipt.source_partition_id
+                or observation.raw_text != receipt.raw_text
+                or tuple(observation.geometry) != tuple(receipt.geometry)
+            ):
+                raise RuntimeError(
+                    f"{PRODUCER_INTEGRITY_FAILURE}: text integrity receipt parent mismatch"
+                )
+            key = (published.snapshot.snapshot_id, observation_id)
+            prior = self._text_integrity_receipts.get(key)
+            if prior is not None and prior != receipt:
+                raise RuntimeError(
+                    f"{PRODUCER_INTEGRITY_FAILURE}: text integrity receipt differs"
+                )
+            self._text_integrity_receipts[key] = receipt
+
         self._published_by_revision[published.revision.revision_id] = published
         return published
 
