@@ -1,5 +1,14 @@
 """Regression coverage for GenericOpeningDeductionPipeline.propagate_to_predictions.
 
+NOTE: bind_openings_to_walls performs no binding at all (see
+test_opening_deduction_authenticated_binding.py) -- there is no way to
+obtain a genuinely "bound" opening through the normal deduct_openings_for_all_walls
+entry point today. Tests here that need a bound opening to exercise the
+complete-deduction / publication-gate logic in isolation construct it
+directly (bound_wall_id set on the OpeningInstance, calculate_wall_deductions
+called directly) rather than going through binding -- this tests the gate
+and arithmetic, not the (separately, exhaustively tested) binding refusal.
+
 Bug: an unresolved or unbound opening contributes zero to
 total_deducted_area_m2 (by design -- see calculate_wall_deductions), but
 propagate_to_predictions previously published net_area_m2 as final regardless,
@@ -49,18 +58,21 @@ def test_incomplete_deduction_blocks_publication_across_all_dependent_prediction
     wall-finish prediction sharing that wall -- not just the wall itself,
     and not silently propagate an undeducted number as final."""
     wall = _wall(gross_area_m2=100.0)
-    resolved_window = OpeningInstance(opening_id="W1", width_m=1.2, height_m=1.5, quantity=2.0)
+    # W1 is constructed already-bound (simulating what a reconciled
+    # host-binding authority would eventually prove) to isolate this test's
+    # actual subject -- the publication gate -- from binding itself.
+    resolved_window = OpeningInstance(
+        opening_id="W1", width_m=1.2, height_m=1.5, quantity=2.0, bound_wall_id="perimeter_walling"
+    )
     unresolved_window = OpeningInstance(opening_id="W2", width_m=None, height_m=None, quantity=1.0)
 
     pipeline = GenericOpeningDeductionPipeline()
-    # W1's binding is independently authenticated (simulating a reconciled
-    # host-binding authority); W2 has no such proof and no dimensions either.
-    results = pipeline.deduct_openings_for_all_walls(
-        [wall],
-        [resolved_window, unresolved_window],
-        authenticated_host_bindings={"W1": "perimeter_walling"},
-    )
-    assert results["perimeter_walling"].unbound_openings  # W2: no authenticated binding at all
+    results = {
+        "perimeter_walling": pipeline.calculate_wall_deductions(
+            wall, [resolved_window, unresolved_window]
+        )
+    }
+    assert results["perimeter_walling"].unbound_openings  # W2: never bound at all
     assert results["perimeter_walling"].net_area_evidence.abstained is True
     assert results["perimeter_walling"].net_area_evidence.value is None
 
@@ -89,11 +101,13 @@ def test_incomplete_deduction_blocks_publication_across_all_dependent_prediction
         )
 
 
-def test_unbound_opening_with_no_authenticated_binding_blocks_publication() -> None:
+def test_unbound_opening_via_normal_entry_point_blocks_publication() -> None:
+    """Through the real entry point (deduct_openings_for_all_walls, which
+    always calls bind_openings_to_walls first), today's only possible
+    outcome is unbound -- today's live reality."""
     wall = _wall(gross_area_m2=50.0)
     door = OpeningInstance(opening_id="D1", width_m=0.9, height_m=2.1, quantity=1.0)
     pipeline = GenericOpeningDeductionPipeline()
-    # No authenticated_host_bindings supplied at all -- current live reality.
     results = pipeline.deduct_openings_for_all_walls([wall], [door])
     assert door.bound_wall_id is None
     assert results["perimeter_walling"].unbound_openings
@@ -104,15 +118,15 @@ def test_unbound_opening_with_no_authenticated_binding_blocks_publication() -> N
 
 
 def test_complete_deduction_publishes_normally_without_blocking() -> None:
-    """The happy path must be unaffected: an authenticated binding plus
-    resolved dimensions -> no publication_blocked marker, real quantity
-    published, no unknown/None state."""
+    """The happy path must be unaffected: a resolved, already-bound opening
+    (constructed directly -- see module note) -> no publication_blocked
+    marker, real quantity published, no unknown/None state."""
     wall = _wall(gross_area_m2=100.0)
-    window = OpeningInstance(opening_id="W1", width_m=1.0, height_m=1.5, quantity=2.0)
-    pipeline = GenericOpeningDeductionPipeline()
-    results = pipeline.deduct_openings_for_all_walls(
-        [wall], [window], authenticated_host_bindings={"W1": "perimeter_walling"}
+    window = OpeningInstance(
+        opening_id="W1", width_m=1.0, height_m=1.5, quantity=2.0, bound_wall_id="perimeter_walling"
     )
+    pipeline = GenericOpeningDeductionPipeline()
+    results = {"perimeter_walling": pipeline.calculate_wall_deductions(wall, [window])}
     assert results["perimeter_walling"].net_area_evidence.abstained is False
     predictions = [
         _Prediction(tag="perimeter_walling", trade_type="walls", quantity=100.0),

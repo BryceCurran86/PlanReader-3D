@@ -30,7 +30,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 import math
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from pb_migration_contracts import QuantityEvidence, stable_contract_id
 
@@ -176,44 +176,58 @@ class GenericOpeningDeductionPipeline:
         self,
         openings: Sequence[OpeningInstance],
         walls: Sequence[WallInstance],
-        *,
-        authenticated_host_bindings: Optional[Mapping[str, str]] = None,
     ) -> None:
-        """Bind openings to walls ONLY from an independently authenticated source.
+        """No binding source is trusted here. Every opening is correctly
+        PROVISIONAL_UNBOUND.
 
-        No heuristic binding is performed here. Specifically REMOVED, and not
-        replaced with any new heuristic:
-        - trusting a caller-populated ``opening.bound_wall_id`` at face value
-          (a caller asserting a binding is not proof of one);
-        - the "exactly one wall exists" shortcut (co-incidentally binding
-          every opening to the sole wall is not evidence that opening
-          actually pierces that wall);
+        Specifically REMOVED, and not replaced with any new heuristic OR any
+        new self-certification mechanism:
+        - trusting a caller-populated ``opening.bound_wall_id`` at face value;
+        - the "exactly one wall exists" shortcut;
         - bounding-box intersection as a proxy for physical hosting;
-        - any nearest/first/proximity fallback.
+        - any nearest/first/proximity fallback;
+        - a caller-supplied ``opening_id -> wall_id`` mapping asserted to be
+          "authenticated" (an earlier revision of this method accepted one --
+          that was still caller self-certification with extra steps: any
+          caller able to invoke this method could construct
+          ``{"opening-123": "wall-456"}`` and mint a host exactly as freely
+          as setting ``bound_wall_id`` directly. Naming a parameter
+          "authenticated" does not authenticate it).
 
-        ``authenticated_host_bindings`` is the ONLY trusted source: a mapping
-        of ``opening_id -> wall_id`` where each entry has already been
-        independently proven by a reconciled host-binding authority (see
-        pb_opening_host_binding_authority.py) elsewhere, before this method
-        is ever called. Until that authority is wired up here, no caller
-        supplies this mapping, so every opening is correctly
-        PROVISIONAL_UNBOUND -- fail closed rather than guess. Mutates
-        opening.bound_wall_id and opening.status.
+        A genuine positive binding requires a result from a producer-owned,
+        SEALED authority object -- one no caller can construct by hand,
+        because it can only ever be minted by its own producer after
+        independent re-verification (see ``OpeningHostBindingAuthority`` /
+        ``OpeningHostBindingProducer`` in pb_opening_host_binding_authority.py,
+        which reuses the #323 physical-wall identity/equivalence stack rather
+        than trusting caller geometry). Consuming that authority correctly
+        here would require this method to:
+        1. accept the sealed authority object itself (not a bare mapping/
+           bool/token/callable a caller could fabricate);
+        2. build a real selector per opening carrying document_id,
+           revision_id, source_sha256, snapshot_id, decision_scope_id, and
+           opening_record_id;
+        3. call ``authority.resolve(selector)`` and require status
+           CORROBORATED with a ``host_wall_id`` present in this ``walls``
+           universe before ever setting ``bound_wall_id``.
+
+        Two things block step 2 today: ``OpeningInstance``/``WallInstance``
+        do not yet carry that lineage, and the host-binding authority itself
+        is not yet reconciled (see PR #366's #360/#364 validator
+        contradiction) -- so there is nothing safe to verify against yet
+        even if the lineage existed. Importing that module here now, before
+        both are true, would create a premature dependency on a still-
+        contradictory, unmerged authority. Until both exist: NO POSITIVE
+        HOST BINDING. Mutates opening.bound_wall_id and opening.status.
         """
-        wall_ids = {w.wall_id for w in walls}
-        bindings = authenticated_host_bindings or {}
+        del walls  # not yet consulted; kept as a parameter for the future call shape
 
         for op in openings:
-            candidate_wall_id = bindings.get(op.opening_id)
-            if candidate_wall_id and candidate_wall_id in wall_ids:
-                op.bound_wall_id = candidate_wall_id
-                continue
-
             op.bound_wall_id = None
             op.status = OpeningDeductionStatus.PROVISIONAL_UNBOUND
             op.notes = (
-                "No independently authenticated host-wall binding available "
-                "for this opening; refusing heuristic binding."
+                "No producer-owned host-binding authority result available; "
+                "refusing self-certified or heuristic binding."
             )
 
     def calculate_wall_deductions(
@@ -306,13 +320,9 @@ class GenericOpeningDeductionPipeline:
         self,
         walls: Sequence[WallInstance],
         openings: Sequence[OpeningInstance],
-        *,
-        authenticated_host_bindings: Optional[Mapping[str, str]] = None,
     ) -> Dict[str, WallDeductionResult]:
         """Perform opening-to-wall binding and compute deduction results for all walls."""
-        self.bind_openings_to_walls(
-            openings, walls, authenticated_host_bindings=authenticated_host_bindings
-        )
+        self.bind_openings_to_walls(openings, walls)
         results: Dict[str, WallDeductionResult] = {}
         for w in walls:
             results[w.wall_id] = self.calculate_wall_deductions(w, openings)
