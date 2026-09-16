@@ -150,19 +150,25 @@ def test_real_source_host_frame_resolves_and_replays() -> None:
     assert evidence.host_binding_record_id == binding.record.record_id
     assert evidence.host_wall_id == binding.record.host_wall_id
     assert evidence.coordinate_unit == "pdf_point"
-    assert evidence.u0_pt == 0.0
-    assert abs(evidence.u1_pt - 40.0) <= 1e-6
+    # The frame is host-wall-local, not opening-local.  The authenticated host
+    # band runs x=20..280 around a 40-point aperture at x=120..160, so the
+    # opening occupies u=100..140 in the common wall frame.
+    assert evidence.origin_pt == (20.0, 90.0)
+    assert evidence.axis_unit == (1.0, 0.0)
+    assert evidence.u0_pt == 100.0
+    assert abs(evidence.u1_pt - 140.0) <= 1e-6
     assert abs(evidence.wall_thickness_pt - 20.0) <= 1e-6
     assert producer.authority().resolve(evidence.selector) == result
 
 
-def test_translation_changes_origin_only_not_local_geometry() -> None:
+def test_translation_changes_host_origin_only_not_wall_local_geometry() -> None:
     first = _frame(_pdf())[1].evidence
     translated = _frame(_pdf(dx=50.0, dy=40.0))[1].evidence
     assert first is not None and translated is not None
-    assert first.origin_pt != translated.origin_pt
+    assert first.origin_pt == (20.0, 90.0)
+    assert translated.origin_pt == (70.0, 130.0)
     assert first.axis_unit == translated.axis_unit
-    assert first.u0_pt == translated.u0_pt == 0.0
+    assert first.u0_pt == translated.u0_pt == 100.0
     assert abs(first.u1_pt - translated.u1_pt) <= 1e-6
     assert abs(first.wall_thickness_pt - translated.wall_thickness_pt) <= 1e-6
 
@@ -174,6 +180,7 @@ def test_reversing_source_primitive_directions_keeps_canonical_frame() -> None:
     assert first.origin_pt == reversed_frame.origin_pt
     assert first.axis_unit == reversed_frame.axis_unit
     assert first.normal_unit == reversed_frame.normal_unit
+    assert first.u0_pt == reversed_frame.u0_pt
     assert abs(first.u1_pt - reversed_frame.u1_pt) <= 1e-6
 
 
