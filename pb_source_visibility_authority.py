@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import math
-from typing import Mapping, Optional, Sequence
+from typing import Mapping, Sequence
 
 import fitz
 
@@ -51,6 +51,11 @@ VISIBILITY_CLIP_STATE_INCONSISTENT = "visibility_clip_state_inconsistent"
 VISIBILITY_PROVEN_NO_ACTIVE_CLIP = "visibility_proven_no_active_clip"
 VISIBILITY_RECEIPT_UNAVAILABLE = "visibility_receipt_unavailable"
 VISIBILITY_PARENT_MISMATCH = "visibility_parent_mismatch"
+
+# Structural in-process construction seal. This is not a security boundary
+# against equal-privilege Python code; it prevents ordinary caller-provided
+# receipt maps from self-certifying visibility through the public constructor.
+_VISIBILITY_AUTHORITY_SEAL = object()
 
 
 @dataclass(frozen=True)
@@ -202,6 +207,7 @@ class SourceVisibilityProducer:
         return SourceVisibilityAuthority(
             self._producer.authority(),
             self._visibility_receipts,
+            _seal=_VISIBILITY_AUTHORITY_SEAL,
         )
 
     def ingest_native_pdf_bytes(
@@ -302,13 +308,24 @@ class SourceVisibilityProducer:
 
 
 class SourceVisibilityAuthority:
-    """Read-only authority for producer-receipted visible segment observations."""
+    """Read-only authority for producer-receipted visible segment observations.
+
+    Obtain instances from ``SourceVisibilityProducer.authority()``. Direct
+    construction with caller-provided receipt maps is rejected.
+    """
 
     def __init__(
         self,
         source_authority: SourceObservationAuthority,
         visibility_receipts: Mapping[tuple[str, str], str],
+        *,
+        _seal: object = None,
     ) -> None:
+        if _seal is not _VISIBILITY_AUTHORITY_SEAL:
+            raise TypeError(
+                "SourceVisibilityAuthority must be obtained from "
+                "SourceVisibilityProducer.authority()"
+            )
         self._source_authority = source_authority
         self._visibility_receipts = visibility_receipts
 
