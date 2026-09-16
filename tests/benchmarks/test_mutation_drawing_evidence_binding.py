@@ -266,9 +266,14 @@ def test_mutation_i_three_reconciled_openings_integrated_into_f9():
 
     wall = WallInstance(wall_id="perimeter_walling", gross_area_m2=100.0)
     pipeline = GenericOpeningDeductionPipeline()
-    results = pipeline.deduct_openings_for_all_walls([wall], instances)
-
-    res = results["perimeter_walling"]
+    # bind_openings_to_walls performs no binding at all -- each PhysicalOpening
+    # above already carries bound_wall_id="perimeter_walling", which
+    # build_opening_instances_from_physical_openings copies onto the
+    # resulting OpeningInstance objects. Call calculate_wall_deductions
+    # directly (bypassing binding) to isolate this test's actual subject --
+    # integration of reconciled multi-observation openings into F.9 -- from
+    # binding itself (separately, exhaustively tested elsewhere).
+    res = pipeline.calculate_wall_deductions(wall, instances)
     assert res.total_deducted_area_m2 == pytest.approx(10.44, rel=1e-3)
     assert res.net_area_m2 == pytest.approx(100.0 - 10.44, rel=1e-3)
 
@@ -290,7 +295,10 @@ def test_mutation_j_change_one_physical_opening_dimension():
     inst_base = build_opening_instances_from_physical_openings(openings_base)
     wall = WallInstance(wall_id="perimeter_walling", gross_area_m2=100.0)
     pipeline = GenericOpeningDeductionPipeline()
-    res_base = pipeline.deduct_openings_for_all_walls([wall], inst_base)["perimeter_walling"]
+    # Each PhysicalOpening already carries bound_wall_id="perimeter_walling";
+    # call calculate_wall_deductions directly (bypassing binding, separately
+    # tested elsewhere) to isolate this test's actual subject.
+    res_base = pipeline.calculate_wall_deductions(wall, inst_base)
     assert res_base.total_deducted_area_m2 == pytest.approx(6.0, rel=1e-3)
 
     # Change only opening 0 to 3.0m width (area becomes 3.0 m², diff is +1.0 m²)
@@ -307,7 +315,7 @@ def test_mutation_j_change_one_physical_opening_dimension():
         openings_base[2],
     ]
     inst_mod = build_opening_instances_from_physical_openings(openings_mod)
-    res_mod = pipeline.deduct_openings_for_all_walls([wall], inst_mod)["perimeter_walling"]
+    res_mod = pipeline.calculate_wall_deductions(wall, inst_mod)
     assert res_mod.total_deducted_area_m2 == pytest.approx(7.0, rel=1e-3)
 
 

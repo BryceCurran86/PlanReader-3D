@@ -50,10 +50,24 @@ def test_mutation_1_changing_source_drawing_numbers_changes_predictions(tmp_path
     preds_a = {p.tag: p for p in extractor.extract_from_pdf(pdf_a)}
 
     assert preds_a["floor_screed"].quantity == 72.0  # 12 * 6
-    # Gross wall: 2 * (12 + 6) * 2.8 = 100.8. Deductions: 2 * (3.0 * 1.2) = 7.2. Net wall: 93.6 SM
-    assert preds_a["perimeter_walling"].quantity == 93.6
+    # Gross wall geometry proof: 2 * (12 + 6) * 2.8 = 100.8 SM -- proportional
+    # to drawing numbers regardless of deduction/binding authority (a
+    # separate proposition -- see below).
     assert preds_a["perimeter_walling"].metadata["gross_area_m2"] == 100.8
-    assert preds_a["perimeter_walling"].metadata["total_deducted_opening_area_m2"] == 7.2
+    # Opening/deduction authority proof: no independently authenticated
+    # host-wall binding exists yet (bind_openings_to_walls performs no
+    # heuristic binding), so net wall area is correctly UNKNOWN, not a
+    # guessed/undeducted number, and must not be published. The intended
+    # deduction (2 * 3.0 * 1.2 = 7.2 SM) is still visible as a
+    # diagnostic-only unbound-opening record, proving opening extraction
+    # itself is still proportionally correct.
+    assert preds_a["perimeter_walling"].quantity is None
+    assert preds_a["perimeter_walling"].metadata["publication_blocked"] is True
+    assert preds_a["perimeter_walling"].metadata["total_deducted_opening_area_m2"] == 0.0
+    unbound_a = preds_a["perimeter_walling"].metadata["unbound_openings"]
+    assert len(unbound_a) == 1
+    assert unbound_a[0]["opening_id"] == "W17"
+    assert unbound_a[0]["total_area_m2"] == 7.2
     assert preds_a["roof_trusses"].quantity == 6.0
     assert preds_a["damp_proof_course"].quantity == 36.0  # 2 * (12 + 6)
     assert preds_a["W17"].quantity == 2.0
@@ -73,17 +87,25 @@ def test_mutation_1_changing_source_drawing_numbers_changes_predictions(tmp_path
     preds_b = {p.tag: p for p in extractor.extract_from_pdf(pdf_b)}
 
     assert preds_b["floor_screed"].quantity == 162.0  # 18 * 9
-    # Gross wall: 2 * (18 + 9) * 2.8 = 151.2. Deductions: 4 * (3.0 * 1.2) = 14.4. Net wall: 136.8 SM
-    assert preds_b["perimeter_walling"].quantity == 136.8
+    # Gross wall: 2 * (18 + 9) * 2.8 = 151.2 SM.
     assert preds_b["perimeter_walling"].metadata["gross_area_m2"] == 151.2
-    assert preds_b["perimeter_walling"].metadata["total_deducted_opening_area_m2"] == 14.4
+    # Deduction/binding authority: same fail-closed reasoning as drawing A.
+    # Intended deduction: 4 * (3.0 * 1.2) = 14.4 SM, diagnostic-only.
+    assert preds_b["perimeter_walling"].quantity is None
+    assert preds_b["perimeter_walling"].metadata["publication_blocked"] is True
+    assert preds_b["perimeter_walling"].metadata["total_deducted_opening_area_m2"] == 0.0
+    unbound_b = preds_b["perimeter_walling"].metadata["unbound_openings"]
+    assert len(unbound_b) == 1
+    assert unbound_b[0]["opening_id"] == "W17"
+    assert unbound_b[0]["total_area_m2"] == 14.4
     assert preds_b["roof_trusses"].quantity == 11.0
     assert preds_b["damp_proof_course"].quantity == 54.0  # 2 * (18 + 9)
     assert preds_b["W17"].quantity == 4.0
 
     # Predictions strictly changed based on drawing numbers
     assert preds_a["floor_screed"].quantity != preds_b["floor_screed"].quantity
-    assert preds_a["perimeter_walling"].quantity != preds_b["perimeter_walling"].quantity
+    assert preds_a["perimeter_walling"].metadata["gross_area_m2"] != preds_b["perimeter_walling"].metadata["gross_area_m2"]
+    assert unbound_a[0]["total_area_m2"] != unbound_b[0]["total_area_m2"]
     assert preds_a["roof_trusses"].quantity != preds_b["roof_trusses"].quantity
     assert preds_a["W17"].quantity != preds_b["W17"].quantity
 
@@ -163,12 +185,22 @@ def test_mutation_3_synthetic_unknown_project_produces_exact_new_values(tmp_path
     # Room: 24 x 12 = 288. Verandah: 24 x 2.0 = 48. Total: 336.0 SM
     assert preds["floor_screed"].quantity == 336.0
     # Wall length still uses the main-room rectangle 2*(24+12)=72 until a
-    # separate wall-perimeter compound fix; gross wall: 72 * 2.8 = 201.6 SM.
-    # Deductions: 3 * (3.0 * 1.2) + 2 * (1.0 * 2.1) = 10.8 + 4.2 = 15.0 m². Net wall: 186.6 SM
-    assert preds["perimeter_walling"].quantity == 186.6
+    # separate wall-perimeter compound fix; gross wall geometry proof:
+    # 72 * 2.8 = 201.6 SM -- unaffected by deduction/binding authority.
     assert preds["perimeter_walling"].metadata["gross_area_m2"] == 201.6
-    assert preds["perimeter_walling"].metadata["total_deducted_opening_area_m2"] == 15.0
     assert preds["perimeter_walling"].dimensions[0] == 72.0
+    # Opening/deduction authority proof: no independently authenticated
+    # host-wall binding exists yet, so net wall area is correctly UNKNOWN,
+    # not a guessed number. Intended deduction
+    # (3 * 3.0*1.2 + 2 * 1.0*2.1 = 10.8 + 4.2 = 15.0 m2) is still visible as
+    # diagnostic-only unbound-opening records.
+    assert preds["perimeter_walling"].quantity is None
+    assert preds["perimeter_walling"].metadata["publication_blocked"] is True
+    assert preds["perimeter_walling"].metadata["total_deducted_opening_area_m2"] == 0.0
+    unbound = {op["opening_id"]: op for op in preds["perimeter_walling"].metadata["unbound_openings"]}
+    assert unbound["W17"]["total_area_m2"] == 10.8
+    assert unbound["D12"]["total_area_m2"] == 4.2
+    assert round(sum(op["total_area_m2"] for op in unbound.values()), 4) == 15.0
     # DPC follows confirmed compound external envelope (main 24x12 + verandah
     # 24x2 → outer 24x14 → 2*(24+14)=76), not the main-only wall rectangle.
     # No project-specific fallback (e.g. 67.0).

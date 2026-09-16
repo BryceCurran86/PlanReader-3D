@@ -1,11 +1,9 @@
 """tests/benchmarks/test_mutation_opening_deductions.py — Mutation Tests for F.9 Opening Deductions.
 
-Verifies PR F.9 Generic Opening Deduction Pipeline:
-1. Add one 1.2x1.5 window -> wall net area decreases exactly 1.8 m²
-2. Remove that window -> deduction disappears (returns to gross area)
-3. Double quantity -> deduction doubles (from 1.8 m² to 3.6 m²)
-4. Move opening to another wall -> only that wall changes
-5. Missing height -> no deduction, explicit unresolved state
+Arithmetic mutations remain deterministic.  Authority is intentionally
+separate: caller-populated wall ids can drive provisional arithmetic but can
+never publish net-wall quantity authority until producer-owned host binding is
+integrated.
 """
 from __future__ import annotations
 
@@ -27,15 +25,8 @@ from pb_planreader_pdf_extractor import (
 
 
 def test_mutation_1_add_window_decreases_net_wall_area_exactly() -> None:
-    """1. Add one 1.2x1.5 window -> wall net area decreases exactly 1.8 m²."""
     pipeline = GenericOpeningDeductionPipeline()
-
-    wall = WallInstance(
-        wall_id="wall_01",
-        length_m=10.0,
-        height_m=3.0,
-        gross_area_m2=30.0,
-    )
+    wall = WallInstance(wall_id="wall_01", length_m=10.0, height_m=3.0, gross_area_m2=30.0)
     window = OpeningInstance(
         opening_id="W1",
         trade_type="windows",
@@ -44,49 +35,33 @@ def test_mutation_1_add_window_decreases_net_wall_area_exactly() -> None:
         quantity=1.0,
         bound_wall_id="wall_01",
     )
-
     res = pipeline.calculate_wall_deductions(wall, [window])
-
     assert res.gross_area_m2 == 30.0
-    # 1.2m * 1.5m * 1.0 = 1.8 m²
     assert res.total_deducted_area_m2 == 1.8
-    assert res.net_area_m2 == 28.2  # 30.0 - 1.8 = 28.2
+    assert res.net_area_m2 == 28.2
     assert len(res.applied_openings) == 1
     assert res.applied_openings[0]["opening_id"] == "W1"
     assert res.applied_openings[0]["status"] == OpeningDeductionStatus.APPLIED.value
+    assert res.net_area_evidence is not None
+    assert res.net_area_evidence.abstained is True
+    assert res.net_area_evidence.value is None
 
 
 def test_mutation_2_remove_window_deduction_disappears() -> None:
-    """2. Remove that window -> deduction disappears, wall net area equals gross area."""
     pipeline = GenericOpeningDeductionPipeline()
-
-    wall = WallInstance(
-        wall_id="wall_01",
-        length_m=10.0,
-        height_m=3.0,
-        gross_area_m2=30.0,
-    )
-
-    # Empty list of openings (window removed)
+    wall = WallInstance(wall_id="wall_01", length_m=10.0, height_m=3.0, gross_area_m2=30.0)
     res = pipeline.calculate_wall_deductions(wall, [])
-
     assert res.gross_area_m2 == 30.0
     assert res.total_deducted_area_m2 == 0.0
     assert res.net_area_m2 == 30.0
     assert len(res.applied_openings) == 0
+    assert res.net_area_evidence is not None
+    assert res.net_area_evidence.abstained is True
 
 
 def test_mutation_3_double_quantity_doubles_deduction() -> None:
-    """3. Double quantity -> deduction doubles exactly (1.8 m² -> 3.6 m²)."""
     pipeline = GenericOpeningDeductionPipeline()
-
-    wall = WallInstance(
-        wall_id="wall_01",
-        length_m=10.0,
-        height_m=3.0,
-        gross_area_m2=30.0,
-    )
-    # Quantity doubled to 2.0
+    wall = WallInstance(wall_id="wall_01", length_m=10.0, height_m=3.0, gross_area_m2=30.0)
     window_2x = OpeningInstance(
         opening_id="W1",
         trade_type="windows",
@@ -95,31 +70,18 @@ def test_mutation_3_double_quantity_doubles_deduction() -> None:
         quantity=2.0,
         bound_wall_id="wall_01",
     )
-
     res = pipeline.calculate_wall_deductions(wall, [window_2x])
-
     assert res.gross_area_m2 == 30.0
-    # 1.2m * 1.5m * 2.0 = 3.6 m² (exactly double 1.8 m²)
     assert res.total_deducted_area_m2 == 3.6
-    assert res.net_area_m2 == 26.4  # 30.0 - 3.6 = 26.4
+    assert res.net_area_m2 == 26.4
     assert len(res.applied_openings) == 1
     assert res.applied_openings[0]["quantity"] == 2.0
 
 
 def test_mutation_4_move_opening_to_another_wall_isolates_change() -> None:
-    """4. Move opening to another wall -> only that wall changes, the other remains gross."""
     pipeline = GenericOpeningDeductionPipeline()
-
-    wall_a = WallInstance(
-        wall_id="wall_north",
-        gross_area_m2=30.0,
-    )
-    wall_b = WallInstance(
-        wall_id="wall_south",
-        gross_area_m2=50.0,
-    )
-
-    # Opening explicitly bound to wall_south (moved from wall_north)
+    wall_a = WallInstance(wall_id="wall_north", gross_area_m2=30.0)
+    wall_b = WallInstance(wall_id="wall_south", gross_area_m2=50.0)
     window_south = OpeningInstance(
         opening_id="W1",
         trade_type="windows",
@@ -128,17 +90,12 @@ def test_mutation_4_move_opening_to_another_wall_isolates_change() -> None:
         quantity=1.0,
         bound_wall_id="wall_south",
     )
-
     res_a = pipeline.calculate_wall_deductions(wall_a, [window_south])
     res_b = pipeline.calculate_wall_deductions(wall_b, [window_south])
-
-    # Wall North is unchanged (0 deduction, full gross area)
     assert res_a.gross_area_m2 == 30.0
     assert res_a.total_deducted_area_m2 == 0.0
     assert res_a.net_area_m2 == 30.0
     assert len(res_a.applied_openings) == 0
-
-    # Wall South receives the deduction
     assert res_b.gross_area_m2 == 50.0
     assert res_b.total_deducted_area_m2 == 1.8
     assert res_b.net_area_m2 == 48.2
@@ -147,14 +104,8 @@ def test_mutation_4_move_opening_to_another_wall_isolates_change() -> None:
 
 
 def test_mutation_5_missing_height_no_deduction_explicit_unresolved_state() -> None:
-    """5. Missing height -> no deduction, explicit unresolved state."""
     pipeline = GenericOpeningDeductionPipeline()
-
-    wall = WallInstance(
-        wall_id="wall_01",
-        gross_area_m2=30.0,
-    )
-    # Window with missing height (None)
+    wall = WallInstance(wall_id="wall_01", gross_area_m2=30.0)
     window_unresolved = OpeningInstance(
         opening_id="W_UNKNOWN",
         trade_type="windows",
@@ -163,16 +114,11 @@ def test_mutation_5_missing_height_no_deduction_explicit_unresolved_state() -> N
         quantity=1.0,
         bound_wall_id="wall_01",
     )
-
     res = pipeline.calculate_wall_deductions(wall, [window_unresolved])
-
-    # Strict fail-closed: NO guessing, zero deduction
     assert res.gross_area_m2 == 30.0
     assert res.total_deducted_area_m2 == 0.0
     assert res.net_area_m2 == 30.0
     assert len(res.applied_openings) == 0
-
-    # Explicit unresolved state recorded
     assert len(res.unresolved_openings) == 1
     unres = res.unresolved_openings[0]
     assert unres["opening_id"] == "W_UNKNOWN"
@@ -180,19 +126,21 @@ def test_mutation_5_missing_height_no_deduction_explicit_unresolved_state() -> N
     assert "Missing figured width or height" in unres["notes"]
 
 
-def test_propagation_to_predictions_metadata() -> None:
-    """Verifies that net wall area propagates to walling and finishes with full audit metadata."""
+def test_propagation_to_predictions_blocks_caller_bound_arithmetic() -> None:
+    """Arithmetic can be computed, but the shared quantity remains unpublished."""
     pipeline = GenericOpeningDeductionPipeline()
-
     wall = WallInstance(wall_id="perimeter_walling", gross_area_m2=100.0)
     window = OpeningInstance(
         opening_id="W1",
         width_m=2.0,
         height_m=1.5,
-        quantity=2.0,  # 2 * 2.0 * 1.5 = 6.0 m²
+        quantity=2.0,
         bound_wall_id="perimeter_walling",
     )
-    results = pipeline.deduct_openings_for_all_walls([wall], [window])
+    results = {"perimeter_walling": pipeline.calculate_wall_deductions(wall, [window])}
+    assert results["perimeter_walling"].net_area_m2 == 94.0
+    assert results["perimeter_walling"].net_area_evidence is not None
+    assert results["perimeter_walling"].net_area_evidence.abstained is True
 
     preds = [
         ExtractedPrediction(
@@ -232,41 +180,27 @@ def test_propagation_to_predictions_metadata() -> None:
             source_page=1,
         ),
     ]
-
     updated = pipeline.propagate_to_predictions(preds, results)
-    pred_map = {p.tag: p for p in updated}
-
-    # Net walling and wall finishes updated to 94.0 m² (100.0 - 6.0)
-    assert pred_map["perimeter_walling"].quantity == 94.0
-    assert pred_map["perimeter_walling"].metadata["gross_area_m2"] == 100.0
-    assert pred_map["perimeter_walling"].metadata["total_deducted_opening_area_m2"] == 6.0
-    assert pred_map["perimeter_walling"].metadata["net_area_m2"] == 94.0
-
-    assert pred_map["internal_plaster"].quantity == 94.0
-    assert pred_map["internal_paint"].quantity == 94.0
-
-    # Non-wall finishes untouched
+    pred_map = {prediction.tag: prediction for prediction in updated}
+    for tag in ("perimeter_walling", "internal_plaster", "internal_paint"):
+        assert pred_map[tag].quantity is None
+        assert pred_map[tag].metadata["net_area_m2"] is None
+        assert pred_map[tag].metadata["provisional_net_area_m2"] == 94.0
+        assert pred_map[tag].metadata["publication_blocked"] is True
     assert pred_map["floor_screed"].quantity == 80.0
 
 
-def test_propagation_respects_independent_gross_area_for_wall_finishes() -> None:
-    """A wall finish carrying its own independently-derived gross area
-    (e.g. a genuine internal-face area, distinct from the external wall's
-    gross area) must have the SAME openings deducted from ITS OWN gross
-    value -- never silently overwritten with the external wall's
-    net_area_m2 as if it were a plain copy of perimeter_walling."""
+def test_propagation_blocks_independent_gross_area_without_host_authority() -> None:
     pipeline = GenericOpeningDeductionPipeline()
-
     wall = WallInstance(wall_id="perimeter_walling", gross_area_m2=100.0)
     window = OpeningInstance(
         opening_id="W1",
         width_m=2.0,
         height_m=1.5,
-        quantity=2.0,  # 2 * 2.0 * 1.5 = 6.0 m2 deducted
+        quantity=2.0,
         bound_wall_id="perimeter_walling",
     )
-    results = pipeline.deduct_openings_for_all_walls([wall], [window])
-
+    results = {"perimeter_walling": pipeline.calculate_wall_deductions(wall, [window])}
     preds = [
         ExtractedPrediction(
             tag="perimeter_walling",
@@ -297,15 +231,31 @@ def test_propagation_respects_independent_gross_area_for_wall_finishes() -> None
             source_page=1,
         ),
     ]
-
     updated = pipeline.propagate_to_predictions(preds, results)
-    pred_map = {p.tag: p for p in updated}
+    pred_map = {prediction.tag: prediction for prediction in updated}
+    assert pred_map["internal_plaster"].quantity is None
+    assert pred_map["internal_plaster"].metadata["net_area_m2"] is None
+    assert pred_map["internal_plaster"].metadata["provisional_net_area_m2"] == 79.0
+    assert pred_map["internal_paint"].quantity is None
+    assert pred_map["internal_paint"].metadata["provisional_net_area_m2"] == 94.0
 
-    # internal_plaster: its OWN gross (85.0) minus the same 6.0 m2 deduction.
-    assert pred_map["internal_plaster"].quantity == 79.0
-    assert pred_map["internal_plaster"].metadata["gross_area_m2"] == 85.0
-    assert pred_map["internal_plaster"].metadata["net_area_m2"] == 79.0
 
-    # internal_paint carries no independent area -- unchanged legacy behaviour.
-    assert pred_map["internal_paint"].quantity == 94.0
-    assert pred_map["internal_paint"].metadata["gross_area_m2"] == 100.0
+def test_wall_deduction_result_round_trip_shape() -> None:
+    """Retain the public result shape used by older callers."""
+    result = WallDeductionResult(
+        wall_id="wall",
+        gross_area_m2=10.0,
+        total_deducted_area_m2=0.0,
+        net_area_m2=10.0,
+    )
+    payload = result.to_dict()
+    assert payload["wall_id"] == "wall"
+    assert payload["net_area_evidence"] is None
+
+
+def test_fixture_imports_remain_available() -> None:
+    """Keep historical fixture dependencies imported for the larger mutation module."""
+    assert Path is not None
+    assert fitz is not None
+    assert pytest is not None
+    assert GenericPlanReaderExtractor is not None
