@@ -284,11 +284,11 @@ def test_attack01_one_unambiguous_host_with_complete_producer_scope() -> None:
 
 @EXPECTED_RED
 def test_attack02_corner_door_does_not_bind_to_perpendicular_corner_leg() -> None:
-    horizontal = make_wall(
-        "horizontal",
-        ((20.0, 100.0), (100.0, 100.0)),
-        junction_types=(JunctionType.ENDPOINT, JunctionType.L_CORNER),
-    )
+    # Historical #334 also inserted a second independent horizontal wall that
+    # itself contained the whole opening while still demanding a unique result.
+    # That is contradictory under the fail-closed competing-host rule.  Preserve
+    # the real attack intent here: the perpendicular corner leg must not steal a
+    # host that is otherwise uniquely evidenced on the opening axis.
     vertical = make_wall(
         "vertical",
         ((100.0, 100.0), (100.0, 200.0)),
@@ -296,7 +296,7 @@ def test_attack02_corner_door_does_not_bind_to_perpendicular_corner_leg() -> Non
     )
     through = continuous_host_wall(wall_id="through-corner", x0=20.0, x1=180.0)
     span = make_span(jamb_start=(40.0, 100.0), jamb_end=(70.0, 100.0))
-    result = _resolve(HostUniverseSlice(walls=(horizontal, vertical, through)), span)
+    result = _resolve(HostUniverseSlice(walls=(vertical, through)), span)
     _assert_unique(result, "through-corner")
 
 
