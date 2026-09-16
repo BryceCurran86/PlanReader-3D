@@ -12,7 +12,7 @@ A future opening-dimension authority must not be constructed from `SourceVisibil
 
 The producer/query boundary must bind all of the following before a positive dimension can be returned:
 
-1. producer-owned native text observations;
+1. producer-owned native text observations with separately proven text/render eligibility;
 2. producer-receipted visible vector observations;
 3. the exact source revision/hash/snapshot/page scope;
 4. a G17 physical-opening existence proof re-derived from an `ObservationSelector`;
@@ -35,6 +35,16 @@ This is deliberate and correct for G17 visibility authority. It means a consumer
 - receiving a producer-bound typed dimension authority that has read access to the same producer-owned raw observations and visibility receipts.
 
 Private attribute reach-through is rejected as an authority design because it bypasses the reviewed query boundary and makes same-store binding implicit rather than contractual.
+
+### 2.1 Raw native word ≠ visible/trustworthy figured text
+
+Current `extract_native_page()` stores words as only `id`, `text`, and `bbox`. Unlike vector drawings, the word record does not retain a proven clip association, text rendering mode, paint/color visibility, occlusion state, or an independently authenticated text-decoding validity result.
+
+Therefore producer ownership of `native_pdf_word(raw_text="900")` proves that the extractor returned those characters from the source bytes. It does **not** by itself prove that the user-visible drawing contained a trustworthy rendered `900` dimension.
+
+A white-on-white, clipped, non-rendering, occluded, or decoding-corrupted text object may still be extractable as raw text. The future dimension authority must fail closed unless the producer separately establishes whatever text/render eligibility is required for the positive claim.
+
+This is especially important for the existing CMap/ToUnicode corruption attack in #336: source ownership must not upgrade garbled extraction into a FIRM figured measurement.
 
 ## 3. Required composition model
 
@@ -67,10 +77,11 @@ The authority must independently:
 1. call the producer-bound physical-opening authority for the selector;
 2. fail closed if G17 existence is unavailable/conflicted;
 3. obtain raw text/vector observations from the producer-owned store for the authenticated source scope;
-4. require a valid figured-dimension relationship such as witness-bound geometry;
-5. preserve competing figured candidates as conflict rather than choosing nearest/first/smallest;
-6. keep width and height independent; and
-7. return an inspectable result with producer-owned evidence identifiers and reason codes.
+4. require independent producer evidence that the figured text is eligible to support the measurement, not merely extractable;
+5. require a valid figured-dimension relationship such as witness-bound geometry;
+6. preserve competing figured candidates as conflict rather than choosing nearest/first/smallest;
+7. keep width and height independent; and
+8. return an inspectable result with producer-owned evidence identifiers and reason codes.
 
 The public resolve methods must not accept caller-provided `width_mm`, `height_mm`, `figured_text`, `PhysicalOpeningExistenceRecord`, `SourceObservationRecord`, or an already-assembled evidence list as the object that proves its own authority.
 
@@ -82,7 +93,9 @@ Reuse the adopted dimension machinery rather than creating a parallel parser/bin
 - `pb_figured_dimension_authority` for figured-value measurement resolution semantics;
 - existing source observation / visibility records for immutable provenance.
 
-A dimension string near an opening is not enough. Positive width requires the producer-owned relationship between the dimension observation and the physical opening geometry. Text-only, OCR-only without an authenticated transform, and unmatched witness geometry remain non-authoritative.
+A dimension string near an opening is not enough. Positive width requires both an eligible producer-owned text observation and the producer-owned relationship between the dimension observation and the physical opening geometry. Text-only, hidden/non-rendering text, decoding-untrusted text, OCR-only without an authenticated transform, and unmatched witness geometry remain non-authoritative.
+
+The existing figured-dimension helpers may parse and geometrically bind evidence, but a future authority wrapper must prevent those helpers from increasing authority beyond their upstream source/render support.
 
 ## 6. Height remains independently gated
 
@@ -112,10 +125,12 @@ The companion red-team suite must prove:
 
 - current visibility authority cannot publicly read raw figured-text observations;
 - raw native words do exist in the producer-owned source observation substrate;
+- a hidden/non-rendering raw word can still be extractable and therefore raw-word ownership alone cannot establish figured-text authority;
 - equal source hash/revision from two independent producers does not itself prove one producer binding;
 - future dimension authority is created by the trusted producer boundary;
 - its public resolve API is selector-based and read-only;
-- a witnessed `900` can resolve width only through the producer-bound authority;
+- a witnessed visible `900` can resolve width only through the producer-bound authority **after** text/render eligibility is established;
+- a hidden white-on-white `900` with identical witness geometry must not resolve a positive width;
 - schedule/text-only selectors cannot mint physical opening dimensions;
 - plan height remains unresolved when only width evidence exists; and
 - downstream capabilities stay closed.
