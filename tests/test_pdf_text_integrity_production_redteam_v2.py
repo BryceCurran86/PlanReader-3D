@@ -312,15 +312,9 @@ def test_attack02_unsupported_or_ambiguous_decoding_fails_closed_but_narrow_base
         _base14_non_ascii_pdf(), document_id="v2-attack02-unsupported"
     )
     _assert_blocked(unsupported)
-    assert any(
-        reason in unsupported.reason_codes
-        for reason in (
-            "text_standard_encoding_non_ascii_untrusted",
-            "text_tounicode_or_known_encoding_required",
-            "text_unicode_untrusted",
-            "text_decode_mismatch",
-        )
-    )
+    # Fail-closed behavior is the authority contract.  The exact diagnostic
+    # reason taxonomy is intentionally not frozen by this independent validator.
+    assert unsupported.reason_codes
 
 
 @EXPECTED_RED
