@@ -15,6 +15,9 @@ from pb_physical_opening_authority import (
 )
 from pb_source_observation_authority import (
     ObservationSelector,
+    SNAPSHOT_MISMATCH,
+    SOURCE_HASH_MISMATCH,
+    STALE_REVISION,
     SourceObservationProducer,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -387,7 +390,9 @@ def test_attack_11_revision_laundering_abstains() -> None:
     )
 
     _assert_unresolved(result)
-    assert _IDENTITY_SCOPE_MISMATCH in result.reason_codes
+    assert STALE_REVISION in result.reason_codes
+    assert _IDENTITY_EXISTENCE_REQUIRED in result.reason_codes
+    assert _IDENTITY_SCOPE_MISMATCH not in result.reason_codes
 
 
 def test_attack_12_source_sha_laundering_fails_closed() -> None:
@@ -407,6 +412,9 @@ def test_attack_12_source_sha_laundering_fails_closed() -> None:
     result = physical.compare_identity(left, forged)
 
     _assert_unresolved(result)
+    assert SOURCE_HASH_MISMATCH in result.reason_codes
+    assert _IDENTITY_EXISTENCE_REQUIRED in result.reason_codes
+    assert _IDENTITY_SCOPE_MISMATCH not in result.reason_codes
 
 
 def test_attack_13_snapshot_laundering_fails_closed() -> None:
@@ -426,6 +434,9 @@ def test_attack_13_snapshot_laundering_fails_closed() -> None:
     result = physical.compare_identity(left, forged)
 
     _assert_unresolved(result)
+    assert SNAPSHOT_MISMATCH in result.reason_codes
+    assert _IDENTITY_EXISTENCE_REQUIRED in result.reason_codes
+    assert _IDENTITY_SCOPE_MISMATCH not in result.reason_codes
 
 
 def test_attack_14_raw_native_geometry_cannot_establish_identity() -> None:
@@ -676,4 +687,5 @@ def test_attack_23_identity_does_not_open_any_downstream_firewall() -> None:
         "jobhub_publish",
     ):
         assert not hasattr(physical, forbidden_method)
+
 
