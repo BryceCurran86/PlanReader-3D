@@ -26,11 +26,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Dict, Mapping, Optional, Tuple
 
 from pb_migration_contracts import (
     EvidenceResolutionStatus,
-    QuantityEvidence,
     stable_contract_id,
 )
 from pb_physical_wall_candidate_authority import (
@@ -113,41 +112,8 @@ class WallRoleSelector:
 
 
 @dataclass(frozen=True)
-class WallRoleEvidence:
-    """A single authenticated evidence observation that contributes to wall-role.
-
-    Only observations with corroborated provenance are accepted by the producer.
-    """
-    evidence_id: str
-    source_sha256: str
-    revision_id: str
-    snapshot_id: str
-    page_id: str
-    viewport_id: str
-    kind: str          # e.g. "plan_boundary_annotation", "section_wall_marker", etc.
-    role_claim: WallRoleClassification
-    confidence: float  # [0, 1]
-
-    def __post_init__(self) -> None:
-        for name in (
-            "evidence_id",
-            "source_sha256",
-            "revision_id",
-            "snapshot_id",
-            "page_id",
-            "viewport_id",
-            "kind",
-        ):
-            _required(getattr(self, name), name)
-        if not isinstance(self.role_claim, WallRoleClassification):
-            raise TypeError("role_claim must be WallRoleClassification")
-        if not (0.0 <= self.confidence <= 1.0):
-            raise ValueError("confidence must be in [0, 1]")
-
-
-@dataclass(frozen=True)
 class WallRoleRecord:
-    """Sealed, authenticated wall-role record.  Never directly constructible."""
+    """Sealed, authenticated wall-role record. Never directly constructible."""
     record_id: str
     document_id: str
     revision_id: str
@@ -212,8 +178,8 @@ class WallRoleProducer:
     """Trusted writer boundary for authenticated wall-role classification.
 
     Callers may NOT supply a role label, thickness, or perimeter claim.
-    Every positive WallRoleRecord is produced only from corroborated
-    WallRoleEvidence observations whose lineage matches the selector.
+    Every positive WallRoleRecord is produced only from authenticated
+    upstream candidate topology evidence.
     """
 
     def __init__(
@@ -253,19 +219,8 @@ class WallRoleProducer:
     def publish(
         self,
         selector: WallRoleSelector,
-        observations: Sequence[WallRoleEvidence],
     ) -> WallRoleResult:
-        """Attempt to resolve wall role from corroborated observations.
-
-        Args:
-            selector:     Exact wall identity and document context.
-            observations: Pre-authenticated evidence atoms; caller must NOT
-                          include thickness-only or perimeter-rank claims.
-
-        Returns:
-            A WallRoleResult.  CORROBORATED only when all observations agree
-            on a single non-UNRESOLVED role and share matching lineage.
-        """
+        """Publish authenticated wall role for selector by re-resolving upstream candidate authority."""
         if type(selector) is not WallRoleSelector:
             raise TypeError("selector must be WallRoleSelector")
 
@@ -280,25 +235,6 @@ class WallRoleProducer:
             decision_scope_id=cand_scope_id,
         )
         cand_result = self._wall_candidates.resolve_scope(cand_sel)
-        if (
-            cand_result.status is not EvidenceResolutionStatus.CORROBORATED
-            and selector.decision_scope_id != cand_scope_id
-        ):
-            try:
-                alt_sel = PhysicalWallCandidateSelector(
-                    document_id=selector.document_id,
-                    revision_id=selector.revision_id,
-                    source_sha256=selector.source_sha256,
-                    snapshot_id=selector.snapshot_id,
-                    page_id=selector.page_id,
-                    decision_scope_id=selector.decision_scope_id,
-                )
-                alt = self._wall_candidates.resolve_scope(alt_sel)
-                if alt.status is EvidenceResolutionStatus.CORROBORATED:
-                    cand_result = alt
-            except Exception:
-                pass
-
         if cand_result.status is not EvidenceResolutionStatus.CORROBORATED:
             return self._store(
                 selector,
@@ -308,88 +244,34 @@ class WallRoleProducer:
                 ),
             )
 
-        # Lineage check on candidate authority result
-        if (
-            getattr(cand_result, "document_id", None) not in (None, selector.document_id)
-            or getattr(cand_result, "revision_id", None) not in (None, selector.revision_id)
-            or getattr(cand_result, "source_sha256", None) not in (None, selector.source_sha256)
-            or getattr(cand_result, "snapshot_id", None) not in (None, selector.snapshot_id)
-        ):
-            return self._store(selector, _conflict(WALL_ROLE_LINEAGE_MISMATCH))
-
-        # Confirm physical_wall_id is present in the candidate scope records
-        found = any(
-            getattr(r, "wall_candidate_id", None) == selector.physical_wall_id
-            or getattr(getattr(r, "physical_identity", None), "physical_wall_id", None)
-            == selector.physical_wall_id
-            for r in getattr(cand_result, "records", ())
-        )
-        if not found:
+        matching_recs = [
+            r for r in getattr(cand_result, "records", ())
+            if getattr(r, "wall_candidate_id", None) == selector.physical_wall_id
+            or getattr(getattr(r, "physical_identity", None), "physical_wall_id", None) == selector.physical_wall_id
+        ]
+        if not matching_recs:
             return self._store(selector, _abstained(WALL_ROLE_WALL_UNRESOLVED))
 
-        # 2. Reject empty evidence: cannot classify without observations
-        obs = list(observations or [])
-        if not obs:
+        rec = matching_recs[0]
+        cand = rec.wall_candidate
+
+        # 2. Derive classification from candidate topology
+        meta = cand.metadata or {}
+        proven_role = WallRoleClassification.UNRESOLVED
+
+        if meta.get("is_gable"):
+            proven_role = WallRoleClassification.GABLE
+        elif meta.get("is_party"):
+            proven_role = WallRoleClassification.PARTY
+        elif cand.interior_exterior == "exterior":
+            proven_role = WallRoleClassification.EXTERNAL
+        elif cand.interior_exterior == "interior":
+            proven_role = WallRoleClassification.INTERNAL
+
+        if proven_role is WallRoleClassification.UNRESOLVED:
             return self._store(selector, _abstained(WALL_ROLE_UNRESOLVED))
 
-        # 3. Validate each observation: reject stale lineage and forbidden kinds
-        forbidden_kinds = {
-            "thickness_only",
-            "perimeter_rank",
-            "caller_label",
-            "assumed_role",
-            "model_default",
-        }
-        valid_obs: list[WallRoleEvidence] = []
-        stale_count = 0
-        forbidden_count = 0
-        for ob in obs:
-            if not isinstance(ob, WallRoleEvidence):
-                continue
-            if ob.kind in forbidden_kinds:
-                forbidden_count += 1
-                continue
-            # Lineage: evidence must share source/revision/snapshot
-            if (
-                ob.source_sha256 != selector.source_sha256
-                or ob.revision_id != selector.revision_id
-                or ob.snapshot_id != selector.snapshot_id
-            ):
-                stale_count += 1
-                continue
-            valid_obs.append(ob)
-
-        if forbidden_count and not valid_obs:
-            return self._store(selector, _abstained(WALL_ROLE_THICKNESS_ONLY_REJECTED))
-
-        if stale_count and not valid_obs:
-            return self._store(selector, _conflict(WALL_ROLE_STALE_EVIDENCE))
-
-        if not valid_obs:
-            return self._store(selector, _abstained(WALL_ROLE_UNRESOLVED))
-
-        # 4. Collect role claims from valid observations only
-        role_claims = {ob.role_claim for ob in valid_obs}
-        # Exclude UNRESOLVED from the consensus set
-        concrete_roles = role_claims - {WallRoleClassification.UNRESOLVED}
-
-        if len(concrete_roles) == 0:
-            # All valid observations abstain
-            return self._store(selector, _abstained(WALL_ROLE_UNRESOLVED))
-
-        if len(concrete_roles) > 1:
-            # Conflicting role claims (e.g. EXTERNAL vs INTERNAL)
-            return self._store(
-                selector,
-                _conflict(
-                    WALL_ROLE_AMBIGUOUS,
-                    *(r.value for r in concrete_roles),
-                ),
-            )
-
-        # 5. Single agreed role
-        agreed_role = next(iter(concrete_roles))
-        evidence_ids = tuple(sorted({ob.evidence_id for ob in valid_obs}))
+        evidence_ids = (rec.wall_candidate_id,)
         payload = {
             "document_id": selector.document_id,
             "revision_id": selector.revision_id,
@@ -398,7 +280,7 @@ class WallRoleProducer:
             "page_id": selector.page_id,
             "decision_scope_id": selector.decision_scope_id,
             "physical_wall_id": selector.physical_wall_id,
-            "role": agreed_role.value,
+            "role": proven_role.value,
             "corroborating_evidence_ids": evidence_ids,
         }
         record_id = stable_contract_id("wall_role", payload, digest_chars=32)
@@ -411,7 +293,7 @@ class WallRoleProducer:
             page_id=selector.page_id,
             decision_scope_id=selector.decision_scope_id,
             physical_wall_id=selector.physical_wall_id,
-            role=agreed_role,
+            role=proven_role,
             corroborating_evidence_ids=evidence_ids,
         )
         return self._store(
@@ -439,7 +321,6 @@ __all__ = [
     "WALL_ROLE_WALL_UNRESOLVED",
     "WallRoleAuthority",
     "WallRoleClassification",
-    "WallRoleEvidence",
     "WallRoleProducer",
     "WallRoleRecord",
     "WallRoleResult",
