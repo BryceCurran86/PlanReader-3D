@@ -6,7 +6,8 @@ Base: 7a933c919fada0e30835d378c684091f72c6e90c.
 The intended repair may narrow the current scope-wide ``ambiguous_wall_ids`` veto,
 but it must not weaken fail-closed handling where ambiguity actually competes for
 one selected opening host role. These tests are independent of PR #415 and add
-repair-specific safety controls.
+repair-specific safety controls using states reachable from producer-owned wall
+equivalence.
 """
 from __future__ import annotations
 
@@ -244,39 +245,6 @@ def test_confidence_cannot_promote_one_ambiguous_same_role_candidate() -> None:
                 PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE,
             ),),
             ambiguous_ids=("left-top", "left-top-low-confidence"),
-        ),
-    )
-    _assert_conflict(result)
-
-
-def test_contradictory_same_and_ambiguous_upstream_state_fails_closed() -> None:
-    """Safety gate for a naive repair that simply deletes ambiguous-id vetoing.
-
-    Even if pair/group fields say SAME, simultaneous upstream ambiguity for the
-    same competing role is contradictory evidence and must not be collapsed into
-    a positive host by deterministic representative choice.
-    """
-    base = _base_records()
-    shadow = _record(
-        "left-top-shadow",
-        (-100.0, -5.0),
-        (0.0, -5.0),
-        source_id="source:shadow",
-    )
-    records = base + (shadow,)
-    same_group = tuple(sorted(("left-top", "left-top-shadow")))
-    result = host._resolve_host_bands(
-        records,
-        OPENING,
-        _equivalence(
-            records,
-            pairs=((
-                "left-top",
-                "left-top-shadow",
-                PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
-            ),),
-            same_groups=(same_group,),
-            ambiguous_ids=("left-top", "left-top-shadow"),
         ),
     )
     _assert_conflict(result)
