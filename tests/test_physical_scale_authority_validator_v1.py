@@ -262,7 +262,10 @@ def test_graphic_bar_agreeing_with_same_page_ratio_text_preserves_mapping() -> N
     result = producer.publish_scope(selector)
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.evidence is not None
-    assert abs(result.evidence.source_span_pt - span_pt) <= 1e-6
+    # PyMuPDF serializes the requested coordinate to five decimal places, so
+    # the authenticated native segment differs slightly from the pre-PDF
+    # analytic value.  Do not require production to snap it back to ratio text.
+    assert abs(result.evidence.source_span_pt - span_pt) <= 5e-6
     assert result.evidence.physical_span_mm == 1000.0
     assert abs(result.evidence.points_per_mm - span_pt / 1000.0) <= 1e-9
     assert abs(result.evidence.mm_per_point - 1000.0 / span_pt) <= 1e-9
