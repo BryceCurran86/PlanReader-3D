@@ -107,6 +107,8 @@ def test_future_live_integration_keeps_blocked_net_unknown_not_zero() -> None:
     mod = importlib.import_module(MODULE_NAME)
     source = inspect.getsource(mod.LiveOpeningNetWallResult).lower()
     assert "net" in source
+    # Integration must preserve explicit unresolved state; absence of a usable
+    # net-wall record must not be converted into an authoritative 0 m2.
     assert "optional" in source or "none" in source or "abstain" in source
 
 
