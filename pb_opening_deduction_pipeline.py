@@ -370,9 +370,11 @@ class GenericOpeningDeductionPipeline:
     ) -> List[Any]:
         """Propagate only authoritative net area; otherwise publish ``None``.
 
-        Until host-binding v3 is integrated, results produced by this module
-        are ABSTAINED and only their provisional arithmetic is retained in
-        diagnostic metadata.
+        ITEM 21A FAIL-CLOSED ENFORCEMENT:
+        - Caller-supplied independent_gross_area_m2 is NEVER authoritative
+        - Global primary_res fanout without exact physical-wall joining is blocked
+        - Results remain ABSTAINED until source-derived gross-wall authority exists
+        - Caller data retained in diagnostic metadata only (UI/provisional paths)
         """
         primary_res = (
             results.get("perimeter_walling")
@@ -405,39 +407,45 @@ class GenericOpeningDeductionPipeline:
                 continue
 
             metadata = prediction.metadata if hasattr(prediction, "metadata") else prediction.get("metadata", {})
+
+            # Item 21A: Caller-supplied independent_gross_area_m2 is diagnostic only
+            # It can never replace authenticated net-wall area in publication path
             independent_gross = metadata.get("independent_gross_area_m2")
+            provisional_net = primary_res.net_area_m2
+
+            # Calculate what caller data would produce (for diagnostics)
             if independent_gross is not None:
-                provisional_net = round(
+                caller_derived_net = round(
                     independent_gross - primary_res.total_deducted_area_m2, 4
                 )
             else:
-                provisional_net = primary_res.net_area_m2
+                caller_derived_net = None
 
-            metadata["gross_area_m2"] = (
-                independent_gross if independent_gross is not None else primary_res.gross_area_m2
-            )
+            metadata["gross_area_m2"] = primary_res.gross_area_m2
             metadata["total_deducted_opening_area_m2"] = primary_res.total_deducted_area_m2
             metadata["applied_openings"] = primary_res.applied_openings
             metadata["unresolved_openings"] = primary_res.unresolved_openings
             metadata["unbound_openings"] = primary_res.unbound_openings
 
-            if abstained:
-                net_value = None
-                metadata["net_area_m2"] = None
-                metadata["provisional_net_area_m2"] = provisional_net
-                metadata["publication_blocked"] = True
-                metadata["reconciliation_status"] = "ambiguous_unresolved"
-                metadata["blocking_reason"] = (
-                    "opening_deduction_authority_unavailable: producer-owned host binding "
-                    "and complete opening scope are not yet established; "
-                    "provisional_net_area_m2 is diagnostic only"
-                )
-            else:
-                net_value = provisional_net
-                metadata["net_area_m2"] = net_value
-                metadata["publication_blocked"] = False
-                metadata["reconciliation_status"] = "corroborated"
-                metadata.pop("blocking_reason", None)
+            # Item 21A diagnostic tracking (never authoritative)
+            if independent_gross is not None:
+                metadata["caller_supplied_gross_area_m2"] = independent_gross
+                metadata["caller_derived_net_area_m2"] = caller_derived_net
+
+            # ITEM 21A FAIL-CLOSED: Always ABSTAINED until source-derived authorities exist
+            # No caller-supplied data, no exact physical-wall joining verified,
+            # no source-derived gross-wall area authority yet implemented
+            net_value = None
+            metadata["net_area_m2"] = None
+            metadata["provisional_net_area_m2"] = provisional_net
+            metadata["publication_blocked"] = True
+            metadata["reconciliation_status"] = "item_21a_awaiting_source_derived_authority"
+            metadata["blocking_reason"] = (
+                "item_21a_fail_closed: caller_gross_area_not_authoritative, "
+                "exact_physical_wall_joining_unavailable, "
+                "source_derived_gross_wall_authority_not_yet_implemented; "
+                "provisional_net_area_m2 is diagnostic only"
+            )
 
             if hasattr(prediction, "quantity"):
                 prediction.quantity = net_value

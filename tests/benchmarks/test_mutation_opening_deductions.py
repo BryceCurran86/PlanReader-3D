@@ -233,9 +233,16 @@ def test_propagation_blocks_independent_gross_area_without_host_authority() -> N
     ]
     updated = pipeline.propagate_to_predictions(preds, results)
     pred_map = {prediction.tag: prediction for prediction in updated}
+    # Item 21A: Caller-supplied independent_gross_area is blocked and never influences quantity
     assert pred_map["internal_plaster"].quantity is None
     assert pred_map["internal_plaster"].metadata["net_area_m2"] is None
-    assert pred_map["internal_plaster"].metadata["provisional_net_area_m2"] == 79.0
+    # provisional_net_area_m2 uses authenticated source data (100 gross - 6 deductions = 94)
+    # not the caller-supplied 85 (which would be 85 - 6 = 79)
+    assert pred_map["internal_plaster"].metadata["provisional_net_area_m2"] == 94.0
+    # Caller data is tracked separately for diagnostics
+    assert pred_map["internal_plaster"].metadata["caller_supplied_gross_area_m2"] == 85.0
+    assert pred_map["internal_plaster"].metadata["caller_derived_net_area_m2"] == 79.0
+    # internal_paint also blocked and uses authenticated 94.0
     assert pred_map["internal_paint"].quantity is None
     assert pred_map["internal_paint"].metadata["provisional_net_area_m2"] == 94.0
 
