@@ -23,6 +23,7 @@ def _qty(
     qid: str,
     family: str = "window_count",
     abstained: bool = False,
+    description: str = "",
 ) -> QuantityEvidence:
     return QuantityEvidence(
         quantity_id=qid,
@@ -39,6 +40,7 @@ def _qty(
         confidence=0.9 if not abstained else 0.0,
         abstained=abstained,
         blocking_reasons=("conflict",) if abstained else (),
+        metadata={"description": description},
     )
 
 
@@ -72,6 +74,43 @@ def test_dimension_shaped_key_cannot_create_opening_identity() -> None:
     result = recovery.recover(object())
     assert result.recovered == ()
     assert result.rejected_quantity_ids == ("q-dim",)
+
+
+def test_dimension_chain_generated_w1_is_rejected_even_though_tag_looks_valid() -> None:
+    recovery = GenericOpeningCountRecovery(
+        _FakeAdapter(
+            (
+                _qty(
+                    "W1",
+                    4.0,
+                    qid="q-chain-w",
+                    description="W1 plan opening/pier chain (4 No, 2900 mm)",
+                ),
+            )
+        )
+    )
+    result = recovery.recover(object())
+    assert result.recovered == ()
+    assert result.rejected_quantity_ids == ("q-chain-w",)
+
+
+def test_dimension_chain_generated_d1_is_rejected_even_though_tag_looks_valid() -> None:
+    recovery = GenericOpeningCountRecovery(
+        _FakeAdapter(
+            (
+                _qty(
+                    "D1",
+                    3.0,
+                    qid="q-chain-d",
+                    family="door_count",
+                    description="D1 repeated floor-plan bay doors (3 No)",
+                ),
+            )
+        )
+    )
+    result = recovery.recover(object())
+    assert result.recovered == ()
+    assert result.rejected_quantity_ids == ("q-chain-d",)
 
 
 def test_abstained_conflict_stays_rejected() -> None:
