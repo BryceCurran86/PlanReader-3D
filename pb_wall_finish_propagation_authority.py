@@ -59,6 +59,7 @@ WALL_FINISH_NET_GEOMETRY_UNRESOLVED = "wall_finish_net_geometry_unresolved"
 WALL_FINISH_PHYSICAL_WALL_UNRESOLVED = "wall_finish_physical_wall_unresolved"
 WALL_FINISH_ASSIGNMENT_UNAVAILABLE = "wall_finish_assignment_unavailable"
 WALL_FINISH_ASSIGNMENT_CONFLICT = "wall_finish_assignment_conflict"
+WALL_FINISH_BINDING_UNAVAILABLE = "wall_finish_binding_unavailable"
 WALL_FINISH_LINEAGE_MISMATCH = "wall_finish_lineage_mismatch"
 WALL_FINISH_FACE_AMBIGUOUS = "wall_finish_face_ambiguous"
 WALL_FINISH_SCOPE_INCOMPLETE = "wall_finish_scope_incomplete"
@@ -83,7 +84,12 @@ def _require_nonempty(value: object, name: str) -> str:
 
 @dataclass(frozen=True)
 class WallFinishAssignment:
-    """Authenticated assignment of a surface finish trade to a physical wall."""
+    """Caller-facing diagnostic finish claim — never measurement authority.
+
+    May be supplied for diagnostics / replay. Cannot mint CORROBORATED
+    wall-finish quantity. Missing producer-owned finish/face binding fails
+    closed with WALL_FINISH_BINDING_UNAVAILABLE.
+    """
 
     assignment_id: str
     physical_wall_id: str
@@ -593,20 +599,20 @@ class WallFinishPropagationProducer:
 
         # 4. ITEM 19A FAIL-CLOSED ENFORCEMENT
         # NO caller-provided finish/face binding is authentic until a source-derived
-        # producer-owned WallFinishFaceBindingAuthority exists.
+        # producer-owned finish/face binding exists.
         #
         # Caller-provided assignments are DIAGNOSTIC ONLY:
         # - Never produce CORROBORATED, FIRM, or authoritative quantity
         # - Cannot determine which faces receive finish
         # - Cannot enforce material/trade scope
-        # - Cannot multiply net area by caller-selected face count
+        # - Cannot multiply net area by caller-selected face count (both_faces)
         #
-        # Until Item 19B completes, return ABSTAINED with diagnostic reason.
+        # Fail closed with WALL_FINISH_BINDING_UNAVAILABLE (never invent zero/quantity).
         return self._store(
             selector,
             _blocked(
                 EvidenceResolutionStatus.ABSTAINED,
-                WALL_FINISH_ASSIGNMENT_UNAVAILABLE,
+                WALL_FINISH_BINDING_UNAVAILABLE,
                 "item_19a_waiting_for_source_derived_finish_binding_authority",
                 f"assignment_id={assignment.assignment_id}",
                 f"physical_wall_id={selector.physical_wall_id}",
@@ -614,13 +620,6 @@ class WallFinishPropagationProducer:
                 f"caller_face_target={assignment.wall_face_target}",
             ),
         )
-
-        result = WallFinishPropagationResult(
-            status=EvidenceResolutionStatus.CORROBORATED,
-            reason_codes=(WALL_FINISH_PROPAGATION_RESOLVED,),
-            record=record,
-        )
-        return self._store(selector, result)
 
     def publish_scope_summary(
         self,
@@ -715,6 +714,7 @@ class WallFinishPropagationProducer:
 __all__ = [
     "WALL_FINISH_ASSIGNMENT_CONFLICT",
     "WALL_FINISH_ASSIGNMENT_UNAVAILABLE",
+    "WALL_FINISH_BINDING_UNAVAILABLE",
     "WALL_FINISH_FACE_AMBIGUOUS",
     "WALL_FINISH_LINEAGE_MISMATCH",
     "WALL_FINISH_NET_GEOMETRY_UNRESOLVED",

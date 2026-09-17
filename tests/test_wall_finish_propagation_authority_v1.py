@@ -37,6 +37,7 @@ from pb_physical_wall_identity import PhysicalWallIdentity
 from pb_wall_finish_propagation_authority import (
     WALL_FINISH_ASSIGNMENT_CONFLICT,
     WALL_FINISH_ASSIGNMENT_UNAVAILABLE,
+    WALL_FINISH_BINDING_UNAVAILABLE,
     WALL_FINISH_FACE_AMBIGUOUS,
     WALL_FINISH_LINEAGE_MISMATCH,
     WALL_FINISH_NET_GEOMETRY_UNRESOLVED,
@@ -213,6 +214,7 @@ def test_successful_propagation_with_both_faces() -> None:
 
     # Item 19A fix: Caller assignments cannot produce CORROBORATED results
     assert res.status == EvidenceResolutionStatus.ABSTAINED
+    assert WALL_FINISH_BINDING_UNAVAILABLE in res.reason_codes
     assert "item_19a_waiting_for_source_derived_finish_binding_authority" in res.reason_codes
     # No record produced from caller-provided data
     assert res.record is None
