@@ -24,9 +24,9 @@ def test_missing_dimensions_remain_unknown_not_zero() -> None:
         host=_host(),
         wall_id="WALL-1",
         context=_ctx(),
-        document=_doc(),
+        document=_doc("ev-w", "ev-h"),
         viewport=_viewport(),
-        opening_entity=_entity("OP-1", ids=()),
+        opening_entity=_entity("OP-1"),
         width_evidence=None,
         height_evidence=None,
     )
