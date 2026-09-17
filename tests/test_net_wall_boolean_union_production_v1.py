@@ -80,9 +80,22 @@ def test_from_authorities_has_no_raw_geometry_or_self_certification_inputs() -> 
         assert forbidden not in params
 
 
-def test_positive_producer_construction_fails_closed_until_items_11_to_15_exist() -> None:
-    with pytest.raises(RuntimeError, match=NET_WALL_BOOLEAN_UNION_UPSTREAM_UNAVAILABLE):
+def test_positive_producer_construction_rejects_wrong_or_unavailable_authorities() -> None:
+    """Remain fail-closed as the real upstream authority modules progressively land.
+
+    Before an upstream module exists, construction stops with the explicit
+    unavailable reason.  Once that module exists, an arbitrary caller object must
+    instead be rejected as the wrong exact producer-owned type.  Both states are
+    intentionally fail-closed; this regression must not depend on which prerequisite
+    happened to have merged at the time the branch was created.
+    """
+    with pytest.raises((RuntimeError, TypeError)) as caught:
         NetWallBooleanUnionProducer.from_authorities(object(), object(), object(), object())
+
+    if isinstance(caught.value, RuntimeError):
+        assert NET_WALL_BOOLEAN_UNION_UPSTREAM_UNAVAILABLE in str(caught.value)
+    else:
+        assert "instance required" in str(caught.value)
 
 
 def test_missing_selector_record_abstains_not_zero() -> None:
