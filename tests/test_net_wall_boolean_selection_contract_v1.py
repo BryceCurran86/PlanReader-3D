@@ -98,9 +98,9 @@ def test_conflicting_geometry_for_same_physical_opening_blocks_not_first_wins() 
 
 
 def test_partial_overlap_and_contained_voids_use_union_not_scalar_sum() -> None:
-    outer = box(1.0, 0.0, 5.0, 2.0)
-    partial = box(4.0, 0.0, 7.0, 2.0)
-    contained = box(2.0, 0.5, 3.0, 1.5)
+    outer = box(1.0, 0.0, 5.0, 2.0)      # area 8
+    partial = box(4.0, 0.0, 7.0, 2.0)    # area 6, overlap 2
+    contained = box(2.0, 0.5, 3.0, 1.5)  # fully inside outer
     union = reference_void_union((outer, partial, contained))
     assert union.area == pytest.approx(12.0)
     assert union.area != pytest.approx(outer.area + partial.area + contained.area)
