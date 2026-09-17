@@ -3,7 +3,7 @@
 TEST-ONLY / EXPECTED-RED / DO NOT MERGE.
 
 Integration base combines exact post-#417 main with the exact #411 production
-files.  These tests do not change production code.  They prove the key Physical
+files. These tests do not change production code. They prove the key Physical
 Opening Void V2 prerequisite that two openings on one physical wall share one
 producer-owned wall coordinate frame even when their authenticated opening-scoped
 host bindings legitimately contain different local wall pieces.
@@ -119,14 +119,13 @@ def _publish_frames(payload: bytes):
         physical_opening_authority=physical,
         host_wall_universe_authority=universe_authority,
     )
-    frame_producer = OpeningHostFrameProducer.from_authorities(
-        physical_opening_authority=physical,
-        host_binding_authority=binding_producer.authority(),
-        physical_wall_candidate_authority=wall_authority,
-    )
 
+    # Publish the complete binding set first. OpeningHostBindingAuthority is a
+    # sealed snapshot, so the frame producer must be built only after these
+    # records exist; otherwise the validator would test stale authority state
+    # rather than whole-wall frame construction.
+    bound_openings = []
     bindings = []
-    frames = []
     for opening_selector, _opening_record in openings.values():
         binding_result = binding_producer.publish(
             opening_left_selector=opening_selector,
@@ -137,7 +136,16 @@ def _publish_frames(payload: bytes):
         assert binding_result.record is not None
         binding = binding_result.record
         bindings.append(binding)
+        bound_openings.append((opening_selector, binding))
 
+    frame_producer = OpeningHostFrameProducer.from_authorities(
+        physical_opening_authority=physical,
+        host_binding_authority=binding_producer.authority(),
+        physical_wall_candidate_authority=wall_authority,
+    )
+
+    frames = []
+    for opening_selector, binding in bound_openings:
         binding_selector = OpeningHostBindingSelector(
             document_id=binding.document_id,
             revision_id=binding.revision_id,
@@ -194,7 +202,7 @@ def test_two_openings_on_one_wall_share_one_whole_wall_frame() -> None:
     assert len(frames) == 2
     assert len(set(local_extents)) == 2
 
-    # Both openings belong to the same physical wall coordinate system.  A
+    # Both openings belong to the same physical wall coordinate system. A
     # correct producer-owned traversal therefore anchors both at the whole-wall
     # centreline origin x=20,y=90 rather than each opening's local member min.
     assert {tuple(frame.origin_pt) for frame in frames} == {(20.0, 90.0)}
@@ -229,6 +237,3 @@ def test_shared_whole_wall_frame_ignores_source_segment_direction() -> None:
     assert sorted(_rounded_span(frame) for frame in forward_frames) == sorted(
         _rounded_span(frame) for frame in reversed_frames
     ) == [(80.0, 120.0), (200.0, 240.0)]
-
-
-# Baseline CI trigger: assertions above are the independent contract under test.
