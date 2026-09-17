@@ -257,6 +257,7 @@ def test_source_does_not_reuse_legacy_commercial_metadata_or_default_rules() -> 
         "default_target",
         "pb_australian_takeoff_standards_v178",
         "calculate_wall_takeoff",
+        "as4041",
     )
     present = tuple(item for item in forbidden if item in source)
     assert not present, f"legacy/default applicability shortcut present: {present}"
