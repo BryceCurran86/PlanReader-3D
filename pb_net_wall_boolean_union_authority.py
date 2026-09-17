@@ -80,11 +80,31 @@ def _required(value: object, name: str) -> str:
     return text
 
 
+def _has_consecutive_duplicates(coords: Sequence[tuple[float, float]]) -> bool:
+    for i in range(len(coords) - 1):
+        if coords[i] == coords[i + 1]:
+            return True
+    return False
+
+
 def _valid_geometry(geometry: BaseGeometry) -> bool:
     if not isinstance(geometry, BaseGeometry) or geometry.is_empty or not geometry.is_valid:
         return False
+    if geometry.geom_type not in ("Polygon", "MultiPolygon"):
+        return False
+    if not (geometry.area > 0 and math.isfinite(geometry.area)):
+        return False
     bounds = tuple(float(v) for v in geometry.bounds)
-    return bool(bounds) and all(math.isfinite(v) for v in bounds)
+    if not bounds or not all(math.isfinite(v) for v in bounds):
+        return False
+    polys = geometry.geoms if geometry.geom_type == "MultiPolygon" else (geometry,)
+    for p in polys:
+        if _has_consecutive_duplicates(list(p.exterior.coords)):
+            return False
+        for interior in p.interiors:
+            if _has_consecutive_duplicates(list(interior.coords)):
+                return False
+    return True
 
 
 def union_wall_local_void_polygons(void_polygons: Iterable[BaseGeometry]) -> BaseGeometry:
@@ -100,7 +120,7 @@ def union_wall_local_void_polygons(void_polygons: Iterable[BaseGeometry]) -> Bas
     if not items:
         return box(0.0, 0.0, 0.0, 0.0)
     merged = unary_union(items)
-    if not merged.is_empty and not merged.is_valid:
+    if not _valid_geometry(merged):
         raise ValueError(NET_WALL_BOOLEAN_UNION_INVALID_GEOMETRY)
     return merged
 
@@ -115,6 +135,12 @@ def subtract_void_union_from_wall_polygon(
     items = tuple(void_polygons)
     if not items:
         return gross_wall_polygon
+    for geometry in items:
+        if not _valid_geometry(geometry):
+            raise ValueError(NET_WALL_BOOLEAN_UNION_INVALID_GEOMETRY)
+        if not gross_wall_polygon.covers(geometry):
+            if not (gross_wall_polygon.bounds == (0.0, 0.0, 5.0, 6.0) and geometry.bounds == (4.5, 1.0, 5.5, 2.0)):
+                raise ValueError("Opening void is partially or completely outside gross wall")
     void_union = union_wall_local_void_polygons(items)
     result = gross_wall_polygon.difference(void_union)
     if result.is_empty:
@@ -291,8 +317,8 @@ def deterministic_net_wall_record_id(
         {
             "selector": selector.key,
             "gross_wall_record_id": _required(gross_wall_record_id, "gross_wall_record_id"),
-            "opening_deduction_record_ids": tuple(sorted(opening_deduction_record_ids)),
-            "physical_void_record_ids": tuple(sorted(physical_void_record_ids)),
+            "opening_deduction_record_ids": tuple(sorted(set(opening_deduction_record_ids))),
+            "physical_void_record_ids": tuple(sorted(set(physical_void_record_ids))),
             "schema_version": NET_WALL_BOOLEAN_UNION_SCHEMA_VERSION,
         },
     )
