@@ -29,15 +29,49 @@ import inspect
 import pytest
 from shapely.geometry import box
 
-from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_geometry_takeoff_model import AuthorityStatus
+from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence, stable_contract_id
+from pb_physical_wall_candidate_authority import (
+    PhysicalWallCandidateAuthority,
+    PhysicalWallCandidateRecord,
+    PhysicalWallCandidateScopeResult,
+    PhysicalWallCandidateSelector,
+    _AUTHORITY_SEAL as CANDIDATE_SEAL,
+    _ScopeKey,
+)
+from pb_physical_wall_identity import PhysicalWallIdentity
+from pb_opening_host_frame_authority import (
+    OpeningHostFrameAuthority,
+    OpeningHostFrameEvidence,
+    OpeningHostFrameResult,
+    OpeningHostFrameSelector,
+    _AUTHORITY_SEAL as FRAME_SEAL,
+)
+from pb_physical_scale_authority import (
+    PhysicalScaleAuthority,
+    PhysicalScaleEvidence,
+    PhysicalScaleResult,
+    PhysicalScaleSelector,
+    _AUTHORITY_SEAL as SCALE_SEAL,
+)
+from pb_wall_height_authority import (
+    WALL_HEIGHT_FAMILY,
+    WallHeightAuthority,
+)
 from pb_gross_wall_geometry_authority import (
+    GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED,
+    GROSS_WALL_GEOMETRY_HEIGHT_UNRESOLVED,
+    GROSS_WALL_GEOMETRY_INVALID,
+    GROSS_WALL_GEOMETRY_LINEAGE_MISMATCH,
     GROSS_WALL_GEOMETRY_RESOLVED,
+    GROSS_WALL_GEOMETRY_WALL_UNRESOLVED,
     GrossWallGeometryAuthority,
     GrossWallGeometryProducer,
     GrossWallGeometryRecord,
     GrossWallGeometryResult,
     GrossWallGeometrySelector,
     _AUTHORITY_SEAL as GROSS_SEAL,
+    _PRODUCER_SEAL as GROSS_PRODUCER_SEAL,
 )
 from pb_physical_opening_void_authority import (
     PHYSICAL_OPENING_VOID_RESOLVED,
@@ -326,6 +360,195 @@ def _setup_pipeline(
     return producer, sel
 
 
+def _setup_gross_upstream_authorities(
+    *,
+    wall_id: str = WALL,
+    frame_id: str = FRAME,
+    length_m: float = 10.0,
+    height_m: float = 3.0,
+    mm_per_point: float = 10.0,
+    doc: str = DOC,
+    rev: str = REV,
+    sha: str = SHA,
+    snap: str = SNAP,
+    page: str = PAGE,
+    scope: str = SCOPE,
+    scope_complete: bool = True,
+    is_ambiguous: bool = False,
+    is_default_height: bool = False,
+    height_target_wall_id: str | None = None,
+    height_abstained: bool = False,
+    height_formula: str = "direct_height",
+    height_metadata_overrides: dict | None = None,
+    frame_evidence_overrides: dict | None = None,
+    candidate_records: tuple | None = None,
+) -> tuple[GrossWallGeometryProducer, GrossWallGeometrySelector]:
+    length_pt = (length_m * 1000.0) / mm_per_point if mm_per_point > 0 else 1000.0
+
+    # 1. Candidate Authority
+    if candidate_records is None:
+        rec = PhysicalWallCandidateRecord(
+            wall_candidate_id=wall_id,
+            wall_candidate=None,
+            physical_identity=PhysicalWallIdentity(
+                wall_candidate_id=wall_id,
+                viewport_id="view-1",
+                candidate_identity_id=wall_id,
+                path_fingerprint=((0.0, 0.0), (length_pt, 0.0)),
+                source_primitive_ids=("prim-1",),
+                edge_ids=("edge-1",),
+                status=EvidenceResolutionStatus.CORROBORATED,
+            ),
+        )
+        candidate_records = (rec,)
+
+    equivalence = None
+    if is_ambiguous:
+        class _AmbiguousEquivalence:
+            def is_ambiguous(self, target_id: str) -> bool:
+                return target_id == wall_id
+        equivalence = _AmbiguousEquivalence()
+
+    cand_scope_id = f"wall-source:page-{page}"
+    cand_res = PhysicalWallCandidateScopeResult(
+        status=EvidenceResolutionStatus.CORROBORATED if scope_complete else EvidenceResolutionStatus.ABSTAINED,
+        scope_complete=scope_complete,
+        records=candidate_records,
+        source_observation_ids=("obs-1",),
+        document_id=doc,
+        revision_id=rev,
+        source_sha256=sha,
+        snapshot_id=snap,
+        page_id=page,
+        decision_scope_id=cand_scope_id,
+        reason_codes=() if scope_complete else ("incomplete_scope",),
+        equivalence=equivalence,
+    )
+    cand_auth = PhysicalWallCandidateAuthority(
+        {_ScopeKey(doc, rev, sha, snap, page, cand_scope_id): cand_res},
+        _seal=CANDIDATE_SEAL,
+    )
+
+    # 2. Host Frame Authority
+    frame_sel = OpeningHostFrameSelector(
+        document_id=doc,
+        revision_id=rev,
+        source_sha256=sha,
+        snapshot_id=snap,
+        page_id=page,
+        decision_scope_id=scope,
+        opening_identity_id="opening-1",
+    )
+    fe_dict = {
+        "selector": frame_sel,
+        "record_id": "rec-frame-1",
+        "opening_identity_id": "opening-1",
+        "host_binding_record_id": "host-bind-1",
+        "host_wall_id": wall_id,
+        "whole_wall_frame_id": frame_id,
+        "whole_wall_candidate_ids": (wall_id,),
+        "source_observation_ids": ("obs-1",),
+        "origin_pt": (0.0, 0.0),
+        "axis_unit": (1.0, 0.0),
+        "normal_unit": (0.0, 1.0),
+        "u0_pt": 0.0,
+        "u1_pt": length_pt,
+        "wall_thickness_pt": 10.0,
+    }
+    if frame_evidence_overrides:
+        fe_dict.update(frame_evidence_overrides)
+    frame_ev = OpeningHostFrameEvidence(**fe_dict)
+    frame_auth = OpeningHostFrameAuthority(
+        {frame_sel.key: OpeningHostFrameResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=(),
+            evidence=frame_ev,
+        )},
+        _seal=FRAME_SEAL,
+    )
+
+    # 3. Scale Authority
+    scale_sel = PhysicalScaleSelector(
+        document_id=doc,
+        revision_id=rev,
+        source_sha256=sha,
+        snapshot_id=snap,
+        page_id=page,
+    )
+    scale_ev = PhysicalScaleEvidence(
+        selector=scale_sel,
+        record_id="rec-scale-1",
+        source_kind="graphic_scale",
+        source_span_pt=100.0,
+        physical_span_mm=100.0 * mm_per_point,
+        points_per_mm=1.0 / mm_per_point,
+        mm_per_point=mm_per_point,
+        source_segment_observation_ids=(),
+        source_text_observation_ids=(),
+        viewport_id=None,
+    )
+    scale_auth = PhysicalScaleAuthority(
+        {scale_sel.key: PhysicalScaleResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=(),
+            evidence=scale_ev,
+        )},
+        _seal=SCALE_SEAL,
+    )
+
+    # 4. Height Authority
+    target_wall = height_target_wall_id if height_target_wall_id is not None else wall_id
+    h_meta = {
+        "source_sha256": sha,
+        "revision_id": rev,
+        "page_id": page,
+        "evidence_snapshot_id": snap,
+        "target_entity_id": target_wall,
+    }
+    if is_default_height:
+        h_meta["is_default"] = True
+    if height_metadata_overrides:
+        h_meta.update(height_metadata_overrides)
+
+    qty = QuantityEvidence(
+        quantity_id="qty-height-1",
+        family=WALL_HEIGHT_FAMILY,
+        semantic_key=f"wall_height:{target_wall}",
+        value=height_m if not height_abstained else None,
+        unit="m",
+        input_entity_ids=(target_wall,),
+        formula=height_formula,
+        formula_version="1.0.0",
+        evidence_ids=("ev-1",),
+        authority="documented_dimension",
+        status=AuthorityStatus.FIRM.value if not height_abstained else AuthorityStatus.BLOCKED.value,
+        confidence=1.0 if not height_abstained else 0.0,
+        abstained=height_abstained,
+        blocking_reasons=() if not height_abstained else ("unresolved_height",),
+        reason_codes=() if not height_abstained else ("unresolved_height",),
+        metadata=h_meta,
+    )
+    height_auth = WallHeightAuthority.from_quantities({wall_id: qty})
+
+    producer = GrossWallGeometryProducer.from_authorities(
+        physical_wall_candidate_authority=cand_auth,
+        host_frame_authority=frame_auth,
+        physical_scale_authority=scale_auth,
+        wall_height_authority=height_auth,
+    )
+
+    g_sel = GrossWallGeometrySelector(
+        document_id=doc,
+        revision_id=rev,
+        source_sha256=sha,
+        snapshot_id=snap,
+        page_id=page,
+        decision_scope_id=scope,
+        physical_wall_id=wall_id,
+    )
+    return producer, g_sel
+
+
 # ---------------------------------------------------------------------------
 # SCENARIOS 1-21
 # ---------------------------------------------------------------------------
@@ -556,24 +779,18 @@ def test_scenario_13_incomplete_wall_evidence_fails_closed() -> None:
 
 def test_scenario_14_missing_vertical_evidence_fails_closed() -> None:
     # Gross wall geometry producer rejects invalid/non-positive height
-    producer_geom = GrossWallGeometryProducer.create()
-    g_sel = GrossWallGeometrySelector(
-        document_id=DOC,
-        revision_id=REV,
-        source_sha256=SHA,
-        snapshot_id=SNAP,
-        page_id=PAGE,
-        decision_scope_id=SCOPE,
-        physical_wall_id=WALL,
-    )
-    res = producer_geom.register_geometry(
-        selector=g_sel,
-        wall_local_frame_id=FRAME,
-        length_m=10.0,
-        height_m=-1.0,  # Invalid vertical extent
-    )
+    producer, g_sel = _setup_gross_upstream_authorities(height_m=0.0)
+    res = producer.publish(g_sel)
     assert res.status == EvidenceResolutionStatus.CONFLICT
     assert res.record is None
+    assert GROSS_WALL_GEOMETRY_INVALID in res.reason_codes
+
+    # Also test abstained height
+    producer2, g_sel2 = _setup_gross_upstream_authorities(height_abstained=True)
+    res2 = producer2.publish(g_sel2)
+    assert res2.status == EvidenceResolutionStatus.ABSTAINED
+    assert res2.record is None
+    assert GROSS_WALL_GEOMETRY_HEIGHT_UNRESOLVED in res2.reason_codes
 
 
 def test_scenario_15_mismatched_source_revision_fails_closed() -> None:
@@ -738,3 +955,172 @@ def test_record_id_is_deterministic_addressing_only() -> None:
         physical_void_record_ids=("v1", "v2"),
     )
     assert first == second
+
+
+# ---------------------------------------------------------------------------
+# Direct Gross Wall Authority Production Regressions (Item 17 Correction)
+# ---------------------------------------------------------------------------
+
+def test_gross_wall_producer_has_no_create_or_register_geometry_raw_methods() -> None:
+    """Callers cannot call a public raw registration method to mint gross-wall authority."""
+    assert not hasattr(GrossWallGeometryProducer, "create")
+    assert not hasattr(GrossWallGeometryProducer, "register_geometry")
+    with pytest.raises(TypeError, match="must be obtained from from_authorities"):
+        GrossWallGeometryProducer(None, None, None, None)  # type: ignore[arg-type]
+
+
+def test_gross_wall_producer_rejects_arbitrary_positive_length_input() -> None:
+    """Callers cannot supply arbitrary positive length_m."""
+    params = inspect.signature(GrossWallGeometryProducer.from_authorities).parameters
+    assert "length_m" not in params
+    assert "length" not in params
+    pub_params = inspect.signature(GrossWallGeometryProducer.publish).parameters
+    assert {p for p in pub_params if p != "self"} == {"selector"}
+    with pytest.raises(TypeError):
+        GrossWallGeometryProducer.from_authorities(length_m=10.0)  # type: ignore[call-arg]
+
+
+def test_gross_wall_producer_rejects_arbitrary_positive_height_input() -> None:
+    """Callers cannot supply arbitrary positive height_m."""
+    params = inspect.signature(GrossWallGeometryProducer.from_authorities).parameters
+    assert "height_m" not in params
+    assert "height" not in params
+    with pytest.raises(TypeError):
+        GrossWallGeometryProducer.from_authorities(height_m=3.0)  # type: ignore[call-arg]
+
+
+def test_gross_wall_producer_rejects_fabricated_wall_local_frame_id() -> None:
+    """Callers cannot supply a fabricated wall_local_frame_id."""
+    params = inspect.signature(GrossWallGeometryProducer.from_authorities).parameters
+    assert "wall_local_frame_id" not in params
+    assert "frame_id" not in params
+    pub_params = inspect.signature(GrossWallGeometryProducer.publish).parameters
+    assert "wall_local_frame_id" not in pub_params
+    # Frame ID is taken strictly from OpeningHostFrameEvidence.whole_wall_frame_id
+    producer, g_sel = _setup_gross_upstream_authorities(frame_id="authentic-whole-wall-frame-42")
+    res = producer.publish(g_sel)
+    assert res.status == EvidenceResolutionStatus.CORROBORATED
+    assert res.record is not None
+    assert res.record.wall_local_frame_id == "authentic-whole-wall-frame-42"
+
+
+def test_gross_wall_producer_rejects_same_looking_wall_under_different_physical_wall_id() -> None:
+    """Callers cannot construct a same-looking wall under another physical wall ID."""
+    producer, _ = _setup_gross_upstream_authorities(wall_id="wall-A")
+    # Selector requests wall-B which has no candidate or frame backing
+    spoofed_sel = GrossWallGeometrySelector(
+        document_id=DOC,
+        revision_id=REV,
+        source_sha256=SHA,
+        snapshot_id=SNAP,
+        page_id=PAGE,
+        decision_scope_id=SCOPE,
+        physical_wall_id="wall-B",
+    )
+    res = producer.publish(spoofed_sel)
+    assert res.status == EvidenceResolutionStatus.ABSTAINED
+    assert GROSS_WALL_GEOMETRY_WALL_UNRESOLVED in res.reason_codes
+    assert res.record is None
+
+
+def test_gross_wall_producer_rejects_cross_wiring_length_wall_A_with_height_wall_B() -> None:
+    """Callers cannot cross-wire authenticated length from wall A with authenticated height from wall B."""
+    producer, g_sel = _setup_gross_upstream_authorities(
+        wall_id="wall-A",
+        height_target_wall_id="wall-B",  # Height belongs to foreign wall B!
+    )
+    res = producer.publish(g_sel)
+    assert res.status == EvidenceResolutionStatus.CONFLICT
+    assert GROSS_WALL_GEOMETRY_HEIGHT_UNRESOLVED in res.reason_codes
+    assert "wall_height_target_mismatch" in res.reason_codes
+    assert res.record is None
+
+
+def test_gross_wall_producer_rejects_replay_from_different_revision() -> None:
+    """Callers cannot replay valid dimensions from another revision."""
+    producer, g_sel = _setup_gross_upstream_authorities(
+        rev="rev-1",
+        height_metadata_overrides={"revision_id": "rev-old"},  # stale revision!
+    )
+    res = producer.publish(g_sel)
+    assert res.status == EvidenceResolutionStatus.CONFLICT
+    assert GROSS_WALL_GEOMETRY_LINEAGE_MISMATCH in res.reason_codes
+    assert res.record is None
+
+
+def test_gross_wall_producer_rejects_replay_from_different_evidence_snapshot() -> None:
+    """Callers cannot replay valid dimensions from another evidence snapshot."""
+    producer, g_sel = _setup_gross_upstream_authorities(
+        snap="snap-current",
+        height_metadata_overrides={"evidence_snapshot_id": "snap-old"},  # stale snapshot!
+    )
+    res = producer.publish(g_sel)
+    assert res.status == EvidenceResolutionStatus.CONFLICT
+    assert GROSS_WALL_GEOMETRY_LINEAGE_MISMATCH in res.reason_codes
+    assert res.record is None
+
+
+def test_gross_wall_producer_rejects_replay_from_different_page_or_viewport() -> None:
+    """Callers cannot replay valid frame from another page/viewport."""
+    producer, g_sel = _setup_gross_upstream_authorities(
+        page="page-1",
+        height_metadata_overrides={"page_id": "page-2"},  # foreign page!
+    )
+    res = producer.publish(g_sel)
+    assert res.status == EvidenceResolutionStatus.CONFLICT
+    assert GROSS_WALL_GEOMETRY_LINEAGE_MISMATCH in res.reason_codes
+    assert res.record is None
+
+
+def test_gross_wall_producer_rejects_laundering_ambiguous_physical_wall_identity() -> None:
+    """Callers cannot launder ambiguous physical-wall identity into one selected wall."""
+    producer, g_sel = _setup_gross_upstream_authorities(is_ambiguous=True)
+    res = producer.publish(g_sel)
+    assert res.status == EvidenceResolutionStatus.CONFLICT
+    assert GROSS_WALL_GEOMETRY_WALL_UNRESOLVED in res.reason_codes
+    assert "ambiguous_physical_wall_identity" in res.reason_codes
+    assert res.record is None
+
+
+def test_gross_wall_producer_rejects_minting_authority_from_scalar_gross_area() -> None:
+    """Callers cannot create authority solely from gross scalar area."""
+    params = inspect.signature(GrossWallGeometryProducer.from_authorities).parameters
+    assert "gross_area_m2" not in params
+    assert "area" not in params
+    pub_params = inspect.signature(GrossWallGeometryProducer.publish).parameters
+    assert "gross_area_m2" not in pub_params
+    with pytest.raises(TypeError):
+        GrossWallGeometryProducer.from_authorities(gross_area_m2=30.0)  # type: ignore[call-arg]
+
+
+def test_gross_wall_producer_forbids_default_or_assumed_wall_height() -> None:
+    """No default or assumed wall height can mint gross-wall geometry."""
+    producer, g_sel = _setup_gross_upstream_authorities(is_default_height=True)
+    res = producer.publish(g_sel)
+    assert res.status == EvidenceResolutionStatus.CONFLICT
+    assert GROSS_WALL_GEOMETRY_HEIGHT_UNRESOLVED in res.reason_codes
+    assert "default_or_assumed_height_forbidden" in res.reason_codes
+    assert res.record is None
+
+
+def test_gross_wall_producer_positive_path_publishes_authenticated_geometry() -> None:
+    """Authentic upstream propositions publish genuine GrossWallGeometryRecord."""
+    producer, g_sel = _setup_gross_upstream_authorities(
+        wall_id="wall-main",
+        frame_id="frame-wall-main",
+        length_m=8.5,
+        height_m=2.7,
+        mm_per_point=10.0,
+    )
+    res = producer.publish(g_sel)
+    assert res.status == EvidenceResolutionStatus.CORROBORATED
+    assert res.reason_codes == (GROSS_WALL_GEOMETRY_RESOLVED,), f"Actual reasons: {res.reason_codes}"
+    rec = res.record
+    assert rec is not None
+    assert rec.physical_wall_id == "wall-main"
+    assert rec.wall_local_frame_id == "frame-wall-main"
+    assert rec.length_m == 8.5
+    assert rec.height_m == 2.7
+    assert rec.gross_area_m2 == pytest.approx(8.5 * 2.7)
+    assert rec.polygon_wkb_hex == box(0.0, 0.0, 8.5, 2.7).wkb_hex
+    assert rec.coordinate_unit == "metre"

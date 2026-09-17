@@ -683,3 +683,39 @@ def build_wall_height_quantity(
             ),
         },
     )
+
+
+_HEIGHT_AUTHORITY_SEAL = object()
+
+
+class WallHeightAuthority:
+    """Sealed selector-only lookup for published wall height QuantityEvidence."""
+
+    def __init__(
+        self,
+        quantities: Mapping[object, QuantityEvidence],
+        *,
+        _seal: object = None,
+    ) -> None:
+        if _seal is not _HEIGHT_AUTHORITY_SEAL:
+            raise TypeError("WallHeightAuthority is producer-owned")
+        from types import MappingProxyType
+        self._quantities = MappingProxyType(dict(quantities))
+
+    @classmethod
+    def from_quantities(
+        cls,
+        quantities: Mapping[object, QuantityEvidence],
+    ) -> "WallHeightAuthority":
+        return cls(quantities, _seal=_HEIGHT_AUTHORITY_SEAL)
+
+    def resolve(self, selector: object) -> QuantityEvidence | None:
+        key = getattr(selector, "key", None)
+        if key is not None and key in self._quantities:
+            return self._quantities[key]
+        wall_id = getattr(selector, "physical_wall_id", None) or getattr(selector, "wall_id", None)
+        if wall_id is not None and wall_id in self._quantities:
+            return self._quantities[wall_id]
+        if isinstance(selector, str) and selector in self._quantities:
+            return self._quantities[selector]
+        return None
