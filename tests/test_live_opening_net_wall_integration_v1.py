@@ -25,6 +25,7 @@ from pb_net_wall_boolean_union_authority import (
     NetWallBooleanUnionRecord,
     NetWallBooleanUnionResult,
     NetWallBooleanUnionSelector,
+    _AUTHORITY_SEAL,
 )
 from pb_opening_deduction_pipeline import (
     GenericOpeningDeductionPipeline,
@@ -95,6 +96,15 @@ def _make_corroborated_record(
     )
 
 
+def _make_authority(mapping: dict[Any, NetWallBooleanUnionResult] | None = None) -> NetWallBooleanUnionAuthority:
+    results = {}
+    if mapping:
+        for k, v in mapping.items():
+            key = k.key if hasattr(k, "key") else k
+            results[key] = v
+    return NetWallBooleanUnionAuthority(results, _seal=_AUTHORITY_SEAL)
+
+
 class TestLiveOpeningNetWallAdapter:
     """Test suite for LiveOpeningNetWallAdapter fail-closed semantics."""
 
@@ -111,26 +121,25 @@ class TestLiveOpeningNetWallAdapter:
         assert LIVE_NET_WALL_AUTHORITY_UNAVAILABLE in res.reason_codes
 
     def test_adapter_without_selector_abstains(self) -> None:
-        mock_auth = MagicMock(spec=NetWallBooleanUnionAuthority)
-        adapter = LiveOpeningNetWallAdapter(net_wall_authority=mock_auth)
+        auth = _make_authority()
+        adapter = LiveOpeningNetWallAdapter(net_wall_authority=auth)
         res = adapter.resolve_wall_net_area(selector=None, wall_id="perimeter_walling", gross_area_m2=100.0)
 
         assert not res.is_authoritative
         assert res.net_area_m2 is None
         assert res.evidence.abstained is True
-        assert mock_auth.resolve.call_count == 0
 
     def test_adapter_corroborated_resolution(self) -> None:
-        mock_auth = MagicMock(spec=NetWallBooleanUnionAuthority)
+        sel = _make_selector()
         record = _make_corroborated_record(gross_area_m2=100.0, net_area_m2=85.0)
-        mock_auth.resolve.return_value = NetWallBooleanUnionResult(
+        res_obj = NetWallBooleanUnionResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             record=record,
             reason_codes=("test_corroborated",),
         )
+        auth = _make_authority({sel: res_obj})
 
-        adapter = LiveOpeningNetWallAdapter(net_wall_authority=mock_auth)
-        sel = _make_selector()
+        adapter = LiveOpeningNetWallAdapter(net_wall_authority=auth)
         res = adapter.resolve_wall_net_area(sel, wall_id="perimeter_walling", gross_area_m2=100.0)
 
         assert res.is_authoritative is True
@@ -144,15 +153,15 @@ class TestLiveOpeningNetWallAdapter:
         assert "test_corroborated" in res.reason_codes
 
     def test_adapter_conflict_resolution_abstains(self) -> None:
-        mock_auth = MagicMock(spec=NetWallBooleanUnionAuthority)
-        mock_auth.resolve.return_value = NetWallBooleanUnionResult(
+        sel = _make_selector()
+        res_obj = NetWallBooleanUnionResult(
             status=EvidenceResolutionStatus.CONFLICT,
             record=None,
             reason_codes=("geometry_clash",),
         )
+        auth = _make_authority({sel: res_obj})
 
-        adapter = LiveOpeningNetWallAdapter(net_wall_authority=mock_auth)
-        sel = _make_selector()
+        adapter = LiveOpeningNetWallAdapter(net_wall_authority=auth)
         res = adapter.resolve_wall_net_area(sel, wall_id="perimeter_walling", gross_area_m2=100.0)
 
         assert res.is_authoritative is False
@@ -164,15 +173,15 @@ class TestLiveOpeningNetWallAdapter:
         assert "geometry_clash" in res.reason_codes
 
     def test_adapter_upstream_abstained_resolution(self) -> None:
-        mock_auth = MagicMock(spec=NetWallBooleanUnionAuthority)
-        mock_auth.resolve.return_value = NetWallBooleanUnionResult(
+        sel = _make_selector()
+        res_obj = NetWallBooleanUnionResult(
             status=EvidenceResolutionStatus.ABSTAINED,
             record=None,
             reason_codes=("missing_gross_wall_record",),
         )
+        auth = _make_authority({sel: res_obj})
 
-        adapter = LiveOpeningNetWallAdapter(net_wall_authority=mock_auth)
-        sel = _make_selector()
+        adapter = LiveOpeningNetWallAdapter(net_wall_authority=auth)
         res = adapter.resolve_wall_net_area(sel, wall_id="perimeter_walling", gross_area_m2=100.0)
 
         assert res.is_authoritative is False
@@ -218,17 +227,17 @@ class TestGenericOpeningDeductionPipelineIntegration:
             bound_wall_id="perimeter_walling",
         )
 
-        mock_auth = MagicMock(spec=NetWallBooleanUnionAuthority)
+        sel = _make_selector("perimeter_walling")
         record = _make_corroborated_record(gross_area_m2=100.0, net_area_m2=97.0)
-        mock_auth.resolve.return_value = NetWallBooleanUnionResult(
+        res_obj = NetWallBooleanUnionResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             record=record,
             reason_codes=("authoritative_union_match",),
         )
+        auth = _make_authority({sel: res_obj})
 
-        sel = _make_selector("perimeter_walling")
         pipeline = GenericOpeningDeductionPipeline(
-            net_wall_authority=mock_auth,
+            net_wall_authority=auth,
             net_wall_selectors={"perimeter_walling": sel},
         )
         results = pipeline.deduct_openings_for_all_walls([wall], [opening])
@@ -267,16 +276,16 @@ class TestGenericOpeningDeductionPipelineIntegration:
             bound_wall_id="perimeter_walling",
         )
 
-        mock_auth = MagicMock(spec=NetWallBooleanUnionAuthority)
-        mock_auth.resolve.return_value = NetWallBooleanUnionResult(
+        sel = _make_selector("perimeter_walling")
+        res_obj = NetWallBooleanUnionResult(
             status=EvidenceResolutionStatus.CONFLICT,
             record=None,
             reason_codes=("geometry_discrepancy",),
         )
+        auth = _make_authority({sel: res_obj})
 
-        sel = _make_selector("perimeter_walling")
         pipeline = GenericOpeningDeductionPipeline(
-            net_wall_authority=mock_auth,
+            net_wall_authority=auth,
             net_wall_selectors={"perimeter_walling": sel},
         )
         results = pipeline.deduct_openings_for_all_walls([wall], [opening])
@@ -320,11 +329,12 @@ class TestShadowAndExtractorIntegration:
         assert extractor.live_net_wall_shadow["walls"] == []
 
     def test_extractor_accepts_net_wall_authority(self) -> None:
-        mock_auth = MagicMock(spec=NetWallBooleanUnionAuthority)
+        auth = _make_authority()
         sel = _make_selector("perimeter_walling")
         extractor = GenericPlanReaderExtractor(
-            net_wall_authority=mock_auth,
+            net_wall_authority=auth,
             net_wall_selectors={"perimeter_walling": sel},
         )
-        assert extractor.net_wall_authority is mock_auth
+        assert extractor.net_wall_authority is auth
         assert extractor.net_wall_selectors["perimeter_walling"] == sel
+
