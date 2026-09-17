@@ -5,6 +5,9 @@ TEST ONLY / DO NOT MERGE.
 Exact production parent under review:
 a027a493baca9bc87bfbdb6efff09c1aea43b8b1
 
+Post-merge main containing that production parent:
+8d8ff44ad095114a9f0f3b1d37de402ebb477225
+
 This validator exists because frozen PR #469 contains one internally contradictory
 geometry case: test_A_equal_scalar_area_non_equivalent_shapes_are_not_interchangeable
 passes a void that protrudes beyond wall_5x6, while Section L of the same frozen file
@@ -23,6 +26,7 @@ from pb_net_wall_boolean_union_authority import subtract_void_union_from_wall_po
 
 
 PRODUCTION_PARENT = "a027a493baca9bc87bfbdb6efff09c1aea43b8b1"
+MERGED_MAIN_PARENT = "8d8ff44ad095114a9f0f3b1d37de402ebb477225"
 
 
 def test_right_lateral_overrun_fails_closed_when_vertically_inset() -> None:
