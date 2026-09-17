@@ -905,3 +905,189 @@ def test_J_legitimate_producer_owned_positive_path_remains_valid() -> None:
     assert auth_res1.record.total_finish_area_m2 == 51.0
 
 
+def test_physical_wall_scope_lineage_mismatch_fails_closed() -> None:
+    """Physical wall candidate scope result from mismatched document fails closed."""
+    # Scope result with mismatched document_id
+    identity = PhysicalWallIdentity(
+        wall_candidate_id="wall_01",
+        viewport_id="view-1",
+        candidate_identity_id="wall_01",
+        path_fingerprint=((0.0, 0.0), (100.0, 0.0)),
+        source_primitive_ids=("prim-1",),
+        edge_ids=("edge-1",),
+        status=EvidenceResolutionStatus.CORROBORATED,
+    )
+    rec = PhysicalWallCandidateRecord(
+        wall_candidate_id="wall_01",
+        wall_candidate=None,
+        physical_identity=identity,
+    )
+    mismatched_scope_res = PhysicalWallCandidateScopeResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        records=(rec,),
+        source_observation_ids=("obs_01",),
+        document_id="doc_DIFFERENT",  # Lineage mismatch
+        revision_id="rev_test_001",
+        source_sha256="a" * 64,
+        snapshot_id="snap_test_001",
+        page_id="page_1",
+        decision_scope_id=DECISION_SCOPE,
+        reason_codes=(PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,),
+    )
+    key = _ScopeKey(
+        document_id="doc_test_100",
+        revision_id="rev_test_001",
+        source_sha256="a" * 64,
+        snapshot_id="snap_test_001",
+        page_id="page_1",
+        decision_scope_id=DECISION_SCOPE,
+    )
+    wall_auth = PhysicalWallCandidateAuthority({key: mismatched_scope_res}, _seal=_WALL_AUTH_SEAL)
+    net_auth = _make_net_wall_auth({"wall_01": 10.0})
+    assign = WallFinishAssignment("a1", "wall_01", "internal_plaster", "both_faces")
+
+    producer = WallFinishPropagationProducer.from_authorities(
+        physical_wall_authority=wall_auth,
+        net_wall_authority=net_auth,
+        assignments=[assign],
+    )
+    res = producer.publish(_sample_selector("wall_01"))
+    assert res.status == EvidenceResolutionStatus.CONFLICT
+    assert WALL_FINISH_LINEAGE_MISMATCH in res.reason_codes
+    assert "physical_wall_scope_lineage_mismatch" in res.reason_codes
+    assert res.record is None
+
+
+def test_net_area_exceeding_gross_area_fails_closed() -> None:
+    """Net wall record claiming net area > gross area fails closed."""
+    wall_auth = _make_physical_wall_auth(["wall_01"])
+    sel = _sample_selector("wall_01")
+    net_sel = NetWallBooleanUnionSelector(
+        document_id=sel.document_id,
+        revision_id=sel.revision_id,
+        source_sha256=sel.source_sha256,
+        snapshot_id=sel.snapshot_id,
+        page_id=sel.page_id,
+        decision_scope_id=sel.decision_scope_id,
+        physical_wall_id=sel.physical_wall_id,
+        trade_scope_id=sel.trade_scope_id,
+    )
+    # Impossible geometry: net area 25 m2 on a 10 m2 wall
+    corrupt_rec = NetWallBooleanUnionRecord(
+        record_id="net_rec_corrupt",
+        document_id=sel.document_id,
+        revision_id=sel.revision_id,
+        source_sha256=sel.source_sha256,
+        snapshot_id=sel.snapshot_id,
+        page_id=sel.page_id,
+        decision_scope_id=sel.decision_scope_id,
+        physical_wall_id=sel.physical_wall_id,
+        gross_geometry_record_id="gross_rec_01",
+        opening_universe_record_id="univ_rec_01",
+        deduction_record_ids=(),
+        union_geometry_id="geom_01",
+        net_area_m2=25.0,  # 25 > 10!
+        gross_area_m2=10.0,
+        void_union_area_m2=0.0,
+        trade_scope_id=sel.trade_scope_id,
+    )
+    from pb_net_wall_boolean_union_authority import _AUTHORITY_SEAL
+    net_auth = NetWallBooleanUnionAuthority(
+        {
+            net_sel.key: NetWallBooleanUnionResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=(NET_WALL_BOOLEAN_UNION_RESOLVED,),
+                record=corrupt_rec,
+            )
+        },
+        _seal=_AUTHORITY_SEAL,
+    )
+    assign = WallFinishAssignment("a1", "wall_01", "internal_plaster", "both_faces")
+    producer = WallFinishPropagationProducer.from_authorities(
+        physical_wall_authority=wall_auth,
+        net_wall_authority=net_auth,
+        assignments=[assign],
+    )
+    res = producer.publish(sel)
+    assert res.status == EvidenceResolutionStatus.CONFLICT
+    assert WALL_FINISH_NET_GEOMETRY_UNRESOLVED in res.reason_codes
+    assert "net_area_exceeds_gross_area" in res.reason_codes
+    assert res.record is None
+
+
+def test_missing_net_wall_record_id_fails_closed() -> None:
+    """Net wall record with empty record_id fails closed."""
+    wall_auth = _make_physical_wall_auth(["wall_01"])
+    sel = _sample_selector("wall_01")
+    net_sel = NetWallBooleanUnionSelector(
+        document_id=sel.document_id,
+        revision_id=sel.revision_id,
+        source_sha256=sel.source_sha256,
+        snapshot_id=sel.snapshot_id,
+        page_id=sel.page_id,
+        decision_scope_id=sel.decision_scope_id,
+        physical_wall_id=sel.physical_wall_id,
+        trade_scope_id=sel.trade_scope_id,
+    )
+    corrupt_rec = NetWallBooleanUnionRecord(
+        record_id="",  # Missing record id
+        document_id=sel.document_id,
+        revision_id=sel.revision_id,
+        source_sha256=sel.source_sha256,
+        snapshot_id=sel.snapshot_id,
+        page_id=sel.page_id,
+        decision_scope_id=sel.decision_scope_id,
+        physical_wall_id=sel.physical_wall_id,
+        gross_geometry_record_id="gross_rec_01",
+        opening_universe_record_id="univ_rec_01",
+        deduction_record_ids=(),
+        union_geometry_id="geom_01",
+        net_area_m2=10.0,
+        gross_area_m2=10.0,
+        void_union_area_m2=0.0,
+        trade_scope_id=sel.trade_scope_id,
+    )
+    from pb_net_wall_boolean_union_authority import _AUTHORITY_SEAL
+    net_auth = NetWallBooleanUnionAuthority(
+        {
+            net_sel.key: NetWallBooleanUnionResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=(NET_WALL_BOOLEAN_UNION_RESOLVED,),
+                record=corrupt_rec,
+            )
+        },
+        _seal=_AUTHORITY_SEAL,
+    )
+    assign = WallFinishAssignment("a1", "wall_01", "internal_plaster", "both_faces")
+    producer = WallFinishPropagationProducer.from_authorities(
+        physical_wall_authority=wall_auth,
+        net_wall_authority=net_auth,
+        assignments=[assign],
+    )
+    res = producer.publish(sel)
+    assert res.status == EvidenceResolutionStatus.CONFLICT
+    assert WALL_FINISH_NET_GEOMETRY_UNRESOLVED in res.reason_codes
+    assert "missing_net_wall_record_id" in res.reason_codes
+    assert res.record is None
+
+
+def test_scope_summary_input_validation() -> None:
+    """Empty or whitespace strings passed to scope summary methods raise ValueError."""
+    wall_auth = _make_physical_wall_auth(["wall_01"])
+    net_auth = _make_net_wall_auth({"wall_01": 10.0})
+    assign = WallFinishAssignment("a1", "wall_01", "internal_plaster", "both_faces")
+    producer = WallFinishPropagationProducer.from_authorities(
+        physical_wall_authority=wall_auth,
+        net_wall_authority=net_auth,
+        assignments=[assign],
+    )
+    with pytest.raises(ValueError, match="document_id must be a non-empty string"):
+        producer.publish_scope_summary("", "rev", "sha", "snap", "page", "scope", "trade")
+
+    auth = producer.authority()
+    with pytest.raises(ValueError, match="trade_scope_id must be a non-empty string"):
+        auth.resolve_scope_summary("doc", "rev", "sha", "snap", "page", "scope", "   ")
+
+
+
