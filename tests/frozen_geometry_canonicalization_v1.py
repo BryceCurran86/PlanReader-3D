@@ -5,9 +5,9 @@ geometry, establish authority, or change PlanReader measurement tolerances.
 
 The live Boolean geometry path remains full precision.  At the frozen snapshot
 boundary we snap metre coordinates to a 0.1 mm grid, convert them to integer
-0.1 mm ticks, canonicalize winding/start position/component order, and hash the
-integer representation.  Collapsed, invalid, empty, or non-polygonal results
-fail closed instead of being silently deleted from a snapshot.
+0.1 mm ticks, canonicalize winding/start position/component order, and hash an
+integer-only geometry representation.  Collapsed, invalid, empty, or
+non-polygonal results fail closed instead of being silently deleted.
 """
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from shapely.geometry.base import BaseGeometry
 
 
 GRID_SIZE_M = 1e-4
+GRID_SIZE_MICROMETRES = 100
 TICKS_PER_METRE = 10_000
 SNAPSHOT_SCHEMA = "planreader_frozen_polygon_v1"
 
@@ -75,7 +76,7 @@ def _canonical_ring(
     if len(points) >= 2 and points[0] == points[-1]:
         points.pop()
 
-    # Quantization may create consecutive duplicates.  They carry no topology.
+    # Quantization may create consecutive duplicates. They carry no topology.
     cleaned: list[PointI] = []
     for point in points:
         if not cleaned or point != cleaned[-1]:
@@ -116,9 +117,12 @@ def _canonical_polygon(polygon: Polygon) -> PolygonI:
 def canonical_polygon_signature(geometry: BaseGeometry) -> tuple[object, ...]:
     """Return a deterministic integer signature for Polygon/MultiPolygon geometry.
 
-    ``geometry`` must be expressed in metres.  Precision reduction is applied only
+    ``geometry`` must be expressed in metres. Precision reduction is applied only
     here at the frozen replay boundary; callers must never feed this signature back
     into live extraction or use it to establish geometric/evidentiary authority.
+
+    The returned/hashable payload contains no floating-point values: the grid is
+    identified as 100 micrometres and every coordinate is an integer 0.1 mm tick.
     """
     if not isinstance(geometry, BaseGeometry):
         raise FrozenGeometryError("geometry_type_invalid")
@@ -151,7 +155,7 @@ def canonical_polygon_signature(geometry: BaseGeometry) -> tuple[object, ...]:
     return (
         SNAPSHOT_SCHEMA,
         "metre",
-        GRID_SIZE_M,
+        GRID_SIZE_MICROMETRES,
         TICKS_PER_METRE,
         polygons,
     )
@@ -175,6 +179,7 @@ def frozen_geometry_snapshot(geometry: BaseGeometry) -> dict[str, object]:
         "schema": SNAPSHOT_SCHEMA,
         "coordinate_unit": "metre",
         "grid_size_m": GRID_SIZE_M,
+        "grid_size_micrometres": GRID_SIZE_MICROMETRES,
         "ticks_per_metre": TICKS_PER_METRE,
         "signature": signature,
         "sha256": sha256(encoded).hexdigest(),
@@ -186,6 +191,7 @@ def frozen_geometry_snapshot(geometry: BaseGeometry) -> dict[str, object]:
 
 __all__ = [
     "GRID_SIZE_M",
+    "GRID_SIZE_MICROMETRES",
     "TICKS_PER_METRE",
     "SNAPSHOT_SCHEMA",
     "FrozenGeometryError",
