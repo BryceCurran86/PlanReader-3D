@@ -1,15 +1,9 @@
-"""tests/benchmarks/test_mutation_opening_deductions.py — Mutation Tests for F.9 Opening Deductions.
-
-Arithmetic mutations remain deterministic.  Authority is intentionally
-separate: caller-populated wall ids can drive provisional arithmetic but can
-never publish net-wall quantity authority until producer-owned host binding is
-integrated.
-"""
+"""Mutation tests for F.9 opening deductions and Item 21A publication gating."""
 from __future__ import annotations
 
 from pathlib import Path
+
 import fitz
-import pytest
 
 from pb_opening_deduction_pipeline import (
     GenericOpeningDeductionPipeline,
@@ -18,15 +12,17 @@ from pb_opening_deduction_pipeline import (
     WallDeductionResult,
     WallInstance,
 )
-from pb_planreader_pdf_extractor import (
-    ExtractedPrediction,
-    GenericPlanReaderExtractor,
-)
+from pb_planreader_pdf_extractor import ExtractedPrediction
 
 
 def test_mutation_1_add_window_decreases_net_wall_area_exactly() -> None:
     pipeline = GenericOpeningDeductionPipeline()
-    wall = WallInstance(wall_id="wall_01", length_m=10.0, height_m=3.0, gross_area_m2=30.0)
+    wall = WallInstance(
+        wall_id="wall_01",
+        length_m=10.0,
+        height_m=3.0,
+        gross_area_m2=30.0,
+    )
     window = OpeningInstance(
         opening_id="W1",
         trade_type="windows",
@@ -49,7 +45,12 @@ def test_mutation_1_add_window_decreases_net_wall_area_exactly() -> None:
 
 def test_mutation_2_remove_window_deduction_disappears() -> None:
     pipeline = GenericOpeningDeductionPipeline()
-    wall = WallInstance(wall_id="wall_01", length_m=10.0, height_m=3.0, gross_area_m2=30.0)
+    wall = WallInstance(
+        wall_id="wall_01",
+        length_m=10.0,
+        height_m=3.0,
+        gross_area_m2=30.0,
+    )
     res = pipeline.calculate_wall_deductions(wall, [])
     assert res.gross_area_m2 == 30.0
     assert res.total_deducted_area_m2 == 0.0
@@ -61,7 +62,12 @@ def test_mutation_2_remove_window_deduction_disappears() -> None:
 
 def test_mutation_3_double_quantity_doubles_deduction() -> None:
     pipeline = GenericOpeningDeductionPipeline()
-    wall = WallInstance(wall_id="wall_01", length_m=10.0, height_m=3.0, gross_area_m2=30.0)
+    wall = WallInstance(
+        wall_id="wall_01",
+        length_m=10.0,
+        height_m=3.0,
+        gross_area_m2=30.0,
+    )
     window_2x = OpeningInstance(
         opening_id="W1",
         trade_type="windows",
@@ -127,7 +133,6 @@ def test_mutation_5_missing_height_no_deduction_explicit_unresolved_state() -> N
 
 
 def test_propagation_to_predictions_blocks_caller_bound_arithmetic() -> None:
-    """Arithmetic can be computed, but the shared quantity remains unpublished."""
     pipeline = GenericOpeningDeductionPipeline()
     wall = WallInstance(wall_id="perimeter_walling", gross_area_m2=100.0)
     window = OpeningInstance(
@@ -137,7 +142,9 @@ def test_propagation_to_predictions_blocks_caller_bound_arithmetic() -> None:
         quantity=2.0,
         bound_wall_id="perimeter_walling",
     )
-    results = {"perimeter_walling": pipeline.calculate_wall_deductions(wall, [window])}
+    results = {
+        "perimeter_walling": pipeline.calculate_wall_deductions(wall, [window])
+    }
     assert results["perimeter_walling"].net_area_m2 == 94.0
     assert results["perimeter_walling"].net_area_evidence is not None
     assert results["perimeter_walling"].net_area_evidence.abstained is True
@@ -160,6 +167,7 @@ def test_propagation_to_predictions_blocks_caller_bound_arithmetic() -> None:
             unit="SM",
             confidence=0.85,
             source_page=1,
+            metadata={"physical_wall_id": "perimeter_walling"},
         ),
         ExtractedPrediction(
             tag="internal_paint",
@@ -169,6 +177,7 @@ def test_propagation_to_predictions_blocks_caller_bound_arithmetic() -> None:
             unit="SM",
             confidence=0.85,
             source_page=1,
+            metadata={"physical_wall_id": "perimeter_walling"},
         ),
         ExtractedPrediction(
             tag="floor_screed",
@@ -187,6 +196,7 @@ def test_propagation_to_predictions_blocks_caller_bound_arithmetic() -> None:
         assert pred_map[tag].metadata["net_area_m2"] is None
         assert pred_map[tag].metadata["provisional_net_area_m2"] == 94.0
         assert pred_map[tag].metadata["publication_blocked"] is True
+        assert pred_map[tag].metadata["resolved_physical_wall_id"] == "perimeter_walling"
     assert pred_map["floor_screed"].quantity == 80.0
 
 
@@ -200,7 +210,9 @@ def test_propagation_blocks_independent_gross_area_without_host_authority() -> N
         quantity=2.0,
         bound_wall_id="perimeter_walling",
     )
-    results = {"perimeter_walling": pipeline.calculate_wall_deductions(wall, [window])}
+    results = {
+        "perimeter_walling": pipeline.calculate_wall_deductions(wall, [window])
+    }
     preds = [
         ExtractedPrediction(
             tag="perimeter_walling",
@@ -219,12 +231,15 @@ def test_propagation_blocks_independent_gross_area_without_host_authority() -> N
             unit="SM",
             confidence=0.8,
             source_page=1,
-            metadata={"independent_gross_area_m2": 85.0},
+            metadata={
+                "physical_wall_id": "perimeter_walling",
+                "independent_gross_area_m2": 85.0,
+            },
         ),
         ExtractedPrediction(
             tag="internal_paint",
             trade_type="finishes",
-            description="Internal paint (plain proxy copy, no independent area)",
+            description="Internal paint (unbound proxy)",
             quantity=100.0,
             unit="SM",
             confidence=0.5,
@@ -235,13 +250,15 @@ def test_propagation_blocks_independent_gross_area_without_host_authority() -> N
     pred_map = {prediction.tag: prediction for prediction in updated}
     assert pred_map["internal_plaster"].quantity is None
     assert pred_map["internal_plaster"].metadata["net_area_m2"] is None
-    assert pred_map["internal_plaster"].metadata["provisional_net_area_m2"] == 79.0
+    assert pred_map["internal_plaster"].metadata["provisional_net_area_m2"] == 94.0
+    assert pred_map["internal_plaster"].metadata["caller_supplied_gross_area_m2"] == 85.0
+    assert pred_map["internal_plaster"].metadata["caller_derived_net_area_m2"] == 79.0
     assert pred_map["internal_paint"].quantity is None
-    assert pred_map["internal_paint"].metadata["provisional_net_area_m2"] == 94.0
+    assert pred_map["internal_paint"].metadata["provisional_net_area_m2"] is None
+    assert pred_map["internal_paint"].metadata["publication_blocked"] is True
 
 
 def test_wall_deduction_result_round_trip_shape() -> None:
-    """Retain the public result shape used by older callers."""
     result = WallDeductionResult(
         wall_id="wall",
         gross_area_m2=10.0,
@@ -254,8 +271,5 @@ def test_wall_deduction_result_round_trip_shape() -> None:
 
 
 def test_fixture_imports_remain_available() -> None:
-    """Keep historical fixture dependencies imported for the larger mutation module."""
     assert Path is not None
     assert fitz is not None
-    assert pytest is not None
-    assert GenericPlanReaderExtractor is not None

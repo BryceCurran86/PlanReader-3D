@@ -118,7 +118,9 @@ def test_existing_d1_deduction_unchanged_when_hosted_span_present() -> None:
         quantity=1.0,
         bound_wall_id="perimeter_walling",
     )
-    hosted = hosted_span_to_opening_instance(_span(width_m=1.72, subtype="door_like"))
+    hosted = hosted_span_to_opening_instance(
+        _span(width_m=1.72, subtype="door_like")
+    )
     pipeline = GenericOpeningDeductionPipeline()
 
     without_hosted = pipeline.calculate_wall_deductions(wall, [door])
@@ -131,7 +133,7 @@ def test_existing_d1_deduction_unchanged_when_hosted_span_present() -> None:
     assert [item["opening_id"] for item in with_hosted.unbound_openings] == [hosted.opening_id]
 
 
-def test_propagation_does_not_mutate_quantities_or_create_wd_tags() -> None:
+def test_propagation_does_not_mutate_unrelated_trades_or_create_wd_tags() -> None:
     wall = WallInstance(wall_id="perimeter_walling", gross_area_m2=87.7)
     hosted = hosted_spans_to_opening_instances([_span(width_m=1.72)])
     pipeline = GenericOpeningDeductionPipeline()
@@ -157,7 +159,10 @@ def test_propagation_does_not_mutate_quantities_or_create_wd_tags() -> None:
             unit="SM",
             confidence=0.9,
             source_page=41,
-            metadata={"independent_gross_area_m2": 84.336},
+            metadata={
+                "physical_wall_id": "perimeter_walling",
+                "independent_gross_area_m2": 84.336,
+            },
         ),
         ExtractedPrediction(
             tag="internal_paint",
@@ -167,7 +172,10 @@ def test_propagation_does_not_mutate_quantities_or_create_wd_tags() -> None:
             unit="SM",
             confidence=0.9,
             source_page=41,
-            metadata={"independent_gross_area_m2": 84.336},
+            metadata={
+                "physical_wall_id": "perimeter_walling",
+                "independent_gross_area_m2": 84.336,
+            },
         ),
         ExtractedPrediction(
             tag="damp_proof_course",
@@ -189,21 +197,17 @@ def test_propagation_does_not_mutate_quantities_or_create_wd_tags() -> None:
             dimensions=[1000.0, 2100.0],
         ),
     ]
-    updated = {item.tag: item for item in pipeline.propagate_to_predictions(preds, results)}
+    updated = {
+        item.tag: item
+        for item in pipeline.propagate_to_predictions(preds, results)
+    }
 
-    # The hosted shadow span is never bound (by design -- see
-    # test_adapter_never_defaults_bound_wall_to_perimeter_walling), so this
-    # wall's deduction is genuinely incomplete: perimeter_walling and its
-    # wall-finishes correctly publish quantity=None rather than silently
-    # keeping their original (undeducted) numbers. Trades this pipeline
-    # never touches (damp_proof_course, D1) are unaffected -- that is the
-    # "does not mutate" this test is actually named for.
     assert updated["perimeter_walling"].quantity is None
     assert updated["perimeter_walling"].metadata["provisional_net_area_m2"] == 87.7
     assert updated["internal_plaster"].quantity is None
-    assert updated["internal_plaster"].metadata["provisional_net_area_m2"] == 84.336
+    assert updated["internal_plaster"].metadata["provisional_net_area_m2"] == 87.7
     assert updated["internal_paint"].quantity is None
-    assert updated["internal_paint"].metadata["provisional_net_area_m2"] == 84.336
+    assert updated["internal_paint"].metadata["provisional_net_area_m2"] == 87.7
     assert updated["damp_proof_course"].quantity == 54.5
     assert updated["D1"].quantity == 1.0
     assert "W1" not in updated
