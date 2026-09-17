@@ -18,6 +18,7 @@ Invariants:
   resolves with CORROBORATED status and valid net_area_m2.
 - Emits QuantityEvidence with family="wall_net_area" and status="corroborated".
 - When unauthenticated or unresolved, abstains with value=None and publication_blocked=True.
+- Caller/request wall identity must exactly match selector and authenticated record identity.
 """
 from __future__ import annotations
 
@@ -31,7 +32,6 @@ from pb_migration_contracts import (
     stable_contract_id,
 )
 from pb_net_wall_boolean_union_authority import (
-    NET_WALL_BOOLEAN_UNION_RESOLVED,
     NetWallBooleanUnionAuthority,
     NetWallBooleanUnionRecord,
     NetWallBooleanUnionResult,
@@ -43,6 +43,7 @@ LIVE_NET_WALL_INTEGRATION_SCHEMA_VERSION = "1.0.0"
 LIVE_NET_WALL_RESOLVED = "live_net_wall_resolved"
 LIVE_NET_WALL_AUTHORITY_UNAVAILABLE = "live_net_wall_authority_unavailable"
 LIVE_NET_WALL_UPSTREAM_UNRESOLVED = "live_net_wall_upstream_unresolved"
+LIVE_NET_WALL_IDENTITY_MISMATCH = "live_net_wall_identity_mismatch"
 
 
 @dataclass(frozen=True)
@@ -78,9 +79,13 @@ class LiveOpeningNetWallAdapter:
         wall_id: str = "perimeter_walling",
         gross_area_m2: Optional[float] = None,
     ) -> LiveNetWallEvidenceResult:
-        """Resolve net wall area using authenticated NetWallBooleanUnionAuthority."""
+        """Resolve net wall area using authenticated NetWallBooleanUnionAuthority.
+
+        ``wall_id`` is a request/addressing identity only. It cannot relabel an
+        authenticated selector/record. A mismatch is an explicit conflict and
+        returns no numeric authority.
+        """
         if self._auth is None or selector is None:
-            # Upstream authority not wired or selector not provided: fail closed safely
             evidence = QuantityEvidence(
                 quantity_id=stable_contract_id(
                     "wall_net_area",
@@ -113,18 +118,40 @@ class LiveOpeningNetWallAdapter:
         if type(selector) is not NetWallBooleanUnionSelector:
             raise TypeError("selector must be NetWallBooleanUnionSelector")
 
-        # Resolve through the authenticated NetWallBooleanUnionAuthority
+        # A caller/request identity may select only its exact physical wall.
+        # The pipeline passes WallInstance.wall_id here, so this also blocks a
+        # caller selector mapping from laundering Wall A authority onto Wall B.
+        if wall_id != selector.physical_wall_id:
+            evidence = QuantityEvidence(
+                quantity_id=stable_contract_id(
+                    "wall_net_area",
+                    {
+                        "wall_id": wall_id,
+                        "selector_physical_wall_id": selector.physical_wall_id,
+                        "status": "conflict",
+                    },
+                ),
+                family="wall_net_area",
+                semantic_key=wall_id,
+                value=None,
+                unit="m2",
+                input_entity_ids=(wall_id, selector.physical_wall_id),
+                formula="gross_wall_polygon - union(opening_void_polygons)",
+                authority="pb_live_opening_net_wall_integration.LiveOpeningNetWallAdapter",
+                status="conflict",
+                abstained=True,
+                blocking_reasons=(LIVE_NET_WALL_IDENTITY_MISMATCH,),
+                reason_codes=(LIVE_NET_WALL_IDENTITY_MISMATCH,),
+            )
+            return LiveNetWallEvidenceResult(
+                wall_id=wall_id,
+                is_authoritative=False,
+                net_area_m2=None,
+                evidence=evidence,
+                reason_codes=(LIVE_NET_WALL_IDENTITY_MISMATCH,),
+            )
+
         res: NetWallBooleanUnionResult = self._auth.resolve(selector)
-
-        # ITEM 21A CROSS-WALL ATTACK PREVENTION:
-        # Caller-supplied wall_id must exactly match authenticated wall identity
-        # Verify all four sources agree on the exact physical wall:
-        # 1. Caller-supplied wall_id parameter
-        # 2. Selector's physical_wall_id
-        # 3. Authenticated record's physical_wall_id
-        # 4. Caller-provided selector (selector.physical_wall_id)
-        caller_wall_matches_selector = wall_id == selector.physical_wall_id
-
         if (
             res.status is EvidenceResolutionStatus.CORROBORATED
             and res.record is not None
@@ -132,7 +159,6 @@ class LiveOpeningNetWallAdapter:
             and math.isfinite(res.record.net_area_m2)
             and res.record.net_area_m2 >= 0.0
             and res.record.physical_wall_id == selector.physical_wall_id
-            and caller_wall_matches_selector  # CRITICAL: prevent cross-wall fanout
             and res.record.document_id == selector.document_id
             and res.record.revision_id == selector.revision_id
             and res.record.source_sha256 == selector.source_sha256
@@ -143,14 +169,13 @@ class LiveOpeningNetWallAdapter:
         ):
             record: NetWallBooleanUnionRecord = res.record
             net_val = float(record.net_area_m2)
-            # wall_id is now guaranteed to match authenticated wall identity
             evidence = QuantityEvidence(
                 quantity_id=record.record_id,
                 family="wall_net_area",
-                semantic_key=wall_id,  # Now safe: verified to match record.physical_wall_id
+                semantic_key=record.physical_wall_id,
                 value=net_val,
                 unit="m2",
-                input_entity_ids=(wall_id,) + tuple(record.physical_void_record_ids),
+                input_entity_ids=(record.physical_wall_id,) + tuple(record.physical_void_record_ids),
                 formula="gross_wall_polygon - union(opening_void_polygons)",
                 authority="pb_net_wall_boolean_union_authority.NetWallBooleanUnionAuthority",
                 status="corroborated",
@@ -159,7 +184,7 @@ class LiveOpeningNetWallAdapter:
                 reason_codes=(LIVE_NET_WALL_RESOLVED, *res.reason_codes),
             )
             return LiveNetWallEvidenceResult(
-                wall_id=wall_id,
+                wall_id=record.physical_wall_id,
                 is_authoritative=True,
                 net_area_m2=net_val,
                 evidence=evidence,
@@ -167,7 +192,6 @@ class LiveOpeningNetWallAdapter:
                 union_record_id=record.record_id,
             )
 
-        # Authority exists but resolution was not corroborated (abstained or conflict)
         blocking_reasons = (
             LIVE_NET_WALL_UPSTREAM_UNRESOLVED,
             *res.reason_codes,
@@ -243,6 +267,7 @@ def collect_live_net_wall_shadow(
 
 __all__ = [
     "LIVE_NET_WALL_AUTHORITY_UNAVAILABLE",
+    "LIVE_NET_WALL_IDENTITY_MISMATCH",
     "LIVE_NET_WALL_INTEGRATION_SCHEMA_VERSION",
     "LIVE_NET_WALL_RESOLVED",
     "LIVE_NET_WALL_UPSTREAM_UNRESOLVED",
