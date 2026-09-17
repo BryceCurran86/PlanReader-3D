@@ -22,6 +22,7 @@ Invariants:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from pb_migration_contracts import (
@@ -109,12 +110,25 @@ class LiveOpeningNetWallAdapter:
                 reason_codes=(LIVE_NET_WALL_AUTHORITY_UNAVAILABLE,),
             )
 
+        if type(selector) is not NetWallBooleanUnionSelector:
+            raise TypeError("selector must be NetWallBooleanUnionSelector")
+
         # Resolve through the authenticated NetWallBooleanUnionAuthority
         res: NetWallBooleanUnionResult = self._auth.resolve(selector)
         if (
             res.status is EvidenceResolutionStatus.CORROBORATED
             and res.record is not None
             and res.record.net_area_m2 is not None
+            and math.isfinite(res.record.net_area_m2)
+            and res.record.net_area_m2 >= 0.0
+            and res.record.physical_wall_id == selector.physical_wall_id
+            and res.record.document_id == selector.document_id
+            and res.record.revision_id == selector.revision_id
+            and res.record.source_sha256 == selector.source_sha256
+            and res.record.snapshot_id == selector.snapshot_id
+            and res.record.page_id == selector.page_id
+            and res.record.decision_scope_id == selector.decision_scope_id
+            and res.record.gross_geometry_record_id
         ):
             record: NetWallBooleanUnionRecord = res.record
             net_val = float(record.net_area_m2)

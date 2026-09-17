@@ -338,3 +338,43 @@ class TestShadowAndExtractorIntegration:
         assert extractor.net_wall_authority is auth
         assert extractor.net_wall_selectors["perimeter_walling"] == sel
 
+    def test_duck_typed_selector_rejected(self) -> None:
+        auth = _make_authority()
+        adapter = LiveOpeningNetWallAdapter(net_wall_authority=auth)
+        with pytest.raises(TypeError, match="selector must be NetWallBooleanUnionSelector"):
+            adapter.resolve_wall_net_area(selector={"physical_wall_id": "w1"})  # type: ignore[arg-type]
+
+    def test_wrong_wall_id_record_fails_closed(self) -> None:
+        sel = _make_selector("perimeter_walling")
+        # Record has mismatched physical_wall_id
+        record = _make_corroborated_record(wall_id="other_wall", gross_area_m2=100.0, net_area_m2=97.0)
+        res_obj = NetWallBooleanUnionResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            record=record,
+            reason_codes=("corroborated",),
+        )
+        auth = _make_authority({sel: res_obj})
+        adapter = LiveOpeningNetWallAdapter(net_wall_authority=auth)
+        res = adapter.resolve_wall_net_area(sel, wall_id="perimeter_walling")
+        assert res.is_authoritative is False
+        assert res.net_area_m2 is None
+        assert res.evidence.abstained is True
+
+    def test_mismatched_lineage_fails_closed(self) -> None:
+        sel = _make_selector("perimeter_walling")
+        # Record has stale document_id
+        rec_dict = _make_corroborated_record("perimeter_walling", 100.0, 97.0).__dict__.copy()
+        rec_dict["document_id"] = "doc-stale-999"
+        record = NetWallBooleanUnionRecord(**rec_dict)
+        res_obj = NetWallBooleanUnionResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            record=record,
+            reason_codes=("corroborated",),
+        )
+        auth = _make_authority({sel: res_obj})
+        adapter = LiveOpeningNetWallAdapter(net_wall_authority=auth)
+        res = adapter.resolve_wall_net_area(sel, wall_id="perimeter_walling")
+        assert res.is_authoritative is False
+        assert res.net_area_m2 is None
+        assert res.evidence.abstained is True
+
