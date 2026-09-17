@@ -1,8 +1,8 @@
 # Physical Opening Void V2 — Authority Architecture
 
-**Status:** validator-first contract foundation / TEST-ONLY lane
+**Status:** corrected validator contract / TEST-ONLY / NEVER MERGE
 
-**Base:** `bb61a8dee24c71b12cffcbb19e8dd89965b6e4fe`
+**Corrected base:** `35aad62125cdebf9332ca94ffe5e40730a960dcf`
 
 This contract defines one proposition only:
 
@@ -38,9 +38,11 @@ from native PDF coordinates (points), while opening dimensions are physical valu
 A direction/origin alone is not a physical unit mapping. The positive void therefore
 must not silently mix PDF points with mm/m, derive a scale from caller inputs, or
 promote an ordinary textual scale merely because it is spatially nearby. Current
-`pb_page_scale_calibration_authority.measurement_authority_for_page_scale()` keeps
-TITLE_BLOCK-only scale provisional; only an upstream scale proposition already
-accepted as FIRM for the exact scope may establish the physical `u` mapping.
+`pb_physical_scale_authority.PhysicalScaleAuthority` is the sole accepted unit
+mapping boundary. It resolves producer-owned, source-native bar geometry for the
+exact page/viewport selector. A title-block ratio, page-global fallback on a
+multi-viewport sheet, or caller-supplied conversion factor cannot establish the
+physical `u` mapping.
 
 Independent evidence must also reconcile rather than compete. After conversion
 through the authenticated unit map, the source-derived jamb span must be compatible
@@ -154,21 +156,25 @@ below fails closed against the real production module.
 
 ## 5. Current external dependencies
 
-At this validator base:
+At this validator base, the reviewed upstream authority boundaries are merged:
 
-- Item 4B physical-wall equivalence is merged.
-- Host-binding V3 production #381 is independently accepted and merged on main.
-- `OpeningDimensionAuthority.resolve_height(...)` remains fail-closed / unavailable
-  for authoritative positive height on current main.
-- No reviewed wall-local vertical-placement authority is available on current main.
-- Page/viewport scale machinery exists, but ordinary textual TITLE_BLOCK scale is
-  intentionally PROVISIONAL rather than FIRM; the void lane must consume only an
-  exact-scope physical unit mapping already authorized for measurement.
+- physical-opening existence and exact identity;
+- opening-universe completeness;
+- host binding and source-native host frame;
+- explicit opening width;
+- schedule-bound opening height and vertical placement;
+- source-native physical scale for the exact page/viewport.
 
-Therefore a real positive Physical Opening Void V2 is intentionally unavailable.
-The validator foundation is expected-red until the remaining prerequisites exist.
-Do not fake them with monkeypatched height, default sill/head, schedule-only values,
-caller geometry, caller scale, or an uncorroborated textual scale.
+The void producer must consume those sealed authorities without weakening them.
+In particular, the physical-opening existence `record_id` must equal the host
+binding/frame `opening_identity_id` and the height/vertical-placement
+`opening_record_id`. Width must carry the same existence record. Cross-authority
+evidence for different openings is a lineage/identity mismatch, even when all
+other lineage fields and numeric values happen to agree.
+
+The production module remains expected-red until implemented. Do not fake its
+prerequisites with monkeypatched height, default sill/head, schedule-only values,
+caller geometry, caller scale, or an uncorroborated textual ratio.
 
 ## 6. Freeze rule
 
