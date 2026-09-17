@@ -1125,3 +1125,52 @@ def test_gross_wall_producer_positive_path_publishes_authenticated_geometry() ->
     assert rec.gross_area_m2 == pytest.approx(8.5 * 2.7)
     assert rec.polygon_wkb_hex == box(0.0, 0.0, 8.5, 2.7).wkb_hex
     assert rec.coordinate_unit == "metre"
+
+
+# ---------------------------------------------------------------------------
+# Containment Semantics & Lateral Overrun Regressions
+# ---------------------------------------------------------------------------
+
+def test_subtract_void_union_rejects_vertically_inset_right_lateral_overrun() -> None:
+    """Opening void protruding laterally past the right wall boundary fails closed."""
+    gross = box(0.0, 0.0, 10.0, 3.0)
+    invalid_right_overrun = box(9.5, 1.0, 10.5, 2.0)
+    with pytest.raises(ValueError, match="partially or completely outside gross wall"):
+        subtract_void_union_from_wall_polygon(gross, (invalid_right_overrun,))
+
+
+def test_subtract_void_union_rejects_vertically_inset_left_lateral_overrun() -> None:
+    """Opening void protruding laterally past the left wall boundary fails closed."""
+    gross = box(0.0, 0.0, 10.0, 3.0)
+    invalid_left_overrun = box(-0.5, 1.0, 0.5, 2.0)
+    with pytest.raises(ValueError, match="partially or completely outside gross wall"):
+        subtract_void_union_from_wall_polygon(gross, (invalid_left_overrun,))
+
+
+def test_subtract_void_union_rejects_tiny_vertically_inset_lateral_overshoot() -> None:
+    """Opening void with tiny lateral overshoot beyond gross wall fails closed."""
+    gross = box(0.0, 0.0, 10.0, 3.0)
+    tiny_overshoot = box(9.0, 1.0, 10.0001, 2.0)
+    with pytest.raises(ValueError, match="partially or completely outside gross wall"):
+        subtract_void_union_from_wall_polygon(gross, (tiny_overshoot,))
+
+
+def test_subtract_void_union_fully_contained_opening_remains_positive() -> None:
+    """Fully contained opening void is subtracted and publishes genuine positive net geometry."""
+    gross = box(0.0, 0.0, 10.0, 3.0)
+    opening = box(1.0, 1.0, 3.0, 2.0)
+    net = subtract_void_union_from_wall_polygon(gross, (opening,))
+    assert net.is_valid
+    assert not net.is_empty
+    assert net.area == pytest.approx(10.0 * 3.0 - 2.0 * 1.0)
+
+
+def test_subtract_void_union_boundary_touching_contained_geometry_preserved() -> None:
+    """Boundary-touching but fully covered geometry (e.g. door at floor) succeeds without clipping."""
+    gross = box(0.0, 0.0, 10.0, 3.0)
+    door_opening = box(1.0, 0.0, 2.0, 2.0)
+    net = subtract_void_union_from_wall_polygon(gross, (door_opening,))
+    assert net.is_valid
+    assert not net.is_empty
+    assert net.area == pytest.approx(10.0 * 3.0 - 1.0 * 2.0)
+
