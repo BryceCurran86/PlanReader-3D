@@ -1,21 +1,17 @@
-"""Test-only authority-selection reference for Net-wall Boolean Union.
-
-This module never authorizes geometry. It models fail-closed selection behavior after
-upstream physical-void/applicability propositions have been independently resolved.
-"""
+"""Test-only authority-selection reference for Net-wall Boolean Union."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
-from shapely.geometry.base import BaseGeometry
+from tests.net_wall_boolean_reference_v1 import Rect
 
 
 @dataclass(frozen=True)
 class ReferenceApplicableVoid:
     opening_identity_id: str
     host_wall_id: str
-    geometry: BaseGeometry
+    geometry: Rect
     resolved: bool = True
     applicable: bool = True
     physical_equivalence_unambiguous: bool = True
@@ -26,16 +22,13 @@ def select_target_wall_voids_or_none(
     *,
     target_wall_id: str,
     opening_universe_complete: bool,
-) -> Optional[tuple[BaseGeometry, ...]]:
-    """Return target-wall applicable voids only when every relevant fact is known."""
+) -> Optional[tuple[Rect, ...]]:
     if not opening_universe_complete:
         return None
 
-    selected: list[BaseGeometry] = []
+    selected: list[Rect] = []
     seen: dict[str, ReferenceApplicableVoid] = {}
     for candidate in candidates:
-        # A positively different host is irrelevant to this wall and must never be
-        # subtracted from it.
         if candidate.host_wall_id != target_wall_id:
             continue
         if not candidate.resolved:
@@ -47,9 +40,7 @@ def select_target_wall_voids_or_none(
 
         existing = seen.get(candidate.opening_identity_id)
         if existing is not None:
-            # Exact duplicate observation is harmless; contradictory geometry for
-            # one physical opening blocks instead of first/nearest wins.
-            if not existing.geometry.equals(candidate.geometry):
+            if existing.geometry != candidate.geometry:
                 return None
             continue
         seen[candidate.opening_identity_id] = candidate
