@@ -34,6 +34,8 @@ def select_target_wall_voids_or_none(
     selected: list[BaseGeometry] = []
     seen: dict[str, ReferenceApplicableVoid] = {}
     for candidate in candidates:
+        # A positively different host is irrelevant to this wall and must never be
+        # subtracted from it.
         if candidate.host_wall_id != target_wall_id:
             continue
         if not candidate.resolved:
@@ -45,6 +47,8 @@ def select_target_wall_voids_or_none(
 
         existing = seen.get(candidate.opening_identity_id)
         if existing is not None:
+            # Exact duplicate observation is harmless; contradictory geometry for
+            # one physical opening blocks instead of first/nearest wins.
             if not existing.geometry.equals(candidate.geometry):
                 return None
             continue
