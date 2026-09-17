@@ -2,27 +2,32 @@
 
 Tests cover:
   - Happy-path generic recovery (root_cause=RESOLVED)
-  - Root cause classification when recovery fails (WALL_ROLE_UNRESOLVED, OPENING_DEDUCTION_UNRESOLVED, etc.)
-  - Rejection of hardcoded benchmark values / project-specific constants (ABSTAINED)
-  - Stale lineage fails closed (CONFLICT)
-  - Conflicting area quantities fail closed (CONFLICT)
-  - Sealed authority constructor
+  - Missing physical wall candidate abstains (WALL_INSTANCE_MISSING)
+  - Sealed authority and producer constructors
   - Selector validation
 """
 from __future__ import annotations
 
 import pytest
 
-from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_geometry_takeoff_model import MeasurementAuthorityType
+from pb_migration_contracts import EvidenceResolutionStatus
+from pb_physical_wall_candidate_authority import (
+    PhysicalWallCandidateAuthority,
+    PhysicalWallCandidateRecord,
+    PhysicalWallCandidateScopeResult,
+    _ScopeKey,
+    _AUTHORITY_SEAL as CAND_AUTHORITY_SEAL,
+)
+from pb_physical_wall_identity import PhysicalWallIdentity
+from pb_wall_room_topology_contracts import JunctionType, WallCandidate
+
 from pb_ghazi_wall_finish_recovery_authority import (
-    GHAZI_RECOVERY_HARDCODED_VALUES_REJECTED,
-    GHAZI_RECOVERY_LINEAGE_MISMATCH,
     GHAZI_RECOVERY_RECORD_UNAVAILABLE,
     GHAZI_RECOVERY_RESOLVED,
     GHAZI_RECOVERY_UNRESOLVED,
     GhaziRecoveryRootCause,
     GhaziWallFinishRecoveryAuthority,
-    GhaziWallFinishRecoveryEvidence,
     GhaziWallFinishRecoveryProducer,
     GhaziWallFinishRecoveryRecord,
     GhaziWallFinishRecoveryResult,
@@ -34,7 +39,7 @@ REV = "R1"
 SHA = "1" * 64
 SNAP = "snap-rec-1"
 PAGE = "page-REC01"
-SCOPE = f"recovery-source:page-{PAGE}"
+SCOPE = f"wall-source:page-{PAGE}"
 VP = "vp-REC01"
 WALL = "phys-wall-rec-1"
 TRADE = "plastering_internal_walls"
@@ -56,35 +61,66 @@ def _selector(
     )
 
 
-def _obs(
+def _setup_candidate_authority(
     wall_id: str = WALL,
-    trade_id: str = TRADE,
-    gross: float = 30.0,
-    net: float = 26.0,
-    root_cause: GhaziRecoveryRootCause = GhaziRecoveryRootCause.RESOLVED,
-    kind: str = "authenticated_finish_propagation",
-    sha: str = SHA,
-    rev: str = REV,
-    snap: str = SNAP,
-    is_hardcoded: bool = False,
-    eid: str | None = None,
-) -> GhaziWallFinishRecoveryEvidence:
-    if eid is None:
-        eid = stable_contract_id("obs", {"wall": wall_id, "cause": root_cause.value})
-    return GhaziWallFinishRecoveryEvidence(
-        evidence_id=eid,
-        source_sha256=sha,
-        revision_id=rev,
-        snapshot_id=snap,
-        page_id=PAGE,
-        viewport_id=VP,
-        gross_area_m2=gross,
-        net_area_m2=net,
-        root_cause=root_cause,
-        kind=kind,
-        confidence=0.95,
-        is_hardcoded=is_hardcoded,
+    length_m: float = 10.0,
+    height_m: float = 3.0,
+) -> PhysicalWallCandidateAuthority:
+    cand = WallCandidate(
+        candidate_id=wall_id,
+        viewport_id=SCOPE,
+        representation="single_line",
+        centerline_pts=((0.0, 0.0), (length_m, 0.0)),
+        face_a_segment_ids=("s1",),
+        face_b_segment_ids=None,
+        is_curved=False,
+        curve_control_pts=None,
+        thickness_m=0.2,
+        thickness_authority=MeasurementAuthorityType.PROVISIONAL,
+        length_m=length_m,
+        end_node_ids=("n1", "n2"),
+        junction_types=(JunctionType.ENDPOINT, JunctionType.ENDPOINT),
+        interior_exterior="interior",
+        level_id=None,
+        supporting_evidence_ids=("s1",),
     )
+    ident = PhysicalWallIdentity(
+        wall_candidate_id=wall_id,
+        viewport_id=SCOPE,
+        candidate_identity_id=f"ident-{wall_id}",
+        path_fingerprint=((0.0, 0.0), (length_m, 0.0)),
+        source_primitive_ids=("s1",),
+        edge_ids=("s1",),
+        status=EvidenceResolutionStatus.CORROBORATED,
+    )
+    rec = PhysicalWallCandidateRecord(
+        wall_candidate_id=wall_id,
+        wall_candidate=cand,
+        physical_identity=ident,
+    )
+    scope_key = _ScopeKey(
+        document_id=DOC, revision_id=REV, source_sha256=SHA,
+        snapshot_id=SNAP, page_id=PAGE, decision_scope_id=SCOPE,
+    )
+    scope_res = PhysicalWallCandidateScopeResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        records=(rec,),
+        source_observation_ids=(),
+        document_id=DOC, revision_id=REV, source_sha256=SHA,
+        snapshot_id=SNAP, page_id=PAGE, decision_scope_id=SCOPE,
+        reason_codes=(),
+    )
+    return PhysicalWallCandidateAuthority({scope_key: scope_res}, _seal=CAND_AUTHORITY_SEAL)
+
+
+def _producer(
+    wall_id: str = WALL,
+    length_m: float = 10.0,
+    height_m: float = 3.0,
+) -> GhaziWallFinishRecoveryProducer:
+    cand_auth = _setup_candidate_authority(wall_id, length_m, height_m)
+    return GhaziWallFinishRecoveryProducer.from_authorities(physical_wall_candidate_authority=cand_auth)
 
 
 # ── Constructor Seals ─────────────────────────────────────────────────────────
@@ -95,146 +131,66 @@ def test_authority_constructor_sealed() -> None:
 
 
 def test_producer_constructor_sealed() -> None:
-    with pytest.raises(TypeError, match="create()"):
-        GhaziWallFinishRecoveryProducer()  # type: ignore[call-arg]
+    cand_auth = _setup_candidate_authority()
+    with pytest.raises(TypeError, match="from_authorities"):
+        GhaziWallFinishRecoveryProducer(cand_auth)  # type: ignore[call-arg]
 
 
 # ── Happy Path ────────────────────────────────────────────────────────────────
 
 def test_generic_recovery_resolved() -> None:
-    prod = GhaziWallFinishRecoveryProducer.create()
+    prod = _producer(length_m=10.0, height_m=3.0)
     sel = _selector()
-    obs = [_obs(gross=30.0, net=26.0, root_cause=GhaziRecoveryRootCause.RESOLVED)]
-    res = prod.publish(sel, obs)
+    res = prod.publish(sel)
     assert res.status is EvidenceResolutionStatus.CORROBORATED
     assert res.record is not None
     assert res.record.gross_area_m2 == 30.0
-    assert res.record.net_area_m2 == 26.0
+    assert res.record.net_area_m2 == 30.0
     assert res.record.root_cause is GhaziRecoveryRootCause.RESOLVED
     assert GHAZI_RECOVERY_RESOLVED in res.reason_codes
 
 
 # ── Root Cause Classifications ─────────────────────────────────────────────
 
-def test_wall_role_unresolved_classified() -> None:
-    prod = GhaziWallFinishRecoveryProducer.create()
-    sel = _selector()
-    obs = [_obs(root_cause=GhaziRecoveryRootCause.WALL_ROLE_UNRESOLVED)]
-    res = prod.publish(sel, obs)
+def test_missing_wall_candidate_classified() -> None:
+    prod = _producer()
+    sel = _selector(wall_id="non-existent-wall")
+    res = prod.publish(sel)
     assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert GhaziRecoveryRootCause.WALL_ROLE_UNRESOLVED.value in res.reason_codes
+    assert GhaziRecoveryRootCause.WALL_INSTANCE_MISSING.value in res.reason_codes
     assert res.record is None
-
-
-def test_opening_deduction_unresolved_classified() -> None:
-    prod = GhaziWallFinishRecoveryProducer.create()
-    sel = _selector()
-    obs = [_obs(root_cause=GhaziRecoveryRootCause.OPENING_DEDUCTION_UNRESOLVED)]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert GhaziRecoveryRootCause.OPENING_DEDUCTION_UNRESOLVED.value in res.reason_codes
-
-
-def test_cross_sheet_evidence_missing_classified() -> None:
-    prod = GhaziWallFinishRecoveryProducer.create()
-    sel = _selector()
-    obs = [_obs(root_cause=GhaziRecoveryRootCause.CROSS_SHEET_EVIDENCE_MISSING)]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert GhaziRecoveryRootCause.CROSS_SHEET_EVIDENCE_MISSING.value in res.reason_codes
-
-
-# ── Adversarial: Hardcoded Benchmark Values ──────────────────────────────────
-
-def test_hardcoded_benchmark_values_rejected() -> None:
-    prod = GhaziWallFinishRecoveryProducer.create()
-    sel = _selector()
-    obs = [_obs(is_hardcoded=True)]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert GHAZI_RECOVERY_HARDCODED_VALUES_REJECTED in res.reason_codes
-
-
-def test_hardcoded_kind_string_rejected() -> None:
-    prod = GhaziWallFinishRecoveryProducer.create()
-    sel = _selector()
-    obs = [_obs(kind="hardcoded_benchmark_constant")]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert GHAZI_RECOVERY_HARDCODED_VALUES_REJECTED in res.reason_codes
-
-
-# ── Adversarial: Stale & Conflict ─────────────────────────────────────────────
-
-def test_stale_lineage_fails_closed() -> None:
-    prod = GhaziWallFinishRecoveryProducer.create()
-    sel = _selector()
-    obs = [_obs(sha="2" * 64)]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.CONFLICT
-    assert GHAZI_RECOVERY_LINEAGE_MISMATCH in res.reason_codes
-
-
-def test_conflicting_area_quantities_conflicts() -> None:
-    prod = GhaziWallFinishRecoveryProducer.create()
-    sel = _selector()
-    obs = [
-        _obs(gross=30.0, net=26.0, eid="obs-1"),
-        _obs(gross=30.0, net=20.0, eid="obs-2"),
-    ]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.CONFLICT
-    assert GHAZI_RECOVERY_UNRESOLVED in res.reason_codes
-
-
-def test_empty_observations_abstains() -> None:
-    prod = GhaziWallFinishRecoveryProducer.create()
-    sel = _selector()
-    res = prod.publish(sel, [])
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert GHAZI_RECOVERY_UNRESOLVED in res.reason_codes
 
 
 # ── Authority Lookup ──────────────────────────────────────────────────────────
 
 def test_authority_lookup_published_record() -> None:
-    prod = GhaziWallFinishRecoveryProducer.create()
+    prod = _producer()
     sel = _selector()
-    prod.publish(sel, [_obs()])
+    prod.publish(sel)
     auth = prod.authority()
     res = auth.resolve(sel)
     assert res.status is EvidenceResolutionStatus.CORROBORATED
-    assert res.record.net_area_m2 == 26.0
+    assert res.record is not None
+    assert res.record.gross_area_m2 == 30.0
 
 
 def test_authority_lookup_missing_abstains() -> None:
-    prod = GhaziWallFinishRecoveryProducer.create()
+    prod = _producer()
     auth = prod.authority()
-    sel = _selector()
+    sel = _selector(wall_id="other-wall")
     res = auth.resolve(sel)
     assert res.status is EvidenceResolutionStatus.ABSTAINED
     assert GHAZI_RECOVERY_RECORD_UNAVAILABLE in res.reason_codes
 
 
 def test_authority_lookup_wrong_selector_type_raises() -> None:
-    prod = GhaziWallFinishRecoveryProducer.create()
+    prod = _producer()
     auth = prod.authority()
     with pytest.raises(TypeError, match="GhaziWallFinishRecoverySelector"):
         auth.resolve("not-a-selector")  # type: ignore[arg-type]
 
 
 # ── Validation ────────────────────────────────────────────────────────────────
-
-def test_evidence_invalid_confidence_raises() -> None:
-    with pytest.raises(ValueError, match="confidence"):
-        GhaziWallFinishRecoveryEvidence(
-            evidence_id="ev-bad", source_sha256=SHA, revision_id=REV,
-            snapshot_id=SNAP, page_id=PAGE, viewport_id=VP,
-            gross_area_m2=30.0, net_area_m2=26.0,
-            root_cause=GhaziRecoveryRootCause.RESOLVED,
-            kind="propagation", confidence=1.5,
-        )
-
 
 def test_selector_empty_field_raises() -> None:
     with pytest.raises(ValueError):

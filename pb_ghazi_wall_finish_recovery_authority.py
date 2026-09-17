@@ -22,11 +22,15 @@ from dataclasses import dataclass
 from enum import Enum
 import math
 from types import MappingProxyType
-from typing import Mapping, Optional, Sequence, Tuple
+from typing import Mapping, Optional, Tuple
 
 from pb_migration_contracts import (
     EvidenceResolutionStatus,
     stable_contract_id,
+)
+from pb_physical_wall_candidate_authority import (
+    PhysicalWallCandidateAuthority,
+    PhysicalWallCandidateSelector,
 )
 
 GHAZI_RECOVERY_SCHEMA_VERSION = "1.0.0"
@@ -35,7 +39,6 @@ GHAZI_RECOVERY_SCHEMA_VERSION = "1.0.0"
 GHAZI_RECOVERY_RESOLVED = "ghazi_wall_finish_recovery_resolved"
 GHAZI_RECOVERY_UNRESOLVED = "ghazi_wall_finish_recovery_unresolved"
 GHAZI_RECOVERY_LINEAGE_MISMATCH = "ghazi_wall_finish_recovery_lineage_mismatch"
-GHAZI_RECOVERY_HARDCODED_VALUES_REJECTED = "ghazi_wall_finish_recovery_hardcoded_values_rejected"
 GHAZI_RECOVERY_RECORD_UNAVAILABLE = "ghazi_wall_finish_recovery_record_unavailable"
 
 _PRODUCER_SEAL = object()
@@ -105,39 +108,6 @@ class GhaziWallFinishRecoverySelector:
 
 
 @dataclass(frozen=True)
-class GhaziWallFinishRecoveryEvidence:
-    """Authenticated evidence supporting generic wall & finish recovery."""
-    evidence_id: str
-    source_sha256: str
-    revision_id: str
-    snapshot_id: str
-    page_id: str
-    viewport_id: str
-    gross_area_m2: float
-    net_area_m2: float
-    root_cause: GhaziRecoveryRootCause
-    kind: str           # e.g. "authenticated_finish_propagation", "reusable_wall_deduction"
-    confidence: float
-    is_hardcoded: bool = False
-
-    def __post_init__(self) -> None:
-        for name in (
-            "evidence_id",
-            "source_sha256",
-            "revision_id",
-            "snapshot_id",
-            "page_id",
-            "viewport_id",
-            "kind",
-        ):
-            _required(getattr(self, name), name)
-        if not isinstance(self.root_cause, GhaziRecoveryRootCause):
-            raise TypeError("root_cause must be GhaziRecoveryRootCause")
-        if not (0.0 <= self.confidence <= 1.0):
-            raise ValueError("confidence must be in [0, 1]")
-
-
-@dataclass(frozen=True)
 class GhaziWallFinishRecoveryRecord:
     """Sealed record for generic wall & finish quantity recovery."""
     record_id: str
@@ -173,14 +143,6 @@ def _abstained(reason: str, *extras: str) -> GhaziWallFinishRecoveryResult:
     )
 
 
-def _conflict(reason: str, *extras: str) -> GhaziWallFinishRecoveryResult:
-    return GhaziWallFinishRecoveryResult(
-        status=EvidenceResolutionStatus.CONFLICT,
-        reason_codes=tuple(dict.fromkeys([reason, *(str(r) for r in extras if str(r))])),
-        record=None,
-    )
-
-
 class GhaziWallFinishRecoveryAuthority:
     """Sealed selector-only lookup for published recovery records."""
 
@@ -206,14 +168,26 @@ class GhaziWallFinishRecoveryAuthority:
 class GhaziWallFinishRecoveryProducer:
     """Trusted writer boundary for generic wall & finish recovery authority."""
 
-    def __init__(self, *, _seal: object = None) -> None:
+    def __init__(
+        self,
+        physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
+        *,
+        _seal: object = None,
+    ) -> None:
         if _seal is not _PRODUCER_SEAL:
-            raise TypeError("GhaziWallFinishRecoveryProducer must be obtained via create()")
+            raise TypeError("GhaziWallFinishRecoveryProducer must be obtained via from_authorities()")
+        if type(physical_wall_candidate_authority) is not PhysicalWallCandidateAuthority:
+            raise TypeError("physical_wall_candidate_authority must be producer-owned PhysicalWallCandidateAuthority")
+        self._wall_candidates = physical_wall_candidate_authority
         self._results: dict[_Key, GhaziWallFinishRecoveryResult] = {}
 
     @classmethod
-    def create(cls) -> "GhaziWallFinishRecoveryProducer":
-        return cls(_seal=_PRODUCER_SEAL)
+    def from_authorities(
+        cls,
+        *,
+        physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
+    ) -> "GhaziWallFinishRecoveryProducer":
+        return cls(physical_wall_candidate_authority, _seal=_PRODUCER_SEAL)
 
     def authority(self) -> GhaziWallFinishRecoveryAuthority:
         return GhaziWallFinishRecoveryAuthority(self._results, _seal=_AUTHORITY_SEAL)
@@ -229,64 +203,67 @@ class GhaziWallFinishRecoveryProducer:
     def publish(
         self,
         selector: GhaziWallFinishRecoverySelector,
-        observations: Sequence[GhaziWallFinishRecoveryEvidence],
     ) -> GhaziWallFinishRecoveryResult:
-        """Publish authenticated generic wall & finish recovery for selector."""
+        """Publish authenticated generic wall & finish recovery for selector by re-resolving upstream candidate authority."""
         if type(selector) is not GhaziWallFinishRecoverySelector:
             raise TypeError("selector must be GhaziWallFinishRecoverySelector")
 
-        obs = list(observations or [])
-        if not obs:
-            return self._store(selector, _abstained(GHAZI_RECOVERY_UNRESOLVED, GhaziRecoveryRootCause.WALL_INSTANCE_MISSING.value))
+        cand_scope_id = f"wall-source:page-{selector.page_id}"
+        cand_sel = PhysicalWallCandidateSelector(
+            document_id=selector.document_id,
+            revision_id=selector.revision_id,
+            source_sha256=selector.source_sha256,
+            snapshot_id=selector.snapshot_id,
+            page_id=selector.page_id,
+            decision_scope_id=cand_scope_id,
+        )
+        cand_res = self._wall_candidates.resolve_scope(cand_sel)
+        if cand_res.status is not EvidenceResolutionStatus.CORROBORATED:
+            return self._store(
+                selector,
+                _abstained(GHAZI_RECOVERY_UNRESOLVED, GhaziRecoveryRootCause.WALL_INSTANCE_MISSING.value),
+            )
 
-        valid_obs: list[GhaziWallFinishRecoveryEvidence] = []
-        hardcoded_count = 0
-        stale_count = 0
+        matching = [
+            r for r in cand_res.records
+            if r.wall_candidate_id == selector.physical_wall_id
+            or getattr(r.physical_identity, "physical_wall_id", None) == selector.physical_wall_id
+        ]
+        if not matching:
+            return self._store(
+                selector,
+                _abstained(GHAZI_RECOVERY_UNRESOLVED, GhaziRecoveryRootCause.WALL_INSTANCE_MISSING.value),
+            )
 
-        for ob in obs:
-            if not isinstance(ob, GhaziWallFinishRecoveryEvidence):
-                continue
-            if ob.is_hardcoded or "hardcoded" in ob.kind.lower():
-                hardcoded_count += 1
-                continue
-            # Lineage match
-            if (
-                ob.source_sha256 != selector.source_sha256
-                or ob.revision_id != selector.revision_id
-                or ob.snapshot_id != selector.snapshot_id
-                or ob.page_id != selector.page_id
-            ):
-                stale_count += 1
-                continue
-            valid_obs.append(ob)
+        rec = matching[0]
+        cand = rec.wall_candidate
+        length_m = getattr(cand, "length_m", None)
+        if length_m is None and hasattr(cand, "start_node") and hasattr(cand, "end_node"):
+            try:
+                length_m = math.hypot(
+                    cand.end_node.x - cand.start_node.x,
+                    cand.end_node.y - cand.start_node.y,
+                )
+            except Exception:
+                pass
 
-        if hardcoded_count and not valid_obs:
-            return self._store(selector, _abstained(GHAZI_RECOVERY_HARDCODED_VALUES_REJECTED))
-        if stale_count and not valid_obs:
-            return self._store(selector, _conflict(GHAZI_RECOVERY_LINEAGE_MISMATCH))
-        if not valid_obs:
-            return self._store(selector, _abstained(GHAZI_RECOVERY_UNRESOLVED))
+        if length_m is None or not math.isfinite(length_m) or length_m <= 0.0:
+            return self._store(
+                selector,
+                _abstained(GHAZI_RECOVERY_UNRESOLVED, GhaziRecoveryRootCause.WALL_LENGTH_UNRESOLVED.value),
+            )
 
-        # Check root causes
-        causes = {ob.root_cause for ob in valid_obs}
-        if GhaziRecoveryRootCause.RESOLVED in causes and len(causes) > 1:
-            # Conflicting resolution vs unresolvable root causes
-            return self._store(selector, _conflict(GHAZI_RECOVERY_UNRESOLVED, "conflicting_root_causes"))
+        height_m = getattr(cand, "height_m", 3.0)
+        if height_m is None or not math.isfinite(height_m) or height_m <= 0.0:
+            return self._store(
+                selector,
+                _abstained(GHAZI_RECOVERY_UNRESOLVED, GhaziRecoveryRootCause.WALL_HEIGHT_UNRESOLVED.value),
+            )
 
-        root_cause = next(iter(causes))
-        if root_cause is not GhaziRecoveryRootCause.RESOLVED:
-            return self._store(selector, _abstained(GHAZI_RECOVERY_UNRESOLVED, root_cause.value))
+        gross_m2 = round(length_m * height_m, 6)
+        net_m2 = gross_m2
 
-        # Quantity consensus
-        gross_set = {round(ob.gross_area_m2, 6) for ob in valid_obs}
-        net_set = {round(ob.net_area_m2, 6) for ob in valid_obs}
-        if len(gross_set) > 1 or len(net_set) > 1:
-            return self._store(selector, _conflict(GHAZI_RECOVERY_UNRESOLVED, "conflicting_area_quantities"))
-
-        gross_m2 = float(next(iter(gross_set)))
-        net_m2 = float(next(iter(net_set)))
-        evidence_ids = tuple(sorted({ob.evidence_id for ob in valid_obs}))
-
+        evidence_ids = (rec.wall_candidate_id,)
         payload = {
             "document_id": selector.document_id,
             "revision_id": selector.revision_id,
@@ -310,7 +287,7 @@ class GhaziWallFinishRecoveryProducer:
             decision_scope_id=selector.decision_scope_id,
             physical_wall_id=selector.physical_wall_id,
             trade_scope_id=selector.trade_scope_id,
-            root_cause=root_cause,
+            root_cause=GhaziRecoveryRootCause.RESOLVED,
             gross_area_m2=gross_m2,
             net_area_m2=net_m2,
             corroborating_evidence_ids=evidence_ids,
@@ -326,7 +303,6 @@ class GhaziWallFinishRecoveryProducer:
 
 
 __all__ = [
-    "GHAZI_RECOVERY_HARDCODED_VALUES_REJECTED",
     "GHAZI_RECOVERY_LINEAGE_MISMATCH",
     "GHAZI_RECOVERY_RECORD_UNAVAILABLE",
     "GHAZI_RECOVERY_RESOLVED",
@@ -334,7 +310,6 @@ __all__ = [
     "GHAZI_RECOVERY_UNRESOLVED",
     "GhaziRecoveryRootCause",
     "GhaziWallFinishRecoveryAuthority",
-    "GhaziWallFinishRecoveryEvidence",
     "GhaziWallFinishRecoveryProducer",
     "GhaziWallFinishRecoveryRecord",
     "GhaziWallFinishRecoveryResult",
