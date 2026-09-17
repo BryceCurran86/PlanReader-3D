@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from enum import Enum
 import math
 from types import MappingProxyType
-from typing import Mapping, Optional, Sequence, Tuple
+from typing import Mapping, Optional, Tuple
 
 from pb_migration_contracts import (
     EvidenceResolutionStatus,
@@ -108,43 +108,6 @@ class DPCSubstructureSelector:
             self.physical_foundation_id,
             self.family.value,
         )
-
-
-@dataclass(frozen=True)
-class DPCSubstructureEvidence:
-    """Authenticated observation for DPC or substructure quantity."""
-    evidence_id: str
-    source_sha256: str
-    revision_id: str
-    snapshot_id: str
-    page_id: str
-    viewport_id: str
-    family: SubstructureFamily
-    measured_value: float
-    unit: str           # "m" or "m2"
-    kind: str           # e.g. "dpc_schedule_row", "foundation_plan_wall"
-    method: str         # e.g. "direct_dimension", "authenticated_section_detail"
-    confidence: float
-
-    def __post_init__(self) -> None:
-        for name in (
-            "evidence_id",
-            "source_sha256",
-            "revision_id",
-            "snapshot_id",
-            "page_id",
-            "viewport_id",
-            "unit",
-            "kind",
-            "method",
-        ):
-            _required(getattr(self, name), name)
-        if not isinstance(self.family, SubstructureFamily):
-            raise TypeError("family must be SubstructureFamily")
-        if not math.isfinite(self.measured_value) or self.measured_value <= 0.0:
-            raise ValueError("measured_value must be positive and finite")
-        if not (0.0 <= self.confidence <= 1.0):
-            raise ValueError("confidence must be in [0, 1]")
 
 
 @dataclass(frozen=True)
@@ -259,11 +222,13 @@ class DPCSubstructureProducer:
     def publish(
         self,
         selector: DPCSubstructureSelector,
-        observations: Sequence[DPCSubstructureEvidence],
     ) -> DPCSubstructureResult:
-        """Publish DPC / substructure quantity for selector."""
+        """Publish DPC / substructure quantity for selector by re-resolving upstream candidate and scale authorities."""
         if type(selector) is not DPCSubstructureSelector:
             raise TypeError("selector must be DPCSubstructureSelector")
+
+        if selector.family == SubstructureFamily.UNRESOLVED:
+            return self._store(selector, _abstained(DPC_SUBSTRUCTURE_UNRESOLVED))
 
         # 1. Resolve Physical Wall Candidates
         cand_scope_id = f"wall-source:page-{selector.page_id}"
@@ -276,25 +241,6 @@ class DPCSubstructureProducer:
             decision_scope_id=cand_scope_id,
         )
         cand_result = self._wall_candidates.resolve_scope(cand_sel)
-        if (
-            cand_result.status is not EvidenceResolutionStatus.CORROBORATED
-            and selector.decision_scope_id != cand_scope_id
-        ):
-            try:
-                alt_sel = PhysicalWallCandidateSelector(
-                    document_id=selector.document_id,
-                    revision_id=selector.revision_id,
-                    source_sha256=selector.source_sha256,
-                    snapshot_id=selector.snapshot_id,
-                    page_id=selector.page_id,
-                    decision_scope_id=selector.decision_scope_id,
-                )
-                alt = self._wall_candidates.resolve_scope(alt_sel)
-                if alt.status is EvidenceResolutionStatus.CORROBORATED:
-                    cand_result = alt
-            except Exception:
-                pass
-
         if cand_result.status is not EvidenceResolutionStatus.CORROBORATED:
             return self._store(
                 selector,
@@ -334,71 +280,44 @@ class DPCSubstructureProducer:
                 ),
             )
 
-        # 3. Filter Observations
-        obs = list(observations or [])
-        if not obs:
+        rec = matching_recs[0]
+        cand = rec.wall_candidate
+        length_m = getattr(cand, "length_m", None)
+        if length_m is None and hasattr(cand, "start_node") and hasattr(cand, "end_node"):
+            try:
+                length_m = math.hypot(
+                    cand.end_node.x - cand.start_node.x,
+                    cand.end_node.y - cand.start_node.y,
+                )
+            except Exception:
+                pass
+
+        if length_m is None or not math.isfinite(length_m) or length_m <= 0.0:
             return self._store(selector, _abstained(DPC_SUBSTRUCTURE_UNRESOLVED))
 
-        forbidden_kinds = {
-            "perimeter_dpc_shortcut",
-            "copied_superstructure_shortcut",
-            "assumed_footing_depth",
-            "assumed_dpc",
-        }
-        valid_obs: list[DPCSubstructureEvidence] = []
-        forbidden_perim = False
-        forbidden_super = False
-        stale_count = 0
-        missing_section = False
-
-        for ob in obs:
-            if not isinstance(ob, DPCSubstructureEvidence):
-                continue
-            if ob.family != selector.family:
-                continue
-            if ob.kind == "perimeter_dpc_shortcut":
-                forbidden_perim = True
-                continue
-            if ob.kind == "copied_superstructure_shortcut":
-                forbidden_super = True
-                continue
-            if ob.kind in forbidden_kinds:
-                continue
-
-            if ob.method == "missing_section_detail":
-                missing_section = True
-                continue
-
-            # Lineage match
-            if (
-                ob.source_sha256 != selector.source_sha256
-                or ob.revision_id != selector.revision_id
-                or ob.snapshot_id != selector.snapshot_id
-                or ob.page_id != selector.page_id
-            ):
-                stale_count += 1
-                continue
-            valid_obs.append(ob)
-
-        if forbidden_perim and not valid_obs:
-            return self._store(selector, _abstained(DPC_SUBSTRUCTURE_PERIMETER_SHORTCUT_REJECTED))
-        if forbidden_super and not valid_obs:
-            return self._store(selector, _abstained(DPC_SUBSTRUCTURE_SUPERSTRUCTURE_COPY_REJECTED))
-        if missing_section and not valid_obs:
-            return self._store(selector, _abstained(DPC_SUBSTRUCTURE_MISSING_SECTION_DETAIL))
-        if stale_count and not valid_obs:
-            return self._store(selector, _conflict(DPC_SUBSTRUCTURE_LINEAGE_MISMATCH))
-        if not valid_obs:
+        if selector.family in (
+            SubstructureFamily.DPC_LENGTH,
+            SubstructureFamily.FOUNDATION_WALL_LENGTH,
+            SubstructureFamily.STRIP_FOOTING_LENGTH,
+        ):
+            val = round(length_m, 6)
+            unit = "m"
+        elif selector.family == SubstructureFamily.SUBSTRUCTURE_WALL_AREA:
+            height_m = getattr(cand, "height_m", None)
+            if height_m is None and cand.metadata:
+                height_m = cand.metadata.get("height_m")
+            if height_m is None or not isinstance(height_m, (int, float)) or not math.isfinite(height_m) or height_m <= 0.0:
+                return self._store(selector, _abstained(DPC_SUBSTRUCTURE_MISSING_SECTION_DETAIL))
+            val = round(length_m * float(height_m), 6)
+            unit = "m2"
+        else:
             return self._store(selector, _abstained(DPC_SUBSTRUCTURE_UNRESOLVED))
 
-        # Value consensus
-        val_set = {round(ob.measured_value, 6) for ob in valid_obs}
-        if len(val_set) > 1:
-            return self._store(selector, _conflict(DPC_SUBSTRUCTURE_UNRESOLVED, "conflicting_measured_values"))
-
-        val = float(next(iter(val_set)))
-        unit = valid_obs[0].unit
-        evidence_ids = tuple(sorted({ob.evidence_id for ob in valid_obs}))
+        scale_id = getattr(scale_res.evidence, "record_id", "scale") if scale_res.evidence else "scale"
+        evidence_ids = (
+            rec.wall_candidate_id,
+            str(scale_id),
+        )
 
         payload = {
             "document_id": selector.document_id,
@@ -449,7 +368,6 @@ __all__ = [
     "DPC_SUBSTRUCTURE_UNRESOLVED",
     "DPC_SUBSTRUCTURE_WALL_UNRESOLVED",
     "DPCSubstructureAuthority",
-    "DPCSubstructureEvidence",
     "DPCSubstructureProducer",
     "DPCSubstructureRecord",
     "DPCSubstructureResult",
