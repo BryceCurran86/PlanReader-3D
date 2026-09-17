@@ -41,12 +41,15 @@ def _two_opening_pdf(
         page = doc.new_page(width=460.0, height=360.0)
         shape = page.new_shape()
         segments = [
+            # top face: left / between openings / right
             ((20.0 + dx, 80.0 + dy), (100.0 + dx, 80.0 + dy)),
             ((140.0 + dx, 80.0 + dy), (220.0 + dx, 80.0 + dy)),
             ((260.0 + dx, 80.0 + dy), (340.0 + dx, 80.0 + dy)),
+            # bottom face
             ((20.0 + dx, 100.0 + dy), (100.0 + dx, 100.0 + dy)),
             ((140.0 + dx, 100.0 + dy), (220.0 + dx, 100.0 + dy)),
             ((260.0 + dx, 100.0 + dy), (340.0 + dx, 100.0 + dy)),
+            # opening jambs
             ((100.0 + dx, 80.0 + dy), (100.0 + dx, 100.0 + dy)),
             ((140.0 + dx, 80.0 + dy), (140.0 + dx, 100.0 + dy)),
             ((220.0 + dx, 80.0 + dy), (220.0 + dx, 100.0 + dy)),
@@ -117,6 +120,10 @@ def _publish_frames(payload: bytes):
         host_wall_universe_authority=universe_authority,
     )
 
+    # Publish the complete binding set first. OpeningHostBindingAuthority is a
+    # sealed snapshot, so the frame producer must be built only after these
+    # records exist; otherwise the validator would test stale authority state
+    # rather than whole-wall frame construction.
     bound_openings = []
     bindings = []
     for opening_selector, _opening_record in openings.values():
@@ -179,6 +186,8 @@ def _publish_frames(payload: bytes):
         ]
         local_extents.append((min(xs), max(xs)))
 
+    # This must be true before the frame assertion has any value: the two host
+    # proofs really are opening-local and select different split pieces.
     assert len(set(local_extents)) == 2
     return tuple(frames), tuple(local_extents)
 
@@ -188,12 +197,19 @@ def _rounded_span(frame) -> tuple[float, float]:
 
 
 def test_two_openings_on_one_wall_share_one_whole_wall_frame() -> None:
+    """Expected RED on current #411: binding-member min/max is not whole-wall extent."""
     frames, local_extents = _publish_frames(_two_opening_pdf())
     assert len(frames) == 2
     assert len(set(local_extents)) == 2
+
+    # Both openings belong to the same physical wall coordinate system. A
+    # correct producer-owned traversal therefore anchors both at the whole-wall
+    # centreline origin x=20,y=90 rather than each opening's local member min.
     assert {tuple(frame.origin_pt) for frame in frames} == {(20.0, 90.0)}
     assert {tuple(frame.axis_unit) for frame in frames} == {(1.0, 0.0)}
     assert {round(float(frame.wall_thickness_pt), 6) for frame in frames} == {20.0}
+
+    # Whole-wall local coordinates distinguish the two openings.
     assert sorted(_rounded_span(frame) for frame in frames) == [
         (80.0, 120.0),
         (200.0, 240.0),
@@ -203,6 +219,7 @@ def test_two_openings_on_one_wall_share_one_whole_wall_frame() -> None:
 def test_shared_whole_wall_coordinates_are_translation_invariant() -> None:
     base_frames, _ = _publish_frames(_two_opening_pdf())
     shifted_frames, _ = _publish_frames(_two_opening_pdf(dx=50.0, dy=40.0))
+
     assert {tuple(frame.origin_pt) for frame in base_frames} == {(20.0, 90.0)}
     assert {tuple(frame.origin_pt) for frame in shifted_frames} == {(70.0, 130.0)}
     assert sorted(_rounded_span(frame) for frame in base_frames) == sorted(
@@ -213,6 +230,7 @@ def test_shared_whole_wall_coordinates_are_translation_invariant() -> None:
 def test_shared_whole_wall_frame_ignores_source_segment_direction() -> None:
     forward_frames, _ = _publish_frames(_two_opening_pdf())
     reversed_frames, _ = _publish_frames(_two_opening_pdf(reverse_segments=True))
+
     assert {tuple(frame.origin_pt) for frame in forward_frames} == {
         tuple(frame.origin_pt) for frame in reversed_frames
     } == {(20.0, 90.0)}
