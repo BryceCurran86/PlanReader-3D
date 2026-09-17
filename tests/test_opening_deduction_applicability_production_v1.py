@@ -37,23 +37,6 @@ TARGET_TOKEN = "ODTARGET(target=wall-finish-1,opening=W1,trade=PAINT,finish=LOW-
 RULE_TOKEN = "ODRULE(target=wall-finish-1,opening=W1,trade=PAINT,finish=LOW-SHEEN,assembly=INT-WALL,id=project-mom,version=1,decision=DEDUCT)"
 
 
-def _pdf_with_tokens(*, target_token: str = TARGET_TOKEN, rule_tokens: tuple[str, ...] = (RULE_TOKEN,), **kwargs) -> bytes:
-    raw = void_tests._pdf(**kwargs)
-    doc = fitz.open(stream=raw, filetype="pdf")
-    try:
-        page = doc.load_page(0)
-        y = 570.0
-        if target_token:
-            page.insert_text(fitz.Point(10.0, y), target_token, fontsize=4.5)
-            y += 18.0
-        for token in rule_tokens:
-            page.insert_text(fitz.Point(10.0, y), token, fontsize=4.5)
-            y += 18.0
-        return bytes(doc.tobytes(garbage=4, deflate=True))
-    finally:
-        doc.close()
-
-
 def _setup(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -125,23 +108,27 @@ def _setup(
     target_result = target.publish(selector)
     rule = OpeningDeductionRuleProducer.from_source_visibility_producer(source)
     rule_result = rule.publish(selector)
+    target_authority = target.authority()
+    rule_authority = rule.authority()
     applicability = OpeningDeductionApplicabilityProducer.from_authorities(
         physical_void_authority=void_producer.authority(),
         host_binding_authority=void_producer._host,
-        target_scope_authority=target.authority(),
-        rule_authority=rule.authority(),
+        target_scope_authority=target_authority,
+        rule_authority=rule_authority,
     )
     return (
         void_producer,
         selector,
         target_result,
         rule_result,
+        target_authority,
+        rule_authority,
         applicability,
     )
 
 
 def test_real_source_target_and_rule_publish_positive_applicability(monkeypatch: pytest.MonkeyPatch) -> None:
-    _, selector, target, rule, applicability = _setup(monkeypatch)
+    _, selector, target, rule, _, _, applicability = _setup(monkeypatch)
     assert target.status is EvidenceResolutionStatus.CORROBORATED
     assert rule.status is EvidenceResolutionStatus.CORROBORATED
     result = applicability.publish(selector)
@@ -174,7 +161,7 @@ def test_wrong_trade_finish_or_assembly_fails_closed(
     rule_token: str,
     reason: str,
 ) -> None:
-    _, selector, _, _, applicability = _setup(monkeypatch, rule_tokens=(rule_token,))
+    _, selector, _, _, _, _, applicability = _setup(monkeypatch, rule_tokens=(rule_token,))
     result = applicability.publish(selector)
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert reason in result.reason_codes
@@ -183,7 +170,7 @@ def test_wrong_trade_finish_or_assembly_fails_closed(
 
 def test_conflicting_rule_versions_fail_closed_without_latest_winner(monkeypatch: pytest.MonkeyPatch) -> None:
     second = RULE_TOKEN.replace("version=1", "version=2")
-    _, selector, _, rule, applicability = _setup(
+    _, selector, _, rule, _, _, applicability = _setup(
         monkeypatch,
         rule_tokens=(RULE_TOKEN, second),
     )
@@ -195,7 +182,7 @@ def test_conflicting_rule_versions_fail_closed_without_latest_winner(monkeypatch
 
 
 def test_duplicate_identical_rule_observation_does_not_create_a_second_rule(monkeypatch: pytest.MonkeyPatch) -> None:
-    _, selector, _, rule, applicability = _setup(
+    _, selector, _, rule, _, _, applicability = _setup(
         monkeypatch,
         rule_tokens=(RULE_TOKEN, RULE_TOKEN),
     )
@@ -206,20 +193,20 @@ def test_duplicate_identical_rule_observation_does_not_create_a_second_rule(monk
 
 
 def test_wrong_host_authority_cannot_authorize_target(monkeypatch: pytest.MonkeyPatch) -> None:
-    first_void, selector, target, rule, _ = _setup(monkeypatch)
+    first_void, selector, target, rule, target_authority, rule_authority, _ = _setup(monkeypatch)
     assert target.status is EvidenceResolutionStatus.CORROBORATED
     assert rule.status is EvidenceResolutionStatus.CORROBORATED
 
-    # A separate real producer-owned host authority has different immutable source
-    # lineage, so it cannot satisfy this selector even though the geometry fixture
-    # is otherwise similar.
+    # The second authority is built from a genuinely different immutable PDF, not
+    # a copied or caller-forged host record.
     monkeypatch.undo()
-    second_void, _, _, _, _ = _setup(monkeypatch)
+    second_rule = RULE_TOKEN.replace("version=1", "version=9")
+    second_void, _, _, _, _, _, _ = _setup(monkeypatch, rule_tokens=(second_rule,))
     applicability = OpeningDeductionApplicabilityProducer.from_authorities(
         physical_void_authority=first_void.authority(),
         host_binding_authority=second_void._host,
-        target_scope_authority=_target_authority_from_result(selector, target),
-        rule_authority=_rule_authority_from_result(selector, rule),
+        target_scope_authority=target_authority,
+        rule_authority=rule_authority,
     )
     result = applicability.publish(selector)
     assert result.status is not EvidenceResolutionStatus.CORROBORATED
@@ -227,28 +214,8 @@ def test_wrong_host_authority_cannot_authorize_target(monkeypatch: pytest.Monkey
     assert result.record is None
 
 
-def _target_authority_from_result(selector, result):
-    # Test-only preservation of an already producer-derived record. This helper is
-    # used solely to isolate the wrong-host attack at the final join boundary.
-    import pb_opening_deduction_applicability_authority as mod
-
-    return mod.OpeningDeductionTargetScopeAuthority(
-        {selector.key: result},
-        _seal=mod._TARGET_AUTHORITY_SEAL,
-    )
-
-
-def _rule_authority_from_result(selector, result):
-    import pb_opening_deduction_applicability_authority as mod
-
-    return mod.OpeningDeductionRuleAuthority(
-        {selector.key: result},
-        _seal=mod._RULE_AUTHORITY_SEAL,
-    )
-
-
 def test_item14_requires_and_retains_positive_applicability(monkeypatch: pytest.MonkeyPatch) -> None:
-    void_producer, app_selector, _, _, applicability = _setup(monkeypatch)
+    void_producer, app_selector, _, _, _, _, applicability = _setup(monkeypatch)
     app_result = applicability.publish(app_selector)
     assert app_result.status is EvidenceResolutionStatus.CORROBORATED
     assert app_result.record is not None
@@ -269,7 +236,7 @@ def test_item14_requires_and_retains_positive_applicability(monkeypatch: pytest.
 
 
 def test_item14_unknown_target_never_becomes_zero_or_authorized(monkeypatch: pytest.MonkeyPatch) -> None:
-    void_producer, app_selector, _, _, applicability = _setup(monkeypatch)
+    void_producer, app_selector, _, _, _, _, applicability = _setup(monkeypatch)
     applicability.publish(app_selector)
     producer = OpeningDeductionProducer.from_authorities(
         physical_void_authority=void_producer.authority(),
