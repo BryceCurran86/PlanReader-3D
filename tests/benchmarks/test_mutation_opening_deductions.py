@@ -235,7 +235,8 @@ def test_propagation_blocks_independent_gross_area_without_host_authority() -> N
     pred_map = {prediction.tag: prediction for prediction in updated}
     assert pred_map["internal_plaster"].quantity is None
     assert pred_map["internal_plaster"].metadata["net_area_m2"] is None
-    assert pred_map["internal_plaster"].metadata["provisional_net_area_m2"] == 79.0
+    # Item 21A: provisional_net_area_m2 uses authenticated source (94.0), not caller (79.0)
+    assert pred_map["internal_plaster"].metadata["provisional_net_area_m2"] == 94.0
     assert pred_map["internal_paint"].quantity is None
     assert pred_map["internal_paint"].metadata["provisional_net_area_m2"] == 94.0
 

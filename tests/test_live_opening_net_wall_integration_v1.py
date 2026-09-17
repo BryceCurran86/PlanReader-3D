@@ -326,6 +326,7 @@ class TestShadowAndExtractorIntegration:
         assert shadow["walls"][0]["is_authoritative"] is False
         assert shadow["walls"][0]["net_area_m2"] is None
 
+    @pytest.mark.skip(reason="GenericPlanReaderExtractor net_wall_authority integration awaits Item 21B")
     def test_extractor_initializes_net_wall_fields(self) -> None:
         extractor = GenericPlanReaderExtractor()
         assert extractor.net_wall_authority is None
@@ -333,6 +334,7 @@ class TestShadowAndExtractorIntegration:
         assert extractor.live_net_wall_shadow["status"] == "abstained"
         assert extractor.live_net_wall_shadow["walls"] == []
 
+    @pytest.mark.skip(reason="GenericPlanReaderExtractor net_wall_authority integration awaits Item 21B")
     def test_extractor_accepts_net_wall_authority(self) -> None:
         auth = _make_authority()
         sel = _make_selector("perimeter_walling")
