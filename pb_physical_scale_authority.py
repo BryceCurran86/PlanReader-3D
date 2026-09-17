@@ -51,6 +51,7 @@ _Point = tuple[float, float]
 _PHYSICAL_LABEL_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(mm|cm|m)\s*$", re.I)
 _ZERO_RE = re.compile(r"^\s*0(?:\.0+)?\s*$")
 _RATIO_RE = re.compile(r"\b(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)\b")
+_SEGMENT_PRIMITIVE_RE = re.compile(r"^visible:segment:d(\d+)i(\d+)$")
 
 
 @dataclass(frozen=True)
@@ -122,12 +123,18 @@ class _TrustedWord:
 @dataclass(frozen=True)
 class _VisibleSegment:
     observation_id: str
+    source_primitive_ref: str
     start: _Point
     end: _Point
+    duplicate_observation_ids: tuple[str, ...] = ()
 
     @property
     def length(self) -> float:
         return math.hypot(self.end[0] - self.start[0], self.end[1] - self.start[1])
+
+    @property
+    def observation_ids(self) -> tuple[str, ...]:
+        return tuple(sorted((self.observation_id, *self.duplicate_observation_ids)))
 
 
 @dataclass(frozen=True)
@@ -182,6 +189,64 @@ def _distance(left: _Point, right: _Point) -> float:
     return math.hypot(left[0] - right[0], left[1] - right[1])
 
 
+def _primitive_position(segment: _VisibleSegment) -> Optional[tuple[int, int]]:
+    match = _SEGMENT_PRIMITIVE_RE.match(segment.source_primitive_ref)
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _coalesce_retraced_segments(
+    segments: Sequence[_VisibleSegment],
+) -> tuple[_VisibleSegment, ...]:
+    """Coalesce only exact reverse retraces from one adjacent native path.
+
+    PyMuPDF can expose a terminal line in a multi-line path twice in opposite
+    directions.  Both authenticated observation IDs remain in provenance; this
+    normalization only prevents that source representation detail from looking
+    like two competing scale ticks.
+    """
+    consumed: set[str] = set()
+    normalized: list[_VisibleSegment] = []
+    for segment in sorted(segments, key=lambda item: item.observation_id):
+        if segment.observation_id in consumed:
+            continue
+        position = _primitive_position(segment)
+        matches = []
+        if position is not None:
+            drawing_index, primitive_index = position
+            for other in segments:
+                other_position = _primitive_position(other)
+                if (
+                    other.observation_id != segment.observation_id
+                    and other.observation_id not in consumed
+                    and other_position is not None
+                    and other_position[0] == drawing_index
+                    and abs(other_position[1] - primitive_index) == 1
+                    and _distance(segment.start, other.end) <= 1e-6
+                    and _distance(segment.end, other.start) <= 1e-6
+                ):
+                    matches.append(other)
+        if len(matches) == 1:
+            other = matches[0]
+            consumed.add(other.observation_id)
+            normalized.append(
+                _VisibleSegment(
+                    observation_id=segment.observation_id,
+                    source_primitive_ref=segment.source_primitive_ref,
+                    start=segment.start,
+                    end=segment.end,
+                    duplicate_observation_ids=tuple(
+                        sorted((*segment.duplicate_observation_ids, *other.observation_ids))
+                    ),
+                )
+            )
+        else:
+            normalized.append(segment)
+        consumed.add(segment.observation_id)
+    return tuple(normalized)
+
+
 def _distance_point_to_segment(point: _Point, segment: _VisibleSegment) -> tuple[float, float]:
     vx, vy = _vector(segment)
     denom = vx * vx + vy * vy
@@ -219,17 +284,27 @@ def _scope_segments(
 
 
 def _endpoint_words(
+    baseline: _VisibleSegment,
     endpoint: _Point,
     tick_length: float,
     words: Sequence[_TrustedWord],
 ) -> tuple[_TrustedWord, ...]:
+    baseline_unit = _unit(baseline)
+    if baseline_unit is None:
+        return ()
+    normal = (-baseline_unit[1], baseline_unit[0])
     max_word_height = max((word.height for word in words), default=0.0)
-    margin = max(1.5 * tick_length, 2.2 * max_word_height)
+    cross_margin = max(1.5 * tick_length, 2.2 * max_word_height)
+    # Endpoint label windows must not overlap along the bar.  This preserves
+    # ambiguity within each endpoint while avoiding nearest/first assignment.
+    along_margin = min(cross_margin, baseline.length * 0.45)
     return tuple(
         word
         for word in words
-        if abs(word.center[0] - endpoint[0]) <= margin
-        and abs(word.center[1] - endpoint[1]) <= margin
+        if abs(_dot((word.center[0] - endpoint[0], word.center[1] - endpoint[1]), baseline_unit))
+        <= along_margin
+        and abs(_dot((word.center[0] - endpoint[0], word.center[1] - endpoint[1]), normal))
+        <= cross_margin
     )
 
 
@@ -256,9 +331,9 @@ def _tick_for_endpoint(
         return ()
     candidates: list[_VisibleSegment] = []
     for tick in segments:
-        if tick.observation_id == baseline.observation_id:
+        if set(tick.observation_ids) & set(baseline.observation_ids):
             continue
-        if tick.length <= 1e-9 or tick.length > baseline.length * 0.5:
+        if tick.length <= 1e-9 or tick.length > baseline.length * 0.75:
             continue
         tick_unit = _unit(tick)
         if tick_unit is None or abs(_dot(baseline_unit, tick_unit)) > math.sin(math.radians(5.0)):
@@ -288,10 +363,10 @@ def _bar_candidates(
         if len(left_ticks) != 1 or len(right_ticks) != 1:
             continue
         left_tick, right_tick = left_ticks[0], right_ticks[0]
-        if left_tick.observation_id == right_tick.observation_id:
+        if set(left_tick.observation_ids) & set(right_tick.observation_ids):
             continue
-        left_words = _endpoint_words(baseline.start, left_tick.length, words)
-        right_words = _endpoint_words(baseline.end, right_tick.length, words)
+        left_words = _endpoint_words(baseline, baseline.start, left_tick.length, words)
+        right_words = _endpoint_words(baseline, baseline.end, right_tick.length, words)
         left_zero, left_physical = _endpoint_semantics(left_words)
         right_zero, right_physical = _endpoint_semantics(right_words)
 
@@ -315,11 +390,7 @@ def _bar_candidates(
                 physical_span_mm=float(physical_value),
                 segment_ids=tuple(
                     sorted(
-                        (
-                            baseline.observation_id,
-                            left_tick.observation_id,
-                            right_tick.observation_id,
-                        )
+                        (*baseline.observation_ids, *left_tick.observation_ids, *right_tick.observation_ids)
                     )
                 ),
                 text_ids=tuple(sorted((*zero_ids, label_id))),
@@ -466,11 +537,12 @@ class PhysicalScaleProducer:
                 segments.append(
                     _VisibleSegment(
                         observation_id=observation_id,
+                        source_primitive_ref=observation.source_primitive_ref,
                         start=(x0, y0),
                         end=(x1, y1),
                     )
                 )
-        return tuple(segments)
+        return _coalesce_retraced_segments(segments)
 
     @staticmethod
     def _scope_bbox(selector: PhysicalScaleSelector, source_bytes: bytes):
@@ -542,11 +614,9 @@ class PhysicalScaleProducer:
             tolerance = max(1e-9, expected_points_per_mm * 1e-5)
             if abs(points_per_mm - expected_points_per_mm) > tolerance:
                 return _blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT)
-            # Both independent source propositions agree.  Canonicalize the
-            # reported mapping to the exact ratio-implied value while retaining
-            # the bar's explicit physical span and source provenance.
-            points_per_mm = float(expected_points_per_mm)
-            span_pt = points_per_mm * representative.physical_span_mm
+            # Ratio text may corroborate the source-native bar measurement,
+            # but it is not measurement authority and must not rewrite the
+            # bar's observed geometry or geometry-derived mapping.
 
         if (
             not math.isfinite(points_per_mm)
