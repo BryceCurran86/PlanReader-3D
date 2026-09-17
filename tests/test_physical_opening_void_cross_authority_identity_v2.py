@@ -206,7 +206,6 @@ def _chain():
             )
         )
 
-    # Snapshot the host authority only after both valid host records exist.
     frame_producer = OpeningHostFrameProducer.from_authorities(
         physical_opening_authority=physical,
         host_binding_authority=host_producer.authority(),
