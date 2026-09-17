@@ -887,12 +887,22 @@ def _resolve_host_bands(
     relevant_wall_ids = {
         record.wall_candidate_id for _offset, record in (*left_raw, *right_raw)
     }
-    if relevant_wall_ids & set(equivalence.ambiguous_wall_ids):
-        return _HostBandResolution(
-            EvidenceResolutionStatus.CONFLICT,
-            (),
-            (HOST_EQUIVALENCE_AMBIGUOUS,),
-        )
+    ambiguous_relevant_ids = relevant_wall_ids & set(equivalence.ambiguous_wall_ids)
+    if ambiguous_relevant_ids:
+        pair_lookup = _pair_lookup(equivalence)
+        for wall_id in ambiguous_relevant_ids:
+            explained = any(
+                wall_id in pair
+                and classification
+                is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+                for pair, classification in pair_lookup.items()
+            )
+            if not explained:
+                return _HostBandResolution(
+                    EvidenceResolutionStatus.CONFLICT,
+                    (),
+                    (HOST_EQUIVALENCE_AMBIGUOUS,),
+                )
 
     axis_tol = max(0.5, opening.thickness * 0.05)
     left_status, left_candidates, left_reasons = _normalize_role_candidates(
