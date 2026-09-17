@@ -58,6 +58,7 @@ WALL_FINISH_PROPAGATION_RESOLVED = "wall_finish_propagation_resolved"
 WALL_FINISH_NET_GEOMETRY_UNRESOLVED = "wall_finish_net_geometry_unresolved"
 WALL_FINISH_PHYSICAL_WALL_UNRESOLVED = "wall_finish_physical_wall_unresolved"
 WALL_FINISH_ASSIGNMENT_UNAVAILABLE = "wall_finish_assignment_unavailable"
+WALL_FINISH_ASSIGNMENT_CONFLICT = "wall_finish_assignment_conflict"
 WALL_FINISH_LINEAGE_MISMATCH = "wall_finish_lineage_mismatch"
 WALL_FINISH_FACE_AMBIGUOUS = "wall_finish_face_ambiguous"
 WALL_FINISH_SCOPE_INCOMPLETE = "wall_finish_scope_incomplete"
@@ -89,7 +90,6 @@ class WallFinishAssignment:
     trade_scope_id: str
     wall_face_target: str  # "left_face", "right_face", "both_faces"
     finish_material: str = ""
-    height_limit_m: Optional[float] = None  # None indicates full net wall height
 
     def __post_init__(self) -> None:
         _require_nonempty(self.assignment_id, "assignment_id")
@@ -97,9 +97,6 @@ class WallFinishAssignment:
         _require_nonempty(self.trade_scope_id, "trade_scope_id")
         if self.wall_face_target not in {"left_face", "right_face", "both_faces"}:
             raise ValueError(f"Invalid wall_face_target: {self.wall_face_target}")
-        if self.height_limit_m is not None:
-            if not math.isfinite(self.height_limit_m) or self.height_limit_m <= 0.0:
-                raise ValueError("height_limit_m must be a positive finite float")
 
 
 @dataclass(frozen=True)
@@ -311,6 +308,11 @@ class WallFinishPropagationProducer:
             raise TypeError("physical_wall_authority must be PhysicalWallCandidateAuthority")
         if type(net_wall_authority) is not NetWallBooleanUnionAuthority:
             raise TypeError("net_wall_authority must be NetWallBooleanUnionAuthority")
+        if not isinstance(assignments, Sequence) or isinstance(assignments, (str, bytes)):
+            raise TypeError("assignments must be a sequence of WallFinishAssignment")
+        for a in assignments:
+            if type(a) is not WallFinishAssignment:
+                raise TypeError("assignments must contain only WallFinishAssignment instances")
 
         self._physical_wall_auth = physical_wall_authority
         self._net_wall_auth = net_wall_authority
@@ -368,6 +370,14 @@ class WallFinishPropagationProducer:
                     WALL_FINISH_ASSIGNMENT_UNAVAILABLE,
                 ),
             )
+        if len(matching_assignments) > 1:
+            return self._store(
+                selector,
+                _blocked(
+                    EvidenceResolutionStatus.CONFLICT,
+                    WALL_FINISH_ASSIGNMENT_CONFLICT,
+                ),
+            )
 
         assignment = matching_assignments[0]
 
@@ -382,13 +392,24 @@ class WallFinishPropagationProducer:
         )
         resolve_wall_fn = getattr(self._physical_wall_auth, "resolve_scope", None) or getattr(self._physical_wall_auth, "resolve")
         wall_scope_res = resolve_wall_fn(wall_sel)
-        if wall_scope_res.status is not EvidenceResolutionStatus.CORROBORATED:
+        if (
+            wall_scope_res is None
+            or wall_scope_res.status is not EvidenceResolutionStatus.CORROBORATED
+            or not hasattr(wall_scope_res, "records")
+            or not wall_scope_res.records
+        ):
+            blocked_status = (
+                wall_scope_res.status
+                if wall_scope_res and wall_scope_res.status is not EvidenceResolutionStatus.CORROBORATED
+                else EvidenceResolutionStatus.ABSTAINED
+            )
+            reason_codes = wall_scope_res.reason_codes if wall_scope_res else ()
             return self._store(
                 selector,
                 _blocked(
-                    wall_scope_res.status,
+                    blocked_status,
                     WALL_FINISH_PHYSICAL_WALL_UNRESOLVED,
-                    *wall_scope_res.reason_codes,
+                    *reason_codes,
                 ),
             )
 
@@ -411,7 +432,11 @@ class WallFinishPropagationProducer:
                 ),
             )
 
-        candidate_ids = tuple(r.wall_candidate_id for r in matching_wall_records)
+        candidate_ids = tuple(
+            r.wall_candidate_id
+            for r in matching_wall_records
+            if getattr(r, "wall_candidate_id", None)
+        )
 
         # 3. Resolve Net Wall Boolean Union Geometry (Item 17 Prerequisite)
         net_sel = NetWallBooleanUnionSelector(
@@ -428,20 +453,82 @@ class WallFinishPropagationProducer:
 
         # Fail closed if net wall geometry is unresolved or missing
         if (
-            net_res.status is not EvidenceResolutionStatus.CORROBORATED
+            net_res is None
+            or net_res.status is not EvidenceResolutionStatus.CORROBORATED
             or net_res.record is None
-            or net_res.record.net_area_m2 is None
         ):
+            blocked_status = (
+                net_res.status
+                if net_res and net_res.status is not EvidenceResolutionStatus.CORROBORATED
+                else EvidenceResolutionStatus.ABSTAINED
+            )
+            reason_codes = net_res.reason_codes if net_res else ()
             return self._store(
                 selector,
                 _blocked(
-                    net_res.status if net_res.status is not EvidenceResolutionStatus.CORROBORATED else EvidenceResolutionStatus.ABSTAINED,
+                    blocked_status,
                     WALL_FINISH_NET_GEOMETRY_UNRESOLVED,
-                    *net_res.reason_codes,
+                    *reason_codes,
                 ),
             )
 
         net_record: NetWallBooleanUnionRecord = net_res.record
+
+        # Strict validation of net_record:
+        # A. Net area must be present, finite, and non-negative
+        if (
+            net_record.net_area_m2 is None
+            or not math.isfinite(net_record.net_area_m2)
+            or net_record.net_area_m2 < 0.0
+        ):
+            return self._store(
+                selector,
+                _blocked(
+                    EvidenceResolutionStatus.CONFLICT,
+                    WALL_FINISH_NET_GEOMETRY_UNRESOLVED,
+                    "net_area_unresolved_or_invalid",
+                ),
+            )
+
+        # B. Gross geometry record ID must be present
+        if not net_record.gross_geometry_record_id:
+            return self._store(
+                selector,
+                _blocked(
+                    EvidenceResolutionStatus.CONFLICT,
+                    WALL_FINISH_NET_GEOMETRY_UNRESOLVED,
+                    "missing_gross_geometry_record_id",
+                ),
+            )
+
+        # C. Exact physical wall identity match on the net wall record
+        if net_record.physical_wall_id != selector.physical_wall_id:
+            return self._store(
+                selector,
+                _blocked(
+                    EvidenceResolutionStatus.CONFLICT,
+                    WALL_FINISH_PHYSICAL_WALL_UNRESOLVED,
+                    "net_wall_physical_wall_id_mismatch",
+                ),
+            )
+
+        # D. Strict Lineage match
+        if (
+            net_record.document_id != selector.document_id
+            or net_record.revision_id != selector.revision_id
+            or net_record.source_sha256 != selector.source_sha256
+            or net_record.snapshot_id != selector.snapshot_id
+            or net_record.page_id != selector.page_id
+            or net_record.decision_scope_id != selector.decision_scope_id
+            or (net_record.trade_scope_id and net_record.trade_scope_id != selector.trade_scope_id)
+        ):
+            return self._store(
+                selector,
+                _blocked(
+                    EvidenceResolutionStatus.CONFLICT,
+                    WALL_FINISH_LINEAGE_MISMATCH,
+                ),
+            )
 
         # 4. Calculate Face Multiplier and Total Finish Area
         face_target = assignment.wall_face_target
@@ -542,7 +629,8 @@ class WallFinishPropagationProducer:
             else:
                 unresolved_walls.append(assignment.physical_wall_id)
 
-        is_complete = (len(unresolved_walls) == 0) and bool(contributing_records)
+        unresolved_tuple = tuple(dict.fromkeys(unresolved_walls))
+        is_complete = (len(unresolved_tuple) == 0) and bool(contributing_records)
         total_trade_area = (
             round(sum(r.total_finish_area_m2 for r in contributing_records), 4)
             if is_complete
@@ -567,7 +655,7 @@ class WallFinishPropagationProducer:
         summary = WallFinishScopeSummaryRecord(
             record_id=record_id,
             contributing_wall_records=tuple(contributing_records),
-            unresolved_wall_ids=tuple(unresolved_walls),
+            unresolved_wall_ids=unresolved_tuple,
             **payload,
         )
         self._scope_summaries[scope_key] = summary
@@ -575,6 +663,7 @@ class WallFinishPropagationProducer:
 
 
 __all__ = [
+    "WALL_FINISH_ASSIGNMENT_CONFLICT",
     "WALL_FINISH_ASSIGNMENT_UNAVAILABLE",
     "WALL_FINISH_FACE_AMBIGUOUS",
     "WALL_FINISH_LINEAGE_MISMATCH",
