@@ -251,22 +251,20 @@ class WallRoleProducer:
         ]
         if not matching_recs:
             return self._store(selector, _abstained(WALL_ROLE_WALL_UNRESOLVED))
-
         rec = matching_recs[0]
         cand = rec.wall_candidate
 
-        # 2. Derive classification from candidate topology
-        meta = cand.metadata or {}
+        # 2. Derive classification strictly from candidate topology (never caller metadata dict)
         proven_role = WallRoleClassification.UNRESOLVED
 
-        if meta.get("is_gable"):
-            proven_role = WallRoleClassification.GABLE
-        elif meta.get("is_party"):
-            proven_role = WallRoleClassification.PARTY
-        elif cand.interior_exterior == "exterior":
+        if cand.interior_exterior == "exterior":
             proven_role = WallRoleClassification.EXTERNAL
         elif cand.interior_exterior == "interior":
             proven_role = WallRoleClassification.INTERNAL
+        elif cand.interior_exterior == "gable":
+            proven_role = WallRoleClassification.GABLE
+        elif cand.interior_exterior == "party":
+            proven_role = WallRoleClassification.PARTY
 
         if proven_role is WallRoleClassification.UNRESOLVED:
             return self._store(selector, _abstained(WALL_ROLE_UNRESOLVED))

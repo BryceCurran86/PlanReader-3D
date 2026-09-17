@@ -63,12 +63,10 @@ def _make_candidate_record(
     interior_exterior: str = "exterior",
     is_gable: bool = False,
     is_party: bool = False,
+    caller_metadata: dict | None = None,
 ) -> PhysicalWallCandidateRecord:
-    meta = {}
-    if is_gable:
-        meta["is_gable"] = True
-    if is_party:
-        meta["is_party"] = True
+    ie = "gable" if is_gable else ("party" if is_party else interior_exterior)
+    meta = dict(caller_metadata) if caller_metadata else {}
 
     cand = WallCandidate(
         candidate_id=wall_id,
@@ -84,7 +82,7 @@ def _make_candidate_record(
         length_m=10.0,
         end_node_ids=("n1", "n2"),
         junction_types=(JunctionType.ENDPOINT, JunctionType.ENDPOINT),
-        interior_exterior=interior_exterior,
+        interior_exterior=ie,
         level_id=None,
         supporting_evidence_ids=("s1",),
         metadata=meta,
@@ -250,3 +248,26 @@ def test_selector_missing_field_raises() -> None:
             decision_scope_id=SCOPE,
             physical_wall_id=WALL_A,
         )
+
+
+def test_caller_injected_metadata_ignored() -> None:
+    rec = _make_candidate_record(WALL_A, interior_exterior="unresolved", caller_metadata={"is_gable": True, "is_party": True})
+    cand_key = _ScopeKey(
+        document_id=DOC, revision_id=REV, source_sha256=SHA,
+        snapshot_id=SNAP, page_id=PAGE, decision_scope_id=SCOPE,
+    )
+    auth = PhysicalWallCandidateAuthority(
+        {cand_key: PhysicalWallCandidateScopeResult(
+            status=EvidenceResolutionStatus.CORROBORATED, scope_complete=True,
+            records=(rec,), source_observation_ids=(), document_id=DOC,
+            revision_id=REV, source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+            decision_scope_id=SCOPE, reason_codes=(),
+        )},
+        _seal=CANDIDATE_SEAL,
+    )
+    producer = WallRoleProducer.from_authorities(physical_wall_candidate_authority=auth)
+    sel = _selector(WALL_A)
+    result = producer.publish(sel)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+    assert WALL_ROLE_UNRESOLVED in result.reason_codes
