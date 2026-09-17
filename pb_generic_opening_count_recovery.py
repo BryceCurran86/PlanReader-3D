@@ -21,7 +21,24 @@ from pb_opening_count_control_adapter import (
 )
 from pb_shadow_opening_count_gate import OPENING_COUNT_AUTHORITY_STATE
 
-GENERIC_OPENING_COUNT_RECOVERY_VERSION = "1.0.0"
+GENERIC_OPENING_COUNT_RECOVERY_VERSION = "1.0.1"
+
+_DIMENSION_DERIVED_IDENTITY_MARKERS = (
+    "plan opening/pier chain",
+    "uniform opening/pier chain",
+    "repeated floor-plan bay doors",
+    "repeated bay door chain",
+)
+
+
+def _is_dimension_derived_identity(quantity: object) -> bool:
+    metadata = getattr(quantity, "metadata", {})
+    description = ""
+    if isinstance(metadata, Mapping):
+        description = str(metadata.get("description") or "")
+    formula = str(getattr(quantity, "formula", "") or "")
+    combined = f"{description} {formula}".lower()
+    return any(marker in combined for marker in _DIMENSION_DERIVED_IDENTITY_MARKERS)
 
 
 @dataclass(frozen=True)
@@ -73,6 +90,13 @@ class GenericOpeningCountRecovery:
             # rollups, not explicit opening identities.  Dimensions or numeric
             # values never create an identity here.
             if not is_production_opening_identity(key):
+                rejected.append(qid)
+                continue
+            # The older generic schedule extractor still has diagnostic
+            # dimension-chain paths that label geometry-derived rows W1/D1.
+            # Those rows are not source-explicit identities and must never be
+            # laundered through this recovery boundary.
+            if _is_dimension_derived_identity(quantity):
                 rejected.append(qid)
                 continue
             if quantity.abstained or quantity.value is None:
