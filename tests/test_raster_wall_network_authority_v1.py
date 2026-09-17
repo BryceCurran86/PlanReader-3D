@@ -182,17 +182,41 @@ def test_authoritative_scale_calculates_metric_dimensions() -> None:
     )
     img = Image.new("RGB", (200, 200), "white")
 
-    # Authoritative 1:100 scale (scale_ratio = 0.01) at 150 DPI
-    transform = RasterTransformProvenance.from_dpi(
-        dpi=150,
-        scale_ratio=0.01,
-        scale_provenance="corroborated_plan_scale_1_to_100",
-        is_scale_authoritative=True,
+    import pb_physical_scale_authority as pb_s
+    scale_sel = pb_s.PhysicalScaleSelector(
+        document_id="doc_test_scan_01",
+        revision_id="rev_test_scan_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_test_scan_01",
+        page_id="page_1",
+        viewport_id="vp_plan",
     )
+    scale_ev = pb_s.PhysicalScaleEvidence(
+        selector=scale_sel,
+        record_id="scale_rec_01",
+        source_kind="graphic_bar",
+        source_span_pt=100.0,
+        physical_span_mm=3527.777777777778,
+        points_per_mm=100.0 / 3527.777777777778,
+        mm_per_point=3527.777777777778 / 100.0,
+        source_segment_observation_ids=("seg1",),
+        source_text_observation_ids=("text1",),
+        viewport_id="vp_plan",
+    )
+    scale_res = pb_s.PhysicalScaleResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=(pb_s.PHYSICAL_SCALE_RESOLVED,),
+        evidence=scale_ev,
+    )
+    scale_auth = pb_s.PhysicalScaleAuthority(
+        {scale_sel.key: scale_res},
+        _seal=pb_s._AUTHORITY_SEAL,
+    )
+
     producer = RasterWallNetworkProducer.from_sources(
         page_images={"page_1": img},
         raw_candidates_by_page={"page_1": (seg1,)},
-        transform_by_page={"page_1": transform},
+        physical_scale_authority=scale_auth,
         snapshot=_sample_snapshot(),
     )
 
@@ -204,9 +228,6 @@ def test_authoritative_scale_calculates_metric_dimensions() -> None:
     rec = res.record
     assert rec is not None
 
-    # 100 px * 0.48 pt/px = 48.0 pt
-    # In paper meters: 48.0 * 0.0254 / 72.0 = 0.016933 m
-    # In real world (1:100): 0.016933 / 0.01 = 1.6933 m
     expected_m = round(48.0 * (0.0254 / 72.0) / 0.01, 4)
     assert rec.total_length_m == pytest.approx(expected_m, abs=0.01)
     assert rec.candidates[0].segment.length_m == pytest.approx(expected_m, abs=0.01)

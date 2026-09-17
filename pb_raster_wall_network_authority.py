@@ -362,6 +362,12 @@ class RasterWallNetworkAuthority:
         )
 
 
+from pb_physical_scale_authority import (
+    PhysicalScaleAuthority,
+    PhysicalScaleSelector,
+)
+
+
 class RasterWallNetworkProducer:
     """Producer-owned trusted boundary constructing verified raster wall networks."""
 
@@ -370,6 +376,7 @@ class RasterWallNetworkProducer:
         page_images: Mapping[str, Image.Image],
         raw_candidates_by_page: Optional[Mapping[str, Sequence[RasterWallSegment]]] = None,
         transform_by_page: Optional[Mapping[str, RasterTransformProvenance]] = None,
+        physical_scale_authority: Optional[PhysicalScaleAuthority] = None,
         snapshot: Optional[Any] = None,
         *,
         _seal: object = None,
@@ -378,9 +385,17 @@ class RasterWallNetworkProducer:
             raise TypeError(
                 "RasterWallNetworkProducer must be obtained from from_sources()"
             )
+        if (
+            physical_scale_authority is not None
+            and type(physical_scale_authority) is not PhysicalScaleAuthority
+        ):
+            raise TypeError(
+                "physical_scale_authority must be producer-owned PhysicalScaleAuthority"
+            )
         self._page_images = MappingProxyType(dict(page_images))
         self._raw_candidates = MappingProxyType(dict(raw_candidates_by_page or {}))
         self._transforms = MappingProxyType(dict(transform_by_page or {}))
+        self._scale_authority = physical_scale_authority
         self._snapshot = snapshot
         self._results: dict[_Key, RasterWallNetworkResult] = {}
 
@@ -390,12 +405,14 @@ class RasterWallNetworkProducer:
         page_images: Optional[Mapping[str, Image.Image]] = None,
         raw_candidates_by_page: Optional[Mapping[str, Sequence[RasterWallSegment]]] = None,
         transform_by_page: Optional[Mapping[str, RasterTransformProvenance]] = None,
+        physical_scale_authority: Optional[PhysicalScaleAuthority] = None,
         snapshot: Optional[Any] = None,
     ) -> "RasterWallNetworkProducer":
         return cls(
             page_images=page_images or {},
             raw_candidates_by_page=raw_candidates_by_page or {},
             transform_by_page=transform_by_page or {},
+            physical_scale_authority=physical_scale_authority,
             snapshot=snapshot,
             _seal=_PRODUCER_SEAL,
         )
@@ -453,10 +470,41 @@ class RasterWallNetworkProducer:
                 ),
             )
 
-        # 3. Retrieve Transform Provenance
-        transform = self._transforms.get(
+        # 3. Retrieve Transform Provenance and verify with PhysicalScaleAuthority
+        raw_transform = self._transforms.get(
             selector.page_id,
             RasterTransformProvenance.from_dpi(150),
+        )
+
+        is_scale_auth = False
+        scale_ratio = None
+        scale_prov = None
+
+        if self._scale_authority is not None:
+            scale_sel = PhysicalScaleSelector(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                page_id=selector.page_id,
+                viewport_id=selector.viewport_id,
+            )
+            scale_res = self._scale_authority.resolve(scale_sel)
+            if (
+                scale_res.status is EvidenceResolutionStatus.CORROBORATED
+                and scale_res.evidence is not None
+            ):
+                ev = scale_res.evidence
+                is_scale_auth = True
+                scale_ratio = (ev.source_span_pt * (25.4 / 72.0)) / ev.physical_span_mm
+                scale_prov = f"physical_scale_authority:{ev.record_id}"
+
+        transform = RasterTransformProvenance(
+            dpi=raw_transform.dpi,
+            px_to_pt_ratio=raw_transform.px_to_pt_ratio,
+            scale_ratio=scale_ratio,
+            scale_provenance=scale_prov,
+            is_scale_authoritative=is_scale_auth,
         )
         px_to_pt = transform.px_to_pt_ratio
 
@@ -465,7 +513,7 @@ class RasterWallNetworkProducer:
         # Real-world distance (m) = point_distance * (0.0254 / 72.0) / scale_ratio
         can_compute_metric = transform.is_scale_authoritative and transform.scale_ratio is not None
         pt_to_m_factor = (
-            (0.0254 / 72.0) / transform.scale_ratio if can_compute_metric else None
+            (0.0254 / 72.0) / transform.scale_ratio if (can_compute_metric and transform.scale_ratio) else None
         )
 
         # 4. Gather Raw Candidates
