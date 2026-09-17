@@ -169,6 +169,12 @@ def test_independent_gross_wall_finish_still_gated_by_shared_openings() -> None:
         ),
     ]
     out = pipeline.propagate_to_predictions(predictions, results)
+    # Item 21A: Caller-supplied independent_gross_area_m2 never influences quantity
     assert out[0].quantity is None
     assert out[0].metadata.get("publication_blocked") is True
-    assert out[0].metadata.get("provisional_net_area_m2") == 90.0
+    # provisional_net_area_m2 uses authenticated source data only (100.0 gross, 0 deductions)
+    # not the caller-supplied 90.0
+    assert out[0].metadata.get("provisional_net_area_m2") == 100.0
+    # But caller data is tracked separately for diagnostics
+    assert out[0].metadata.get("caller_supplied_gross_area_m2") == 90.0
+    assert out[0].metadata.get("caller_derived_net_area_m2") == 90.0

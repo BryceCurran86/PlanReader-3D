@@ -198,12 +198,16 @@ def test_propagation_does_not_mutate_quantities_or_create_wd_tags() -> None:
     # keeping their original (undeducted) numbers. Trades this pipeline
     # never touches (damp_proof_course, D1) are unaffected -- that is the
     # "does not mutate" this test is actually named for.
+    #
+    # Item 21A: provisional_net_area_m2 uses authenticated source (87.7) not
+    # caller-supplied independent_gross_area_m2 (84.336). This enforces fail-closed
+    # semantics: caller data never influences quantity publication paths.
     assert updated["perimeter_walling"].quantity is None
     assert updated["perimeter_walling"].metadata["provisional_net_area_m2"] == 87.7
     assert updated["internal_plaster"].quantity is None
-    assert updated["internal_plaster"].metadata["provisional_net_area_m2"] == 84.336
+    assert updated["internal_plaster"].metadata["provisional_net_area_m2"] == 87.7
     assert updated["internal_paint"].quantity is None
-    assert updated["internal_paint"].metadata["provisional_net_area_m2"] == 84.336
+    assert updated["internal_paint"].metadata["provisional_net_area_m2"] == 87.7
     assert updated["damp_proof_course"].quantity == 54.5
     assert updated["D1"].quantity == 1.0
     assert "W1" not in updated
