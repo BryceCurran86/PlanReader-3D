@@ -4,10 +4,10 @@ This module proves one proposition only: one already-authenticated physical open
 void applies to one exact measurement target under one exact source-proven rule.
 A physical void is never sufficient by itself.
 
-Target and rule semantics are derived from the complete producer-owned trusted PDF
-text universe.  Public publication boundaries accept selectors only; callers cannot
-supply wall/trade/finish/assembly truth, applicability booleans, geometry, rule
-versions, or commercial state.
+Target and rule semantics come only from the complete producer-owned trusted PDF
+text universe. Public applicability boundaries accept selectors only; callers do
+not supply wall/trade/finish/assembly truth, applicability decisions, geometry,
+rule versions, or downstream commercial state.
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-OPENING_DEDUCTION_APPLICABILITY_SCHEMA_VERSION = "1.0.0"
+OPENING_DEDUCTION_APPLICABILITY_SCHEMA_VERSION = "1.1.0"
 
 OPENING_DEDUCTION_APPLICABILITY_RESOLVED = "opening_deduction_applicability_resolved"
 OPENING_DEDUCTION_APPLICABILITY_TARGET_UNRESOLVED = "opening_deduction_applicability_target_unresolved"
@@ -66,8 +66,7 @@ _APPLICABILITY_PRODUCER_SEAL = object()
 
 _AppKey = tuple[str, str, str, str, str, str, str, str]
 
-# Deliberately explicit project-source syntax. These tokens are evidence, not defaults.
-# They are accepted only from producer-owned trusted native PDF text.
+# Explicit project-source declarations. These are evidence, never defaults.
 _TARGET_RE = re.compile(
     r"^ODTARGET\(target=(?P<target>[A-Za-z0-9_.-]+),"
     r"opening=(?P<opening>[A-Za-z0-9_.-]+),"
@@ -155,7 +154,7 @@ class OpeningDeductionTargetScopeRecord:
     trade_scope_id: str
     finish_scope_id: str
     assembly_scope_id: str
-    source_observation_id: str
+    source_observation_ids: tuple[str, ...]
     schema_version: str = OPENING_DEDUCTION_APPLICABILITY_SCHEMA_VERSION
 
 
@@ -176,7 +175,7 @@ class OpeningDeductionRuleRecord:
     rule_id: str
     rule_version: str
     decision: str
-    source_observation_id: str
+    source_observation_ids: tuple[str, ...]
     schema_version: str = OPENING_DEDUCTION_APPLICABILITY_SCHEMA_VERSION
 
 
@@ -298,7 +297,10 @@ class _TrustedTextUniverse:
             raise TypeError("source_visibility_producer must be producer-owned SourceVisibilityProducer")
         self._source = source_visibility_producer
 
-    def words(self, selector: OpeningDeductionApplicabilitySelector) -> tuple[tuple[str, str, str], ...] | None:
+    def words(
+        self,
+        selector: OpeningDeductionApplicabilitySelector,
+    ) -> tuple[tuple[str, str, str], ...] | None:
         published = self._source.published_snapshot_for_revision(selector.revision_id)
         if (
             published is None
@@ -333,7 +335,7 @@ class _TrustedTextUniverse:
 
 
 class OpeningDeductionTargetScopeProducer:
-    """Derive an exact target from complete trusted source text and sealed bindings."""
+    """Derive an exact target from trusted source text plus sealed opening/host bindings."""
 
     def __init__(
         self,
@@ -415,15 +417,29 @@ class OpeningDeductionTargetScopeProducer:
             )
             self._results[selector.key] = result
             return result
-        words = self._text.words(selector)
-        if words is None:
+        if (
+            not _lineage_matches(selector, schedule.record)
+            or not _lineage_matches(selector, host.record)
+            or schedule.record.opening_record_id != selector.opening_identity_id
+            or host.record.opening_identity_id != selector.opening_identity_id
+        ):
             result = OpeningDeductionTargetScopeResult(
-                EvidenceResolutionStatus.ABSTAINED, (_TARGET_SCOPE_UNRESOLVED,)
+                EvidenceResolutionStatus.CONFLICT,
+                (_TARGET_SCOPE_CONFLICT,),
             )
             self._results[selector.key] = result
             return result
-        matches: dict[tuple[str, ...], tuple[str, re.Match[str]]] = {}
-        for observation_id, raw, page_id in words:
+        words = self._text.words(selector)
+        if words is None:
+            result = OpeningDeductionTargetScopeResult(
+                EvidenceResolutionStatus.ABSTAINED,
+                (_TARGET_SCOPE_UNRESOLVED,),
+            )
+            self._results[selector.key] = result
+            return result
+
+        matches: dict[tuple[str, str, str, str, str], list[str]] = {}
+        for observation_id, raw, _page_id in words:
             match = _TARGET_RE.fullmatch(raw.strip())
             if match is None:
                 continue
@@ -431,22 +447,23 @@ class OpeningDeductionTargetScopeProducer:
                 continue
             if _norm(match.group("opening")) != _norm(schedule.record.tag_mark):
                 continue
-            payload_key = (
+            semantic = (
                 _norm(match.group("target")),
                 _norm(match.group("opening")),
                 _norm(match.group("trade")),
                 _norm(match.group("finish")),
                 _norm(match.group("assembly")),
-                page_id,
             )
-            matches.setdefault(payload_key, (observation_id, match))
+            matches.setdefault(semantic, []).append(observation_id)
         if len(matches) != 1:
-            status = EvidenceResolutionStatus.CONFLICT if len(matches) > 1 else EvidenceResolutionStatus.ABSTAINED
-            reason = _TARGET_SCOPE_CONFLICT if len(matches) > 1 else _TARGET_SCOPE_UNRESOLVED
+            status = EvidenceResolutionStatus.CONFLICT if matches else EvidenceResolutionStatus.ABSTAINED
+            reason = _TARGET_SCOPE_CONFLICT if matches else _TARGET_SCOPE_UNRESOLVED
             result = OpeningDeductionTargetScopeResult(status, (reason,))
             self._results[selector.key] = result
             return result
-        (_, _, trade_scope_id, finish_scope_id, assembly_scope_id, source_page_id), (observation_id, match) = next(iter(matches.items()))
+
+        semantic, observation_ids = next(iter(matches.items()))
+        target_scope_id, opening_mark, trade_scope_id, finish_scope_id, assembly_scope_id = semantic
         payload = {
             "document_id": selector.document_id,
             "revision_id": selector.revision_id,
@@ -456,35 +473,22 @@ class OpeningDeductionTargetScopeProducer:
             "decision_scope_id": selector.decision_scope_id,
             "target_scope_id": selector.target_scope_id,
             "opening_identity_id": selector.opening_identity_id,
-            "opening_mark": _norm(schedule.record.tag_mark),
+            "opening_mark": opening_mark,
             "host_binding_record_id": host.record.record_id,
             "host_wall_id": host.record.host_wall_id,
             "trade_scope_id": trade_scope_id,
             "finish_scope_id": finish_scope_id,
             "assembly_scope_id": assembly_scope_id,
-            "source_observation_id": observation_id,
-            "source_page_id": source_page_id,
+            "source_observation_ids": tuple(sorted(set(observation_ids))),
         }
         record = OpeningDeductionTargetScopeRecord(
             record_id=stable_contract_id("opening_deduction_target_scope", payload, digest_chars=32),
-            document_id=selector.document_id,
-            revision_id=selector.revision_id,
-            source_sha256=selector.source_sha256,
-            snapshot_id=selector.snapshot_id,
-            page_id=selector.page_id,
-            decision_scope_id=selector.decision_scope_id,
-            target_scope_id=selector.target_scope_id,
-            opening_identity_id=selector.opening_identity_id,
-            opening_mark=_norm(schedule.record.tag_mark),
-            host_binding_record_id=host.record.record_id,
-            host_wall_id=host.record.host_wall_id,
-            trade_scope_id=trade_scope_id,
-            finish_scope_id=finish_scope_id,
-            assembly_scope_id=assembly_scope_id,
-            source_observation_id=observation_id,
+            **payload,
         )
         result = OpeningDeductionTargetScopeResult(
-            EvidenceResolutionStatus.CORROBORATED, (_TARGET_SCOPE_RESOLVED,), record
+            EvidenceResolutionStatus.CORROBORATED,
+            (_TARGET_SCOPE_RESOLVED,),
+            record,
         )
         self._results[selector.key] = result
         return result
@@ -494,53 +498,152 @@ class OpeningDeductionTargetScopeProducer:
 
 
 class OpeningDeductionRuleProducer:
-    """Derive the exact governing rule from the complete trusted source-text universe."""
+    """Resolve rules only after binding them to the exact authenticated target opening."""
 
-    def __init__(self, source_visibility_producer: SourceVisibilityProducer, *, _seal: object = None) -> None:
+    def __init__(
+        self,
+        source_visibility_producer: SourceVisibilityProducer,
+        target_scope_authority: OpeningDeductionTargetScopeAuthority,
+        *,
+        _seal: object = None,
+    ) -> None:
         if _seal is not _RULE_PRODUCER_SEAL:
-            raise TypeError("OpeningDeductionRuleProducer must be obtained from from_source_visibility_producer()")
+            raise TypeError("OpeningDeductionRuleProducer must be obtained from from_authorities()")
+        if type(target_scope_authority) is not OpeningDeductionTargetScopeAuthority:
+            raise TypeError("target_scope_authority must be producer-owned")
         self._text = _TrustedTextUniverse(source_visibility_producer)
+        self._target = target_scope_authority
         self._results: dict[_AppKey, OpeningDeductionRuleResult] = {}
 
     @classmethod
-    def from_source_visibility_producer(
-        cls, source_visibility_producer: SourceVisibilityProducer
+    def from_authorities(
+        cls,
+        *,
+        source_visibility_producer: SourceVisibilityProducer,
+        target_scope_authority: OpeningDeductionTargetScopeAuthority,
     ) -> "OpeningDeductionRuleProducer":
-        return cls(source_visibility_producer, _seal=_RULE_PRODUCER_SEAL)
+        return cls(
+            source_visibility_producer,
+            target_scope_authority,
+            _seal=_RULE_PRODUCER_SEAL,
+        )
+
+    @classmethod
+    def from_source_visibility_producer(
+        cls,
+        source_visibility_producer: SourceVisibilityProducer,
+        *,
+        target_scope_authority: OpeningDeductionTargetScopeAuthority,
+    ) -> "OpeningDeductionRuleProducer":
+        return cls.from_authorities(
+            source_visibility_producer=source_visibility_producer,
+            target_scope_authority=target_scope_authority,
+        )
 
     def publish(self, selector: OpeningDeductionApplicabilitySelector) -> OpeningDeductionRuleResult:
         if type(selector) is not OpeningDeductionApplicabilitySelector:
             raise TypeError("selector must be OpeningDeductionApplicabilitySelector")
-        words = self._text.words(selector)
-        if words is None:
-            result = OpeningDeductionRuleResult(EvidenceResolutionStatus.ABSTAINED, (_RULE_UNRESOLVED,))
+        target_result = self._target.resolve(selector)
+        target = target_result.record
+        if target_result.status is EvidenceResolutionStatus.CONFLICT:
+            result = OpeningDeductionRuleResult(
+                EvidenceResolutionStatus.CONFLICT,
+                (_RULE_CONFLICT, *target_result.reason_codes),
+            )
             self._results[selector.key] = result
             return result
-        matches: dict[tuple[str, ...], tuple[str, re.Match[str], str]] = {}
+        if target_result.status is not EvidenceResolutionStatus.CORROBORATED or target is None:
+            result = OpeningDeductionRuleResult(
+                EvidenceResolutionStatus.ABSTAINED,
+                (_RULE_UNRESOLVED, *target_result.reason_codes),
+            )
+            self._results[selector.key] = result
+            return result
+        if (
+            not _lineage_matches(selector, target)
+            or target.opening_identity_id != selector.opening_identity_id
+            or _norm(target.target_scope_id) != _norm(selector.target_scope_id)
+        ):
+            result = OpeningDeductionRuleResult(
+                EvidenceResolutionStatus.CONFLICT,
+                (_RULE_CONFLICT,),
+            )
+            self._results[selector.key] = result
+            return result
+
+        words = self._text.words(selector)
+        if words is None:
+            result = OpeningDeductionRuleResult(
+                EvidenceResolutionStatus.ABSTAINED,
+                (_RULE_UNRESOLVED,),
+            )
+            self._results[selector.key] = result
+            return result
+
+        matches: dict[tuple[str, str, str, str, str, str, str, str], list[tuple[str, str]]] = {}
         for observation_id, raw, page_id in words:
             match = _RULE_RE.fullmatch(raw.strip())
-            if match is None or _norm(match.group("target")) != _norm(selector.target_scope_id):
+            if match is None:
                 continue
-            key = tuple(
+            if _norm(match.group("target")) != _norm(selector.target_scope_id):
+                continue
+            if _norm(match.group("opening")) != _norm(target.opening_mark):
+                continue
+            semantic = tuple(
                 _norm(match.group(name))
-                for name in ("target", "opening", "trade", "finish", "assembly", "rule_id", "version", "decision")
+                for name in (
+                    "target",
+                    "opening",
+                    "trade",
+                    "finish",
+                    "assembly",
+                    "rule_id",
+                    "version",
+                    "decision",
+                )
             )
-            matches.setdefault(key, (observation_id, match, page_id))
+            matches.setdefault(semantic, []).append((observation_id, page_id))
         if not matches:
-            result = OpeningDeductionRuleResult(EvidenceResolutionStatus.ABSTAINED, (_RULE_UNRESOLVED,))
+            result = OpeningDeductionRuleResult(
+                EvidenceResolutionStatus.ABSTAINED,
+                (_RULE_UNRESOLVED,),
+            )
             self._results[selector.key] = result
             return result
         if len(matches) != 1:
-            result = OpeningDeductionRuleResult(EvidenceResolutionStatus.CONFLICT, (_RULE_CONFLICT,))
+            result = OpeningDeductionRuleResult(
+                EvidenceResolutionStatus.CONFLICT,
+                (_RULE_CONFLICT,),
+            )
             self._results[selector.key] = result
             return result
-        key, (observation_id, match, source_page_id) = next(iter(matches.items()))
-        target_scope_id, opening_mark, trade_scope_id, finish_scope_id, assembly_scope_id, rule_id, rule_version, decision = key
+
+        semantic, observations = next(iter(matches.items()))
+        (
+            target_scope_id,
+            opening_mark,
+            trade_scope_id,
+            finish_scope_id,
+            assembly_scope_id,
+            rule_id,
+            rule_version,
+            decision,
+        ) = semantic
+        page_ids = {page_id for _, page_id in observations}
+        if len(page_ids) != 1:
+            result = OpeningDeductionRuleResult(
+                EvidenceResolutionStatus.CONFLICT,
+                (_RULE_CONFLICT,),
+            )
+            self._results[selector.key] = result
+            return result
+        source_page_id = next(iter(page_ids))
         payload = {
             "document_id": selector.document_id,
             "revision_id": selector.revision_id,
             "source_sha256": selector.source_sha256,
             "snapshot_id": selector.snapshot_id,
+            "page_id": source_page_id,
             "decision_scope_id": selector.decision_scope_id,
             "target_scope_id": target_scope_id,
             "opening_mark": opening_mark,
@@ -550,28 +653,17 @@ class OpeningDeductionRuleProducer:
             "rule_id": rule_id,
             "rule_version": rule_version,
             "decision": decision,
-            "source_observation_id": observation_id,
-            "source_page_id": source_page_id,
+            "source_observation_ids": tuple(sorted({obs_id for obs_id, _ in observations})),
         }
         record = OpeningDeductionRuleRecord(
             record_id=stable_contract_id("opening_deduction_rule", payload, digest_chars=32),
-            document_id=selector.document_id,
-            revision_id=selector.revision_id,
-            source_sha256=selector.source_sha256,
-            snapshot_id=selector.snapshot_id,
-            page_id=source_page_id,
-            decision_scope_id=selector.decision_scope_id,
-            target_scope_id=target_scope_id,
-            opening_mark=opening_mark,
-            trade_scope_id=trade_scope_id,
-            finish_scope_id=finish_scope_id,
-            assembly_scope_id=assembly_scope_id,
-            rule_id=rule_id,
-            rule_version=rule_version,
-            decision=decision,
-            source_observation_id=observation_id,
+            **payload,
         )
-        result = OpeningDeductionRuleResult(EvidenceResolutionStatus.CORROBORATED, (_RULE_RESOLVED,), record)
+        result = OpeningDeductionRuleResult(
+            EvidenceResolutionStatus.CORROBORATED,
+            (_RULE_RESOLVED,),
+            record,
+        )
         self._results[selector.key] = result
         return result
 
@@ -693,6 +785,20 @@ class OpeningDeductionApplicabilityProducer:
                     *void_result.reason_codes,
                 ),
             )
+        if (
+            not _lineage_matches(selector, void)
+            or void.page_id != selector.page_id
+            or void.decision_scope_id != selector.decision_scope_id
+            or void.opening_identity_id != selector.opening_identity_id
+        ):
+            return self._store(
+                selector,
+                _blocked_applicability(
+                    EvidenceResolutionStatus.CONFLICT,
+                    OPENING_DEDUCTION_APPLICABILITY_LINEAGE_MISMATCH,
+                ),
+            )
+
         host_result = self._host.resolve(
             OpeningHostBindingSelector(
                 document_id=selector.document_id,
@@ -720,6 +826,7 @@ class OpeningDeductionApplicabilityProducer:
                     *host_result.reason_codes,
                 ),
             )
+
         target_result = self._target.resolve(selector)
         target = target_result.record
         if target_result.status is not EvidenceResolutionStatus.CORROBORATED or target is None:
@@ -740,24 +847,39 @@ class OpeningDeductionApplicabilityProducer:
         ):
             return self._store(
                 selector,
-                _blocked_applicability(EvidenceResolutionStatus.CONFLICT, OPENING_DEDUCTION_APPLICABILITY_LINEAGE_MISMATCH),
+                _blocked_applicability(
+                    EvidenceResolutionStatus.CONFLICT,
+                    OPENING_DEDUCTION_APPLICABILITY_LINEAGE_MISMATCH,
+                ),
             )
         if target.host_binding_record_id != host.record_id or target.host_wall_id != host.host_wall_id:
             return self._store(
                 selector,
-                _blocked_applicability(EvidenceResolutionStatus.CONFLICT, OPENING_DEDUCTION_APPLICABILITY_WALL_SCOPE_MISMATCH),
+                _blocked_applicability(
+                    EvidenceResolutionStatus.CONFLICT,
+                    OPENING_DEDUCTION_APPLICABILITY_WALL_SCOPE_MISMATCH,
+                ),
             )
+
         rule_result = self._rule.resolve(selector)
         rule = rule_result.record
         if rule_result.status is EvidenceResolutionStatus.CONFLICT:
             return self._store(
                 selector,
-                _blocked_applicability(EvidenceResolutionStatus.CONFLICT, OPENING_DEDUCTION_APPLICABILITY_RULE_CONFLICT, *rule_result.reason_codes),
+                _blocked_applicability(
+                    EvidenceResolutionStatus.CONFLICT,
+                    OPENING_DEDUCTION_APPLICABILITY_RULE_CONFLICT,
+                    *rule_result.reason_codes,
+                ),
             )
         if rule_result.status is not EvidenceResolutionStatus.CORROBORATED or rule is None:
             return self._store(
                 selector,
-                _blocked_applicability(rule_result.status, OPENING_DEDUCTION_APPLICABILITY_RULE_UNRESOLVED, *rule_result.reason_codes),
+                _blocked_applicability(
+                    rule_result.status,
+                    OPENING_DEDUCTION_APPLICABILITY_RULE_UNRESOLVED,
+                    *rule_result.reason_codes,
+                ),
             )
         if (
             not _lineage_matches(selector, rule)
@@ -766,21 +888,52 @@ class OpeningDeductionApplicabilityProducer:
         ):
             return self._store(
                 selector,
-                _blocked_applicability(EvidenceResolutionStatus.CONFLICT, OPENING_DEDUCTION_APPLICABILITY_LINEAGE_MISMATCH),
+                _blocked_applicability(
+                    EvidenceResolutionStatus.CONFLICT,
+                    OPENING_DEDUCTION_APPLICABILITY_LINEAGE_MISMATCH,
+                ),
             )
         if _norm(target.opening_mark) != _norm(rule.opening_mark):
             return self._store(
                 selector,
-                _blocked_applicability(EvidenceResolutionStatus.CONFLICT, OPENING_DEDUCTION_APPLICABILITY_WALL_SCOPE_MISMATCH),
+                _blocked_applicability(
+                    EvidenceResolutionStatus.CONFLICT,
+                    OPENING_DEDUCTION_APPLICABILITY_WALL_SCOPE_MISMATCH,
+                ),
             )
         if _norm(target.trade_scope_id) != _norm(rule.trade_scope_id):
-            return self._store(selector, _blocked_applicability(EvidenceResolutionStatus.CONFLICT, OPENING_DEDUCTION_APPLICABILITY_TRADE_SCOPE_MISMATCH))
+            return self._store(
+                selector,
+                _blocked_applicability(
+                    EvidenceResolutionStatus.CONFLICT,
+                    OPENING_DEDUCTION_APPLICABILITY_TRADE_SCOPE_MISMATCH,
+                ),
+            )
         if _norm(target.finish_scope_id) != _norm(rule.finish_scope_id):
-            return self._store(selector, _blocked_applicability(EvidenceResolutionStatus.CONFLICT, OPENING_DEDUCTION_APPLICABILITY_FINISH_SCOPE_MISMATCH))
+            return self._store(
+                selector,
+                _blocked_applicability(
+                    EvidenceResolutionStatus.CONFLICT,
+                    OPENING_DEDUCTION_APPLICABILITY_FINISH_SCOPE_MISMATCH,
+                ),
+            )
         if _norm(target.assembly_scope_id) != _norm(rule.assembly_scope_id):
-            return self._store(selector, _blocked_applicability(EvidenceResolutionStatus.CONFLICT, OPENING_DEDUCTION_APPLICABILITY_ASSEMBLY_SCOPE_MISMATCH))
+            return self._store(
+                selector,
+                _blocked_applicability(
+                    EvidenceResolutionStatus.CONFLICT,
+                    OPENING_DEDUCTION_APPLICABILITY_ASSEMBLY_SCOPE_MISMATCH,
+                ),
+            )
         if _norm(rule.decision) != "DEDUCT":
-            return self._store(selector, _blocked_applicability(EvidenceResolutionStatus.ABSTAINED, OPENING_DEDUCTION_APPLICABILITY_RULE_UNRESOLVED))
+            return self._store(
+                selector,
+                _blocked_applicability(
+                    EvidenceResolutionStatus.ABSTAINED,
+                    OPENING_DEDUCTION_APPLICABILITY_RULE_UNRESOLVED,
+                ),
+            )
+
         payload = {
             "document_id": selector.document_id,
             "revision_id": selector.revision_id,
