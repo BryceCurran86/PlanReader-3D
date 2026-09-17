@@ -1,25 +1,23 @@
-"""Unit tests for Item 21 Live Opening Net-Wall Integration Authority.
-
-Tests the integration of NetWallBooleanUnionAuthority into:
-- LiveOpeningNetWallAdapter
-- GenericOpeningDeductionPipeline
-- GenericPlanReaderExtractor
+"""Unit tests for Item 21A live opening / net-wall adapter and pipeline integration.
 
 Validates fail-closed invariants:
-- Unauthenticated or missing net-wall authority leaves quantities abstained (value=None, publication_blocked=True).
-- Corroborated NetWallBooleanUnionAuthority unblocks publication (value=net_area, publication_blocked=False).
-- Conflicting or abstained net-wall upstream authority preserves fail-closed safety.
-- Shadow diagnostic collection faithfully tracks authoritative vs blocked wall counts.
+- missing net-wall authority leaves quantities abstained;
+- exact corroborated net-wall authority may resolve at the adapter/pipeline result layer;
+- prediction publication remains blocked in Item 21A;
+- conflicting, stale, or mismatched evidence fails closed;
+- shadow diagnostics report authority state without minting authority.
+
+GenericPlanReaderExtractor wiring is intentionally outside this Item 21A PR and is
+therefore not represented by skipped tests here.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-from unittest.mock import MagicMock
+from typing import Any, Dict, Optional
 
 import pytest
 
-from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
+from pb_migration_contracts import EvidenceResolutionStatus
 from pb_net_wall_boolean_union_authority import (
     NetWallBooleanUnionAuthority,
     NetWallBooleanUnionRecord,
@@ -36,19 +34,14 @@ from pb_live_opening_net_wall_integration import (
     LIVE_NET_WALL_AUTHORITY_UNAVAILABLE,
     LIVE_NET_WALL_RESOLVED,
     LIVE_NET_WALL_UPSTREAM_UNRESOLVED,
-    LiveNetWallEvidenceResult,
     LiveOpeningNetWallAdapter,
     collect_live_net_wall_shadow,
-)
-from pb_planreader_pdf_extractor import (
-    ExtractedPrediction,
-    GenericPlanReaderExtractor,
 )
 
 
 @dataclass
 class _Prediction:
-    """Minimal test fixture for ExtractedPrediction."""
+    """Minimal test fixture for prediction propagation."""
 
     tag: str
     trade_type: str
@@ -96,22 +89,30 @@ def _make_corroborated_record(
     )
 
 
-def _make_authority(mapping: dict[Any, NetWallBooleanUnionResult] | None = None) -> NetWallBooleanUnionAuthority:
+def _make_authority(
+    mapping: dict[Any, NetWallBooleanUnionResult] | None = None,
+) -> NetWallBooleanUnionAuthority:
     results = {}
     if mapping:
-        for k, v in mapping.items():
-            key = k.key if hasattr(k, "key") else k
-            results[key] = v
+        for key_or_selector, value in mapping.items():
+            key = (
+                key_or_selector.key
+                if hasattr(key_or_selector, "key")
+                else key_or_selector
+            )
+            results[key] = value
     return NetWallBooleanUnionAuthority(results, _seal=_AUTHORITY_SEAL)
 
 
 class TestLiveOpeningNetWallAdapter:
-    """Test suite for LiveOpeningNetWallAdapter fail-closed semantics."""
+    """LiveOpeningNetWallAdapter fail-closed semantics."""
 
     def test_adapter_without_authority_abstains(self) -> None:
         adapter = LiveOpeningNetWallAdapter(net_wall_authority=None)
         sel = _make_selector()
-        res = adapter.resolve_wall_net_area(sel, wall_id="perimeter_walling", gross_area_m2=100.0)
+        res = adapter.resolve_wall_net_area(
+            sel, wall_id="perimeter_walling", gross_area_m2=100.0
+        )
 
         assert not res.is_authoritative
         assert res.net_area_m2 is None
@@ -123,7 +124,11 @@ class TestLiveOpeningNetWallAdapter:
     def test_adapter_without_selector_abstains(self) -> None:
         auth = _make_authority()
         adapter = LiveOpeningNetWallAdapter(net_wall_authority=auth)
-        res = adapter.resolve_wall_net_area(selector=None, wall_id="perimeter_walling", gross_area_m2=100.0)
+        res = adapter.resolve_wall_net_area(
+            selector=None,
+            wall_id="perimeter_walling",
+            gross_area_m2=100.0,
+        )
 
         assert not res.is_authoritative
         assert res.net_area_m2 is None
@@ -131,7 +136,10 @@ class TestLiveOpeningNetWallAdapter:
 
     def test_adapter_corroborated_resolution(self) -> None:
         sel = _make_selector()
-        record = _make_corroborated_record(gross_area_m2=100.0, net_area_m2=85.0)
+        record = _make_corroborated_record(
+            gross_area_m2=100.0,
+            net_area_m2=85.0,
+        )
         res_obj = NetWallBooleanUnionResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             record=record,
@@ -140,7 +148,11 @@ class TestLiveOpeningNetWallAdapter:
         auth = _make_authority({sel: res_obj})
 
         adapter = LiveOpeningNetWallAdapter(net_wall_authority=auth)
-        res = adapter.resolve_wall_net_area(sel, wall_id="perimeter_walling", gross_area_m2=100.0)
+        res = adapter.resolve_wall_net_area(
+            sel,
+            wall_id="perimeter_walling",
+            gross_area_m2=100.0,
+        )
 
         assert res.is_authoritative is True
         assert res.net_area_m2 == 85.0
@@ -162,7 +174,11 @@ class TestLiveOpeningNetWallAdapter:
         auth = _make_authority({sel: res_obj})
 
         adapter = LiveOpeningNetWallAdapter(net_wall_authority=auth)
-        res = adapter.resolve_wall_net_area(sel, wall_id="perimeter_walling", gross_area_m2=100.0)
+        res = adapter.resolve_wall_net_area(
+            sel,
+            wall_id="perimeter_walling",
+            gross_area_m2=100.0,
+        )
 
         assert res.is_authoritative is False
         assert res.net_area_m2 is None
@@ -182,7 +198,11 @@ class TestLiveOpeningNetWallAdapter:
         auth = _make_authority({sel: res_obj})
 
         adapter = LiveOpeningNetWallAdapter(net_wall_authority=auth)
-        res = adapter.resolve_wall_net_area(sel, wall_id="perimeter_walling", gross_area_m2=100.0)
+        res = adapter.resolve_wall_net_area(
+            sel,
+            wall_id="perimeter_walling",
+            gross_area_m2=100.0,
+        )
 
         assert res.is_authoritative is False
         assert res.net_area_m2 is None
@@ -192,7 +212,7 @@ class TestLiveOpeningNetWallAdapter:
 
 
 class TestGenericOpeningDeductionPipelineIntegration:
-    """Test suite for pipeline integration with NetWallBooleanUnionAuthority."""
+    """Pipeline integration with NetWallBooleanUnionAuthority."""
 
     def test_pipeline_without_authority_remains_fail_closed(self) -> None:
         wall = WallInstance(wall_id="perimeter_walling", gross_area_m2=100.0)
@@ -210,14 +230,25 @@ class TestGenericOpeningDeductionPipelineIntegration:
         assert result.net_area_evidence.abstained is True
         assert result.net_area_evidence.value is None
 
-        preds = [_Prediction(tag="perimeter_walling", trade_type="walls", quantity=100.0)]
-        out = pipeline.propagate_to_predictions(preds, {"perimeter_walling": result})
+        preds = [
+            _Prediction(
+                tag="perimeter_walling",
+                trade_type="walls",
+                quantity=100.0,
+            )
+        ]
+        out = pipeline.propagate_to_predictions(
+            preds,
+            {"perimeter_walling": result},
+        )
         assert out[0].quantity is None
         assert out[0].metadata["publication_blocked"] is True
         assert out[0].metadata["net_area_m2"] is None
         assert out[0].metadata["provisional_net_area_m2"] == 97.0
 
-    def test_pipeline_with_corroborated_authority_unblocks_publication(self) -> None:
+    def test_pipeline_with_corroborated_authority_resolves_but_prediction_stays_blocked(
+        self,
+    ) -> None:
         wall = WallInstance(wall_id="perimeter_walling", gross_area_m2=100.0)
         opening = OpeningInstance(
             opening_id="W1",
@@ -228,7 +259,10 @@ class TestGenericOpeningDeductionPipelineIntegration:
         )
 
         sel = _make_selector("perimeter_walling")
-        record = _make_corroborated_record(gross_area_m2=100.0, net_area_m2=97.0)
+        record = _make_corroborated_record(
+            gross_area_m2=100.0,
+            net_area_m2=97.0,
+        )
         res_obj = NetWallBooleanUnionResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             record=record,
@@ -251,17 +285,20 @@ class TestGenericOpeningDeductionPipelineIntegration:
         assert res.net_area_evidence.status == "corroborated"
 
         preds = [
-            _Prediction(tag="perimeter_walling", trade_type="walls", quantity=100.0),
-            _Prediction(tag="internal_plaster", trade_type="wall_finish", quantity=100.0),
+            _Prediction(
+                tag="perimeter_walling",
+                trade_type="walls",
+                quantity=100.0,
+            ),
+            _Prediction(
+                tag="internal_plaster",
+                trade_type="wall_finish",
+                quantity=100.0,
+            ),
         ]
         out = pipeline.propagate_to_predictions(preds, results)
-        by_tag = {p.tag: p for p in out}
+        by_tag = {prediction.tag: prediction for prediction in out}
 
-        # Item 21A: Even with CORROBORATED authority from resolve_wall_net_area(),
-        # propagate_to_predictions() remains FAIL-CLOSED: quantity=None until
-        # source-derived gross-wall authority is fully implemented (Item 21B/later).
-        # The net_area_evidence from resolve_wall_net_area() is CORROBORATED (line 246),
-        # but propagate_to_predictions() enforces publication blocking at the prediction level.
         assert by_tag["perimeter_walling"].quantity is None
         assert by_tag["perimeter_walling"].metadata["publication_blocked"] is True
         assert by_tag["perimeter_walling"].metadata["provisional_net_area_m2"] == 97.0
@@ -300,22 +337,34 @@ class TestGenericOpeningDeductionPipelineIntegration:
         assert res.net_area_evidence.abstained is True
         assert res.net_area_evidence.status == "conflict"
 
-        preds = [_Prediction(tag="perimeter_walling", trade_type="walls", quantity=100.0)]
+        preds = [
+            _Prediction(
+                tag="perimeter_walling",
+                trade_type="walls",
+                quantity=100.0,
+            )
+        ]
         out = pipeline.propagate_to_predictions(preds, results)
         assert out[0].quantity is None
         assert out[0].metadata["publication_blocked"] is True
 
 
-class TestShadowAndExtractorIntegration:
-    """Test suite for shadow collection and GenericPlanReaderExtractor attributes."""
+class TestShadowAndAdapterIntegration:
+    """Shadow collection and adapter boundary regressions."""
 
     def test_collect_live_net_wall_shadow_summary(self) -> None:
         pipeline = GenericOpeningDeductionPipeline()
         wall = WallInstance(wall_id="perimeter_walling", gross_area_m2=100.0)
         unresolved_opening = OpeningInstance(
-            opening_id="W1", width_m=None, height_m=None, quantity=1.0
+            opening_id="W1",
+            width_m=None,
+            height_m=None,
+            quantity=1.0,
         )
-        wall_results = pipeline.deduct_openings_for_all_walls([wall], [unresolved_opening])
+        wall_results = pipeline.deduct_openings_for_all_walls(
+            [wall],
+            [unresolved_opening],
+        )
 
         shadow = collect_live_net_wall_shadow(wall_results)
         assert shadow["status"] == "collected"
@@ -326,35 +375,21 @@ class TestShadowAndExtractorIntegration:
         assert shadow["walls"][0]["is_authoritative"] is False
         assert shadow["walls"][0]["net_area_m2"] is None
 
-    @pytest.mark.skip(reason="GenericPlanReaderExtractor net_wall_authority integration awaits Item 21B")
-    def test_extractor_initializes_net_wall_fields(self) -> None:
-        extractor = GenericPlanReaderExtractor()
-        assert extractor.net_wall_authority is None
-        assert extractor.net_wall_selectors == {}
-        assert extractor.live_net_wall_shadow["status"] == "abstained"
-        assert extractor.live_net_wall_shadow["walls"] == []
-
-    @pytest.mark.skip(reason="GenericPlanReaderExtractor net_wall_authority integration awaits Item 21B")
-    def test_extractor_accepts_net_wall_authority(self) -> None:
-        auth = _make_authority()
-        sel = _make_selector("perimeter_walling")
-        extractor = GenericPlanReaderExtractor(
-            net_wall_authority=auth,
-            net_wall_selectors={"perimeter_walling": sel},
-        )
-        assert extractor.net_wall_authority is auth
-        assert extractor.net_wall_selectors["perimeter_walling"] == sel
-
     def test_duck_typed_selector_rejected(self) -> None:
         auth = _make_authority()
         adapter = LiveOpeningNetWallAdapter(net_wall_authority=auth)
         with pytest.raises(TypeError, match="selector must be NetWallBooleanUnionSelector"):
-            adapter.resolve_wall_net_area(selector={"physical_wall_id": "w1"})  # type: ignore[arg-type]
+            adapter.resolve_wall_net_area(
+                selector={"physical_wall_id": "w1"}  # type: ignore[arg-type]
+            )
 
     def test_wrong_wall_id_record_fails_closed(self) -> None:
         sel = _make_selector("perimeter_walling")
-        # Record has mismatched physical_wall_id
-        record = _make_corroborated_record(wall_id="other_wall", gross_area_m2=100.0, net_area_m2=97.0)
+        record = _make_corroborated_record(
+            wall_id="other_wall",
+            gross_area_m2=100.0,
+            net_area_m2=97.0,
+        )
         res_obj = NetWallBooleanUnionResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             record=record,
@@ -362,15 +397,21 @@ class TestShadowAndExtractorIntegration:
         )
         auth = _make_authority({sel: res_obj})
         adapter = LiveOpeningNetWallAdapter(net_wall_authority=auth)
-        res = adapter.resolve_wall_net_area(sel, wall_id="perimeter_walling")
+        res = adapter.resolve_wall_net_area(
+            sel,
+            wall_id="perimeter_walling",
+        )
         assert res.is_authoritative is False
         assert res.net_area_m2 is None
         assert res.evidence.abstained is True
 
     def test_mismatched_lineage_fails_closed(self) -> None:
         sel = _make_selector("perimeter_walling")
-        # Record has stale document_id
-        rec_dict = _make_corroborated_record("perimeter_walling", 100.0, 97.0).__dict__.copy()
+        rec_dict = _make_corroborated_record(
+            "perimeter_walling",
+            100.0,
+            97.0,
+        ).__dict__.copy()
         rec_dict["document_id"] = "doc-stale-999"
         record = NetWallBooleanUnionRecord(**rec_dict)
         res_obj = NetWallBooleanUnionResult(
@@ -380,8 +421,10 @@ class TestShadowAndExtractorIntegration:
         )
         auth = _make_authority({sel: res_obj})
         adapter = LiveOpeningNetWallAdapter(net_wall_authority=auth)
-        res = adapter.resolve_wall_net_area(sel, wall_id="perimeter_walling")
+        res = adapter.resolve_wall_net_area(
+            sel,
+            wall_id="perimeter_walling",
+        )
         assert res.is_authoritative is False
         assert res.net_area_m2 is None
         assert res.evidence.abstained is True
-
