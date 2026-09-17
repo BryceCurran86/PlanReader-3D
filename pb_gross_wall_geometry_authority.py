@@ -210,7 +210,7 @@ class GrossWallGeometryProducer:
         physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
         host_frame_authority: OpeningHostFrameAuthority,
         physical_scale_authority: PhysicalScaleAuthority,
-        wall_height_authority: object,
+        wall_height_authority: WallHeightAuthority,
         *,
         _seal: object = None,
     ) -> None:
@@ -222,6 +222,12 @@ class GrossWallGeometryProducer:
             raise TypeError("host_frame_authority must be producer-owned OpeningHostFrameAuthority")
         if type(physical_scale_authority) is not PhysicalScaleAuthority:
             raise TypeError("physical_scale_authority must be producer-owned PhysicalScaleAuthority")
+        if type(wall_height_authority) is not WallHeightAuthority:
+            raise TypeError(
+                "wall_height_authority must be a producer-owned WallHeightAuthority obtained from "
+                "WallHeightProducer.from_context().authority(); duck-typed resolvers and plain "
+                "Mappings are not accepted."
+            )
         self._wall_candidates = physical_wall_candidate_authority
         self._frame = host_frame_authority
         self._scale = physical_scale_authority
@@ -235,7 +241,7 @@ class GrossWallGeometryProducer:
         physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
         host_frame_authority: OpeningHostFrameAuthority,
         physical_scale_authority: PhysicalScaleAuthority,
-        wall_height_authority: object,
+        wall_height_authority: WallHeightAuthority,
     ) -> "GrossWallGeometryProducer":
         return cls(
             physical_wall_candidate_authority,
@@ -471,14 +477,9 @@ class GrossWallGeometryProducer:
                 ),
             )
 
-        # 4. Resolve Wall Height from WallHeightAuthority
-        height_qty = None
-        if hasattr(self._height, "resolve"):
-            height_qty = self._height.resolve(selector)
-        elif isinstance(self._height, Mapping):
-            height_qty = self._height.get(selector.key) or self._height.get(
-                selector.physical_wall_id
-            )
+        # 4. Resolve Wall Height from WallHeightAuthority (exact type guaranteed at construction).
+        # No duck-typing, no Mapping fallback — the authority was type-checked in __init__.
+        height_qty = self._height.resolve(selector)
 
         if height_qty is None:
             return self._store(
@@ -488,8 +489,6 @@ class GrossWallGeometryProducer:
                     GROSS_WALL_GEOMETRY_HEIGHT_UNRESOLVED,
                 ),
             )
-        if hasattr(height_qty, "quantity"):
-            height_qty = height_qty.quantity
         if not isinstance(height_qty, QuantityEvidence):
             return self._store(
                 selector,

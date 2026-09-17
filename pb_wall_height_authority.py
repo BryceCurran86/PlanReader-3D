@@ -686,10 +686,18 @@ def build_wall_height_quantity(
 
 
 _HEIGHT_AUTHORITY_SEAL = object()
+_HEIGHT_PRODUCER_SEAL = object()
 
 
 class WallHeightAuthority:
-    """Sealed selector-only lookup for published wall height QuantityEvidence."""
+    """Sealed selector-only lookup for published wall height QuantityEvidence.
+
+    Construction is only possible through WallHeightProducer.authority().
+    There is intentionally no public factory method; the former
+    from_quantities() classmethod has been removed because it allowed any
+    caller to wrap arbitrary QuantityEvidence and obtain a sealed authority
+    object, bypassing provenance checks.
+    """
 
     def __init__(
         self,
@@ -698,24 +706,96 @@ class WallHeightAuthority:
         _seal: object = None,
     ) -> None:
         if _seal is not _HEIGHT_AUTHORITY_SEAL:
-            raise TypeError("WallHeightAuthority is producer-owned")
+            raise TypeError(
+                "WallHeightAuthority is producer-owned and cannot be constructed directly; "
+                "use WallHeightProducer.from_context() to obtain one."
+            )
         from types import MappingProxyType
         self._quantities = MappingProxyType(dict(quantities))
 
-    @classmethod
-    def from_quantities(
-        cls,
-        quantities: Mapping[object, QuantityEvidence],
-    ) -> "WallHeightAuthority":
-        return cls(quantities, _seal=_HEIGHT_AUTHORITY_SEAL)
-
     def resolve(self, selector: object) -> QuantityEvidence | None:
+        """Look up a previously published wall-height quantity by selector.
+
+        Only keys published via WallHeightProducer.publish() are present.
+        Returns None (not a fabricated abstain) when no matching entry exists.
+        """
+        if type(selector) is str:
+            return self._quantities.get(selector)
         key = getattr(selector, "key", None)
-        if key is not None and key in self._quantities:
-            return self._quantities[key]
-        wall_id = getattr(selector, "physical_wall_id", None) or getattr(selector, "wall_id", None)
-        if wall_id is not None and wall_id in self._quantities:
-            return self._quantities[wall_id]
-        if isinstance(selector, str) and selector in self._quantities:
-            return self._quantities[selector]
+        if key is not None:
+            result = self._quantities.get(key)
+            if result is not None:
+                return result
+        wall_id = (
+            getattr(selector, "physical_wall_id", None)
+            or getattr(selector, "wall_id", None)
+        )
+        if wall_id is not None:
+            return self._quantities.get(wall_id)
         return None
+
+
+class WallHeightProducer:
+    """Trusted writer boundary for wall-height QuantityEvidence.
+
+    The only way to obtain a WallHeightAuthority is through this class.
+    Every positive quantity stored here must originate from
+    build_wall_height_quantity() called with a real ProviderContext,
+    DocumentEvidence, ViewportEvidence, EntityEvidence, and optional
+    EvidenceAtom observations.  Callers cannot inject pre-built
+    QuantityEvidence objects.
+    """
+
+    def __init__(self, *, _seal: object = None) -> None:
+        if _seal is not _HEIGHT_PRODUCER_SEAL:
+            raise TypeError(
+                "WallHeightProducer must be created via WallHeightProducer.from_context()"
+            )
+        self._quantities: dict[object, QuantityEvidence] = {}
+
+    @classmethod
+    def from_context(cls) -> "WallHeightProducer":
+        """Create a new, empty WallHeightProducer."""
+        return cls(_seal=_HEIGHT_PRODUCER_SEAL)
+
+    def publish(
+        self,
+        wall_id: str,
+        *,
+        context: ProviderContext,
+        document: DocumentEvidence,
+        viewport: ViewportEvidence,
+        entity: EntityEvidence,
+        direct_height_evidence: Optional[EvidenceAtom] = None,
+        lower_datum_evidence: Optional[EvidenceAtom] = None,
+        upper_datum_evidence: Optional[EvidenceAtom] = None,
+        wall_segment_id: Optional[str] = None,
+        datum_relationship_proofs: tuple[WallDatumRelationshipProof, ...] = (),
+        relationship_evidence: Optional[Mapping[str, EvidenceAtom]] = None,
+    ) -> QuantityEvidence:
+        """Resolve and store a wall-height quantity for wall_id.
+
+        Delegates entirely to build_wall_height_quantity(); the result is
+        stored under wall_id and returned.  Abstained results are also stored
+        so callers can inspect blocking reasons.
+        """
+        qty = build_wall_height_quantity(
+            wall_id=wall_id,
+            context=context,
+            document=document,
+            viewport=viewport,
+            entity=entity,
+            direct_height_evidence=direct_height_evidence,
+            lower_datum_evidence=lower_datum_evidence,
+            upper_datum_evidence=upper_datum_evidence,
+            wall_segment_id=wall_segment_id,
+            datum_relationship_proofs=datum_relationship_proofs,
+            relationship_evidence=relationship_evidence,
+        )
+        self._quantities[wall_id] = qty
+        return qty
+
+    def authority(self) -> WallHeightAuthority:
+        """Seal and return a read-only WallHeightAuthority from published quantities."""
+        return WallHeightAuthority(self._quantities, _seal=_HEIGHT_AUTHORITY_SEAL)
+
