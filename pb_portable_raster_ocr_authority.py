@@ -5,14 +5,15 @@ canonical CI and runtime environments without depending on local machine state
 or undeclared binary installations.
 
 Key rules:
-- Clean provider/backend interface (Tesseract, WinOCR, Mock, Null).
+- Clean provider/backend interface (Tesseract, WinOCR, Null production; Mock tests-only).
 - Deterministic capability detection without crashing or hardcoded paths.
 - Explicit provenance on every record: backend name/version, DPI, page, viewport.
 - Page & viewport spatial binding.
 - Output clearly identified as OCR-derived (is_ocr_derived=True, extraction_method="raster_ocr").
-- Confidence & status tracking: OCR output is strictly provisional, never silent FIRM authority.
-- Native-text and OCR reconciliation: matching -> confirmed; contradictory -> conflict_manual_review.
+- OCR publish status is CANDIDATE only — never silent CORROBORATED/FIRM authority.
+- Native-text and OCR reconciliation labels are diagnostic; they do not raise firm authority.
 - Fail closed when OCR backend is unavailable (never fakes text).
+- Caller page_images / native_texts maps are tagged non-authority.
 - 100% portable on Python 3.13 and 3.14: zero local absolute paths or machine-specific configs.
 - Generic only: ZERO benchmark IDs, ground truth BOQs, or project-name heuristics.
 """
@@ -45,9 +46,14 @@ OCR_NATIVE_CONFLICT = "ocr_native_conflict"
 OCR_NO_TEXT_DETECTED = "ocr_no_text_detected"
 OCR_SCOPE_UNAVAILABLE = "ocr_scope_unavailable"
 OCR_SOURCE_IMAGE_MISSING = "ocr_source_image_missing"
+OCR_CALLER_PAGE_IMAGES_NOT_AUTHORITY = "ocr_caller_page_images_not_authority"
+OCR_CALLER_NATIVE_TEXT_NOT_AUTHORITY = "ocr_caller_native_text_not_authority"
+OCR_PROVISIONAL_CANDIDATE_ONLY = "ocr_provisional_candidate_only"
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
+# Populated after Null/Tesseract/WinOCR class definitions below.
+_PRODUCTION_BACKEND_TYPES: tuple[type, ...] = ()
 
 _Key = tuple[str, str, str, str, str, Optional[str], Optional[tuple[float, float, float, float]]]
 
@@ -151,7 +157,11 @@ OCRBackend = RasterOCRBackend
 
 
 class MockOCRBackend(RasterOCRBackend):
-    """Deterministic in-memory backend for unit tests and reproducible verification."""
+    """Deterministic in-memory backend for unit tests only.
+
+    Not a production authority input. ``PortableRasterOCRProducer.from_backend``
+    rejects this type; tests must use ``from_backend_for_tests``.
+    """
 
     def __init__(
         self,
@@ -159,10 +169,12 @@ class MockOCRBackend(RasterOCRBackend):
         *,
         is_ready: bool = True,
         version: str = "mock-1.0.0",
+        fail_with: Optional[BaseException] = None,
     ) -> None:
         self._lines = tuple(canned_lines)
         self._is_ready = is_ready
         self._version = version
+        self._fail_with = fail_with
 
     @property
     def name(self) -> str:
@@ -178,6 +190,8 @@ class MockOCRBackend(RasterOCRBackend):
     def extract_lines(self, image: Image.Image, dpi: int = 150) -> tuple[OCRLine, ...]:
         if not self._is_ready:
             raise RuntimeError("Mock OCR backend unavailable")
+        if self._fail_with is not None:
+            raise self._fail_with
         return self._lines
 
 
@@ -261,6 +275,10 @@ class TesseractOCRBackend(RasterOCRBackend):
                 )
             )
         return tuple(lines)
+
+
+# Exact production backends only — Mock and arbitrary subclasses are not authority.
+_PRODUCTION_BACKEND_TYPES = (NullOCRBackend, TesseractOCRBackend, WinOCRBackend)
 
 
 @dataclass(frozen=True)
@@ -494,7 +512,12 @@ class PortableRasterOCRAuthority:
 
 
 class PortableRasterOCRProducer:
-    """Trusted boundary extracting and publishing portable raster OCR evidence."""
+    """Trusted boundary extracting and publishing portable raster OCR evidence.
+
+    OCR records are shadow/diagnostic evidence only. Successful publish uses
+    ``EvidenceResolutionStatus.CANDIDATE`` — never CORROBORATED/FIRM. Caller
+    ``page_images`` / ``native_texts`` maps are not measurement authority.
+    """
 
     def __init__(
         self,
@@ -504,17 +527,28 @@ class PortableRasterOCRProducer:
         default_dpi: int = 150,
         snapshot: Optional[PublishedSourceSnapshot] = None,
         *,
+        _allow_test_backend: bool = False,
         _seal: object = None,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError(
                 "PortableRasterOCRProducer must be obtained from from_backend()"
             )
-        if not isinstance(backend, RasterOCRBackend):
-            raise TypeError("backend must implement RasterOCRBackend")
+        if _allow_test_backend:
+            if type(backend) is not MockOCRBackend:
+                raise TypeError(
+                    "from_backend_for_tests requires exact MockOCRBackend"
+                )
+        elif type(backend) not in _PRODUCTION_BACKEND_TYPES:
+            raise TypeError(
+                "backend must be exact NullOCRBackend, TesseractOCRBackend, "
+                "or WinOCRBackend; MockOCRBackend requires from_backend_for_tests"
+            )
         self._backend = backend
         self._page_images = MappingProxyType(dict(page_images))
         self._native_texts = MappingProxyType(dict(native_texts or {}))
+        self._caller_page_images = True  # current seam: images are caller-supplied
+        self._caller_native_texts = bool(native_texts)
         self._dpi = default_dpi
         self._snapshot = snapshot
         self._results: dict[_Key, PortableRasterOCRResult] = {}
@@ -535,6 +569,28 @@ class PortableRasterOCRProducer:
             native_texts=native_texts,
             default_dpi=default_dpi,
             snapshot=snapshot,
+            _allow_test_backend=False,
+            _seal=_PRODUCER_SEAL,
+        )
+
+    @classmethod
+    def from_backend_for_tests(
+        cls,
+        backend: MockOCRBackend,
+        page_images: Optional[Mapping[str, Image.Image]] = None,
+        native_texts: Optional[Mapping[tuple[str, Optional[str]], str]] = None,
+        default_dpi: int = 150,
+        snapshot: Optional[PublishedSourceSnapshot] = None,
+    ) -> "PortableRasterOCRProducer":
+        """Test-only entry: allows MockOCRBackend. Never a production path."""
+
+        return cls(
+            backend=backend,
+            page_images=page_images or {},
+            native_texts=native_texts,
+            default_dpi=default_dpi,
+            snapshot=snapshot,
+            _allow_test_backend=True,
             _seal=_PRODUCER_SEAL,
         )
 
@@ -712,9 +768,17 @@ class PortableRasterOCRProducer:
             lines=raw_lines,
             **payload,
         )
+        # OCR evidence never mints CORROBORATED/FIRM. Caller page images and
+        # caller native-text maps are diagnostic inputs only.
+        reasons: list[str] = [OCR_EXTRACTION_RESOLVED, OCR_PROVISIONAL_CANDIDATE_ONLY]
+        reasons.extend(recon_reasons)
+        if self._caller_page_images:
+            reasons.append(OCR_CALLER_PAGE_IMAGES_NOT_AUTHORITY)
+        if self._caller_native_texts:
+            reasons.append(OCR_CALLER_NATIVE_TEXT_NOT_AUTHORITY)
         result = PortableRasterOCRResult(
-            status=EvidenceResolutionStatus.CORROBORATED,
-            reason_codes=(OCR_EXTRACTION_RESOLVED, *recon_reasons),
+            status=EvidenceResolutionStatus.CANDIDATE,
+            reason_codes=tuple(dict.fromkeys(reasons)),
             record=record,
         )
         return self._store(selector, result)
@@ -728,10 +792,13 @@ __all__ = [
     "OCRCapabilityReport",
     "OCRLine",
     "OCR_BACKEND_UNAVAILABLE",
+    "OCR_CALLER_NATIVE_TEXT_NOT_AUTHORITY",
+    "OCR_CALLER_PAGE_IMAGES_NOT_AUTHORITY",
     "OCR_EXTRACTION_RESOLVED",
     "OCR_LINEAGE_MISMATCH",
     "OCR_NATIVE_CONFLICT",
     "OCR_NO_TEXT_DETECTED",
+    "OCR_PROVISIONAL_CANDIDATE_ONLY",
     "OCR_SCOPE_UNAVAILABLE",
     "OCR_SOURCE_IMAGE_MISSING",
     "PORTABLE_RASTER_OCR_SCHEMA_VERSION",
@@ -744,5 +811,6 @@ __all__ = [
     "TesseractOCRBackend",
     "WinOCRBackend",
     "detect_ocr_capabilities",
+    "normalize_text_for_reconciliation",
     "reconcile_native_and_ocr_text",
 ]

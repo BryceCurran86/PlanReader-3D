@@ -32,10 +32,13 @@ from pb_portable_raster_ocr_authority import (
     OCRCapabilityReport,
     OCRLine,
     OCR_BACKEND_UNAVAILABLE,
+    OCR_CALLER_NATIVE_TEXT_NOT_AUTHORITY,
+    OCR_CALLER_PAGE_IMAGES_NOT_AUTHORITY,
     OCR_EXTRACTION_RESOLVED,
     OCR_LINEAGE_MISMATCH,
     OCR_NATIVE_CONFLICT,
     OCR_NO_TEXT_DETECTED,
+    OCR_PROVISIONAL_CANDIDATE_ONLY,
     OCR_SCOPE_UNAVAILABLE,
     OCR_SOURCE_IMAGE_MISSING,
     PORTABLE_RASTER_OCR_SCHEMA_VERSION,
@@ -133,7 +136,7 @@ def test_fail_closed_when_backend_unavailable() -> None:
 
 def test_fail_closed_when_page_image_missing() -> None:
     mock_be = MockOCRBackend(is_ready=True)
-    producer = PortableRasterOCRProducer.from_backend(
+    producer = PortableRasterOCRProducer.from_backend_for_tests(
         backend=mock_be,
         page_images={},
         snapshot=_sample_snapshot(),
@@ -152,7 +155,7 @@ def test_lineage_mismatch_fails_closed() -> None:
         is_ready=True,
     )
     img = Image.new("RGB", (100, 100), "white")
-    producer = PortableRasterOCRProducer.from_backend(
+    producer = PortableRasterOCRProducer.from_backend_for_tests(
         backend=mock_be,
         page_images={"page_1": img},
         snapshot=_sample_snapshot(),
@@ -177,7 +180,7 @@ def test_successful_ocr_extraction_with_provisional_status() -> None:
     ]
     mock_be = MockOCRBackend(canned_lines=canned, is_ready=True)
     img = Image.new("RGB", (200, 200), "white")
-    producer = PortableRasterOCRProducer.from_backend(
+    producer = PortableRasterOCRProducer.from_backend_for_tests(
         backend=mock_be,
         page_images={"page_1": img},
         snapshot=_sample_snapshot(),
@@ -186,7 +189,7 @@ def test_successful_ocr_extraction_with_provisional_status() -> None:
     sel = _sample_selector()
     res = producer.publish(sel)
 
-    assert res.status == EvidenceResolutionStatus.CORROBORATED
+    assert res.status == EvidenceResolutionStatus.CANDIDATE
     assert OCR_EXTRACTION_RESOLVED in res.reason_codes
     rec = res.record
     assert rec is not None
@@ -204,7 +207,7 @@ def test_native_and_ocr_reconciliation_confirmed() -> None:
     canned = [OCRLine(text="BEDROOM 1", confidence=0.95, bbox_px=(10, 10, 80, 25))]
     mock_be = MockOCRBackend(canned_lines=canned, is_ready=True)
     img = Image.new("RGB", (200, 200), "white")
-    producer = PortableRasterOCRProducer.from_backend(
+    producer = PortableRasterOCRProducer.from_backend_for_tests(
         backend=mock_be,
         page_images={"page_1": img},
         native_texts={("page_1", "vp_floor_plan"): "Bedroom 1"},
@@ -213,7 +216,7 @@ def test_native_and_ocr_reconciliation_confirmed() -> None:
     sel = _sample_selector()
     res = producer.publish(sel)
 
-    assert res.status == EvidenceResolutionStatus.CORROBORATED
+    assert res.status == EvidenceResolutionStatus.CANDIDATE
     assert res.record is not None
     assert res.record.reconciliation_status == "confirmed"
     assert res.record.full_text == "Bedroom 1"
@@ -223,7 +226,7 @@ def test_native_and_ocr_reconciliation_conflict_fails_closed() -> None:
     canned = [OCRLine(text="KITCHEN", confidence=0.95, bbox_px=(10, 10, 80, 25))]
     mock_be = MockOCRBackend(canned_lines=canned, is_ready=True)
     img = Image.new("RGB", (200, 200), "white")
-    producer = PortableRasterOCRProducer.from_backend(
+    producer = PortableRasterOCRProducer.from_backend_for_tests(
         backend=mock_be,
         page_images={"page_1": img},
         native_texts={("page_1", "vp_floor_plan"): "BATHROOM"},
@@ -243,7 +246,7 @@ def test_target_region_cropping_and_coordinate_adjustment() -> None:
     ]
     mock_be = MockOCRBackend(canned_lines=canned, is_ready=True)
     img = Image.new("RGB", (400, 400), "white")
-    producer = PortableRasterOCRProducer.from_backend(
+    producer = PortableRasterOCRProducer.from_backend_for_tests(
         backend=mock_be,
         page_images={"page_1": img},
         snapshot=_sample_snapshot(),
@@ -252,7 +255,7 @@ def test_target_region_cropping_and_coordinate_adjustment() -> None:
     sel = _sample_selector(target_region_pt=(50.0, 50.0, 100.0, 100.0))
     res = producer.publish(sel)
 
-    assert res.status == EvidenceResolutionStatus.CORROBORATED
+    assert res.status == EvidenceResolutionStatus.CANDIDATE
     assert res.record is not None
     assert len(res.record.lines) == 1
     line = res.record.lines[0]
@@ -269,7 +272,7 @@ def test_empty_ocr_text_fails_closed() -> None:
         is_ready=True,
     )
     img = Image.new("RGB", (100, 100), "white")
-    producer = PortableRasterOCRProducer.from_backend(
+    producer = PortableRasterOCRProducer.from_backend_for_tests(
         backend=mock_be,
         page_images={"page_1": img},
         snapshot=_sample_snapshot(),
@@ -286,7 +289,7 @@ def test_authority_lookup_and_immutability() -> None:
     canned = [OCRLine(text="DOOR D01", confidence=0.92, bbox_px=(5, 5, 50, 20))]
     mock_be = MockOCRBackend(canned_lines=canned, is_ready=True)
     img = Image.new("RGB", (100, 100), "white")
-    producer = PortableRasterOCRProducer.from_backend(
+    producer = PortableRasterOCRProducer.from_backend_for_tests(
         backend=mock_be,
         page_images={"page_1": img},
         snapshot=_sample_snapshot(),
@@ -296,7 +299,7 @@ def test_authority_lookup_and_immutability() -> None:
 
     auth = producer.authority()
     resolved = auth.resolve(sel)
-    assert resolved.status == EvidenceResolutionStatus.CORROBORATED
+    assert resolved.status == EvidenceResolutionStatus.CANDIDATE
     assert resolved.record is not None
     assert resolved.record.full_text == "DOOR D01"
 
@@ -344,7 +347,7 @@ def test_producer_snapshot_record_duck_typing() -> None:
         canned_lines=[OCRLine(text="LEVEL 1", confidence=0.9, bbox_px=(0, 0, 10, 10))],
         is_ready=True,
     )
-    producer = PortableRasterOCRProducer.from_backend(
+    producer = PortableRasterOCRProducer.from_backend_for_tests(
         backend=mock_be,
         page_images={"page_1": Image.new("RGB", (100, 100), "white")},
         snapshot=snap_rec,
@@ -357,26 +360,17 @@ def test_producer_snapshot_record_duck_typing() -> None:
         page_id="page_1",
     )
     res = producer.publish(matching_sel)
-    assert res.status == EvidenceResolutionStatus.CORROBORATED
+    assert res.status == EvidenceResolutionStatus.CANDIDATE
     assert res.record is not None
     assert res.record.full_text == "LEVEL 1"
 
 
 def test_backend_exception_fails_closed_with_conflict() -> None:
-    class FailingBackend(RasterOCRBackend):
-        @property
-        def name(self) -> str:
-            return "failing"
-        @property
-        def version(self) -> str:
-            return "0.0.1"
-        def is_available(self) -> bool:
-            return True
-        def extract_lines(self, image: Image.Image, dpi: int = 150) -> tuple[OCRLine, ...]:
-            raise RuntimeError("Engine segmentation fault simulation")
-
-    producer = PortableRasterOCRProducer.from_backend(
-        backend=FailingBackend(),
+    producer = PortableRasterOCRProducer.from_backend_for_tests(
+        backend=MockOCRBackend(
+            is_ready=True,
+            fail_with=RuntimeError("Engine segmentation fault simulation"),
+        ),
         page_images={"page_1": Image.new("RGB", (50, 50), "white")},
         snapshot=_sample_snapshot(),
     )
@@ -411,4 +405,56 @@ def test_invalid_target_region_pt_validation() -> None:
 def test_ocr_line_confidence_validation() -> None:
     with pytest.raises(ValueError, match="confidence must be between 0.0 and 1.0"):
         OCRLine(text="TEST", confidence=1.5, bbox_px=(0, 0, 10, 10))
+
+
+def test_production_from_backend_rejects_mock() -> None:
+    mock_be = MockOCRBackend(
+        canned_lines=[OCRLine(text="X", confidence=0.9, bbox_px=(0, 0, 1, 1))],
+        is_ready=True,
+    )
+    with pytest.raises(TypeError, match="from_backend_for_tests"):
+        PortableRasterOCRProducer.from_backend(
+            backend=mock_be,
+            page_images={"page_1": Image.new("RGB", (10, 10), "white")},
+        )
+
+
+def test_arbitrary_backend_subclass_rejected() -> None:
+    class CallerBackend(RasterOCRBackend):
+        @property
+        def name(self) -> str:
+            return "caller"
+
+        @property
+        def version(self) -> str:
+            return "0"
+
+        def is_available(self) -> bool:
+            return True
+
+        def extract_lines(self, image, dpi=150):
+            return (OCRLine(text="forged", confidence=1.0, bbox_px=(0, 0, 1, 1)),)
+
+    with pytest.raises(TypeError, match="exact NullOCRBackend"):
+        PortableRasterOCRProducer.from_backend(
+            backend=CallerBackend(),
+            page_images={"page_1": Image.new("RGB", (10, 10), "white")},
+        )
+
+
+def test_candidate_ocr_never_corroborated_and_tags_caller_bags() -> None:
+    canned = [OCRLine(text="LABEL", confidence=0.9, bbox_px=(1, 1, 20, 10))]
+    producer = PortableRasterOCRProducer.from_backend_for_tests(
+        backend=MockOCRBackend(canned_lines=canned, is_ready=True),
+        page_images={"page_1": Image.new("RGB", (50, 50), "white")},
+        native_texts={("page_1", "vp_floor_plan"): "LABEL"},
+    )
+    res = producer.publish(_sample_selector())
+    assert res.status is EvidenceResolutionStatus.CANDIDATE
+    assert res.status is not EvidenceResolutionStatus.CORROBORATED
+    assert OCR_PROVISIONAL_CANDIDATE_ONLY in res.reason_codes
+    assert OCR_CALLER_PAGE_IMAGES_NOT_AUTHORITY in res.reason_codes
+    assert OCR_CALLER_NATIVE_TEXT_NOT_AUTHORITY in res.reason_codes
+    assert res.record is not None
+    assert res.record.reconciliation_status == "confirmed"
 
