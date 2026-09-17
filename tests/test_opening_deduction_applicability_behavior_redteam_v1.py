@@ -3,8 +3,8 @@
 TEST ONLY / DRAFT / DO NOT MERGE.
 
 Runs through native PDF ingestion and the merged physical opening -> host -> void
-chain.  Target/rule truth must come from the producer-owned complete trusted-text
-universe.  The tests intentionally never pass caller applicability booleans or
+chain. Target/rule truth must come from the producer-owned complete trusted-text
+universe. The tests intentionally never pass caller applicability booleans or
 trade/finish/assembly truth into the public applicability selector.
 """
 from __future__ import annotations
@@ -81,8 +81,6 @@ def _pdf_with_applicability_lines(
         page = doc.load_page(0)
         y = 330.0
         for text in lines:
-            # No spaces: each declaration is one native PDF word.  Small font keeps
-            # the complete token inside the source page so text integrity can prove it.
             page.insert_text(fitz.Point(20.0, y), text, fontsize=5.0)
             y += 16.0
         return bytes(doc.tobytes(garbage=4, deflate=True))
@@ -123,9 +121,6 @@ def _chain(monkeypatch: pytest.MonkeyPatch, lines: tuple[str, ...], *, partial_s
     source = captured["source"]
     published = source.published_snapshot_for_revision(void_selector.revision_id)
     assert published is not None
-    if partial_source:
-        object.__setattr__(published.coverage, "state", "partial")
-        object.__setattr__(published.coverage, "failed_pages", (1,))
 
     physical = PhysicalOpeningAuthority(source.authority())
     wall_authority = PhysicalWallCandidateProducer.from_source_visibility_producer(
@@ -165,6 +160,13 @@ def _chain(monkeypatch: pytest.MonkeyPatch, lines: tuple[str, ...], *, partial_s
     assert schedule.status is EvidenceResolutionStatus.CORROBORATED
     assert schedule.record is not None
     assert schedule.record.tag_mark == "W1"
+
+    # Corrupt only the source-universe completeness seen by the target/rule
+    # producers. The authenticated opening/host/void/schedule chain above must stay
+    # healthy so this test isolates the applicability source-completeness boundary.
+    if partial_source:
+        object.__setattr__(published.coverage, "state", "partial")
+        object.__setattr__(published.coverage, "failed_pages", (1,))
 
     selector = OpeningDeductionApplicabilitySelector(
         document_id=void_selector.document_id,
