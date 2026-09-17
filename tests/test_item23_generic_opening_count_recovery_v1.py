@@ -133,7 +133,7 @@ def test_duplicate_same_identity_fails_closed_instead_of_first_or_last_wins() ->
     )
     result = recovery.recover(object())
     assert result.recovered == ()
-    assert "q-second" in result.rejected_quantity_ids
+    assert set(result.rejected_quantity_ids) == {"q-first", "q-second"}
 
 
 def test_arbitrary_explicit_door_and_window_numbers_are_supported() -> None:
