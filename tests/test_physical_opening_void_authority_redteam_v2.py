@@ -18,30 +18,29 @@ from pathlib import Path
 
 import pytest
 
-from pb_geometry_takeoff_model import AuthorityStatus
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_opening_dimension_authority import OpeningDimensionAuthority
+from pb_opening_height_authority import OpeningHeightAuthority, OpeningHeightSelector
+from pb_opening_vertical_placement_authority import (
+    OpeningVerticalPlacementAuthority,
+    OpeningVerticalPlacementSelector,
+)
 from pb_opening_universe_completeness_authority import (
     OpeningUniverseCompletenessAuthority,
     OpeningUniverseSelector,
 )
-from pb_page_scale_calibration_authority import (
-    ScaleSourceReading,
-    ScaleSourceType,
-    measurement_authority_for_page_scale,
-    resolve_page_scale_calibration,
-)
+from pb_physical_scale_authority import PhysicalScaleAuthority, PhysicalScaleSelector
 
 
-BASE_SHA = "5b5d92583ef8a8695da90209bf05f84b7385a77a"
+BASE_SHA = "35aad62125cdebf9332ca94ffe5e40730a960dcf"
 MODULE_NAME = "pb_physical_opening_void_authority"
 HAS_VOID_AUTHORITY = importlib.util.find_spec(MODULE_NAME) is not None
 EXPECTED_RED = pytest.mark.xfail(
     condition=not HAS_VOID_AUTHORITY,
     strict=True,
     reason=(
-        "Physical Opening Void V2 production is intentionally absent; host #381 is "
-        "unmerged and authenticated height / vertical placement / unit mapping are unavailable"
+        "Physical Opening Void V2 production is intentionally absent; this validator "
+        "must remain test-only until the current sealed prerequisite chain replays green"
     ),
 )
 
@@ -155,6 +154,7 @@ _REQUIRED_REASON_EXPORTS = {
     "PHYSICAL_OPENING_VOID_UNIT_MAPPING_UNRESOLVED",
     "PHYSICAL_OPENING_VOID_UNIVERSE_INCOMPLETE",
     "PHYSICAL_OPENING_VOID_PROFILE_UNSUPPORTED",
+    "PHYSICAL_OPENING_VOID_GEOMETRY_CONFLICT",
     "PHYSICAL_OPENING_VOID_LINEAGE_MISMATCH",
 }
 
@@ -177,10 +177,37 @@ def _source_text() -> str:
     return Path(spec.origin).read_text(encoding="utf-8")
 
 
-def test_current_height_boundary_still_does_not_self_certify_height() -> None:
-    """Current main has a height resolver, but no caller height input surface."""
+def test_legacy_dimension_height_boundary_still_cannot_self_certify_height() -> None:
+    """Width authority retains a fail-closed legacy height surface only."""
     params = set(inspect.signature(OpeningDimensionAuthority.resolve_height).parameters)
     assert params == {"self", "selector"}
+
+
+def test_current_height_and_vertical_boundaries_are_selector_only() -> None:
+    assert set(inspect.signature(OpeningHeightAuthority.resolve).parameters) == {
+        "self",
+        "selector",
+    }
+    assert set(inspect.signature(OpeningVerticalPlacementAuthority.resolve).parameters) == {
+        "self",
+        "selector",
+    }
+    assert {item.name for item in fields(OpeningHeightSelector)} == {
+        "document_id",
+        "revision_id",
+        "source_sha256",
+        "snapshot_id",
+        "decision_scope_id",
+        "opening_record_id",
+    }
+    assert {item.name for item in fields(OpeningVerticalPlacementSelector)} == {
+        "document_id",
+        "revision_id",
+        "source_sha256",
+        "snapshot_id",
+        "decision_scope_id",
+        "opening_record_id",
+    }
 
 
 def test_opening_universe_lookup_is_selector_only_not_caller_completeness() -> None:
@@ -190,22 +217,22 @@ def test_opening_universe_lookup_is_selector_only_not_caller_completeness() -> N
     assert not (selector_fields & {"complete", "claimed_complete", "count", "fingerprint"})
 
 
-def test_title_block_text_scale_is_not_firm_physical_unit_authority() -> None:
-    """A nearby textual 1:N scale cannot silently establish physical void units."""
-    calibration = resolve_page_scale_calibration(
-        page_no=1,
-        sheet_label="A101",
-        readings=[
-            ScaleSourceReading(
-                source_type=ScaleSourceType.TITLE_BLOCK.value,
-                scale_text="1:100",
-                ratio=100.0,
-                confidence=1.0,
-            )
-        ],
-        revision_id="rev-a",
-    )
-    assert measurement_authority_for_page_scale(calibration) == AuthorityStatus.PROVISIONAL.value
+def test_physical_scale_lookup_is_selector_only_and_viewport_addressed() -> None:
+    """Ratios and conversion factors cannot enter the sealed physical-scale lookup."""
+    assert set(inspect.signature(PhysicalScaleAuthority.resolve).parameters) == {
+        "self",
+        "selector",
+    }
+    selector_fields = {item.name for item in fields(PhysicalScaleSelector)}
+    assert selector_fields == {
+        "document_id",
+        "revision_id",
+        "source_sha256",
+        "snapshot_id",
+        "page_id",
+        "viewport_id",
+    }
+    assert not (selector_fields & {"ratio", "scale_ratio", "points_per_mm", "mm_per_point"})
 
 
 @EXPECTED_RED
@@ -293,13 +320,29 @@ def test_reason_vocabulary_covers_every_blocking_prerequisite() -> None:
 @EXPECTED_RED
 def test_source_depends_on_authenticated_host_dimension_completeness_and_scale_layers() -> None:
     source = _source_text()
+    assert "pb_physical_opening_authority" in source
     assert "pb_opening_host_binding_authority" in source
+    assert "pb_opening_host_frame_authority" in source
     assert "pb_opening_dimension_authority" in source
+    assert "pb_opening_height_authority" in source
+    assert "pb_opening_vertical_placement_authority" in source
     assert "pb_opening_universe_completeness_authority" in source
-    assert "pb_page_scale_calibration_authority" in source
-    assert "resolve_height" in source
+    assert "pb_physical_scale_authority" in source
+    assert "OpeningHeightSelector" in source
+    assert "OpeningVerticalPlacementSelector" in source
+    assert "PhysicalScaleSelector" in source
     assert "decision_scope_complete" in source
-    assert "measurement_authority_for_page_scale" in source
+    assert "pb_page_scale_calibration_authority" not in source
+    assert "measurement_authority_for_page_scale" not in source
+
+
+@EXPECTED_RED
+def test_source_enforces_exact_cross_authority_opening_identity_join() -> None:
+    source = _source_text()
+    assert "opening_identity_id" in source
+    assert "opening_record_id" in source
+    assert "existence_record" in source
+    assert "host_binding_record_id" in source
 
 
 @EXPECTED_RED
