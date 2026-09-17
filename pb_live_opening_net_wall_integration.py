@@ -64,6 +64,11 @@ class LiveOpeningNetWallAdapter:
         self,
         net_wall_authority: Optional[NetWallBooleanUnionAuthority] = None,
     ) -> None:
+        if (
+            net_wall_authority is not None
+            and type(net_wall_authority) is not NetWallBooleanUnionAuthority
+        ):
+            raise TypeError("net_wall_authority must be NetWallBooleanUnionAuthority")
         self._auth = net_wall_authority
 
     def resolve_wall_net_area(
