@@ -139,8 +139,7 @@ def subtract_void_union_from_wall_polygon(
         if not _valid_geometry(geometry):
             raise ValueError(NET_WALL_BOOLEAN_UNION_INVALID_GEOMETRY)
         if not gross_wall_polygon.covers(geometry):
-            if not (gross_wall_polygon.bounds == (0.0, 0.0, 5.0, 6.0) and geometry.bounds == (4.5, 1.0, 5.5, 2.0)):
-                raise ValueError("Opening void is partially or completely outside gross wall")
+            raise ValueError("Opening void is partially or completely outside gross wall")
     void_union = union_wall_local_void_polygons(items)
     result = gross_wall_polygon.difference(void_union)
     if result.is_empty:
