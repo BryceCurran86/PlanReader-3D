@@ -157,7 +157,7 @@ class WallDeductionResult:
     ``net_area_m2`` is always only the best-known arithmetic estimate.  It is
     authoritative only when ``net_area_evidence`` says so.  On the current
     architecture there is no producer-owned host-binding integration here, so
-    this public result always carries ABSTAINED evidence and ``value=None``.
+    publication remains fail-closed at the prediction layer.
     """
 
     wall_id: str
@@ -275,12 +275,18 @@ class GenericOpeningDeductionPipeline:
         sel = selector or self._net_wall_selectors.get(wall.wall_id)
         if self._net_wall_authority is not None and sel is not None:
             from pb_live_opening_net_wall_integration import LiveOpeningNetWallAdapter
+
             adapter = LiveOpeningNetWallAdapter(self._net_wall_authority)
             live_res = adapter.resolve_wall_net_area(
-                sel, wall_id=wall.wall_id, gross_area_m2=wall.gross_area_m2
+                sel,
+                wall_id=wall.wall_id,
+                gross_area_m2=wall.gross_area_m2,
             )
             if live_res.is_authoritative and live_res.net_area_m2 is not None:
-                deducted_area = round(max(0.0, wall.gross_area_m2 - live_res.net_area_m2), 4)
+                deducted_area = round(
+                    max(0.0, wall.gross_area_m2 - live_res.net_area_m2),
+                    4,
+                )
                 return WallDeductionResult(
                     wall_id=provisional.wall_id,
                     gross_area_m2=provisional.gross_area_m2,
@@ -291,17 +297,16 @@ class GenericOpeningDeductionPipeline:
                     unresolved_openings=provisional.unresolved_openings,
                     unbound_openings=provisional.unbound_openings,
                 )
-            else:
-                return WallDeductionResult(
-                    wall_id=provisional.wall_id,
-                    gross_area_m2=provisional.gross_area_m2,
-                    total_deducted_area_m2=provisional.total_deducted_area_m2,
-                    net_area_m2=provisional.net_area_m2,
-                    net_area_evidence=live_res.evidence,
-                    applied_openings=provisional.applied_openings,
-                    unresolved_openings=provisional.unresolved_openings,
-                    unbound_openings=provisional.unbound_openings,
-                )
+            return WallDeductionResult(
+                wall_id=provisional.wall_id,
+                gross_area_m2=provisional.gross_area_m2,
+                total_deducted_area_m2=provisional.total_deducted_area_m2,
+                net_area_m2=provisional.net_area_m2,
+                net_area_evidence=live_res.evidence,
+                applied_openings=provisional.applied_openings,
+                unresolved_openings=provisional.unresolved_openings,
+                unbound_openings=provisional.unbound_openings,
+            )
 
         blocking_reasons = (
             "producer_owned_host_binding_authority_unavailable",
@@ -309,7 +314,10 @@ class GenericOpeningDeductionPipeline:
                 f"unresolved_dimensions:{entry['opening_id']}"
                 for entry in provisional.unresolved_openings
             ),
-            *(f"unbound:{entry['opening_id']}" for entry in provisional.unbound_openings),
+            *(
+                f"unbound:{entry['opening_id']}"
+                for entry in provisional.unbound_openings
+            ),
         )
         evidence = QuantityEvidence(
             quantity_id=stable_contract_id(
@@ -326,7 +334,8 @@ class GenericOpeningDeductionPipeline:
             semantic_key=wall.wall_id,
             value=None,
             unit="m2",
-            input_entity_ids=(wall.wall_id,) + tuple(opening.opening_id for opening in openings),
+            input_entity_ids=(wall.wall_id,)
+            + tuple(opening.opening_id for opening in openings),
             formula="gross_area_m2 - sum(provisional_opening_areas)",
             authority="pb_opening_deduction_pipeline.calculate_wall_deductions",
             status="abstained",
@@ -351,14 +360,16 @@ class GenericOpeningDeductionPipeline:
         openings: Sequence[OpeningInstance],
         selectors: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, WallDeductionResult]:
-        """Refuse host self-certification, then compute deductions using live authorities if present."""
+        """Refuse host self-certification, then compute exact-wall diagnostics."""
         self.bind_openings_to_walls(openings, walls)
         all_selectors = dict(self._net_wall_selectors)
         if selectors:
             all_selectors.update(selectors)
         return {
             wall.wall_id: self.calculate_wall_deductions(
-                wall, openings, selector=all_selectors.get(wall.wall_id)
+                wall,
+                openings,
+                selector=all_selectors.get(wall.wall_id),
             )
             for wall in walls
         }
@@ -368,28 +379,26 @@ class GenericOpeningDeductionPipeline:
         predictions: Sequence[Any],
         results: Dict[str, WallDeductionResult],
     ) -> List[Any]:
-        """Propagate only authoritative net area; otherwise publish ``None``.
+        """Keep prediction publication fail-closed and prevent cross-wall fanout.
 
-        ITEM 21A FAIL-CLOSED ENFORCEMENT:
-        - Caller-supplied independent_gross_area_m2 is NEVER authoritative
-        - Global primary_res fanout without exact physical-wall joining is blocked
-        - Results remain ABSTAINED until source-derived gross-wall authority exists
-        - Caller data retained in diagnostic metadata only (UI/provisional paths)
+        Item 21A rules:
+        - caller ``independent_gross_area_m2`` is diagnostic only;
+        - no result is selected by "first", perimeter, or external fallback;
+        - walling predictions may select only a result whose key equals the tag;
+        - wall-finish predictions require an explicit addressing-only
+          ``metadata['physical_wall_id']`` that exactly matches a result key and
+          the result's own wall_id;
+        - without that exact match, no numeric wall diagnostics are copied;
+        - prediction quantity remains ``None`` even with exact corroborated
+          adapter evidence until the later source-derived publication contract.
         """
-        primary_res = (
-            results.get("perimeter_walling")
-            or results.get("external_walling")
-            or (list(results.values())[0] if results else None)
-        )
-        if not primary_res:
-            return list(predictions)
-
-        evidence = primary_res.net_area_evidence
-        abstained = evidence is None or evidence.abstained
-
-        out_preds = []
+        out_preds: List[Any] = []
         for prediction in predictions:
-            tag = prediction.tag if hasattr(prediction, "tag") else prediction.get("tag", "")
+            tag = (
+                prediction.tag
+                if hasattr(prediction, "tag")
+                else prediction.get("tag", "")
+            )
             is_walling = tag in (
                 "perimeter_walling",
                 "external_walling",
@@ -406,52 +415,88 @@ class GenericOpeningDeductionPipeline:
                 out_preds.append(prediction)
                 continue
 
-            metadata = prediction.metadata if hasattr(prediction, "metadata") else prediction.get("metadata", {})
-
-            # Item 21A: Caller-supplied independent_gross_area_m2 is diagnostic only
-            # It can never replace authenticated net-wall area in publication path
+            metadata = (
+                prediction.metadata
+                if hasattr(prediction, "metadata")
+                else prediction.get("metadata", {})
+            )
             independent_gross = metadata.get("independent_gross_area_m2")
-            provisional_net = primary_res.net_area_m2
-
-            # Calculate what caller data would produce (for diagnostics)
-            if independent_gross is not None:
-                caller_derived_net = round(
-                    independent_gross - primary_res.total_deducted_area_m2, 4
-                )
-            else:
-                caller_derived_net = None
-
-            metadata["gross_area_m2"] = primary_res.gross_area_m2
-            metadata["total_deducted_opening_area_m2"] = primary_res.total_deducted_area_m2
-            metadata["applied_openings"] = primary_res.applied_openings
-            metadata["unresolved_openings"] = primary_res.unresolved_openings
-            metadata["unbound_openings"] = primary_res.unbound_openings
-
-            # Item 21A diagnostic tracking (never authoritative)
             if independent_gross is not None:
                 metadata["caller_supplied_gross_area_m2"] = independent_gross
-                metadata["caller_derived_net_area_m2"] = caller_derived_net
 
-            # ITEM 21A FAIL-CLOSED: Always ABSTAINED until source-derived authorities exist
-            # No caller-supplied data, no exact physical-wall joining verified,
-            # no source-derived gross-wall area authority yet implemented
-            net_value = None
+            requested_wall_id: Optional[str] = None
+            if is_walling and tag in results:
+                requested_wall_id = tag
+            else:
+                candidate_wall_id = metadata.get("physical_wall_id")
+                if isinstance(candidate_wall_id, str) and candidate_wall_id.strip():
+                    requested_wall_id = candidate_wall_id.strip()
+
+            exact_res = (
+                results.get(requested_wall_id)
+                if requested_wall_id is not None
+                else None
+            )
+            exact_match = (
+                exact_res is not None
+                and exact_res.wall_id == requested_wall_id
+            )
+
+            if not exact_match:
+                metadata["net_area_m2"] = None
+                metadata["provisional_net_area_m2"] = None
+                metadata["publication_blocked"] = True
+                metadata["reconciliation_status"] = (
+                    "item_21a_no_exact_physical_wall_binding"
+                )
+                metadata["blocking_reason"] = (
+                    "item_21a_fail_closed: exact_physical_wall_joining_unavailable; "
+                    "no wall result was copied across identities"
+                )
+                if independent_gross is not None:
+                    metadata["caller_derived_net_area_m2"] = None
+                if hasattr(prediction, "quantity"):
+                    prediction.quantity = None
+                    prediction.metadata = metadata
+                else:
+                    prediction["quantity"] = None
+                    prediction["metadata"] = metadata
+                out_preds.append(prediction)
+                continue
+
+            assert exact_res is not None
+            provisional_net = exact_res.net_area_m2
+            if independent_gross is not None:
+                metadata["caller_derived_net_area_m2"] = round(
+                    independent_gross - exact_res.total_deducted_area_m2,
+                    4,
+                )
+
+            metadata["resolved_physical_wall_id"] = exact_res.wall_id
+            metadata["gross_area_m2"] = exact_res.gross_area_m2
+            metadata["total_deducted_opening_area_m2"] = (
+                exact_res.total_deducted_area_m2
+            )
+            metadata["applied_openings"] = exact_res.applied_openings
+            metadata["unresolved_openings"] = exact_res.unresolved_openings
+            metadata["unbound_openings"] = exact_res.unbound_openings
             metadata["net_area_m2"] = None
             metadata["provisional_net_area_m2"] = provisional_net
             metadata["publication_blocked"] = True
-            metadata["reconciliation_status"] = "item_21a_awaiting_source_derived_authority"
+            metadata["reconciliation_status"] = (
+                "item_21a_awaiting_source_derived_authority"
+            )
             metadata["blocking_reason"] = (
                 "item_21a_fail_closed: caller_gross_area_not_authoritative, "
-                "exact_physical_wall_joining_unavailable, "
-                "source_derived_gross_wall_authority_not_yet_implemented; "
+                "prediction publication contract not yet source-derived; "
                 "provisional_net_area_m2 is diagnostic only"
             )
 
             if hasattr(prediction, "quantity"):
-                prediction.quantity = net_value
+                prediction.quantity = None
                 prediction.metadata = metadata
             else:
-                prediction["quantity"] = net_value
+                prediction["quantity"] = None
                 prediction["metadata"] = metadata
             out_preds.append(prediction)
 
