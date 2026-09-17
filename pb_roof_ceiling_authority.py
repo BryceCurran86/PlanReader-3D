@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from enum import Enum
 import math
 from types import MappingProxyType
-from typing import Mapping, Optional, Sequence, Tuple
+from typing import Mapping, Optional, Tuple
 
 from pb_migration_contracts import (
     EvidenceResolutionStatus,
@@ -32,6 +32,10 @@ from pb_migration_contracts import (
 from pb_physical_scale_authority import (
     PhysicalScaleAuthority,
     PhysicalScaleSelector,
+)
+from pb_physical_wall_candidate_authority import (
+    PhysicalWallCandidateAuthority,
+    PhysicalWallCandidateSelector,
 )
 
 ROOF_CEILING_SCHEMA_VERSION = "1.0.0"
@@ -114,45 +118,6 @@ class RoofCeilingSelector:
 
 
 @dataclass(frozen=True)
-class RoofCeilingEvidence:
-    """Authenticated observation for roof or ceiling parameter."""
-    evidence_id: str
-    source_sha256: str
-    revision_id: str
-    snapshot_id: str
-    page_id: str
-    viewport_id: str
-    family: RoofCeilingFamily
-    measured_value: float
-    unit: str           # "m2", "deg", "m"
-    kind: str           # e.g. "ceiling_plan_annotation", "roof_elevation_pitch"
-    method: str         # e.g. "direct_dimension", "authenticated_elevation_angle"
-    confidence: float
-    is_sloped: bool = False
-    pitch_deg: Optional[float] = None
-
-    def __post_init__(self) -> None:
-        for name in (
-            "evidence_id",
-            "source_sha256",
-            "revision_id",
-            "snapshot_id",
-            "page_id",
-            "viewport_id",
-            "unit",
-            "kind",
-            "method",
-        ):
-            _required(getattr(self, name), name)
-        if not isinstance(self.family, RoofCeilingFamily):
-            raise TypeError("family must be RoofCeilingFamily")
-        if not math.isfinite(self.measured_value) or self.measured_value <= 0.0:
-            raise ValueError("measured_value must be positive and finite")
-        if not (0.0 <= self.confidence <= 1.0):
-            raise ValueError("confidence must be in [0, 1]")
-
-
-@dataclass(frozen=True)
 class RoofCeilingRecord:
     """Sealed roof/ceiling authority record."""
     record_id: str
@@ -225,6 +190,7 @@ class RoofCeilingProducer:
     def __init__(
         self,
         physical_scale_authority: PhysicalScaleAuthority,
+        physical_wall_candidate_authority: Optional[PhysicalWallCandidateAuthority] = None,
         *,
         _seal: object = None,
     ) -> None:
@@ -232,7 +198,13 @@ class RoofCeilingProducer:
             raise TypeError("RoofCeilingProducer must be obtained via from_authorities()")
         if type(physical_scale_authority) is not PhysicalScaleAuthority:
             raise TypeError("physical_scale_authority must be producer-owned PhysicalScaleAuthority")
+        if (
+            physical_wall_candidate_authority is not None
+            and type(physical_wall_candidate_authority) is not PhysicalWallCandidateAuthority
+        ):
+            raise TypeError("physical_wall_candidate_authority must be producer-owned PhysicalWallCandidateAuthority")
         self._scale = physical_scale_authority
+        self._wall_candidates = physical_wall_candidate_authority
         self._results: dict[_Key, RoofCeilingResult] = {}
 
     @classmethod
@@ -240,8 +212,13 @@ class RoofCeilingProducer:
         cls,
         *,
         physical_scale_authority: PhysicalScaleAuthority,
+        physical_wall_candidate_authority: Optional[PhysicalWallCandidateAuthority] = None,
     ) -> "RoofCeilingProducer":
-        return cls(physical_scale_authority, _seal=_PRODUCER_SEAL)
+        return cls(
+            physical_scale_authority,
+            physical_wall_candidate_authority,
+            _seal=_PRODUCER_SEAL,
+        )
 
     def authority(self) -> RoofCeilingAuthority:
         return RoofCeilingAuthority(self._results, _seal=_AUTHORITY_SEAL)
@@ -257,11 +234,13 @@ class RoofCeilingProducer:
     def publish(
         self,
         selector: RoofCeilingSelector,
-        observations: Sequence[RoofCeilingEvidence],
     ) -> RoofCeilingResult:
-        """Publish roof/ceiling quantity for selector."""
+        """Publish roof/ceiling quantity for selector by re-resolving scale and candidate authorities."""
         if type(selector) is not RoofCeilingSelector:
             raise TypeError("selector must be RoofCeilingSelector")
+
+        if selector.family == RoofCeilingFamily.UNRESOLVED:
+            return self._store(selector, _abstained(ROOF_CEILING_UNRESOLVED))
 
         # 1. Resolve Scale
         scale_sel = PhysicalScaleSelector(
@@ -284,93 +263,91 @@ class RoofCeilingProducer:
                 ),
             )
 
-        # 2. Filter Observations
-        obs = list(observations or [])
-        if not obs:
+        if self._wall_candidates is None:
             return self._store(selector, _abstained(ROOF_CEILING_UNRESOLVED))
 
-        forbidden_kinds = {
-            "floor_area_ceiling_shortcut",
-            "plan_footprint_roof_surface_shortcut",
-            "assumed_pitch",
-            "assumed_overhang",
-            "boq_description_only",
-            "gable_wall_pitch_inference",
-        }
-        valid_obs: list[RoofCeilingEvidence] = []
-        forbidden_floor = False
-        forbidden_footprint = False
-        forbidden_pitch = False
-        forbidden_overhang = False
-        forbidden_boq = False
-        forbidden_gable = False
-        stale_count = 0
-
-        for ob in obs:
-            if not isinstance(ob, RoofCeilingEvidence):
-                continue
-            if ob.family != selector.family:
-                continue
-            if ob.kind == "floor_area_ceiling_shortcut":
-                forbidden_floor = True
-                continue
-            if ob.kind == "plan_footprint_roof_surface_shortcut":
-                forbidden_footprint = True
-                continue
-            if ob.kind == "assumed_pitch":
-                forbidden_pitch = True
-                continue
-            if ob.kind == "assumed_overhang":
-                forbidden_overhang = True
-                continue
-            if ob.kind == "boq_description_only":
-                forbidden_boq = True
-                continue
-            if ob.kind == "gable_wall_pitch_inference":
-                forbidden_gable = True
-                continue
-            if ob.kind in forbidden_kinds:
-                continue
-
-            # Lineage match
-            if (
-                ob.source_sha256 != selector.source_sha256
-                or ob.revision_id != selector.revision_id
-                or ob.snapshot_id != selector.snapshot_id
-                or ob.page_id != selector.page_id
-            ):
-                stale_count += 1
-                continue
-            valid_obs.append(ob)
-
-        if forbidden_floor and not valid_obs:
-            return self._store(selector, _abstained(ROOF_CEILING_FLOOR_AREA_SHORTCUT_REJECTED))
-        if forbidden_footprint and not valid_obs:
-            return self._store(selector, _abstained(ROOF_CEILING_FOOTPRINT_SURFACE_SHORTCUT_REJECTED))
-        if forbidden_pitch and not valid_obs:
-            return self._store(selector, _abstained(ROOF_CEILING_ASSUMED_PITCH_REJECTED))
-        if forbidden_overhang and not valid_obs:
-            return self._store(selector, _abstained(ROOF_CEILING_ASSUMED_OVERHANG_REJECTED))
-        if forbidden_boq and not valid_obs:
-            return self._store(selector, _abstained(ROOF_CEILING_BOQ_ONLY_REJECTED))
-        if forbidden_gable and not valid_obs:
-            return self._store(selector, _abstained(ROOF_CEILING_GABLE_INFERENCE_REJECTED))
-        if stale_count and not valid_obs:
-            return self._store(selector, _conflict(ROOF_CEILING_LINEAGE_MISMATCH))
-        if not valid_obs:
+        # 2. Resolve Candidate Geometry
+        cand_scope_id = f"wall-source:page-{selector.page_id}"
+        cand_sel = PhysicalWallCandidateSelector(
+            document_id=selector.document_id,
+            revision_id=selector.revision_id,
+            source_sha256=selector.source_sha256,
+            snapshot_id=selector.snapshot_id,
+            page_id=selector.page_id,
+            decision_scope_id=cand_scope_id,
+        )
+        cand_res = self._wall_candidates.resolve_scope(cand_sel)
+        if cand_res.status is not EvidenceResolutionStatus.CORROBORATED:
             return self._store(selector, _abstained(ROOF_CEILING_UNRESOLVED))
 
-        # Value consensus
-        val_set = {round(ob.measured_value, 6) for ob in valid_obs}
-        if len(val_set) > 1:
-            return self._store(selector, _conflict(ROOF_CEILING_UNRESOLVED, "conflicting_measured_values"))
+        matching = [
+            r for r in cand_res.records
+            if r.wall_candidate_id == selector.target_id
+            or getattr(r.physical_identity, "physical_wall_id", None) == selector.target_id
+        ]
+        if not matching:
+            return self._store(selector, _abstained(ROOF_CEILING_UNRESOLVED))
 
-        val = float(next(iter(val_set)))
-        first_ob = valid_obs[0]
-        unit = first_ob.unit
-        is_sloped = first_ob.is_sloped
-        pitch_deg = first_ob.pitch_deg
-        evidence_ids = tuple(sorted({ob.evidence_id for ob in valid_obs}))
+        rec = matching[0]
+        cand = rec.wall_candidate
+        meta = cand.metadata or {}
+
+        val = 0.0
+        unit = "m2"
+        is_sloped = False
+        pitch_deg: Optional[float] = None
+
+        if selector.family in (RoofCeilingFamily.CEILING_AREA, RoofCeilingFamily.ROOF_PLAN_AREA):
+            area_m2 = meta.get("area_m2")
+            if area_m2 is None and getattr(cand, "length_m", None) and meta.get("width_m"):
+                try:
+                    area_m2 = float(cand.length_m) * float(meta["width_m"])
+                except (TypeError, ValueError):
+                    area_m2 = None
+
+            if area_m2 is None or not isinstance(area_m2, (int, float)) or not math.isfinite(area_m2) or area_m2 <= 0.0:
+                return self._store(selector, _abstained(ROOF_CEILING_UNRESOLVED))
+
+            val = round(float(area_m2), 6)
+            unit = "m2"
+            is_sloped = bool(meta.get("is_sloped", False))
+            pitch_deg = float(meta["pitch_deg"]) if "pitch_deg" in meta and meta["pitch_deg"] is not None else None
+
+        elif selector.family == RoofCeilingFamily.ROOF_PITCH_DEG:
+            pitch = meta.get("pitch_deg")
+            if pitch is None or not isinstance(pitch, (int, float)) or not math.isfinite(pitch) or pitch <= 0.0:
+                return self._store(selector, _abstained(ROOF_CEILING_ASSUMED_PITCH_REJECTED))
+            val = round(float(pitch), 6)
+            unit = "deg"
+            is_sloped = True
+            pitch_deg = val
+
+        elif selector.family == RoofCeilingFamily.ROOF_SURFACE_AREA:
+            pitch = meta.get("pitch_deg")
+            plan_area = meta.get("area_m2")
+            if pitch is None or plan_area is None:
+                return self._store(selector, _abstained(ROOF_CEILING_FOOTPRINT_SURFACE_SHORTCUT_REJECTED))
+            try:
+                rad = math.radians(float(pitch))
+                val = round(float(plan_area) / math.cos(rad), 6)
+            except Exception:
+                return self._store(selector, _abstained(ROOF_CEILING_ASSUMED_PITCH_REJECTED))
+            unit = "m2"
+            is_sloped = True
+            pitch_deg = float(pitch)
+
+        elif selector.family == RoofCeilingFamily.EAVES_OVERHANG_LENGTH:
+            overhang = meta.get("overhang_length_m")
+            if overhang is None or not isinstance(overhang, (int, float)) or not math.isfinite(overhang) or overhang <= 0.0:
+                return self._store(selector, _abstained(ROOF_CEILING_ASSUMED_OVERHANG_REJECTED))
+            val = round(float(overhang), 6)
+            unit = "m"
+
+        else:
+            return self._store(selector, _abstained(ROOF_CEILING_UNRESOLVED))
+
+        scale_id = getattr(scale_res.evidence, "record_id", "scale") if scale_res.evidence else "scale"
+        evidence_ids = (rec.wall_candidate_id, str(scale_id))
 
         payload = {
             "document_id": selector.document_id,
@@ -425,10 +402,9 @@ __all__ = [
     "ROOF_CEILING_SCHEMA_VERSION",
     "ROOF_CEILING_UNRESOLVED",
     "RoofCeilingAuthority",
-    "RoofCeilingEvidence",
-    "RoofCeilingFamily",
     "RoofCeilingProducer",
     "RoofCeilingRecord",
     "RoofCeilingResult",
     "RoofCeilingSelector",
+    "RoofCeilingFamily",
 ]

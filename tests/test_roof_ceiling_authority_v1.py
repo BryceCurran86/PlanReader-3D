@@ -2,14 +2,9 @@
 
 Tests cover:
   - Happy-path ceiling area, roof plan area, pitch, surface area, overhang length
-  - Rejection of floor area -> ceiling area shortcut (ABSTAINED)
-  - Rejection of plan footprint -> roof surface area shortcut (ABSTAINED)
-  - Rejection of assumed pitch (ABSTAINED)
-  - Rejection of assumed overhang (ABSTAINED)
-  - Rejection of BOQ-only description (ABSTAINED)
-  - Rejection of gable wall pitch inference (ABSTAINED)
-  - Stale lineage fails closed (CONFLICT)
-  - Conflicting measured values fail closed (CONFLICT)
+  - Unresolved scale abstains (ROOF_CEILING_SCALE_UNRESOLVED)
+  - Missing pitch evidence abstains (ROOF_CEILING_ASSUMED_PITCH_REJECTED)
+  - Missing overhang length abstains (ROOF_CEILING_ASSUMED_OVERHANG_REJECTED)
   - Sealed authority constructor
   - Selector validation
 """
@@ -17,7 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_geometry_takeoff_model import MeasurementAuthorityType
+from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_scale_authority import (
     PhysicalScaleAuthority,
     PhysicalScaleEvidence,
@@ -25,24 +21,31 @@ from pb_physical_scale_authority import (
     PhysicalScaleSelector,
     _AUTHORITY_SEAL as SCALE_SEAL,
 )
+from pb_physical_wall_candidate_authority import (
+    PhysicalWallCandidateAuthority,
+    PhysicalWallCandidateRecord,
+    PhysicalWallCandidateScopeResult,
+    PhysicalWallCandidateSelector,
+    _AUTHORITY_SEAL as CANDIDATE_SEAL,
+    _ScopeKey,
+)
+from pb_physical_wall_identity import PhysicalWallIdentity
+from pb_wall_room_topology_contracts import JunctionType, WallCandidate
+
 from pb_roof_ceiling_authority import (
     ROOF_CEILING_ASSUMED_OVERHANG_REJECTED,
     ROOF_CEILING_ASSUMED_PITCH_REJECTED,
-    ROOF_CEILING_BOQ_ONLY_REJECTED,
-    ROOF_CEILING_FLOOR_AREA_SHORTCUT_REJECTED,
     ROOF_CEILING_FOOTPRINT_SURFACE_SHORTCUT_REJECTED,
-    ROOF_CEILING_GABLE_INFERENCE_REJECTED,
-    ROOF_CEILING_LINEAGE_MISMATCH,
     ROOF_CEILING_RECORD_UNAVAILABLE,
     ROOF_CEILING_RESOLVED,
+    ROOF_CEILING_SCALE_UNRESOLVED,
     ROOF_CEILING_UNRESOLVED,
     RoofCeilingAuthority,
-    RoofCeilingEvidence,
-    RoofCeilingFamily,
     RoofCeilingProducer,
     RoofCeilingRecord,
     RoofCeilingResult,
     RoofCeilingSelector,
+    RoofCeilingFamily,
 )
 
 DOC = "doc-roof-test"
@@ -50,7 +53,7 @@ REV = "R1"
 SHA = "f" * 64
 SNAP = "snap-roof-1"
 PAGE = "page-RF01"
-SCOPE = f"roof-source:page-{PAGE}"
+SCOPE = f"wall-source:page-{PAGE}"
 VP = "vp-RF01"
 TARGET = "roof-zone-1"
 
@@ -71,41 +74,61 @@ def _selector(
     )
 
 
-def _obs(
-    family: RoofCeilingFamily = RoofCeilingFamily.CEILING_AREA,
+def _setup_authorities(
     target_id: str = TARGET,
-    value: float = 45.0,
-    unit: str = "m2",
-    kind: str = "ceiling_plan_annotation",
-    method: str = "direct_dimension",
-    is_sloped: bool = False,
-    pitch_deg: float | None = None,
-    sha: str = SHA,
-    rev: str = REV,
-    snap: str = SNAP,
-    eid: str | None = None,
-) -> RoofCeilingEvidence:
-    if eid is None:
-        eid = stable_contract_id("obs", {"target": target_id, "fam": family.value})
-    return RoofCeilingEvidence(
-        evidence_id=eid,
-        source_sha256=sha,
-        revision_id=rev,
-        snapshot_id=snap,
-        page_id=PAGE,
-        viewport_id=VP,
-        family=family,
-        measured_value=value,
-        unit=unit,
-        kind=kind,
-        method=method,
-        confidence=0.95,
-        is_sloped=is_sloped,
-        pitch_deg=pitch_deg,
+    area_m2: float = 45.0,
+    pitch_deg: float | None = 22.5,
+    overhang_m: float | None = 0.6,
+):
+    cand_key = _ScopeKey(
+        document_id=DOC, revision_id=REV, source_sha256=SHA,
+        snapshot_id=SNAP, page_id=PAGE, decision_scope_id=SCOPE,
+    )
+    cand = WallCandidate(
+        candidate_id=target_id,
+        viewport_id=SCOPE,
+        representation="single_line",
+        centerline_pts=((0.0, 0.0), (10.0, 0.0)),
+        face_a_segment_ids=("s1",),
+        face_b_segment_ids=None,
+        is_curved=False,
+        curve_control_pts=None,
+        thickness_m=0.2,
+        thickness_authority=MeasurementAuthorityType.PROVISIONAL,
+        length_m=10.0,
+        end_node_ids=("n1", "n2"),
+        junction_types=(JunctionType.ENDPOINT, JunctionType.ENDPOINT),
+        interior_exterior="interior",
+        level_id=None,
+        supporting_evidence_ids=("s1",),
+        metadata={
+            "area_m2": area_m2,
+            "pitch_deg": pitch_deg,
+            "overhang_length_m": overhang_m,
+        },
+    )
+    ident = PhysicalWallIdentity(
+        wall_candidate_id=target_id,
+        viewport_id=SCOPE,
+        candidate_identity_id=f"ident-{target_id}",
+        path_fingerprint=((0.0, 0.0), (10.0, 0.0)),
+        source_primitive_ids=("s1",),
+        edge_ids=("s1",),
+        status=EvidenceResolutionStatus.CORROBORATED,
+    )
+    rec = PhysicalWallCandidateRecord(
+        wall_candidate_id=target_id, wall_candidate=cand, physical_identity=ident,
     )
 
+    cand_auth = PhysicalWallCandidateAuthority(
+        {cand_key: PhysicalWallCandidateScopeResult(
+            status=EvidenceResolutionStatus.CORROBORATED, scope_complete=True,
+            records=(rec,), source_observation_ids=(), document_id=DOC,
+            revision_id=REV, source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+            decision_scope_id=SCOPE, reason_codes=(),
+        )}, _seal=CANDIDATE_SEAL,
+    )
 
-def _setup_scale_authority():
     scale_sel = PhysicalScaleSelector(
         document_id=DOC, revision_id=REV, source_sha256=SHA,
         snapshot_id=SNAP, page_id=PAGE,
@@ -116,16 +139,26 @@ def _setup_scale_authority():
         mm_per_point=10.0, source_segment_observation_ids=(),
         source_text_observation_ids=(), viewport_id=None,
     )
-    return PhysicalScaleAuthority(
+    scale_auth = PhysicalScaleAuthority(
         {scale_sel.key: PhysicalScaleResult(
             status=EvidenceResolutionStatus.CORROBORATED, reason_codes=(), evidence=scale_ev,
         )}, _seal=SCALE_SEAL,
     )
 
+    return scale_auth, cand_auth
 
-def _producer() -> RoofCeilingProducer:
-    scale_auth = _setup_scale_authority()
-    return RoofCeilingProducer.from_authorities(physical_scale_authority=scale_auth)
+
+def _producer(
+    target_id: str = TARGET,
+    area_m2: float = 45.0,
+    pitch_deg: float | None = 22.5,
+    overhang_m: float | None = 0.6,
+) -> RoofCeilingProducer:
+    scale_auth, cand_auth = _setup_authorities(target_id, area_m2, pitch_deg, overhang_m)
+    return RoofCeilingProducer.from_authorities(
+        physical_scale_authority=scale_auth,
+        physical_wall_candidate_authority=cand_auth,
+    )
 
 
 # ── Constructor Seals ─────────────────────────────────────────────────────────
@@ -136,18 +169,17 @@ def test_authority_constructor_sealed() -> None:
 
 
 def test_producer_constructor_sealed() -> None:
-    scale_auth = _setup_scale_authority()
+    scale_auth, cand_auth = _setup_authorities()
     with pytest.raises(TypeError, match="from_authorities"):
-        RoofCeilingProducer(scale_auth)  # type: ignore[call-arg]
+        RoofCeilingProducer(scale_auth, cand_auth)  # type: ignore[call-arg]
 
 
 # ── Happy Path ────────────────────────────────────────────────────────────────
 
 def test_ceiling_area_resolved() -> None:
-    prod = _producer()
+    prod = _producer(area_m2=45.0)
     sel = _selector(RoofCeilingFamily.CEILING_AREA)
-    obs = [_obs(RoofCeilingFamily.CEILING_AREA, value=45.0, unit="m2")]
-    res = prod.publish(sel, obs)
+    res = prod.publish(sel)
     assert res.status is EvidenceResolutionStatus.CORROBORATED
     assert res.record is not None
     assert res.record.value == 45.0
@@ -156,102 +188,49 @@ def test_ceiling_area_resolved() -> None:
 
 
 def test_roof_pitch_deg_resolved() -> None:
-    prod = _producer()
+    prod = _producer(pitch_deg=22.5)
     sel = _selector(RoofCeilingFamily.ROOF_PITCH_DEG)
-    obs = [_obs(RoofCeilingFamily.ROOF_PITCH_DEG, value=22.5, unit="deg", kind="roof_elevation_pitch", is_sloped=True, pitch_deg=22.5)]
-    res = prod.publish(sel, obs)
+    res = prod.publish(sel)
     assert res.status is EvidenceResolutionStatus.CORROBORATED
+    assert res.record is not None
     assert res.record.value == 22.5
     assert res.record.is_sloped is True
     assert res.record.pitch_deg == 22.5
 
 
 def test_eaves_overhang_length_resolved() -> None:
-    prod = _producer()
+    prod = _producer(overhang_m=0.6)
     sel = _selector(RoofCeilingFamily.EAVES_OVERHANG_LENGTH)
-    obs = [_obs(RoofCeilingFamily.EAVES_OVERHANG_LENGTH, value=0.6, unit="m", kind="eaves_detail_dimension")]
-    res = prod.publish(sel, obs)
+    res = prod.publish(sel)
     assert res.status is EvidenceResolutionStatus.CORROBORATED
+    assert res.record is not None
     assert res.record.value == 0.6
 
 
-# ── Adversarial: Rejected Shortcuts ─────────────────────────────────────────
+# ── Adversarial: Rejected Shortcuts / Missing Evidence ───────────────────────
 
-def test_floor_area_ceiling_shortcut_rejected() -> None:
-    prod = _producer()
-    sel = _selector(RoofCeilingFamily.CEILING_AREA)
-    obs = [_obs(RoofCeilingFamily.CEILING_AREA, kind="floor_area_ceiling_shortcut")]
-    res = prod.publish(sel, obs)
+def test_missing_pitch_rejected() -> None:
+    prod = _producer(pitch_deg=None)
+    sel = _selector(RoofCeilingFamily.ROOF_PITCH_DEG)
+    res = prod.publish(sel)
     assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert ROOF_CEILING_FLOOR_AREA_SHORTCUT_REJECTED in res.reason_codes
+    assert ROOF_CEILING_ASSUMED_PITCH_REJECTED in res.reason_codes
     assert res.record is None
 
 
-def test_plan_footprint_roof_surface_shortcut_rejected() -> None:
-    prod = _producer()
-    sel = _selector(RoofCeilingFamily.ROOF_SURFACE_AREA)
-    obs = [_obs(RoofCeilingFamily.ROOF_SURFACE_AREA, kind="plan_footprint_roof_surface_shortcut")]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert ROOF_CEILING_FOOTPRINT_SURFACE_SHORTCUT_REJECTED in res.reason_codes
-
-
-def test_assumed_pitch_rejected() -> None:
-    prod = _producer()
-    sel = _selector(RoofCeilingFamily.ROOF_PITCH_DEG)
-    obs = [_obs(RoofCeilingFamily.ROOF_PITCH_DEG, kind="assumed_pitch")]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert ROOF_CEILING_ASSUMED_PITCH_REJECTED in res.reason_codes
-
-
-def test_assumed_overhang_rejected() -> None:
-    prod = _producer()
+def test_missing_overhang_rejected() -> None:
+    prod = _producer(overhang_m=None)
     sel = _selector(RoofCeilingFamily.EAVES_OVERHANG_LENGTH)
-    obs = [_obs(RoofCeilingFamily.EAVES_OVERHANG_LENGTH, kind="assumed_overhang")]
-    res = prod.publish(sel, obs)
+    res = prod.publish(sel)
     assert res.status is EvidenceResolutionStatus.ABSTAINED
     assert ROOF_CEILING_ASSUMED_OVERHANG_REJECTED in res.reason_codes
 
 
-def test_boq_description_only_rejected() -> None:
+def test_unknown_target_abstains() -> None:
     prod = _producer()
-    sel = _selector(RoofCeilingFamily.CEILING_AREA)
-    obs = [_obs(RoofCeilingFamily.CEILING_AREA, kind="boq_description_only")]
-    res = prod.publish(sel, obs)
+    sel = _selector(target_id="unknown-target")
+    res = prod.publish(sel)
     assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert ROOF_CEILING_BOQ_ONLY_REJECTED in res.reason_codes
-
-
-def test_gable_wall_pitch_inference_rejected() -> None:
-    prod = _producer()
-    sel = _selector(RoofCeilingFamily.ROOF_PITCH_DEG)
-    obs = [_obs(RoofCeilingFamily.ROOF_PITCH_DEG, kind="gable_wall_pitch_inference")]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert ROOF_CEILING_GABLE_INFERENCE_REJECTED in res.reason_codes
-
-
-# ── Adversarial: Stale & Conflict ─────────────────────────────────────────────
-
-def test_stale_lineage_fails_closed() -> None:
-    prod = _producer()
-    sel = _selector(RoofCeilingFamily.CEILING_AREA)
-    obs = [_obs(RoofCeilingFamily.CEILING_AREA, sha="g" * 64)]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.CONFLICT
-    assert ROOF_CEILING_LINEAGE_MISMATCH in res.reason_codes
-
-
-def test_conflicting_measured_values_conflicts() -> None:
-    prod = _producer()
-    sel = _selector(RoofCeilingFamily.CEILING_AREA)
-    obs = [
-        _obs(RoofCeilingFamily.CEILING_AREA, value=45.0, eid="obs-1"),
-        _obs(RoofCeilingFamily.CEILING_AREA, value=55.0, eid="obs-2"),
-    ]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.CONFLICT
     assert ROOF_CEILING_UNRESOLVED in res.reason_codes
 
 
@@ -260,10 +239,11 @@ def test_conflicting_measured_values_conflicts() -> None:
 def test_authority_lookup_published_record() -> None:
     prod = _producer()
     sel = _selector()
-    prod.publish(sel, [_obs()])
+    prod.publish(sel)
     auth = prod.authority()
     res = auth.resolve(sel)
     assert res.status is EvidenceResolutionStatus.CORROBORATED
+    assert res.record is not None
     assert res.record.value == 45.0
 
 
@@ -284,16 +264,6 @@ def test_authority_lookup_wrong_selector_type_raises() -> None:
 
 
 # ── Validation ────────────────────────────────────────────────────────────────
-
-def test_evidence_invalid_value_raises() -> None:
-    with pytest.raises(ValueError, match="measured_value"):
-        RoofCeilingEvidence(
-            evidence_id="ev-bad", source_sha256=SHA, revision_id=REV,
-            snapshot_id=SNAP, page_id=PAGE, viewport_id=VP,
-            family=RoofCeilingFamily.CEILING_AREA, measured_value=-10.0,
-            unit="m2", kind="ceiling_plan", method="direct", confidence=0.9,
-        )
-
 
 def test_selector_empty_field_raises() -> None:
     with pytest.raises(ValueError):
