@@ -43,6 +43,8 @@ def test_current_main_legacy_net_path_is_still_fail_closed_not_union_authority()
 
 def test_benchmark_scorer_still_exposes_quantity_none_guard_path() -> None:
     source = inspect.getsource(benchmark_engine)
+    # Item 22 must never require undoing the established fail-closed publication
+    # behavior merely to keep the scorer running.
     assert "quantity" in source
     assert "missed_in_extraction" in source.lower()
 
