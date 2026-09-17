@@ -25,7 +25,7 @@ import json
 import math
 from pathlib import Path
 import re
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import fitz  # PyMuPDF
 
@@ -331,8 +331,20 @@ def merge_extracted_prediction(
 class GenericPlanReaderExtractor:
     """Extracts physical building quantities from PDF drawing sets strictly from drawing evidence."""
 
-    def __init__(self, default_ceiling_height_m: float = 2.80) -> None:
+    def __init__(
+        self,
+        default_ceiling_height_m: float = 2.80,
+        net_wall_authority: Optional[Any] = None,
+        net_wall_selectors: Optional[Mapping[str, Any]] = None,
+    ) -> None:
         self.default_ceiling_height_m = default_ceiling_height_m
+        self.net_wall_authority = net_wall_authority
+        self.net_wall_selectors = dict(net_wall_selectors or {})
+        self.live_net_wall_shadow: Dict[str, Any] = {
+            "status": "abstained",
+            "reason": "not_collected",
+            "walls": [],
+        }
         self._ocr_text_by_page: Dict[int, str] = {}
         self.hosted_opening_shadow: Dict[str, Any] = {
             "status": "abstained",
@@ -2407,10 +2419,15 @@ class GenericPlanReaderExtractor:
                         )
 
                 if opening_instances:
-                    pipeline = GenericOpeningDeductionPipeline()
+                    pipeline = GenericOpeningDeductionPipeline(
+                        net_wall_authority=self.net_wall_authority,
+                        net_wall_selectors=self.net_wall_selectors,
+                    )
                     wall_results = pipeline.deduct_openings_for_all_walls([wall_inst], opening_instances)
                     preds_list = pipeline.propagate_to_predictions(list(pred_dict.values()), wall_results)
                     pred_dict = {p.tag: p for p in preds_list}
+                    from pb_live_opening_net_wall_integration import collect_live_net_wall_shadow
+                    self.live_net_wall_shadow = collect_live_net_wall_shadow(wall_results)
         except Exception:
             self.extraction_status["opening_deduction"] = "extraction_failed"
 

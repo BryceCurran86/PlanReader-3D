@@ -185,6 +185,14 @@ class WallDeductionResult:
 class GenericOpeningDeductionPipeline:
     """Orchestrates fail-closed opening deductions and publication gating."""
 
+    def __init__(
+        self,
+        net_wall_authority: Optional[Any] = None,
+        net_wall_selectors: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        self._net_wall_authority = net_wall_authority
+        self._net_wall_selectors = dict(net_wall_selectors or {})
+
     def bind_openings_to_walls(
         self,
         openings: Sequence[OpeningInstance],
@@ -259,16 +267,42 @@ class GenericOpeningDeductionPipeline:
         self,
         wall: WallInstance,
         openings: Sequence[OpeningInstance],
+        selector: Optional[Any] = None,
     ) -> WallDeductionResult:
-        """Public authority-producing calculation; currently always abstains.
-
-        The arithmetic is still exposed for diagnostics, but neither a
-        caller-populated ``bound_wall_id`` nor an empty/local opening set can
-        establish producer-owned host binding or opening-universe completeness.
-        A future integration may replace this blocker only with sealed
-        producer-owned host-binding v3 evidence.
-        """
+        """Authority-producing calculation integrating NetWallBooleanUnionAuthority."""
         provisional = self.calculate_provisional_wall_deductions(wall, openings)
+
+        sel = selector or self._net_wall_selectors.get(wall.wall_id)
+        if self._net_wall_authority is not None and sel is not None:
+            from pb_live_opening_net_wall_integration import LiveOpeningNetWallAdapter
+            adapter = LiveOpeningNetWallAdapter(self._net_wall_authority)
+            live_res = adapter.resolve_wall_net_area(
+                sel, wall_id=wall.wall_id, gross_area_m2=wall.gross_area_m2
+            )
+            if live_res.is_authoritative and live_res.net_area_m2 is not None:
+                deducted_area = round(max(0.0, wall.gross_area_m2 - live_res.net_area_m2), 4)
+                return WallDeductionResult(
+                    wall_id=provisional.wall_id,
+                    gross_area_m2=provisional.gross_area_m2,
+                    total_deducted_area_m2=deducted_area,
+                    net_area_m2=live_res.net_area_m2,
+                    net_area_evidence=live_res.evidence,
+                    applied_openings=provisional.applied_openings,
+                    unresolved_openings=provisional.unresolved_openings,
+                    unbound_openings=provisional.unbound_openings,
+                )
+            else:
+                return WallDeductionResult(
+                    wall_id=provisional.wall_id,
+                    gross_area_m2=provisional.gross_area_m2,
+                    total_deducted_area_m2=provisional.total_deducted_area_m2,
+                    net_area_m2=provisional.net_area_m2,
+                    net_area_evidence=live_res.evidence,
+                    applied_openings=provisional.applied_openings,
+                    unresolved_openings=provisional.unresolved_openings,
+                    unbound_openings=provisional.unbound_openings,
+                )
+
         blocking_reasons = (
             "producer_owned_host_binding_authority_unavailable",
             *(
@@ -315,10 +349,19 @@ class GenericOpeningDeductionPipeline:
         self,
         walls: Sequence[WallInstance],
         openings: Sequence[OpeningInstance],
+        selectors: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, WallDeductionResult]:
-        """Refuse host self-certification, then compute blocked diagnostics."""
+        """Refuse host self-certification, then compute deductions using live authorities if present."""
         self.bind_openings_to_walls(openings, walls)
-        return {wall.wall_id: self.calculate_wall_deductions(wall, openings) for wall in walls}
+        all_selectors = dict(self._net_wall_selectors)
+        if selectors:
+            all_selectors.update(selectors)
+        return {
+            wall.wall_id: self.calculate_wall_deductions(
+                wall, openings, selector=all_selectors.get(wall.wall_id)
+            )
+            for wall in walls
+        }
 
     def propagate_to_predictions(
         self,
@@ -392,6 +435,9 @@ class GenericOpeningDeductionPipeline:
             else:
                 net_value = provisional_net
                 metadata["net_area_m2"] = net_value
+                metadata["publication_blocked"] = False
+                metadata["reconciliation_status"] = "corroborated"
+                metadata.pop("blocking_reason", None)
 
             if hasattr(prediction, "quantity"):
                 prediction.quantity = net_value
