@@ -2,10 +2,11 @@
 
 Proves the 2D physical face geometry and thickness for an exact physical wall:
 - Sourced only from authenticated PhysicalWallCandidateAuthority and PhysicalScaleAuthority.
-- Thickness must be backed by authenticated evidence; default/assumed thicknesses
-  (such as 90mm, 110mm, 230mm) without explicit evidence are strictly forbidden.
+- Obtains thickness_m and centerline_pts directly from the authenticated WallCandidate record.
+- NEVER accepts caller-supplied observation objects or fabricated scalar dimensions.
+- NEVER synthesizes a 10m centerline when source geometry is absent; if centerline points
+  or thickness are missing from the authenticated candidate, fails closed (ABSTAINED).
 - Preserves distinct left-face and right-face boundary geometries.
-- Unresolved thickness means physical face geometry remains unavailable (ABSTAINED).
 - Lineage, scale, and physical wall identity must be corroborated.
 """
 from __future__ import annotations
@@ -19,6 +20,38 @@ from pb_migration_contracts import (
     EvidenceResolutionStatus,
     stable_contract_id,
 )
+from pb_physical_scale_authority import (
+    PhysicalScaleAuthority,
+    PhysicalScaleSelector,
+)
+from pb_physical_wall_candidate_authority import (
+    PhysicalWallCandidateAuthority,
+    PhysicalWallCandidateSelector,
+)
+
+WALL_THICKNESS_FACE_SCHEMA_VERSION = "1.0.0"
+
+# Public reason codes
+WALL_THICKNESS_FACE_RESOLVED = "wall_thickness_face_resolved"
+WALL_THICKNESS_UNRESOLVED = "wall_thickness_unresolved"
+WALL_THICKNESS_WALL_UNRESOLVED = "wall_thickness_wall_candidate_unresolved"
+WALL_THICKNESS_SCALE_UNRESOLVED = "wall_thickness_scale_unresolved"
+WALL_THICKNESS_LINEAGE_MISMATCH = "wall_thickness_lineage_mismatch"
+WALL_THICKNESS_GEOMETRY_UNAVAILABLE = "wall_thickness_geometry_unavailable"
+WALL_THICKNESS_RECORD_UNAVAILABLE = "wall_thickness_record_unavailable"
+WALL_THICKNESS_GEOMETRY_INVALID = "wall_thickness_geometry_invalid"
+
+_PRODUCER_SEAL = object()
+_AUTHORITY_SEAL = object()
+
+_Key = Tuple[str, str, str, str, str, str, str]
+
+
+def _required(value: object, name: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError(f"{name} must be non-empty")
+    return text
 
 
 def _line_length(pts: Sequence[Tuple[float, float]]) -> float:
@@ -42,7 +75,6 @@ def _offset_line(
     length = math.hypot(dx, dy)
     if length < 1e-12:
         return tuple(pts)
-    # Left normal: (-dy/L, dx/L)
     nx = -dy / length
     ny = dx / length
     res = []
@@ -54,49 +86,6 @@ def _offset_line(
 def _pts_to_hex(pts: Sequence[Tuple[float, float]]) -> str:
     raw = f"LINESTRING({','.join(f'{x:.4f} {y:.4f}' for x, y in pts)})"
     return raw.encode("utf-8").hex()
-
-from pb_physical_scale_authority import (
-    PhysicalScaleAuthority,
-    PhysicalScaleSelector,
-)
-from pb_physical_wall_candidate_authority import (
-    PhysicalWallCandidateAuthority,
-    PhysicalWallCandidateSelector,
-)
-
-
-WALL_THICKNESS_FACE_SCHEMA_VERSION = "1.0.0"
-
-# Public reason codes
-WALL_THICKNESS_FACE_RESOLVED = "wall_thickness_face_resolved"
-WALL_THICKNESS_UNRESOLVED = "wall_thickness_unresolved"
-WALL_THICKNESS_WALL_UNRESOLVED = "wall_thickness_wall_candidate_unresolved"
-WALL_THICKNESS_SCALE_UNRESOLVED = "wall_thickness_scale_unresolved"
-WALL_THICKNESS_LINEAGE_MISMATCH = "wall_thickness_lineage_mismatch"
-WALL_THICKNESS_DEFAULT_FORBIDDEN = "wall_thickness_default_or_assumed_forbidden"
-WALL_THICKNESS_RECORD_UNAVAILABLE = "wall_thickness_record_unavailable"
-WALL_THICKNESS_GEOMETRY_INVALID = "wall_thickness_geometry_invalid"
-
-_PRODUCER_SEAL = object()
-_AUTHORITY_SEAL = object()
-
-_Key = Tuple[str, str, str, str, str, str, str]
-
-_FORBIDDEN_DEFAULT_TOKENS = frozenset({
-    "default",
-    "assumed",
-    "fallback",
-    "legacy_default",
-    "model_default",
-    "estimated",
-})
-
-
-def _required(value: object, name: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        raise ValueError(f"{name} must be non-empty")
-    return text
 
 
 @dataclass(frozen=True)
@@ -133,39 +122,6 @@ class WallThicknessFaceSelector:
             self.decision_scope_id,
             self.physical_wall_id,
         )
-
-
-@dataclass(frozen=True)
-class WallThicknessObservation:
-    """A single authenticated thickness observation."""
-    evidence_id: str
-    source_sha256: str
-    revision_id: str
-    snapshot_id: str
-    page_id: str
-    viewport_id: str
-    thickness_mm: float
-    kind: str           # e.g. "wall_callout_dimension", "schedule_thickness"
-    method: str         # e.g. "direct_dimension", "schedule_row"
-    confidence: float   # [0, 1]
-    is_default: bool = False
-
-    def __post_init__(self) -> None:
-        for name in (
-            "evidence_id",
-            "source_sha256",
-            "revision_id",
-            "snapshot_id",
-            "page_id",
-            "viewport_id",
-            "kind",
-            "method",
-        ):
-            _required(getattr(self, name), name)
-        if not math.isfinite(self.thickness_mm) or self.thickness_mm <= 0.0:
-            raise ValueError("thickness_mm must be positive and finite")
-        if not (0.0 <= self.confidence <= 1.0):
-            raise ValueError("confidence must be in [0, 1]")
 
 
 @dataclass(frozen=True)
@@ -237,7 +193,11 @@ class WallThicknessFaceAuthority:
 
 
 class WallThicknessFaceProducer:
-    """Trusted writer boundary for authenticated wall thickness & face geometry."""
+    """Trusted writer boundary for authenticated wall thickness & face geometry.
+
+    Consumes ONLY producer-owned PhysicalWallCandidateAuthority and PhysicalScaleAuthority.
+    Does NOT accept caller observations or scalar dimension inputs.
+    """
 
     def __init__(
         self,
@@ -283,9 +243,8 @@ class WallThicknessFaceProducer:
     def publish(
         self,
         selector: WallThicknessFaceSelector,
-        observations: Sequence[WallThicknessObservation],
     ) -> WallThicknessFaceResult:
-        """Resolve wall thickness and compute authenticated face geometry."""
+        """Resolve wall thickness and compute authenticated face geometry strictly from upstream authorities."""
         if type(selector) is not WallThicknessFaceSelector:
             raise TypeError("selector must be WallThicknessFaceSelector")
 
@@ -328,7 +287,6 @@ class WallThicknessFaceProducer:
                 ),
             )
 
-        # Confirm wall_id is present
         matching_recs = [
             r for r in getattr(cand_result, "records", ())
             if getattr(r, "wall_candidate_id", None) == selector.physical_wall_id
@@ -365,56 +323,23 @@ class WallThicknessFaceProducer:
         if not math.isfinite(mm_per_pt) or mm_per_pt <= 0.0:
             return self._store(selector, _abstained(WALL_THICKNESS_SCALE_UNRESOLVED))
 
-        # 3. Filter Thickness Observations
-        obs = list(observations or [])
-        if not obs:
+        # 3. Extract Thickness from Authenticated Wall Candidate
+        thickness_m = getattr(wc, "thickness_m", None)
+        if thickness_m is None or not math.isfinite(thickness_m) or thickness_m <= 0.0:
             return self._store(selector, _abstained(WALL_THICKNESS_UNRESOLVED))
 
-        valid_obs: list[WallThicknessObservation] = []
-        default_count = 0
-        stale_count = 0
-        for ob in obs:
-            if not isinstance(ob, WallThicknessObservation):
-                continue
-            if ob.is_default:
-                default_count += 1
-                continue
-            if any(t in ob.kind.lower() for t in _FORBIDDEN_DEFAULT_TOKENS) or \
-               any(t in ob.method.lower() for t in _FORBIDDEN_DEFAULT_TOKENS):
-                default_count += 1
-                continue
-            if (
-                ob.source_sha256 != selector.source_sha256
-                or ob.revision_id != selector.revision_id
-                or ob.snapshot_id != selector.snapshot_id
-            ):
-                stale_count += 1
-                continue
-            valid_obs.append(ob)
+        thickness_mm = thickness_m * 1000.0
 
-        if default_count and not valid_obs:
-            return self._store(selector, _abstained(WALL_THICKNESS_DEFAULT_FORBIDDEN))
-        if stale_count and not valid_obs:
-            return self._store(selector, _conflict(WALL_THICKNESS_LINEAGE_MISMATCH))
-        if not valid_obs:
-            return self._store(selector, _abstained(WALL_THICKNESS_UNRESOLVED))
-
-        # Check for thickness agreement
-        thick_values = {round(ob.thickness_mm, 2) for ob in valid_obs}
-        if len(thick_values) > 1:
-            return self._store(selector, _conflict(WALL_THICKNESS_UNRESOLVED, "conflicting_thicknesses"))
-
-        thickness_mm = float(next(iter(thick_values)))
-        thickness_m = thickness_mm / 1000.0
-
-        # 4. Compute Geometry
+        # 4. Extract Centerline Points — NEVER synthesize 10m centerline!
         centerline_pts = getattr(wc, "centerline_pts", None)
         if not centerline_pts or len(centerline_pts) < 2:
-            # Synthetic 10m centerline if candidate lacks explicit points
-            centerline_pts = ((0.0, 0.0), (10.0, 0.0))
+            return self._store(selector, _abstained(WALL_THICKNESS_GEOMETRY_UNAVAILABLE))
 
         length_pt = _line_length(centerline_pts)
-        length_m = round((length_pt * mm_per_pt) / 1000.0, 6) if length_pt > 0 else 10.0
+        if length_pt <= 0.0:
+            return self._store(selector, _abstained(WALL_THICKNESS_GEOMETRY_UNAVAILABLE))
+
+        length_m = round((length_pt * mm_per_pt) / 1000.0, 6)
 
         half_thick_pt = (thickness_mm / mm_per_pt) / 2.0 if mm_per_pt > 0 else (thickness_m / 2.0)
         face_left_pts = _offset_line(centerline_pts, half_thick_pt)
@@ -462,10 +387,10 @@ class WallThicknessFaceProducer:
 
 
 __all__ = [
-    "WALL_THICKNESS_DEFAULT_FORBIDDEN",
     "WALL_THICKNESS_FACE_RESOLVED",
     "WALL_THICKNESS_FACE_SCHEMA_VERSION",
     "WALL_THICKNESS_GEOMETRY_INVALID",
+    "WALL_THICKNESS_GEOMETRY_UNAVAILABLE",
     "WALL_THICKNESS_LINEAGE_MISMATCH",
     "WALL_THICKNESS_RECORD_UNAVAILABLE",
     "WALL_THICKNESS_SCALE_UNRESOLVED",
@@ -476,5 +401,4 @@ __all__ = [
     "WallThicknessFaceProducer",
     "WallThicknessFaceResult",
     "WallThicknessFaceSelector",
-    "WallThicknessObservation",
 ]

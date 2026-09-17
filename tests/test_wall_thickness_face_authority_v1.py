@@ -1,13 +1,10 @@
 """Production + adversarial tests for pb_wall_thickness_face_authority (Item 27).
 
 Tests cover:
-  - Happy-path authenticated thickness and face geometry resolution
-  - Default / assumed thicknesses (is_default=True, kind/method='model_default') fail closed
-  - No 90mm / 110mm / 230mm assumption without explicit evidence
-  - Unresolved thickness means face geometry is unavailable (ABSTAINED)
+  - Happy-path authenticated thickness and face geometry resolution from upstream WallCandidate
+  - Rejection of synthesized geometry (missing centerline_pts -> ABSTAINED with WALL_THICKNESS_GEOMETRY_UNAVAILABLE)
+  - Unresolved thickness in candidate (thickness_m=None -> ABSTAINED with WALL_THICKNESS_UNRESOLVED)
   - Mismatched physical wall candidate ID abstains
-  - Stale source/revision/snapshot lineage fails closed
-  - Conflicting thickness observations fail closed
   - Sealed authority constructor
   - Sealed producer constructor
   - Selector validation
@@ -33,10 +30,16 @@ from pb_physical_wall_candidate_authority import (
     _ScopeKey,
 )
 from pb_physical_wall_identity import PhysicalWallIdentity
+from pb_wall_room_topology_contracts import (
+    InteriorExterior,
+    JunctionType,
+    MeasurementAuthorityType,
+    WallCandidate,
+    WallRepresentation,
+)
 from pb_wall_thickness_face_authority import (
-    WALL_THICKNESS_DEFAULT_FORBIDDEN,
     WALL_THICKNESS_FACE_RESOLVED,
-    WALL_THICKNESS_LINEAGE_MISMATCH,
+    WALL_THICKNESS_GEOMETRY_UNAVAILABLE,
     WALL_THICKNESS_RECORD_UNAVAILABLE,
     WALL_THICKNESS_SCALE_UNRESOLVED,
     WALL_THICKNESS_UNRESOLVED,
@@ -46,7 +49,6 @@ from pb_wall_thickness_face_authority import (
     WallThicknessFaceProducer,
     WallThicknessFaceResult,
     WallThicknessFaceSelector,
-    WallThicknessObservation,
 )
 
 DOC = "doc-thick-test"
@@ -72,35 +74,39 @@ def _selector(wall_id: str = WALL_A) -> WallThicknessFaceSelector:
     )
 
 
-def _obs(
-    wall_id: str = WALL_A,
-    thick_mm: float = 110.0,
-    kind: str = "wall_callout_dimension",
-    method: str = "direct_dimension",
-    sha: str = SHA,
-    rev: str = REV,
-    snap: str = SNAP,
-    is_default: bool = False,
-    eid: str | None = None,
-) -> WallThicknessObservation:
-    if eid is None:
-        eid = stable_contract_id("thick_obs", {"wall": wall_id, "thick": thick_mm})
-    return WallThicknessObservation(
-        evidence_id=eid,
-        source_sha256=sha,
-        revision_id=rev,
-        snapshot_id=snap,
-        page_id=PAGE,
+def _make_candidate(
+    candidate_id: str,
+    thickness_m: float | None = 0.11,
+    centerline_pts: tuple[tuple[float, float], ...] | None = ((0.0, 0.0), (100.0, 0.0)),
+) -> WallCandidate:
+    cand_status = EvidenceResolutionStatus.CORROBORATED if thickness_m is not None else EvidenceResolutionStatus.RAW
+    thick_auth = MeasurementAuthorityType.DOCUMENTED_DIMENSION if thickness_m is not None else MeasurementAuthorityType.PROVISIONAL
+    return WallCandidate(
+        candidate_id=candidate_id,
         viewport_id=VP,
-        thickness_mm=thick_mm,
-        kind=kind,
-        method=method,
-        confidence=0.95,
-        is_default=is_default,
+        representation="double_line",
+        centerline_pts=centerline_pts if centerline_pts else ((0.0, 0.0), (0.0, 0.0)),
+        face_a_segment_ids=("seg-a",),
+        face_b_segment_ids=("seg-b",),
+        is_curved=False,
+        curve_control_pts=None,
+        thickness_m=thickness_m,
+        thickness_authority=thick_auth,
+        length_m=10.0,
+        end_node_ids=("n1", "n2"),
+        junction_types=("free_end", "free_end"),
+        interior_exterior="exterior",
+        level_id="L1",
+        status=cand_status,
+        confidence=1.0 if cand_status == EvidenceResolutionStatus.CORROBORATED else 0.0,
     )
 
 
-def _setup_authorities(*wall_ids: str):
+def _setup_authorities(
+    *wall_ids: str,
+    thickness_m: float | None = 0.11,
+    centerline_pts: tuple[tuple[float, float], ...] | None = ((0.0, 0.0), (100.0, 0.0)),
+):
     records = []
     for wid in wall_ids:
         ident = PhysicalWallIdentity(
@@ -108,8 +114,9 @@ def _setup_authorities(*wall_ids: str):
             path_fingerprint=None, source_primitive_ids=(), edge_ids=(),
             status=EvidenceResolutionStatus.CORROBORATED,
         )
+        wc = _make_candidate(wid, thickness_m=thickness_m, centerline_pts=centerline_pts)
         rec = PhysicalWallCandidateRecord(
-            wall_candidate_id=wid, wall_candidate=None, physical_identity=ident,
+            wall_candidate_id=wid, wall_candidate=wc, physical_identity=ident,
         )
         records.append(rec)
 
@@ -145,10 +152,14 @@ def _setup_authorities(*wall_ids: str):
     return cand_auth, scale_auth
 
 
-def _producer(*wall_ids: str) -> WallThicknessFaceProducer:
+def _producer(
+    *wall_ids: str,
+    thickness_m: float | None = 0.11,
+    centerline_pts: tuple[tuple[float, float], ...] | None = ((0.0, 0.0), (100.0, 0.0)),
+) -> WallThicknessFaceProducer:
     if not wall_ids:
         wall_ids = (WALL_A,)
-    cand_auth, scale_auth = _setup_authorities(*wall_ids)
+    cand_auth, scale_auth = _setup_authorities(*wall_ids, thickness_m=thickness_m, centerline_pts=centerline_pts)
     return WallThicknessFaceProducer.from_authorities(
         physical_wall_candidate_authority=cand_auth,
         physical_scale_authority=scale_auth,
@@ -184,11 +195,10 @@ def test_producer_rejects_wrong_authority_types() -> None:
 
 # ── Happy Path ────────────────────────────────────────────────────────────────
 
-def test_authenticated_110mm_thickness_resolved() -> None:
-    prod = _producer(WALL_A)
+def test_authenticated_110mm_thickness_resolved_from_candidate() -> None:
+    prod = _producer(WALL_A, thickness_m=0.11)
     sel = _selector(WALL_A)
-    obs = [_obs(WALL_A, thick_mm=110.0)]
-    res = prod.publish(sel, obs)
+    res = prod.publish(sel)
     assert res.status is EvidenceResolutionStatus.CORROBORATED
     assert res.record is not None
     assert res.record.thickness_mm == 110.0
@@ -196,82 +206,39 @@ def test_authenticated_110mm_thickness_resolved() -> None:
     assert WALL_THICKNESS_FACE_RESOLVED in res.reason_codes
 
 
-def test_authenticated_230mm_thickness_resolved() -> None:
-    prod = _producer(WALL_A)
+def test_authenticated_230mm_thickness_resolved_from_candidate() -> None:
+    prod = _producer(WALL_A, thickness_m=0.23)
     sel = _selector(WALL_A)
-    obs = [_obs(WALL_A, thick_mm=230.0)]
-    res = prod.publish(sel, obs)
+    res = prod.publish(sel)
     assert res.status is EvidenceResolutionStatus.CORROBORATED
     assert res.record.thickness_mm == 230.0
     assert res.record.thickness_m == 0.23
 
 
-# ── Adversarial: No default / assumed thickness ───────────────────────────────
+# ── Fail Closed: Missing Thickness / Geometry ─────────────────────────────────
 
-def test_is_default_flag_rejected() -> None:
-    prod = _producer(WALL_A)
+def test_missing_candidate_thickness_abstains() -> None:
+    prod = _producer(WALL_A, thickness_m=None)
     sel = _selector(WALL_A)
-    obs = [_obs(WALL_A, thick_mm=110.0, is_default=True)]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_THICKNESS_DEFAULT_FORBIDDEN in res.reason_codes
-
-
-def test_model_default_kind_rejected() -> None:
-    prod = _producer(WALL_A)
-    sel = _selector(WALL_A)
-    obs = [_obs(WALL_A, thick_mm=90.0, kind="model_default")]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_THICKNESS_DEFAULT_FORBIDDEN in res.reason_codes
-
-
-def test_assumed_method_rejected() -> None:
-    prod = _producer(WALL_A)
-    sel = _selector(WALL_A)
-    obs = [_obs(WALL_A, thick_mm=230.0, method="assumed_thickness")]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_THICKNESS_DEFAULT_FORBIDDEN in res.reason_codes
-
-
-# ── Adversarial: Unresolved / Stale / Conflict ───────────────────────────────
-
-def test_empty_observations_abstains() -> None:
-    prod = _producer(WALL_A)
-    sel = _selector(WALL_A)
-    res = prod.publish(sel, [])
+    res = prod.publish(sel)
     assert res.status is EvidenceResolutionStatus.ABSTAINED
     assert WALL_THICKNESS_UNRESOLVED in res.reason_codes
     assert res.record is None
 
 
-def test_stale_lineage_fails_closed() -> None:
-    prod = _producer(WALL_A)
+def test_missing_centerline_pts_abstains() -> None:
+    prod = _producer(WALL_A, thickness_m=0.11, centerline_pts=())
     sel = _selector(WALL_A)
-    obs = [_obs(WALL_A, thick_mm=110.0, sha="c" * 64)]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.CONFLICT
-    assert WALL_THICKNESS_LINEAGE_MISMATCH in res.reason_codes
-
-
-def test_conflicting_thicknesses_fails_closed() -> None:
-    prod = _producer(WALL_A)
-    sel = _selector(WALL_A)
-    obs = [
-        _obs(WALL_A, thick_mm=110.0, eid="ev-110"),
-        _obs(WALL_A, thick_mm=230.0, eid="ev-230"),
-    ]
-    res = prod.publish(sel, obs)
-    assert res.status is EvidenceResolutionStatus.CONFLICT
-    assert WALL_THICKNESS_UNRESOLVED in res.reason_codes
+    res = prod.publish(sel)
+    assert res.status is EvidenceResolutionStatus.ABSTAINED
+    assert WALL_THICKNESS_GEOMETRY_UNAVAILABLE in res.reason_codes
+    assert res.record is None
 
 
 def test_unknown_physical_wall_abstains() -> None:
     prod = _producer(WALL_A)
     sel = _selector("phys-wall-UNKNOWN")
-    obs = [_obs("phys-wall-UNKNOWN", thick_mm=110.0)]
-    res = prod.publish(sel, obs)
+    res = prod.publish(sel)
     assert res.status is EvidenceResolutionStatus.ABSTAINED
     assert WALL_THICKNESS_WALL_UNRESOLVED in res.reason_codes
 
@@ -279,9 +246,9 @@ def test_unknown_physical_wall_abstains() -> None:
 # ── Authority Lookup ──────────────────────────────────────────────────────────
 
 def test_authority_lookup_published_record() -> None:
-    prod = _producer(WALL_A)
+    prod = _producer(WALL_A, thickness_m=0.11)
     sel = _selector(WALL_A)
-    prod.publish(sel, [_obs(WALL_A, thick_mm=110.0)])
+    prod.publish(sel)
     auth = prod.authority()
     res = auth.resolve(sel)
     assert res.status is EvidenceResolutionStatus.CORROBORATED
@@ -302,17 +269,6 @@ def test_authority_lookup_wrong_selector_type_raises() -> None:
     auth = prod.authority()
     with pytest.raises(TypeError, match="WallThicknessFaceSelector"):
         auth.resolve("not-a-selector")  # type: ignore[arg-type]
-
-
-# ── Validation ────────────────────────────────────────────────────────────────
-
-def test_observation_invalid_thickness_raises() -> None:
-    with pytest.raises(ValueError, match="thickness_mm"):
-        WallThicknessObservation(
-            evidence_id="ev-bad", source_sha256=SHA, revision_id=REV,
-            snapshot_id=SNAP, page_id=PAGE, viewport_id=VP,
-            thickness_mm=-10.0, kind="wall_callout", method="direct", confidence=0.9,
-        )
 
 
 def test_selector_empty_field_raises() -> None:
