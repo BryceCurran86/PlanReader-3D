@@ -307,9 +307,9 @@ class WallFinishPropagationProducer:
             raise TypeError(
                 "WallFinishPropagationProducer must be obtained from from_authorities()"
             )
-        if not isinstance(physical_wall_authority, PhysicalWallCandidateAuthority):
+        if type(physical_wall_authority) is not PhysicalWallCandidateAuthority:
             raise TypeError("physical_wall_authority must be PhysicalWallCandidateAuthority")
-        if not isinstance(net_wall_authority, NetWallBooleanUnionAuthority):
+        if type(net_wall_authority) is not NetWallBooleanUnionAuthority:
             raise TypeError("net_wall_authority must be NetWallBooleanUnionAuthority")
 
         self._physical_wall_auth = physical_wall_authority
