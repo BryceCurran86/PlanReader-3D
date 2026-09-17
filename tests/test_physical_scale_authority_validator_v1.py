@@ -267,8 +267,12 @@ def test_graphic_bar_agreeing_with_same_page_ratio_text_preserves_mapping() -> N
     # analytic value.  Do not require production to snap it back to ratio text.
     assert abs(result.evidence.source_span_pt - span_pt) <= 5e-6
     assert result.evidence.physical_span_mm == 1000.0
-    assert abs(result.evidence.points_per_mm - span_pt / 1000.0) <= 1e-9
-    assert abs(result.evidence.mm_per_point - 1000.0 / span_pt) <= 1e-9
+    assert abs(
+        result.evidence.points_per_mm - result.evidence.source_span_pt / 1000.0
+    ) <= 1e-12
+    assert abs(
+        result.evidence.mm_per_point - 1000.0 / result.evidence.source_span_pt
+    ) <= 1e-12
 
 
 @EXPECTED_RED
