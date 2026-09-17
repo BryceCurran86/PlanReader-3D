@@ -229,3 +229,6 @@ def test_shared_whole_wall_frame_ignores_source_segment_direction() -> None:
     assert sorted(_rounded_span(frame) for frame in forward_frames) == sorted(
         _rounded_span(frame) for frame in reversed_frames
     ) == [(80.0, 120.0), (200.0, 240.0)]
+
+
+# Baseline CI trigger: assertions above are the independent contract under test.
