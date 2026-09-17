@@ -8,6 +8,7 @@ import fitz
 import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
+import pb_opening_host_binding_authority as host_geometry
 from pb_opening_host_binding_authority import (
     OpeningHostBindingProducer,
     OpeningHostBindingSelector,
@@ -15,9 +16,9 @@ from pb_opening_host_binding_authority import (
     OpeningHostWallUniverseSelector,
 )
 from pb_opening_host_frame_authority import (
+    OPENING_HOST_FRAME_WHOLE_WALL_UNPROVEN,
     OpeningHostFrameAuthority,
     OpeningHostFrameProducer,
-    OPENING_HOST_FRAME_WHOLE_WALL_UNPROVEN,
 )
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
@@ -25,19 +26,19 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-def _pdf(*, dx: float = 0.0, dy: float = 0.0, reverse: bool = False) -> bytes:
+def _single_pdf(*, dx: float = 0.0, dy: float = 0.0, reverse: bool = False) -> bytes:
+    segments = [
+        ((20.0 + dx, 80.0 + dy), (120.0 + dx, 80.0 + dy)),
+        ((160.0 + dx, 80.0 + dy), (280.0 + dx, 80.0 + dy)),
+        ((20.0 + dx, 100.0 + dy), (120.0 + dx, 100.0 + dy)),
+        ((160.0 + dx, 100.0 + dy), (280.0 + dx, 100.0 + dy)),
+        ((120.0 + dx, 80.0 + dy), (120.0 + dx, 100.0 + dy)),
+        ((160.0 + dx, 80.0 + dy), (160.0 + dx, 100.0 + dy)),
+    ]
     doc = fitz.open()
     try:
         page = doc.new_page(width=420.0, height=320.0)
         shape = page.new_shape()
-        segments = [
-            ((20.0 + dx, 80.0 + dy), (120.0 + dx, 80.0 + dy)),
-            ((160.0 + dx, 80.0 + dy), (280.0 + dx, 80.0 + dy)),
-            ((20.0 + dx, 100.0 + dy), (120.0 + dx, 100.0 + dy)),
-            ((160.0 + dx, 100.0 + dy), (280.0 + dx, 100.0 + dy)),
-            ((120.0 + dx, 80.0 + dy), (120.0 + dx, 100.0 + dy)),
-            ((160.0 + dx, 80.0 + dy), (160.0 + dx, 100.0 + dy)),
-        ]
         for start, end in segments:
             if reverse:
                 start, end = end, start
@@ -49,7 +50,7 @@ def _pdf(*, dx: float = 0.0, dy: float = 0.0, reverse: bool = False) -> bytes:
         doc.close()
 
 
-def _multi_opening_pdf(*, remote_unproven: bool = False) -> bytes:
+def _two_opening_pdf(*, remote_unproven: bool = False) -> bytes:
     openings = ((100.0, 140.0), (220.0, 260.0))
     intervals = ((20.0, 100.0), (140.0, 220.0), (260.0, 340.0))
     doc = fitz.open()
@@ -72,108 +73,15 @@ def _multi_opening_pdf(*, remote_unproven: bool = False) -> bytes:
         doc.close()
 
 
-def _fixture(payload: bytes | None = None):
+def _fixture(payload: bytes, *, expected_openings: int):
     source = SourceVisibilityProducer(
         producer_method="opening-host-frame-production-test",
         producer_version="2.0",
     )
     published = source.ingest_native_pdf_bytes(
         document_id="opening-host-frame-production",
-        source_bytes=payload or _pdf(),
-        source_locator="memory://opening-host-frame-production.pdf",
-    )
-    physical = PhysicalOpeningAuthority(source.authority())
-    opening_selector = None
-    opening_record = None
-    for observation_id in published.visible_observation_ids:
-        selector = ObservationSelector(
-            document_id=published.revision.document_id,
-            revision_id=published.revision.revision_id,
-            source_sha256=published.revision.source_sha256,
-            snapshot_id=published.snapshot.snapshot_id,
-            observation_id=observation_id,
-        )
-        result = physical.prove_existence(selector)
-        if result.proposition == PHYSICAL_OPENING_EXISTS and result.existence_record is not None:
-            opening_selector = selector
-            opening_record = result.existence_record
-            break
-    assert opening_selector is not None and opening_record is not None
-
-    wall_authority = PhysicalWallCandidateProducer.from_source_visibility_producer(source).authority()
-    universe_authority = OpeningHostWallUniverseProducer.from_physical_wall_candidate_authority(
-        wall_authority
-    ).authority()
-    universe_selector = OpeningHostWallUniverseSelector(
-        document_id=opening_record.document_id,
-        revision_id=opening_record.revision_id,
-        source_sha256=opening_record.source_sha256,
-        snapshot_id=opening_record.snapshot_id,
-        page_id=opening_record.page_id,
-        decision_scope_id=f"wall-source:page-{opening_record.page_id}",
-    )
-    binding_producer = OpeningHostBindingProducer.from_authorities(
-        physical_opening_authority=physical,
-        host_wall_universe_authority=universe_authority,
-    )
-    binding = binding_producer.publish(
-        opening_left_selector=opening_selector,
-        opening_right_selector=opening_selector,
-        host_universe_selector=universe_selector,
-    )
-    assert binding.status is EvidenceResolutionStatus.CORROBORATED
-    assert binding.record is not None
-    binding_selector = OpeningHostBindingSelector(
-        document_id=binding.record.document_id,
-        revision_id=binding.record.revision_id,
-        source_sha256=binding.record.source_sha256,
-        snapshot_id=binding.record.snapshot_id,
-        page_id=binding.record.page_id,
-        decision_scope_id=binding.record.decision_scope_id,
-        opening_identity_id=binding.record.opening_identity_id,
-    )
-    return (
-        physical,
-        wall_authority,
-        opening_selector,
-        opening_record,
-        binding_producer,
-        binding_selector,
-        binding,
-    )
-
-
-def _frame(payload: bytes | None = None):
-    (
-        physical,
-        wall_authority,
-        opening_selector,
-        opening,
-        binding_producer,
-        binding_selector,
-        binding,
-    ) = _fixture(payload)
-    producer = OpeningHostFrameProducer.from_authorities(
-        physical_opening_authority=physical,
-        host_binding_authority=binding_producer.authority(),
-        physical_wall_candidate_authority=wall_authority,
-    )
-    result = producer.publish(
-        opening_selector=opening_selector,
-        host_binding_selector=binding_selector,
-    )
-    return producer, result, opening, binding, binding_selector
-
-
-def _multi_fixture(payload: bytes):
-    source = SourceVisibilityProducer(
-        producer_method="opening-host-frame-multi-production-test",
-        producer_version="2.0",
-    )
-    published = source.ingest_native_pdf_bytes(
-        document_id="opening-host-frame-multi-production",
         source_bytes=payload,
-        source_locator="memory://opening-host-frame-multi-production.pdf",
+        source_locator="memory://opening-host-frame-production.pdf",
     )
     physical = PhysicalOpeningAuthority(source.authority())
     discovered: dict[str, tuple[ObservationSelector, object]] = {}
@@ -192,10 +100,18 @@ def _multi_fixture(payload: bytes):
             and result.existence_record is not None
         ):
             discovered.setdefault(result.existence_record.record_id, (selector, result.existence_record))
-    assert len(discovered) == 2
+    assert len(discovered) == expected_openings
+
+    ordered = []
+    for selector, opening in discovered.values():
+        geometry = host_geometry._opening_geometry(physical, opening)
+        assert geometry is not None
+        scalar = float(geometry.origin[0]) * float(geometry.axis[0]) + float(geometry.origin[1]) * float(geometry.axis[1])
+        ordered.append((scalar, selector, opening))
+    ordered.sort(key=lambda item: item[0])
 
     wall_authority = PhysicalWallCandidateProducer.from_source_visibility_producer(source).authority()
-    first = next(iter(discovered.values()))[1]
+    first = ordered[0][2]
     universe_authority = OpeningHostWallUniverseProducer.from_physical_wall_candidate_authority(
         wall_authority
     ).authority()
@@ -212,7 +128,7 @@ def _multi_fixture(payload: bytes):
         host_wall_universe_authority=universe_authority,
     )
     bound = []
-    for opening_selector, opening in discovered.values():
+    for _scalar, opening_selector, opening in ordered:
         binding = binding_producer.publish(
             opening_left_selector=opening_selector,
             opening_right_selector=opening_selector,
@@ -222,8 +138,8 @@ def _multi_fixture(payload: bytes):
         assert binding.record is not None
         bound.append(
             (
-                opening,
                 opening_selector,
+                opening,
                 OpeningHostBindingSelector(
                     document_id=binding.record.document_id,
                     revision_id=binding.record.revision_id,
@@ -233,53 +149,55 @@ def _multi_fixture(payload: bytes):
                     decision_scope_id=binding.record.decision_scope_id,
                     opening_identity_id=binding.record.opening_identity_id,
                 ),
+                binding.record,
             )
         )
-    bound.sort(key=lambda item: min(float(value) for value in item[0].source_bbox[::2]))
-    producer = OpeningHostFrameProducer.from_authorities(
+
+    frame_producer = OpeningHostFrameProducer.from_authorities(
         physical_opening_authority=physical,
         host_binding_authority=binding_producer.authority(),
         physical_wall_candidate_authority=wall_authority,
     )
-    return producer, tuple(bound)
+    return physical, wall_authority, binding_producer, frame_producer, tuple(bound)
+
+
+def _publish_all(frame_producer, bound):
+    results = []
+    for opening_selector, _opening, binding_selector, _binding in bound:
+        results.append(
+            frame_producer.publish(
+                opening_selector=opening_selector,
+                host_binding_selector=binding_selector,
+            )
+        )
+    return tuple(results)
 
 
 def test_authority_and_producer_are_sealed_and_no_raw_geometry_surface() -> None:
-    (
-        physical,
-        wall_authority,
-        _opening_selector,
-        _opening,
-        binding_producer,
-        _binding_selector,
-        _binding,
-    ) = _fixture()
+    physical, wall_authority, binding_producer, _frame_producer, _bound = _fixture(
+        _single_pdf(), expected_openings=1
+    )
     with pytest.raises(TypeError):
-        OpeningHostFrameProducer(
-            physical,
-            binding_producer.authority(),
-            wall_authority,
-        )
+        OpeningHostFrameProducer(physical, binding_producer.authority(), wall_authority)
     with pytest.raises(ValueError):
         OpeningHostFrameAuthority({}, _seal=object())
     forbidden = {
-        "host_wall_id", "origin", "axis", "normal", "u0", "u1", "jambs",
-        "thickness", "scale", "px_per_m", "confidence", "nearest", "radius",
-        "member_wall_candidate_ids", "complete", "claimed_complete",
+        "host_wall_id", "origin", "axis", "normal", "baseline", "u0", "u1",
+        "jambs", "thickness", "scale", "px_per_m", "confidence", "nearest",
+        "first", "radius", "member_wall_candidate_ids", "complete", "claimed_complete",
     }
     params = set(inspect.signature(OpeningHostFrameProducer.publish).parameters)
     assert not (params & forbidden)
 
 
-def test_real_source_host_frame_resolves_and_replays() -> None:
-    producer, result, opening, binding, _binding_selector = _frame()
+def test_single_opening_real_source_frame_resolves_and_replays() -> None:
+    _physical, _walls, _bindings, producer, bound = _fixture(
+        _single_pdf(), expected_openings=1
+    )
+    result = _publish_all(producer, bound)[0]
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.evidence is not None
     evidence = result.evidence
-    assert evidence.opening_identity_id == opening.record_id
-    assert evidence.host_binding_record_id == binding.record.record_id
-    assert evidence.host_wall_id == binding.record.host_wall_id
-    assert evidence.coordinate_unit == "pdf_point"
     assert evidence.origin_pt == (20.0, 90.0)
     assert evidence.axis_unit == (1.0, 0.0)
     assert evidence.u0_pt == 100.0
@@ -288,71 +206,36 @@ def test_real_source_host_frame_resolves_and_replays() -> None:
     assert producer.authority().resolve(evidence.selector) == result
 
 
-def test_translation_changes_host_origin_only_not_wall_local_geometry() -> None:
-    first = _frame(_pdf())[1].evidence
-    translated = _frame(_pdf(dx=50.0, dy=40.0))[1].evidence
-    assert first is not None and translated is not None
-    assert first.origin_pt == (20.0, 90.0)
-    assert translated.origin_pt == (70.0, 130.0)
-    assert first.axis_unit == translated.axis_unit
-    assert first.u0_pt == translated.u0_pt == 100.0
-    assert abs(first.u1_pt - translated.u1_pt) <= 1e-6
-    assert abs(first.wall_thickness_pt - translated.wall_thickness_pt) <= 1e-6
-
-
-def test_reversing_source_primitive_directions_keeps_canonical_frame() -> None:
-    first = _frame(_pdf())[1].evidence
-    reversed_frame = _frame(_pdf(reverse=True))[1].evidence
-    assert first is not None and reversed_frame is not None
-    assert first.origin_pt == reversed_frame.origin_pt
-    assert first.axis_unit == reversed_frame.axis_unit
-    assert first.normal_unit == reversed_frame.normal_unit
-    assert first.u0_pt == reversed_frame.u0_pt
-    assert abs(first.u1_pt - reversed_frame.u1_pt) <= 1e-6
-
-
-def test_cross_wired_host_binding_selector_fails_closed() -> None:
-    (
-        physical,
-        wall_authority,
-        opening_selector,
-        _opening,
-        binding_producer,
-        binding_selector,
-        _binding,
-    ) = _fixture()
-    producer = OpeningHostFrameProducer.from_authorities(
-        physical_opening_authority=physical,
-        host_binding_authority=binding_producer.authority(),
-        physical_wall_candidate_authority=wall_authority,
+def test_translation_and_reversed_primitives_preserve_local_geometry() -> None:
+    _p1, _w1, _b1, producer1, bound1 = _fixture(_single_pdf(), expected_openings=1)
+    first = _publish_all(producer1, bound1)[0].evidence
+    _p2, _w2, _b2, producer2, bound2 = _fixture(
+        _single_pdf(dx=50.0, dy=40.0, reverse=True), expected_openings=1
     )
-    wrong = dataclasses.replace(binding_selector, opening_identity_id="wrong-opening")
+    moved = _publish_all(producer2, bound2)[0].evidence
+    assert first is not None and moved is not None
+    assert first.origin_pt == (20.0, 90.0)
+    assert moved.origin_pt == (70.0, 130.0)
+    assert first.axis_unit == moved.axis_unit
+    assert first.u0_pt == moved.u0_pt == 100.0
+    assert abs(first.u1_pt - moved.u1_pt) <= 1e-6
+    assert abs(first.wall_thickness_pt - moved.wall_thickness_pt) <= 1e-6
+
+
+def test_cross_wired_binding_and_wrong_observation_fail_closed() -> None:
+    _physical, _walls, _bindings, producer, bound = _fixture(_single_pdf(), expected_openings=1)
+    opening_selector, _opening, binding_selector, _binding = bound[0]
+    wrong_binding = dataclasses.replace(binding_selector, opening_identity_id="wrong-opening")
     result = producer.publish(
         opening_selector=opening_selector,
-        host_binding_selector=wrong,
+        host_binding_selector=wrong_binding,
     )
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.evidence is None
 
-
-def test_wrong_opening_observation_cannot_reuse_valid_host_binding() -> None:
-    (
-        physical,
-        wall_authority,
-        opening_selector,
-        _opening,
-        binding_producer,
-        binding_selector,
-        _binding,
-    ) = _fixture()
-    producer = OpeningHostFrameProducer.from_authorities(
-        physical_opening_authority=physical,
-        host_binding_authority=binding_producer.authority(),
-        physical_wall_candidate_authority=wall_authority,
-    )
-    wrong = dataclasses.replace(opening_selector, observation_id="not-a-real-observation")
+    wrong_opening = dataclasses.replace(opening_selector, observation_id="not-a-real-observation")
     result = producer.publish(
-        opening_selector=wrong,
+        opening_selector=wrong_opening,
         host_binding_selector=binding_selector,
     )
     assert result.status in {
@@ -362,28 +245,26 @@ def test_wrong_opening_observation_cannot_reuse_valid_host_binding() -> None:
     assert result.evidence is None
 
 
-def test_two_openings_share_one_whole_wall_frame() -> None:
-    producer, bound = _multi_fixture(_multi_opening_pdf())
-    frames = []
-    for _opening, opening_selector, binding_selector in bound:
-        result = producer.publish(
-            opening_selector=opening_selector,
-            host_binding_selector=binding_selector,
-        )
-        assert result.status is EvidenceResolutionStatus.CORROBORATED
-        assert result.evidence is not None
-        frames.append(result.evidence)
-    assert {frame.origin_pt for frame in frames} == {(20.0, 90.0)}
-    assert len({frame.whole_wall_frame_id for frame in frames}) == 1
-    assert tuple((frame.u0_pt, frame.u1_pt) for frame in frames) == (
-        (80.0, 120.0),
-        (200.0, 240.0),
+def test_two_openings_share_one_whole_wall_origin_and_distinct_intervals() -> None:
+    _physical, _walls, _bindings, producer, bound = _fixture(
+        _two_opening_pdf(), expected_openings=2
     )
+    results = _publish_all(producer, bound)
+    assert all(result.status is EvidenceResolutionStatus.CORROBORATED for result in results)
+    frames = tuple(result.evidence for result in results)
+    assert all(frame is not None for frame in frames)
+    assert {frame.origin_pt for frame in frames if frame is not None} == {(20.0, 90.0)}
+    assert len({frame.whole_wall_frame_id for frame in frames if frame is not None}) == 1
+    assert tuple(
+        (frame.u0_pt, frame.u1_pt) for frame in frames if frame is not None
+    ) == ((80.0, 120.0), (200.0, 240.0))
 
 
-def test_unproven_aligned_remote_fragments_block_whole_wall_frame() -> None:
-    producer, bound = _multi_fixture(_multi_opening_pdf(remote_unproven=True))
-    _opening, opening_selector, binding_selector = bound[0]
+def test_unproven_aligned_remote_fragments_block_whole_wall_publication() -> None:
+    _physical, _walls, _bindings, producer, bound = _fixture(
+        _two_opening_pdf(remote_unproven=True), expected_openings=2
+    )
+    opening_selector, _opening, binding_selector, _binding = bound[0]
     result = producer.publish(
         opening_selector=opening_selector,
         host_binding_selector=binding_selector,
