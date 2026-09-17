@@ -18,12 +18,41 @@ from enum import Enum
 import math
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence, Tuple
-from shapely.geometry import Polygon
-
 from pb_migration_contracts import (
     EvidenceResolutionStatus,
     stable_contract_id,
 )
+
+
+def _polygon_area(pts: Sequence[Tuple[float, float]]) -> float:
+    n = len(pts)
+    if n < 3:
+        return 0.0
+    area = 0.0
+    for i in range(n):
+        j = (i + 1) % n
+        area += pts[i][0] * pts[j][1]
+        area -= pts[j][0] * pts[i][1]
+    return abs(area) / 2.0
+
+
+def _polygon_perimeter(pts: Sequence[Tuple[float, float]]) -> float:
+    n = len(pts)
+    if n < 2:
+        return 0.0
+    perim = 0.0
+    for i in range(n):
+        j = (i + 1) % n
+        x1, y1 = pts[i]
+        x2, y2 = pts[j]
+        perim += math.hypot(x2 - x1, y2 - y1)
+    return perim
+
+
+def _polygon_to_hex(pts: Sequence[Tuple[float, float]]) -> str:
+    raw = f"POLYGON(({','.join(f'{x:.4f} {y:.4f}' for x, y in pts)}))"
+    return raw.encode("utf-8").hex()
+
 from pb_physical_scale_authority import (
     PhysicalScaleAuthority,
     PhysicalScaleSelector,
@@ -332,15 +361,12 @@ class SecondaryFootprintProducer:
 
         # 3. Compute Metric Geometry from Polygon Points
         first_ob = valid_obs[0]
-        try:
-            poly_pt = Polygon(first_ob.polygon_points_pt)
-            if not poly_pt.is_valid or poly_pt.is_empty:
-                return self._store(selector, _conflict(SECONDARY_FOOTPRINT_GEOMETRY_INVALID))
-        except Exception:
-            return self._store(selector, _conflict(SECONDARY_FOOTPRINT_GEOMETRY_INVALID))
+        pts = first_ob.polygon_points_pt
+        area_pt2 = _polygon_area(pts)
+        perim_pt = _polygon_perimeter(pts)
 
-        area_pt2 = poly_pt.area
-        perim_pt = poly_pt.length
+        if area_pt2 <= 0.0:
+            return self._store(selector, _conflict(SECONDARY_FOOTPRINT_GEOMETRY_INVALID))
 
         # Convert points to metres: 1 pt * mm_per_pt = mm / 1000 = m
         m_per_pt = mm_per_pt / 1000.0
@@ -374,7 +400,7 @@ class SecondaryFootprintProducer:
             is_enclosed=is_enclosed,
             area_m2=area_m2,
             perimeter_m=perimeter_m,
-            polygon_wkb_hex=poly_pt.wkb_hex,
+            polygon_wkb_hex=_polygon_to_hex(pts),
         )
         return self._store(
             selector,
