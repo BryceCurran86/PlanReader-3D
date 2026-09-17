@@ -59,12 +59,14 @@ def _setup(
         doc = fitz.open(stream=raw, filetype="pdf")
         try:
             page = doc.load_page(0)
-            y = 570.0
+            # Keep applicability declarations well outside the schedule region at
+            # y~=500-530 so the sealed schedule parser never sees them as rows.
+            y = 330.0
             if target_token:
-                page.insert_text(fitz.Point(10.0, y), target_token, fontsize=4.5)
+                page.insert_text(fitz.Point(20.0, y), target_token, fontsize=4.5)
                 y += 18.0
             for token in rule_tokens:
-                page.insert_text(fitz.Point(10.0, y), token, fontsize=4.5)
+                page.insert_text(fitz.Point(20.0, y), token, fontsize=4.5)
                 y += 18.0
             return bytes(doc.tobytes(garbage=4, deflate=True))
         finally:
