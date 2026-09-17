@@ -57,6 +57,7 @@ from pb_physical_scale_authority import (
 from pb_wall_height_authority import (
     WALL_HEIGHT_FAMILY,
     WallHeightAuthority,
+    _HEIGHT_AUTHORITY_SEAL as HEIGHT_SEAL,
 )
 from pb_gross_wall_geometry_authority import (
     GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED,
@@ -528,7 +529,7 @@ def _setup_gross_upstream_authorities(
         reason_codes=() if not height_abstained else ("unresolved_height",),
         metadata=h_meta,
     )
-    height_auth = WallHeightAuthority.from_quantities({wall_id: qty})
+    height_auth = WallHeightAuthority({wall_id: qty}, _seal=HEIGHT_SEAL)
 
     producer = GrossWallGeometryProducer.from_authorities(
         physical_wall_candidate_authority=cand_auth,
