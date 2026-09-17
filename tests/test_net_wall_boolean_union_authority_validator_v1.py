@@ -35,6 +35,8 @@ def _future_module():
 
 
 def test_legacy_scalar_net_wall_path_remains_non_union_and_fail_closed() -> None:
+    """The old scalar path is diagnostic/readiness logic, not the new authority."""
+
     source = inspect.getsource(legacy_net.build_net_wall_area_quantity)
     assert "total_deduction += numeric" in source
     assert "unary_union" not in source
@@ -96,8 +98,8 @@ def test_geometry_helper_unions_overlaps_instead_of_scalar_summing() -> None:
     from shapely.geometry import box
 
     union = mod.union_wall_local_void_polygons
-    left = box(0.0, 0.0, 2.0, 2.0)
-    right = box(1.0, 0.0, 3.0, 2.0)
+    left = box(0.0, 0.0, 2.0, 2.0)   # area 4
+    right = box(1.0, 0.0, 3.0, 2.0)  # area 4, overlap area 2
 
     merged = union((left, right))
     assert merged.area == pytest.approx(6.0)
@@ -115,6 +117,7 @@ def test_geometry_helper_handles_duplicate_disjoint_and_same_size_distinct_voids
     second_same_size = box(4.0, 0.0, 6.0, 2.0)
 
     assert union((first, duplicate)).area == pytest.approx(4.0)
+    # Equal dimensions are not identity: distinct positions remain two voids.
     assert union((first, second_same_size)).area == pytest.approx(8.0)
 
 
@@ -141,6 +144,7 @@ def test_wall_local_boolean_subtraction_is_translation_rotation_and_reversal_inv
     rotated_voids = tuple(affinity.rotate(v, 37.0, origin=(0.0, 0.0)) for v in voids)
     assert subtract(rotated_gross, rotated_voids).area == pytest.approx(baseline.area)
 
+    # Reverse the wall-local u axis around the wall midpoint.
     reversed_gross = affinity.scale(gross, xfact=-1.0, yfact=1.0, origin=(5.0, 0.0))
     reversed_voids = tuple(
         affinity.scale(v, xfact=-1.0, yfact=1.0, origin=(5.0, 0.0)) for v in voids
@@ -156,4 +160,5 @@ def test_geometry_implementation_uses_shapely_unary_union_at_geometry_layer() ->
 
     assert "unary_union" in union_source
     assert ".difference(" in subtract_source
+    # The subtraction helper must consume the union result, not sum scalar void areas.
     assert "sum(" not in subtract_source
