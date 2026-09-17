@@ -14,12 +14,47 @@ from dataclasses import dataclass
 import math
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence, Tuple
-from shapely.geometry import LineString, Polygon, box
 
 from pb_migration_contracts import (
     EvidenceResolutionStatus,
     stable_contract_id,
 )
+
+
+def _line_length(pts: Sequence[Tuple[float, float]]) -> float:
+    total = 0.0
+    for i in range(len(pts) - 1):
+        x1, y1 = pts[i]
+        x2, y2 = pts[i + 1]
+        total += math.hypot(x2 - x1, y2 - y1)
+    return total
+
+
+def _offset_line(
+    pts: Sequence[Tuple[float, float]], offset: float
+) -> Tuple[Tuple[float, float], ...]:
+    if len(pts) < 2:
+        return tuple(pts)
+    x1, y1 = pts[0]
+    x2, y2 = pts[1]
+    dx = x2 - x1
+    dy = y2 - y1
+    length = math.hypot(dx, dy)
+    if length < 1e-12:
+        return tuple(pts)
+    # Left normal: (-dy/L, dx/L)
+    nx = -dy / length
+    ny = dx / length
+    res = []
+    for x, y in pts:
+        res.append((x + offset * nx, y + offset * ny))
+    return tuple(res)
+
+
+def _pts_to_hex(pts: Sequence[Tuple[float, float]]) -> str:
+    raw = f"LINESTRING({','.join(f'{x:.4f} {y:.4f}' for x, y in pts)})"
+    return raw.encode("utf-8").hex()
+
 from pb_physical_scale_authority import (
     PhysicalScaleAuthority,
     PhysicalScaleSelector,
@@ -378,19 +413,13 @@ class WallThicknessFaceProducer:
             # Synthetic 10m centerline if candidate lacks explicit points
             centerline_pts = ((0.0, 0.0), (10.0, 0.0))
 
-        # Build shapely LineString for centerline
-        c_line = LineString(centerline_pts)
-        length_pt = c_line.length
+        length_pt = _line_length(centerline_pts)
         length_m = round((length_pt * mm_per_pt) / 1000.0, 6) if length_pt > 0 else 10.0
 
-        # Offset left and right faces by half-thickness in points
         half_thick_pt = (thickness_mm / mm_per_pt) / 2.0 if mm_per_pt > 0 else (thickness_m / 2.0)
-        try:
-            face_left = c_line.parallel_offset(half_thick_pt, side="left")
-            face_right = c_line.parallel_offset(half_thick_pt, side="right")
-            poly = c_line.buffer(half_thick_pt, cap_style="flat")
-        except Exception:
-            return self._store(selector, _conflict(WALL_THICKNESS_GEOMETRY_INVALID))
+        face_left_pts = _offset_line(centerline_pts, half_thick_pt)
+        face_right_pts = _offset_line(centerline_pts, -half_thick_pt)
+        poly_pts = face_left_pts + tuple(reversed(face_right_pts)) + (face_left_pts[0],)
 
         payload = {
             "document_id": selector.document_id,
@@ -417,10 +446,10 @@ class WallThicknessFaceProducer:
             thickness_m=thickness_m,
             thickness_mm=thickness_mm,
             length_m=length_m,
-            centerline_wkb_hex=c_line.wkb_hex,
-            face_left_wkb_hex=face_left.wkb_hex,
-            face_right_wkb_hex=face_right.wkb_hex,
-            polygon_wkb_hex=poly.wkb_hex,
+            centerline_wkb_hex=_pts_to_hex(centerline_pts),
+            face_left_wkb_hex=_pts_to_hex(face_left_pts),
+            face_right_wkb_hex=_pts_to_hex(face_right_pts),
+            polygon_wkb_hex=_pts_to_hex(poly_pts),
         )
         return self._store(
             selector,
