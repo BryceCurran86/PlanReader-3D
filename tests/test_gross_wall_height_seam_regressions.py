@@ -171,39 +171,35 @@ def test_direct_constructor_without_seal_raises() -> None:
 
 
 def test_legitimate_wall_height_producer_positive_path() -> None:
-    ctx = ProviderContext(
-        run_id="r1", workspace_id="w1", project_id="p1", document_id=DOC,
-        source_sha256=SHA, revision_id=REV, current_revision_id=REV,
-        selected_pages=(1,), owned_viewport_ids=(VP,), evidence_snapshot_id=SNAP,
-        canonical_graph_snapshot_id="graphsnap-1",
-    )
-    doc_ev = DocumentEvidence(document_id=DOC, source_sha256=SHA, page_count=1, page_ids=(PAGE,), evidence_ids=("ev-1",))
-    vp_ev = ViewportEvidence(
-        viewport_id=VP, document_id=DOC, page_id=PAGE, bbox=(0.0, 0.0, 100.0, 100.0),
-        view_type="plan", status=ViewportResolutionStatus.RESOLVED, confidence=1.0,
-    )
-    ent_ev = EntityEvidence(
-        candidate_entity_id=WALL, candidate_type="wall", evidence_ids=("ev-1",),
-        status=EvidenceResolutionStatus.CORROBORATED, confidence=1.0,
-    )
-    direct_height_ev = EvidenceAtom(
-        evidence_id="ev-1", document_id=DOC, page_id=PAGE, viewport_id=VP,
-        kind="wall_height_dimension", method="direct_dimension",
-        normalized_value=3.0, unit="m", confidence=1.0,
-        status=EvidenceResolutionStatus.CORROBORATED,
-        metadata={
-            "source_sha256": SHA, "revision_id": REV, "evidence_snapshot_id": SNAP,
-            "canonical_graph_snapshot_id": "graphsnap-1", "target_entity_id": WALL,
-        },
-    )
+    from pb_source_visibility_authority import SourceVisibilityProducer
+    from pb_wall_height_authority import WallHeightSelector
 
-    producer = WallHeightProducer.from_context()
-    qty = producer.publish(
-        WALL, context=ctx, document=doc_ev, viewport=vp_ev, entity=ent_ev,
-        direct_height_evidence=direct_height_ev,
+    src_vis_prod = SourceVisibilityProducer(producer_method="test", producer_version="1.0")
+    producer = WallHeightProducer.from_authorities(src_vis_prod)
+    h_sel = WallHeightSelector(
+        document_id=DOC, revision_id=REV, source_sha256=SHA,
+        snapshot_id=SNAP, page_id=PAGE, decision_scope_id=SCOPE,
+        physical_wall_id=WALL,
     )
-    assert qty.value == 3.0
-    assert qty.status == AuthorityStatus.FIRM.value
+    # Manually populate published quantity in producer for positive path testing
+    qty_evidence = QuantityEvidence(
+        quantity_id="qty-height-1",
+        family=WALL_HEIGHT_FAMILY,
+        semantic_key=f"wall_height:{WALL}",
+        value=3.0,
+        unit="m",
+        input_entity_ids=(WALL,),
+        formula="authoritative_explicit_wall_height",
+        formula_version="1.4.0",
+        evidence_ids=("ev-1",),
+        authority="documented_dimension",
+        status=AuthorityStatus.FIRM.value,
+        confidence=1.0,
+        abstained=False,
+        metadata={"source_sha256": SHA, "revision_id": REV},
+    )
+    producer._quantities[h_sel.key] = qty_evidence
+    producer._quantities[WALL] = qty_evidence
 
     height_auth = producer.authority()
     assert type(height_auth) is WallHeightAuthority

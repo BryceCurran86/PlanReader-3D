@@ -685,6 +685,42 @@ def build_wall_height_quantity(
     )
 
 
+@dataclass(frozen=True)
+class WallHeightSelector:
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    snapshot_id: str
+    page_id: str
+    decision_scope_id: str
+    physical_wall_id: str
+
+    def __post_init__(self) -> None:
+        for field in (
+            "document_id",
+            "revision_id",
+            "source_sha256",
+            "snapshot_id",
+            "page_id",
+            "decision_scope_id",
+            "physical_wall_id",
+        ):
+            if not str(getattr(self, field) or "").strip():
+                raise ValueError(f"{field} must be non-empty")
+
+    @property
+    def key(self) -> tuple[str, str, str, str, str, str, str]:
+        return (
+            self.document_id,
+            self.revision_id,
+            self.source_sha256,
+            self.snapshot_id,
+            self.page_id,
+            self.decision_scope_id,
+            self.physical_wall_id,
+        )
+
+
 _HEIGHT_AUTHORITY_SEAL = object()
 _HEIGHT_PRODUCER_SEAL = object()
 
@@ -708,7 +744,7 @@ class WallHeightAuthority:
         if _seal is not _HEIGHT_AUTHORITY_SEAL:
             raise TypeError(
                 "WallHeightAuthority is producer-owned and cannot be constructed directly; "
-                "use WallHeightProducer.from_context() to obtain one."
+                "use WallHeightProducer.from_authorities() to obtain one."
             )
         from types import MappingProxyType
         self._quantities = MappingProxyType(dict(quantities))
@@ -736,64 +772,185 @@ class WallHeightAuthority:
 
 
 class WallHeightProducer:
-    """Trusted writer boundary for wall-height QuantityEvidence.
+    """Trusted producer boundary for wall-height QuantityEvidence.
 
     The only way to obtain a WallHeightAuthority is through this class.
-    Every positive quantity stored here must originate from
-    build_wall_height_quantity() called with a real ProviderContext,
-    DocumentEvidence, ViewportEvidence, EntityEvidence, and optional
-    EvidenceAtom observations.  Callers cannot inject pre-built
-    QuantityEvidence objects.
+    Must be bound to a real producer-owned SourceVisibilityProducer.
+    Callers cannot pass caller-constructed evidence atoms or context objects
+    to mint FIRM height.
     """
 
-    def __init__(self, *, _seal: object = None) -> None:
+    def __init__(
+        self,
+        source_visibility_producer: object,
+        *,
+        _seal: object = None,
+    ) -> None:
         if _seal is not _HEIGHT_PRODUCER_SEAL:
             raise TypeError(
-                "WallHeightProducer must be created via WallHeightProducer.from_context()"
+                "WallHeightProducer must be created via WallHeightProducer.from_authorities()"
             )
+        from pb_source_visibility_authority import SourceVisibilityProducer
+        if type(source_visibility_producer) is not SourceVisibilityProducer:
+            raise TypeError("source_visibility_producer must be producer-owned SourceVisibilityProducer")
+        self._source_visibility_producer = source_visibility_producer
         self._quantities: dict[object, QuantityEvidence] = {}
 
     @classmethod
-    def from_context(cls) -> "WallHeightProducer":
-        """Create a new, empty WallHeightProducer."""
-        return cls(_seal=_HEIGHT_PRODUCER_SEAL)
+    def from_authorities(
+        cls,
+        source_visibility_producer: object,
+    ) -> "WallHeightProducer":
+        """Construct from exact producer-owned SourceVisibilityProducer."""
+        return cls(source_visibility_producer, _seal=_HEIGHT_PRODUCER_SEAL)
 
-    def publish(
+    @classmethod
+    def from_source_visibility_producer(
+        cls,
+        source_visibility_producer: object,
+    ) -> "WallHeightProducer":
+        return cls.from_authorities(source_visibility_producer)
+
+    def publish_scope(
         self,
-        wall_id: str,
-        *,
-        context: ProviderContext,
-        document: DocumentEvidence,
-        viewport: ViewportEvidence,
-        entity: EntityEvidence,
-        direct_height_evidence: Optional[EvidenceAtom] = None,
-        lower_datum_evidence: Optional[EvidenceAtom] = None,
-        upper_datum_evidence: Optional[EvidenceAtom] = None,
-        wall_segment_id: Optional[str] = None,
-        datum_relationship_proofs: tuple[WallDatumRelationshipProof, ...] = (),
-        relationship_evidence: Optional[Mapping[str, EvidenceAtom]] = None,
+        selector: WallHeightSelector,
     ) -> QuantityEvidence:
-        """Resolve and store a wall-height quantity for wall_id.
+        """Resolve and store a wall-height quantity for selector."""
+        if type(selector) is not WallHeightSelector:
+            raise TypeError("selector must be WallHeightSelector")
+        published = self._source_visibility_producer.published_snapshot_for_revision(selector.revision_id)
+        if (
+            published is None
+            or published.revision.document_id != selector.document_id
+            or published.revision.source_sha256 != selector.source_sha256
+            or published.snapshot.snapshot_id != selector.snapshot_id
+        ):
+            qty = QuantityEvidence(
+                quantity_id=stable_contract_id("qty", {"selector": selector.key, "reason": "snapshot_unavailable"}),
+                family=WALL_HEIGHT_FAMILY,
+                semantic_key=f"wall_height:{selector.physical_wall_id}",
+                value=None,
+                unit="m",
+                input_entity_ids=(selector.physical_wall_id,),
+                formula="authoritative_explicit_wall_height",
+                formula_version=WALL_HEIGHT_FORMULA_VERSION,
+                evidence_ids=(),
+                authority="unresolved",
+                status=AuthorityStatus.BLOCKED.value,
+                confidence=0.0,
+                abstained=True,
+                blocking_reasons=("no_authoritative_wall_height_evidence",),
+                reason_codes=("no_authoritative_wall_height_evidence",),
+                metadata={},
+            )
+            self._quantities[selector.key] = qty
+            self._quantities[selector.physical_wall_id] = qty
+            return qty
 
-        Delegates entirely to build_wall_height_quantity(); the result is
-        stored under wall_id and returned.  Abstained results are also stored
-        so callers can inspect blocking reasons.
-        """
-        qty = build_wall_height_quantity(
-            wall_id=wall_id,
-            context=context,
-            document=document,
-            viewport=viewport,
-            entity=entity,
-            direct_height_evidence=direct_height_evidence,
-            lower_datum_evidence=lower_datum_evidence,
-            upper_datum_evidence=upper_datum_evidence,
-            wall_segment_id=wall_segment_id,
-            datum_relationship_proofs=datum_relationship_proofs,
-            relationship_evidence=relationship_evidence,
-        )
-        self._quantities[wall_id] = qty
+        from pb_pdf_text_integrity_authority import ObservationSelector
+        authority = self._source_visibility_producer.text_integrity_authority()
+        height_atom = None
+        for obs_id in published.text_observation_ids:
+            try:
+                res = authority.resolve_text(
+                    ObservationSelector(
+                        document_id=selector.document_id,
+                        revision_id=selector.revision_id,
+                        source_sha256=selector.source_sha256,
+                        snapshot_id=selector.snapshot_id,
+                        page_id=selector.page_id,
+                        observation_id=obs_id,
+                    )
+                )
+                if (
+                    res.status == EvidenceResolutionStatus.CORROBORATED
+                    and res.atom is not None
+                    and res.atom.kind in _ALLOWED_DIRECT_KINDS
+                    and str(_metadata(res.atom).get("target_entity_id") or "") == selector.physical_wall_id
+                ):
+                    height_atom = res.atom
+                    break
+            except Exception:
+                pass
+
+        if height_atom is None or height_atom.normalized_value is None:
+            qty = QuantityEvidence(
+                quantity_id=stable_contract_id("qty", {"selector": selector.key, "reason": "no_height_atom"}),
+                family=WALL_HEIGHT_FAMILY,
+                semantic_key=f"wall_height:{selector.physical_wall_id}",
+                value=None,
+                unit="m",
+                input_entity_ids=(selector.physical_wall_id,),
+                formula="authoritative_explicit_wall_height",
+                formula_version=WALL_HEIGHT_FORMULA_VERSION,
+                evidence_ids=(),
+                authority="unresolved",
+                status=AuthorityStatus.BLOCKED.value,
+                confidence=0.0,
+                abstained=True,
+                blocking_reasons=("no_authoritative_wall_height_evidence",),
+                reason_codes=("no_authoritative_wall_height_evidence",),
+                metadata={},
+            )
+        else:
+            value_m = _numeric_to_m(height_atom.normalized_value, height_atom.unit)
+            if value_m is None or value_m <= 0.0:
+                qty = QuantityEvidence(
+                    quantity_id=stable_contract_id("qty", {"selector": selector.key, "reason": "invalid_value"}),
+                    family=WALL_HEIGHT_FAMILY,
+                    semantic_key=f"wall_height:{selector.physical_wall_id}",
+                    value=None,
+                    unit="m",
+                    input_entity_ids=(selector.physical_wall_id,),
+                    formula="authoritative_explicit_wall_height",
+                    formula_version=WALL_HEIGHT_FORMULA_VERSION,
+                    evidence_ids=(height_atom.evidence_id,),
+                    authority="unresolved",
+                    status=AuthorityStatus.BLOCKED.value,
+                    confidence=0.0,
+                    abstained=True,
+                    blocking_reasons=("invalid_direct_height_value",),
+                    reason_codes=("invalid_direct_height_value",),
+                    metadata={},
+                )
+            else:
+                payload = {
+                    "wall_id": selector.physical_wall_id,
+                    "value_m": round(value_m, 6),
+                    "evidence_id": height_atom.evidence_id,
+                    "source_sha256": selector.source_sha256,
+                    "revision_id": selector.revision_id,
+                    "snapshot_id": selector.snapshot_id,
+                }
+                qty = QuantityEvidence(
+                    quantity_id=stable_contract_id("qty", payload),
+                    family=WALL_HEIGHT_FAMILY,
+                    semantic_key=f"wall_height:{selector.physical_wall_id}",
+                    value=round(value_m, 6),
+                    unit="m",
+                    input_entity_ids=(selector.physical_wall_id,),
+                    formula="authoritative_explicit_wall_height",
+                    formula_version=WALL_HEIGHT_FORMULA_VERSION,
+                    evidence_ids=(height_atom.evidence_id,),
+                    authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+                    status=AuthorityStatus.FIRM.value,
+                    confidence=float(height_atom.confidence),
+                    abstained=False,
+                    metadata={
+                        "source_sha256": selector.source_sha256,
+                        "revision_id": selector.revision_id,
+                        "evidence_snapshot_id": selector.snapshot_id,
+                        "page_id": selector.page_id,
+                        "evidence_kind": height_atom.kind,
+                    },
+                )
+
+        self._quantities[selector.key] = qty
+        self._quantities[selector.physical_wall_id] = qty
         return qty
+
+    def publish(self, selector: WallHeightSelector) -> QuantityEvidence:
+        return self.publish_scope(selector)
 
     def authority(self) -> WallHeightAuthority:
         """Seal and return a read-only WallHeightAuthority from published quantities."""
