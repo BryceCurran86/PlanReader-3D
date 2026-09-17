@@ -106,9 +106,12 @@ def _setup(
         host_binding_authority=void_producer._host,
     )
     target_result = target.publish(selector)
-    rule = OpeningDeductionRuleProducer.from_source_visibility_producer(source)
-    rule_result = rule.publish(selector)
     target_authority = target.authority()
+    rule = OpeningDeductionRuleProducer.from_source_visibility_producer(
+        source,
+        target_scope_authority=target_authority,
+    )
+    rule_result = rule.publish(selector)
     rule_authority = rule.authority()
     applicability = OpeningDeductionApplicabilityProducer.from_authorities(
         physical_void_authority=void_producer.authority(),
@@ -197,8 +200,6 @@ def test_wrong_host_authority_cannot_authorize_target(monkeypatch: pytest.Monkey
     assert target.status is EvidenceResolutionStatus.CORROBORATED
     assert rule.status is EvidenceResolutionStatus.CORROBORATED
 
-    # The second authority is built from a genuinely different immutable PDF, not
-    # a copied or caller-forged host record.
     monkeypatch.undo()
     second_rule = RULE_TOKEN.replace("version=1", "version=9")
     second_void, _, _, _, _, _, _ = _setup(monkeypatch, rule_tokens=(second_rule,))
