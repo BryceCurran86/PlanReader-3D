@@ -436,7 +436,7 @@ class OpeningDeductionApplicabilityProducer:
 
         rule_result = self._rule.resolve(selector)
         if (
-            rule_result.status is EvidenceResolutionStatus.CONFLICTING
+            rule_result.status is EvidenceResolutionStatus.CONFLICT
             or OPENING_DEDUCTION_APPLICABILITY_RULE_CONFLICT in rule_result.reason_codes
         ):
             result = _blocked(OPENING_DEDUCTION_APPLICABILITY_RULE_CONFLICT)
