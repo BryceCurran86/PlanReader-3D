@@ -277,6 +277,16 @@ class WallFinishPropagationAuthority:
         decision_scope_id: str,
         trade_scope_id: str,
     ) -> Optional[WallFinishScopeSummaryRecord]:
+        for val, name in (
+            (document_id, "document_id"),
+            (revision_id, "revision_id"),
+            (source_sha256, "source_sha256"),
+            (snapshot_id, "snapshot_id"),
+            (page_id, "page_id"),
+            (decision_scope_id, "decision_scope_id"),
+            (trade_scope_id, "trade_scope_id"),
+        ):
+            _require_nonempty(val, name)
         key = (
             document_id,
             revision_id,
@@ -413,6 +423,35 @@ class WallFinishPropagationProducer:
                 ),
             )
 
+        # Check physical wall candidate scope lineage match
+        if (
+            getattr(wall_scope_res, "document_id", None)
+            and getattr(wall_scope_res, "document_id") != selector.document_id
+        ) or (
+            getattr(wall_scope_res, "source_sha256", None)
+            and getattr(wall_scope_res, "source_sha256") != selector.source_sha256
+        ) or (
+            getattr(wall_scope_res, "revision_id", None)
+            and getattr(wall_scope_res, "revision_id") != selector.revision_id
+        ) or (
+            getattr(wall_scope_res, "snapshot_id", None)
+            and getattr(wall_scope_res, "snapshot_id") != selector.snapshot_id
+        ) or (
+            getattr(wall_scope_res, "page_id", None)
+            and getattr(wall_scope_res, "page_id") != selector.page_id
+        ) or (
+            getattr(wall_scope_res, "decision_scope_id", None)
+            and getattr(wall_scope_res, "decision_scope_id") != selector.decision_scope_id
+        ):
+            return self._store(
+                selector,
+                _blocked(
+                    EvidenceResolutionStatus.CONFLICT,
+                    WALL_FINISH_LINEAGE_MISMATCH,
+                    "physical_wall_scope_lineage_mismatch",
+                ),
+            )
+
         # Match exact physical wall identity
         matching_wall_records = [
             r
@@ -490,7 +529,16 @@ class WallFinishPropagationProducer:
                 ),
             )
 
-        # B. Gross geometry record ID must be present
+        # B. Gross geometry record ID and record ID must be present
+        if not net_record.record_id:
+            return self._store(
+                selector,
+                _blocked(
+                    EvidenceResolutionStatus.CONFLICT,
+                    WALL_FINISH_NET_GEOMETRY_UNRESOLVED,
+                    "missing_net_wall_record_id",
+                ),
+            )
         if not net_record.gross_geometry_record_id:
             return self._store(
                 selector,
@@ -498,6 +546,19 @@ class WallFinishPropagationProducer:
                     EvidenceResolutionStatus.CONFLICT,
                     WALL_FINISH_NET_GEOMETRY_UNRESOLVED,
                     "missing_gross_geometry_record_id",
+                ),
+            )
+        if (
+            getattr(net_record, "gross_area_m2", None) is not None
+            and net_record.gross_area_m2 > 0.0
+            and net_record.net_area_m2 > (net_record.gross_area_m2 + 1e-6)
+        ):
+            return self._store(
+                selector,
+                _blocked(
+                    EvidenceResolutionStatus.CONFLICT,
+                    WALL_FINISH_NET_GEOMETRY_UNRESOLVED,
+                    "net_area_exceeds_gross_area",
                 ),
             )
 
@@ -594,6 +655,17 @@ class WallFinishPropagationProducer:
         trade_scope_id: str,
     ) -> WallFinishScopeSummaryRecord:
         """Aggregate all wall finishes for a trade scope, failing closed if any is unresolved."""
+        for val, name in (
+            (document_id, "document_id"),
+            (revision_id, "revision_id"),
+            (source_sha256, "source_sha256"),
+            (snapshot_id, "snapshot_id"),
+            (page_id, "page_id"),
+            (decision_scope_id, "decision_scope_id"),
+            (trade_scope_id, "trade_scope_id"),
+        ):
+            _require_nonempty(val, name)
+
         scope_key = (
             document_id,
             revision_id,
