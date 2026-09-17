@@ -1,74 +1,147 @@
-"""Adversarial tests for Item 21A cross-wall authority laundering attack.
-
-ITEM 21A CRITICAL BLOCKER: prevent cross-wall authority laundering.
-Caller-supplied wall_id must exactly match authenticated record identity.
-
-Attack Scenario:
-  1. Attacker obtains authenticated Wall_A net-wall evidence
-  2. Attacker creates selector for Wall_A
-  3. Attacker calls resolve_wall_net_area(selector_for_Wall_A, wall_id="Wall_B")
-  4. VULNERABLE: caller-supplied wall_id used without verification
-  5. RESULT: Wall_A's authenticated authority published as Wall_B
-
-The fix adds: `caller_wall_matches_selector = wall_id == selector.physical_wall_id`
-And checks it in the CORROBORATED branch before returning publication.
-"""
+"""Behavioral adversarial tests for Item 21A wall-identity authority boundaries."""
 from __future__ import annotations
 
-from pb_live_opening_net_wall_integration import LiveOpeningNetWallAdapter
+from pb_live_opening_net_wall_integration import (
+    LIVE_NET_WALL_IDENTITY_MISMATCH,
+    LIVE_NET_WALL_RESOLVED,
+    LiveOpeningNetWallAdapter,
+)
+from pb_migration_contracts import EvidenceResolutionStatus
+from pb_net_wall_boolean_union_authority import (
+    NetWallBooleanUnionAuthority,
+    NetWallBooleanUnionRecord,
+    NetWallBooleanUnionResult,
+    NetWallBooleanUnionSelector,
+    _AUTHORITY_SEAL,
+)
+from pb_opening_deduction_pipeline import GenericOpeningDeductionPipeline, WallInstance
 
 
-def test_cross_wall_attack_mismatch_blocks_publication() -> None:
-    """CRITICAL: wall_id != selector.physical_wall_id must block publication.
+def _selector(wall_id: str) -> NetWallBooleanUnionSelector:
+    return NetWallBooleanUnionSelector(
+        document_id="doc-item21a",
+        revision_id="rev-1",
+        source_sha256="a" * 64,
+        snapshot_id="snap-1",
+        page_id="page-1",
+        decision_scope_id="scope-wall",
+        physical_wall_id=wall_id,
+        trade_scope_id="walls",
+    )
 
-    Adapter has no upstream authority (None).
-    When wall_id="Wall_B" but selector.physical_wall_id="Wall_A", no mismatch
-    can happen yet (authority is None), but the code path is tested.
-    """
-    adapter = LiveOpeningNetWallAdapter(net_wall_authority=None)
 
-    # Call with mismatched wall_id and selector would fail if authority were present
-    # With no authority, this returns ABSTAINED/None safely
+def _record(wall_id: str, net_area_m2: float = 12.0) -> NetWallBooleanUnionRecord:
+    return NetWallBooleanUnionRecord(
+        record_id=f"union-{wall_id}",
+        document_id="doc-item21a",
+        revision_id="rev-1",
+        source_sha256="a" * 64,
+        snapshot_id="snap-1",
+        page_id="page-1",
+        decision_scope_id="scope-wall",
+        physical_wall_id=wall_id,
+        gross_geometry_record_id=f"gross-{wall_id}",
+        opening_universe_record_id=f"universe-{wall_id}",
+        deduction_record_ids=(),
+        union_geometry_id=f"union-geom-{wall_id}",
+        net_area_m2=net_area_m2,
+        gross_area_m2=15.0,
+        void_union_area_m2=3.0,
+        net_geometry_wkb_hex="01030000",
+        physical_void_record_ids=(),
+        trade_scope_id="walls",
+    )
+
+
+def _authority_for(selector: NetWallBooleanUnionSelector) -> NetWallBooleanUnionAuthority:
+    record = _record(selector.physical_wall_id)
+    result = NetWallBooleanUnionResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        record=record,
+        reason_codes=("test_authenticated_wall",),
+    )
+    return NetWallBooleanUnionAuthority(
+        {selector.key: result},
+        _seal=_AUTHORITY_SEAL,
+    )
+
+
+def test_cross_wall_attack_authenticated_wall_a_cannot_be_relabelled_wall_b() -> None:
+    """Real attack: genuine Wall A authority cannot be published under Wall B."""
+    selector_a = _selector("wall_A")
+    adapter = LiveOpeningNetWallAdapter(_authority_for(selector_a))
+
     result = adapter.resolve_wall_net_area(
-        selector=None,  # No authority, no selector
-        wall_id="Wall_B",
-        gross_area_m2=None,
+        selector=selector_a,
+        wall_id="wall_B",
+        gross_area_m2=15.0,
     )
 
     assert result.is_authoritative is False
     assert result.net_area_m2 is None
-    assert result.evidence.abstained is True
     assert result.evidence.value is None
-    assert result.evidence.status == "abstained"
+    assert result.evidence.abstained is True
+    assert result.evidence.status == "conflict"
+    assert LIVE_NET_WALL_IDENTITY_MISMATCH in result.reason_codes
+    assert LIVE_NET_WALL_IDENTITY_MISMATCH in result.evidence.blocking_reasons
 
 
-def test_code_review_wall_id_identity_check_line_126() -> None:
-    """Code review: verify wall_id identity check is in place.
+def test_exact_wall_positive_control_remains_authoritative() -> None:
+    """Exact Wall A request + selector + authenticated record remains valid."""
+    selector_a = _selector("wall_A")
+    adapter = LiveOpeningNetWallAdapter(_authority_for(selector_a))
 
-    The fix adds at line 126 (after line 117 resolve call):
-        caller_wall_matches_selector = wall_id == selector.physical_wall_id
+    result = adapter.resolve_wall_net_area(
+        selector=selector_a,
+        wall_id="wall_A",
+        gross_area_m2=15.0,
+    )
 
-    And at line 135:
-        and caller_wall_matches_selector  # CRITICAL: prevent cross-wall fanout
-
-    This ensures the CORROBORATED branch only executes when wall_id exactly
-    matches the authenticated selector's physical_wall_id.
-    """
-    import inspect
-    from pb_live_opening_net_wall_integration import LiveOpeningNetWallAdapter
-
-    # Read source to verify the fix is present
-    source = inspect.getsource(LiveOpeningNetWallAdapter.resolve_wall_net_area)
-
-    # Verify the critical check is in the source code
-    assert "caller_wall_matches_selector = wall_id == selector.physical_wall_id" in source
-    assert "CRITICAL: prevent cross-wall fanout" in source
-
-    # Verify it's in the condition chain
-    assert "and caller_wall_matches_selector" in source
+    assert result.is_authoritative is True
+    assert result.net_area_m2 == 12.0
+    assert result.wall_id == "wall_A"
+    assert result.evidence.value == 12.0
+    assert result.evidence.semantic_key == "wall_A"
+    assert result.evidence.status == "corroborated"
+    assert LIVE_NET_WALL_RESOLVED in result.reason_codes
 
 
-if __name__ == "__main__":
-    test_cross_wall_attack_mismatch_blocks_publication()
-    test_code_review_wall_id_identity_check_line_126()
-    print("All adversarial tests passed!")
+def test_pipeline_wall_instance_cannot_use_another_walls_selector() -> None:
+    """WallInstance wall_B cannot obtain authority through a Wall A selector map."""
+    selector_a = _selector("wall_A")
+    pipeline = GenericOpeningDeductionPipeline(
+        net_wall_authority=_authority_for(selector_a),
+        net_wall_selectors={"wall_B": selector_a},
+    )
+    wall_b = WallInstance(wall_id="wall_B", gross_area_m2=15.0)
+
+    result = pipeline.calculate_wall_deductions(wall_b, [], selector=selector_a)
+
+    assert result.wall_id == "wall_B"
+    assert result.net_area_evidence is not None
+    assert result.net_area_evidence.value is None
+    assert result.net_area_evidence.abstained is True
+    assert result.net_area_evidence.status == "conflict"
+    assert LIVE_NET_WALL_IDENTITY_MISMATCH in result.net_area_evidence.reason_codes
+
+
+def test_caller_selector_mapping_cannot_establish_wall_equivalence() -> None:
+    """A caller-provided mapping key cannot make selector Wall A equivalent to Wall B."""
+    selector_a = _selector("wall_A")
+    pipeline = GenericOpeningDeductionPipeline(
+        net_wall_authority=_authority_for(selector_a)
+    )
+    wall_b = WallInstance(wall_id="wall_B", gross_area_m2=15.0)
+
+    results = pipeline.deduct_openings_for_all_walls(
+        [wall_b],
+        [],
+        selectors={"wall_B": selector_a},
+    )
+
+    result = results["wall_B"]
+    assert result.net_area_evidence is not None
+    assert result.net_area_evidence.value is None
+    assert result.net_area_evidence.abstained is True
+    assert result.net_area_evidence.status == "conflict"
+    assert LIVE_NET_WALL_IDENTITY_MISMATCH in result.net_area_evidence.reason_codes
