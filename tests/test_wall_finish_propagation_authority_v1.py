@@ -184,6 +184,13 @@ def _sample_selector(wall_id: str, trade_id: str = "internal_plaster") -> WallFi
 
 
 def test_successful_propagation_with_both_faces() -> None:
+    """Item 19A: Caller-provided assignments never produce CORROBORATED results.
+
+    Even when all upstream authorities are valid and complete, finish/face binding
+    must derive from authenticated source evidence, not caller-provided data.
+    Until Item 19B producer-owned finish-binding authority is implemented,
+    all assignments return ABSTAINED (fail-closed).
+    """
     wall_auth = _make_physical_wall_auth(["wall_01"])
     net_auth = _make_net_wall_auth({"wall_01": 12.0})
 
@@ -204,22 +211,19 @@ def test_successful_propagation_with_both_faces() -> None:
     sel = _sample_selector("wall_01")
     res = producer.publish(sel)
 
-    assert res.status == EvidenceResolutionStatus.CORROBORATED
-    assert WALL_FINISH_PROPAGATION_RESOLVED in res.reason_codes
-    rec = res.record
-    assert rec is not None
-    assert rec.physical_wall_id == "wall_01"
-    assert rec.trade_scope_id == "internal_plaster"
-    assert rec.net_area_per_face_m2 == 12.0
-    assert rec.face_multiplier == 2.0
-    # 12.0 m2 per face * 2 faces = 24.0 m2 total finish area
-    assert rec.total_finish_area_m2 == 24.0
-    assert rec.unit == "m2"
-    assert rec.net_wall_record_id == "net_rec_wall_01"
-    assert rec.schema_version == WALL_FINISH_PROPAGATION_SCHEMA_VERSION
+    # Item 19A fix: Caller assignments cannot produce CORROBORATED results
+    assert res.status == EvidenceResolutionStatus.ABSTAINED
+    assert "item_19a_waiting_for_source_derived_finish_binding_authority" in res.reason_codes
+    # No record produced from caller-provided data
+    assert res.record is None
 
 
 def test_successful_propagation_with_single_face() -> None:
+    """Item 19A: Single-face caller assignments also fail-closed.
+
+    Caller cannot distinguish between left_face/right_face either.
+    No authenticated source-derived binding exists.
+    """
     wall_auth = _make_physical_wall_auth(["wall_02"])
     net_auth = _make_net_wall_auth({"wall_02": 15.5})
 
@@ -240,15 +244,19 @@ def test_successful_propagation_with_single_face() -> None:
     sel = _sample_selector("wall_02")
     res = producer.publish(sel)
 
-    assert res.status == EvidenceResolutionStatus.CORROBORATED
-    rec = res.record
-    assert rec is not None
-    assert rec.face_multiplier == 1.0
-    assert rec.total_finish_area_m2 == 15.5
+    # Item 19A fix: Even single-face caller assignments return ABSTAINED
+    assert res.status == EvidenceResolutionStatus.ABSTAINED
+    assert res.record is None
 
 
 def test_independent_identity_preservation_across_multiple_walls() -> None:
-    # Wall 1 and Wall 2 both receive internal plaster
+    """Item 19A: Multiple caller assignments still fail-closed independently.
+
+    Even though wall 1 and 2 have distinct identities and valid net-wall geometry,
+    the assignments themselves never produce CORROBORATED results.
+    Identity preservation will matter in Item 19B when source-derived binding exists.
+    """
+    # Wall 1 and Wall 2 both receive internal plaster (from caller, not source)
     wall_auth = _make_physical_wall_auth(["wall_01", "wall_02"])
     net_auth = _make_net_wall_auth({"wall_01": 10.0, "wall_02": 14.0})
 
@@ -274,13 +282,11 @@ def test_independent_identity_preservation_across_multiple_walls() -> None:
     res1 = producer.publish(_sample_selector("wall_01"))
     res2 = producer.publish(_sample_selector("wall_02"))
 
-    assert res1.record is not None
-    assert res2.record is not None
-    # Distinct identities are preserved; never merged into a single anonymous record
-    assert res1.record.physical_wall_id == "wall_01"
-    assert res1.record.total_finish_area_m2 == 20.0
-    assert res2.record.physical_wall_id == "wall_02"
-    assert res2.record.total_finish_area_m2 == 28.0
+    # Item 19A fix: No records produced from caller assignments
+    assert res1.record is None
+    assert res1.status == EvidenceResolutionStatus.ABSTAINED
+    assert res2.record is None
+    assert res2.status == EvidenceResolutionStatus.ABSTAINED
 
 
 def test_fail_closed_when_net_wall_geometry_unresolved() -> None:
@@ -310,7 +316,13 @@ def test_fail_closed_when_net_wall_geometry_unresolved() -> None:
 
 
 def test_scope_summary_aggregation_and_fail_closed() -> None:
-    # Wall 1 resolved (10 m2 * 2 = 20 m2), Wall 2 resolved (15 m2 * 2 = 30 m2)
+    """Item 19A: Scope summary fails closed when all assignments are caller-provided.
+
+    Even with two fully-resolved walls and complete net-wall geometry,
+    caller-provided assignments cannot contribute numeric authority.
+    The scope summary must reflect that no source-derived finish binding exists.
+    """
+    # Wall 1 and 2 have valid net geometry, but finish assignments are caller-provided
     wall_auth = _make_physical_wall_auth(["wall_01", "wall_02"])
     net_auth = _make_net_wall_auth({"wall_01": 10.0, "wall_02": 15.0})
 
@@ -333,12 +345,14 @@ def test_scope_summary_aggregation_and_fail_closed() -> None:
         trade_scope_id="internal_plaster",
     )
 
-    assert summary.is_scope_complete is True
-    assert summary.total_trade_area_m2 == 50.0  # 20.0 + 30.0
-    assert len(summary.contributing_wall_records) == 2
-    assert summary.unresolved_wall_ids == ()
+    # Item 19A fix: Scope summary fails closed for caller-provided assignments
+    assert summary.is_scope_complete is False
+    assert summary.total_trade_area_m2 is None
+    assert len(summary.contributing_wall_records) == 0
+    # Both walls marked as unresolved (no source-derived binding)
+    assert set(summary.unresolved_wall_ids) == {"wall_01", "wall_02"}
 
-    # Now add an unresolved wall 3: scope summary MUST fail closed
+    # The fail-closed behavior holds even with additional walls
     wall_auth_3 = _make_physical_wall_auth(["wall_01", "wall_02", "wall_03"])
     net_auth_3 = _make_net_wall_auth({"wall_01": 10.0, "wall_02": 15.0}, unresolved_walls=["wall_03"])
     assign3 = WallFinishAssignment("a3", "wall_03", "internal_plaster", "both_faces")
@@ -384,6 +398,11 @@ def test_missing_assignment_fails_closed() -> None:
 
 
 def test_authority_sealing_and_immutability() -> None:
+    """Authority sealing prevents direct instantiation and caller tampering.
+
+    Authority resolution reflects the Item 19A fail-closed behavior:
+    caller-provided assignments return ABSTAINED, not CORROBORATED.
+    """
     wall_auth = _make_physical_wall_auth(["wall_01"])
     net_auth = _make_net_wall_auth({"wall_01": 10.0})
     assign = WallFinishAssignment("a1", "wall_01", "internal_plaster", "both_faces")
@@ -398,11 +417,11 @@ def test_authority_sealing_and_immutability() -> None:
 
     auth = producer.authority()
     resolved = auth.resolve(sel)
-    assert resolved.status == EvidenceResolutionStatus.CORROBORATED
-    assert resolved.record is not None
-    assert resolved.record.total_finish_area_m2 == 20.0
+    # Item 19A: Caller assignments return ABSTAINED
+    assert resolved.status == EvidenceResolutionStatus.ABSTAINED
+    assert resolved.record is None
 
-    # Direct instantiation without seal fails
+    # Direct instantiation without seal still fails (sealing still enforced)
     with pytest.raises(TypeError, match="producer-owned"):
         WallFinishPropagationAuthority({}, {})
 
@@ -731,7 +750,13 @@ def test_F_gross_wall_fallback_cannot_masquerade_as_net_wall_finish() -> None:
 
 
 def test_G_overlapping_openings_not_re_subtracted_downstream() -> None:
-    """G: overlapping openings not re-subtracted downstream."""
+    """G: Item 19A—overlapping openings test deferred to 19B.
+
+    This test documents that even with correct boolean-union net area (15.0 m2),
+    a caller-provided assignment cannot produce CORROBORATED finish quantity.
+    The proof that openings are not re-subtracted downstream belongs in Item 19B
+    when a source-derived finish-binding authority exists.
+    """
     # Wall gross area: 20.0 m2
     # Two openings: 3.0 m2 each, overlapping by 1.0 m2 -> void union = 5.0 m2
     # Net wall boolean union area: exactly 15.0 m2 (not 20 - 6 = 14)
@@ -786,16 +811,18 @@ def test_G_overlapping_openings_not_re_subtracted_downstream() -> None:
 
     res = producer.publish(sel)
 
-    assert res.status == EvidenceResolutionStatus.CORROBORATED
-    assert res.record is not None
-    assert res.record.net_area_per_face_m2 == 15.0
-    assert res.record.face_multiplier == 2.0
-    # Exactly 15.0 * 2.0 = 30.0 m2 (openings are NOT re-subtracted downstream)
-    assert res.record.total_finish_area_m2 == 30.0
+    # Item 19A: Caller assignment returns ABSTAINED, not CORROBORATED
+    assert res.status == EvidenceResolutionStatus.ABSTAINED
+    assert res.record is None
 
 
 def test_H_one_face_finish_does_not_implicitly_double_count() -> None:
-    """H: one-face finish does not implicitly double-count."""
+    """H: Item 19A—single-face test deferred to 19B.
+
+    This test documents the invariant that single-face assignments
+    don't implicitly double-count. However, Item 19A cannot produce
+    ANY authoritative finish quantities from caller assignments.
+    """
     wall_auth = _make_physical_wall_auth(["wall_left", "wall_right"])
     net_auth = _make_net_wall_auth({"wall_left": 12.0, "wall_right": 18.0})
 
@@ -809,16 +836,14 @@ def test_H_one_face_finish_does_not_implicitly_double_count() -> None:
     )
 
     res_left = producer.publish(_sample_selector("wall_left"))
-    assert res_left.status == EvidenceResolutionStatus.CORROBORATED
-    assert res_left.record is not None
-    assert res_left.record.face_multiplier == 1.0
-    assert res_left.record.total_finish_area_m2 == 12.0  # NOT double-counted to 24.0
+    # Item 19A: Single-face caller assignments return ABSTAINED
+    assert res_left.status == EvidenceResolutionStatus.ABSTAINED
+    assert res_left.record is None
 
     res_right = producer.publish(_sample_selector("wall_right"))
-    assert res_right.status == EvidenceResolutionStatus.CORROBORATED
-    assert res_right.record is not None
-    assert res_right.record.face_multiplier == 1.0
-    assert res_right.record.total_finish_area_m2 == 18.0  # NOT double-counted to 36.0
+    # Item 19A: Single-face caller assignments return ABSTAINED
+    assert res_right.status == EvidenceResolutionStatus.ABSTAINED
+    assert res_right.record is None
 
 
 def test_I_conflicting_finish_bindings_fail_closed() -> None:
@@ -845,8 +870,16 @@ def test_I_conflicting_finish_bindings_fail_closed() -> None:
     assert res.record is None
 
 
-def test_J_legitimate_producer_owned_positive_path_remains_valid() -> None:
-    """J: legitimate producer-owned positive path remains valid."""
+def test_J_legitimate_producer_owned_positive_path_reserved_for_item_19b() -> None:
+    """J: Producer-owned finish-binding positive path reserved for Item 19B.
+
+    Item 19A accepts NO caller-provided assignments as authoritative.
+    A truly "positive path" requires source-derived WallFinishFaceBindingAuthority
+    that will be implemented in Item 19B.
+
+    This test documents that even seemingly "complete" scenarios with all upstream
+    authorities valid return ABSTAINED until source-derived binding exists.
+    """
     wall_ids = ["wall_101", "wall_102"]
     wall_auth = _make_physical_wall_auth(wall_ids)
     net_auth = _make_net_wall_auth({"wall_101": 25.5, "wall_102": 14.25})
@@ -866,23 +899,14 @@ def test_J_legitimate_producer_owned_positive_path_remains_valid() -> None:
     res1 = producer.publish(sel1)
     res2 = producer.publish(sel2)
 
-    assert res1.status == EvidenceResolutionStatus.CORROBORATED
-    assert res1.record is not None
-    assert res1.record.physical_wall_id == "wall_101"
-    assert res1.record.net_area_per_face_m2 == 25.5
-    assert res1.record.face_multiplier == 2.0
-    assert res1.record.total_finish_area_m2 == 51.0
-    assert res1.record.net_wall_record_id == "net_rec_wall_101"
-    assert res1.record.gross_geometry_record_id == "gross_rec_wall_101"
+    # Item 19A fix: All caller assignments return ABSTAINED, not CORROBORATED
+    assert res1.status == EvidenceResolutionStatus.ABSTAINED
+    assert res1.record is None
 
-    assert res2.status == EvidenceResolutionStatus.CORROBORATED
-    assert res2.record is not None
-    assert res2.record.physical_wall_id == "wall_102"
-    assert res2.record.net_area_per_face_m2 == 14.25
-    assert res2.record.face_multiplier == 1.0
-    assert res2.record.total_finish_area_m2 == 14.25
+    assert res2.status == EvidenceResolutionStatus.ABSTAINED
+    assert res2.record is None
 
-    # Test scope summary
+    # Test scope summary also fails closed
     summary = producer.publish_scope_summary(
         document_id=sel1.document_id,
         revision_id=sel1.revision_id,
@@ -892,17 +916,16 @@ def test_J_legitimate_producer_owned_positive_path_remains_valid() -> None:
         decision_scope_id=sel1.decision_scope_id,
         trade_scope_id="internal_plaster",
     )
-    assert summary.is_scope_complete is True
-    # 51.0 + 14.25 = 65.25
-    assert summary.total_trade_area_m2 == 65.25
-    assert len(summary.contributing_wall_records) == 2
-    assert summary.unresolved_wall_ids == ()
+    assert summary.is_scope_complete is False
+    assert summary.total_trade_area_m2 is None
+    assert len(summary.contributing_wall_records) == 0
+    assert set(summary.unresolved_wall_ids) == {"wall_101", "wall_102"}
 
-    # Test authority resolution
+    # Test authority resolution also returns ABSTAINED
     auth = producer.authority()
     auth_res1 = auth.resolve(sel1)
-    assert auth_res1.status == EvidenceResolutionStatus.CORROBORATED
-    assert auth_res1.record.total_finish_area_m2 == 51.0
+    assert auth_res1.status == EvidenceResolutionStatus.ABSTAINED
+    assert auth_res1.record is None
 
 
 def test_physical_wall_scope_lineage_mismatch_fails_closed() -> None:

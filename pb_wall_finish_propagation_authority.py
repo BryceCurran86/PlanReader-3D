@@ -591,50 +591,28 @@ class WallFinishPropagationProducer:
                 ),
             )
 
-        # 4. Calculate Face Multiplier and Total Finish Area
-        face_target = assignment.wall_face_target
-        if face_target == "both_faces":
-            face_mult = 2.0
-        elif face_target in {"left_face", "right_face"}:
-            face_mult = 1.0
-        else:
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.CONFLICT,
-                    WALL_FINISH_FACE_AMBIGUOUS,
-                ),
-            )
-
-        net_face_area = net_record.net_area_m2
-        total_finish_area = round(net_face_area * face_mult, 4)
-
-        # 5. Build WallFinishPropagationRecord
-        payload = {
-            "document_id": selector.document_id,
-            "revision_id": selector.revision_id,
-            "source_sha256": selector.source_sha256,
-            "snapshot_id": selector.snapshot_id,
-            "page_id": selector.page_id,
-            "decision_scope_id": selector.decision_scope_id,
-            "physical_wall_id": selector.physical_wall_id,
-            "trade_scope_id": selector.trade_scope_id,
-            "assignment_id": assignment.assignment_id,
-            "wall_face_target": face_target,
-            "net_area_per_face_m2": net_face_area,
-            "face_multiplier": face_mult,
-            "total_finish_area_m2": total_finish_area,
-            "unit": "m2",
-            "net_wall_record_id": net_record.record_id,
-            "gross_geometry_record_id": net_record.gross_geometry_record_id,
-            "contributing_candidate_ids": candidate_ids,
-        }
-        record_id = stable_contract_id(
-            "wall_finish_propagation_record", payload, digest_chars=32
-        )
-        record = WallFinishPropagationRecord(
-            record_id=record_id,
-            **payload,
+        # 4. ITEM 19A FAIL-CLOSED ENFORCEMENT
+        # NO caller-provided finish/face binding is authentic until a source-derived
+        # producer-owned WallFinishFaceBindingAuthority exists.
+        #
+        # Caller-provided assignments are DIAGNOSTIC ONLY:
+        # - Never produce CORROBORATED, FIRM, or authoritative quantity
+        # - Cannot determine which faces receive finish
+        # - Cannot enforce material/trade scope
+        # - Cannot multiply net area by caller-selected face count
+        #
+        # Until Item 19B completes, return ABSTAINED with diagnostic reason.
+        return self._store(
+            selector,
+            _blocked(
+                EvidenceResolutionStatus.ABSTAINED,
+                WALL_FINISH_ASSIGNMENT_UNAVAILABLE,
+                "item_19a_waiting_for_source_derived_finish_binding_authority",
+                f"assignment_id={assignment.assignment_id}",
+                f"physical_wall_id={selector.physical_wall_id}",
+                f"trade_scope_id={selector.trade_scope_id}",
+                f"caller_face_target={assignment.wall_face_target}",
+            ),
         )
 
         result = WallFinishPropagationResult(
