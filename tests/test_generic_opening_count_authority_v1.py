@@ -138,102 +138,83 @@ def _setup_count_authorities(
         univ_rec.decision_scope_id,
     )
 
-    class _MockUniverseAuthority(OpeningUniverseCompletenessAuthority):
-        def __init__(self, record: OpeningUniverseCompletenessRecord):
-            self._record = record
-
-        def resolve(self, selector):
-            complete = self._record.decision_scope_complete
-            status = (
-                EvidenceResolutionStatus.CORROBORATED
-                if complete
-                else EvidenceResolutionStatus.ABSTAINED
-            )
-            from pb_opening_universe_completeness_authority import OpeningUniverseCompletenessResult
-            return OpeningUniverseCompletenessResult(
-                status=status,
-                source_decode_complete=complete,
-                semantic_enumeration_complete=complete,
-                decision_scope_complete=complete,
-                reason_codes=() if complete else ("incomplete",),
-                record=self._record if complete else None,
-            )
-
-    univ_auth = _MockUniverseAuthority(univ_rec)
+    import pb_opening_universe_completeness_authority as pb_u
+    univ_auth = pb_u.OpeningUniverseCompletenessAuthority(
+        {univ_key: univ_rec},
+        _seal=pb_u._AUTHORITY_SEAL,
+    )
 
     # 2. Physical Opening Authority
+    from pb_source_observation_authority import SourceObservationProducer
+    src_producer = SourceObservationProducer(producer_method="test", producer_version="1.0")
+    src_auth = src_producer.authority()
+    phys_auth = PhysicalOpeningAuthority(src_auth)
+
     physical_by_id = {op.record_id: op for op in openings}
 
-    class _MockPhysicalOpeningAuthority(PhysicalOpeningAuthority):
-        def __init__(self, records: dict[str, PhysicalOpeningExistenceRecord]):
-            self._records = records
-
-        def prove_existence(self, selector: ObservationSelector) -> PhysicalOpeningExistenceResult:
-            rec = self._records.get(selector.observation_id)
-            if rec is None:
-                return PhysicalOpeningExistenceResult(
-                    status=EvidenceResolutionStatus.ABSTAINED,
-                    proposition=None,
-                    physical_opening_existence="unresolved",
-                    reason_codes=("not_found",),
-                )
+    def _custom_prove_existence(selector: ObservationSelector) -> PhysicalOpeningExistenceResult:
+        rec = physical_by_id.get(selector.observation_id)
+        if rec is None:
             return PhysicalOpeningExistenceResult(
-                status=EvidenceResolutionStatus.CORROBORATED,
-                proposition=PHYSICAL_OPENING_EXISTS,
-                physical_opening_existence="exists",
-                reason_codes=(),
-                existence_record=rec,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                proposition=None,
+                physical_opening_existence="unresolved",
+                reason_codes=("not_found",),
             )
+        return PhysicalOpeningExistenceResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            proposition=PHYSICAL_OPENING_EXISTS,
+            physical_opening_existence="exists",
+            reason_codes=(),
+            existence_record=rec,
+        )
 
-    phys_auth = _MockPhysicalOpeningAuthority(physical_by_id)
+    object.__setattr__(phys_auth, "prove_existence", _custom_prove_existence)
 
     # 3. Schedule Binding Authority
+    import pb_schedule_opening_instance_binding_authority as pb_b
     binding_map: dict[str, tuple[str, str]] = {op_id: (mark, row_id) for op_id, mark, row_id in bindings}
 
-    class _MockScheduleBindingAuthority(ScheduleOpeningInstanceBindingAuthority):
-        def __init__(self, b_map: dict[str, tuple[str, str]], amb_id: str | None):
-            self._b_map = b_map
-            self._amb_id = amb_id
+    bind_results = {}
+    if ambiguous_opening_id is not None:
+        b_key = (doc, rev, sha, snap, scope, ambiguous_opening_id)
+        bind_results[b_key] = pb_b.ScheduleOpeningInstanceBindingResult(
+            status=EvidenceResolutionStatus.CONFLICT,
+            reason_codes=("ambiguous_schedule_rows",),
+            record=None,
+        )
+    for op_id, (mark, row_id) in binding_map.items():
+        if ambiguous_opening_id is not None and op_id == ambiguous_opening_id:
+            continue
+        rec = pb_b.ScheduleOpeningInstanceBindingRecord(
+            record_id=f"bind-{op_id}",
+            document_id=doc,
+            revision_id=rev,
+            source_sha256=sha,
+            snapshot_id=snap,
+            page_id=page,
+            decision_scope_id=scope,
+            opening_record_id=op_id,
+            tag_observation_id="tag-1",
+            tag_mark=mark,
+            schedule_page_id=page,
+            schedule_row_observation_ids=(row_id,),
+            schedule_row_type_mark=mark,
+            schedule_row_width_mm=900,
+            schedule_row_height_mm=2100,
+        )
+        res = pb_b.ScheduleOpeningInstanceBindingResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=(pb_b.BINDING_RESOLVED,),
+            record=rec,
+        )
+        b_key = (doc, rev, sha, snap, scope, op_id)
+        bind_results[b_key] = res
 
-        def resolve(self, selector: ScheduleOpeningInstanceBindingSelector) -> ScheduleOpeningInstanceBindingResult:
-            if self._amb_id is not None and selector.opening_record_id == self._amb_id:
-                return ScheduleOpeningInstanceBindingResult(
-                    status=EvidenceResolutionStatus.CONFLICT,
-                    reason_codes=("ambiguous_schedule_rows",),
-                    record=None,
-                )
-            match = self._b_map.get(selector.opening_record_id)
-            if match is None:
-                return ScheduleOpeningInstanceBindingResult(
-                    status=EvidenceResolutionStatus.ABSTAINED,
-                    reason_codes=("no_schedule_row",),
-                    record=None,
-                )
-            mark, row_id = match
-            rec = ScheduleOpeningInstanceBindingRecord(
-                record_id=f"bind-{selector.opening_record_id}",
-                document_id=selector.document_id,
-                revision_id=selector.revision_id,
-                source_sha256=selector.source_sha256,
-                snapshot_id=selector.snapshot_id,
-                page_id=PAGE,
-                decision_scope_id=selector.decision_scope_id,
-                opening_record_id=selector.opening_record_id,
-                tag_observation_id="tag-1",
-                tag_mark=mark,
-                schedule_page_id=PAGE,
-                schedule_row_observation_ids=(row_id,),
-                schedule_row_type_mark=mark,
-                schedule_row_width_mm=900,
-                schedule_row_height_mm=2100,
-            )
-            return ScheduleOpeningInstanceBindingResult(
-                status=EvidenceResolutionStatus.CORROBORATED,
-                reason_codes=(BINDING_RESOLVED,),
-                record=rec,
-            )
-
-    bind_auth = _MockScheduleBindingAuthority(binding_map, ambiguous_opening_id)
+    bind_auth = pb_b.ScheduleOpeningInstanceBindingAuthority(
+        bind_results,
+        _seal=pb_b._AUTHORITY_SEAL,
+    )
 
     producer = GenericOpeningCountProducer.from_authorities(
         opening_universe_authority=univ_auth,

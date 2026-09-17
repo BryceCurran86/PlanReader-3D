@@ -217,13 +217,20 @@ class GenericOpeningCountProducer:
             raise TypeError(
                 "GenericOpeningCountProducer must be obtained from from_authorities()"
             )
-        if not isinstance(opening_universe_authority, OpeningUniverseCompletenessAuthority):
+        if type(opening_universe_authority) is not OpeningUniverseCompletenessAuthority:
             raise TypeError(
                 "opening_universe_authority must be producer-owned OpeningUniverseCompletenessAuthority"
             )
-        if not isinstance(physical_opening_authority, PhysicalOpeningAuthority):
+        if type(physical_opening_authority) is not PhysicalOpeningAuthority:
             raise TypeError(
                 "physical_opening_authority must be producer-owned PhysicalOpeningAuthority"
+            )
+        if (
+            schedule_binding_authority is not None
+            and type(schedule_binding_authority) is not ScheduleOpeningInstanceBindingAuthority
+        ):
+            raise TypeError(
+                "schedule_binding_authority must be producer-owned ScheduleOpeningInstanceBindingAuthority"
             )
         self._universe = opening_universe_authority
         self._physical = physical_opening_authority
@@ -355,10 +362,14 @@ class GenericOpeningCountProducer:
                 )
 
             # Viewport isolation: non-plan views (elevations, details) cannot contaminate plan counts
-            if (
-                p_rec.viewport_id is not None
-                and p_rec.viewport_id in self._non_plan_viewports
-            ):
+            is_non_plan = False
+            if p_rec.viewport_id is not None:
+                vp_lower = p_rec.viewport_id.lower()
+                if vp_lower in self._non_plan_viewports:
+                    is_non_plan = True
+                elif any(kw in vp_lower for kw in ("elevation", "section", "detail", "schedule", "legend", "axonometric", "3d", "non_plan")):
+                    is_non_plan = True
+            if is_non_plan:
                 return self._store(
                     selector,
                     _blocked(
