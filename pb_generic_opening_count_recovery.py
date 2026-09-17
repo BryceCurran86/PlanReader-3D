@@ -21,7 +21,7 @@ from pb_opening_count_control_adapter import (
 )
 from pb_shadow_opening_count_gate import OPENING_COUNT_AUTHORITY_STATE
 
-GENERIC_OPENING_COUNT_RECOVERY_VERSION = "1.0.1"
+GENERIC_OPENING_COUNT_RECOVERY_VERSION = "1.0.2"
 
 _DIMENSION_DERIVED_IDENTITY_MARKERS = (
     "plan opening/pier chain",
@@ -81,6 +81,7 @@ class GenericOpeningCountRecovery:
         recovered: list[RecoveredOpeningTypeCount] = []
         rejected: list[str] = []
         seen_keys: set[str] = set()
+        accepted_qid_by_key: dict[str, str] = {}
 
         for quantity in provider_result.quantities:
             key = str(quantity.semantic_key or "").strip()
@@ -114,13 +115,17 @@ class GenericOpeningCountRecovery:
                 continue
             if key in seen_keys:
                 # Reconciliation should already have made duplicate/conflicting
-                # identities fail closed.  Do not choose first/last here if that
-                # upstream invariant is ever violated.
+                # identities fail closed.  If that invariant is ever violated,
+                # reject both the previously accepted record and this record.
+                prior_qid = accepted_qid_by_key.get(key)
+                if prior_qid:
+                    rejected.append(prior_qid)
                 rejected.append(qid)
                 recovered = [item for item in recovered if item.semantic_key != key]
                 continue
 
             seen_keys.add(key)
+            accepted_qid_by_key[key] = qid
             recovered.append(
                 RecoveredOpeningTypeCount(
                     semantic_key=key,
