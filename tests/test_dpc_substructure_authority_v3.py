@@ -209,45 +209,36 @@ def test_substructure_wall_area_requires_both_length_and_depth() -> None:
     assert res.record.depth_dimension_chain_id is not None
 
 
+
 def test_arbitrary_physical_run_id_cannot_relabel_one_source_measurement() -> None:
-    """The same real source-derived measurement must bind to exactly one
-    physical_run_id. A second, different caller-chosen id against the
-    identical evidence must NOT also mint a CORROBORATED record -- that
-    would let a caller relabel one measurement as an arbitrary DPC/
-    foundation/footing run (identity laundering)."""
-    pdf = _substructure_pdf(label="DPC", length_text="4250")
+    """The physical run id is source-derived, never first-caller-owned."""
+    pdf = _substructure_pdf(label="DPC", length_text="12000")
     source, published = _ingest(pdf)
     producer = DPCSubstructureProducer.from_source_visibility_producer(source)
 
-    a = producer.publish(_selector(published, family=SubstructureFamily.DPC_LENGTH, physical_run_id="run-A"))
-    assert a.status is EvidenceResolutionStatus.CORROBORATED
-    assert a.record.value == pytest.approx(4.25)
+    first = producer.publish(_selector(published, family=SubstructureFamily.DPC_LENGTH, physical_run_id="run-A"))
+    second = producer.publish(_selector(published, family=SubstructureFamily.DPC_LENGTH, physical_run_id="run-B"))
 
-    b = producer.publish(_selector(published, family=SubstructureFamily.DPC_LENGTH, physical_run_id="run-B"))
-    assert b.status is EvidenceResolutionStatus.CONFLICT
-    assert b.record is None
-    assert DPC_SUBSTRUCTURE_RUN_ID_MISMATCH in b.reason_codes
-
-    # The first binding remains intact and resolvable.
-    replay = producer.authority().resolve(
-        _selector(published, family=SubstructureFamily.DPC_LENGTH, physical_run_id="run-A")
-    )
-    assert replay.status is EvidenceResolutionStatus.CORROBORATED
+    assert first.status is EvidenceResolutionStatus.CORROBORATED
+    assert second.status is EvidenceResolutionStatus.CORROBORATED
+    assert first.record is not None and second.record is not None
+    assert first.record.physical_run_id == second.record.physical_run_id
+    assert first.record.record_id == second.record.record_id
+    assert first.record.physical_run_id not in {"run-A", "run-B"}
 
 
 def test_same_physical_run_id_republished_is_idempotent_not_a_conflict() -> None:
-    pdf = _substructure_pdf(label="DPC", length_text="4250")
+    pdf = _substructure_pdf(label="DPC", length_text="12000")
     source, published = _ingest(pdf)
     producer = DPCSubstructureProducer.from_source_visibility_producer(source)
-    sel = _selector(published, family=SubstructureFamily.DPC_LENGTH, physical_run_id="run-A")
+    sel = _selector(published, family=SubstructureFamily.DPC_LENGTH, physical_run_id="caller-run")
     first = producer.publish(sel)
     second = producer.publish(sel)
     assert first.status is EvidenceResolutionStatus.CORROBORATED
     assert second.status is EvidenceResolutionStatus.CORROBORATED
-    assert first.record.value == second.record.value == pytest.approx(4.25)
-
-
-# ── Adversarial: no wall-length fallback, fail-closed ambiguity ────────────────
+    assert first.record == second.record
+    assert first.record is not None
+    assert first.record.physical_run_id != "caller-run"
 
 def test_no_family_label_abstains_unresolved() -> None:
     pdf = _substructure_pdf(label="UNRELATED", length_text="4250")
