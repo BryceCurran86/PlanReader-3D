@@ -191,7 +191,7 @@ def test_legitimate_wall_height_producer_positive_path() -> None:
         input_entity_ids=(WALL,),
         formula="authoritative_explicit_wall_height",
         formula_version="1.4.0",
-        evidence_ids=("ev-1",),
+        evidence_ids=("ev-1", "registration-wall-1"),
         authority="documented_dimension",
         status=AuthorityStatus.FIRM.value,
         confidence=1.0,
