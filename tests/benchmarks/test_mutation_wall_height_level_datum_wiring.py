@@ -80,7 +80,14 @@ class TestWallHeightLevelDatumWiring:
         assert wall.metadata["wall_height_source"] == "resolved_level_datum_evidence"
         assert wall.metadata["wall_height_authority"] == "documented_dimension"
         perimeter_m = 2 * (10.0 + 6.0)
-        assert wall.quantity == pytest.approx(round(perimeter_m * 3.0, 2))
+        # perimeter_walling.quantity is always None here: with no detected
+        # openings the fail-closed opening-deduction gate blocks final
+        # publication (an empty opening list is not evidence of zero
+        # openings). The gross area computed from the genuinely-resolved
+        # level-datum height is still visible as a diagnostic and is what
+        # this test actually verifies the wiring produced.
+        assert wall.quantity is None
+        assert wall.metadata["gross_area_m2"] == pytest.approx(round(perimeter_m * 3.0, 2))
 
     def test_one_sided_level_evidence_leaves_height_unresolved_and_falls_back(self, tmp_path: Path) -> None:
         doc = fitz.open()

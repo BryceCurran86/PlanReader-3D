@@ -66,7 +66,12 @@ def test_corroborated_orthogonal_envelope_drives_wall_and_floor_geometry(tmp_pat
     assert floor.metadata["secondary_width_source"] == "spatial_label_dimension"
 
     assert wall.dimensions[0] == pytest.approx(48.3)
-    assert wall.quantity == pytest.approx(48.3 * 2.8)
+    # No opening was detected on this synthetic plan, so the fail-closed
+    # opening-deduction gate blocks final publication (an empty opening
+    # list is not evidence of zero openings); the envelope-wiring result
+    # is still visible via the gross_area_m2 diagnostic.
+    assert wall.quantity is None
+    assert wall.metadata["gross_area_m2"] == pytest.approx(48.3 * 2.8)
     assert wall.metadata["envelope_authority"] == floor.metadata["envelope_authority"]
 
 

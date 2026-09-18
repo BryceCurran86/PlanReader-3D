@@ -150,4 +150,10 @@ def test_6_unknown_new_benchmark_uses_same_extraction_path(mock_pdf):
     # Predictions contain generic tags and trades
     tags = [p.tag for p in preds]
     assert all(not t.startswith("BOQ-") for t in tags)
-    assert all(isinstance(p.quantity, (int, float)) for p in preds)
+    # A prediction's quantity is either a real number or None -- fail-closed
+    # abstention (e.g. a wall with no evidenced opening deduction) is a
+    # legitimate, generic outcome, not a broken one. At least one genuine
+    # numeric quantity must still be produced, proving real extraction (not
+    # a bespoke no-op) occurred for this unknown document.
+    assert all(p.quantity is None or isinstance(p.quantity, (int, float)) for p in preds)
+    assert any(isinstance(p.quantity, (int, float)) for p in preds)

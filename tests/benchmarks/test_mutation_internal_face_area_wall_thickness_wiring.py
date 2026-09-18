@@ -75,11 +75,19 @@ class TestInternalFaceAreaWiring:
         assert plaster.metadata["wall_height_authority"] == "provisional"
         # Internal perimeter = external perimeter - 8 * thickness; a real,
         # strictly smaller internal face area than the external wall's.
+        # Both plaster.quantity and wall.quantity are None here: with no
+        # detected openings the fail-closed opening-deduction gate blocks
+        # final publication for both. The genuinely wiring-derived internal
+        # face area is still visible as a diagnostic
+        # (independent_gross_area_m2), which is what this test verifies.
         expected_internal_perimeter = wall.dimensions[0] - 8 * 0.15
         expected_internal_area = round(expected_internal_perimeter * wall.dimensions[1], 4)
-        assert plaster.quantity == pytest.approx(expected_internal_area)
-        assert plaster.quantity < wall.quantity
-        assert paint.quantity == plaster.quantity
+        assert plaster.quantity is None
+        assert plaster.metadata["independent_gross_area_m2"] == pytest.approx(expected_internal_area)
+        assert plaster.metadata["independent_gross_area_m2"] < wall.metadata["gross_area_m2"]
+        assert paint.metadata["independent_gross_area_m2"] == pytest.approx(
+            plaster.metadata["independent_gross_area_m2"]
+        )
 
     def test_external_key_pointing_is_never_affected_by_internal_face_area(self, tmp_path: Path) -> None:
         pred_map_without = _extract(tmp_path, with_wall_thickness_evidence=False)
