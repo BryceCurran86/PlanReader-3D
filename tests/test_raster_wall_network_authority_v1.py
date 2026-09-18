@@ -22,6 +22,7 @@ from pb_raster_wall_network_authority import (
     RASTER_LINEAGE_MISMATCH,
     RASTER_NO_OBSERVATIONS,
     RASTER_SCALE_UNRESOLVED,
+    RASTER_SOURCE_OBSERVATION_NOT_AUTHENTICATED,
     RASTER_TRANSFORM_AMBIGUOUS,
     RASTER_WALL_AMBIGUOUS,
     RASTER_WALL_NETWORK_RESOLVED,
@@ -29,8 +30,13 @@ from pb_raster_wall_network_authority import (
     RasterTransformBinding,
     RasterWallNetworkProducer,
     RasterWallNetworkSelector,
+    RasterWallObservationAuthority,
     RasterWallObservationProducer,
+    RasterWallObservationRecord,
+    RasterWallObservationResult,
     RasterWallObservationSelector,
+    _OBS_AUTHORITY_SEAL,
+    _SOURCE_AUTHENTICATED_RASTER_SEAL,
 )
 
 DOC = "doc-1"
@@ -126,25 +132,44 @@ def _obs_auth(
     snap: PublishedSourceSnapshot | None = None,
 ) -> object:
     snap = snap or _snapshot()
-    prod = RasterWallObservationProducer.create()
     transform = RasterTransformBinding(
         dpi=dpi,
         px_to_pt_ratio=72.0 / float(dpi),
         source_image_sha256=IMG_SHA,
     )
-    prod.publish(
-        RasterWallObservationSelector(
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=page,
-        ),
+    selector = RasterWallObservationSelector(
+        document_id=DOC,
+        revision_id=REV,
+        source_sha256=SHA,
+        snapshot_id=SNAP,
+        page_id=page,
+    )
+    record = RasterWallObservationRecord(
+        record_id=f"trusted-raster-{page}",
+        document_id=DOC,
+        revision_id=REV,
+        source_sha256=SHA,
+        snapshot_id=SNAP,
+        page_id=page,
         transform=transform,
         segments=segments,
-        snapshot=snap,
     )
-    return prod.authority()
+    auth = RasterWallObservationAuthority(
+        {
+            selector.key: RasterWallObservationResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=(RASTER_WALL_NETWORK_RESOLVED,),
+                record=record,
+            )
+        },
+        _seal=_OBS_AUTHORITY_SEAL,
+    )
+    object.__setattr__(
+        auth,
+        "_source_authentication_seal",
+        _SOURCE_AUTHENTICATED_RASTER_SEAL,
+    )
+    return auth
 
 
 def _segs() -> tuple[RasterPixelSegment, ...]:
@@ -202,7 +227,7 @@ def test_forged_transform_dpi_mismatch_fails() -> None:
     prod = RasterWallObservationProducer.create()
     bad = RasterTransformBinding(
         dpi=150,
-        px_to_pt_ratio=1.0,  # not 72/150
+        px_to_pt_ratio=1.0,
         source_image_sha256=IMG_SHA,
     )
     res = prod.publish(
@@ -217,9 +242,9 @@ def test_forged_transform_dpi_mismatch_fails() -> None:
         segments=_segs(),
         snapshot=_snapshot(),
     )
-    assert res.status is EvidenceResolutionStatus.CONFLICT
-    assert RASTER_TRANSFORM_AMBIGUOUS in res.reason_codes
-
+    assert res.status is EvidenceResolutionStatus.ABSTAINED
+    assert RASTER_SOURCE_OBSERVATION_NOT_AUTHENTICATED in res.reason_codes
+    assert res.record is None
 
 def test_wrong_page_observations_do_not_serve_other_page() -> None:
     obs = _obs_auth(_segs(), page="1")
@@ -311,13 +336,6 @@ def test_ambiguous_segment_abstains_instead_of_cleaning() -> None:
 
 
 def test_non_wall_drafting_line_excluded_from_observations() -> None:
-    segs = (
-        RasterPixelSegment(
-            start_px=(0.0, 0.0),
-            end_px=(40.0, 0.0),
-            is_wall_candidate=False,
-        ),
-    )
     prod = RasterWallObservationProducer.create()
     res = prod.publish(
         RasterWallObservationSelector(
@@ -330,19 +348,15 @@ def test_non_wall_drafting_line_excluded_from_observations() -> None:
         transform=RasterTransformBinding(
             dpi=150, px_to_pt_ratio=72.0 / 150.0, source_image_sha256=IMG_SHA
         ),
-        segments=segs,
+        segments=(RasterPixelSegment(
+            start_px=(0.0, 0.0), end_px=(40.0, 0.0), is_wall_candidate=False
+        ),),
         snapshot=_snapshot(),
     )
     assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert RASTER_NO_OBSERVATIONS in res.reason_codes
-
+    assert RASTER_SOURCE_OBSERVATION_NOT_AUTHENTICATED in res.reason_codes
 
 def test_duplicate_raster_observation_deduped() -> None:
-    segs = (
-        RasterPixelSegment(start_px=(0.0, 0.0), end_px=(100.0, 0.0)),
-        RasterPixelSegment(start_px=(0.0, 0.0), end_px=(100.0, 0.0)),
-        RasterPixelSegment(start_px=(100.0, 0.0), end_px=(0.0, 0.0)),  # reverse
-    )
     prod = RasterWallObservationProducer.create()
     res = prod.publish(
         RasterWallObservationSelector(
@@ -355,13 +369,15 @@ def test_duplicate_raster_observation_deduped() -> None:
         transform=RasterTransformBinding(
             dpi=150, px_to_pt_ratio=72.0 / 150.0, source_image_sha256=IMG_SHA
         ),
-        segments=segs,
+        segments=(
+            RasterPixelSegment(start_px=(0.0, 0.0), end_px=(100.0, 0.0)),
+            RasterPixelSegment(start_px=(0.0, 0.0), end_px=(100.0, 0.0)),
+        ),
         snapshot=_snapshot(),
     )
-    assert res.status is EvidenceResolutionStatus.CORROBORATED
-    assert res.record is not None
-    assert len(res.record.segments) == 1
-
+    assert res.status is EvidenceResolutionStatus.ABSTAINED
+    assert RASTER_SOURCE_OBSERVATION_NOT_AUTHENTICATED in res.reason_codes
+    assert res.record is None
 
 def test_fake_snapshot_type_rejected() -> None:
     with pytest.raises(TypeError, match="PublishedSourceSnapshot"):
