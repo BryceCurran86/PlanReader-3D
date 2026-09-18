@@ -16,6 +16,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-ci-v1228.txt
+          pip install pytesseract==0.3.13
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq tesseract-ocr
       - name: Download and verify diagnostic sources
         run: |
           python - <<'PY'
@@ -37,27 +40,117 @@ jobs:
               (source_root/filename).write_bytes(data)
               print("VERIFIED", bid, filename, actual)
           PY
-      - name: Inspect Murera page 220 only
+      - name: Trace Murera PV callouts and publication path
         env:
           PYTHONPATH: .
         run: |
           python - <<'PY'
           import fitz, json, pathlib, re
-          from pb_raster_schedule_extractor import GenericScheduleTableExtractor
-          p = fitz.open(pathlib.Path("benchmarks/sources/1785347143869-bqs-drawings.pdf"))[219]
-          txt = p.get_text("text") or ""
-          words = p.get_text("words") or []
-          rows = GenericScheduleTableExtractor().extract_from_page(p,220)
-          pv = [
-              {"text":w[4],"bbox":list(w[:4]),"block":w[5],"line":w[6],"word":w[7]}
-              for w in words if re.fullmatch(r"P\\.?V\\.?",str(w[4]),re.I)
-          ]
-          print(json.dumps({
-              "page":220,
-              "text":txt,
-              "pv_words":pv,
-              "rows":[r.to_dict() for r in rows],
-              "drawings":len(p.get_drawings()),
-              "images":[list(x[2:4]) for x in p.get_images()],
-          },indent=2))
+          import pytesseract
+          from PIL import Image
+          from pb_drawing_evidence_binding import DrawingViewClassifier
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          from pb_viewport_segmentation import segment_page_viewports
+
+          path = pathlib.Path("benchmarks/sources/1785347143869-bqs-drawings.pdf")
+          doc = fitz.open(path)
+          rx = re.compile(r"\bPV\b|\bPermanent Vent\b|\bBrick Vent\b", re.I)
+
+          native_hits = []
+          for pno, page in enumerate(doc):
+              text = page.get_text("text") or ""
+              matches = rx.findall(text)
+              if matches:
+                  native_hits.append({
+                      "page": pno + 1,
+                      "count": len(matches),
+                      "class": DrawingViewClassifier.classify_text(text).value,
+                      "titles": [line.strip() for line in text.splitlines() if "ELEVATION" in line.upper()][:12],
+                  })
+          print("NATIVE_PV_PAGES", json.dumps(native_hits, indent=2))
+
+          for page_number in (219, 220):
+              page = doc[page_number - 1]
+              text = page.get_text("text") or ""
+              words = page.get_text("words") or []
+              pv_words = [
+                  {"text": w[4], "bbox": list(w[:4]), "block": w[5], "line": w[6], "word": w[7]}
+                  for w in words if re.fullmatch(r"P\.?V\.?", str(w[4]), re.I)
+              ]
+              viewports = segment_page_viewports(page, page_number=page_number)
+              image_rects = []
+              for image in page.get_images(full=True):
+                  xref = image[0]
+                  try:
+                      rects = [list(r) for r in page.get_image_rects(xref)]
+                  except Exception:
+                      rects = []
+                  image_rects.append({
+                      "xref": xref,
+                      "width": image[2],
+                      "height": image[3],
+                      "rects": rects,
+                  })
+
+              print("PAGE_NATIVE", json.dumps({
+                  "page": page_number,
+                  "class": DrawingViewClassifier.classify_text(text).value,
+                  "regex_count": len(rx.findall(text)),
+                  "pv_words": pv_words,
+                  "viewports": [
+                      {
+                          "id": getattr(v, "view_id", None),
+                          "type": getattr(v, "view_type", None),
+                          "title": getattr(v, "title", None),
+                          "bbox": list(getattr(v, "bbox", ()) or ()),
+                      }
+                      for v in viewports
+                  ],
+                  "image_rects": image_rects,
+                  "text": text,
+              }, indent=2, default=str))
+
+              pix = page.get_pixmap(matrix=fitz.Matrix(4, 4), alpha=False)
+              img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+              data = pytesseract.image_to_data(img, config="--psm 11", output_type=pytesseract.Output.DICT)
+              ocr_pv = []
+              for i, raw in enumerate(data.get("text", [])):
+                  token = str(raw or "").strip()
+                  normalized = re.sub(r"[^A-Za-z]", "", token).upper()
+                  if normalized != "PV":
+                      continue
+                  conf = float(data["conf"][i]) if str(data["conf"][i]).strip() else -1
+                  ocr_pv.append({
+                      "text": token,
+                      "confidence": conf,
+                      "bbox_px": [
+                          data["left"][i],
+                          data["top"][i],
+                          data["left"][i] + data["width"][i],
+                          data["top"][i] + data["height"][i],
+                      ],
+                  })
+              print("PAGE_OCR_PV", json.dumps({"page": page_number, "count": len(ocr_pv), "hits": ocr_pv}, indent=2))
+
+          doc.close()
+
+          for label, pages in [
+              ("page219_only", [218]),
+              ("page220_only", [219]),
+              ("pages219_220", [218, 219]),
+              ("full_document", None),
+          ]:
+              extractor = GenericPlanReaderExtractor()
+              preds = extractor.extract_from_pdf(path, pages=pages)
+              vents = [p for p in preds if p.tag == "brick_vents"]
+              print("EXTRACTOR_RESULT", label, json.dumps([
+                  {
+                      "quantity": p.quantity,
+                      "page": p.source_page,
+                      "sheet": p.sheet_number,
+                      "description": p.description,
+                      "metadata": p.metadata,
+                  }
+                  for p in vents
+              ], indent=2, default=str))
           PY
