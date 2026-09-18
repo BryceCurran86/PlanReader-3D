@@ -979,21 +979,9 @@ class GenericScheduleTableExtractor:
                 )
             )
         else:
-            all_words = page.get_text("words")
+            from pb_elevation_vector_vent_extractor import extract_verified_pv_callouts
 
-            def _next_word_text(word: tuple) -> str:
-                block_no, line_no, word_no = word[5], word[6], word[7]
-                for other in all_words:
-                    if other[5] == block_no and other[6] == line_no and other[7] == word_no + 1:
-                        return str(other[4])
-                return ""
-
-            pv_words = [
-                w
-                for w in all_words
-                if re.match(r"^(?:PV|P\.V)$", w[4], re.I)
-                and _next_word_text(w).strip().lower().rstrip(".,:;") != "denotes"
-            ]
+            pv_words = extract_verified_pv_callouts(page)
             page_text_lower = page.get_text().lower()
             is_facade_sheet = any(k in page_text_lower for k in ("elevation", "facade", "façade", "section", "schedule", "plan"))
 
