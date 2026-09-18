@@ -20,11 +20,7 @@ jobs:
         run: |
           python - <<'PY'
           import hashlib, json, pathlib, urllib.request
-          ids = [
-            "tenders_ke_kstvet_cbc_classroom",
-            "tenders_ke_murera_science_lab",
-            "tenders_ke_lamu_ishakani_ecd_classrooms",
-          ]
+          ids = ["tenders_ke_murera_science_lab"]
           root = pathlib.Path("benchmarks/public_tenders")
           source_root = pathlib.Path("benchmarks/sources")
           source_root.mkdir(parents=True, exist_ok=True)
@@ -51,9 +47,7 @@ jobs:
           from pb_shadow_opening_evidence import page_is_opening_schedule_sheet
           from pb_viewport_segmentation import segment_page_viewports
           cases = [
-            ("KSTVET", "1727358888238-bq-nd-drawing.pdf", [54,55]),
-            ("MURERA", "1785347143869-bqs-drawings.pdf", [219,223,225]),
-            ("LAMU", "lamu-ishakani-ecd-classrooms-boq.pdf", [41]),
+            ("MURERA", "1785347143869-bqs-drawings.pdf", [219,220,221,222,223,224,225]),
           ]
           root=pathlib.Path("benchmarks/sources")
           ex=GenericScheduleTableExtractor()
