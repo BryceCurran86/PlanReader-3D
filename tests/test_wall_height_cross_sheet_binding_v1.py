@@ -12,7 +12,7 @@ from pb_cross_sheet_registration_authority import (
     CrossSheetRegistrationResult,
     _AUTHORITY_SEAL as CROSS_SEAL,
 )
-from pb_geometry_takeoff_model import AuthorityStatus
+from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateAuthority,
@@ -114,7 +114,7 @@ def _wall_candidate(
         is_curved=False,
         curve_control_pts=None,
         thickness_m=None,
-        thickness_authority=None,
+        thickness_authority=MeasurementAuthorityType.PROVISIONAL,
         length_m=None,
         end_node_ids=("n1", "n2"),
         junction_types=(JunctionType.ENDPOINT, JunctionType.ENDPOINT),
