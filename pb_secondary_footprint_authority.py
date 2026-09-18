@@ -29,12 +29,11 @@ bytes this producer's own ``SourceVisibilityProducer`` already ingested:
   CORROBORATED, since that value stands on its own real witness-bound
   evidence independent of any boundary primitive.
 
-Identity binding: ``secondary_space_id`` is a caller-supplied selector key,
-never proof by itself. The producer binds the FIRST secondary_space_id
-successfully published against a given real (page, viewport, edge, label)
-evidence instance; any later publish() for the identical evidence under a
-DIFFERENT secondary_space_id is rejected with CONFLICT rather than being
-allowed to "relabel" the same real footprint under a second identity.
+Identity binding: selector ``secondary_space_id`` is addressing-only.
+The authoritative secondary-space identity is deterministically derived from
+the authenticated source evidence (lineage/page/view/edge/label/dimension
+chain). Caller text is never copied into the authoritative record, including
+on the first publication.
 """
 from __future__ import annotations
 
@@ -73,12 +72,15 @@ _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
 
 _Key = Tuple[str, str, str, str, str, Optional[str], str]
-_EvidenceKey = Tuple[str, str, str, str, str, str, str, str]
 _BOUNDARY_MATCH_TOLERANCE_PT = 1.5
 
 
 def _find_real_boundary_edge_span(
-    page: object, *, viewport_bbox: Tuple[float, float, float, float], edge: str
+    page: object,
+    *,
+    viewport_bbox: Tuple[float, float, float, float],
+    edge: str,
+    label_bbox: Tuple[float, float, float, float],
 ) -> Optional[float]:
     """Return the real drawn-boundary span along ``edge``, or ``None``.
 
@@ -90,6 +92,9 @@ def _find_real_boundary_edge_span(
     """
     vx0, vy0, vx1, vy1 = (float(v) for v in viewport_bbox)
     native = extract_native_page(page)
+    label_cx = (float(label_bbox[0]) + float(label_bbox[2])) / 2.0
+    label_cy = (float(label_bbox[1]) + float(label_bbox[3])) / 2.0
+    matched_spans: list[float] = []
     for rect in native.get("rects") or ():
         bbox = rect.get("bbox") if isinstance(rect, dict) else None
         if not bbox or len(bbox) != 4:
@@ -104,10 +109,34 @@ def _find_real_boundary_edge_span(
             and abs(rx1 - vx1) <= _BOUNDARY_MATCH_TOLERANCE_PT
             and abs(ry1 - vy1) <= _BOUNDARY_MATCH_TOLERANCE_PT
         ):
-            if edge in ("top", "bottom"):
-                return abs(rx1 - rx0)
-            return abs(ry1 - ry0)
-    return None
+            if edge == "top":
+                edge_distance = abs(label_cy - ry0)
+                cross_span = abs(ry1 - ry0)
+                span = abs(rx1 - rx0)
+            elif edge == "bottom":
+                edge_distance = abs(ry1 - label_cy)
+                cross_span = abs(ry1 - ry0)
+                span = abs(rx1 - rx0)
+            elif edge == "left":
+                edge_distance = abs(label_cx - rx0)
+                cross_span = abs(rx1 - rx0)
+                span = abs(ry1 - ry0)
+            else:
+                edge_distance = abs(rx1 - label_cx)
+                cross_span = abs(rx1 - rx0)
+                span = abs(ry1 - ry0)
+
+            # The native primitive must be bound to the SAME labelled
+            # verandah edge, not merely coincide with the viewport frame.
+            # F.23 has already proved the label is edge-adjacent and the
+            # depth is witness-bound/orthogonal; here we additionally require
+            # the label itself to be tightly adjacent to this exact native edge.
+            edge_band = max(30.0, cross_span * 0.12)
+            if edge_distance <= edge_band:
+                matched_spans.append(span)
+    if len(matched_spans) != 1:
+        return None
+    return matched_spans[0]
 
 
 def _required(value: object, name: str) -> str:
@@ -252,7 +281,6 @@ class SecondaryFootprintProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
         self._source = source_visibility_producer
         self._results: dict[_Key, SecondaryFootprintResult] = {}
-        self._space_id_by_evidence: dict[_EvidenceKey, str] = {}
 
     @classmethod
     def from_source_visibility_producer(
@@ -326,21 +354,22 @@ class SecondaryFootprintProducer:
                 return self._store(selector, _abstained(SECONDARY_FOOTPRINT_UNRESOLVED))
             category = FootprintCategory.VERANDAH
 
-            evidence_key: _EvidenceKey = (
-                selector.document_id,
-                selector.revision_id,
-                selector.source_sha256,
-                selector.snapshot_id,
-                selector.page_id,
-                evidence.view_id,
-                evidence.edge,
-                label,
+            producer_space_id = stable_contract_id(
+                "secondary_space_identity",
+                {
+                    "document_id": selector.document_id,
+                    "revision_id": selector.revision_id,
+                    "source_sha256": selector.source_sha256,
+                    "snapshot_id": selector.snapshot_id,
+                    "page_id": selector.page_id,
+                    "viewport_id": evidence.view_id,
+                    "edge": evidence.edge,
+                    "label_text": label,
+                    "dimension_chain_id": evidence.chain_id,
+                    "label_bbox": tuple(round(float(v), 3) for v in evidence.label_bbox),
+                },
+                digest_chars=32,
             )
-            bound_space_id = self._space_id_by_evidence.get(evidence_key)
-            if bound_space_id is None:
-                self._space_id_by_evidence[evidence_key] = selector.secondary_space_id
-            elif bound_space_id != selector.secondary_space_id:
-                return self._store(selector, _conflict(SECONDARY_FOOTPRINT_SPACE_ID_MISMATCH))
 
             viewports = segment_page_viewports(page, page_number=page_num)
             viewport = next(
@@ -399,7 +428,10 @@ class SecondaryFootprintProducer:
             area_m2: Optional[float] = None
             perimeter_m: Optional[float] = None
             edge_span_pt = _find_real_boundary_edge_span(
-                page, viewport_bbox=(vx0, vy0, vx1, vy1), edge=evidence.edge
+                page,
+                viewport_bbox=(vx0, vy0, vx1, vy1),
+                edge=evidence.edge,
+                label_bbox=evidence.label_bbox,
             )
             if edge_span_pt is not None and math.isfinite(edge_span_pt) and edge_span_pt > 0.0:
                 candidate_width_m = round(edge_span_pt * m_per_pt, 6)
@@ -417,7 +449,7 @@ class SecondaryFootprintProducer:
             "snapshot_id": selector.snapshot_id,
             "page_id": selector.page_id,
             "viewport_id": evidence.view_id,
-            "secondary_space_id": selector.secondary_space_id,
+            "secondary_space_id": producer_space_id,
             "category": category.value,
             "area_m2": area_m2,
             "perimeter_m": perimeter_m,
@@ -431,7 +463,7 @@ class SecondaryFootprintProducer:
             snapshot_id=selector.snapshot_id,
             page_id=selector.page_id,
             viewport_id=evidence.view_id,
-            secondary_space_id=selector.secondary_space_id,
+            secondary_space_id=producer_space_id,
             category=category,
             area_m2=area_m2,
             perimeter_m=perimeter_m,
