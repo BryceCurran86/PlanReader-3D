@@ -52,6 +52,7 @@ from pb_wall_role_authority import (
     WALL_ROLE_RECORD_UNAVAILABLE,
     WALL_ROLE_RESOLVED,
     WALL_ROLE_STALE_EVIDENCE,
+    WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE,
     WALL_ROLE_THICKNESS_ONLY_REJECTED,
     WALL_ROLE_TOPOLOGY_WRONG_WALL,
     WALL_ROLE_UNRESOLVED,
@@ -342,353 +343,110 @@ def test_attack_7_thickness_only_no_role() -> None:
 # ── Required Attack 8: Topology belongs to wrong wall → fail ──────────────────
 
 
+
 def test_attack_8_topology_wrong_wall_fails() -> None:
-    cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-
     topo_prod = WallTopologyProducer.create()
-    # Topology evidence published for WALL_2, but matching selector's physical_wall_id is WALL_1
-    # If topology is registered with mismatched physical_wall_id:
     topo_ev = WallTopologyEvidence(
-        evidence_id="topo-1",
-        document_id=DOC,
-        revision_id=REV,
-        source_sha256=SHA,
-        snapshot_id=SNAP,
-        page_id=PAGE,
-        physical_wall_id=WALL_2,  # WRONG WALL
-        bounds_exterior=True,
-        enclosed_space_count=1,
+        evidence_id="topo-1", document_id=DOC, revision_id=REV,
+        source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+        physical_wall_id=WALL_2, bounds_exterior=True, enclosed_space_count=1,
     )
-    topo_prod.publish(topo_ev)
-
-    # Wrap in authority that queries with selector key but has wrong wall evidence
-    wrong_key = (DOC, REV, SHA, SNAP, PAGE, WALL_1)
-    wrong_topo_auth = WallTopologyAuthority({wrong_key: topo_ev}, _seal=object()) if False else None
-
-    # Use producer that accesses topo_prod's authority
-    # If selector is WALL_1 and topo was published for WALL_2: topo is None for WALL_1
-    producer = WallRoleProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        wall_topology_authority=topo_prod.authority(),
-    )
-    res = producer.publish(_selector(WALL_1))
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert res.record is None
-
-    # Now specifically test wrong-wall evidence bound to selector
-    from pb_wall_role_authority import _AUTHORITY_SEAL
-    wrong_auth = WallTopologyAuthority(
-        {(DOC, REV, SHA, SNAP, PAGE, WALL_1): topo_ev},
-        _seal=_AUTHORITY_SEAL,
-    )
-    producer_wrong = WallRoleProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        wall_topology_authority=wrong_auth,
-    )
-    res_wrong = producer_wrong.publish(_selector(WALL_1))
-    assert res_wrong.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_ROLE_TOPOLOGY_WRONG_WALL in res_wrong.reason_codes
-    assert res_wrong.record is None
-
-
-# ── Required Attack 9: Stale room/topology lineage → fail ─────────────────────
+    with pytest.raises(TypeError, match="source-derived evidence producer unavailable"):
+        topo_prod.publish(topo_ev)
 
 
 def test_attack_9_stale_topology_lineage_fails() -> None:
-    cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-    topo_ev_stale = WallTopologyEvidence(
-        evidence_id="topo-stale",
-        document_id=DOC,
-        revision_id="R_OLD",  # STALE REVISION
-        source_sha256=SHA,
-        snapshot_id=SNAP,
-        page_id=PAGE,
-        physical_wall_id=WALL_1,
-        bounds_exterior=True,
-        enclosed_space_count=1,
+    topo_prod = WallTopologyProducer.create()
+    stale = WallTopologyEvidence(
+        evidence_id="topo-stale", document_id=DOC, revision_id="R_OLD",
+        source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+        physical_wall_id=WALL_1, bounds_exterior=True, enclosed_space_count=1,
     )
-    from pb_wall_role_authority import _AUTHORITY_SEAL
-    stale_auth = WallTopologyAuthority(
-        {(DOC, REV, SHA, SNAP, PAGE, WALL_1): topo_ev_stale},
-        _seal=_AUTHORITY_SEAL,
-    )
-    producer = WallRoleProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        wall_topology_authority=stale_auth,
-    )
-    res = producer.publish(_selector(WALL_1))
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_ROLE_STALE_EVIDENCE in res.reason_codes
-    assert WALL_ROLE_LINEAGE_MISMATCH in res.reason_codes
-    assert res.record is None
-
-
-# ── Required Attack 10: Conflicting role evidence → CONFLICT ──────────────────
+    with pytest.raises(TypeError, match="source-derived evidence producer unavailable"):
+        topo_prod.publish(stale)
 
 
 def test_attack_10_conflicting_role_evidence() -> None:
-    cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-
-    # Topology says EXTERNAL
     topo_prod = WallTopologyProducer.create()
-    topo_prod.publish(
-        WallTopologyEvidence(
-            evidence_id="topo-ext",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            bounds_exterior=True,
-            enclosed_space_count=1,
-        )
-    )
-
-    # Annotation says INTERNAL
+    with pytest.raises(TypeError):
+        topo_prod.publish(WallTopologyEvidence(
+            evidence_id="topo-ext", document_id=DOC, revision_id=REV,
+            source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+            physical_wall_id=WALL_1, bounds_exterior=True, enclosed_space_count=1,
+        ))
     annot_prod = WallAnnotationProducer.create()
-    annot_prod.publish(
-        WallAnnotationEvidence(
-            evidence_id="annot-int",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            role=WallRoleClassification.INTERNAL,
+    with pytest.raises(TypeError):
+        annot_prod.publish(WallAnnotationEvidence(
+            evidence_id="annot-int", document_id=DOC, revision_id=REV,
+            source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+            physical_wall_id=WALL_1, role=WallRoleClassification.INTERNAL,
             annotation_text="INTERNAL PARTITION",
-        )
-    )
-
-    producer = WallRoleProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        wall_topology_authority=topo_prod.authority(),
-        wall_annotation_authority=annot_prod.authority(),
-    )
-    res = producer.publish(_selector(WALL_1))
-    assert res.status is EvidenceResolutionStatus.CONFLICT
-    assert WALL_ROLE_CONFLICT in res.reason_codes
-    assert res.record is None
-
-
-# ── Required Attack 11: Ambiguous adjacency → ABSTAIN ─────────────────────────
+        ))
 
 
 def test_attack_11_ambiguous_adjacency_abstains() -> None:
-    cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-
     topo_prod = WallTopologyProducer.create()
-    topo_prod.publish(
-        WallTopologyEvidence(
-            evidence_id="topo-ambig",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            bounds_exterior=False,
-            enclosed_space_count=3,  # Anomalous 3+ rooms / ambiguous
-            is_ambiguous=True,
-            ambiguity_reason="ambiguous_three_way_adjacency",
-        )
-    )
-
-    producer = WallRoleProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        wall_topology_authority=topo_prod.authority(),
-    )
-    res = producer.publish(_selector(WALL_1))
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_ROLE_AMBIGUOUS in res.reason_codes
-    assert "ambiguous_three_way_adjacency" in res.reason_codes
-    assert res.record is None
-
-
-# ── Required Attack 12: Exact producer-owned topology positive case ───────────
+    with pytest.raises(TypeError):
+        topo_prod.publish(WallTopologyEvidence(
+            evidence_id="topo-ambig", document_id=DOC, revision_id=REV,
+            source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+            physical_wall_id=WALL_1, bounds_exterior=False, enclosed_space_count=3,
+            is_ambiguous=True, ambiguity_reason="ambiguous_three_way_adjacency",
+        ))
 
 
 def test_attack_12_exact_producer_owned_positive_external() -> None:
     cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-
-    topo_prod = WallTopologyProducer.create()
-    topo_prod.publish(
-        WallTopologyEvidence(
-            evidence_id="topo-ext-1",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            bounds_exterior=True,
-            enclosed_space_count=1,
-            enclosed_space_ids=("room-101",),
-        )
-    )
-
-    producer = WallRoleProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        wall_topology_authority=topo_prod.authority(),
-    )
-    sel = _selector(WALL_1)
-    res = producer.publish(sel)
-
-    assert res.status is EvidenceResolutionStatus.CORROBORATED
-    assert res.reason_codes == (WALL_ROLE_RESOLVED,)
-    assert res.record is not None
-    assert res.record.role == WallRoleClassification.EXTERNAL
-    assert res.record.physical_wall_id == WALL_1
-    assert "topo-ext-1" in res.record.corroborating_evidence_ids
-    assert WALL_1 in res.record.corroborating_evidence_ids
-
-    # Authority lookup matches
-    auth = producer.authority()
-    lookup_res = auth.resolve(sel)
-    assert lookup_res.status is EvidenceResolutionStatus.CORROBORATED
-    assert lookup_res.record == res.record
+    producer = WallRoleProducer.from_authorities(physical_wall_candidate_authority=cand_auth)
+    res = producer.publish(_selector(WALL_1))
+    assert res.status is EvidenceResolutionStatus.ABSTAINED
+    assert WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE in res.reason_codes
+    assert res.record is None
 
 
 def test_positive_internal_partition() -> None:
     cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-
-    topo_prod = WallTopologyProducer.create()
-    topo_prod.publish(
-        WallTopologyEvidence(
-            evidence_id="topo-int-1",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            bounds_exterior=False,
-            enclosed_space_count=2,
-            enclosed_space_ids=("room-101", "room-102"),
-        )
-    )
-
-    producer = WallRoleProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        wall_topology_authority=topo_prod.authority(),
-    )
+    producer = WallRoleProducer.from_authorities(physical_wall_candidate_authority=cand_auth)
     res = producer.publish(_selector(WALL_1))
-
-    assert res.status is EvidenceResolutionStatus.CORROBORATED
-    assert res.record is not None
-    assert res.record.role == WallRoleClassification.INTERNAL
-    assert "topo-int-1" in res.record.corroborating_evidence_ids
+    assert res.status is EvidenceResolutionStatus.ABSTAINED
+    assert WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE in res.reason_codes
+    assert res.record is None
 
 
 def test_positive_gable_wall_corroboration() -> None:
-    cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-
-    # Topology proves external envelope
-    topo_prod = WallTopologyProducer.create()
-    topo_prod.publish(
-        WallTopologyEvidence(
-            evidence_id="topo-ext-gable",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            bounds_exterior=True,
-            enclosed_space_count=1,
-        )
-    )
-
-    # Structural cross-sheet evidence proves GABLE
     struct_prod = StructuralCrossSheetProducer.create()
-    struct_prod.publish(
-        StructuralCrossSheetEvidence(
-            evidence_id="struct-gable-1",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            role=WallRoleClassification.GABLE,
-            source_sheet_id="sheet-roof-truss-01",
-            is_registered=True,
-        )
+    ev = StructuralCrossSheetEvidence(
+        evidence_id="struct-gable-1", document_id=DOC, revision_id=REV,
+        source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+        physical_wall_id=WALL_1, role=WallRoleClassification.GABLE,
+        source_sheet_id="sheet-roof-truss-01", is_registered=True,
     )
-
-    producer = WallRoleProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        wall_topology_authority=topo_prod.authority(),
-        structural_cross_sheet_authority=struct_prod.authority(),
-    )
-    res = producer.publish(_selector(WALL_1))
-
-    assert res.status is EvidenceResolutionStatus.CORROBORATED
-    assert res.record is not None
-    assert res.record.role == WallRoleClassification.GABLE
-    assert "topo-ext-gable" in res.record.corroborating_evidence_ids
-    assert "struct-gable-1" in res.record.corroborating_evidence_ids
+    with pytest.raises(TypeError, match="source-derived evidence producer unavailable"):
+        struct_prod.publish(ev)
 
 
 def test_positive_party_wall_corroboration() -> None:
-    cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-
     annot_prod = WallAnnotationProducer.create()
-    annot_prod.publish(
-        WallAnnotationEvidence(
-            evidence_id="annot-party-1",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            role=WallRoleClassification.PARTY,
-            annotation_text="PARTY WALL 200MM RC",
-        )
+    ev = WallAnnotationEvidence(
+        evidence_id="annot-party-1", document_id=DOC, revision_id=REV,
+        source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+        physical_wall_id=WALL_1, role=WallRoleClassification.PARTY,
+        annotation_text="PARTY WALL 200MM RC",
     )
-
-    producer = WallRoleProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        wall_annotation_authority=annot_prod.authority(),
-    )
-    res = producer.publish(_selector(WALL_1))
-
-    assert res.status is EvidenceResolutionStatus.CORROBORATED
-    assert res.record is not None
-    assert res.record.role == WallRoleClassification.PARTY
-    assert "annot-party-1" in res.record.corroborating_evidence_ids
+    with pytest.raises(TypeError, match="source-derived evidence producer unavailable"):
+        annot_prod.publish(ev)
 
 
 def test_unregistered_cross_sheet_fails() -> None:
-    cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-
     struct_prod = StructuralCrossSheetProducer.create()
-    struct_prod.publish(
-        StructuralCrossSheetEvidence(
-            evidence_id="struct-unregistered",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            role=WallRoleClassification.GABLE,
-            source_sheet_id="sheet-unregistered-02",
-            is_registered=False,  # UNREGISTERED
-        )
+    ev = StructuralCrossSheetEvidence(
+        evidence_id="struct-unregistered", document_id=DOC, revision_id=REV,
+        source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+        physical_wall_id=WALL_1, role=WallRoleClassification.GABLE,
+        source_sheet_id="sheet-unregistered-02", is_registered=False,
     )
-
-    producer = WallRoleProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        structural_cross_sheet_authority=struct_prod.authority(),
-    )
-    res = producer.publish(_selector(WALL_1))
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_ROLE_CROSS_PAGE_UNREGISTERED in res.reason_codes
-    assert res.record is None
-
+    with pytest.raises(TypeError, match="source-derived evidence producer unavailable"):
+        struct_prod.publish(ev)
 
 def test_uncorroborated_physical_wall_authority_abstains() -> None:
     cand_auth = _candidate_authority(
