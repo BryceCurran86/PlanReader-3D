@@ -31,13 +31,11 @@ metadata, an assumed default pitch, or an unverified printed angle must
 never mint a firm pitch. ``roof_surface_area`` depends on a real pitch, so
 it abstains for the same reason rather than falling back to plan area.
 
-Identity binding: ``target_id`` is a caller-supplied selector key, never
-proof by itself that the source-derived evidence belongs to that exact
-roof/ceiling/eaves target. The producer binds the FIRST target_id
-successfully published against a given real (page, view, family, label)
-evidence instance; a later publish() for the identical evidence under a
-DIFFERENT target_id is rejected with CONFLICT rather than letting a
-caller publish the same evidence under arbitrary target IDs.
+Identity binding: selector ``target_id`` is addressing-only. The
+authoritative target identity is deterministically derived from the
+authenticated source evidence (lineage/page/view/family/label geometry and
+dimension chain where present). Caller text is never copied into the
+authoritative record, including on the first publication.
 """
 from __future__ import annotations
 
@@ -72,7 +70,6 @@ _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
 
 _Key = Tuple[str, str, str, str, str, Optional[str], str, str]
-_EvidenceKey = Tuple[str, str, str, str, str, str, str, str]
 
 
 class RoofCeilingFamily(str, Enum):
@@ -224,7 +221,6 @@ class RoofCeilingProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
         self._source = source_visibility_producer
         self._results: dict[_Key, RoofCeilingResult] = {}
-        self._target_id_by_evidence: dict[_EvidenceKey, str] = {}
 
     @classmethod
     def from_source_visibility_producer(
@@ -317,21 +313,22 @@ class RoofCeilingProducer:
             if not (value > 0.0) or not math.isfinite(value):
                 return self._store(selector, _conflict(ROOF_CEILING_GEOMETRY_INVALID))
 
-            evidence_key: _EvidenceKey = (
-                selector.document_id,
-                selector.revision_id,
-                selector.source_sha256,
-                selector.snapshot_id,
-                selector.page_id,
-                view_id,
-                selector.family.value,
-                label_text,
+            producer_target_id = stable_contract_id(
+                "roof_ceiling_target_identity",
+                {
+                    "document_id": selector.document_id,
+                    "revision_id": selector.revision_id,
+                    "source_sha256": selector.source_sha256,
+                    "snapshot_id": selector.snapshot_id,
+                    "page_id": selector.page_id,
+                    "viewport_id": view_id,
+                    "family": selector.family.value,
+                    "label_text": label_text,
+                    "label_bbox": tuple(round(float(v), 3) for v in evidence.label_bbox),
+                    "dimension_chain_id": dimension_chain_id,
+                },
+                digest_chars=32,
             )
-            bound_target_id = self._target_id_by_evidence.get(evidence_key)
-            if bound_target_id is None:
-                self._target_id_by_evidence[evidence_key] = selector.target_id
-            elif bound_target_id != selector.target_id:
-                return self._store(selector, _conflict(ROOF_CEILING_TARGET_ID_MISMATCH))
         finally:
             pdf.close()
 
@@ -342,7 +339,7 @@ class RoofCeilingProducer:
             "snapshot_id": selector.snapshot_id,
             "page_id": selector.page_id,
             "viewport_id": view_id,
-            "target_id": selector.target_id,
+            "target_id": producer_target_id,
             "family": selector.family.value,
             "value": value,
             "unit": unit,
@@ -356,7 +353,7 @@ class RoofCeilingProducer:
             snapshot_id=selector.snapshot_id,
             page_id=selector.page_id,
             viewport_id=view_id,
-            target_id=selector.target_id,
+            target_id=producer_target_id,
             family=selector.family,
             value=value,
             unit=unit,
