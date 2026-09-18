@@ -201,26 +201,14 @@ def test_caller_transform_and_page_images_kwargs_rejected() -> None:
 
 
 def test_forged_segment_path_requires_observation_authority() -> None:
-    """Segments only reach the network through sealed observation publish."""
-    # Empty observation authority → ABSTAIN even if caller has segments locally.
+    """Untrusted observation authorities cannot cross the network boundary."""
     empty = RasterWallObservationProducer.create().authority()
-    producer = RasterWallNetworkProducer.from_authorities(
-        observation_authority=empty,
-        physical_scale_authority=_scale_auth(),
-        snapshot=_snapshot(),
-    )
-    res = producer.publish(
-        RasterWallNetworkSelector(
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
+    with pytest.raises(TypeError, match="not source-authenticated"):
+        RasterWallNetworkProducer.from_authorities(
+            observation_authority=empty,
+            physical_scale_authority=_scale_auth(),
+            snapshot=_snapshot(),
         )
-    )
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert RASTER_NO_OBSERVATIONS in res.reason_codes
-    assert res.record is None
 
 
 def test_forged_transform_dpi_mismatch_fails() -> None:
