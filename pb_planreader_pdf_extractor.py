@@ -1805,21 +1805,9 @@ class GenericPlanReaderExtractor:
                 )
 
             # ------------------------------------------------------------------
-            # 3. Permanent / Brick Ventilation Openings: EXACT count from text
+            # 3. Permanent / Brick Ventilation Openings: Handled authoritatively
+            # by Phase F.8 Schedule / Vector Vent Extractor after the page loop.
             # ------------------------------------------------------------------
-            pv_matches = re.findall(r"\bPV\b|\bPermanent Vent\b|\bBrick Vent\b", clean_page_text, re.I)
-            if len(pv_matches) >= 2 and any(k in pt_lower for k in ("elevation", "facade", "façade", "section", "wall")):
-                vent_count = float(len(pv_matches))
-                pred_dict["brick_vents"] = ExtractedPrediction(
-                    tag="brick_vents",
-                    trade_type="walls",
-                    description=f"Precast / brick ventilation openings ({int(vent_count)} No parsed from drawing)",
-                    quantity=vent_count,
-                    unit="NO",
-                    confidence=0.90,
-                    source_page=page_num,
-                    sheet_number=sheet_no,
-                )
 
             # ------------------------------------------------------------------
             # 4 & 5. Window and Door Identity
