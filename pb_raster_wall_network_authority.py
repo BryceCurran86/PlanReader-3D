@@ -40,9 +40,11 @@ RASTER_CALLER_TRANSFORM_NOT_AUTHORITY = "raster_caller_transform_not_authority"
 RASTER_OBSERVATION_PAGE_MISMATCH = "raster_observation_page_mismatch"
 RASTER_DUPLICATE_OBSERVATION = "raster_duplicate_observation"
 RASTER_NON_WALL_SEGMENT = "raster_non_wall_segment"
+RASTER_SOURCE_OBSERVATION_NOT_AUTHENTICATED = "raster_source_observation_not_authenticated"
 
 _OBS_PRODUCER_SEAL = object()
 _OBS_AUTHORITY_SEAL = object()
+_SOURCE_AUTHENTICATED_RASTER_SEAL = object()
 _NET_PRODUCER_SEAL = object()
 _NET_AUTHORITY_SEAL = object()
 
@@ -226,6 +228,19 @@ class RasterWallObservationProducer:
             raise TypeError("transform must be RasterTransformBinding")
         if type(snapshot) is not PublishedSourceSnapshot:
             raise TypeError("snapshot must be PublishedSourceSnapshot")
+        # Caller-provided pixel segments / DPI transforms are diagnostic only.
+        # A future authenticated page-image decoder must mint the private
+        # source-authenticated observation authority used by the network layer.
+        return self._store(
+            selector,
+            _obs_blocked(
+                EvidenceResolutionStatus.ABSTAINED,
+                RASTER_SOURCE_OBSERVATION_NOT_AUTHENTICATED,
+            ),
+        )
+
+        # Legacy derivation below is intentionally unreachable until a
+        # source-bound decoder owns segment and transform production.
 
         rev = snapshot.revision
         snap = snapshot.snapshot
@@ -552,6 +567,11 @@ class RasterWallNetworkProducer:
             )
         if type(snapshot) is not PublishedSourceSnapshot:
             raise TypeError("snapshot must be PublishedSourceSnapshot")
+        if getattr(observation_authority, "_source_authentication_seal", None) is not _SOURCE_AUTHENTICATED_RASTER_SEAL:
+            raise TypeError(
+                "raster observation authority is not source-authenticated; "
+                "caller segments/transforms cannot mint wall geometry"
+            )
         self._observations = observation_authority
         self._scale = physical_scale_authority
         self._snapshot = snapshot
@@ -838,6 +858,7 @@ __all__ = [
     "RASTER_OBSERVATION_PAGE_MISMATCH",
     "RASTER_SCALE_AMBIGUOUS",
     "RASTER_SCALE_UNRESOLVED",
+    "RASTER_SOURCE_OBSERVATION_NOT_AUTHENTICATED",
     "RASTER_TRANSFORM_AMBIGUOUS",
     "RASTER_WALL_AMBIGUOUS",
     "RASTER_WALL_NETWORK_RESOLVED",
