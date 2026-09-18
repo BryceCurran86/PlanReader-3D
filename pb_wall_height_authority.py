@@ -13,9 +13,12 @@ numeric value is plausible.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import math
 import re
 from typing import Mapping, Optional
+
+import fitz
 
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_migration_contracts import (
@@ -28,6 +31,7 @@ from pb_migration_contracts import (
     stable_contract_id,
 )
 from pb_migration_provider_envelope import ProviderContext
+from pb_wall_height_evidence import resolve_wall_height_dimension_m
 
 WALL_HEIGHT_FAMILY = "wall_height"
 WALL_HEIGHT_FORMULA_VERSION = "1.4.0"
@@ -795,6 +799,7 @@ class WallHeightProducer:
             raise TypeError("source_visibility_producer must be producer-owned SourceVisibilityProducer")
         self._source_visibility_producer = source_visibility_producer
         self._quantities: dict[object, QuantityEvidence] = {}
+        self._wall_id_by_evidence: dict[tuple[str, str, str, str, str, str, str], str] = {}
 
     @classmethod
     def from_authorities(
@@ -847,35 +852,26 @@ class WallHeightProducer:
             self._quantities[selector.physical_wall_id] = qty
             return qty
 
-        from pb_pdf_text_integrity_authority import ObservationSelector
-        authority = self._source_visibility_producer.text_integrity_authority()
-        height_atom = None
-        for obs_id in published.text_observation_ids:
-            try:
-                res = authority.resolve_text(
-                    ObservationSelector(
-                        document_id=selector.document_id,
-                        revision_id=selector.revision_id,
-                        source_sha256=selector.source_sha256,
-                        snapshot_id=selector.snapshot_id,
-                        page_id=selector.page_id,
-                        observation_id=obs_id,
-                    )
-                )
-                if (
-                    res.status == EvidenceResolutionStatus.CORROBORATED
-                    and res.atom is not None
-                    and res.atom.kind in _ALLOWED_DIRECT_KINDS
-                    and str(_metadata(res.atom).get("target_entity_id") or "") == selector.physical_wall_id
-                ):
-                    height_atom = res.atom
-                    break
-            except Exception:
-                pass
+        try:
+            page_num = int(str(selector.page_id))
+        except ValueError:
+            page_num = None
 
-        if height_atom is None or height_atom.normalized_value is None:
+        source_bytes = self._raw_source_bytes(selector)
+        evidence = None
+        if source_bytes is not None and page_num is not None and page_num >= 1:
+            pdf = fitz.open(stream=source_bytes, filetype="pdf")
+            try:
+                page_index = page_num - 1
+                if page_index < pdf.page_count:
+                    page = pdf.load_page(page_index)
+                    evidence = resolve_wall_height_dimension_m(page, page_num=page_num)
+            finally:
+                pdf.close()
+
+        if evidence is None:
             qty = QuantityEvidence(
-                quantity_id=stable_contract_id("qty", {"selector": selector.key, "reason": "no_height_atom"}),
+                quantity_id=stable_contract_id("qty", {"selector": selector.key, "reason": "no_height_evidence"}),
                 family=WALL_HEIGHT_FAMILY,
                 semantic_key=f"wall_height:{selector.physical_wall_id}",
                 value=None,
@@ -892,62 +888,128 @@ class WallHeightProducer:
                 reason_codes=("no_authoritative_wall_height_evidence",),
                 metadata={},
             )
+            self._quantities[selector.key] = qty
+            self._quantities[selector.physical_wall_id] = qty
+            return qty
+
+        # Identity binding: physical_wall_id is a caller-supplied selector
+        # key, never proof by itself. Bind the FIRST physical_wall_id
+        # successfully published against this real (page, view, label)
+        # evidence instance; a later publish() for the identical evidence
+        # under a DIFFERENT physical_wall_id is rejected rather than
+        # letting a caller relabel one source measurement as an arbitrary
+        # wall.
+        evidence_key = (
+            selector.document_id,
+            selector.revision_id,
+            selector.source_sha256,
+            selector.snapshot_id,
+            selector.page_id,
+            evidence.view_id,
+            evidence.label_text,
+        )
+        bound_wall_id = self._wall_id_by_evidence.get(evidence_key)
+        if bound_wall_id is None:
+            self._wall_id_by_evidence[evidence_key] = selector.physical_wall_id
+        elif bound_wall_id != selector.physical_wall_id:
+            qty = QuantityEvidence(
+                quantity_id=stable_contract_id("qty", {"selector": selector.key, "reason": "wall_id_mismatch"}),
+                family=WALL_HEIGHT_FAMILY,
+                semantic_key=f"wall_height:{selector.physical_wall_id}",
+                value=None,
+                unit="m",
+                input_entity_ids=(selector.physical_wall_id,),
+                formula="authoritative_explicit_wall_height",
+                formula_version=WALL_HEIGHT_FORMULA_VERSION,
+                evidence_ids=(evidence.chain_id,),
+                authority="unresolved",
+                status=AuthorityStatus.BLOCKED.value,
+                confidence=0.0,
+                abstained=True,
+                blocking_reasons=("wall_height_physical_wall_id_mismatch",),
+                reason_codes=("wall_height_physical_wall_id_mismatch",),
+                metadata={},
+            )
+            self._quantities[selector.key] = qty
+            self._quantities[selector.physical_wall_id] = qty
+            return qty
+
+        value_m = round(float(evidence.height_m), 6)
+        if not math.isfinite(value_m) or value_m <= 0.0:
+            qty = QuantityEvidence(
+                quantity_id=stable_contract_id("qty", {"selector": selector.key, "reason": "invalid_value"}),
+                family=WALL_HEIGHT_FAMILY,
+                semantic_key=f"wall_height:{selector.physical_wall_id}",
+                value=None,
+                unit="m",
+                input_entity_ids=(selector.physical_wall_id,),
+                formula="authoritative_explicit_wall_height",
+                formula_version=WALL_HEIGHT_FORMULA_VERSION,
+                evidence_ids=(evidence.chain_id,),
+                authority="unresolved",
+                status=AuthorityStatus.BLOCKED.value,
+                confidence=0.0,
+                abstained=True,
+                blocking_reasons=("invalid_direct_height_value",),
+                reason_codes=("invalid_direct_height_value",),
+                metadata={},
+            )
         else:
-            value_m = _numeric_to_m(height_atom.normalized_value, height_atom.unit)
-            if value_m is None or value_m <= 0.0:
-                qty = QuantityEvidence(
-                    quantity_id=stable_contract_id("qty", {"selector": selector.key, "reason": "invalid_value"}),
-                    family=WALL_HEIGHT_FAMILY,
-                    semantic_key=f"wall_height:{selector.physical_wall_id}",
-                    value=None,
-                    unit="m",
-                    input_entity_ids=(selector.physical_wall_id,),
-                    formula="authoritative_explicit_wall_height",
-                    formula_version=WALL_HEIGHT_FORMULA_VERSION,
-                    evidence_ids=(height_atom.evidence_id,),
-                    authority="unresolved",
-                    status=AuthorityStatus.BLOCKED.value,
-                    confidence=0.0,
-                    abstained=True,
-                    blocking_reasons=("invalid_direct_height_value",),
-                    reason_codes=("invalid_direct_height_value",),
-                    metadata={},
-                )
-            else:
-                payload = {
-                    "wall_id": selector.physical_wall_id,
-                    "value_m": round(value_m, 6),
-                    "evidence_id": height_atom.evidence_id,
+            payload = {
+                "wall_id": selector.physical_wall_id,
+                "value_m": value_m,
+                "evidence_id": evidence.chain_id,
+                "source_sha256": selector.source_sha256,
+                "revision_id": selector.revision_id,
+                "snapshot_id": selector.snapshot_id,
+            }
+            qty = QuantityEvidence(
+                quantity_id=stable_contract_id("qty", payload),
+                family=WALL_HEIGHT_FAMILY,
+                semantic_key=f"wall_height:{selector.physical_wall_id}",
+                value=value_m,
+                unit="m",
+                input_entity_ids=(selector.physical_wall_id,),
+                formula="authoritative_explicit_wall_height",
+                formula_version=WALL_HEIGHT_FORMULA_VERSION,
+                evidence_ids=(evidence.chain_id,),
+                authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+                status=AuthorityStatus.FIRM.value,
+                confidence=1.0,
+                abstained=False,
+                metadata={
                     "source_sha256": selector.source_sha256,
                     "revision_id": selector.revision_id,
-                    "snapshot_id": selector.snapshot_id,
-                }
-                qty = QuantityEvidence(
-                    quantity_id=stable_contract_id("qty", payload),
-                    family=WALL_HEIGHT_FAMILY,
-                    semantic_key=f"wall_height:{selector.physical_wall_id}",
-                    value=round(value_m, 6),
-                    unit="m",
-                    input_entity_ids=(selector.physical_wall_id,),
-                    formula="authoritative_explicit_wall_height",
-                    formula_version=WALL_HEIGHT_FORMULA_VERSION,
-                    evidence_ids=(height_atom.evidence_id,),
-                    authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
-                    status=AuthorityStatus.FIRM.value,
-                    confidence=float(height_atom.confidence),
-                    abstained=False,
-                    metadata={
-                        "source_sha256": selector.source_sha256,
-                        "revision_id": selector.revision_id,
-                        "evidence_snapshot_id": selector.snapshot_id,
-                        "page_id": selector.page_id,
-                        "evidence_kind": height_atom.kind,
-                    },
-                )
+                    "evidence_snapshot_id": selector.snapshot_id,
+                    "page_id": selector.page_id,
+                    "target_entity_id": selector.physical_wall_id,
+                    "evidence_kind": "wall_height_dimension",
+                },
+            )
 
         self._quantities[selector.key] = qty
         self._quantities[selector.physical_wall_id] = qty
         return qty
+
+    def _raw_source_bytes(self, selector: WallHeightSelector) -> Optional[bytes]:
+        """Producer-owned immutable PDF bytes for this exact revision, or
+        None if unavailable/mismatched. Mirrors the same sha256-verified
+        reach-through pattern already used by PhysicalScaleProducer."""
+        published = self._source_visibility_producer.published_snapshot_for_revision(selector.revision_id)
+        if published is None:
+            return None
+        if (
+            published.revision.document_id != selector.document_id
+            or published.revision.source_sha256 != selector.source_sha256
+            or published.snapshot.snapshot_id != selector.snapshot_id
+        ):
+            return None
+        source_bytes = self._source_visibility_producer._producer._store.source_bytes_by_revision.get(
+            selector.revision_id
+        )
+        if source_bytes is None or hashlib.sha256(source_bytes).hexdigest() != selector.source_sha256:
+            return None
+        return bytes(source_bytes)
 
     def publish(self, selector: WallHeightSelector) -> QuantityEvidence:
         return self.publish_scope(selector)
