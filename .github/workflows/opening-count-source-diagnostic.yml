@@ -78,25 +78,3 @@ jobs:
               finally:
                   doc.close()
           PY
-      - name: Run opening-count diagnostics
-        env:
-          PYTHONPATH: .
-        run: |
-          python - <<'PY'
-          import json
-          from pb_shadow_opening_count_eval import run_project_shadow
-          for bid in [
-            "tenders_ke_kstvet_cbc_classroom",
-            "tenders_ke_murera_science_lab",
-            "tenders_ke_lamu_ishakani_ecd_classrooms",
-          ]:
-              r = run_project_shadow(bid)
-              print("===PROJECT===", bid)
-              print(json.dumps({
-                  "pages": r.get("pages"),
-                  "frozen_quantities": r.get("frozen_quantities"),
-                  "canonical_openings": r.get("canonical_openings"),
-                  "diagnostics": r.get("diagnostics"),
-                  "metrics": r.get("metrics"),
-              }, indent=2, sort_keys=True))
-          PY
