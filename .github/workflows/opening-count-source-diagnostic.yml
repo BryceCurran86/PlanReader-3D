@@ -52,6 +52,18 @@ jobs:
               print("\n===SCHEDULE_ROWS",bid,"===")
               for row in rows:
                   print(json.dumps(row.to_dict(),sort_keys=True))
+              print("\n===TARGET_PAGE_TEXT",bid,"===")
+              target_nums = [54,55] if "kstvet" in bid else [219,220,221,222,223,224,225]
+              for page_no in target_nums:
+                  if 1 <= page_no <= len(doc):
+                      page = doc[page_no-1]
+                      txt = page.get_text("text") or ""
+                      if any(k in txt.lower() for k in ("window","door","schedule","w1","w2","w3","w4","d1","d2","steel casement","flush")):
+                          print("\n---PAGE",page_no,"TEXT---")
+                          print(txt[:20000])
+                          print("\n---PAGE",page_no,"WORDS---")
+                          for w in page.get_text("words")[:2500]:
+                              print("WORD",page_no,repr(w[4]),round(w[0],1),round(w[1],1),round(w[2],1),round(w[3],1),w[5],w[6],w[7])
               doc.close()
               preds=GenericPlanReaderExtractor().extract_from_pdf(pdf)
               print("\n===LIVE_OPENING_PREDS",bid,"===")
