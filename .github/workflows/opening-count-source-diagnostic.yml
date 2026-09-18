@@ -1,4 +1,4 @@
-name: Cross View Secondary Width Diagnostic
+name: DPC Scope Diagnostic
 on:
   pull_request:
     branches: [main]
@@ -18,42 +18,36 @@ jobs:
           python - <<'PY'
           import hashlib,json,pathlib,urllib.request
           root=pathlib.Path("benchmarks/public_tenders/tenders_ke_murera_science_lab")
-          d=json.loads((root/"download_manifest.json").read_text())
-          s=json.loads((root/"source_manifest.json").read_text())
-          fn=s["source_pdf"]
-          expected=next(x["sha256"] for x in d["documents"] if x["filename"]==fn).lower()
+          d=json.loads((root/"download_manifest.json").read_text()); s=json.loads((root/"source_manifest.json").read_text())
+          fn=s["source_pdf"]; expected=next(x["sha256"] for x in d["documents"] if x["filename"]==fn).lower()
           data=urllib.request.urlopen(urllib.request.Request(d["source_url"],headers={"User-Agent":"Mozilla/5.0 PlanReaderDiagnostic/1.0"}),timeout=180).read()
           assert hashlib.sha256(data).hexdigest()==expected
           out=pathlib.Path("benchmarks/sources"); out.mkdir(parents=True,exist_ok=True); (out/fn).write_bytes(data)
           PY
-      - name: Inspect page 221 figured evidence
+      - name: Probe DPC scope and internal partition evidence
         env:
           PYTHONPATH: .
         run: |
           python - <<'PY'
-          import json,pathlib,fitz
-          from pb_figured_dimension_evidence import extract_dimension_evidence_bundle
-          from pb_viewport_segmentation import segment_page_viewports
+          import json,pathlib,fitz,re
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          from pb_wall_fill_internal_partition_evidence import resolve_internal_partition_length_m
           root=pathlib.Path("benchmarks/public_tenders/tenders_ke_murera_science_lab")
           sm=json.loads((root/"source_manifest.json").read_text())
           doc=fitz.open(str(pathlib.Path("benchmarks/sources")/sm["source_pdf"]))
-          page=doc[220]
-          print("TEXT",page.get_text("text"))
-          print("VIEWPORTS",json.dumps([
-            {"id":v.view_id,"type":v.view_type,"status":v.status,"bbox":list(v.bounding_box) if v.bounding_box else None}
-            for v in segment_page_viewports(page,page_number=221)
-          ]))
-          bundle=extract_dimension_evidence_bundle(page,page_num=221,view_id="page_221")
-          bind={b.observation_id:b.status for b in bundle.bindings}
-          for o in bundle.observations:
-              try: val=float(o.value_m)
-              except: continue
-              if 1.5 <= val <= 3.5:
-                  print("OBS",json.dumps({
-                    "id":o.dimension_id,"value":val,"orientation":str(o.orientation),
-                    "bbox":list(o.bbox) if o.bbox else None,
-                    "endpoints":list(o.endpoints) if o.endpoints else None,
-                    "binding":bind.get(o.dimension_id)
-                  },sort_keys=True))
+          ex=GenericPlanReaderExtractor()
+          for page_no in range(219,239):
+              page=doc[page_no-1]
+              text=page.get_text("text") or ""
+              if ex._has_dpc_specification(text) or ex._has_dpc_all_walls_scope(text):
+                  print("\nPAGE",page_no)
+                  print("DPC_SPEC",ex._has_dpc_specification(text))
+                  print("ALL_WALLS",ex._has_dpc_all_walls_scope(text))
+                  print("TEXT",text)
+                  try:
+                    e=resolve_internal_partition_length_m(page.get_drawings(),length_m=18.2,width_m=8.2,page=page)
+                    print("PARTITION",e)
+                  except Exception as err:
+                    print("PARTITION_ERROR",repr(err))
           doc.close()
           PY
