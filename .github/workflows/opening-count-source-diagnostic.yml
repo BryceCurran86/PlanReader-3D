@@ -65,9 +65,4 @@ jobs:
                           for w in page.get_text("words")[:2500]:
                               print("WORD",page_no,repr(w[4]),round(w[0],1),round(w[1],1),round(w[2],1),round(w[3],1),w[5],w[6],w[7])
               doc.close()
-              preds=GenericPlanReaderExtractor().extract_from_pdf(pdf)
-              print("\n===LIVE_OPENING_PREDS",bid,"===")
-              for p in preds:
-                  if p.trade_type in ("windows","doors") or p.tag in ("W1","W2","D1","D2","steel_casement_windows","doors_complete","brick_vents","verandah_pillars","masonry_piers"):
-                      print(json.dumps(p.to_dict(),sort_keys=True))
           PY
