@@ -112,27 +112,58 @@ class ElevationVentResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-def _extract_verified_pv_callouts(page: fitz.Page) -> List[Tuple[float, float, float, float, str]]:
-    """Extract verified PV / P.V callouts, excluding legend definitions.
+def extract_verified_pv_callouts(page: fitz.Page) -> List[Tuple[float, float, float, float, str]]:
+    """Extract verified permanent-vent callouts, excluding legend definitions.
 
-    Returns list of (x0, y0, x1, y1, word_text).
+    Recognizes both the abbreviated "PV"/"P.V" callout form and the
+    spelled-out "Permanent Vent"/"Brick Vent" phrase form -- the legacy
+    page-loop extractor this module replaced matched both
+    (``\\bPV\\b|\\bPermanent Vent\\b|\\bBrick Vent\\b``); only matching the
+    abbreviation would silently drop any drawing set that spells vents out
+    in full without ever using "PV".
+
+    Returns list of (x0, y0, x1, y1, matched_text).
     """
     all_words = page.get_text("words")
 
-    def _next_word_text(word: tuple) -> str:
-        block_no, line_no, word_no = word[5], word[6], word[7]
+    def _word_at(block_no: int, line_no: int, word_no: int) -> Optional[tuple]:
         for other in all_words:
-            if other[5] == block_no and other[6] == line_no and other[7] == word_no + 1:
-                return str(other[4])
-        return ""
+            if other[5] == block_no and other[6] == line_no and other[7] == word_no:
+                return other
+        return None
+
+    def _clean(word: Optional[tuple]) -> str:
+        return str(word[4]).strip().lower().rstrip(".,:;") if word is not None else ""
 
     verified: List[Tuple[float, float, float, float, str]] = []
+    seen_spans: set = set()
     for w in all_words:
         txt = str(w[4]).strip()
+        block_no, line_no, word_no = w[5], w[6], w[7]
+        span_key = (block_no, line_no, word_no)
+        if span_key in seen_spans:
+            continue
+
         if re.match(r"^(?:PV|P\.V)$", txt, re.I):
-            next_w = _next_word_text(w).strip().lower().rstrip(".,:;")
-            if next_w != "denotes":
-                verified.append((float(w[0]), float(w[1]), float(w[2]), float(w[3]), txt))
+            if _clean(_word_at(block_no, line_no, word_no + 1)) == "denotes":
+                continue
+            seen_spans.add(span_key)
+            verified.append((float(w[0]), float(w[1]), float(w[2]), float(w[3]), txt))
+            continue
+
+        if txt.strip(".,:;").lower() in ("permanent", "brick"):
+            next_w = _word_at(block_no, line_no, word_no + 1)
+            if _clean(next_w) != "vent":
+                continue
+            if _clean(_word_at(block_no, line_no, word_no + 2)) == "denotes":
+                continue
+            seen_spans.add(span_key)
+            seen_spans.add((block_no, line_no, word_no + 1))
+            x0 = min(float(w[0]), float(next_w[0]))
+            y0 = min(float(w[1]), float(next_w[1]))
+            x1 = max(float(w[2]), float(next_w[2]))
+            y1 = max(float(w[3]), float(next_w[3]))
+            verified.append((x0, y0, x1, y1, f"{txt} {next_w[4]}"))
     return verified
 
 
@@ -323,7 +354,13 @@ def detect_unlabeled_vent_symbols(
 
     Rules:
     - Must match learned signature within tolerance.
-    - Must be inside a recognized elevation viewport (or valid facade area).
+    - Must be inside a genuinely segmented elevation viewport. There is no
+      fallback to "anywhere on the page" when viewport segmentation is
+      empty or unavailable: labeled callouts alone are explicit text
+      evidence, but extrapolating unlabeled geometry across a whole page
+      with no proven elevation boundary risks matching unrelated symbols
+      (furniture, in-plan openings, schedule-table graphics) that merely
+      share the learned symbol's size.
     - Must not be near any labeled callout (to avoid double-counting).
     - Deduplicates overlapping / identical symbols (< 2 pt).
     """
@@ -342,21 +379,19 @@ def detect_unlabeled_vent_symbols(
         if any(_distance(cand.centroid, cc) <= search_radius_pt for cc in callout_centers):
             continue
 
-        # Check if cand is within an elevation viewport
+        # Check if cand is within a genuinely segmented elevation viewport.
+        # No page-wide fallback: an empty/failed segmentation means this
+        # symbol's containment in a real elevation is unproven, so it is
+        # never counted -- not "probably fine because it's not in the
+        # margin."
         in_elevation_view = False
-        if elevation_viewports:
-            for vp in elevation_viewports:
-                if vp.view_type == "elevation" and vp.bounding_box:
-                    vx0, vy0, vx1, vy1 = vp.bounding_box
-                    cx, cy = cand.centroid
-                    if vx0 <= cx <= vx1 and vy0 <= cy <= vy1:
-                        in_elevation_view = True
-                        break
-        else:
-            # If no segmented viewports, ensure it is within drawing area (not margin/border)
-            cx, cy = cand.centroid
-            if 10.0 <= cx <= page_rect.width - 10.0 and 10.0 <= cy <= page_rect.height - 10.0:
-                in_elevation_view = True
+        for vp in elevation_viewports:
+            if vp.view_type == "elevation" and vp.bounding_box:
+                vx0, vy0, vx1, vy1 = vp.bounding_box
+                cx, cy = cand.centroid
+                if vx0 <= cx <= vx1 and vy0 <= cy <= vy1:
+                    in_elevation_view = True
+                    break
 
         if not in_elevation_view:
             continue
@@ -398,7 +433,7 @@ def extract_elevation_vector_vents(
         return None
 
     # Step 1: Verified callouts
-    labeled_callouts = _extract_verified_pv_callouts(page)
+    labeled_callouts = extract_verified_pv_callouts(page)
 
     # Step 2: Segment viewports
     try:
