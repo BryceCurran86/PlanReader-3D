@@ -1,0 +1,65 @@
+name: Opening Count Source Diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download and verify diagnostic sources
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, urllib.request
+          ids = [
+            "tenders_ke_kstvet_cbc_classroom",
+            "tenders_ke_murera_science_lab",
+            "tenders_ke_lamu_ishakani_ecd_classrooms",
+          ]
+          root = pathlib.Path("benchmarks/public_tenders")
+          source_root = pathlib.Path("benchmarks/sources")
+          source_root.mkdir(parents=True, exist_ok=True)
+          for bid in ids:
+              bdir = root / bid
+              dm = json.loads((bdir/"download_manifest.json").read_text())
+              sm = json.loads((bdir/"source_manifest.json").read_text())
+              filename = sm["source_pdf"]
+              doc = next(d for d in dm["documents"] if d["filename"] == filename)
+              req = urllib.request.Request(dm["source_url"], headers={"User-Agent":"Mozilla/5.0 PlanReaderDiagnostic/1.0"})
+              data = urllib.request.urlopen(req, timeout=180).read()
+              actual = hashlib.sha256(data).hexdigest()
+              assert actual == doc["sha256"].lower(), (bid, actual, doc["sha256"])
+              (source_root/filename).write_bytes(data)
+              print("VERIFIED", bid, filename, actual)
+          PY
+      - name: Run opening-count diagnostics
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pb_shadow_opening_count_eval import run_project_shadow
+          for bid in [
+            "tenders_ke_kstvet_cbc_classroom",
+            "tenders_ke_murera_science_lab",
+            "tenders_ke_lamu_ishakani_ecd_classrooms",
+          ]:
+              r = run_project_shadow(bid)
+              print("===PROJECT===", bid)
+              print(json.dumps({
+                  "pages": r.get("pages"),
+                  "frozen_quantities": r.get("frozen_quantities"),
+                  "canonical_openings": r.get("canonical_openings"),
+                  "diagnostics": r.get("diagnostics"),
+                  "metrics": r.get("metrics"),
+              }, indent=2, sort_keys=True))
+          PY
