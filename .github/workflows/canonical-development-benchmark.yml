@@ -36,13 +36,16 @@ jobs:
           ]
           print("Scored benchmark sources:", [row["benchmark_id"] for row in scored])
 
+          source_root = pathlib.Path("benchmarks/sources")
+          source_root.mkdir(parents=True, exist_ok=True)
+
           for row in scored:
               bid = row["benchmark_id"]
               bdir = root / bid
               download = json.loads((bdir / "download_manifest.json").read_text(encoding="utf-8"))
               source = json.loads((bdir / "source_manifest.json").read_text(encoding="utf-8"))
               filename = source["source_pdf"]
-              target = bdir / filename
+              target = source_root / filename
               url = download["source_url"]
               expected = None
               for doc in download.get("documents", []):
