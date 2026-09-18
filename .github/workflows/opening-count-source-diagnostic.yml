@@ -37,38 +37,27 @@ jobs:
               (source_root/filename).write_bytes(data)
               print("VERIFIED", bid, filename, actual)
           PY
-      - name: Inspect target schedule pages
+      - name: Inspect Murera page 220 only
         env:
           PYTHONPATH: .
         run: |
           python - <<'PY'
-          import fitz, json, pathlib
+          import fitz, json, pathlib, re
           from pb_raster_schedule_extractor import GenericScheduleTableExtractor
-          from pb_shadow_opening_evidence import page_is_opening_schedule_sheet
-          from pb_viewport_segmentation import segment_page_viewports
-          cases = [
-            ("MURERA", "1785347143869-bqs-drawings.pdf", [219,220,221,222,223,224,225]),
+          p = fitz.open(pathlib.Path("benchmarks/sources/1785347143869-bqs-drawings.pdf"))[219]
+          txt = p.get_text("text") or ""
+          words = p.get_text("words") or []
+          rows = GenericScheduleTableExtractor().extract_from_page(p,220)
+          pv = [
+              {"text":w[4],"bbox":list(w[:4]),"block":w[5],"line":w[6],"word":w[7]}
+              for w in words if re.fullmatch(r"P\\.?V\\.?",str(w[4]),re.I)
           ]
-          root=pathlib.Path("benchmarks/sources")
-          ex=GenericScheduleTableExtractor()
-          for label, fn, pages in cases:
-              doc=fitz.open(root/fn)
-              try:
-                  for pnum in pages:
-                      p=doc[pnum-1]
-                      txt=p.get_text("text") or ""
-                      rows=ex.extract_from_page(p,pnum)
-                      vps=segment_page_viewports(p,page_number=pnum)
-                      print("===PAGE===",label,pnum)
-                      print(json.dumps({
-                        "text_len":len(txt),
-                        "text":txt[:12000],
-                        "images":[list(x[2:4]) for x in p.get_images()],
-                        "drawings":len(p.get_drawings()),
-                        "page_is_opening_schedule_sheet":page_is_opening_schedule_sheet(txt),
-                        "rows":[getattr(r,"__dict__",str(r)) for r in rows],
-                        "viewports":[getattr(v,"__dict__",str(v)) for v in vps],
-                      },default=str,indent=2))
-              finally:
-                  doc.close()
+          print(json.dumps({
+              "page":220,
+              "text":txt,
+              "pv_words":pv,
+              "rows":[r.to_dict() for r in rows],
+              "drawings":len(p.get_drawings()),
+              "images":[list(x[2:4]) for x in p.get_images()],
+          },indent=2))
           PY
