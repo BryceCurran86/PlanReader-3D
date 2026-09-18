@@ -154,3 +154,32 @@ jobs:
                   for p in vents
               ], indent=2, default=str))
           PY
+
+      - name: Render Murera page 219 for vector-symbol inspection
+        run: |
+          python - <<'PY'
+          import fitz, pathlib
+          from PIL import Image
+          path = pathlib.Path("benchmarks/sources/1785347143869-bqs-drawings.pdf")
+          out = pathlib.Path("diagnostic-artifacts")
+          out.mkdir(exist_ok=True)
+          doc = fitz.open(path)
+          page = doc[218]
+          pix = page.get_pixmap(matrix=fitz.Matrix(3, 3), alpha=False)
+          img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+          img.save(out / "murera-page219.png")
+          # E-03 occupies the lower facade band on this composite sheet.
+          # Save broad overlapping crops; these are diagnostic only and do not
+          # encode benchmark quantities or feed production.
+          w, h = img.size
+          img.crop((0, int(h * 0.45), w, h)).save(out / "murera-page219-lower55.png")
+          img.crop((int(w * 0.45), int(h * 0.25), w, int(h * 0.85))).save(out / "murera-page219-right60.png")
+          print("RENDER_SIZE", w, h)
+          doc.close()
+          PY
+      - name: Upload Murera page render
+        uses: actions/upload-artifact@v4
+        with:
+          name: murera-page219-render
+          path: diagnostic-artifacts/*.png
+          if-no-files-found: error
