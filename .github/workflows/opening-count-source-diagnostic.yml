@@ -32,37 +32,52 @@ jobs:
               (out/fn).write_bytes(data)
               print("SOURCE",bid,fn,len(data),actual)
           PY
-      - name: Dump schedule rows and live opening predictions
+      - name: Probe physical opening marks and view context
         env:
           PYTHONPATH: .
         run: |
           python - <<'PY'
-          import json,pathlib,fitz
-          from pb_raster_schedule_extractor import GenericScheduleTableExtractor
-          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          import json,pathlib,re,fitz
+          from pb_plan_opening_instance_marks import (
+              extract_plan_instance_opening_totals,
+              package_documents_casement_windows,
+              package_documents_door_system,
+          )
+          from pb_viewport_segmentation import segment_page_viewports
           root=pathlib.Path("benchmarks/public_tenders")
           src=pathlib.Path("benchmarks/sources")
+          mark_re=re.compile(r"^(?:W|D)[-–—]?[0-9]{1,2}$",re.I)
           for bid in ["tenders_ke_kstvet_cbc_classroom","tenders_ke_murera_science_lab"]:
               sm=json.loads((root/bid/"source_manifest.json").read_text())
               pdf=src/sm["source_pdf"]
               doc=fitz.open(str(pdf))
-              extractor=GenericPlanReaderExtractor()
-              dwg=[p for p in range(len(doc)) if extractor.is_drawing_page(doc[p].get_text("text"),doc[p])]
-              rows=GenericScheduleTableExtractor().extract_from_document(doc,pages=dwg)
-              print("\n===SCHEDULE_ROWS",bid,"===")
-              for row in rows:
-                  print(json.dumps(row.to_dict(),sort_keys=True))
-              print("\n===TARGET_PAGE_TEXT",bid,"===")
-              target_nums = [54,55] if "kstvet" in bid else [219,220,221,222,223,224,225]
-              for page_no in target_nums:
-                  if 1 <= page_no <= len(doc):
-                      page = doc[page_no-1]
-                      txt = page.get_text("text") or ""
-                      if any(k in txt.lower() for k in ("window","door","schedule","w1","w2","w3","w4","d1","d2","steel casement","flush")):
-                          print("\n---PAGE",page_no,"TEXT---")
-                          print(txt[:20000])
-                          print("\n---PAGE",page_no,"WORDS---")
-                          for w in page.get_text("words")[:2500]:
-                              print("WORD",page_no,repr(w[4]),round(w[0],1),round(w[1],1),round(w[2],1),round(w[3],1),w[5],w[6],w[7])
+              pnos=range(53,55) if "kstvet" in bid else range(218,238)
+              texts=[]
+              print("\n===",bid,"===")
+              for pno in pnos:
+                  if pno<0 or pno>=len(doc): continue
+                  page=doc[pno]
+                  text=page.get_text("text") or ""
+                  texts.append(text)
+                  marks=[w for w in page.get_text("words") if mark_re.fullmatch(str(w[4]).strip())]
+                  views=[]
+                  try:
+                      for v in segment_page_viewports(page,page_number=pno+1):
+                          views.append({
+                            "id":v.view_id,"type":v.view_type,"status":v.status,
+                            "bbox":list(v.bounding_box) if v.bounding_box else None
+                          })
+                  except Exception as e:
+                      views=[{"error":str(e)}]
+                  if marks or any(k in text.lower() for k in ("floor plan","window schedule","door schedule","schedule of windows","schedule of doors")):
+                      print("PAGE",pno+1,"TEXTLEN",len(text),"MARKS",[
+                        {"t":w[4],"x0":round(w[0],1),"y0":round(w[1],1),"x1":round(w[2],1),"y1":round(w[3],1)}
+                        for w in marks
+                      ])
+                      print("VIEWS",json.dumps(views,sort_keys=True))
+              print("CASEMENT_DOC",package_documents_casement_windows(texts))
+              print("DOOR_DOC",package_documents_door_system(texts))
+              totals=extract_plan_instance_opening_totals(doc,list(pnos))
+              print("CURRENT_TOTALS",None if totals is None else totals)
               doc.close()
           PY
