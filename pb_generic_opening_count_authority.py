@@ -60,6 +60,7 @@ GENERIC_OPENING_COUNT_LINEAGE_MISMATCH = "generic_opening_count_lineage_mismatch
 GENERIC_OPENING_COUNT_AMBIGUOUS = "generic_opening_count_ambiguous"
 GENERIC_OPENING_COUNT_SCHEDULE_MISMATCH = "generic_opening_count_schedule_mismatch"
 GENERIC_OPENING_COUNT_SCOPE_INCOMPLETE = "generic_opening_count_scope_incomplete"
+GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED = "generic_opening_count_completeness_not_source_authenticated"
 GENERIC_OPENING_COUNT_NON_PLAN_VIEW = "generic_opening_count_non_plan_view"
 GENERIC_OPENING_COUNT_NO_PHYSICAL_INSTANCES = (
     "generic_opening_count_no_physical_instances"
@@ -364,6 +365,19 @@ class GenericOpeningCountProducer:
             raise TypeError("selector must be GenericOpeningCountSelector")
 
         diagnostic_reasons = self._diagnostic_reasons()
+
+        # Current OpeningUniverseCompletenessAuthority can be produced from
+        # caller-supplied source/enumerated primitive collections. Until that
+        # upstream producer is bound directly to authenticated source decode,
+        # completeness is not strong enough to support a FIRM count.
+        return self._store(
+            selector,
+            _blocked(
+                EvidenceResolutionStatus.ABSTAINED,
+                GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED,
+                *diagnostic_reasons,
+            ),
+        )
 
         univ_sel = OpeningUniverseSelector(
             document_id=selector.document_id,
@@ -718,6 +732,7 @@ __all__ = [
     "GENERIC_OPENING_COUNT_AMBIGUOUS",
     "GENERIC_OPENING_COUNT_CALLER_NON_PLAN_NOT_AUTHORITY",
     "GENERIC_OPENING_COUNT_CALLER_SCHEDULE_COUNTS_NOT_AUTHORITY",
+    "GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED",
     "GENERIC_OPENING_COUNT_LINEAGE_MISMATCH",
     "GENERIC_OPENING_COUNT_NON_PLAN_VIEW",
     "GENERIC_OPENING_COUNT_NO_PHYSICAL_INSTANCES",
