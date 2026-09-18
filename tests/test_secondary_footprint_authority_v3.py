@@ -173,37 +173,36 @@ def test_no_real_boundary_primitive_leaves_width_area_perimeter_unknown() -> Non
     assert res.record.perimeter_m is None
 
 
+
 def test_arbitrary_secondary_space_id_cannot_relabel_one_source_footprint() -> None:
-    """The same real footprint evidence must bind to exactly one
-    secondary_space_id. A second, different caller-chosen id against the
-    identical source must not also mint a CORROBORATED record."""
+    """Caller selector labels never become authoritative physical identity."""
     pdf = _verandah_pdf()
     source, published = _ingest(pdf)
     producer = SecondaryFootprintProducer.from_source_visibility_producer(source)
 
     first = producer.publish(_selector(published, viewport_id=None, secondary_space_id="verandah-A"))
-    assert first.status is EvidenceResolutionStatus.CORROBORATED
-
     second = producer.publish(_selector(published, viewport_id=None, secondary_space_id="verandah-B"))
-    assert second.status is EvidenceResolutionStatus.CONFLICT
-    assert second.record is None
-    assert SECONDARY_FOOTPRINT_SPACE_ID_MISMATCH in second.reason_codes
 
-    # The first binding remains intact and resolvable.
-    replay = producer.authority().resolve(_selector(published, viewport_id=None, secondary_space_id="verandah-A"))
-    assert replay.status is EvidenceResolutionStatus.CORROBORATED
+    assert first.status is EvidenceResolutionStatus.CORROBORATED
+    assert second.status is EvidenceResolutionStatus.CORROBORATED
+    assert first.record is not None and second.record is not None
+    assert first.record.secondary_space_id == second.record.secondary_space_id
+    assert first.record.record_id == second.record.record_id
+    assert first.record.secondary_space_id not in {"verandah-A", "verandah-B"}
 
 
 def test_same_secondary_space_id_republished_is_idempotent_not_a_conflict() -> None:
     pdf = _verandah_pdf()
     source, published = _ingest(pdf)
     producer = SecondaryFootprintProducer.from_source_visibility_producer(source)
-    sel = _selector(published, viewport_id=None, secondary_space_id="verandah-A")
+    sel = _selector(published, viewport_id=None, secondary_space_id="caller-label")
     first = producer.publish(sel)
     second = producer.publish(sel)
     assert first.status is EvidenceResolutionStatus.CORROBORATED
     assert second.status is EvidenceResolutionStatus.CORROBORATED
-
+    assert first.record is not None and second.record is not None
+    assert first.record == second.record
+    assert first.record.secondary_space_id != "caller-label"
 
 def test_publish_is_idempotent_and_deterministic() -> None:
     pdf = _verandah_pdf()
