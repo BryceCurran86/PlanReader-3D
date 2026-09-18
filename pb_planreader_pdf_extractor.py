@@ -2394,11 +2394,18 @@ class GenericPlanReaderExtractor:
                             )
                         )
 
-                if opening_instances:
-                    pipeline = GenericOpeningDeductionPipeline()
-                    wall_results = pipeline.deduct_openings_for_all_walls([wall_inst], opening_instances)
-                    preds_list = pipeline.propagate_to_predictions(list(pred_dict.values()), wall_results)
-                    pred_dict = {p.tag: p for p in preds_list}
+                # Always route through the fail-closed deduction/publication
+                # gate, even when no opening was detected for this wall. An
+                # empty opening_instances list is NOT evidence that the wall
+                # truly has zero openings -- it is at least as likely to mean
+                # opening detection/schedule extraction was incomplete for
+                # this document. Bypassing the gate in that case let a wall's
+                # raw, un-deducted gross area publish as if it were final,
+                # silently overcounting whenever openings went undetected.
+                pipeline = GenericOpeningDeductionPipeline()
+                wall_results = pipeline.deduct_openings_for_all_walls([wall_inst], opening_instances)
+                preds_list = pipeline.propagate_to_predictions(list(pred_dict.values()), wall_results)
+                pred_dict = {p.tag: p for p in preds_list}
         except Exception:
             self.extraction_status["opening_deduction"] = "extraction_failed"
 
