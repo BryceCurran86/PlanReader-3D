@@ -350,8 +350,12 @@ def test_attack_9_multi_segment_bent_wall() -> None:
     pts = ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0))
     left = _compute_multi_segment_offset(pts, 0.1)
     right = _compute_multi_segment_offset(pts, -0.1)
-    assert left == pytest.approx(((0.0, 0.1), (9.9, 0.1), (9.9, 10.0)))
-    assert right == pytest.approx(((0.0, -0.1), (10.1, -0.1), (10.1, 10.0)))
+    expected_left = ((0.0, 0.1), (9.9, 0.1), (9.9, 10.0))
+    expected_right = ((0.0, -0.1), (10.1, -0.1), (10.1, 10.0))
+    for actual, expected in zip(left, expected_left):
+        assert actual == pytest.approx(expected)
+    for actual, expected in zip(right, expected_right):
+        assert actual == pytest.approx(expected)
 
 def test_attack_10_and_11_reversed_polyline_does_not_swap_faces() -> None:
     fwd = ((0.0, 0.0), (10.0, 0.0))
