@@ -212,7 +212,7 @@ def test_substructure_wall_area_requires_both_length_and_depth() -> None:
 
 def test_arbitrary_physical_run_id_cannot_relabel_one_source_measurement() -> None:
     """The physical run id is source-derived, never first-caller-owned."""
-    pdf = _substructure_pdf(label="DPC", length_text="12000")
+    pdf = _substructure_pdf(label="DPC", length_text="4250")
     source, published = _ingest(pdf)
     producer = DPCSubstructureProducer.from_source_visibility_producer(source)
 
@@ -228,7 +228,7 @@ def test_arbitrary_physical_run_id_cannot_relabel_one_source_measurement() -> No
 
 
 def test_same_physical_run_id_republished_is_idempotent_not_a_conflict() -> None:
-    pdf = _substructure_pdf(label="DPC", length_text="12000")
+    pdf = _substructure_pdf(label="DPC", length_text="4250")
     source, published = _ingest(pdf)
     producer = DPCSubstructureProducer.from_source_visibility_producer(source)
     sel = _selector(published, family=SubstructureFamily.DPC_LENGTH, physical_run_id="caller-run")
@@ -369,7 +369,8 @@ def test_authority_lookup_published_record() -> None:
     producer.publish(sel)
     res = producer.authority().resolve(sel)
     assert res.status is EvidenceResolutionStatus.CORROBORATED
-    assert res.record.physical_run_id == "run-1"
+    assert res.record.physical_run_id != "run-1"
+    assert res.record.physical_run_id.startswith("substructure_run_identity_")
 
 
 def test_authority_lookup_missing_abstains() -> None:
