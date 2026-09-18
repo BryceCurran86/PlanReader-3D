@@ -225,7 +225,7 @@ class GrossWallGeometryProducer:
         if type(wall_height_authority) is not WallHeightAuthority:
             raise TypeError(
                 "wall_height_authority must be a producer-owned WallHeightAuthority obtained from "
-                "WallHeightProducer.from_context().authority(); duck-typed resolvers and plain "
+                "WallHeightProducer.from_authorities().authority(); duck-typed resolvers and plain "
                 "Mappings are not accepted."
             )
         self._wall_candidates = physical_wall_candidate_authority
@@ -529,11 +529,11 @@ class GrossWallGeometryProducer:
         h_meta = (
             height_qty.metadata if isinstance(height_qty.metadata, Mapping) else {}
         )
-        target_entity_id = h_meta.get("target_entity_id")
-        if (
-            target_entity_id is not None
-            and target_entity_id != selector.physical_wall_id
-        ):
+
+        # Item 18 accepts a wall-specific height only when Item 17 proves the
+        # exact plan-wall identity through producer-owned cross-sheet
+        # registration. Merely sealing a QuantityEvidence object is not enough.
+        if h_meta.get("target_entity_id") != selector.physical_wall_id:
             return self._store(
                 selector,
                 _blocked(
@@ -542,17 +542,49 @@ class GrossWallGeometryProducer:
                     "wall_height_target_mismatch",
                 ),
             )
-
-        # Lineage check on height
-        h_sha = h_meta.get("source_sha256")
-        h_rev = h_meta.get("revision_id")
-        h_page = h_meta.get("page_id")
-        h_snap = h_meta.get("evidence_snapshot_id")
+        if h_meta.get("identity_binding_kind") != "cross_sheet_registration":
+            return self._store(
+                selector,
+                _blocked(
+                    EvidenceResolutionStatus.ABSTAINED,
+                    GROSS_WALL_GEOMETRY_HEIGHT_UNRESOLVED,
+                    "wall_height_exact_identity_binding_unavailable",
+                ),
+            )
+        registration_record_id = str(
+            h_meta.get("cross_sheet_registration_record_id") or ""
+        ).strip()
+        target_physical_element_id = str(
+            h_meta.get("target_physical_element_id") or ""
+        ).strip()
+        height_evidence_page_id = str(
+            h_meta.get("height_evidence_page_id") or ""
+        ).strip()
         if (
-            (h_sha and h_sha != selector.source_sha256)
-            or (h_rev and h_rev != selector.revision_id)
-            or (h_page and h_page != selector.page_id)
-            or (h_snap and h_snap != selector.snapshot_id)
+            not registration_record_id
+            or not target_physical_element_id
+            or not height_evidence_page_id
+            or height_evidence_page_id == selector.page_id
+            or registration_record_id not in tuple(height_qty.evidence_ids)
+        ):
+            return self._store(
+                selector,
+                _blocked(
+                    EvidenceResolutionStatus.ABSTAINED,
+                    GROSS_WALL_GEOMETRY_HEIGHT_UNRESOLVED,
+                    "wall_height_cross_sheet_binding_incomplete",
+                ),
+            )
+
+        # Lineage is exact. The height-evidence page is intentionally allowed
+        # to differ from the plan wall page; source_page_id must equal the plan
+        # wall page, and the differing page is authenticated by the registration
+        # record carried by producer-owned Item 17 metadata.
+        if (
+            h_meta.get("source_sha256") != selector.source_sha256
+            or h_meta.get("revision_id") != selector.revision_id
+            or h_meta.get("evidence_snapshot_id") != selector.snapshot_id
+            or h_meta.get("source_page_id") != selector.page_id
         ):
             return self._store(
                 selector,

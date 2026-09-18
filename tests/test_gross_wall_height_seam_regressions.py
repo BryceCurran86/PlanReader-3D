@@ -191,12 +191,22 @@ def test_legitimate_wall_height_producer_positive_path() -> None:
         input_entity_ids=(WALL,),
         formula="authoritative_explicit_wall_height",
         formula_version="1.4.0",
-        evidence_ids=("ev-1",),
+        evidence_ids=("ev-1", "registration-wall-1"),
         authority="documented_dimension",
         status=AuthorityStatus.FIRM.value,
         confidence=1.0,
         abstained=False,
-        metadata={"source_sha256": SHA, "revision_id": REV},
+        metadata={
+            "source_sha256": SHA,
+            "revision_id": REV,
+            "evidence_snapshot_id": SNAP,
+            "source_page_id": PAGE,
+            "height_evidence_page_id": "page-2",
+            "target_entity_id": WALL,
+            "target_physical_element_id": "elevation-wall-1",
+            "cross_sheet_registration_record_id": "registration-wall-1",
+            "identity_binding_kind": "cross_sheet_registration",
+        },
     )
     producer._quantities[h_sel.key] = qty_evidence
     producer._quantities[WALL] = qty_evidence
@@ -220,3 +230,68 @@ def test_legitimate_wall_height_producer_positive_path() -> None:
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.record is not None
     assert result.record.height_m == 3.0
+
+
+def test_firm_height_without_exact_cross_sheet_binding_is_rejected() -> None:
+    from pb_source_visibility_authority import SourceVisibilityProducer
+    from pb_wall_height_authority import WallHeightSelector
+
+    source = SourceVisibilityProducer(
+        producer_method="test", producer_version="1.0"
+    )
+    height_producer = WallHeightProducer.from_authorities(source)
+    h_sel = WallHeightSelector(
+        document_id=DOC,
+        revision_id=REV,
+        source_sha256=SHA,
+        snapshot_id=SNAP,
+        page_id=PAGE,
+        decision_scope_id=SCOPE,
+        physical_wall_id=WALL,
+    )
+    forged = QuantityEvidence(
+        quantity_id="qty-forged-height",
+        family=WALL_HEIGHT_FAMILY,
+        semantic_key=f"wall_height:{WALL}",
+        value=3.0,
+        unit="m",
+        input_entity_ids=(WALL,),
+        formula="authoritative_explicit_wall_height",
+        formula_version="1.4.0",
+        evidence_ids=("ev-forged",),
+        authority="documented_dimension",
+        status=AuthorityStatus.FIRM.value,
+        confidence=1.0,
+        abstained=False,
+        metadata={
+            "source_sha256": SHA,
+            "revision_id": REV,
+            "evidence_snapshot_id": SNAP,
+            "source_page_id": PAGE,
+            "target_entity_id": WALL,
+        },
+    )
+    height_producer._quantities[h_sel.key] = forged
+    height_auth = height_producer.authority()
+
+    cand_auth, frame_auth, scale_auth = _setup_deps()
+    gross_producer = GrossWallGeometryProducer.from_authorities(
+        physical_wall_candidate_authority=cand_auth,
+        host_frame_authority=frame_auth,
+        physical_scale_authority=scale_auth,
+        wall_height_authority=height_auth,
+    )
+    result = gross_producer.publish(
+        GrossWallGeometrySelector(
+            document_id=DOC,
+            revision_id=REV,
+            source_sha256=SHA,
+            snapshot_id=SNAP,
+            page_id=PAGE,
+            decision_scope_id=SCOPE,
+            physical_wall_id=WALL,
+        )
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+    assert "wall_height_exact_identity_binding_unavailable" in result.reason_codes

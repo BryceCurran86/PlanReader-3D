@@ -772,187 +772,415 @@ class WallHeightAuthority:
 
 
 class WallHeightProducer:
-    """Trusted producer boundary for wall-height QuantityEvidence.
+    """Producer-owned wall-height publication.
 
-    The only way to obtain a WallHeightAuthority is through this class.
-    Must be bound to a real producer-owned SourceVisibilityProducer.
-    Callers cannot pass caller-constructed evidence atoms or context objects
-    to mint FIRM height.
+    Source bytes establish that a height callout exists. They do *not* establish
+    which plan wall owns it. Wall-specific FIRM publication therefore requires a
+    producer-owned CrossSheetRegistrationAuthority plus producer-owned target
+    wall geometry on the registered elevation/section page.
     """
 
     def __init__(
         self,
         source_visibility_producer: object,
         *,
+        cross_sheet_registration_authority: object = None,
+        physical_wall_candidate_authority: object = None,
         _seal: object = None,
     ) -> None:
         if _seal is not _HEIGHT_PRODUCER_SEAL:
             raise TypeError(
                 "WallHeightProducer must be created via WallHeightProducer.from_authorities()"
             )
+        from pb_cross_sheet_registration_authority import CrossSheetRegistrationAuthority
+        from pb_physical_wall_candidate_authority import PhysicalWallCandidateAuthority
         from pb_source_visibility_authority import SourceVisibilityProducer
+
         if type(source_visibility_producer) is not SourceVisibilityProducer:
-            raise TypeError("source_visibility_producer must be producer-owned SourceVisibilityProducer")
+            raise TypeError(
+                "source_visibility_producer must be producer-owned SourceVisibilityProducer"
+            )
+        if (
+            cross_sheet_registration_authority is not None
+            and type(cross_sheet_registration_authority)
+            is not CrossSheetRegistrationAuthority
+        ):
+            raise TypeError(
+                "cross_sheet_registration_authority must be producer-owned "
+                "CrossSheetRegistrationAuthority or None"
+            )
+        if (
+            physical_wall_candidate_authority is not None
+            and type(physical_wall_candidate_authority)
+            is not PhysicalWallCandidateAuthority
+        ):
+            raise TypeError(
+                "physical_wall_candidate_authority must be producer-owned "
+                "PhysicalWallCandidateAuthority or None"
+            )
+
         self._source_visibility_producer = source_visibility_producer
+        self._cross_sheet = cross_sheet_registration_authority
+        self._wall_candidates = physical_wall_candidate_authority
         self._quantities: dict[object, QuantityEvidence] = {}
 
     @classmethod
     def from_authorities(
         cls,
         source_visibility_producer: object,
+        *,
+        cross_sheet_registration_authority: object = None,
+        physical_wall_candidate_authority: object = None,
     ) -> "WallHeightProducer":
-        """Construct from exact producer-owned SourceVisibilityProducer."""
-        return cls(source_visibility_producer, _seal=_HEIGHT_PRODUCER_SEAL)
+        return cls(
+            source_visibility_producer,
+            cross_sheet_registration_authority=cross_sheet_registration_authority,
+            physical_wall_candidate_authority=physical_wall_candidate_authority,
+            _seal=_HEIGHT_PRODUCER_SEAL,
+        )
 
     @classmethod
     def from_source_visibility_producer(
         cls,
         source_visibility_producer: object,
     ) -> "WallHeightProducer":
+        # Backward-compatible construction. Without exact cross-sheet identity
+        # authority this producer remains fail-closed for wall-specific output.
         return cls.from_authorities(source_visibility_producer)
+
+    def _blocked(
+        self,
+        selector: WallHeightSelector,
+        reason: str,
+        *extras: str,
+        evidence_ids: tuple[str, ...] = (),
+    ) -> QuantityEvidence:
+        reasons = tuple(
+            dict.fromkeys([reason, *(str(r) for r in extras if str(r))])
+        )
+        qty = QuantityEvidence(
+            quantity_id=stable_contract_id(
+                "qty",
+                {
+                    "selector": selector.key,
+                    "reason_codes": list(reasons),
+                    "evidence_ids": list(evidence_ids),
+                },
+            ),
+            family=WALL_HEIGHT_FAMILY,
+            semantic_key=f"wall_height:{selector.physical_wall_id}",
+            value=None,
+            unit="m",
+            input_entity_ids=(selector.physical_wall_id,),
+            formula="cross_sheet_registered_explicit_wall_height",
+            formula_version=WALL_HEIGHT_FORMULA_VERSION,
+            evidence_ids=evidence_ids,
+            authority="unresolved",
+            status=AuthorityStatus.BLOCKED.value,
+            confidence=0.0,
+            abstained=True,
+            blocking_reasons=reasons,
+            reason_codes=reasons,
+            metadata={},
+        )
+        self._quantities[selector.key] = qty
+        return qty
+
+    def _raw_source_bytes(
+        self, selector: WallHeightSelector
+    ) -> Optional[bytes]:
+        import hashlib
+
+        published = (
+            self._source_visibility_producer.published_snapshot_for_revision(
+                selector.revision_id
+            )
+        )
+        if published is None:
+            return None
+        if (
+            published.revision.document_id != selector.document_id
+            or published.revision.source_sha256 != selector.source_sha256
+            or published.snapshot.snapshot_id != selector.snapshot_id
+            or self._source_visibility_producer._producer.current_revision_id(
+                selector.document_id
+            )
+            != selector.revision_id
+        ):
+            return None
+        source_bytes = (
+            self._source_visibility_producer._producer._store.source_bytes_by_revision.get(
+                selector.revision_id
+            )
+        )
+        if (
+            source_bytes is None
+            or hashlib.sha256(source_bytes).hexdigest()
+            != selector.source_sha256
+        ):
+            return None
+        return bytes(source_bytes)
+
+    def _registered_target_geometry(
+        self,
+        selector: WallHeightSelector,
+        *,
+        target_page_id: str,
+        target_physical_element_id: str,
+    ) -> Optional[tuple[float, float, float, float]]:
+        from pb_physical_wall_candidate_authority import (
+            PhysicalWallCandidateSelector,
+        )
+
+        if self._wall_candidates is None:
+            return None
+        scope_id = f"wall-source:page-{target_page_id}"
+        result = self._wall_candidates.resolve_scope(
+            PhysicalWallCandidateSelector(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                page_id=target_page_id,
+                decision_scope_id=scope_id,
+            )
+        )
+        if result.status is not EvidenceResolutionStatus.CORROBORATED:
+            return None
+        if (
+            result.document_id != selector.document_id
+            or result.revision_id != selector.revision_id
+            or result.source_sha256 != selector.source_sha256
+            or result.snapshot_id != selector.snapshot_id
+            or result.page_id != target_page_id
+        ):
+            return None
+
+        matches = [
+            record
+            for record in result.records
+            if record.wall_candidate_id == target_physical_element_id
+            or getattr(
+                record.physical_identity, "physical_wall_id", None
+            )
+            == target_physical_element_id
+        ]
+        if len(matches) != 1:
+            return None
+
+        candidate = matches[0].wall_candidate
+        points = getattr(candidate, "centerline_pts", None)
+        if not points:
+            return None
+        xs = [float(point[0]) for point in points]
+        ys = [float(point[1]) for point in points]
+        return (min(xs), min(ys), max(xs), max(ys))
 
     def publish_scope(
         self,
         selector: WallHeightSelector,
     ) -> QuantityEvidence:
-        """Resolve and store a wall-height quantity for selector."""
         if type(selector) is not WallHeightSelector:
             raise TypeError("selector must be WallHeightSelector")
-        published = self._source_visibility_producer.published_snapshot_for_revision(selector.revision_id)
-        if (
-            published is None
-            or published.revision.document_id != selector.document_id
-            or published.revision.source_sha256 != selector.source_sha256
-            or published.snapshot.snapshot_id != selector.snapshot_id
-        ):
-            qty = QuantityEvidence(
-                quantity_id=stable_contract_id("qty", {"selector": selector.key, "reason": "snapshot_unavailable"}),
-                family=WALL_HEIGHT_FAMILY,
-                semantic_key=f"wall_height:{selector.physical_wall_id}",
-                value=None,
-                unit="m",
-                input_entity_ids=(selector.physical_wall_id,),
-                formula="authoritative_explicit_wall_height",
-                formula_version=WALL_HEIGHT_FORMULA_VERSION,
-                evidence_ids=(),
-                authority="unresolved",
-                status=AuthorityStatus.BLOCKED.value,
-                confidence=0.0,
-                abstained=True,
-                blocking_reasons=("no_authoritative_wall_height_evidence",),
-                reason_codes=("no_authoritative_wall_height_evidence",),
-                metadata={},
-            )
-            self._quantities[selector.key] = qty
-            self._quantities[selector.physical_wall_id] = qty
-            return qty
 
-        from pb_pdf_text_integrity_authority import ObservationSelector
-        authority = self._source_visibility_producer.text_integrity_authority()
-        height_atom = None
-        for obs_id in published.text_observation_ids:
-            try:
-                res = authority.resolve_text(
-                    ObservationSelector(
+        source_bytes = self._raw_source_bytes(selector)
+        if source_bytes is None:
+            return self._blocked(
+                selector, "no_authoritative_wall_height_evidence"
+            )
+
+        # A generic HEIGHT callout is not wall identity. Without both exact
+        # producer-owned registration and target geometry, remain blocked.
+        if self._cross_sheet is None or self._wall_candidates is None:
+            return self._blocked(
+                selector, "wall_height_exact_identity_binding_unavailable"
+            )
+
+        import fitz
+
+        from pb_cross_sheet_registration_authority import (
+            CrossSheetRegistrationSelector,
+        )
+        from pb_wall_height_evidence import (
+            resolve_wall_height_dimension_m,
+        )
+
+        try:
+            source_page_num = int(str(selector.page_id))
+        except (TypeError, ValueError):
+            return self._blocked(selector, "wall_height_source_page_invalid")
+
+        pdf = fitz.open(stream=source_bytes, filetype="pdf")
+        candidates: list[
+            tuple[float, str, str, str, str, str]
+        ] = []
+        # value, dimension id, registration record id, target page,
+        # target element id, view id
+        try:
+            if (
+                source_page_num < 1
+                or source_page_num > int(pdf.page_count)
+            ):
+                return self._blocked(
+                    selector, "wall_height_source_page_invalid"
+                )
+
+            for page_num in range(1, int(pdf.page_count) + 1):
+                if page_num == source_page_num:
+                    continue
+                target_page_id = str(page_num)
+                registration = self._cross_sheet.resolve(
+                    CrossSheetRegistrationSelector(
                         document_id=selector.document_id,
                         revision_id=selector.revision_id,
                         source_sha256=selector.source_sha256,
                         snapshot_id=selector.snapshot_id,
-                        page_id=selector.page_id,
-                        observation_id=obs_id,
+                        source_page_id=selector.page_id,
+                        target_page_id=target_page_id,
+                        physical_element_id=selector.physical_wall_id,
                     )
                 )
                 if (
-                    res.status == EvidenceResolutionStatus.CORROBORATED
-                    and res.atom is not None
-                    and res.atom.kind in _ALLOWED_DIRECT_KINDS
-                    and str(_metadata(res.atom).get("target_entity_id") or "") == selector.physical_wall_id
+                    registration.status
+                    is not EvidenceResolutionStatus.CORROBORATED
+                    or registration.record is None
                 ):
-                    height_atom = res.atom
-                    break
-            except Exception:
-                pass
+                    continue
+                record = registration.record
+                if (
+                    record.document_id != selector.document_id
+                    or record.revision_id != selector.revision_id
+                    or record.source_sha256 != selector.source_sha256
+                    or record.snapshot_id != selector.snapshot_id
+                    or record.source_page_id != selector.page_id
+                    or record.target_page_id != target_page_id
+                    or record.physical_element_id
+                    != selector.physical_wall_id
+                ):
+                    continue
 
-        if height_atom is None or height_atom.normalized_value is None:
-            qty = QuantityEvidence(
-                quantity_id=stable_contract_id("qty", {"selector": selector.key, "reason": "no_height_atom"}),
-                family=WALL_HEIGHT_FAMILY,
-                semantic_key=f"wall_height:{selector.physical_wall_id}",
-                value=None,
-                unit="m",
-                input_entity_ids=(selector.physical_wall_id,),
-                formula="authoritative_explicit_wall_height",
-                formula_version=WALL_HEIGHT_FORMULA_VERSION,
-                evidence_ids=(),
-                authority="unresolved",
-                status=AuthorityStatus.BLOCKED.value,
-                confidence=0.0,
-                abstained=True,
-                blocking_reasons=("no_authoritative_wall_height_evidence",),
-                reason_codes=("no_authoritative_wall_height_evidence",),
-                metadata={},
+                target_bbox = self._registered_target_geometry(
+                    selector,
+                    target_page_id=target_page_id,
+                    target_physical_element_id=record.target_physical_element_id,
+                )
+                if target_bbox is None:
+                    continue
+
+                evidence = resolve_wall_height_dimension_m(
+                    pdf.load_page(page_num - 1),
+                    page_num=page_num,
+                    target_geometry_bbox=target_bbox,
+                )
+                if evidence is None:
+                    continue
+                candidates.append(
+                    (
+                        float(evidence.height_m),
+                        evidence.chain_id,
+                        record.record_id,
+                        target_page_id,
+                        record.target_physical_element_id,
+                        evidence.view_id,
+                    )
+                )
+        finally:
+            pdf.close()
+
+        if not candidates:
+            return self._blocked(
+                selector, "no_cross_sheet_bound_wall_height_evidence"
             )
-        else:
-            value_m = _numeric_to_m(height_atom.normalized_value, height_atom.unit)
-            if value_m is None or value_m <= 0.0:
-                qty = QuantityEvidence(
-                    quantity_id=stable_contract_id("qty", {"selector": selector.key, "reason": "invalid_value"}),
-                    family=WALL_HEIGHT_FAMILY,
-                    semantic_key=f"wall_height:{selector.physical_wall_id}",
-                    value=None,
-                    unit="m",
-                    input_entity_ids=(selector.physical_wall_id,),
-                    formula="authoritative_explicit_wall_height",
-                    formula_version=WALL_HEIGHT_FORMULA_VERSION,
-                    evidence_ids=(height_atom.evidence_id,),
-                    authority="unresolved",
-                    status=AuthorityStatus.BLOCKED.value,
-                    confidence=0.0,
-                    abstained=True,
-                    blocking_reasons=("invalid_direct_height_value",),
-                    reason_codes=("invalid_direct_height_value",),
-                    metadata={},
-                )
-            else:
-                payload = {
-                    "wall_id": selector.physical_wall_id,
-                    "value_m": round(value_m, 6),
-                    "evidence_id": height_atom.evidence_id,
-                    "source_sha256": selector.source_sha256,
-                    "revision_id": selector.revision_id,
-                    "snapshot_id": selector.snapshot_id,
-                }
-                qty = QuantityEvidence(
-                    quantity_id=stable_contract_id("qty", payload),
-                    family=WALL_HEIGHT_FAMILY,
-                    semantic_key=f"wall_height:{selector.physical_wall_id}",
-                    value=round(value_m, 6),
-                    unit="m",
-                    input_entity_ids=(selector.physical_wall_id,),
-                    formula="authoritative_explicit_wall_height",
-                    formula_version=WALL_HEIGHT_FORMULA_VERSION,
-                    evidence_ids=(height_atom.evidence_id,),
-                    authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
-                    status=AuthorityStatus.FIRM.value,
-                    confidence=float(height_atom.confidence),
-                    abstained=False,
-                    metadata={
-                        "source_sha256": selector.source_sha256,
-                        "revision_id": selector.revision_id,
-                        "evidence_snapshot_id": selector.snapshot_id,
-                        "page_id": selector.page_id,
-                        "evidence_kind": height_atom.kind,
-                    },
-                )
 
+        distinct_values = {round(item[0], 6) for item in candidates}
+        if len(distinct_values) != 1:
+            return self._blocked(
+                selector,
+                "conflicting_cross_sheet_wall_height_evidence",
+                evidence_ids=tuple(
+                    dict.fromkeys(
+                        item[1] for item in candidates
+                    )
+                ),
+            )
+
+        # Multiple registered views may corroborate the same value. Identity is
+        # still the source wall from producer-owned registration, never the
+        # selector alone.
+        candidates.sort(key=lambda item: (item[3], item[2], item[1]))
+        (
+            value_m,
+            dimension_id,
+            registration_record_id,
+            height_page_id,
+            target_element_id,
+            height_view_id,
+        ) = candidates[0]
+        value_m = round(float(value_m), 6)
+        if not math.isfinite(value_m) or value_m <= 0.0:
+            return self._blocked(
+                selector,
+                "invalid_direct_height_value",
+                evidence_ids=(dimension_id, registration_record_id),
+            )
+
+        all_evidence_ids = tuple(
+            dict.fromkeys(
+                [
+                    *(item[1] for item in candidates),
+                    *(item[2] for item in candidates),
+                ]
+            )
+        )
+        payload = {
+            "wall_id": selector.physical_wall_id,
+            "value_m": value_m,
+            "source_sha256": selector.source_sha256,
+            "revision_id": selector.revision_id,
+            "snapshot_id": selector.snapshot_id,
+            "source_page_id": selector.page_id,
+            "height_evidence_page_id": height_page_id,
+            "cross_sheet_registration_record_id": registration_record_id,
+            "target_physical_element_id": target_element_id,
+            "evidence_ids": list(all_evidence_ids),
+        }
+        qty = QuantityEvidence(
+            quantity_id=stable_contract_id("qty", payload),
+            family=WALL_HEIGHT_FAMILY,
+            semantic_key=f"wall_height:{selector.physical_wall_id}",
+            value=value_m,
+            unit="m",
+            input_entity_ids=(selector.physical_wall_id,),
+            formula="cross_sheet_registered_explicit_wall_height",
+            formula_version=WALL_HEIGHT_FORMULA_VERSION,
+            evidence_ids=all_evidence_ids,
+            authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+            status=AuthorityStatus.FIRM.value,
+            confidence=1.0,
+            abstained=False,
+            metadata={
+                "source_sha256": selector.source_sha256,
+                "revision_id": selector.revision_id,
+                "evidence_snapshot_id": selector.snapshot_id,
+                "source_page_id": selector.page_id,
+                "height_evidence_page_id": height_page_id,
+                "height_evidence_view_id": height_view_id,
+                "target_entity_id": selector.physical_wall_id,
+                "target_physical_element_id": target_element_id,
+                "cross_sheet_registration_record_id": registration_record_id,
+                "identity_binding_kind": "cross_sheet_registration",
+                "evidence_kind": "wall_height_dimension",
+            },
+        )
         self._quantities[selector.key] = qty
-        self._quantities[selector.physical_wall_id] = qty
         return qty
 
-    def publish(self, selector: WallHeightSelector) -> QuantityEvidence:
+    def publish(
+        self, selector: WallHeightSelector
+    ) -> QuantityEvidence:
         return self.publish_scope(selector)
 
     def authority(self) -> WallHeightAuthority:
-        """Seal and return a read-only WallHeightAuthority from published quantities."""
-        return WallHeightAuthority(self._quantities, _seal=_HEIGHT_AUTHORITY_SEAL)
-
+        return WallHeightAuthority(
+            self._quantities, _seal=_HEIGHT_AUTHORITY_SEAL
+        )
