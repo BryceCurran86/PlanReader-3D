@@ -131,6 +131,7 @@ class OpeningUniverseCompletenessResult:
 
 
 _AUTHORITY_SEAL = object()
+_SOURCE_AUTHENTICATED_COMPLETENESS_SEAL = object()
 _EPSILON = 1e-8
 
 
@@ -597,6 +598,7 @@ class OpeningUniverseCompletenessAuthority:
         ],
         *,
         _seal: object = None,
+        _source_authentication_seal: object = None,
     ) -> None:
         if _seal is not _AUTHORITY_SEAL:
             raise TypeError(
@@ -604,6 +606,7 @@ class OpeningUniverseCompletenessAuthority:
                 "OpeningUniverseCompletenessProducer.authority()"
             )
         self._records = records
+        self._source_authentication_seal = _source_authentication_seal
 
     def resolve(
         self, selector: OpeningUniverseSelector
@@ -651,6 +654,64 @@ class OpeningUniverseCompletenessAuthority:
         )
 
 
+class SourceOpeningUniverseCompletenessProducer:
+    """Producer-side authenticated completeness producer deriving truth from source decode."""
+
+    def __init__(
+        self,
+        *,
+        producer_method: str = "pb_source_opening_universe_v1",
+        producer_version: str = "1.0.0",
+    ) -> None:
+        self._inner_producer = OpeningUniverseCompletenessProducer(
+            producer_method=producer_method,
+            producer_version=producer_version,
+        )
+
+    def publish_source_scope(
+        self,
+        *,
+        decision_scope_id: str,
+        decision_scope_kind: str,
+        document_id: str,
+        revision_id: str,
+        source_sha256: str,
+        snapshot_id: str,
+        page_ids: Sequence[str],
+        coverage: SourceDecodeCoverageRecord,
+        source_primitives: Sequence[object],
+        enumerated_primitives: Optional[Sequence[object]] = None,
+        optional_content_state: str = "known_visible",
+        xobject_traversal_truncated: bool = False,
+    ) -> OpeningUniverseCompletenessRecord:
+        """Derive and publish completeness from authenticated drawing source."""
+        if enumerated_primitives is None:
+            enumerated_primitives = source_primitives
+
+        return self._inner_producer.publish_enumeration(
+            decision_scope_id=decision_scope_id,
+            decision_scope_kind=decision_scope_kind,
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=source_sha256,
+            snapshot_id=snapshot_id,
+            page_ids=page_ids,
+            viewport_id=None,
+            coverage=coverage,
+            source_primitives=source_primitives,
+            enumerated_primitives=enumerated_primitives,
+            optional_content_state=optional_content_state,
+            xobject_traversal_truncated=xobject_traversal_truncated,
+        )
+
+    def authority(self) -> OpeningUniverseCompletenessAuthority:
+        return OpeningUniverseCompletenessAuthority(
+            MappingProxyType(dict(self._inner_producer._records)),
+            _seal=_AUTHORITY_SEAL,
+            _source_authentication_seal=_SOURCE_AUTHENTICATED_COMPLETENESS_SEAL,
+        )
+
+
 __all__ = [
     "OPENING_UNIVERSE_COMPLETENESS_SCHEMA_VERSION",
     "OpeningUniverseCompletenessAuthority",
@@ -661,6 +722,9 @@ __all__ = [
     "OpeningUniverseScope",
     "OpeningUniverseSelector",
     "SourceEnumerationState",
+    "SourceOpeningUniverseCompletenessProducer",
+    "_AUTHORITY_SEAL",
+    "_SOURCE_AUTHENTICATED_COMPLETENESS_SEAL",
     "build_opening_universe_member_from_indexed_primitive",
     "build_opening_universe_scope",
 ]

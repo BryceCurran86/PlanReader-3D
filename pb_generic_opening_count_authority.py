@@ -31,6 +31,7 @@ from pb_migration_contracts import (
 from pb_opening_universe_completeness_authority import (
     OpeningUniverseCompletenessAuthority,
     OpeningUniverseSelector,
+    _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL,
 )
 from pb_physical_opening_authority import (
     PHYSICAL_OPENING_EXISTS,
@@ -83,7 +84,6 @@ GENERIC_OPENING_COUNT_SCHEDULE_ONLY_NOT_PHYSICAL = (
 
 _COUNT_PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
-_SOURCE_AUTHENTICATED_COMPLETENESS_SEAL = object()
 
 _Key = tuple[str, str, str, str, str, Optional[str], Optional[str]]
 
@@ -752,4 +752,5 @@ __all__ = [
     "GenericOpeningCountResult",
     "GenericOpeningCountSelector",
     "OpeningCountDiagnosticRequest",
+    "_SOURCE_AUTHENTICATED_COMPLETENESS_SEAL",
 ]

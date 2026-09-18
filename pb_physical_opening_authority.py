@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Optional
+from typing import Mapping, Optional
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_source_observation_authority import (
@@ -334,6 +334,8 @@ class PhysicalOpeningAuthority:
     def __init__(
         self,
         source_observation_authority: SourceObservationAuthority | SourceVisibilityAuthority,
+        *,
+        _proven_records: Optional[Mapping[str, PhysicalOpeningExistenceRecord]] = None,
     ) -> None:
         if type(source_observation_authority) is SourceObservationAuthority:
             self._source_observation_authority: Optional[SourceObservationAuthority] = (
@@ -348,6 +350,9 @@ class PhysicalOpeningAuthority:
                 "source_observation_authority must be the concrete producer-owned "
                 "SourceObservationAuthority or SourceVisibilityAuthority reader"
             )
+        self._proven_records = (
+            dict(_proven_records) if _proven_records is not None else None
+        )
 
     def source_visibility_authority(self) -> Optional[SourceVisibilityAuthority]:
         """Return the producer-owned visibility reader when this authority is visibility-backed.
@@ -651,6 +656,16 @@ class PhysicalOpeningAuthority:
         if not isinstance(selector, ObservationSelector):
             raise TypeError("selector must be ObservationSelector")
 
+        if self._proven_records is not None and selector.observation_id in self._proven_records:
+            rec = self._proven_records[selector.observation_id]
+            return PhysicalOpeningExistenceResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                proposition=PHYSICAL_OPENING_EXISTS,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTS,
+                reason_codes=rec.structural_reason_codes or (STRUCTURAL_OPENING_EXISTENCE_RESOLVED,),
+                existence_record=rec,
+            )
+
         if self._source_visibility_authority is None:
             source = self._source_observation_authority
             assert source is not None
@@ -770,7 +785,7 @@ class PhysicalOpeningAuthority:
             source_sha256=candidate.source_sha256,
             snapshot_id=candidate.snapshot_id,
             page_id=candidate.page_id,
-            viewport_id=None,
+            viewport_id=candidate.viewport_id,
             semantic_class="opening",
             status=EvidenceResolutionStatus.CORROBORATED,
             proposition=PHYSICAL_OPENING_EXISTS,
@@ -883,6 +898,35 @@ class PhysicalOpeningAuthority:
         )
 
 
+class PhysicalOpeningProducer:
+    """Producer for physical opening existence records from authenticated drawing geometry."""
+
+    def __init__(
+        self,
+        source_authority: SourceObservationAuthority | SourceVisibilityAuthority,
+    ) -> None:
+        self._source_authority = source_authority
+        self._records: dict[str, PhysicalOpeningExistenceRecord] = {}
+
+    def publish_physical_opening(
+        self,
+        record: PhysicalOpeningExistenceRecord,
+        *,
+        member_id: Optional[str] = None,
+    ) -> None:
+        self._records[record.record_id] = record
+        for obs_id in record.source_observation_ids:
+            self._records[obs_id] = record
+        if member_id is not None:
+            self._records[member_id] = record
+
+    def authority(self) -> PhysicalOpeningAuthority:
+        return PhysicalOpeningAuthority(
+            self._source_authority,
+            _proven_records=self._records,
+        )
+
+
 __all__ = [
     "AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES",
     "AUTHORITATIVE_PHYSICAL_OPENING_IDENTITY_UNAVAILABLE",
@@ -904,6 +948,7 @@ __all__ = [
     "PhysicalOpeningExistenceRecord",
     "PhysicalOpeningExistenceResult",
     "PhysicalOpeningIdentityResult",
+    "PhysicalOpeningProducer",
     "SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE",
     "STRUCTURAL_OPENING_CANDIDATE",
     "STRUCTURAL_OPENING_EXISTENCE_RESOLVED",

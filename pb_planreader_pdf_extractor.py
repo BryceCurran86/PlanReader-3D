@@ -1805,21 +1805,9 @@ class GenericPlanReaderExtractor:
                 )
 
             # ------------------------------------------------------------------
-            # 3. Permanent / Brick Ventilation Openings: EXACT count from text
+            # 3. Permanent / Brick Ventilation Openings: Handled authoritatively
+            # by Phase F.8 Schedule / Vector Vent Extractor after the page loop.
             # ------------------------------------------------------------------
-            pv_matches = re.findall(r"\bPV\b|\bPermanent Vent\b|\bBrick Vent\b", clean_page_text, re.I)
-            if len(pv_matches) >= 2 and any(k in pt_lower for k in ("elevation", "facade", "façade", "section", "wall")):
-                vent_count = float(len(pv_matches))
-                pred_dict["brick_vents"] = ExtractedPrediction(
-                    tag="brick_vents",
-                    trade_type="walls",
-                    description=f"Precast / brick ventilation openings ({int(vent_count)} No parsed from drawing)",
-                    quantity=vent_count,
-                    unit="NO",
-                    confidence=0.90,
-                    source_page=page_num,
-                    sheet_number=sheet_no,
-                )
 
             # ------------------------------------------------------------------
             # 4 & 5. Window and Door Identity
@@ -2024,6 +2012,65 @@ class GenericPlanReaderExtractor:
                 )
         except Exception:
             self.extraction_status["schedule"] = "extraction_failed"
+
+        # ------------------------------------------------------------------
+        # Source-Derived Opening Universe Completeness & Count Authority (Phase F.24)
+        # ------------------------------------------------------------------
+        try:
+            import hashlib
+            from pb_source_opening_count_pipeline import run_source_opening_count_pipeline
+
+            source_sha256 = hashlib.sha256(p_path.read_bytes()).hexdigest()
+            document_id = p_path.stem
+            revision_id = "rev1"
+            pipeline_dwg_pages = [
+                p for p in target_pages
+                if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])
+            ]
+            pipeline_sched_rows = schedule_rows if "schedule_rows" in locals() else None
+
+            source_counts = run_source_opening_count_pipeline(
+                doc=doc,
+                dwg_pages=pipeline_dwg_pages,
+                document_id=document_id,
+                revision_id=revision_id,
+                source_sha256=source_sha256,
+                schedule_rows=pipeline_sched_rows,
+            )
+            for mark_or_fam, count_rec in source_counts.items():
+                fam = count_rec.opening_family or (
+                    "door"
+                    if mark_or_fam.startswith("D")
+                    else ("window" if mark_or_fam.startswith("W") else "unknown")
+                )
+                trade = "doors" if fam == "door" or mark_or_fam.startswith("D") else "windows"
+                tag = count_rec.opening_mark or mark_or_fam
+                desc = (
+                    f"{fam.title()} {tag} ({count_rec.count} No authenticated from drawing source"
+                    + (", schedule corroborated" if count_rec.schedule_corroborated else "")
+                    + ")"
+                )
+                merge_extracted_prediction(
+                    pred_dict,
+                    ExtractedPrediction(
+                        tag=tag,
+                        trade_type=trade,
+                        description=desc,
+                        quantity=float(count_rec.count),
+                        unit="NO",
+                        confidence=0.96 if count_rec.schedule_corroborated else 0.88,
+                        source_page=pipeline_dwg_pages[0] + 1 if pipeline_dwg_pages else 1,
+                        metadata={
+                            "derivation": "source_opening_count_authority",
+                            "record_id": count_rec.record_id,
+                            "schedule_corroborated": count_rec.schedule_corroborated,
+                            "physical_instance_record_ids": list(count_rec.physical_instance_record_ids),
+                        },
+                    ),
+                    merge_source="source_opening_count_authority",
+                )
+        except Exception:
+            pass
 
         # ------------------------------------------------------------------
         # Plan instance marks (hyphenated W-# / D-# stamps on scanned plans)
