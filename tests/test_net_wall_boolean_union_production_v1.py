@@ -499,12 +499,17 @@ def _setup_gross_upstream_authorities(
 
     # 4. Height Authority
     target_wall = height_target_wall_id if height_target_wall_id is not None else wall_id
+    registration_record_id = "registration-height-1"
     h_meta = {
         "source_sha256": sha,
         "revision_id": rev,
-        "page_id": page,
         "evidence_snapshot_id": snap,
+        "source_page_id": page,
+        "height_evidence_page_id": f"{page}:elevation",
         "target_entity_id": target_wall,
+        "target_physical_element_id": f"{target_wall}:elevation",
+        "cross_sheet_registration_record_id": registration_record_id,
+        "identity_binding_kind": "cross_sheet_registration",
     }
     if is_default_height:
         h_meta["is_default"] = True
@@ -520,7 +525,7 @@ def _setup_gross_upstream_authorities(
         input_entity_ids=(target_wall,),
         formula=height_formula,
         formula_version="1.0.0",
-        evidence_ids=("ev-1",),
+        evidence_ids=("ev-1", registration_record_id),
         authority="documented_dimension",
         status=AuthorityStatus.FIRM.value if not height_abstained else AuthorityStatus.BLOCKED.value,
         confidence=1.0 if not height_abstained else 0.0,
@@ -1065,7 +1070,7 @@ def test_gross_wall_producer_rejects_replay_from_different_page_or_viewport() ->
     """Callers cannot replay valid frame from another page/viewport."""
     producer, g_sel = _setup_gross_upstream_authorities(
         page="page-1",
-        height_metadata_overrides={"page_id": "page-2"},  # foreign page!
+        height_metadata_overrides={"source_page_id": "page-2"},  # foreign plan-wall page!
     )
     res = producer.publish(g_sel)
     assert res.status == EvidenceResolutionStatus.CONFLICT
