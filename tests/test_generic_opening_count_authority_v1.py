@@ -38,6 +38,7 @@ from pb_viewport_view_class_authority import (
 from pb_generic_opening_count_authority import (
     GENERIC_OPENING_COUNT_CALLER_NON_PLAN_NOT_AUTHORITY,
     GENERIC_OPENING_COUNT_CALLER_SCHEDULE_COUNTS_NOT_AUTHORITY,
+    GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED,
     GENERIC_OPENING_COUNT_NON_PLAN_VIEW,
     GENERIC_OPENING_COUNT_NO_PHYSICAL_INSTANCES,
     GENERIC_OPENING_COUNT_RESOLVED,
@@ -48,6 +49,7 @@ from pb_generic_opening_count_authority import (
     GenericOpeningCountProducer,
     GenericOpeningCountSelector,
     OpeningCountDiagnosticRequest,
+    _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL,
 )
 
 DOC = "doc-1"
@@ -125,6 +127,13 @@ def _setup(
     univ_key = (DOC, REV, SHA, SNAP, SCOPE)
     univ_auth = OpeningUniverseCompletenessAuthority(
         {univ_key: univ_rec}, _seal=UNIV_SEAL
+    )
+    # Test-only internal source-authenticated adapter marker. Public
+    # completeness producers never receive this seal.
+    object.__setattr__(
+        univ_auth,
+        "_source_authentication_seal",
+        _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL,
     )
 
     src_auth = SourceObservationProducer(
@@ -391,6 +400,11 @@ def test_duplicate_observations_of_same_physical_count_once() -> None:
     univ_auth = OpeningUniverseCompletenessAuthority(
         {(DOC, REV, SHA, SNAP, SCOPE): univ_rec}, _seal=UNIV_SEAL
     )
+    object.__setattr__(
+        univ_auth,
+        "_source_authentication_seal",
+        _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL,
+    )
     src_auth = SourceObservationProducer(
         producer_method="test", producer_version="1.0"
     ).authority()
@@ -514,3 +528,50 @@ def test_physical_plus_matching_schedule_corroborates() -> None:
     assert res.record.schedule_corroborated is True
     assert res.record.quantity_evidence is not None
     assert res.record.quantity_evidence.status == AuthorityStatus.FIRM.value
+
+
+def test_public_unsealed_completeness_cannot_unlock_firm_count() -> None:
+    op = _physical("op-public")
+    univ_rec = OpeningUniverseCompletenessRecord(
+        record_id="univ-public",
+        decision_scope_id=SCOPE,
+        decision_scope_kind="viewport",
+        document_id=DOC,
+        revision_id=REV,
+        source_sha256=SHA,
+        snapshot_id=SNAP,
+        page_ids=(PAGE,),
+        viewport_id=VP_PLAN,
+        enumeration_state=SourceEnumerationState.COMPLETE.value,
+        source_decode_complete=True,
+        semantic_enumeration_complete=True,
+        decision_scope_complete=True,
+        accounted_member_ids=(op.record_id,),
+        universe_fingerprint="caller-fp",
+        reason_codes=(),
+    )
+    univ_auth = OpeningUniverseCompletenessAuthority(
+        {(DOC, REV, SHA, SNAP, SCOPE): univ_rec}, _seal=UNIV_SEAL
+    )
+    src_auth = SourceObservationProducer(
+        producer_method="test", producer_version="1.0"
+    ).authority()
+    phys_auth = PhysicalOpeningAuthority(src_auth)
+    view_prod = ViewportViewClassProducer.create()
+    producer = GenericOpeningCountProducer.from_authorities(
+        opening_universe_authority=univ_auth,
+        physical_opening_authority=phys_auth,
+        viewport_view_class_authority=view_prod.authority(),
+    )
+    res = producer.publish(
+        GenericOpeningCountSelector(
+            document_id=DOC,
+            revision_id=REV,
+            source_sha256=SHA,
+            snapshot_id=SNAP,
+            decision_scope_id=SCOPE,
+        )
+    )
+    assert res.status is EvidenceResolutionStatus.ABSTAINED
+    assert res.record is None
+    assert GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED in res.reason_codes
