@@ -21,14 +21,11 @@ witness-bound depth/height callout in the same viewport (real section/detail
 evidence); without one it abstains with
 ``DPC_SUBSTRUCTURE_MISSING_SECTION_DETAIL`` rather than assuming a depth.
 
-Identity binding: ``physical_run_id`` is a caller-supplied selector key,
-never proof by itself that the source-derived measurement belongs to that
-exact physical run. The producer binds the FIRST physical_run_id
-successfully published against a given real (page, view, family,
-dimension) evidence instance; a later publish() for the identical evidence
-under a DIFFERENT physical_run_id is rejected with CONFLICT rather than
-letting a caller relabel one source-derived measurement as an arbitrary
-DPC/foundation/footing run.
+Identity binding: ``physical_run_id`` on the selector is addressing-only.
+Authoritative run identity is deterministically derived from the authenticated
+source evidence itself (document/revision/source/snapshot/page/view/family/
+dimension chain/label). Caller text is never copied into the authoritative
+record, including on the first publication.
 """
 from __future__ import annotations
 
@@ -63,7 +60,6 @@ _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
 
 _Key = Tuple[str, str, str, str, str, Optional[str], str, str]
-_EvidenceKey = Tuple[str, str, str, str, str, str, str, str]
 
 _DEPTH_TOKENS: Tuple[str, ...] = ("depth", "height")
 
@@ -222,7 +218,6 @@ class DPCSubstructureProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
         self._source = source_visibility_producer
         self._results: dict[_Key, DPCSubstructureResult] = {}
-        self._run_id_by_evidence: dict[_EvidenceKey, str] = {}
 
     @classmethod
     def from_source_visibility_producer(
@@ -292,21 +287,21 @@ class DPCSubstructureProducer:
             ):
                 return self._store(selector, _abstained(DPC_SUBSTRUCTURE_VIEWPORT_MISMATCH))
 
-            evidence_key: _EvidenceKey = (
-                selector.document_id,
-                selector.revision_id,
-                selector.source_sha256,
-                selector.snapshot_id,
-                selector.page_id,
-                evidence.view_id,
-                selector.family.value,
-                evidence.chain_id,
+            producer_run_id = stable_contract_id(
+                "substructure_run_identity",
+                {
+                    "document_id": selector.document_id,
+                    "revision_id": selector.revision_id,
+                    "source_sha256": selector.source_sha256,
+                    "snapshot_id": selector.snapshot_id,
+                    "page_id": selector.page_id,
+                    "viewport_id": evidence.view_id,
+                    "family": selector.family.value,
+                    "dimension_chain_id": evidence.chain_id,
+                    "label_text": evidence.label_text,
+                },
+                digest_chars=32,
             )
-            bound_run_id = self._run_id_by_evidence.get(evidence_key)
-            if bound_run_id is None:
-                self._run_id_by_evidence[evidence_key] = selector.physical_run_id
-            elif bound_run_id != selector.physical_run_id:
-                return self._store(selector, _conflict(DPC_SUBSTRUCTURE_RUN_ID_MISMATCH))
 
             length_m = round(float(evidence.length_m), 6)
             if not (length_m > 0.0) or not math.isfinite(length_m):
@@ -338,7 +333,7 @@ class DPCSubstructureProducer:
             "snapshot_id": selector.snapshot_id,
             "page_id": selector.page_id,
             "viewport_id": evidence.view_id,
-            "physical_run_id": selector.physical_run_id,
+            "physical_run_id": producer_run_id,
             "family": selector.family.value,
             "value": value,
             "unit": unit,
@@ -352,7 +347,7 @@ class DPCSubstructureProducer:
             snapshot_id=selector.snapshot_id,
             page_id=selector.page_id,
             viewport_id=evidence.view_id,
-            physical_run_id=selector.physical_run_id,
+            physical_run_id=producer_run_id,
             family=selector.family,
             value=value,
             unit=unit,
