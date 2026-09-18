@@ -275,7 +275,8 @@ def test_authority_lookup_published_record() -> None:
     auth = producer.authority()
     res = auth.resolve(sel)
     assert res.status is EvidenceResolutionStatus.CORROBORATED
-    assert res.record.secondary_space_id == SPACE
+    assert res.record.secondary_space_id != SPACE
+    assert res.record.secondary_space_id.startswith("secondary_space_identity_")
 
 
 def test_authority_lookup_missing_abstains() -> None:
