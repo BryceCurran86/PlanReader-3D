@@ -564,6 +564,8 @@ class GrossWallGeometryProducer:
             not registration_record_id
             or not target_physical_element_id
             or not height_evidence_page_id
+            or height_evidence_page_id == selector.page_id
+            or registration_record_id not in tuple(height_qty.evidence_ids)
         ):
             return self._store(
                 selector,
