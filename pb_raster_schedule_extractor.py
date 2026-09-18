@@ -955,50 +955,67 @@ class GenericScheduleTableExtractor:
 
         # 5. Permanent Vents (PV): Group and deduplicate by elevation/section sheet
         #
-        # "PV"/"P.V" also appears once per sheet as a drafting-legend
-        # definition ("P.V denotes permanent vents.") rather than as a real
-        # vent-location callout. That definition line is itself a generic,
-        # recurring drawing convention -- this same document also defines
-        # "S.V.P denotes soil vent pipe" the same way -- so any "<abbrev>
-        # denotes <meaning>" occurrence is excluded by its own grammar,
-        # never by a benchmark-specific count or page.
-        all_words = page.get_text("words")
+        # Delegates to extract_elevation_vector_vents to learn vector geometry signatures
+        # from labeled instances and match unlabeled instances across elevation viewports,
+        # while strictly preserving the generic "<abbrev> denotes <meaning>" legend exclusion.
+        try:
+            from pb_elevation_vector_vent_extractor import extract_elevation_vector_vents
+            vent_res = extract_elevation_vector_vents(page, page_num=page_num)
+        except Exception:
+            vent_res = None
 
-        def _next_word_text(word: tuple) -> str:
-            block_no, line_no, word_no = word[5], word[6], word[7]
-            for other in all_words:
-                if other[5] == block_no and other[6] == line_no and other[7] == word_no + 1:
-                    return str(other[4])
-            return ""
-
-        pv_words = [
-            w
-            for w in all_words
-            if re.match(r"^(?:PV|P\.V)$", w[4], re.I)
-            and _next_word_text(w).strip().lower().rstrip(".,:;") != "denotes"
-        ]
-        page_text_lower = page.get_text().lower()
-        is_facade_sheet = any(k in page_text_lower for k in ("elevation", "facade", "façade", "section", "schedule", "plan"))
-
-        if len(pv_words) >= 2 and is_facade_sheet:
-            pv_x0 = min(w[0] for w in pv_words)
-            pv_y0 = min(w[1] for w in pv_words)
-            pv_x1 = max(w[2] for w in pv_words)
-            pv_y1 = max(w[3] for w in pv_words)
-            pv_count = float(len(pv_words))
+        if vent_res is not None and vent_res.quantity >= 2:
             rows.append(
                 ScheduleRow(
                     tag="brick_vents",
                     trade_type="walls",
-                    description=f"Permanent / brick vents ({int(pv_count)} No on page {page_num})",
-                    quantity=pv_count,
-                    unit="NO",
+                    description=vent_res.description,
+                    quantity=vent_res.quantity,
+                    unit=vent_res.unit,
                     source_page=page_num,
-                    bbox=(pv_x0, pv_y0, pv_x1, pv_y1),
-                    confidence=0.88,
-                    evidence_text=f"{int(pv_count)} PV callouts detected on facade",
+                    bbox=vent_res.bbox or (0.0, 0.0, 0.0, 0.0),
+                    confidence=vent_res.confidence,
+                    evidence_text=vent_res.evidence_text,
                 )
             )
+        else:
+            all_words = page.get_text("words")
+
+            def _next_word_text(word: tuple) -> str:
+                block_no, line_no, word_no = word[5], word[6], word[7]
+                for other in all_words:
+                    if other[5] == block_no and other[6] == line_no and other[7] == word_no + 1:
+                        return str(other[4])
+                return ""
+
+            pv_words = [
+                w
+                for w in all_words
+                if re.match(r"^(?:PV|P\.V)$", w[4], re.I)
+                and _next_word_text(w).strip().lower().rstrip(".,:;") != "denotes"
+            ]
+            page_text_lower = page.get_text().lower()
+            is_facade_sheet = any(k in page_text_lower for k in ("elevation", "facade", "façade", "section", "schedule", "plan"))
+
+            if len(pv_words) >= 2 and is_facade_sheet:
+                pv_x0 = min(w[0] for w in pv_words)
+                pv_y0 = min(w[1] for w in pv_words)
+                pv_x1 = max(w[2] for w in pv_words)
+                pv_y1 = max(w[3] for w in pv_words)
+                pv_count = float(len(pv_words))
+                rows.append(
+                    ScheduleRow(
+                        tag="brick_vents",
+                        trade_type="walls",
+                        description=f"Permanent / brick vents ({int(pv_count)} No on page {page_num})",
+                        quantity=pv_count,
+                        unit="NO",
+                        source_page=page_num,
+                        bbox=(pv_x0, pv_y0, pv_x1, pv_y1),
+                        confidence=0.88,
+                        evidence_text=f"{int(pv_count)} PV callouts detected on facade",
+                    )
+                )
 
         return rows
 
@@ -1097,8 +1114,22 @@ class GenericScheduleTableExtractor:
                     continue
 
             if r.tag == "brick_vents":
-                if r.source_page not in vent_pages and r.quantity:
-                    vent_pages[r.source_page] = r.quantity
+                if r.quantity and r.quantity > 0:
+                    # Check for duplicate / repeated sheet
+                    is_dup = False
+                    for existing_p, existing_row in vent_pages.items():
+                        if existing_p == r.source_page:
+                            is_dup = True
+                            break
+                        if r.sheet_number and existing_row.sheet_number and r.sheet_number == existing_row.sheet_number:
+                            is_dup = True
+                            break
+                        if existing_row.quantity == r.quantity and r.bbox and existing_row.bbox:
+                            if all(abs(a - b) < 1.0 for a, b in zip(r.bbox, existing_row.bbox)):
+                                is_dup = True
+                                break
+                    if not is_dup:
+                        vent_pages[r.source_page] = r
                 continue
 
             dim_str = ""
@@ -1118,8 +1149,10 @@ class GenericScheduleTableExtractor:
         result = list(deduped.values())
 
         if vent_pages:
-            total_vents = sum(vent_pages.values())
+            total_vents = sum(vr.quantity for vr in vent_pages.values() if vr.quantity is not None)
             first_vent_row = next(r for r in rows if r.tag == "brick_vents")
+            is_vector_aug = any("vector vent symbols" in (vr.evidence_text or "") for vr in vent_pages.values())
+            conf = 0.92 if is_vector_aug else 0.90
             result.append(
                 ScheduleRow(
                     tag="brick_vents",
@@ -1129,8 +1162,8 @@ class GenericScheduleTableExtractor:
                     unit="NO",
                     source_page=first_vent_row.source_page,
                     bbox=first_vent_row.bbox,
-                    confidence=0.90,
-                    evidence_text=f"Total {int(total_vents)} vents across pages {list(vent_pages.keys())}",
+                    confidence=conf,
+                    evidence_text=f"Total {int(total_vents)} vents across pages {list(vent_pages.keys())}" + (" (vector-geometry corroborated)" if is_vector_aug else ""),
                 )
             )
 
