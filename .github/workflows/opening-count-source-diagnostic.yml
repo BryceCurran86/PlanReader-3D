@@ -155,6 +155,101 @@ jobs:
               ], indent=2, default=str))
           PY
 
+      - name: Trace vector signatures beside proven PV labels
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import collections, json, math, pathlib, re
+          import fitz
+
+          path = pathlib.Path("benchmarks/sources/1785347143869-bqs-drawings.pdf")
+          doc = fitz.open(path)
+          page = doc[218]
+          words = page.get_text("words") or []
+
+          def nxt(w):
+              for o in words:
+                  if o[5] == w[5] and o[6] == w[6] and o[7] == w[7] + 1:
+                      return str(o[4])
+              return ""
+
+          pv = [
+              w for w in words
+              if re.fullmatch(r"(?:PV|P\.V)", str(w[4]), re.I)
+              and nxt(w).strip().lower().rstrip(".,:;") != "denotes"
+          ]
+          pv_centers = [((w[0]+w[2])/2.0, (w[1]+w[3])/2.0) for w in pv]
+          print("PV_CENTERS", json.dumps(pv_centers))
+
+          drawings = page.get_drawings()
+          records = []
+          for idx, d in enumerate(drawings):
+              r = d.get("rect")
+              if not r:
+                  continue
+              x0,y0,x1,y1 = map(float, (r.x0,r.y0,r.x1,r.y1))
+              if x1 <= x0 or y1 <= y0:
+                  continue
+              ops = tuple(str(item[0]) for item in d.get("items", ()))
+              sig = (
+                  round(x1-x0, 1),
+                  round(y1-y0, 1),
+                  len(ops),
+                  ops[:12],
+                  round(float(d.get("width") or 0.0), 2),
+                  bool(d.get("fill")),
+              )
+              records.append({
+                  "idx":idx, "bbox":[x0,y0,x1,y1],
+                  "center":[(x0+x1)/2.0,(y0+y1)/2.0],
+                  "sig":sig,
+              })
+
+          # A signature is interesting only if it recurs close to at least
+          # three independently labelled PV instances. The radius is broad
+          # diagnostic search only; nothing here is production authority.
+          support = collections.defaultdict(set)
+          near_examples = collections.defaultdict(list)
+          for li,(px,py) in enumerate(pv_centers):
+              for rec in records:
+                  cx,cy = rec["center"]
+                  if abs(cx-px) <= 45.0 and abs(cy-py) <= 45.0:
+                      key = repr(rec["sig"])
+                      support[key].add(li)
+                      if len(near_examples[key]) < 20:
+                          near_examples[key].append(rec)
+          ranked = sorted(
+              ((len(v),k) for k,v in support.items() if len(v) >= 3),
+              reverse=True,
+          )
+          print("RECURRING_NEAR_PV_SIGNATURES", len(ranked))
+          for n,key in ranked[:40]:
+              sig = eval(key)
+              matches = [rec for rec in records if rec["sig"] == sig]
+              print(json.dumps({
+                  "label_support": n,
+                  "signature": sig,
+                  "page_match_count": len(matches),
+                  "near_examples": near_examples[key][:8],
+                  "page_matches": matches[:80],
+              }, default=str))
+
+          # Also list compact direct rectangle/path candidates in the broad
+          # elevation drawing band, grouped by width/height, to expose symbols
+          # whose path decomposition differs between instances.
+          dims = collections.defaultdict(list)
+          for rec in records:
+              x0,y0,x1,y1 = rec["bbox"]
+              w,h = x1-x0,y1-y0
+              if 2.0 <= w <= 40.0 and 2.0 <= h <= 40.0:
+                  dims[(round(w,1),round(h,1))].append(rec)
+          for key, vals in sorted(dims.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:60]:
+              print("SMALL_PATH_DIM_GROUP", key, "COUNT", len(vals), "BBOXES",
+                    [v["bbox"] for v in vals[:80]])
+          doc.close()
+          PY
+
       - name: Render Murera page 219 for vector-symbol inspection
         run: |
           python - <<'PY'
