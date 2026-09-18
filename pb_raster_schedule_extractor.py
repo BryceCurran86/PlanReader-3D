@@ -706,17 +706,43 @@ class GenericScheduleTableExtractor:
                 return rows
 
             x_coords = sorted([w[0] for w in sched_words])
-            
-            clusters: List[List[float]] = []
-            current_cluster: List[float] = []
-            for x in x_coords:
-                if not current_cluster or (x - current_cluster[-1]) < 80.0:
-                    current_cluster.append(x)
-                else:
-                    clusters.append(current_cluster)
-                    current_cluster = [x]
-            if current_cluster:
-                clusters.append(current_cluster)
+
+            def _cluster_xs(xs: List[float], gap: float) -> List[List[float]]:
+                clusters_local: List[List[float]] = []
+                current: List[float] = []
+                for x in xs:
+                    if not current or (x - current[-1]) < gap:
+                        current.append(x)
+                    else:
+                        clusters_local.append(current)
+                        current = [x]
+                if current:
+                    clusters_local.append(current)
+                return clusters_local
+
+            # Primary gap (80pt). If a sheet packs elevation-card columns tighter
+            # than that, re-cluster using ``N no.`` quantity anchors — generic
+            # structural recovery, not project-specific page/mark hardcodes.
+            clusters = _cluster_xs(x_coords, 80.0)
+            if len(clusters) < 2:
+                qty_xs = sorted(
+                    float(w[0])
+                    for w in sched_words
+                    if re.search(r"^\d+$", str(w[4]))
+                    or re.search(r"^(?:no\.?s?|nos?)$", str(w[4]), re.I)
+                )
+                # Pair digit + no. tokens that share a vertical card: use digit x.
+                digit_xs = sorted(
+                    {
+                        float(w[0])
+                        for w in sched_words
+                        if re.fullmatch(r"\d+", str(w[4]) or "")
+                    }
+                )
+                if len(digit_xs) >= 2:
+                    clusters = _cluster_xs(digit_xs, 40.0)
+                elif len(qty_xs) >= 2:
+                    clusters = _cluster_xs(qty_xs, 40.0)
 
             if len(clusters) < 2:
                 return rows
