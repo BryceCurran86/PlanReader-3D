@@ -61,6 +61,7 @@ WALL_ROLE_THICKNESS_ONLY_REJECTED = "wall_role_thickness_only_classification_rej
 WALL_ROLE_PERIMETER_ONLY_REJECTED = "wall_role_largest_perimeter_classification_rejected"
 WALL_ROLE_TOPOLOGY_WRONG_WALL = "wall_role_topology_wrong_wall"
 WALL_ROLE_CONFLICT = "wall_role_conflict"
+WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE = "wall_role_source_evidence_unavailable"
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
@@ -456,9 +457,10 @@ class WallRoleProducer:
     """Trusted writer boundary for authenticated wall-role classification.
 
     Callers may NOT supply a role label, thickness, perimeter claim, or candidate flag.
-    Every positive WallRoleRecord is produced only from authenticated physical wall
-    evidence combined with independent producer-owned evidence (topology, explicit
-    annotation, or registered structural/cross-sheet evidence).
+    No public caller-constructible topology/annotation/cross-sheet container is
+    accepted as positive role authority. Until a genuinely source-derived upstream
+    role-evidence producer is wired, this Item 26 boundary deliberately ABSTAINS
+    after authenticating the physical wall candidate.
     """
 
     def __init__(
@@ -483,10 +485,25 @@ class WallRoleProducer:
         if structural_cross_sheet_authority is not None and type(structural_cross_sheet_authority) is not StructuralCrossSheetAuthority:
             raise TypeError("structural_cross_sheet_authority must be a producer-owned StructuralCrossSheetAuthority")
 
+        # These three authority classes currently wrap publicly constructible
+        # evidence records. A sealed wrapper does not establish provenance.
+        # Reject every positive injection path until source-derived producers
+        # (room/envelope topology, annotation extraction, registered structural
+        # evidence) exist and can be consumed directly.
+        if (
+            wall_topology_authority is not None
+            or wall_annotation_authority is not None
+            or structural_cross_sheet_authority is not None
+        ):
+            raise TypeError(
+                "caller-constructible role evidence authorities are not accepted; "
+                "source-derived role evidence producer unavailable"
+            )
+
         self._wall_candidates = physical_wall_candidate_authority
-        self._wall_topology = wall_topology_authority
-        self._wall_annotations = wall_annotation_authority
-        self._structural_evidence = structural_cross_sheet_authority
+        self._wall_topology = None
+        self._wall_annotations = None
+        self._structural_evidence = None
         self._results: Dict[_Key, WallRoleResult] = {}
 
     @classmethod
@@ -577,7 +594,16 @@ class WallRoleProducer:
         ):
             diagnostic_reasons.append(WALL_ROLE_PERIMETER_ONLY_REJECTED)
 
-        # 3. Query independent producer-owned evidence sources
+        # No positive role evidence source is currently authentic enough to
+        # cross this boundary. Candidate metadata remains diagnostic only.
+        return self._store(
+            selector,
+            _abstained(WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE, *diagnostic_reasons),
+        )
+
+        # 3. Query independent producer-owned evidence sources (intentionally
+        # unreachable until a future source-derived role-evidence producer is
+        # wired and independently reviewed).
         propositions: list[tuple[WallRoleClassification, str]] = []
         corroborating_ids: list[str] = []
         stale_reasons: list[str] = []
@@ -738,6 +764,7 @@ __all__ = [
     "WALL_ROLE_RESOLVED",
     "WALL_ROLE_SCHEMA_VERSION",
     "WALL_ROLE_STALE_EVIDENCE",
+    "WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE",
     "WALL_ROLE_THICKNESS_ONLY_REJECTED",
     "WALL_ROLE_TOPOLOGY_WRONG_WALL",
     "WALL_ROLE_UNRESOLVED",
