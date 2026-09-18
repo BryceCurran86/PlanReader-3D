@@ -1,4 +1,4 @@
-name: Substructure Source Diagnostic
+name: Cross View Secondary Width Diagnostic
 on:
   pull_request:
     branches: [main]
@@ -17,52 +17,43 @@ jobs:
         run: |
           python - <<'PY'
           import hashlib,json,pathlib,urllib.request
-          bid="tenders_ke_murera_science_lab"
-          root=pathlib.Path("benchmarks/public_tenders")/bid
+          root=pathlib.Path("benchmarks/public_tenders/tenders_ke_murera_science_lab")
           d=json.loads((root/"download_manifest.json").read_text())
           s=json.loads((root/"source_manifest.json").read_text())
           fn=s["source_pdf"]
           expected=next(x["sha256"] for x in d["documents"] if x["filename"]==fn).lower()
-          req=urllib.request.Request(d["source_url"],headers={"User-Agent":"Mozilla/5.0 PlanReaderDiagnostic/1.0"})
-          data=urllib.request.urlopen(req,timeout=180).read()
-          actual=hashlib.sha256(data).hexdigest()
-          assert actual==expected,(actual,expected)
-          out=pathlib.Path("benchmarks/sources"); out.mkdir(parents=True,exist_ok=True)
-          (out/fn).write_bytes(data)
-          print("SOURCE",fn,len(data),actual)
+          data=urllib.request.urlopen(urllib.request.Request(d["source_url"],headers={"User-Agent":"Mozilla/5.0 PlanReaderDiagnostic/1.0"}),timeout=180).read()
+          assert hashlib.sha256(data).hexdigest()==expected
+          out=pathlib.Path("benchmarks/sources"); out.mkdir(parents=True,exist_ok=True); (out/fn).write_bytes(data)
           PY
-      - name: Probe Murera secondary floor geometry
+      - name: Inspect page 221 figured evidence
         env:
           PYTHONPATH: .
         run: |
           python - <<'PY'
-          import json,pathlib,re,fitz
-          from pb_dimension_chain_evidence_extractor import extract_dimension_chains_from_page
-          from pb_secondary_area_support_evidence import extract_secondary_area_support_evidence_from_page
+          import json,pathlib,fitz
+          from pb_figured_dimension_evidence import extract_dimension_evidence_bundle
+          from pb_viewport_segmentation import segment_page_viewports
           root=pathlib.Path("benchmarks/public_tenders/tenders_ke_murera_science_lab")
           sm=json.loads((root/"source_manifest.json").read_text())
-          pdf=pathlib.Path("benchmarks/sources")/sm["source_pdf"]
-          doc=fitz.open(str(pdf))
-          for page_no in range(219,226):
-              page=doc[page_no-1]
-              txt=page.get_text("text") or ""
-              chains=extract_dimension_chains_from_page(page,page_num=page_no,view_id=f"page_{page_no}")
-              sec=extract_secondary_area_support_evidence_from_page(page,source_page=page_no,dimension_chains=chains)
-              keyblocks=[]
-              for b in page.get_text("blocks") or []:
-                  t=" ".join(str(b[4]).split())
-                  if re.search(r"veranda|verandah|pillar|column|post|pier|floor|hardcore|damp|polythene|A142|mesh",t,re.I):
-                      keyblocks.append({"text":t,"bbox":[round(float(v),1) for v in b[:4]]})
-              print("\nPAGE",page_no,"TEXTLEN",len(txt))
-              print("KEYBLOCKS",json.dumps(keyblocks,sort_keys=True))
-              print("CHAINS",json.dumps([
-                 {
-                   "id":str(c.chain_id),
-                   "orientation":str(c.orientation),
-                   "values":[round(float(o.value_m),3) for o in c.observations],
-                   "bboxes":[list(o.bbox) if o.bbox else None for o in c.observations],
-                 } for c in chains
-              ],sort_keys=True))
-              print("SECONDARY",sec)
+          doc=fitz.open(str(pathlib.Path("benchmarks/sources")/sm["source_pdf"]))
+          page=doc[220]
+          print("TEXT",page.get_text("text"))
+          print("VIEWPORTS",json.dumps([
+            {"id":v.view_id,"type":v.view_type,"status":v.status,"bbox":list(v.bounding_box) if v.bounding_box else None}
+            for v in segment_page_viewports(page,page_number=221)
+          ]))
+          bundle=extract_dimension_evidence_bundle(page,page_num=221,view_id="page_221")
+          bind={b.observation_id:b.status for b in bundle.bindings}
+          for o in bundle.observations:
+              try: val=float(o.value_m)
+              except: continue
+              if 1.5 <= val <= 3.5:
+                  print("OBS",json.dumps({
+                    "id":o.dimension_id,"value":val,"orientation":str(o.orientation),
+                    "bbox":list(o.bbox) if o.bbox else None,
+                    "endpoints":list(o.endpoints) if o.endpoints else None,
+                    "binding":bind.get(o.dimension_id)
+                  },sort_keys=True))
           doc.close()
           PY
