@@ -43,7 +43,7 @@ from pb_source_visibility_authority import (
     classify_native_segment_visibility,
 )
 from pb_vector_geometry_v130 import extract_native_page
-from pb_wall_room_topology_contracts import WallCandidate
+from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 from pb_wall_room_topology_junction_classifier import classify_junctions
 from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
 from pb_wall_room_topology_wall_assembly import assemble_wall_topology
@@ -58,6 +58,14 @@ PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE = (
 PHYSICAL_WALL_CANDIDATE_IDENTITY_UNRESOLVED = (
     "physical_wall_candidate_identity_unresolved"
 )
+PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_BOUNDARY = (
+    "physical_wall_candidate_scope_cropped_at_boundary"
+)
+
+# A dangling end counts as "at the page edge" only when it lies essentially
+# exactly on it -- this is the page's own coordinate boundary, not a
+# proximity heuristic tuned against any drawing.
+_PAGE_BOUNDARY_TOL_PT = 0.5
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
@@ -153,8 +161,14 @@ def _source_page_segments(
     source_bytes: bytes,
     page_id: str,
     decision_scope_id: str,
-) -> tuple[list[dict], tuple[str, ...]]:
-    """Rebuild W2 inputs from exact bytes and exact receipted visible membership."""
+) -> tuple[list[dict], tuple[str, ...], float, float]:
+    """Rebuild W2 inputs from exact bytes and exact receipted visible membership.
+
+    Also returns the page's own (width, height) in points, so callers can
+    determine whether a wall's dangling end actually terminates inside the
+    drawing (a real wall end) or merely at the page edge (the wall's true
+    continuation is unknown -- it may simply be cropped by this sheet).
+    """
 
     visibility = source_producer.authority()
     visible_by_raw_id: dict[str, tuple[str, tuple[float, ...]]] = {}
@@ -236,7 +250,46 @@ def _source_page_segments(
     if native_visible_ids != set(page_visible_ids):
         raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
 
-    return segments, tuple(sorted(page_visible_ids))
+    return (
+        segments,
+        tuple(sorted(page_visible_ids)),
+        float(native["width"]),
+        float(native["height"]),
+    )
+
+
+def _wall_touches_page_boundary(
+    wall: WallCandidate, *, page_width: float, page_height: float
+) -> bool:
+    """True when a genuinely dangling end of this wall lies on the page's
+    own edge rather than terminating inside the drawing.
+
+    A wall end classified ``JunctionType.ENDPOINT`` (not connected to any
+    other wall) whose coordinate sits on the page boundary is not proven to
+    actually end there -- the drawing may simply be cropped by this sheet,
+    with the wall's true continuation on an adjoining sheet or off-page. An
+    end that meets another wall (any other junction type) is a real,
+    resolved terminus regardless of its position on the page.
+    """
+    if not wall.centerline_pts or len(wall.centerline_pts) < 2:
+        return False
+    if len(wall.junction_types) != 2:
+        return False
+    ends = (
+        (wall.centerline_pts[0], wall.junction_types[0]),
+        (wall.centerline_pts[-1], wall.junction_types[1]),
+    )
+    for (x, y), junction_type in ends:
+        if junction_type != JunctionType.ENDPOINT:
+            continue
+        if (
+            x <= _PAGE_BOUNDARY_TOL_PT
+            or y <= _PAGE_BOUNDARY_TOL_PT
+            or x >= page_width - _PAGE_BOUNDARY_TOL_PT
+            or y >= page_height - _PAGE_BOUNDARY_TOL_PT
+        ):
+            return True
+    return False
 
 
 def _line(values: Sequence[float]) -> Optional[Line]:
@@ -688,7 +741,7 @@ def _build_scope_result(
     ):
         return _blocked(selector, PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
 
-    segments, source_observation_ids = _source_page_segments(
+    segments, source_observation_ids, page_width, page_height = _source_page_segments(
         source_producer=source_producer,
         published=published,
         source_bytes=source_bytes,
@@ -743,9 +796,19 @@ def _build_scope_result(
         trusted_overrides,
     )
 
+    cropped = any(
+        _wall_touches_page_boundary(wall, page_width=page_width, page_height=page_height)
+        for wall in ordered_walls
+    )
+    reason_codes = (
+        (PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED, PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_BOUNDARY)
+        if cropped
+        else (PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,)
+    )
+
     return PhysicalWallCandidateScopeResult(
         status=EvidenceResolutionStatus.CORROBORATED,
-        scope_complete=True,
+        scope_complete=not cropped,
         records=tuple(records),
         source_observation_ids=source_observation_ids,
         document_id=published.revision.document_id,
@@ -754,7 +817,7 @@ def _build_scope_result(
         snapshot_id=published.snapshot.snapshot_id,
         page_id=page_id,
         decision_scope_id=scope_id,
-        reason_codes=(PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,),
+        reason_codes=reason_codes,
         equivalence=equivalence,
         proposition=PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,
     )
@@ -852,6 +915,7 @@ class PhysicalWallCandidateAuthority:
 
 __all__ = [
     "PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION",
+    "PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_BOUNDARY",
     "PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED",
     "PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE",
     "PhysicalWallCandidateAuthority",
