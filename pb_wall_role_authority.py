@@ -245,17 +245,10 @@ class WallTopologyProducer:
         return cls(_seal=_PRODUCER_SEAL)
 
     def publish(self, evidence: WallTopologyEvidence) -> None:
-        if type(evidence) is not WallTopologyEvidence:
-            raise TypeError("evidence must be WallTopologyEvidence")
-        key = (
-            evidence.document_id,
-            evidence.revision_id,
-            evidence.source_sha256,
-            evidence.snapshot_id,
-            evidence.page_id,
-            evidence.physical_wall_id,
+        raise TypeError(
+            "caller-constructed WallTopologyEvidence is diagnostic only; "
+            "source-derived evidence producer unavailable"
         )
-        self._records[key] = evidence
 
     def authority(self) -> WallTopologyAuthority:
         return WallTopologyAuthority(self._records, _seal=_AUTHORITY_SEAL)
@@ -328,17 +321,10 @@ class WallAnnotationProducer:
         return cls(_seal=_PRODUCER_SEAL)
 
     def publish(self, evidence: WallAnnotationEvidence) -> None:
-        if type(evidence) is not WallAnnotationEvidence:
-            raise TypeError("evidence must be WallAnnotationEvidence")
-        key = (
-            evidence.document_id,
-            evidence.revision_id,
-            evidence.source_sha256,
-            evidence.snapshot_id,
-            evidence.page_id,
-            evidence.physical_wall_id,
+        raise TypeError(
+            "caller-constructed WallAnnotationEvidence is diagnostic only; "
+            "source-derived evidence producer unavailable"
         )
-        self._records[key] = evidence
 
     def authority(self) -> WallAnnotationAuthority:
         return WallAnnotationAuthority(self._records, _seal=_AUTHORITY_SEAL)
@@ -412,17 +398,10 @@ class StructuralCrossSheetProducer:
         return cls(_seal=_PRODUCER_SEAL)
 
     def publish(self, evidence: StructuralCrossSheetEvidence) -> None:
-        if type(evidence) is not StructuralCrossSheetEvidence:
-            raise TypeError("evidence must be StructuralCrossSheetEvidence")
-        key = (
-            evidence.document_id,
-            evidence.revision_id,
-            evidence.source_sha256,
-            evidence.snapshot_id,
-            evidence.page_id,
-            evidence.physical_wall_id,
+        raise TypeError(
+            "caller-constructed StructuralCrossSheetEvidence is diagnostic only; "
+            "source-derived evidence producer unavailable"
         )
-        self._records[key] = evidence
 
     def authority(self) -> StructuralCrossSheetAuthority:
         return StructuralCrossSheetAuthority(self._records, _seal=_AUTHORITY_SEAL)
