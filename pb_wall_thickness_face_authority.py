@@ -50,6 +50,7 @@ WALL_THICKNESS_CANDIDATE_REJECTED = "wall_thickness_candidate_thickness_rejected
 WALL_THICKNESS_DEFAULT_REJECTED = "wall_thickness_default_rejected"
 WALL_THICKNESS_WRONG_WALL = "wall_thickness_wrong_wall"
 WALL_THICKNESS_CONFLICT = "wall_thickness_conflict"
+WALL_THICKNESS_SOURCE_EVIDENCE_UNAVAILABLE = "wall_thickness_source_evidence_unavailable"
 WALL_THICKNESS_ZERO_REJECTED = "wall_thickness_zero_rejected"
 WALL_THICKNESS_NEGATIVE_REJECTED = "wall_thickness_negative_rejected"
 WALL_THICKNESS_FACE_IDENTITY_UNSTABLE = "wall_thickness_face_identity_unstable"
@@ -342,21 +343,10 @@ class WallThicknessProducer:
         return cls(_seal=_PRODUCER_SEAL)
 
     def publish(self, evidence: WallThicknessEvidence) -> None:
-        if type(evidence) is not WallThicknessEvidence:
-            raise TypeError("evidence must be WallThicknessEvidence")
-        key = (
-            evidence.document_id,
-            evidence.revision_id,
-            evidence.source_sha256,
-            evidence.snapshot_id,
-            evidence.page_id,
-            evidence.physical_wall_id,
+        raise TypeError(
+            "caller-constructed WallThicknessEvidence is diagnostic only; "
+            "source-derived wall-thickness producer unavailable"
         )
-        if key in self._records:
-            existing = self._records[key]
-            if abs(existing.thickness_m - evidence.thickness_m) > 1e-4:
-                self._conflicts.add(key)
-        self._records[key] = evidence
 
     def authority(self) -> WallThicknessAuthority:
         return WallThicknessAuthority(self._records, self._conflicts, _seal=_AUTHORITY_SEAL)
@@ -470,10 +460,15 @@ class WallThicknessFaceProducer:
             raise TypeError(
                 "wall_thickness_authority must be a producer-owned WallThicknessAuthority"
             )
+        if wall_thickness_authority is not None:
+            raise TypeError(
+                "current WallThicknessAuthority can be backed by caller-constructed "
+                "evidence; source-derived wall-thickness authority unavailable"
+            )
 
         self._wall_candidates = physical_wall_candidate_authority
         self._scale = physical_scale_authority
-        self._thickness_auth = wall_thickness_authority
+        self._thickness_auth = None
         self._results: Dict[_Key, WallThicknessFaceResult] = {}
 
     @classmethod
@@ -573,7 +568,7 @@ class WallThicknessFaceProducer:
         if self._thickness_auth is None:
             return self._store(
                 selector,
-                _abstained(WALL_THICKNESS_UNRESOLVED, *diagnostic_reasons),
+                _abstained(WALL_THICKNESS_SOURCE_EVIDENCE_UNAVAILABLE, *diagnostic_reasons),
             )
 
         # Conflict check
@@ -711,6 +706,7 @@ __all__ = [
     "WALL_THICKNESS_SCALE_UNRESOLVED",
     "WALL_THICKNESS_SCHEMA_VERSION",
     "WALL_THICKNESS_STALE_EVIDENCE",
+    "WALL_THICKNESS_SOURCE_EVIDENCE_UNAVAILABLE",
     "WALL_THICKNESS_UNRESOLVED",
     "WALL_THICKNESS_WALL_UNRESOLVED",
     "WALL_THICKNESS_WRONG_WALL",
