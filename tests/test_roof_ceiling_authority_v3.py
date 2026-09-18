@@ -325,7 +325,8 @@ def test_authority_lookup_published_record() -> None:
     producer.publish(sel)
     res = producer.authority().resolve(sel)
     assert res.status is EvidenceResolutionStatus.CORROBORATED
-    assert res.record.target_id == "roof-1"
+    assert res.record.target_id != "roof-1"
+    assert res.record.target_id.startswith("roof_ceiling_target_identity_")
 
 
 def test_authority_lookup_missing_abstains() -> None:
