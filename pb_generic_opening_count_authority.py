@@ -83,6 +83,7 @@ GENERIC_OPENING_COUNT_SCHEDULE_ONLY_NOT_PHYSICAL = (
 
 _COUNT_PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
+_SOURCE_AUTHENTICATED_COMPLETENESS_SEAL = object()
 
 _Key = tuple[str, str, str, str, str, Optional[str], Optional[str]]
 
@@ -366,18 +367,19 @@ class GenericOpeningCountProducer:
 
         diagnostic_reasons = self._diagnostic_reasons()
 
-        # Current OpeningUniverseCompletenessAuthority can be produced from
-        # caller-supplied source/enumerated primitive collections. Until that
-        # upstream producer is bound directly to authenticated source decode,
-        # completeness is not strong enough to support a FIRM count.
-        return self._store(
-            selector,
-            _blocked(
-                EvidenceResolutionStatus.ABSTAINED,
-                GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED,
-                *diagnostic_reasons,
-            ),
-        )
+        # Current public OpeningUniverseCompletenessProducer can be fed
+        # caller-supplied source/enumerated primitive collections. Only an
+        # internal source-bound adapter may attach this private seal after
+        # deriving completeness from authenticated source decode.
+        if getattr(self._universe, "_source_authentication_seal", None) is not _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL:
+            return self._store(
+                selector,
+                _blocked(
+                    EvidenceResolutionStatus.ABSTAINED,
+                    GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED,
+                    *diagnostic_reasons,
+                ),
+            )
 
         univ_sel = OpeningUniverseSelector(
             document_id=selector.document_id,
