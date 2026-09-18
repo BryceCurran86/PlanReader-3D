@@ -1,4 +1,4 @@
-name: Support Count Source Diagnostic
+name: Murera Vent Diagnostic
 on:
   pull_request:
     branches: [main]
@@ -13,56 +13,39 @@ jobs:
       - run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Download verified sources
+      - name: Download verified Murera source
         run: |
           python - <<'PY'
           import hashlib,json,pathlib,urllib.request
-          bids=["tenders_ke_kstvet_cbc_classroom","tenders_ke_murera_science_lab"]
-          out=pathlib.Path("benchmarks/sources"); out.mkdir(parents=True,exist_ok=True)
-          for bid in bids:
-              root=pathlib.Path("benchmarks/public_tenders")/bid
-              d=json.loads((root/"download_manifest.json").read_text()); s=json.loads((root/"source_manifest.json").read_text())
-              fn=s["source_pdf"]; expected=next(x["sha256"] for x in d["documents"] if x["filename"]==fn).lower()
-              data=urllib.request.urlopen(urllib.request.Request(d["source_url"],headers={"User-Agent":"Mozilla/5.0 PlanReaderDiagnostic/1.0"}),timeout=180).read()
-              assert hashlib.sha256(data).hexdigest()==expected
-              (out/fn).write_bytes(data)
+          root=pathlib.Path("benchmarks/public_tenders/tenders_ke_murera_science_lab")
+          d=json.loads((root/"download_manifest.json").read_text()); s=json.loads((root/"source_manifest.json").read_text())
+          fn=s["source_pdf"]; expected=next(x["sha256"] for x in d["documents"] if x["filename"]==fn).lower()
+          data=urllib.request.urlopen(urllib.request.Request(d["source_url"],headers={"User-Agent":"Mozilla/5.0 PlanReaderDiagnostic/1.0"}),timeout=180).read()
+          assert hashlib.sha256(data).hexdigest()==expected
+          out=pathlib.Path("benchmarks/sources"); out.mkdir(parents=True,exist_ok=True); (out/fn).write_bytes(data)
           PY
-      - name: Probe support counts
+      - name: Count PV callouts page by page
         env:
           PYTHONPATH: .
         run: |
           python - <<'PY'
           import json,pathlib,re,fitz
-          from pb_structural_bay_pillar_count import find_uniform_bay_runs
-          from pb_secondary_area_support_evidence import extract_secondary_area_support_evidence_from_page
-          from pb_dimension_chain_evidence_extractor import extract_dimension_chains_from_page
-          from pb_explicit_item_count_extractor import extract_explicit_item_counts
-          specs=[
-            ("tenders_ke_kstvet_cbc_classroom",[54,55]),
-            ("tenders_ke_murera_science_lab",[219,220,221,225]),
-          ]
-          for bid,pages in specs:
-              root=pathlib.Path("benchmarks/public_tenders")/bid
-              sm=json.loads((root/"source_manifest.json").read_text())
-              doc=fitz.open(str(pathlib.Path("benchmarks/sources")/sm["source_pdf"]))
-              print("\n===",bid,"===")
-              for page_no in pages:
-                  page=doc[page_no-1]
-                  text=page.get_text("text") or ""
-                  parsed=[]
-                  for maj,minr in re.findall(r"\b(\d{1,2})[,.]?(\d{3})\b",text):
-                      v=float(maj)+float(minr)/1000.0
-                      if 0.1<=v<=60: parsed.append(round(v,3))
-                  runs=find_uniform_bay_runs(parsed)
-                  chains=extract_dimension_chains_from_page(page,page_num=page_no,view_id=f"page_{page_no}")
-                  sec=extract_secondary_area_support_evidence_from_page(page,source_page=page_no,dimension_chains=chains)
-                  explicit=extract_explicit_item_counts(text)
-                  print("PAGE",page_no)
-                  print("RUNS",runs)
-                  print("SECONDARY",sec)
-                  print("EXPLICIT",[x for x in explicit if x.tag in ("verandah_pillars","masonry_piers","structural_columns")])
-                  for line in text.splitlines():
-                      if re.search(r"pillar|pier|column|veranda|verandah|chs|support",line,re.I):
-                          print("LINE",line)
-              doc.close()
+          root=pathlib.Path("benchmarks/public_tenders/tenders_ke_murera_science_lab")
+          sm=json.loads((root/"source_manifest.json").read_text())
+          doc=fitz.open(str(pathlib.Path("benchmarks/sources")/sm["source_pdf"]))
+          for page_no in range(219,239):
+              page=doc[page_no-1]
+              words=page.get_text("words") or []
+              def nxt(w):
+                  for o in words:
+                      if o[5]==w[5] and o[6]==w[6] and o[7]==w[7]+1:
+                          return str(o[4])
+                  return ""
+              hits=[w for w in words if re.fullmatch(r"(?:PV|P\.V)",str(w[4]),re.I) and nxt(w).strip().lower().rstrip(".,:;")!="denotes"]
+              if hits:
+                  print("PAGE",page_no,"COUNT",len(hits),"TOKENS",[
+                    {"t":w[4],"x":round(float(w[0]),1),"y":round(float(w[1]),1),"next":nxt(w)} for w in hits
+                  ])
+                  print("TEXT",page.get_text("text"))
+          doc.close()
           PY
