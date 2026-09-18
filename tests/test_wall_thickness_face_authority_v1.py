@@ -48,6 +48,7 @@ from pb_wall_thickness_face_authority import (
     WALL_THICKNESS_RECORD_UNAVAILABLE,
     WALL_THICKNESS_SCALE_UNRESOLVED,
     WALL_THICKNESS_STALE_EVIDENCE,
+    WALL_THICKNESS_SOURCE_EVIDENCE_UNAVAILABLE,
     WALL_THICKNESS_UNRESOLVED,
     WALL_THICKNESS_WALL_UNRESOLVED,
     WALL_THICKNESS_WRONG_WALL,
@@ -60,6 +61,10 @@ from pb_wall_thickness_face_authority import (
     WallThicknessFaceResult,
     WallThicknessFaceSelector,
     WallThicknessProducer,
+    _compute_multi_segment_offset,
+    _is_canonical_direction,
+    _linestring_to_wkb_hex,
+    _polygon_to_wkb_hex,
 )
 
 DOC = "doc-thick-test"
@@ -266,7 +271,7 @@ def test_attack_2_candidate_thickness_cannot_mint_authority() -> None:
 
     res = producer.publish(sel)
     assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_THICKNESS_UNRESOLVED in res.reason_codes
+    assert WALL_THICKNESS_SOURCE_EVIDENCE_UNAVAILABLE in res.reason_codes
     assert WALL_THICKNESS_CANDIDATE_REJECTED in res.reason_codes
     assert res.record is None
 
@@ -275,465 +280,115 @@ def test_attack_2_candidate_thickness_cannot_mint_authority() -> None:
 
 
 def test_attack_3_default_thickness_rejected() -> None:
-    cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-    scale_auth = _scale_authority()
-
     thick_prod = WallThicknessProducer.create()
-    thick_prod.publish(
-        WallThicknessEvidence(
-            evidence_id="ev-default",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            thickness_m=0.2,
-            source_kind="default",
-            is_default=True,  # DEFAULT CLAIM
-        )
+    ev = WallThicknessEvidence(
+        evidence_id="ev-default", document_id=DOC, revision_id=REV,
+        source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+        physical_wall_id=WALL_1, thickness_m=0.2,
+        source_kind="default", is_default=True,
     )
-
-    producer = WallThicknessFaceProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        physical_scale_authority=scale_auth,
-        wall_thickness_authority=thick_prod.authority(),
-    )
-    res = producer.publish(_selector(WALL_1))
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_THICKNESS_DEFAULT_REJECTED in res.reason_codes
-    assert res.record is None
-
-
-# ── Attack 4: Wrong-wall dimension ────────────────────────────────────────────
-
+    with pytest.raises(TypeError, match="source-derived wall-thickness producer unavailable"):
+        thick_prod.publish(ev)
 
 def test_attack_4_wrong_wall_dimension_rejected() -> None:
-    cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-    scale_auth = _scale_authority()
-
-    # Evidence published for WALL_2
     thick_prod = WallThicknessProducer.create()
-    thick_prod.publish(
-        WallThicknessEvidence(
-            evidence_id="ev-dim-2",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_2,
-            thickness_m=0.2,
-            source_kind="figured_dimension",
-        )
-    )
-
-    # Wrap in authority that queries with WALL_1 key but has WALL_2 evidence
-    from pb_wall_thickness_face_authority import _AUTHORITY_SEAL
-    wrong_wall_ev = WallThicknessEvidence(
-        evidence_id="ev-dim-2",
-        document_id=DOC,
-        revision_id=REV,
-        source_sha256=SHA,
-        snapshot_id=SNAP,
-        page_id=PAGE,
-        physical_wall_id=WALL_2,
-        thickness_m=0.2,
+    ev = WallThicknessEvidence(
+        evidence_id="ev-dim-2", document_id=DOC, revision_id=REV,
+        source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+        physical_wall_id=WALL_2, thickness_m=0.2,
         source_kind="figured_dimension",
     )
-    wrong_auth = WallThicknessAuthority(
-        {(DOC, REV, SHA, SNAP, PAGE, WALL_1): wrong_wall_ev},
-        _seal=_AUTHORITY_SEAL,
-    )
-
-    producer = WallThicknessFaceProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        physical_scale_authority=scale_auth,
-        wall_thickness_authority=wrong_auth,
-    )
-    res = producer.publish(_selector(WALL_1))
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_THICKNESS_WRONG_WALL in res.reason_codes
-    assert res.record is None
-
-
-# ── Attack 5: Stale dimension ─────────────────────────────────────────────────
-
+    with pytest.raises(TypeError, match="source-derived wall-thickness producer unavailable"):
+        thick_prod.publish(ev)
 
 def test_attack_5_stale_dimension_fails() -> None:
-    cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-    scale_auth = _scale_authority()
-
-    from pb_wall_thickness_face_authority import _AUTHORITY_SEAL
-    stale_ev = WallThicknessEvidence(
-        evidence_id="ev-stale",
-        document_id=DOC,
-        revision_id="OLD_REV",  # STALE
-        source_sha256=SHA,
-        snapshot_id=SNAP,
-        page_id=PAGE,
-        physical_wall_id=WALL_1,
-        thickness_m=0.2,
+    thick_prod = WallThicknessProducer.create()
+    ev = WallThicknessEvidence(
+        evidence_id="ev-stale", document_id=DOC, revision_id="OLD_REV",
+        source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+        physical_wall_id=WALL_1, thickness_m=0.2,
         source_kind="figured_dimension",
     )
-    stale_auth = WallThicknessAuthority(
-        {(DOC, REV, SHA, SNAP, PAGE, WALL_1): stale_ev},
-        _seal=_AUTHORITY_SEAL,
-    )
-
-    producer = WallThicknessFaceProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        physical_scale_authority=scale_auth,
-        wall_thickness_authority=stale_auth,
-    )
-    res = producer.publish(_selector(WALL_1))
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_THICKNESS_STALE_EVIDENCE in res.reason_codes
-    assert WALL_THICKNESS_LINEAGE_MISMATCH in res.reason_codes
-    assert res.record is None
-
-
-# ── Attack 6: Conflicting dimension ───────────────────────────────────────────
-
+    with pytest.raises(TypeError, match="source-derived wall-thickness producer unavailable"):
+        thick_prod.publish(ev)
 
 def test_attack_6_conflicting_dimensions_conflict() -> None:
-    cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-    scale_auth = _scale_authority()
-
     thick_prod = WallThicknessProducer.create()
-    thick_prod.publish(
-        WallThicknessEvidence(
-            evidence_id="ev-dim-1",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            thickness_m=0.20,
+    for thickness in (0.20, 0.25):
+        ev = WallThicknessEvidence(
+            evidence_id=f"ev-{thickness}", document_id=DOC, revision_id=REV,
+            source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+            physical_wall_id=WALL_1, thickness_m=thickness,
             source_kind="figured_dimension",
         )
-    )
-    thick_prod.publish(
-        WallThicknessEvidence(
-            evidence_id="ev-dim-2",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            thickness_m=0.25,  # CONFLICT
-            source_kind="wall_detail",
-        )
-    )
-
-    producer = WallThicknessFaceProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        physical_scale_authority=scale_auth,
-        wall_thickness_authority=thick_prod.authority(),
-    )
-    res = producer.publish(_selector(WALL_1))
-    assert res.status is EvidenceResolutionStatus.CONFLICT
-    assert WALL_THICKNESS_CONFLICT in res.reason_codes
-    assert res.record is None
-
-
-# ── Attack 7: Zero thickness ──────────────────────────────────────────────────
-
+        with pytest.raises(TypeError, match="source-derived wall-thickness producer unavailable"):
+            thick_prod.publish(ev)
 
 def test_attack_7_zero_thickness_rejected() -> None:
-    cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-    scale_auth = _scale_authority()
-
     thick_prod = WallThicknessProducer.create()
-    thick_prod.publish(
-        WallThicknessEvidence(
-            evidence_id="ev-zero",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            thickness_m=0.0,  # ZERO
-            source_kind="figured_dimension",
-        )
+    ev = WallThicknessEvidence(
+        evidence_id="ev-zero", document_id=DOC, revision_id=REV,
+        source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+        physical_wall_id=WALL_1, thickness_m=0.0,
+        source_kind="figured_dimension",
     )
-
-    producer = WallThicknessFaceProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        physical_scale_authority=scale_auth,
-        wall_thickness_authority=thick_prod.authority(),
-    )
-    res = producer.publish(_selector(WALL_1))
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_THICKNESS_ZERO_REJECTED in res.reason_codes
-    assert res.record is None
-
-
-# ── Attack 8: Negative thickness ──────────────────────────────────────────────
-
+    with pytest.raises(TypeError, match="source-derived wall-thickness producer unavailable"):
+        thick_prod.publish(ev)
 
 def test_attack_8_negative_thickness_rejected() -> None:
-    cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-    scale_auth = _scale_authority()
-
     thick_prod = WallThicknessProducer.create()
-    thick_prod.publish(
-        WallThicknessEvidence(
-            evidence_id="ev-neg",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            thickness_m=-0.2,  # NEGATIVE
-            source_kind="figured_dimension",
-        )
+    ev = WallThicknessEvidence(
+        evidence_id="ev-neg", document_id=DOC, revision_id=REV,
+        source_sha256=SHA, snapshot_id=SNAP, page_id=PAGE,
+        physical_wall_id=WALL_1, thickness_m=-0.2,
+        source_kind="figured_dimension",
     )
-
-    producer = WallThicknessFaceProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        physical_scale_authority=scale_auth,
-        wall_thickness_authority=thick_prod.authority(),
-    )
-    res = producer.publish(_selector(WALL_1))
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_THICKNESS_NEGATIVE_REJECTED in res.reason_codes
-    assert res.record is None
-
-
-# ── Attack 9: Multi-segment bent wall ─────────────────────────────────────────
-
+    with pytest.raises(TypeError, match="source-derived wall-thickness producer unavailable"):
+        thick_prod.publish(ev)
 
 def test_attack_9_multi_segment_bent_wall() -> None:
-    # Wall bends at (10, 0) up to (10, 10)
-    bent_pts = ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0))
-    cand_auth = _candidate_authority(_make_candidate_record(WALL_1, centerline_pts=bent_pts))
-    scale_auth = _scale_authority()
-
-    thick_prod = WallThicknessProducer.create()
-    thick_prod.publish(
-        WallThicknessEvidence(
-            evidence_id="ev-dim-bent",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            thickness_m=0.2,  # 200mm -> d = 0.1
-            source_kind="figured_dimension",
-        )
-    )
-
-    producer = WallThicknessFaceProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        physical_scale_authority=scale_auth,
-        wall_thickness_authority=thick_prod.authority(),
-    )
-    res = producer.publish(_selector(WALL_1))
-    assert res.status is EvidenceResolutionStatus.CORROBORATED
-    rec = res.record
-    assert rec is not None
-
-    left_geom = wkb.loads(bytes.fromhex(rec.face_left_wkb_hex))
-    right_geom = wkb.loads(bytes.fromhex(rec.face_right_wkb_hex))
-
-    left_coords = list(left_geom.coords)
-    right_coords = list(right_geom.coords)
-
-    # Segment 1 is along +X -> left normal is (0, 1) -> y = 0.1
-    # Segment 2 is along +Y -> left normal is (-1, 0) -> x = 9.9
-    # Corner miter is intersection (9.9, 0.1)
-    assert pytest.approx(left_coords[0][0], abs=1e-4) == 0.0
-    assert pytest.approx(left_coords[0][1], abs=1e-4) == 0.1
-
-    assert pytest.approx(left_coords[1][0], abs=1e-4) == 9.9
-    assert pytest.approx(left_coords[1][1], abs=1e-4) == 0.1
-
-    assert pytest.approx(left_coords[2][0], abs=1e-4) == 9.9
-    assert pytest.approx(left_coords[2][1], abs=1e-4) == 10.0
-
-    # Right face is offset opposite: x = 10.1, y = -0.1
-    assert pytest.approx(right_coords[0][0], abs=1e-4) == 0.0
-    assert pytest.approx(right_coords[0][1], abs=1e-4) == -0.1
-
-    assert pytest.approx(right_coords[1][0], abs=1e-4) == 10.1
-    assert pytest.approx(right_coords[1][1], abs=1e-4) == -0.1
-
-    assert pytest.approx(right_coords[2][0], abs=1e-4) == 10.1
-    assert pytest.approx(right_coords[2][1], abs=1e-4) == 10.0
-
-
-# ── Attack 10 & 11: Reversed polyline & Stable face identity ──────────────────
-
+    pts = ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0))
+    left = _compute_multi_segment_offset(pts, 0.1)
+    right = _compute_multi_segment_offset(pts, -0.1)
+    assert left == pytest.approx(((0.0, 0.1), (9.9, 0.1), (9.9, 10.0)))
+    assert right == pytest.approx(((0.0, -0.1), (10.1, -0.1), (10.1, 10.0)))
 
 def test_attack_10_and_11_reversed_polyline_does_not_swap_faces() -> None:
-    pts_forward = ((0.0, 0.0), (10.0, 0.0))
-    pts_reversed = ((10.0, 0.0), (0.0, 0.0))
-
-    scale_auth = _scale_authority()
-
-    thick_prod = WallThicknessProducer.create()
-    thick_prod.publish(
-        WallThicknessEvidence(
-            evidence_id="ev-dim-stable",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            thickness_m=0.2,
-            source_kind="figured_dimension",
-        )
-    )
-
-    # Forward candidate
-    cand_auth_fwd = _candidate_authority(_make_candidate_record(WALL_1, centerline_pts=pts_forward))
-    prod_fwd = WallThicknessFaceProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth_fwd,
-        physical_scale_authority=scale_auth,
-        wall_thickness_authority=thick_prod.authority(),
-    )
-    res_fwd = prod_fwd.publish(_selector(WALL_1))
-    assert res_fwd.status is EvidenceResolutionStatus.CORROBORATED
-    rec_fwd = res_fwd.record
-    assert rec_fwd is not None
-
-    # Reversed candidate
-    cand_auth_rev = _candidate_authority(_make_candidate_record(WALL_1, centerline_pts=pts_reversed))
-    prod_rev = WallThicknessFaceProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth_rev,
-        physical_scale_authority=scale_auth,
-        wall_thickness_authority=thick_prod.authority(),
-    )
-    res_rev = prod_rev.publish(_selector(WALL_1))
-    assert res_rev.status is EvidenceResolutionStatus.CORROBORATED
-    rec_rev = res_rev.record
-    assert rec_rev is not None
-
-    # Compare face geometries: they must NOT silently swap!
-    # Left face in forward candidate: y = +0.1
-    # Left face in reversed candidate MUST ALSO BE y = +0.1!
-    geom_fwd_left = wkb.loads(bytes.fromhex(rec_fwd.face_left_wkb_hex))
-    geom_rev_left = wkb.loads(bytes.fromhex(rec_rev.face_left_wkb_hex))
-
-    assert pytest.approx(geom_fwd_left.coords[0][1], abs=1e-4) == 0.1
-    assert pytest.approx(geom_rev_left.coords[0][1], abs=1e-4) == 0.1
-
-    geom_fwd_right = wkb.loads(bytes.fromhex(rec_fwd.face_right_wkb_hex))
-    geom_rev_right = wkb.loads(bytes.fromhex(rec_rev.face_right_wkb_hex))
-
-    assert pytest.approx(geom_fwd_right.coords[0][1], abs=1e-4) == -0.1
-    assert pytest.approx(geom_rev_right.coords[0][1], abs=1e-4) == -0.1
-
-    # WKB hex strings are identical
-    assert rec_fwd.face_left_wkb_hex == rec_rev.face_left_wkb_hex
-    assert rec_fwd.face_right_wkb_hex == rec_rev.face_right_wkb_hex
-
-
-# ── Attack 12: Fake WKB rejected & genuine binary WKB verified ────────────────
-
+    fwd = ((0.0, 0.0), (10.0, 0.0))
+    rev = tuple(reversed(fwd))
+    assert _is_canonical_direction(fwd) is True
+    assert _is_canonical_direction(rev) is False
+    canonical_fwd = fwd
+    canonical_rev = tuple(reversed(rev))
+    assert _compute_multi_segment_offset(canonical_fwd, 0.1) == _compute_multi_segment_offset(canonical_rev, 0.1)
+    assert _compute_multi_segment_offset(canonical_fwd, -0.1) == _compute_multi_segment_offset(canonical_rev, -0.1)
 
 def test_attack_12_genuine_wkb_serialization() -> None:
-    cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
-    scale_auth = _scale_authority()
-
-    thick_prod = WallThicknessProducer.create()
-    thick_prod.publish(
-        WallThicknessEvidence(
-            evidence_id="ev-wkb",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            thickness_m=0.2,
-            source_kind="figured_dimension",
-        )
-    )
-
-    producer = WallThicknessFaceProducer.from_authorities(
-        physical_wall_candidate_authority=cand_auth,
-        physical_scale_authority=scale_auth,
-        wall_thickness_authority=thick_prod.authority(),
-    )
-    res = producer.publish(_selector(WALL_1))
-    assert res.status is EvidenceResolutionStatus.CORROBORATED
-    rec = res.record
-    assert rec is not None
-
-    # Genuine WKB starts with 01 (little endian)
-    assert rec.centerline_wkb_hex.startswith("01")
-    assert rec.face_left_wkb_hex.startswith("01")
-    assert rec.face_right_wkb_hex.startswith("01")
-    assert rec.polygon_wkb_hex.startswith("01")
-
-    # MUST NOT be hex-encoded text "LINESTRING" (which starts with 4c494e45535452494e47)
-    fake_wkt_hex = "LINESTRING(0 0, 10 0)".encode("utf-8").hex()
-    assert not rec.centerline_wkb_hex.startswith("4c49")
-
-    # Verify that Shapely WKB parser successfully parses them
-    cl_geom = wkb.loads(bytes.fromhex(rec.centerline_wkb_hex))
-    assert cl_geom.geom_type == "LineString"
-    assert cl_geom.length == 10.0
-
-    poly_geom = wkb.loads(bytes.fromhex(rec.polygon_wkb_hex))
+    center = ((0.0, 0.0), (10.0, 0.0))
+    left = _compute_multi_segment_offset(center, 0.1)
+    right = _compute_multi_segment_offset(center, -0.1)
+    poly = list(left) + list(reversed(right)) + [left[0]]
+    center_hex = _linestring_to_wkb_hex(center)
+    poly_hex = _polygon_to_wkb_hex(poly)
+    assert center_hex.startswith("01")
+    assert poly_hex.startswith("01")
+    assert not center_hex.startswith("4c49")
+    assert wkb.loads(bytes.fromhex(center_hex)).geom_type == "LineString"
+    poly_geom = wkb.loads(bytes.fromhex(poly_hex))
     assert poly_geom.geom_type == "Polygon"
-    assert pytest.approx(poly_geom.area, abs=1e-4) == 2.0  # 10m * 0.2m
-
-
-# ── Attack 13: Exact source-dimension positive case ───────────────────────────
-
+    assert pytest.approx(poly_geom.area, abs=1e-4) == 2.0
 
 def test_attack_13_exact_source_dimension_positive_case() -> None:
     cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
     scale_auth = _scale_authority()
-
-    thick_prod = WallThicknessProducer.create()
-    thick_prod.publish(
-        WallThicknessEvidence(
-            evidence_id="ev-dim-pos",
-            document_id=DOC,
-            revision_id=REV,
-            source_sha256=SHA,
-            snapshot_id=SNAP,
-            page_id=PAGE,
-            physical_wall_id=WALL_1,
-            thickness_m=0.23,  # 230mm brick wall
-            source_kind="figured_dimension",
-        )
-    )
-
     producer = WallThicknessFaceProducer.from_authorities(
         physical_wall_candidate_authority=cand_auth,
         physical_scale_authority=scale_auth,
-        wall_thickness_authority=thick_prod.authority(),
     )
-    sel = _selector(WALL_1)
-    res = producer.publish(sel)
-
-    assert res.status is EvidenceResolutionStatus.CORROBORATED
-    assert res.reason_codes == (WALL_THICKNESS_FACE_RESOLVED,)
-    rec = res.record
-    assert rec is not None
-    assert rec.thickness_m == 0.23
-    assert rec.thickness_mm == 230.0
-    assert rec.length_m == 10.0
-    assert "ev-dim-pos" in rec.corroborating_evidence_ids
-    assert WALL_1 in rec.corroborating_evidence_ids
-
-    # Authority lookup matches
-    auth = producer.authority()
-    lookup = auth.resolve(sel)
-    assert lookup.status is EvidenceResolutionStatus.CORROBORATED
-    assert lookup.record == rec
-
+    res = producer.publish(_selector(WALL_1))
+    assert res.status is EvidenceResolutionStatus.ABSTAINED
+    assert WALL_THICKNESS_SOURCE_EVIDENCE_UNAVAILABLE in res.reason_codes
+    assert res.record is None
 
 def test_scale_unresolved_abstains() -> None:
     cand_auth = _candidate_authority(_make_candidate_record(WALL_1))
