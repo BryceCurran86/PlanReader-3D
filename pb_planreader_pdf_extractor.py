@@ -1590,35 +1590,17 @@ class GenericPlanReaderExtractor:
                         metadata=dict(_internal_face_derivation),
                     )
 
-                # External key pointing: at least the correct FACE (external,
-                # like perimeter_walling itself), but still triggered purely
-                # by a keyword appearing somewhere in the page text with no
-                # geometric evidence of its own extent -- never as confident
-                # as a directly measured quantity.
-                if any(k in pt_norm for k in (
-                    "key pointing", "key finish", "pointing externally",
-                    "key to finish", "keyed pointing",
-                )):
-                    pred_dict["external_key_pointing"] = ExtractedPrediction(
-                        tag="external_key_pointing",
-                        trade_type="finishes",
-                        description="External key pointing to exposed stone/block masonry",
-                        quantity=cur_wall,
-                        unit="SM",
-                        confidence=0.5,
-                        source_page=page_num,
-                        sheet_number=sheet_no,
-                        metadata={
-                            "derivation": "external_wall_area_copy_keyword_triggered",
-                            "wall_height_authority": wall_height_authority,
-                            "note": (
-                                "Triggered by a key-pointing keyword in the page text "
-                                "with no independent measurement of its own extent; "
-                                "reuses the external wall area and should be treated "
-                                "as provisional."
-                            ),
-                        },
-                    )
+                # External key-pointing / exposed-masonry finish publication is
+                # intentionally fail-closed here. A page-wide keyword such as
+                # "key to finish externally" establishes, at most, a finish
+                # proposition; it does not prove which physical wall faces receive
+                # that finish or their measured extent. The previous implementation
+                # copied the entire perimeter-wall area into
+                # external_key_pointing, which could create a quantity for a finish
+                # whose physical scope was never independently bound. A genuine
+                # finish quantity must come through the producer-owned wall-finish
+                # authority / exact-face binding path instead. Until that path
+                # resolves, no scalar external_key_pointing prediction is emitted.
 
                 # DPC from evidenced external envelope perimeter.
                 # Prefer confirmed compound external_perimeter_m (verandah /
