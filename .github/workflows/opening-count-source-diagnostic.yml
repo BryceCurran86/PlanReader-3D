@@ -41,6 +41,43 @@ jobs:
               (source_root/filename).write_bytes(data)
               print("VERIFIED", bid, filename, actual)
           PY
+      - name: Inspect target schedule pages
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import fitz, json, pathlib
+          from pb_raster_schedule_extractor import GenericScheduleTableExtractor
+          from pb_shadow_opening_evidence import page_is_opening_schedule_sheet
+          from pb_viewport_segmentation import segment_page_viewports
+          cases = [
+            ("KSTVET", "1727358888238-bq-nd-drawing.pdf", [54,55]),
+            ("MURERA", "1785347143869-bqs-drawings.pdf", [219,223,225]),
+            ("LAMU", "lamu-ishakani-ecd-classrooms-boq.pdf", [41]),
+          ]
+          root=pathlib.Path("benchmarks/sources")
+          ex=GenericScheduleTableExtractor()
+          for label, fn, pages in cases:
+              doc=fitz.open(root/fn)
+              try:
+                  for pnum in pages:
+                      p=doc[pnum-1]
+                      txt=p.get_text("text") or ""
+                      rows=ex.extract_from_page(p,pnum)
+                      vps=segment_page_viewports(p,page_number=pnum)
+                      print("===PAGE===",label,pnum)
+                      print(json.dumps({
+                        "text_len":len(txt),
+                        "text":txt[:12000],
+                        "images":[list(x[2:4]) for x in p.get_images()],
+                        "drawings":len(p.get_drawings()),
+                        "page_is_opening_schedule_sheet":page_is_opening_schedule_sheet(txt),
+                        "rows":[getattr(r,"__dict__",str(r)) for r in rows],
+                        "viewports":[getattr(v,"__dict__",str(v)) for v in vps],
+                      },default=str,indent=2))
+              finally:
+                  doc.close()
+          PY
       - name: Run opening-count diagnostics
         env:
           PYTHONPATH: .
