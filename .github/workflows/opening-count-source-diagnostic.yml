@@ -1,0 +1,61 @@
+name: Opening Count Source Diagnostic
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download verified KSTVET and Murera sources
+        run: |
+          python - <<'PY'
+          import hashlib,json,pathlib,urllib.request
+          root=pathlib.Path("benchmarks/public_tenders")
+          out=pathlib.Path("benchmarks/sources"); out.mkdir(parents=True,exist_ok=True)
+          for bid in ["tenders_ke_kstvet_cbc_classroom","tenders_ke_murera_science_lab"]:
+              bdir=root/bid
+              d=json.loads((bdir/"download_manifest.json").read_text())
+              s=json.loads((bdir/"source_manifest.json").read_text())
+              fn=s["source_pdf"]
+              expected=next(x["sha256"] for x in d["documents"] if x["filename"]==fn).lower()
+              req=urllib.request.Request(d["source_url"],headers={"User-Agent":"Mozilla/5.0 PlanReaderDiagnostic/1.0"})
+              data=urllib.request.urlopen(req,timeout=180).read()
+              actual=hashlib.sha256(data).hexdigest()
+              assert actual==expected,(bid,actual,expected)
+              (out/fn).write_bytes(data)
+              print("SOURCE",bid,fn,len(data),actual)
+          PY
+      - name: Dump schedule rows and live opening predictions
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json,pathlib,fitz
+          from pb_raster_schedule_extractor import GenericScheduleTableExtractor
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          root=pathlib.Path("benchmarks/public_tenders")
+          src=pathlib.Path("benchmarks/sources")
+          for bid in ["tenders_ke_kstvet_cbc_classroom","tenders_ke_murera_science_lab"]:
+              sm=json.loads((root/bid/"source_manifest.json").read_text())
+              pdf=src/sm["source_pdf"]
+              doc=fitz.open(str(pdf))
+              extractor=GenericPlanReaderExtractor()
+              dwg=[p for p in range(len(doc)) if extractor.is_drawing_page(doc[p].get_text("text"),doc[p])]
+              rows=GenericScheduleTableExtractor().extract_from_document(doc,pages=dwg)
+              print("\n===SCHEDULE_ROWS",bid,"===")
+              for row in rows:
+                  print(json.dumps(row.to_dict(),sort_keys=True))
+              doc.close()
+              preds=GenericPlanReaderExtractor().extract_from_pdf(pdf)
+              print("\n===LIVE_OPENING_PREDS",bid,"===")
+              for p in preds:
+                  if p.trade_type in ("windows","doors") or p.tag in ("W1","W2","D1","D2","steel_casement_windows","doors_complete","brick_vents","verandah_pillars","masonry_piers"):
+                      print(json.dumps(p.to_dict(),sort_keys=True))
+          PY
