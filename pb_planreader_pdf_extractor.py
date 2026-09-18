@@ -1599,25 +1599,14 @@ class GenericPlanReaderExtractor:
                     "key pointing", "key finish", "pointing externally",
                     "key to finish", "keyed pointing",
                 )):
-                    pred_dict["external_key_pointing"] = ExtractedPrediction(
-                        tag="external_key_pointing",
-                        trade_type="finishes",
-                        description="External key pointing to exposed stone/block masonry",
-                        quantity=cur_wall,
-                        unit="SM",
-                        confidence=0.5,
-                        source_page=page_num,
-                        sheet_number=sheet_no,
-                        metadata={
-                            "derivation": "external_wall_area_copy_keyword_triggered",
-                            "wall_height_authority": wall_height_authority,
-                            "note": (
-                                "Triggered by a key-pointing keyword in the page text "
-                                "with no independent measurement of its own extent; "
-                                "reuses the external wall area and should be treated "
-                                "as provisional."
-                            ),
-                        },
+                    # A finish keyword proves specification/scope intent only.
+                    # It does NOT prove the physical extent of that finish, and
+                    # copying the wall area here turns caller-independent wall
+                    # geometry into an unsupported finish quantity. Keep the
+                    # evidence visible diagnostically but fail closed until an
+                    # independently bound finish-face area producer exists.
+                    self.extraction_status["external_key_pointing"] = (
+                        "evidence_present_unresolved"
                     )
 
                 # DPC from evidenced external envelope perimeter.
