@@ -43,6 +43,7 @@ from pb_source_visibility_authority import (
     classify_native_segment_visibility,
 )
 from pb_vector_geometry_v130 import extract_native_page
+from pb_viewport_segmentation import ViewportSegmentationStatus, segment_page_viewports
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 from pb_wall_room_topology_junction_classifier import classify_junctions
 from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
@@ -58,14 +59,15 @@ PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE = (
 PHYSICAL_WALL_CANDIDATE_IDENTITY_UNRESOLVED = (
     "physical_wall_candidate_identity_unresolved"
 )
-PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_BOUNDARY = (
-    "physical_wall_candidate_scope_cropped_at_boundary"
+PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_PAGE_BOUNDARY = (
+    "physical_wall_candidate_scope_cropped_at_page_boundary"
 )
-
-# A dangling end counts as "at the page edge" only when it lies essentially
-# exactly on it -- this is the page's own coordinate boundary, not a
-# proximity heuristic tuned against any drawing.
-_PAGE_BOUNDARY_TOL_PT = 0.5
+PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY = (
+    "physical_wall_candidate_scope_cropped_at_viewport_boundary"
+)
+PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED = (
+    "physical_wall_candidate_scope_bounds_unresolved"
+)
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
@@ -73,6 +75,17 @@ _COORD_TOL = 1e-6
 _PARALLEL_REL_TOL = 1e-9
 Point = tuple[float, float]
 Line = tuple[float, float, float, float]
+
+# Exact-coincidence tolerance for "this coordinate is the same point as that
+# boundary coordinate". This is the same tolerance this module already uses
+# everywhere else for point/line exactness (_line, _canonical_direction,
+# _trusted_face_break, _same_gap, _segment_matches, etc.) -- not a new
+# constant invented for boundary checking. A native PDF coordinate that was
+# actually drawn at a page or viewport edge decodes back to that exact
+# value (verified: a segment endpoint drawn at x=0.0 on an unrotated,
+# unscaled page reads back as exactly 0.0), so no larger, hand-picked
+# proximity tolerance is needed or used.
+_BOUNDARY_COORD_TOL = _COORD_TOL
 
 
 @dataclass(frozen=True)
@@ -258,38 +271,136 @@ def _source_page_segments(
     )
 
 
-def _wall_touches_page_boundary(
-    wall: WallCandidate, *, page_width: float, page_height: float
-) -> bool:
-    """True when a genuinely dangling end of this wall lies on the page's
-    own edge rather than terminating inside the drawing.
+def _dangling_ends(wall: WallCandidate) -> list[Point]:
+    """Return the coordinates of this wall's ends that are genuinely
+    dangling (``JunctionType.ENDPOINT`` -- not connected to any other wall).
 
-    A wall end classified ``JunctionType.ENDPOINT`` (not connected to any
-    other wall) whose coordinate sits on the page boundary is not proven to
-    actually end there -- the drawing may simply be cropped by this sheet,
-    with the wall's true continuation on an adjoining sheet or off-page. An
-    end that meets another wall (any other junction type) is a real,
-    resolved terminus regardless of its position on the page.
+    An end that meets another wall (any other junction type) is a real,
+    resolved terminus regardless of where it happens to sit; it is never a
+    candidate for "cropped" classification.
     """
     if not wall.centerline_pts or len(wall.centerline_pts) < 2:
-        return False
+        return []
     if len(wall.junction_types) != 2:
-        return False
+        return []
     ends = (
         (wall.centerline_pts[0], wall.junction_types[0]),
         (wall.centerline_pts[-1], wall.junction_types[1]),
     )
-    for (x, y), junction_type in ends:
-        if junction_type != JunctionType.ENDPOINT:
+    return [point for point, junction_type in ends if junction_type == JunctionType.ENDPOINT]
+
+
+def _on_rect_boundary(
+    point: Point, *, x0: float, y0: float, x1: float, y1: float, tol: float = _BOUNDARY_COORD_TOL
+) -> bool:
+    x, y = point
+    return (
+        abs(x - x0) <= tol
+        or abs(x - x1) <= tol
+        or abs(y - y0) <= tol
+        or abs(y - y1) <= tol
+    )
+
+
+def _inside_rect(
+    point: Point, *, x0: float, y0: float, x1: float, y1: float, tol: float = _BOUNDARY_COORD_TOL
+) -> bool:
+    x, y = point
+    return (x0 - tol) <= x <= (x1 + tol) and (y0 - tol) <= y <= (y1 + tol)
+
+
+def _resolved_viewports(page: fitz.Page, *, page_number: int) -> Optional[list]:
+    """Return this page's RESOLVED-status segmented viewports, or ``None``
+    if segmentation itself could not be run at all (a hard failure, not
+    "no viewport structure exists").
+
+    Only ``RESOLVED`` viewports (a real drawn vector frame) are treated as
+    an authenticated boundary. ``DERIVED`` viewports are page-space
+    partitions inferred from title placement alone with no real drawn
+    boundary primitive -- exactly the case already established elsewhere in
+    this codebase as insufficient proof of a physical boundary -- and
+    ``AMBIGUOUS``/``UNSUPPORTED`` viewports carry no usable geometry at all.
+    """
+    all_viewports = _all_viewports(page, page_number=page_number)
+    if all_viewports is None:
+        return None
+    return [v for v in all_viewports if v.status == ViewportSegmentationStatus.RESOLVED.value and v.bounding_box]
+
+
+def _all_viewports(page: fitz.Page, *, page_number: int) -> Optional[list]:
+    """Return every segmented viewport regardless of status, or ``None`` if
+    segmentation itself raised. An empty list here means genuinely no
+    sub-viewport structure was attempted (no title anchors at all) -- a
+    non-empty list with no RESOLVED entries means structure was attempted
+    but could not be authenticated, which is a different, stricter state.
+    """
+    try:
+        return segment_page_viewports(page, page_number=page_number)
+    except Exception:
+        return None
+
+
+def _scope_boundary_reason(
+    wall: WallCandidate,
+    *,
+    page: fitz.Page,
+    page_number: int,
+    page_width: float,
+    page_height: float,
+) -> Optional[str]:
+    """Classify this wall's scope-completeness boundary state.
+
+    Returns ``None`` when every dangling end is a RESOLVED_INTERIOR_TERMINUS
+    (either no dangling end exists at all, or every dangling end sits
+    strictly inside both the page and any containing RESOLVED viewport).
+    Otherwise returns the specific reason code for the first problem found:
+    PAGE boundary, VIEWPORT boundary, or unresolved scope bounds.
+    """
+    dangling = _dangling_ends(wall)
+    if not dangling:
+        return None
+
+    all_viewports = _all_viewports(page, page_number=page_number)
+
+    for point in dangling:
+        if _on_rect_boundary(point, x0=0.0, y0=0.0, x1=page_width, y1=page_height):
+            return PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_PAGE_BOUNDARY
+
+        if all_viewports is None:
+            # Viewport segmentation itself failed outright: whether this
+            # sheet has real sub-viewport structure this end might be
+            # cropped against is genuinely unknown.
+            return PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED
+
+        if not all_viewports:
+            # No viewport structure was found on this page at all (no title
+            # anchors) -- the drawing genuinely occupies the whole page as
+            # one undivided scope, and the page-boundary check above is the
+            # only applicable one.
             continue
-        if (
-            x <= _PAGE_BOUNDARY_TOL_PT
-            or y <= _PAGE_BOUNDARY_TOL_PT
-            or x >= page_width - _PAGE_BOUNDARY_TOL_PT
-            or y >= page_height - _PAGE_BOUNDARY_TOL_PT
+
+        resolved_viewports = [
+            v for v in all_viewports if v.status == ViewportSegmentationStatus.RESOLVED.value and v.bounding_box
+        ]
+
+        containing = [
+            vp
+            for vp in resolved_viewports
+            if _inside_rect(point, x0=vp.bounding_box[0], y0=vp.bounding_box[1], x1=vp.bounding_box[2], y1=vp.bounding_box[3])
+        ]
+        if not containing:
+            # This page has authenticated viewport structure, but this
+            # dangling end falls outside every RESOLVED viewport's bounds
+            # (e.g. only DERIVED/AMBIGUOUS regions cover it) -- its true
+            # scope cannot be authenticated from this page alone.
+            return PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED
+        if any(
+            _on_rect_boundary(point, x0=vp.bounding_box[0], y0=vp.bounding_box[1], x1=vp.bounding_box[2], y1=vp.bounding_box[3])
+            for vp in containing
         ):
-            return True
-    return False
+            return PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY
+
+    return None
 
 
 def _line(values: Sequence[float]) -> Optional[Line]:
@@ -796,12 +907,26 @@ def _build_scope_result(
         trusted_overrides,
     )
 
-    cropped = any(
-        _wall_touches_page_boundary(wall, page_width=page_width, page_height=page_height)
-        for wall in ordered_walls
-    )
+    boundary_reasons: list[str] = []
+    boundary_pdf = fitz.open(stream=source_bytes, filetype="pdf")
+    try:
+        boundary_page = boundary_pdf.load_page(page_number - 1)
+        for wall in ordered_walls:
+            reason = _scope_boundary_reason(
+                wall,
+                page=boundary_page,
+                page_number=page_number,
+                page_width=page_width,
+                page_height=page_height,
+            )
+            if reason is not None:
+                boundary_reasons.append(reason)
+    finally:
+        boundary_pdf.close()
+
+    cropped = bool(boundary_reasons)
     reason_codes = (
-        (PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED, PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_BOUNDARY)
+        (PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED, *dict.fromkeys(boundary_reasons))
         if cropped
         else (PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,)
     )
@@ -915,7 +1040,9 @@ class PhysicalWallCandidateAuthority:
 
 __all__ = [
     "PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION",
-    "PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_BOUNDARY",
+    "PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED",
+    "PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_PAGE_BOUNDARY",
+    "PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY",
     "PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED",
     "PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE",
     "PhysicalWallCandidateAuthority",
