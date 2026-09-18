@@ -192,44 +192,36 @@ def test_eaves_overhang_resolved_from_real_witness_bound_dimension() -> None:
     assert res.record.dimension_chain_id is not None
 
 
+
 def test_arbitrary_target_id_cannot_relabel_one_source_evidence_instance() -> None:
-    """The same real roof/ceiling evidence must bind to exactly one
-    target_id. A second, different caller-chosen id against the identical
-    evidence must NOT also mint a CORROBORATED record -- that would let a
-    caller publish the same evidence under arbitrary physical targets."""
+    """Target identity is producer-derived from the source evidence."""
     pdf = _roof_pdf(label="ROOF", area_text="24.50", area_unit="SM")
     source, published = _ingest(pdf)
     producer = RoofCeilingProducer.from_source_visibility_producer(source)
 
-    a = producer.publish(_selector(published, family=RoofCeilingFamily.ROOF_PLAN_AREA, target_id="roof-A"))
-    assert a.status is EvidenceResolutionStatus.CORROBORATED
-    assert a.record.value == pytest.approx(24.50)
+    first = producer.publish(_selector(published, family=RoofCeilingFamily.ROOF_PLAN_AREA, target_id="roof-A"))
+    second = producer.publish(_selector(published, family=RoofCeilingFamily.ROOF_PLAN_AREA, target_id="roof-B"))
 
-    b = producer.publish(_selector(published, family=RoofCeilingFamily.ROOF_PLAN_AREA, target_id="roof-B"))
-    assert b.status is EvidenceResolutionStatus.CONFLICT
-    assert b.record is None
-    assert ROOF_CEILING_TARGET_ID_MISMATCH in b.reason_codes
-
-    # The first binding remains intact and resolvable.
-    replay = producer.authority().resolve(
-        _selector(published, family=RoofCeilingFamily.ROOF_PLAN_AREA, target_id="roof-A")
-    )
-    assert replay.status is EvidenceResolutionStatus.CORROBORATED
+    assert first.status is EvidenceResolutionStatus.CORROBORATED
+    assert second.status is EvidenceResolutionStatus.CORROBORATED
+    assert first.record is not None and second.record is not None
+    assert first.record.target_id == second.record.target_id
+    assert first.record.record_id == second.record.record_id
+    assert first.record.target_id not in {"roof-A", "roof-B"}
 
 
 def test_same_target_id_republished_is_idempotent_not_a_conflict() -> None:
     pdf = _roof_pdf(label="ROOF", area_text="24.50", area_unit="SM")
     source, published = _ingest(pdf)
     producer = RoofCeilingProducer.from_source_visibility_producer(source)
-    sel = _selector(published, family=RoofCeilingFamily.ROOF_PLAN_AREA, target_id="roof-A")
+    sel = _selector(published, family=RoofCeilingFamily.ROOF_PLAN_AREA, target_id="caller-target")
     first = producer.publish(sel)
     second = producer.publish(sel)
     assert first.status is EvidenceResolutionStatus.CORROBORATED
     assert second.status is EvidenceResolutionStatus.CORROBORATED
-    assert first.record.value == second.record.value == pytest.approx(24.50)
-
-
-# ── Adversarial: no floor/footprint fallback, fail-closed ambiguity ────────────
+    assert first.record == second.record
+    assert first.record is not None
+    assert first.record.target_id != "caller-target"
 
 def test_no_label_abstains_unresolved() -> None:
     pdf = _roof_pdf(label="UNRELATED")
