@@ -985,10 +985,21 @@ class BenchmarkAccuracyEngine:
                 continue
             if pid in logged_hallucinated_ids:
                 continue
+
+            raw_val = p_dict.get("value", p_dict.get("quantity", p_dict.get("actual", 0.0)))
+            if raw_val is None:
+                # An unmatched prediction with an explicit quantity=None published
+                # no commercial quantity at all (publication blocked / fail-closed
+                # abstention -- see pb_opening_deduction_pipeline.py's Item 21A
+                # gate). A hallucination requires an actual invented number; an
+                # abstention is the opposite of that, so it must never be scored
+                # as a hallucinated item.
+                continue
+
             logged_hallucinated_ids.add(pid)
 
             hallucinated_items += 1
-            act_val = float(p_dict.get("value", p_dict.get("quantity", p_dict.get("actual", 0.0))))
+            act_val = float(raw_val)
             unit = p_dict.get("unit")
             desc = p_dict.get("description", "Extracted quantity without BOQ counterpart")
             item_results.append(
