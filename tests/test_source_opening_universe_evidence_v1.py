@@ -57,7 +57,12 @@ from pb_physical_opening_authority import (
     PHYSICAL_OPENING_IDENTITY_RESOLVED,
     PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
 )
-from pb_source_observation_authority import SourceDecodeCoverageRecord
+from pb_source_observation_authority import (
+    ObservationSelector,
+    SourceDecodeCoverageRecord,
+    SourceObservationAuthority,
+    SourceObservationProducer,
+)
 from pb_source_opening_candidate_authority import (
     AuthenticatedViewportDecision,
     CandidateContextFilter,
@@ -69,6 +74,8 @@ from pb_source_opening_candidate_authority import (
     TagBindingEvidence,
     TagBindingRelationKind,
     TagObservation,
+    authenticate_tag_binding_evidence,
+    authenticate_viewport_decision,
     create_opening_candidate,
     derive_deterministic_candidate_id,
     validate_opening_decision_viewport,
@@ -142,13 +149,14 @@ def sample_view_class_authority(
 @pytest.fixture
 def sample_viewport_decision(
     sample_segmented_viewport: SegmentedViewport,
+    sample_view_class_authority: ViewportViewClassAuthority,
+    floor_plan_selector: ViewportViewClassSelector,
 ) -> AuthenticatedViewportDecision:
     """Fixture providing an authenticated viewport decision."""
-    return AuthenticatedViewportDecision(
+    return authenticate_viewport_decision(
         viewport=sample_segmented_viewport,
-        view_kind=VIEW_KIND_FLOOR_PLAN,
-        status=EvidenceResolutionStatus.CORROBORATED,
-        is_uncropped=True,
+        view_class_authority=sample_view_class_authority,
+        selector=floor_plan_selector,
     )
 
 
@@ -280,10 +288,11 @@ def test_one_arc_with_no_tag_remains_unresolved() -> None:
 def test_one_arc_beside_d1_binds_unambiguously() -> None:
     candidate = make_candidate()
     tag_obs = make_tag_obs(tag_text="D1", center=(122.0, 121.0), observation_id="tag_obs_d1")
-    evidence = TagBindingEvidence(
-        tag_observation_id="tag_obs_d1",
-        candidate_id=candidate.candidate_id,
+    evidence = authenticate_tag_binding_evidence(
+        tag=tag_obs,
+        candidate=candidate,
         relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=("obs_rel_01",),
     )
     result = OpeningIdentityResolver.resolve_tag_binding(
         candidate=candidate,
@@ -351,10 +360,11 @@ def test_tag_binding_semantic_family_filtering() -> None:
     assert result_window_tag.bound_tag is None
 
     tag_d = make_tag_obs(tag_text="D1", center=(120.0, 120.0), observation_id="obs_d1")
-    evidence = TagBindingEvidence(
-        tag_observation_id="obs_d1",
-        candidate_id=candidate.candidate_id,
+    evidence = authenticate_tag_binding_evidence(
+        tag=tag_d,
+        candidate=candidate,
         relation_kind=TagBindingRelationKind.EXPLICIT_APERTURE_TAG,
+        relation_observation_ids=("obs_rel_01",),
     )
     result_both = OpeningIdentityResolver.resolve_tag_binding(
         candidate=candidate,
@@ -1270,10 +1280,11 @@ def test_nearby_d1_with_authenticated_leader_relation_resolves() -> None:
     """7. Nearby D1 tag with authenticated leader relation resolves to PROVEN_SAME."""
     cand = make_candidate()
     tag_obs = make_tag_obs(tag_text="D1", center=(120.0, 120.0), observation_id="tag_d1")
-    evidence = TagBindingEvidence(
-        tag_observation_id="tag_d1",
-        candidate_id=cand.candidate_id,
+    evidence = authenticate_tag_binding_evidence(
+        tag=tag_obs,
+        candidate=cand,
         relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=("obs_rel_01",),
     )
     result = OpeningIdentityResolver.resolve_tag_binding(
         candidate=cand,
@@ -1507,3 +1518,419 @@ def test_same_physical_aperture_with_two_detector_modalities_not_double_counted(
     result_disjoint = OpeningIdentityResolver.compare_candidates(cand_arc, cand_interruption_disjoint)
     assert result_disjoint.proven_same is False
     assert result_disjoint.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+
+
+# ---------------------------------------------------------------------------
+# Review Hardening Suite: 15 Narrow Authority-Hardening Tests
+# ---------------------------------------------------------------------------
+
+
+def test_fabricated_authenticated_viewport_decision_without_authority_cannot_promote(
+    sample_tolerance: SourceToleranceProvenance,
+    sample_segmented_viewport: SegmentedViewport,
+) -> None:
+    """1. Fabricated AuthenticatedViewportDecision(CORROBORATED, FLOOR_PLAN) without authority resolution cannot promote CANDIDATE."""
+    with pytest.raises(ValueError, match="must be created via authenticate_viewport_decision"):
+        AuthenticatedViewportDecision(
+            viewport=sample_segmented_viewport,
+            view_kind=VIEW_KIND_FLOOR_PLAN,
+            status=EvidenceResolutionStatus.CORROBORATED,
+            is_uncropped=True,
+        )
+
+    fake_raw_decision = AuthenticatedViewportDecision(
+        viewport=sample_segmented_viewport,
+        view_kind=VIEW_KIND_FLOOR_PLAN,
+        status=EvidenceResolutionStatus.RAW,
+        is_uncropped=True,
+    )
+    cand = create_opening_candidate(
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="dimension_chain_opening",
+        source_observation_ids=("obs_1",),
+        source_lineage_root_ids=("root_1",),
+        tolerance_provenance=sample_tolerance,
+        viewport_decision=fake_raw_decision,
+        viewport_bbox=(0.0, 0.0, 1000.0, 1000.0),
+    )
+    assert cand.status == EvidenceResolutionStatus.RAW
+    assert "viewport_decision_rejected_floor_plan" in cand.reason_codes
+
+
+def test_authenticated_viewport_with_mismatched_scope_fails_closed(
+    sample_tolerance: SourceToleranceProvenance,
+    sample_viewport_decision: AuthenticatedViewportDecision,
+) -> None:
+    """2. Authenticated viewport whose ID/page does not match candidate scope fails closed to RAW."""
+    cand_wrong_vp = create_opening_candidate(
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_mismatched_02",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="dimension_chain_opening",
+        source_observation_ids=("obs_1",),
+        source_lineage_root_ids=("root_1",),
+        tolerance_provenance=sample_tolerance,
+        viewport_decision=sample_viewport_decision,
+        viewport_bbox=(0.0, 0.0, 1000.0, 1000.0),
+    )
+    assert cand_wrong_vp.status == EvidenceResolutionStatus.RAW
+    assert "viewport_decision_scope_mismatch_with_candidate" in cand_wrong_vp.reason_codes
+
+    cand_wrong_page = create_opening_candidate(
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_2",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="dimension_chain_opening",
+        source_observation_ids=("obs_1",),
+        source_lineage_root_ids=("root_1",),
+        tolerance_provenance=sample_tolerance,
+        viewport_decision=sample_viewport_decision,
+        viewport_bbox=(0.0, 0.0, 1000.0, 1000.0),
+    )
+    assert cand_wrong_page.status == EvidenceResolutionStatus.RAW
+    assert "viewport_decision_scope_mismatch_with_candidate" in cand_wrong_page.reason_codes
+
+
+def test_fabricated_tag_binding_evidence_without_relation_observations_cannot_bind() -> None:
+    """3. Fabricated TagBindingEvidence(status=CORROBORATED) without relation observations cannot bind."""
+    cand = make_candidate()
+    tag_obs = make_tag_obs(tag_text="D1", center=(120.0, 120.0), observation_id="tag_d1")
+
+    with pytest.raises(ValueError, match="must be produced via authenticate_tag_binding_evidence"):
+        TagBindingEvidence(
+            tag_observation_id="tag_d1",
+            candidate_id=cand.candidate_id,
+            relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+            document_id=cand.document_id,
+            revision_id=cand.revision_id,
+            source_sha256=cand.source_sha256,
+            snapshot_id=cand.snapshot_id,
+            page_id=cand.page_id,
+            viewport_id=cand.viewport_id,
+            relation_observation_ids=(),
+            status=EvidenceResolutionStatus.CORROBORATED,
+        )
+
+    empty_ev = authenticate_tag_binding_evidence(
+        tag=tag_obs,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(),
+    )
+    assert empty_ev.status == EvidenceResolutionStatus.ABSTAINED
+    assert "empty_relation_observation_ids_cannot_corroborate_relation" in empty_ev.reason_codes
+
+    result = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[tag_obs],
+        binding_evidences=[empty_ev],
+        expected_semantic_family="doors",
+    )
+    assert result.identity_state == IdentityState.UNRESOLVED
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert "spatial_proximity_without_authenticated_relation_ambiguous" in result.reason_codes
+
+
+def test_binding_relation_with_wrong_source_sha_cannot_bind() -> None:
+    """4. Binding relation with wrong source SHA cannot bind."""
+    cand = make_candidate(source_sha256="a" * 64)
+    tag_obs = make_tag_obs(tag_text="D1", center=(120.0, 120.0), source_sha256="a" * 64)
+    wrong_sha_ev = TagBindingEvidence(
+        tag_observation_id=tag_obs.observation_id,
+        candidate_id=cand.candidate_id,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        document_id=cand.document_id,
+        revision_id=cand.revision_id,
+        source_sha256="b" * 64,
+        snapshot_id=cand.snapshot_id,
+        page_id=cand.page_id,
+        viewport_id=cand.viewport_id,
+        relation_observation_ids=("obs_rel_01",),
+        status=EvidenceResolutionStatus.RAW,
+    )
+    result = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[tag_obs],
+        binding_evidences=[wrong_sha_ev],
+        expected_semantic_family="doors",
+    )
+    assert result.identity_state == IdentityState.UNRESOLVED
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+
+
+def test_binding_relation_with_wrong_revision_cannot_bind() -> None:
+    """5. Binding relation with wrong revision cannot bind."""
+    cand = make_candidate(revision_id="rev_01")
+    tag_obs = make_tag_obs(tag_text="D1", center=(120.0, 120.0), revision_id="rev_01")
+    wrong_rev_ev = TagBindingEvidence(
+        tag_observation_id=tag_obs.observation_id,
+        candidate_id=cand.candidate_id,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        document_id=cand.document_id,
+        revision_id="rev_02_mismatch",
+        source_sha256=cand.source_sha256,
+        snapshot_id=cand.snapshot_id,
+        page_id=cand.page_id,
+        viewport_id=cand.viewport_id,
+        relation_observation_ids=("obs_rel_01",),
+        status=EvidenceResolutionStatus.RAW,
+    )
+    result = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[tag_obs],
+        binding_evidences=[wrong_rev_ev],
+        expected_semantic_family="doors",
+    )
+    assert result.identity_state == IdentityState.UNRESOLVED
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+
+
+def test_binding_relation_with_wrong_viewport_cannot_bind() -> None:
+    """6. Binding relation with wrong viewport cannot bind."""
+    cand = make_candidate(viewport_id="vp_floor_plan_p1")
+    tag_obs = make_tag_obs(tag_text="D1", center=(120.0, 120.0), viewport_id="vp_floor_plan_p1")
+    wrong_vp_ev = TagBindingEvidence(
+        tag_observation_id=tag_obs.observation_id,
+        candidate_id=cand.candidate_id,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        document_id=cand.document_id,
+        revision_id=cand.revision_id,
+        source_sha256=cand.source_sha256,
+        snapshot_id=cand.snapshot_id,
+        page_id=cand.page_id,
+        viewport_id="vp_other_mismatch",
+        relation_observation_ids=("obs_rel_01",),
+        status=EvidenceResolutionStatus.RAW,
+    )
+    result = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[tag_obs],
+        binding_evidences=[wrong_vp_ev],
+        expected_semantic_family="doors",
+    )
+    assert result.identity_state == IdentityState.UNRESOLVED
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+
+
+def test_fabricated_tag_observation_lineage_strings_cannot_bridge_identity() -> None:
+    """7. Fabricated TagObservation copying candidate lineage strings cannot create PROVEN_SAME unless lineage IDs are authenticated."""
+    cand = make_candidate(
+        source_lineage_root_ids=("unauthenticated_fake_root_123",),
+    )
+    tag_fake_lineage = make_tag_obs(
+        tag_text="D1",
+        center=(120.0, 120.0),
+        source_lineage_root_ids=("unauthenticated_fake_root_123",),
+    )
+    result_unauth = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[tag_fake_lineage],
+        binding_evidences=[],
+        expected_semantic_family="doors",
+        source_observation_authority=None,
+    )
+    assert result_unauth.identity_state == IdentityState.UNRESOLVED
+    assert result_unauth.status == EvidenceResolutionStatus.ABSTAINED
+    assert "unauthenticated_lineage_strings_cannot_bridge_identity" in result_unauth.reason_codes
+
+    auth = SourceObservationProducer(producer_method="test", producer_version="1.0").authority()
+    result_with_auth = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[tag_fake_lineage],
+        binding_evidences=[],
+        expected_semantic_family="doors",
+        source_observation_authority=auth,
+    )
+    assert result_with_auth.identity_state == IdentityState.UNRESOLVED
+    assert result_with_auth.status == EvidenceResolutionStatus.ABSTAINED
+    assert "unauthenticated_lineage_strings_cannot_bridge_identity" in result_with_auth.reason_codes
+
+
+def test_direct_candidate_record_with_fake_candidate_id_rejected() -> None:
+    """8. Direct PhysicalOpeningCandidateRecord with fake but correctly formatted cand_op_<hash> is rejected."""
+    tol = SourceToleranceProvenance.from_scale_and_stroke(scale_ratio=100.0, stroke_width_pt=0.7)
+    with pytest.raises(ValueError, match="deterministic_candidate_id_mismatch"):
+        PhysicalOpeningCandidateRecord(
+            candidate_id="cand_op_0123456789abcdef0123",
+            document_id="doc_test",
+            revision_id="rev_test_01",
+            source_sha256="a" * 64,
+            snapshot_id="snap_01",
+            page_id="page_1",
+            viewport_id="vp_floor_plan_p1",
+            geometry=(100.0, 100.0, 140.0, 140.0),
+            structural_pattern="door_swing_arc",
+            context_kind="floor_plan_opening",
+            source_observation_ids=("obs_1",),
+            source_lineage_root_ids=("root_1",),
+            tolerance_provenance=tol,
+        )
+
+
+def test_direct_candidate_record_with_recomputed_id_accepted() -> None:
+    """9. Direct PhysicalOpeningCandidateRecord with correctly recomputed ID is accepted."""
+    tol = SourceToleranceProvenance.from_scale_and_stroke(scale_ratio=100.0, stroke_width_pt=0.7)
+    expected_id = derive_deterministic_candidate_id(
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        source_observation_ids=("obs_1",),
+        source_lineage_root_ids=("root_1",),
+    )
+    rec = PhysicalOpeningCandidateRecord(
+        candidate_id=expected_id,
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_1",),
+        source_lineage_root_ids=("root_1",),
+        tolerance_provenance=tol,
+    )
+    assert rec.candidate_id == expected_id
+
+
+def test_overlapping_opening_bboxes_with_centers_differing_by_tolerance_is_unresolved() -> None:
+    """10. Overlapping opening bboxes whose centers differ by > tolerance -> UNRESOLVED, not PROVEN_DISTINCT."""
+    tol = SourceToleranceProvenance.from_scale_and_stroke(scale_ratio=100.0, stroke_width_pt=10.0)
+    cand_a = make_candidate(
+        geometry=(100.0, 100.0, 200.0, 200.0),
+        tolerance_provenance=tol,
+        structural_pattern="dimension_chain_opening",
+    )
+    cand_b = make_candidate(
+        geometry=(140.0, 100.0, 240.0, 200.0),
+        tolerance_provenance=tol,
+        structural_pattern="dimension_chain_opening",
+    )
+    result = OpeningIdentityResolver.compare_candidates(cand_a, cand_b)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert "overlapping_apertures_with_disjoint_lineage_ambiguous" in result.reason_codes[1]
+
+
+def test_one_aperture_bbox_contained_inside_another_is_unresolved() -> None:
+    """11. One aperture bbox contained inside another -> UNRESOLVED."""
+    tol = SourceToleranceProvenance.from_scale_and_stroke(scale_ratio=100.0, stroke_width_pt=5.0)
+    cand_outer = make_candidate(
+        geometry=(100.0, 100.0, 200.0, 200.0),
+        tolerance_provenance=tol,
+        structural_pattern="dimension_chain_opening",
+    )
+    cand_inner = make_candidate(
+        geometry=(120.0, 120.0, 180.0, 180.0),
+        tolerance_provenance=tol,
+        structural_pattern="dimension_chain_opening",
+    )
+    result = OpeningIdentityResolver.compare_candidates(cand_outer, cand_inner)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+
+
+def test_two_disjoint_apertures_with_geometric_gap_exceeding_tolerance_is_proven_distinct() -> None:
+    """12. Two disjoint apertures with minimum geometric gap > tolerance in same authenticated viewport -> PROVEN_DISTINCT."""
+    tol = SourceToleranceProvenance.from_scale_and_stroke(scale_ratio=100.0, stroke_width_pt=10.0)
+    cand_a = make_candidate(
+        geometry=(100.0, 100.0, 150.0, 150.0),
+        tolerance_provenance=tol,
+        structural_pattern="dimension_chain_opening",
+    )
+    cand_b = make_candidate(
+        geometry=(200.0, 100.0, 250.0, 150.0),
+        tolerance_provenance=tol,
+        structural_pattern="dimension_chain_opening",
+    )
+    result = OpeningIdentityResolver.compare_candidates(cand_a, cand_b)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITIES_DISTINCT
+    assert result.status == EvidenceResolutionStatus.CORROBORATED
+    assert "distinct_physical_locations" in result.reason_codes[0]
+
+
+def test_two_disjoint_observations_in_different_viewports_is_unresolved() -> None:
+    """13. Two disjoint observations but different viewport -> UNRESOLVED pending cross-view authority."""
+    cand_vp1 = make_candidate(
+        viewport_id="vp_plan_01",
+        geometry=(100.0, 100.0, 150.0, 150.0),
+    )
+    cand_vp2 = make_candidate(
+        viewport_id="vp_plan_02",
+        geometry=(500.0, 100.0, 550.0, 150.0),
+    )
+    result = OpeningIdentityResolver.compare_candidates(cand_vp1, cand_vp2)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert "cross_viewport_unresolved_without_cross_view_authority" in result.reason_codes[0]
+
+
+def test_two_disjoint_apertures_with_same_type_mark_w1_proven_distinct() -> None:
+    """14. Two disjoint apertures with same type mark W1 -> PROVEN_DISTINCT physical instances."""
+    tag_w1_a = OpeningTagBindingResult(
+        candidate_id="cand_win_a",
+        bound_mark="W1",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        identity_state=IdentityState.PROVEN_SAME,
+    )
+    tag_w1_b = OpeningTagBindingResult(
+        candidate_id="cand_win_b",
+        bound_mark="W1",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        identity_state=IdentityState.PROVEN_SAME,
+    )
+    cand_a = make_candidate(
+        geometry=(100.0, 50.0, 150.0, 60.0),
+        semantic_family="windows",
+        tag_binding=tag_w1_a,
+    )
+    cand_b = make_candidate(
+        geometry=(300.0, 50.0, 350.0, 60.0),
+        semantic_family="windows",
+        tag_binding=tag_w1_b,
+    )
+    result = OpeningIdentityResolver.compare_candidates(cand_a, cand_b)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITIES_DISTINCT
+    assert result.status == EvidenceResolutionStatus.CORROBORATED
+
+
+def test_two_detector_modalities_with_partially_overlapping_geometry_is_unresolved() -> None:
+    """15. Two detector modalities with partially overlapping geometry -> UNRESOLVED."""
+    cand_arc = make_candidate(
+        geometry=(100.0, 100.0, 150.0, 150.0),
+        structural_pattern="door_swing_arc",
+    )
+    cand_jamb = make_candidate(
+        geometry=(120.0, 100.0, 170.0, 150.0),
+        structural_pattern="jamb_wall_interruption",
+    )
+    result = OpeningIdentityResolver.compare_candidates(cand_arc, cand_jamb)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert "differing_detector_modalities_at_same_location_ambiguous" in result.reason_codes[0]
+

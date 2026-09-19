@@ -41,6 +41,10 @@ from pb_physical_opening_authority import (
     PHYSICAL_OPENING_IDENTITY_RESOLVED,
     PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
 )
+from pb_source_observation_authority import (
+    ObservationSelector,
+    SourceObservationAuthority,
+)
 from pb_viewport_segmentation import SegmentedViewport
 from pb_viewport_view_class_authority import (
     VIEW_KIND_DETAIL,
@@ -53,7 +57,7 @@ from pb_viewport_view_class_authority import (
     ViewportViewClassSelector,
 )
 
-SOURCE_OPENING_CANDIDATE_SCHEMA_VERSION = "2.2.0"
+SOURCE_OPENING_CANDIDATE_SCHEMA_VERSION = "2.3.0"
 
 PT_TO_MM = 25.4 / 72.0
 MM_TO_PT = 72.0 / 25.4
@@ -305,16 +309,120 @@ class SourceToleranceProvenance:
 # ---------------------------------------------------------------------------
 
 
+_VIEWPORT_DECISION_SEAL = object()
+
+
 @dataclass(frozen=True)
 class AuthenticatedViewportDecision:
     """Authenticated viewport decision linking a SegmentedViewport and resolved view kind."""
 
     viewport: SegmentedViewport
     view_kind: str
-    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CORROBORATED
+    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
     is_uncropped: bool = True
+    selector: Optional[ViewportViewClassSelector] = None
     reason_codes: Tuple[str, ...] = ()
     schema_version: str = SOURCE_OPENING_CANDIDATE_SCHEMA_VERSION
+    _seal: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.status == EvidenceResolutionStatus.CORROBORATED:
+            if self._seal is not _VIEWPORT_DECISION_SEAL:
+                raise ValueError(
+                    "AuthenticatedViewportDecision with CORROBORATED status must be created via "
+                    "authenticate_viewport_decision() using ViewportViewClassAuthority"
+                )
+            if self.view_kind != VIEW_KIND_FLOOR_PLAN:
+                raise ValueError(
+                    f"AuthenticatedViewportDecision with CORROBORATED status must have view_kind "
+                    f"'{VIEW_KIND_FLOOR_PLAN}', got '{self.view_kind}'"
+                )
+
+
+def authenticate_viewport_decision(
+    *,
+    viewport: Optional[SegmentedViewport],
+    view_class_authority: ViewportViewClassAuthority,
+    selector: ViewportViewClassSelector,
+    require_uncropped: bool = True,
+) -> AuthenticatedViewportDecision:
+    """Lawful producer factory producing an AuthenticatedViewportDecision via ViewportViewClassAuthority.
+
+    Reuses existing ViewportViewClassAuthority and SegmentedViewport.
+    Rejects invented/fallback viewport IDs, non-floor-plan views, unsegmented viewports, and cropped viewports.
+    """
+    if viewport is None:
+        return AuthenticatedViewportDecision(
+            viewport=SegmentedViewport(
+                view_id=selector.viewport_id,
+                page_number=1,
+                view_type=VIEW_KIND_UNKNOWN,
+                label="",
+                title_bbox=(0.0, 0.0, 0.0, 0.0),
+                bounding_box=(0.0, 0.0, 0.0, 0.0),
+                status="unresolved",
+                boundary_source="none",
+                confidence=0.0,
+            ),
+            view_kind=VIEW_KIND_UNKNOWN,
+            status=EvidenceResolutionStatus.ABSTAINED,
+            is_uncropped=False,
+            selector=selector,
+            reason_codes=("viewport_segmentation_unresolved",),
+        )
+
+    if not viewport.bounding_box or len(viewport.bounding_box) != 4:
+        return AuthenticatedViewportDecision(
+            viewport=viewport,
+            view_kind=VIEW_KIND_UNKNOWN,
+            status=EvidenceResolutionStatus.ABSTAINED,
+            is_uncropped=False,
+            selector=selector,
+            reason_codes=("viewport_boundary_unresolved",),
+        )
+
+    class_res = view_class_authority.resolve(selector)
+    if class_res.status != EvidenceResolutionStatus.CORROBORATED or not class_res.record:
+        return AuthenticatedViewportDecision(
+            viewport=viewport,
+            view_kind=VIEW_KIND_UNKNOWN,
+            status=EvidenceResolutionStatus.ABSTAINED,
+            is_uncropped=False,
+            selector=selector,
+            reason_codes=(f"viewport_view_class_unresolved: {','.join(class_res.reason_codes)}",),
+        )
+
+    view_kind = class_res.record.view_kind
+    if view_kind != VIEW_KIND_FLOOR_PLAN:
+        return AuthenticatedViewportDecision(
+            viewport=viewport,
+            view_kind=view_kind,
+            status=EvidenceResolutionStatus.ABSTAINED,
+            is_uncropped=False,
+            selector=selector,
+            reason_codes=(f"non_floor_plan_view_kind_{view_kind}",),
+        )
+
+    is_uncropped = viewport.status != "cropped"
+    if require_uncropped and not is_uncropped:
+        return AuthenticatedViewportDecision(
+            viewport=viewport,
+            view_kind=view_kind,
+            status=EvidenceResolutionStatus.ABSTAINED,
+            is_uncropped=False,
+            selector=selector,
+            reason_codes=("viewport_boundary_cropped",),
+        )
+
+    return AuthenticatedViewportDecision(
+        viewport=viewport,
+        view_kind=view_kind,
+        status=EvidenceResolutionStatus.CORROBORATED,
+        is_uncropped=is_uncropped,
+        selector=selector,
+        reason_codes=("viewport_authenticated",),
+        _seal=_VIEWPORT_DECISION_SEAL,
+    )
 
 
 def validate_opening_decision_viewport(
@@ -329,25 +437,15 @@ def validate_opening_decision_viewport(
     Reuses existing ViewportViewClassAuthority and SegmentedViewport.
     Rejects invented/fallback viewport IDs, non-floor-plan views, and cropped viewports.
     """
-    if viewport is None:
-        return False, "viewport_segmentation_unresolved"
-
-    if not viewport.bounding_box or len(viewport.bounding_box) != 4:
-        return False, "viewport_boundary_unresolved"
-
-    # Resolve view class via official authority
-    class_res = view_class_authority.resolve(selector)
-    if class_res.status != EvidenceResolutionStatus.CORROBORATED or not class_res.record:
-        return False, f"viewport_view_class_unresolved: {','.join(class_res.reason_codes)}"
-
-    if class_res.record.view_kind != VIEW_KIND_FLOOR_PLAN:
-        return False, f"non_floor_plan_view_kind_{class_res.record.view_kind}"
-
-    # Check crop status from SegmentedViewport status
-    if require_uncropped and viewport.status == "cropped":
-        return False, "viewport_boundary_cropped"
-
-    return True, "viewport_authenticated"
+    decision = authenticate_viewport_decision(
+        viewport=viewport,
+        view_class_authority=view_class_authority,
+        selector=selector,
+        require_uncropped=require_uncropped,
+    )
+    if decision.status == EvidenceResolutionStatus.CORROBORATED:
+        return True, "viewport_authenticated"
+    return False, decision.reason_codes[0] if decision.reason_codes else "viewport_unauthenticated"
 
 
 # ---------------------------------------------------------------------------
@@ -462,16 +560,145 @@ class TagObservation:
         )
 
 
+_TAG_RELATION_SEAL = object()
+
+
 @dataclass(frozen=True)
 class TagBindingEvidence:
-    """Typed affirmative evidence establishing a relationship between a tag observation and candidate."""
+    """Typed affirmative evidence establishing an authenticated relationship between a tag observation and candidate."""
 
     tag_observation_id: str
     candidate_id: str
     relation_kind: TagBindingRelationKind
-    relation_observation_ids: Tuple[str, ...] = ()
-    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CORROBORATED
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    snapshot_id: str
+    page_id: str
+    viewport_id: str
+    relation_observation_ids: Tuple[str, ...]
+    source_lineage_root_ids: Tuple[str, ...] = ()
+    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
+    reason_codes: Tuple[str, ...] = ()
     schema_version: str = SOURCE_OPENING_CANDIDATE_SCHEMA_VERSION
+    _seal: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.status == EvidenceResolutionStatus.CORROBORATED:
+            if self._seal is not _TAG_RELATION_SEAL:
+                raise ValueError(
+                    "TagBindingEvidence with CORROBORATED status must be produced via "
+                    "authenticate_tag_binding_evidence()"
+                )
+            if not self.relation_observation_ids:
+                raise ValueError(
+                    "relation_observation_ids must be non-empty to corroborate tag binding relation"
+                )
+
+
+def authenticate_tag_binding_evidence(
+    *,
+    tag: TagObservation,
+    candidate: "PhysicalOpeningCandidateRecord",
+    relation_kind: TagBindingRelationKind,
+    relation_observation_ids: Sequence[str],
+    source_lineage_root_ids: Sequence[str] = (),
+    source_observation_authority: Optional[SourceObservationAuthority] = None,
+) -> TagBindingEvidence:
+    """Lawful factory validating and sealing TagBindingEvidence.
+
+    Verifies that tag and candidate scopes match (document, revision, sha256, snapshot, page, viewport).
+    Requires non-empty relation_observation_ids.
+    If source_observation_authority is provided, validates that relation_observation_ids exist
+    in the source observation authority.
+    """
+    clean_rel_obs = tuple(str(x) for x in relation_observation_ids if str(x).strip())
+    if not clean_rel_obs:
+        return TagBindingEvidence(
+            tag_observation_id=tag.observation_id,
+            candidate_id=candidate.candidate_id,
+            relation_kind=relation_kind,
+            document_id=candidate.document_id,
+            revision_id=candidate.revision_id,
+            source_sha256=candidate.source_sha256,
+            snapshot_id=candidate.snapshot_id,
+            page_id=candidate.page_id,
+            viewport_id=candidate.viewport_id,
+            relation_observation_ids=(),
+            source_lineage_root_ids=tuple(source_lineage_root_ids),
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=("empty_relation_observation_ids_cannot_corroborate_relation",),
+        )
+
+    # Scope agreement check between tag and candidate
+    scope_mismatch = (
+        tag.document_id != candidate.document_id
+        or tag.revision_id != candidate.revision_id
+        or tag.source_sha256 != candidate.source_sha256
+        or tag.snapshot_id != candidate.snapshot_id
+        or tag.page_id != candidate.page_id
+        or tag.viewport_id != candidate.viewport_id
+    )
+    if scope_mismatch:
+        return TagBindingEvidence(
+            tag_observation_id=tag.observation_id,
+            candidate_id=candidate.candidate_id,
+            relation_kind=relation_kind,
+            document_id=candidate.document_id,
+            revision_id=candidate.revision_id,
+            source_sha256=candidate.source_sha256,
+            snapshot_id=candidate.snapshot_id,
+            page_id=candidate.page_id,
+            viewport_id=candidate.viewport_id,
+            relation_observation_ids=clean_rel_obs,
+            source_lineage_root_ids=tuple(source_lineage_root_ids),
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=("scope_mismatch_between_tag_and_candidate",),
+        )
+
+    if source_observation_authority is not None:
+        for obs_id in clean_rel_obs:
+            sel = ObservationSelector(
+                document_id=candidate.document_id,
+                revision_id=candidate.revision_id,
+                source_sha256=candidate.source_sha256,
+                snapshot_id=candidate.snapshot_id,
+                observation_id=obs_id,
+            )
+            auth_res = source_observation_authority.resolve(sel)
+            if auth_res.status != EvidenceResolutionStatus.CORROBORATED:
+                return TagBindingEvidence(
+                    tag_observation_id=tag.observation_id,
+                    candidate_id=candidate.candidate_id,
+                    relation_kind=relation_kind,
+                    document_id=candidate.document_id,
+                    revision_id=candidate.revision_id,
+                    source_sha256=candidate.source_sha256,
+                    snapshot_id=candidate.snapshot_id,
+                    page_id=candidate.page_id,
+                    viewport_id=candidate.viewport_id,
+                    relation_observation_ids=clean_rel_obs,
+                    source_lineage_root_ids=tuple(source_lineage_root_ids),
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(f"unauthenticated_relation_observation_{obs_id}",),
+                )
+
+    return TagBindingEvidence(
+        tag_observation_id=tag.observation_id,
+        candidate_id=candidate.candidate_id,
+        relation_kind=relation_kind,
+        document_id=candidate.document_id,
+        revision_id=candidate.revision_id,
+        source_sha256=candidate.source_sha256,
+        snapshot_id=candidate.snapshot_id,
+        page_id=candidate.page_id,
+        viewport_id=candidate.viewport_id,
+        relation_observation_ids=clean_rel_obs,
+        source_lineage_root_ids=tuple(source_lineage_root_ids),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("authenticated_tag_binding_relation_established",),
+        _seal=_TAG_RELATION_SEAL,
+    )
 
 
 @dataclass(frozen=True)
@@ -576,6 +803,25 @@ class PhysicalOpeningCandidateRecord:
                 f"candidate_id must follow deterministic contract format 'cand_op_<hash>', got '{self.candidate_id}'"
             )
 
+        # Enforce deterministic candidate ID at the record level
+        recomputed_id = derive_deterministic_candidate_id(
+            document_id=self.document_id,
+            revision_id=self.revision_id,
+            source_sha256=self.source_sha256,
+            snapshot_id=self.snapshot_id,
+            page_id=self.page_id,
+            viewport_id=self.viewport_id,
+            geometry=self.geometry,
+            structural_pattern=self.structural_pattern,
+            source_observation_ids=self.source_observation_ids,
+            source_lineage_root_ids=self.source_lineage_root_ids,
+        )
+        if self.candidate_id != recomputed_id:
+            raise ValueError(
+                f"deterministic_candidate_id_mismatch: record candidate_id '{self.candidate_id}' != "
+                f"recomputed derived ID '{recomputed_id}'"
+            )
+
     def center(self) -> Tuple[float, float]:
         return (
             0.5 * (self.geometry[0] + self.geometry[2]),
@@ -674,12 +920,37 @@ def create_opening_candidate(
     if viewport_decision is not None:
         if (
             viewport_decision.status == EvidenceResolutionStatus.CORROBORATED
+            and viewport_decision._seal is _VIEWPORT_DECISION_SEAL
             and viewport_decision.view_kind == VIEW_KIND_FLOOR_PLAN
             and viewport_decision.is_uncropped
         ):
-            vp_authenticated = True
-            if effective_viewport_bbox is None and viewport_decision.viewport.bounding_box:
-                effective_viewport_bbox = tuple(viewport_decision.viewport.bounding_box)  # type: ignore[assignment]
+            # Verify candidate scope matches authenticated viewport decision
+            scope_ok = True
+            if viewport_decision.selector is not None:
+                sel = viewport_decision.selector
+                if (
+                    sel.document_id != document_id
+                    or sel.revision_id != revision_id
+                    or sel.source_sha256 != source_sha256
+                    or sel.snapshot_id != snapshot_id
+                    or sel.viewport_id != viewport_id
+                ):
+                    scope_ok = False
+            if (
+                viewport_decision.viewport.view_id != viewport_id
+                or (
+                    str(viewport_decision.viewport.page_number) != str(page_id)
+                    and f"page_{viewport_decision.viewport.page_number}" != str(page_id)
+                )
+            ):
+                scope_ok = False
+
+            if scope_ok:
+                vp_authenticated = True
+                if effective_viewport_bbox is None and viewport_decision.viewport.bounding_box:
+                    effective_viewport_bbox = tuple(viewport_decision.viewport.bounding_box)  # type: ignore[assignment]
+            else:
+                reason_codes.append("viewport_decision_scope_mismatch_with_candidate")
         else:
             reason_codes.append(f"viewport_decision_rejected_{viewport_decision.view_kind}")
     elif (
@@ -687,17 +958,34 @@ def create_opening_candidate(
         and view_class_authority is not None
         and view_class_selector is not None
     ):
-        vp_valid, vp_msg = validate_opening_decision_viewport(
+        dec = authenticate_viewport_decision(
             viewport=viewport,
             view_class_authority=view_class_authority,
             selector=view_class_selector,
         )
-        if vp_valid:
-            vp_authenticated = True
-            if effective_viewport_bbox is None and viewport.bounding_box:
-                effective_viewport_bbox = tuple(viewport.bounding_box)  # type: ignore[assignment]
+        if dec.status == EvidenceResolutionStatus.CORROBORATED:
+            scope_ok = (
+                view_class_selector.document_id == document_id
+                and view_class_selector.revision_id == revision_id
+                and view_class_selector.source_sha256 == source_sha256
+                and view_class_selector.snapshot_id == snapshot_id
+                and view_class_selector.viewport_id == viewport_id
+                and viewport.view_id == viewport_id
+                and (
+                    str(viewport.page_number) == str(page_id)
+                    or f"page_{viewport.page_number}" == str(page_id)
+                )
+            )
+            if scope_ok:
+                vp_authenticated = True
+                if effective_viewport_bbox is None and viewport.bounding_box:
+                    effective_viewport_bbox = tuple(viewport.bounding_box)  # type: ignore[assignment]
+            else:
+                reason_codes.append("viewport_scope_mismatch_with_candidate")
         else:
-            reason_codes.append(f"viewport_validation_failed_{vp_msg}")
+            reason_codes.append(
+                f"viewport_validation_failed_{dec.reason_codes[0] if dec.reason_codes else 'unknown'}"
+            )
     else:
         reason_codes.append("missing_authenticated_viewport_decision")
 
@@ -783,6 +1071,7 @@ class OpeningIdentityResolver:
         expected_semantic_family: str = "doors",
         viewport_authenticated: bool = True,
         revision_authenticated: bool = True,
+        source_observation_authority: Optional[SourceObservationAuthority] = None,
     ) -> OpeningTagBindingResult:
         """Bind an opening candidate to an authenticated TagObservation using typed evidence.
 
@@ -796,7 +1085,7 @@ class OpeningIdentityResolver:
         - Multiple competing tags fail closed as CONFLICT.
         - Spatial proximity alone is candidate evidence, NOT identity authority. PROVEN_SAME strictly
           requires typed TagBindingEvidence (e.g. leader, shared annotation, explicit aperture tag)
-          or shared explicit source lineage. A nearby tag without an authenticated relation returns UNRESOLVED.
+          or shared authenticated source lineage. A nearby tag without an authenticated relation returns UNRESOLVED.
         """
         # Strictly reject naked strings or raw tuples
         for tag in nearby_tags:
@@ -915,22 +1204,67 @@ class OpeningIdentityResolver:
         relation_codes: list[str] = []
 
         for ev in binding_evidences:
+            if not isinstance(ev, TagBindingEvidence):
+                continue
             if (
-                ev.tag_observation_id == target_tag.observation_id
-                and ev.candidate_id == candidate.candidate_id
-                and ev.status == EvidenceResolutionStatus.CORROBORATED
+                ev.status != EvidenceResolutionStatus.CORROBORATED
+                or ev._seal is not _TAG_RELATION_SEAL
             ):
-                has_typed_relation = True
-                relation_codes.append(f"relation_{ev.relation_kind.value}")
+                continue
+            if not ev.relation_observation_ids:
+                continue
+
+            # Provenance checks: must match candidate and target tag
+            if (
+                ev.tag_observation_id != target_tag.observation_id
+                or ev.candidate_id != candidate.candidate_id
+                or ev.document_id != candidate.document_id
+                or ev.document_id != target_tag.document_id
+                or ev.revision_id != candidate.revision_id
+                or ev.revision_id != target_tag.revision_id
+                or ev.source_sha256 != candidate.source_sha256
+                or ev.source_sha256 != target_tag.source_sha256
+                or ev.snapshot_id != candidate.snapshot_id
+                or ev.snapshot_id != target_tag.snapshot_id
+                or ev.page_id != candidate.page_id
+                or ev.page_id != target_tag.page_id
+                or ev.viewport_id != candidate.viewport_id
+                or ev.viewport_id != target_tag.viewport_id
+            ):
+                continue
+
+            has_typed_relation = True
+            relation_codes.append(f"relation_{ev.relation_kind.value}")
 
         # Check for shared explicit lineage between candidate and tag observation
-        shared_lineage = bool(
+        shared_lineage_ids = (
             set(candidate.source_lineage_root_ids) & set(target_tag.source_lineage_root_ids)
-            or set(candidate.source_observation_ids) & set(target_tag.source_observation_ids)
+        ) | (
+            set(candidate.source_observation_ids) & set(target_tag.source_observation_ids)
         )
-        if shared_lineage:
-            has_typed_relation = True
-            relation_codes.append("shared_explicit_source_lineage")
+
+        if shared_lineage_ids:
+            if source_observation_authority is None:
+                relation_codes.append("unauthenticated_lineage_strings_cannot_bridge_identity")
+            else:
+                lineage_authenticated = False
+                for lid in shared_lineage_ids:
+                    sel = ObservationSelector(
+                        document_id=candidate.document_id,
+                        revision_id=candidate.revision_id,
+                        source_sha256=candidate.source_sha256,
+                        snapshot_id=candidate.snapshot_id,
+                        observation_id=lid,
+                    )
+                    auth_res = source_observation_authority.resolve(sel)
+                    if auth_res.status == EvidenceResolutionStatus.CORROBORATED:
+                        lineage_authenticated = True
+                        break
+                if lineage_authenticated:
+                    has_typed_relation = True
+                    relation_codes.append("shared_authenticated_source_lineage")
+                else:
+                    relation_codes.append("unauthenticated_lineage_strings_cannot_bridge_identity")
 
         if not has_typed_relation:
             # Spatial proximity alone nominates candidate, but cannot prove binding authority
@@ -943,6 +1277,7 @@ class OpeningIdentityResolver:
                 reason_codes=(
                     "spatial_proximity_without_authenticated_relation_ambiguous",
                     "proximity_is_candidate_evidence_not_identity_authority",
+                    *relation_codes,
                 ),
             )
 
@@ -971,15 +1306,15 @@ class OpeningIdentityResolver:
            - Shared authenticated observation lineage
            - Non-conflicting classifications
         2. PROVEN_DISTINCT requires affirmative proof of physical separation:
-           - Non-overlapping physical apertures at different spatial locations exceeding derived tolerance
-             inside the same authenticated viewport.
+           - Non-overlapping physical apertures at affirmatively disjoint spatial locations exceeding derived
+             tolerance (minimum boundary separation gap > tolerance) inside the same authenticated viewport.
         3. UNRESOLVED handles conflicting or insufficient evidence:
            - Different context kinds (type definition in schedule vs physical floor plan instance) are
              not comparable for physical instance identity -> UNRESOLVED.
            - Conflicting classifications (semantic family, structural pattern, conflicting tags, conflicting
-             dimensions) at coincident/proximate locations indicate detector or annotation conflict,
+             dimensions) at coincident/proximate/overlapping locations indicate detector or annotation conflict,
              NOT two separate physical objects -> UNRESOLVED.
-           - Proximate candidates with disjoint lineage -> UNRESOLVED.
+           - Overlapping apertures or proximate candidates with disjoint lineage -> UNRESOLVED.
         """
         # 1. Cross-Document check
         if cand_a.document_id != cand_b.document_id:
@@ -1048,27 +1383,51 @@ class OpeningIdentityResolver:
                 reason_codes=("cross_viewport_unresolved_without_cross_view_authority",),
             )
 
-        # 8. Spatial distance between aperture centers
-        cax, cay = cand_a.center()
-        cbx, cby = cand_b.center()
-        dist = math.hypot(cax - cbx, cay - cby)
+        # 8. Physical Separation vs Overlap Analysis
+        ax0, ay0, ax1, ay1 = (
+            min(cand_a.geometry[0], cand_a.geometry[2]),
+            min(cand_a.geometry[1], cand_a.geometry[3]),
+            max(cand_a.geometry[0], cand_a.geometry[2]),
+            max(cand_a.geometry[1], cand_a.geometry[3]),
+        )
+        bx0, by0, bx1, by1 = (
+            min(cand_b.geometry[0], cand_b.geometry[2]),
+            min(cand_b.geometry[1], cand_b.geometry[3]),
+            max(cand_b.geometry[0], cand_b.geometry[2]),
+            max(cand_b.geometry[1], cand_b.geometry[3]),
+        )
+
+        ix0 = max(ax0, bx0)
+        iy0 = max(ay0, by0)
+        ix1 = min(ax1, bx1)
+        iy1 = min(ay1, by1)
+        has_overlap = (ix1 > ix0) and (iy1 > iy0)
+        a_contains_b = (ax0 <= bx0 <= bx1 <= ax1) and (ay0 <= by0 <= by1 <= ay1)
+        b_contains_a = (bx0 <= ax0 <= ax1 <= bx1) and (by0 <= ay0 <= ay1 <= by1)
+        has_containment = a_contains_b or b_contains_a
+
+        dx = max(0.0, ax0 - bx1, bx0 - ax1)
+        dy = max(0.0, ay0 - by1, by0 - ay1)
+        gap = math.hypot(dx, dy)
+        is_disjoint = (not has_overlap) and (not has_containment) and (gap > 0.0)
+
         tol = max(
             cand_a.tolerance_provenance.derived_tolerance_pt,
             cand_b.tolerance_provenance.derived_tolerance_pt,
         )
 
-        # Affirmative Physical Separation: distance exceeds tolerance envelope
-        if dist > tol:
+        # Affirmative Physical Separation: disjoint apertures with edge gap exceeding tolerance
+        if is_disjoint and gap > tol:
             return PhysicalOpeningIdentityResult(
                 status=EvidenceResolutionStatus.CORROBORATED,
                 physical_opening_identity=PHYSICAL_OPENING_IDENTITIES_DISTINCT,
                 proven_same=False,
                 reason_codes=(
-                    f"distinct_physical_locations_delta_{dist:.2f}pt_exceeds_tol_{tol:.2f}pt",
+                    f"distinct_physical_locations_disjoint_gap_{gap:.2f}pt_exceeds_tol_{tol:.2f}pt",
                 ),
             )
 
-        # Proximate or Coincident Candidates (dist <= tol):
+        # Proximate or Overlapping Candidates (not is_disjoint or gap <= tol):
         # Disagreements here represent conflicting observations or differing detector modalities,
         # NOT two distinct physical objects.
 
@@ -1151,14 +1510,20 @@ class OpeningIdentityResolver:
                 reason_codes=("shared_authenticated_lineage_with_coincident_geometry",),
             )
 
-        # Proximate/coincident without shared lineage -> UNRESOLVED
+        # Proximate or overlapping candidates without shared lineage -> UNRESOLVED
+        reason = (
+            "overlapping_apertures_with_disjoint_lineage_ambiguous"
+            if (has_overlap or has_containment)
+            else "proximate_candidates_with_disjoint_lineage_ambiguous"
+        )
         return PhysicalOpeningIdentityResult(
             status=EvidenceResolutionStatus.ABSTAINED,
             physical_opening_identity=PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
             proven_same=False,
             reason_codes=(
-                "proximate_or_coincident_candidates_with_disjoint_lineage_ambiguous",
-                f"dist_{dist:.2f}pt_within_tol_{tol:.2f}pt",
+                f"proximate_or_coincident_candidates_with_disjoint_lineage_ambiguous_{reason}",
+                reason,
+                f"gap_{gap:.2f}pt_within_tol_{tol:.2f}pt",
             ),
         )
 
@@ -1175,6 +1540,8 @@ __all__ = [
     "TagBindingEvidence",
     "TagBindingRelationKind",
     "TagObservation",
+    "authenticate_tag_binding_evidence",
+    "authenticate_viewport_decision",
     "create_opening_candidate",
     "derive_deterministic_candidate_id",
     "validate_opening_decision_viewport",
