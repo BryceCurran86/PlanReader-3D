@@ -58,8 +58,12 @@ from pb_source_opening_candidate_authority import (
     OpeningTagBindingResult,
     PhysicalOpeningCandidateRecord,
     SourceToleranceProvenance,
+    TagObservation,
+    create_opening_candidate,
+    derive_deterministic_candidate_id,
     validate_opening_decision_viewport,
 )
+
 from pb_viewport_segmentation import SegmentedViewport
 from pb_viewport_view_class_authority import (
     VIEW_KIND_DETAIL,
@@ -145,7 +149,6 @@ def test_one_arc_with_no_tag_remains_unresolved(sample_tolerance: SourceToleranc
         source_lineage_root_ids=("root_01",),
         tolerance_provenance=sample_tolerance,
         status=EvidenceResolutionStatus.CANDIDATE,
-        inferred_tag=None,
     )
 
     result = OpeningIdentityResolver.resolve_tag_binding(
@@ -182,8 +185,8 @@ def test_one_arc_beside_d1_binds_unambiguously(sample_tolerance: SourceTolerance
         source_lineage_root_ids=("root_02",),
         tolerance_provenance=sample_tolerance,
         status=EvidenceResolutionStatus.CANDIDATE,
-        inferred_tag=None,
     )
+
 
     nearby_tags = [("D1", (122.0, 121.0))]
     result = OpeningIdentityResolver.resolve_tag_binding(
@@ -341,8 +344,8 @@ def test_one_arc_beside_two_plausible_tags_fails_closed(
         source_lineage_root_ids=("root_03",),
         tolerance_provenance=sample_tolerance,
         status=EvidenceResolutionStatus.CANDIDATE,
-        inferred_tag=None,
     )
+
 
     nearby_tags = [
         ("D1", (121.0, 120.0)),
@@ -604,7 +607,6 @@ def test_dimension_chain_window_with_no_type_mark(sample_tolerance: SourceTolera
         tolerance_provenance=sample_tolerance,
         status=EvidenceResolutionStatus.CANDIDATE,
         dimension_mm=(1500.0, 1200.0),
-        inferred_tag=None,
     )
 
     result = OpeningIdentityResolver.resolve_tag_binding(
@@ -640,8 +642,8 @@ def test_two_possible_wtags_fails_closed(sample_tolerance: SourceToleranceProven
         tolerance_provenance=sample_tolerance,
         status=EvidenceResolutionStatus.CANDIDATE,
         dimension_mm=(1500.0, 1200.0),
-        inferred_tag=None,
     )
+
 
     nearby_tags = [
         ("W1", (231.0, 110.0)),
@@ -1165,7 +1167,7 @@ def test_nearby_openings_with_conflicting_tags_inside_tolerance_are_proven_disti
         scale_residual_mm=1.5,
     )
     # Two adjacent doors sharing a frame, centers 2.0 pt apart (within derived tolerance ~12.75 pt)
-    # but one is tagged D1 and one is tagged D2
+    # but one has validated tag D1 and one has validated tag D2
     cand_1 = PhysicalOpeningCandidateRecord(
         candidate_id="cand_frame_d1",
         document_id="doc_test",
@@ -1181,7 +1183,12 @@ def test_nearby_openings_with_conflicting_tags_inside_tolerance_are_proven_disti
         source_lineage_root_ids=("root_d1",),
         tolerance_provenance=tol,
         status=EvidenceResolutionStatus.CANDIDATE,
-        inferred_tag="D1",
+        tag_binding=OpeningTagBindingResult(
+            candidate_id="cand_frame_d1",
+            bound_mark="D1",
+            status=EvidenceResolutionStatus.CORROBORATED,
+            identity_state=IdentityState.PROVEN_SAME,
+        ),
     )
     cand_2 = PhysicalOpeningCandidateRecord(
         candidate_id="cand_frame_d2",
@@ -1198,13 +1205,19 @@ def test_nearby_openings_with_conflicting_tags_inside_tolerance_are_proven_disti
         source_lineage_root_ids=("root_d2",),
         tolerance_provenance=tol,
         status=EvidenceResolutionStatus.CANDIDATE,
-        inferred_tag="D2",
+        tag_binding=OpeningTagBindingResult(
+            candidate_id="cand_frame_d2",
+            bound_mark="D2",
+            status=EvidenceResolutionStatus.CORROBORATED,
+            identity_state=IdentityState.PROVEN_SAME,
+        ),
     )
 
     result = OpeningIdentityResolver.compare_candidates(cand_1, cand_2)
     assert result.proven_same is False
     assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITIES_DISTINCT
-    assert "conflicting_tag_marks_D1_vs_D2" in result.reason_codes
+    assert "conflicting_validated_tags_D1_vs_D2" in result.reason_codes[0]
+
 
 
 # ---------------------------------------------------------------------------
@@ -1309,4 +1322,832 @@ def test_nearby_candidates_with_disjoint_lineage_inside_tolerance_are_unresolved
     assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
     assert result.status == EvidenceResolutionStatus.ABSTAINED
     assert "disjoint_lineage_ambiguous" in result.reason_codes[0]
+
+
+# ---------------------------------------------------------------------------
+# Requirement 7: Regression Matrix (Tests 33 to 46)
+# ---------------------------------------------------------------------------
+
+
+def test_regression_matrix_1_coincident_geometry_plus_disjoint_lineage_is_unresolved(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """1. coincident geometry + disjoint lineage -> UNRESOLVED."""
+    cand_a = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_geom_coincident_a",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_a",),
+        source_lineage_root_ids=("lineage_root_alpha",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+    cand_b = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_geom_coincident_b",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),  # Exactly identical geometry
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_b",),
+        source_lineage_root_ids=("lineage_root_beta",),  # Disjoint lineage!
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+
+    result = OpeningIdentityResolver.compare_candidates(cand_a, cand_b)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert "proximate_or_coincident_candidates_with_disjoint_lineage_ambiguous" in result.reason_codes[0]
+
+
+def test_regression_matrix_2_same_dimensions_plus_disjoint_lineage_is_unresolved(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """2. same dimensions + disjoint lineage -> UNRESOLVED."""
+    cand_a = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_dim_a",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="dimension_chain_opening",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_a",),
+        source_lineage_root_ids=("root_dim_a",),
+        tolerance_provenance=sample_tolerance,
+        dimension_mm=(1500.0, 1200.0),
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+    cand_b = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_dim_b",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.1, 100.1, 140.1, 140.1),  # Inside tolerance
+        structural_pattern="dimension_chain_opening",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_b",),
+        source_lineage_root_ids=("root_dim_b",),  # Disjoint lineage!
+        tolerance_provenance=sample_tolerance,
+        dimension_mm=(1500.0, 1200.0),  # Exactly same dimensions!
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+
+    result = OpeningIdentityResolver.compare_candidates(cand_a, cand_b)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+
+
+def test_regression_matrix_3_different_document_ids_never_proven_same(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """3. different document IDs + coincident geometry -> never PROVEN_SAME (UNRESOLVED)."""
+    cand_a = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_doc_a",
+        document_id="doc_first_tender",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_a",),
+        source_lineage_root_ids=("root_01",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+    cand_b = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_doc_b",
+        document_id="doc_second_tender",  # Different document!
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_b",),
+        source_lineage_root_ids=("root_01",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+
+    result = OpeningIdentityResolver.compare_candidates(cand_a, cand_b)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert "cross_document_identity_unresolved" in result.reason_codes[0]
+
+
+def test_regression_matrix_4_different_revision_ids_never_proven_same(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """4. different revision IDs + coincident geometry -> never PROVEN_SAME (UNRESOLVED)."""
+    cand_a = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_rev_a",
+        document_id="doc_test",
+        revision_id="rev_architectural_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_a",),
+        source_lineage_root_ids=("root_01",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+    cand_b = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_rev_b",
+        document_id="doc_test",
+        revision_id="rev_architectural_02",  # Different revision!
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_b",),
+        source_lineage_root_ids=("root_01",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+
+    result = OpeningIdentityResolver.compare_candidates(cand_a, cand_b)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert "cross_revision_identity_unresolved" in result.reason_codes[0]
+
+
+def test_regression_matrix_5_different_source_sha256_never_proven_same(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """5. different source SHA256 + coincident geometry -> never PROVEN_SAME (UNRESOLVED)."""
+    cand_a = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_sha_a",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="1" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_a",),
+        source_lineage_root_ids=("root_01",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+    cand_b = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_sha_b",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="2" * 64,  # Different SHA256 hash!
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_b",),
+        source_lineage_root_ids=("root_01",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+
+    result = OpeningIdentityResolver.compare_candidates(cand_a, cand_b)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert "source_sha256_mismatch_unresolved" in result.reason_codes[0]
+
+
+def test_regression_matrix_6_incompatible_snapshots_never_proven_same(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """6. incompatible snapshots -> never PROVEN_SAME (UNRESOLVED)."""
+    cand_a = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_snap_a",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_run_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_a",),
+        source_lineage_root_ids=("root_01",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+    cand_b = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_snap_b",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_run_02",  # Different snapshot!
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_b",),
+        source_lineage_root_ids=("root_01",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+
+    result = OpeningIdentityResolver.compare_candidates(cand_a, cand_b)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert "snapshot_id_mismatch_unresolved" in result.reason_codes[0]
+
+
+def test_regression_matrix_7_same_page_id_from_different_documents_never_proven_same(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """7. same page_id string from different documents -> never PROVEN_SAME."""
+    cand_a = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_same_page_doc_a",
+        document_id="doc_first_tender",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",  # Same page ID string!
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_a",),
+        source_lineage_root_ids=("root_01",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+    cand_b = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_same_page_doc_b",
+        document_id="doc_second_tender",  # Different document!
+        revision_id="rev_test_01",
+        source_sha256="b" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",  # Same page ID string!
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_b",),
+        source_lineage_root_ids=("root_01",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+
+    result = OpeningIdentityResolver.compare_candidates(cand_a, cand_b)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+
+
+def test_regression_matrix_8_shared_authenticated_lineage_proven_same_only_when_all_scope_agrees(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """8. identical geometry + shared authenticated observation lineage -> PROVEN_SAME only if every hard scope constraint agrees."""
+    base_a = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_scope_a",
+        document_id="doc_authoritative",
+        revision_id="rev_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_lineage_shared",),
+        source_lineage_root_ids=("root_lineage_shared",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+    base_b = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_scope_b",
+        document_id="doc_authoritative",
+        revision_id="rev_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_lineage_shared",),
+        source_lineage_root_ids=("root_lineage_shared",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+
+    # All scopes agree + shared lineage -> PROVEN_SAME
+    res_agree = OpeningIdentityResolver.compare_candidates(base_a, base_b)
+    assert res_agree.proven_same is True
+    assert res_agree.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_RESOLVED
+
+    # Scope mutation: different revision -> immediately flips to UNRESOLVED
+    mut_rev = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_scope_b_mut",
+        document_id=base_b.document_id,
+        revision_id="rev_02",  # Mismatch!
+        source_sha256=base_b.source_sha256,
+        snapshot_id=base_b.snapshot_id,
+        page_id=base_b.page_id,
+        viewport_id=base_b.viewport_id,
+        geometry=base_b.geometry,
+        structural_pattern=base_b.structural_pattern,
+        context_kind=base_b.context_kind,
+        source_observation_ids=base_b.source_observation_ids,
+        source_lineage_root_ids=base_b.source_lineage_root_ids,
+        tolerance_provenance=base_b.tolerance_provenance,
+    )
+    res_disagree = OpeningIdentityResolver.compare_candidates(base_a, mut_rev)
+    assert res_disagree.proven_same is False
+    assert res_disagree.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+
+
+def test_regression_matrix_9_identical_geometry_with_no_identity_bridge_is_unresolved(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """9. identical geometry + no identity bridge -> UNRESOLVED."""
+    cand_a = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_no_bridge_a",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=(),  # Empty observation ids
+        source_lineage_root_ids=(),  # Empty lineage
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+    cand_b = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_no_bridge_b",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=(),
+        source_lineage_root_ids=(),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+
+    result = OpeningIdentityResolver.compare_candidates(cand_a, cand_b)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+
+
+def test_regression_matrix_10_two_equal_w1_windows_remain_distinct_physical_instances(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """10. two equal W1 windows -> two physical instances, never collapsed by type equality."""
+    win_1 = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_w1_room_north",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 50.0, 160.0, 60.0),
+        structural_pattern="dimension_chain_opening",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_w1_north",),
+        source_lineage_root_ids=("root_w1_north",),
+        tolerance_provenance=sample_tolerance,
+        tag_binding=OpeningTagBindingResult(
+            candidate_id="cand_w1_room_north",
+            bound_mark="W1",
+            status=EvidenceResolutionStatus.CORROBORATED,
+            identity_state=IdentityState.PROVEN_SAME,
+        ),
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+    win_2 = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_w1_room_south",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(350.0, 50.0, 410.0, 60.0),
+        structural_pattern="dimension_chain_opening",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_w1_south",),
+        source_lineage_root_ids=("root_w1_south",),
+        tolerance_provenance=sample_tolerance,
+        tag_binding=OpeningTagBindingResult(
+            candidate_id="cand_w1_room_south",
+            bound_mark="W1",  # Same W1 type mark!
+            status=EvidenceResolutionStatus.CORROBORATED,
+            identity_state=IdentityState.PROVEN_SAME,
+        ),
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+
+    result = OpeningIdentityResolver.compare_candidates(win_1, win_2)
+    # Must remain distinct instances! Type equality must NEVER collapse them!
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITIES_DISTINCT
+    assert "distinct_locations" in result.reason_codes[0]
+
+
+def test_regression_matrix_11_plan_physical_opening_vs_schedule_type_definition_never_physical_proven_same(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """11. plan physical opening vs schedule TYPE_DEFINITION -> never physical PROVEN_SAME."""
+    plan_door = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_room_101_door",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_plan_d1",),
+        source_lineage_root_ids=("root_01",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+    sched_type_card = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_sched_type_d1",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_5",
+        viewport_id="vp_schedule_page",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="schedule_type_definition",  # Type definition in schedule
+        source_observation_ids=("obs_sched_d1",),
+        source_lineage_root_ids=("root_01",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+
+    result = OpeningIdentityResolver.compare_candidates(plan_door, sched_type_card)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITIES_DISTINCT
+    assert "different_context_kinds" in result.reason_codes
+
+
+def test_regression_matrix_12_plan_opening_vs_legend_example_symbol_never_physical_proven_same(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """12. plan opening vs legend/example symbol -> never physical PROVEN_SAME."""
+    plan_door = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_room_102_door",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_plan_d2",),
+        source_lineage_root_ids=("root_02",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+    legend_symbol = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_legend_symbol_door",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(550.0, 50.0, 590.0, 90.0),
+        structural_pattern="door_swing_arc",
+        context_kind="legend_example_symbol",  # Sample symbol in legend definition
+        source_observation_ids=("obs_legend_d",),
+        source_lineage_root_ids=("root_02",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+
+    result = OpeningIdentityResolver.compare_candidates(plan_door, legend_symbol)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITIES_DISTINCT
+    assert "different_context_kinds" in result.reason_codes
+
+
+def test_regression_matrix_13_paired_double_door_vs_single_door_observation_fails_closed(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """13. paired/double door vs two adjacent single-door observations -> UNRESOLVED unless structural evidence independently resolves it."""
+    cand_paired = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_paired_door",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 180.0, 140.0),
+        structural_pattern="paired_door_swing",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_paired",),
+        source_lineage_root_ids=("root_paired",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+    cand_single = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_single_leaf",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",  # Different structural pattern!
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_leaf_1",),
+        source_lineage_root_ids=("root_leaf_1",),
+        tolerance_provenance=sample_tolerance,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+
+    result = OpeningIdentityResolver.compare_candidates(cand_paired, cand_single)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITIES_DISTINCT
+    assert "conflicting_structural_patterns" in result.reason_codes
+
+
+def test_regression_matrix_14_two_nearby_distinct_objects_within_tolerance_envelope_never_collapse(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """14. two nearby distinct objects both within the same tolerance envelope -> tolerance alone cannot collapse them."""
+    tol = SourceToleranceProvenance.from_residuals(
+        scale_ratio=100.0,
+        residuals_pt=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+        stroke_width_pt=0.7,
+    )
+    cand_1 = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_near_1",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_1",),
+        source_lineage_root_ids=("lineage_1",),
+        tolerance_provenance=tol,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+    cand_2 = PhysicalOpeningCandidateRecord(
+        candidate_id="cand_near_2",
+        document_id="doc_test",
+        revision_id="rev_test_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(101.5, 100.0, 141.5, 140.0),  # 1.5 pt offset <= tol (~11 pt)
+        structural_pattern="door_swing_arc",
+        context_kind="floor_plan_opening",
+        source_observation_ids=("obs_2",),
+        source_lineage_root_ids=("lineage_2",),  # Disjoint lineage!
+        tolerance_provenance=tol,
+        status=EvidenceResolutionStatus.CANDIDATE,
+    )
+
+    result = OpeningIdentityResolver.compare_candidates(cand_1, cand_2)
+    # Tolerance envelope alone DOES NOT establish identity!
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+
+
+# ---------------------------------------------------------------------------
+# Lawful Candidate Constructor & Context Filter Enforcement Tests
+# ---------------------------------------------------------------------------
+
+
+def test_create_opening_candidate_enforces_schedule_context_filter(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """Candidate constructor marks candidate ABSTAINED when constructed in schedule context."""
+    candidate = create_opening_candidate(
+        document_id="doc_test",
+        revision_id="rev_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_2",
+        viewport_id="vp_sched_01",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        source_observation_ids=("obs_1",),
+        source_lineage_root_ids=("root_1",),
+        tolerance_provenance=sample_tolerance,
+        view_kind=VIEW_KIND_SCHEDULE,  # Schedule viewport!
+    )
+    assert candidate.status == EvidenceResolutionStatus.ABSTAINED
+    assert "non_floor_plan_context_schedule" in candidate.reason_codes
+
+
+def test_create_opening_candidate_enforces_title_block_filter(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """Candidate constructor marks candidate ABSTAINED when inside title block."""
+    candidate = create_opening_candidate(
+        document_id="doc_test",
+        revision_id="rev_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(650.0, 500.0, 670.0, 520.0),
+        structural_pattern="door_swing_arc",
+        source_observation_ids=("obs_1",),
+        source_lineage_root_ids=("root_1",),
+        tolerance_provenance=sample_tolerance,
+        viewport_bbox=(50.0, 50.0, 750.0, 550.0),
+        title_block_bbox=(600.0, 480.0, 750.0, 550.0),  # Inside title block!
+    )
+    assert candidate.status == EvidenceResolutionStatus.ABSTAINED
+    assert "title_block_or_outside_viewport" in candidate.reason_codes
+
+
+def test_create_opening_candidate_enforces_sanitary_filter(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """Candidate constructor marks candidate ABSTAINED when matching sanitary fixture."""
+    candidate = create_opening_candidate(
+        document_id="doc_test",
+        revision_id="rev_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        source_observation_ids=("obs_1",),
+        source_lineage_root_ids=("root_1",),
+        tolerance_provenance=sample_tolerance,
+        layer="A-FIXT-SANITARY",
+        nearby_text="WC Toilet",
+    )
+    assert candidate.status == EvidenceResolutionStatus.ABSTAINED
+    assert "sanitary_fixture_context" in candidate.reason_codes
+
+
+def test_create_opening_candidate_enforces_furniture_arc_filter(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """Candidate constructor marks candidate ABSTAINED when furniture arc is not hosted at wall jamb."""
+    wall_lines = [(100.0, 0.0, 100.0, 400.0)]
+    candidate = create_opening_candidate(
+        document_id="doc_test",
+        revision_id="rev_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(230.0, 180.0, 270.0, 220.0),  # In room center
+        structural_pattern="door_swing_arc",
+        source_observation_ids=("obs_1",),
+        source_lineage_root_ids=("root_1",),
+        tolerance_provenance=sample_tolerance,
+        wall_lines=wall_lines,
+    )
+    assert candidate.status == EvidenceResolutionStatus.ABSTAINED
+    assert "furniture_arc_not_at_wall_jamb" in candidate.reason_codes
+
+
+def test_deterministic_candidate_id_is_reproducible_and_content_derived(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """Deterministic candidate ID is identical for identical evidence and distinct when evidence varies."""
+    cid1 = derive_deterministic_candidate_id(
+        document_id="doc_test",
+        revision_id="rev_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        source_observation_ids=("obs_1",),
+        source_lineage_root_ids=("root_1",),
+    )
+    cid2 = derive_deterministic_candidate_id(
+        document_id="doc_test",
+        revision_id="rev_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        source_observation_ids=("obs_1",),
+        source_lineage_root_ids=("root_1",),
+    )
+    assert cid1 == cid2
+    assert cid1.startswith("cand_op_")
+
+    cid_diff_rev = derive_deterministic_candidate_id(
+        document_id="doc_test",
+        revision_id="rev_02",  # Changed revision
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        source_observation_ids=("obs_1",),
+        source_lineage_root_ids=("root_1",),
+    )
+    assert cid1 != cid_diff_rev
+
+
+def test_tag_observation_source_scope_mismatch_is_ignored(
+    sample_tolerance: SourceToleranceProvenance,
+) -> None:
+    """Tag observation from incompatible document/revision cannot bind to candidate."""
+    cand = create_opening_candidate(
+        document_id="doc_tender_1",
+        revision_id="rev_01",
+        source_sha256="a" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        structural_pattern="door_swing_arc",
+        source_observation_ids=("obs_1",),
+        source_lineage_root_ids=("root_1",),
+        tolerance_provenance=sample_tolerance,
+    )
+    tag_obs_diff_doc = TagObservation(
+        observation_id="tag_obs_diff_doc",
+        raw_tag_text="D1",
+        bounding_box=(110.0, 110.0, 130.0, 130.0),
+        document_id="doc_tender_2",  # Different document!
+        revision_id="rev_01",
+        source_sha256="b" * 64,
+        snapshot_id="snap_01",
+        page_id="page_1",
+        viewport_id="vp_floor_plan_p1",
+    )
+
+    result = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[tag_obs_diff_doc],
+        expected_semantic_family="doors",
+    )
+    assert result.identity_state == IdentityState.UNRESOLVED
+    assert result.bound_mark is None
+    assert "no_tag_within_source_tolerance" in result.reason_codes
+
 
