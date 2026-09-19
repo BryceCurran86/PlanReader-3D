@@ -2013,16 +2013,45 @@ class GenericPlanReaderExtractor:
         except Exception:
             self.extraction_status["schedule"] = "extraction_failed"
 
-        # pb_plan_opening_instance_marks.py recovers OCR plan-tag evidence
-        # (now portable via RapidOCR) but has no physical door/window geometry
-        # backbone of its own, so a recovered tag count alone cannot prove the
-        # physical opening universe is complete -- a floating text hit is not
-        # a physical instance until bound to real wall-opening geometry. Not
-        # wired to publish steel_casement_windows / doors_complete here until
-        # a validated physical-geometry candidate detector exists for this
-        # drawing set's orange (not dark-on-inverted) opening convention; see
-        # pb_plan_raster_door_swings.py for the closest existing attempt at
-        # that detector (dark-on-inverted only, does not apply to this page).
+        # ------------------------------------------------------------------
+        # Plan instance marks (hyphenated W-# / D-# stamps on scanned plans)
+        # ------------------------------------------------------------------
+        try:
+            from pb_plan_opening_instance_marks import (
+                extract_plan_instance_opening_totals,
+                package_documents_casement_windows,
+                should_emit_casement_window_total,
+            )
+
+            dwg_pages = [
+                p for p in target_pages
+                if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])
+            ]
+            drawing_texts = [doc[p].get_text("text") or "" for p in dwg_pages]
+            if package_documents_casement_windows(drawing_texts):
+                totals = extract_plan_instance_opening_totals(doc, dwg_pages)
+                if totals is not None and should_emit_casement_window_total(
+                    totals, pred_dict.keys()
+                ):
+                    pred_dict["steel_casement_windows"] = ExtractedPrediction(
+                        tag="steel_casement_windows",
+                        trade_type="windows",
+                        description=(
+                            "Steel casement windows complete "
+                            f"({totals.window_count} No from plan instance marks)"
+                        ),
+                        quantity=float(totals.window_count),
+                        unit="NO",
+                        confidence=0.86,
+                        source_page=totals.source_page,
+                        metadata={
+                            "derivation": "plan_instance_opening_marks",
+                            "window_types": list(totals.window_types),
+                            "raw_evidence_ref": totals.evidence_text,
+                        },
+                    )
+        except Exception:
+            self.extraction_status["plan_instance_marks"] = "extraction_failed"
 
         # ------------------------------------------------------------------
         # Sole unlabeled floor-plan door swing (native quarter-circle cubic)
