@@ -3,7 +3,7 @@
 - **Benchmark ID**: `ungm_al_qayarah_hospital_renovation`
 - **Organization**: UNDP / UNGM
 - **Tender Reference**: `RFP/2024/78912`
-- **Evaluation Timestamp**: `2026-09-19T11:23:51.512010+00:00`
+- **Evaluation Timestamp**: `2026-09-09T18:41:38.661434+00:00`
 - **Evaluation Status**: `candidate_unverified`
 - **Source PDF**: `None / Not supplied`
 
