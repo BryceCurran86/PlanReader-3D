@@ -2020,7 +2020,6 @@ class GenericPlanReaderExtractor:
             from pb_plan_opening_instance_marks import (
                 extract_plan_instance_opening_totals,
                 package_documents_casement_windows,
-                package_documents_door_system,
                 should_emit_casement_window_total,
                 should_emit_door_system_total,
             )
@@ -2031,8 +2030,15 @@ class GenericPlanReaderExtractor:
             ]
             drawing_texts = [doc[p].get_text("text") or "" for p in dwg_pages]
             has_casement_windows = package_documents_casement_windows(drawing_texts)
-            has_door_system = package_documents_door_system(drawing_texts)
-            if has_casement_windows or has_door_system:
+            # Door-system evidence lives on plan-tag stamps (D-1/D-2 hyphenated
+            # marks) rather than a reliable native-text phrase: unlike casement
+            # windows, no drawing-range page reliably names a "flush door" /
+            # "casement door" system in extractable native text -- that wording
+            # (when it exists at all) lives on BOQ pages outside drawing_pages,
+            # or is itself raster. should_emit_door_system_total's own
+            # thresholds (2+ distinct hyphenated D-N types, 3+ instances, no
+            # pre-existing typed door tag) are the safety gate here instead.
+            if dwg_pages:
                 totals = extract_plan_instance_opening_totals(doc, dwg_pages)
                 if totals is not None and has_casement_windows and should_emit_casement_window_total(
                     totals, pred_dict.keys()
@@ -2054,7 +2060,7 @@ class GenericPlanReaderExtractor:
                             "raw_evidence_ref": totals.evidence_text,
                         },
                     )
-                if totals is not None and has_door_system and should_emit_door_system_total(
+                if totals is not None and should_emit_door_system_total(
                     totals, pred_dict.keys()
                 ):
                     pred_dict["doors_complete"] = ExtractedPrediction(
