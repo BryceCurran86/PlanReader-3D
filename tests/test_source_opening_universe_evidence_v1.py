@@ -37,7 +37,8 @@ Validates the clean, evidence-first opening candidate authority across all requi
 """
 from __future__ import annotations
 
-from typing import Optional, Sequence, Tuple
+from typing import Any, Optional, Sequence, Tuple
+import fitz
 import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -158,6 +159,82 @@ def sample_viewport_decision(
         view_class_authority=sample_view_class_authority,
         selector=floor_plan_selector,
     )
+
+
+def build_source_test_bundle(
+    *,
+    document_id: str = "doc_test",
+    tag_text: str = "D1",
+    tag_pt: Tuple[float, float] = (120.0, 120.0),
+    leader_start: Tuple[float, float] = (120.0, 120.0),
+    leader_end: Tuple[float, float] = (100.0, 100.0),
+    rect_bbox: Tuple[float, float, float, float] = (100.0, 100.0, 140.0, 140.0),
+) -> dict[str, Any]:
+    """Build an authentic in-memory PDF source environment with tag, leader, and aperture rect."""
+    doc = fitz.open()
+    page = doc.new_page(width=1000, height=1000)
+    page.insert_text(fitz.Point(*tag_pt), tag_text, fontsize=10)
+    page.draw_line(fitz.Point(*leader_start), fitz.Point(*leader_end))
+    page.draw_rect(fitz.Rect(*rect_bbox))
+    payload = doc.tobytes()
+    doc.close()
+
+    producer = SourceObservationProducer(
+        producer_method="test_producer",
+        producer_version="1.0",
+    )
+    published = producer.ingest_native_pdf_bytes(
+        document_id=document_id,
+        source_bytes=payload,
+        source_locator="memory://test.pdf",
+    )
+    auth = producer.authority()
+    rev = published.revision
+    snap = published.snapshot
+
+    tag_obs_id = ""
+    leader_obs_id = ""
+    rect_obs_id = ""
+    for obs_id in snap.observation_ids:
+        res = auth.resolve(
+            ObservationSelector(
+                document_id=rev.document_id,
+                revision_id=rev.revision_id,
+                source_sha256=rev.source_sha256,
+                snapshot_id=snap.snapshot_id,
+                observation_id=obs_id,
+            )
+        )
+        if res.observation:
+            kind = res.observation.observation_kind
+            if kind in ("native_pdf_word", "native_pdf_text") and tag_text in res.observation.raw_text:
+                tag_obs_id = obs_id
+            elif kind == "native_pdf_segment":
+                geom = res.observation.geometry
+                if len(geom) >= 4:
+                    p1 = (geom[0], geom[1])
+                    p2 = (geom[2], geom[3])
+                    if (
+                        (abs(p1[0] - leader_start[0]) < 1.0 and abs(p1[1] - leader_start[1]) < 1.0)
+                        or (abs(p2[0] - leader_start[0]) < 1.0 and abs(p2[1] - leader_start[1]) < 1.0)
+                    ):
+                        leader_obs_id = obs_id
+            elif kind == "native_pdf_rect":
+                rect_obs_id = obs_id
+
+    return {
+        "authority": auth,
+        "producer": producer,
+        "published": published,
+        "document_id": rev.document_id,
+        "revision_id": rev.revision_id,
+        "source_sha256": rev.source_sha256,
+        "snapshot_id": snap.snapshot_id,
+        "page_id": "1",
+        "tag_obs_id": tag_obs_id,
+        "leader_obs_id": leader_obs_id,
+        "rect_obs_id": rect_obs_id,
+    }
 
 
 _candidate_counter = 0
@@ -286,13 +363,27 @@ def test_one_arc_with_no_tag_remains_unresolved() -> None:
 # Edge Case 2: One arc beside D1 with relation -> PROVEN_SAME (unambiguous)
 # ---------------------------------------------------------------------------
 def test_one_arc_beside_d1_binds_unambiguously() -> None:
-    candidate = make_candidate()
-    tag_obs = make_tag_obs(tag_text="D1", center=(122.0, 121.0), observation_id="tag_obs_d1")
+    bundle = build_source_test_bundle()
+    candidate = make_candidate(
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    tag_obs = make_tag_obs(
+        tag_text="D1",
+        center=(122.0, 121.0),
+        observation_id=bundle["tag_obs_id"],
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+    )
     evidence = authenticate_tag_binding_evidence(
         tag=tag_obs,
         candidate=candidate,
         relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
-        relation_observation_ids=("obs_rel_01",),
+        relation_observation_ids=(bundle["leader_obs_id"],),
+        source_observation_authority=bundle["authority"],
     )
     result = OpeningIdentityResolver.resolve_tag_binding(
         candidate=candidate,
@@ -301,6 +392,7 @@ def test_one_arc_beside_d1_binds_unambiguously() -> None:
         expected_semantic_family="doors",
         viewport_authenticated=True,
         revision_authenticated=True,
+        source_observation_authority=bundle["authority"],
     )
     assert result.identity_state == IdentityState.PROVEN_SAME
     assert result.bound_tag == "D1"
@@ -347,8 +439,21 @@ def test_tag_binding_rejected_when_revision_mismatched() -> None:
 # Edge Case 5: Tag binding semantic family filtering
 # ---------------------------------------------------------------------------
 def test_tag_binding_semantic_family_filtering() -> None:
-    candidate = make_candidate()
-    tag_w = make_tag_obs(tag_text="W1", center=(122.0, 121.0), observation_id="obs_w1")
+    bundle = build_source_test_bundle()
+    candidate = make_candidate(
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    tag_w = make_tag_obs(
+        tag_text="W1",
+        center=(122.0, 121.0),
+        observation_id="obs_w1",
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+    )
     result_window_tag = OpeningIdentityResolver.resolve_tag_binding(
         candidate=candidate,
         nearby_tags=[tag_w],
@@ -359,12 +464,20 @@ def test_tag_binding_semantic_family_filtering() -> None:
     assert result_window_tag.identity_state == IdentityState.UNRESOLVED
     assert result_window_tag.bound_tag is None
 
-    tag_d = make_tag_obs(tag_text="D1", center=(120.0, 120.0), observation_id="obs_d1")
+    tag_d = make_tag_obs(
+        tag_text="D1",
+        center=(120.0, 120.0),
+        observation_id=bundle["tag_obs_id"],
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+    )
     evidence = authenticate_tag_binding_evidence(
         tag=tag_d,
         candidate=candidate,
         relation_kind=TagBindingRelationKind.EXPLICIT_APERTURE_TAG,
-        relation_observation_ids=("obs_rel_01",),
+        relation_observation_ids=(bundle["rect_obs_id"],),
+        source_observation_authority=bundle["authority"],
     )
     result_both = OpeningIdentityResolver.resolve_tag_binding(
         candidate=candidate,
@@ -373,6 +486,7 @@ def test_tag_binding_semantic_family_filtering() -> None:
         expected_semantic_family="doors",
         viewport_authenticated=True,
         revision_authenticated=True,
+        source_observation_authority=bundle["authority"],
     )
     assert result_both.identity_state == IdentityState.PROVEN_SAME
     assert result_both.bound_tag == "D1"
@@ -413,15 +527,28 @@ def test_two_equal_doors_are_proven_distinct() -> None:
 # Edge Case 8: Coincident detections at same location with shared lineage -> PROVEN_SAME
 # ---------------------------------------------------------------------------
 def test_coincident_detections_are_proven_same() -> None:
+    bundle = build_source_test_bundle()
     cand_1 = make_candidate(
         geometry=(100.0, 100.0, 140.0, 140.0),
-        source_lineage_root_ids=("root_shared_01",),
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+        source_lineage_root_ids=(bundle["rect_obs_id"],),
     )
     cand_2 = make_candidate(
         geometry=(100.2, 100.2, 140.2, 140.2),  # 0.28 pt delta, well within tolerance
-        source_lineage_root_ids=("root_shared_01",),  # Shared lineage!
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+        source_lineage_root_ids=(bundle["rect_obs_id"],),
     )
-    result = OpeningIdentityResolver.compare_candidates(cand_1, cand_2)
+    result = OpeningIdentityResolver.compare_candidates(
+        cand_1,
+        cand_2,
+        source_observation_authority=bundle["authority"],
+    )
     assert result.proven_same is True
     assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_RESOLVED
     assert "shared_authenticated_lineage_with_coincident_geometry" in result.reason_codes
@@ -1016,15 +1143,26 @@ def test_regression_matrix_7_same_page_id_from_different_documents_never_proven_
 
 
 def test_regression_matrix_8_shared_authenticated_lineage_proven_same_only_when_all_scope_agrees() -> None:
+    bundle = build_source_test_bundle()
     cand_a = make_candidate(
         geometry=(100.0, 100.0, 140.0, 140.0),
-        source_lineage_root_ids=("lineage_common_root",),
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_lineage_root_ids=(bundle["rect_obs_id"],),
     )
     cand_b = make_candidate(
         geometry=(100.2, 100.2, 140.2, 140.2),
-        source_lineage_root_ids=("lineage_common_root",),
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_lineage_root_ids=(bundle["rect_obs_id"],),
     )
-    result = OpeningIdentityResolver.compare_candidates(cand_a, cand_b)
+    result = OpeningIdentityResolver.compare_candidates(
+        cand_a,
+        cand_b,
+        source_observation_authority=bundle["authority"],
+    )
     assert result.proven_same is True
     assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_RESOLVED
 
@@ -1278,19 +1416,34 @@ def test_nearby_d1_without_binding_relation_is_unresolved() -> None:
 
 def test_nearby_d1_with_authenticated_leader_relation_resolves() -> None:
     """7. Nearby D1 tag with authenticated leader relation resolves to PROVEN_SAME."""
-    cand = make_candidate()
-    tag_obs = make_tag_obs(tag_text="D1", center=(120.0, 120.0), observation_id="tag_d1")
+    bundle = build_source_test_bundle()
+    cand = make_candidate(
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    tag_obs = make_tag_obs(
+        tag_text="D1",
+        center=(120.0, 120.0),
+        observation_id=bundle["tag_obs_id"],
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+    )
     evidence = authenticate_tag_binding_evidence(
         tag=tag_obs,
         candidate=cand,
         relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
-        relation_observation_ids=("obs_rel_01",),
+        relation_observation_ids=(bundle["leader_obs_id"],),
+        source_observation_authority=bundle["authority"],
     )
     result = OpeningIdentityResolver.resolve_tag_binding(
         candidate=cand,
         nearby_tags=[tag_obs],
         binding_evidences=[evidence],
         expected_semantic_family="doors",
+        source_observation_authority=bundle["authority"],
     )
     assert result.identity_state == IdentityState.PROVEN_SAME
     assert result.status == EvidenceResolutionStatus.CORROBORATED
@@ -1491,20 +1644,31 @@ def test_same_type_w1_in_two_authenticated_separate_wall_apertures_proven_distin
 
 def test_same_physical_aperture_with_two_detector_modalities_not_double_counted() -> None:
     """17. Same physical aperture with two detector modalities: shared lineage resolves to PROVEN_SAME, disjoint fails closed as UNRESOLVED."""
+    bundle = build_source_test_bundle()
     cand_arc = make_candidate(
         geometry=(100.0, 100.0, 140.0, 140.0),
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
         structural_pattern="door_swing_arc",
-        source_observation_ids=("obs_modal_1",),
-        source_lineage_root_ids=("aperture_root_01",),
+        source_observation_ids=(bundle["rect_obs_id"],),
+        source_lineage_root_ids=(bundle["rect_obs_id"],),
     )
     # Different detector modality sharing the same aperture lineage
     cand_interruption_same = make_candidate(
         geometry=(100.1, 100.1, 140.1, 140.1),
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
         structural_pattern="door_swing_arc",
-        source_observation_ids=("obs_modal_2",),
-        source_lineage_root_ids=("aperture_root_01",),
+        source_observation_ids=(bundle["rect_obs_id"],),
+        source_lineage_root_ids=(bundle["rect_obs_id"],),
     )
-    result = OpeningIdentityResolver.compare_candidates(cand_arc, cand_interruption_same)
+    result = OpeningIdentityResolver.compare_candidates(
+        cand_arc,
+        cand_interruption_same,
+        source_observation_authority=bundle["authority"],
+    )
     assert result.proven_same is True
     assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_RESOLVED
 
@@ -1933,4 +2097,439 @@ def test_two_detector_modalities_with_partially_overlapping_geometry_is_unresolv
     assert result.proven_same is False
     assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
     assert "differing_detector_modalities_at_same_location_ambiguous" in result.reason_codes[0]
+
+
+# ===========================================================================
+# SECTION 6: AUTHORITY HARDENING MUTATION TESTS (15 REQUIRED TESTS)
+# ===========================================================================
+
+
+def test_mutation_1_tag_binding_evidence_factory_without_source_authority_abstained() -> None:
+    """1. TagBindingEvidence factory without SourceObservationAuthority -> ABSTAINED, never sealed CORROBORATED."""
+    cand = make_candidate()
+    tag = make_tag_obs(tag_text="D1", center=(120.0, 120.0), observation_id="obs_tag_1")
+    ev = authenticate_tag_binding_evidence(
+        tag=tag,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=("obs_leader_1",),
+        source_observation_authority=None,
+    )
+    assert ev.status == EvidenceResolutionStatus.ABSTAINED
+    assert ev._seal is None
+    assert "missing_source_observation_authority_cannot_corroborate_relation" in ev.reason_codes[0]
+
+
+def test_mutation_2_fake_relation_observation_id_abstained() -> None:
+    """2. Fake relation observation ID -> ABSTAINED."""
+    bundle = build_source_test_bundle()
+    cand = make_candidate(
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+    )
+    tag = make_tag_obs(
+        tag_text="D1",
+        center=(120.0, 120.0),
+        observation_id=bundle["tag_obs_id"],
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+    )
+    ev = authenticate_tag_binding_evidence(
+        tag=tag,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=("fake_nonexistent_obs_id",),
+        source_observation_authority=bundle["authority"],
+    )
+    assert ev.status == EvidenceResolutionStatus.ABSTAINED
+    assert ev._seal is None
+    assert "unauthenticated_relation_observation_fake_nonexistent_obs_id" in ev.reason_codes
+
+
+def test_mutation_3_real_relation_observation_from_wrong_document_abstained() -> None:
+    """3. Real relation observation ID from wrong document -> ABSTAINED."""
+    bundle_a = build_source_test_bundle(document_id="doc_A")
+    bundle_b = build_source_test_bundle(document_id="doc_B")
+    cand_a = make_candidate(
+        document_id=bundle_a["document_id"],
+        revision_id=bundle_a["revision_id"],
+        source_sha256=bundle_a["source_sha256"],
+        snapshot_id=bundle_a["snapshot_id"],
+    )
+    tag_a = make_tag_obs(
+        tag_text="D1",
+        center=(120.0, 120.0),
+        observation_id=bundle_a["tag_obs_id"],
+        document_id=bundle_a["document_id"],
+        revision_id=bundle_a["revision_id"],
+        source_sha256=bundle_a["source_sha256"],
+        snapshot_id=bundle_a["snapshot_id"],
+    )
+    ev = authenticate_tag_binding_evidence(
+        tag=tag_a,
+        candidate=cand_a,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(bundle_b["leader_obs_id"],),
+        source_observation_authority=bundle_a["authority"],
+    )
+    assert ev.status == EvidenceResolutionStatus.ABSTAINED
+    assert ev._seal is None
+
+
+def test_mutation_4_real_relation_observation_from_wrong_revision_abstained() -> None:
+    """4. Real relation observation ID from wrong revision -> ABSTAINED."""
+    bundle = build_source_test_bundle()
+    cand = make_candidate(
+        revision_id="rev_wrong_999",
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+    )
+    tag = make_tag_obs(
+        tag_text="D1",
+        center=(120.0, 120.0),
+        observation_id=bundle["tag_obs_id"],
+        revision_id="rev_wrong_999",
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+    )
+    ev = authenticate_tag_binding_evidence(
+        tag=tag,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(bundle["leader_obs_id"],),
+        source_observation_authority=bundle["authority"],
+    )
+    assert ev.status == EvidenceResolutionStatus.ABSTAINED
+    assert ev._seal is None
+
+
+def test_mutation_5_real_relation_observation_from_wrong_snapshot_abstained() -> None:
+    """5. Real relation observation ID from wrong snapshot -> ABSTAINED."""
+    bundle = build_source_test_bundle()
+    cand = make_candidate(
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id="snap_wrong_999",
+    )
+    tag = make_tag_obs(
+        tag_text="D1",
+        center=(120.0, 120.0),
+        observation_id=bundle["tag_obs_id"],
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id="snap_wrong_999",
+    )
+    ev = authenticate_tag_binding_evidence(
+        tag=tag,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(bundle["leader_obs_id"],),
+        source_observation_authority=bundle["authority"],
+    )
+    assert ev.status == EvidenceResolutionStatus.ABSTAINED
+    assert ev._seal is None
+
+
+def test_mutation_6_tag_observation_not_present_in_source_authority_abstained() -> None:
+    """6. tag.observation_id not present in source authority -> ABSTAINED."""
+    bundle = build_source_test_bundle()
+    cand = make_candidate(
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+    )
+    tag = make_tag_obs(
+        tag_text="D1",
+        center=(120.0, 120.0),
+        observation_id="unregistered_tag_obs_999",
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+    )
+    ev = authenticate_tag_binding_evidence(
+        tag=tag,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(bundle["leader_obs_id"],),
+        source_observation_authority=bundle["authority"],
+    )
+    assert ev.status == EvidenceResolutionStatus.ABSTAINED
+    assert ev._seal is None
+    assert "unauthenticated_tag_observation_unregistered_tag_obs_999" in ev.reason_codes
+
+
+def test_mutation_7_real_unrelated_observation_passed_as_leader_abstained() -> None:
+    """7. Real but unrelated observation passed as LEADER_TO_OPENING -> cannot corroborate relation (ABSTAINED)."""
+    bundle = build_source_test_bundle()
+    cand = make_candidate(
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    tag = make_tag_obs(
+        tag_text="D1",
+        center=(120.0, 120.0),
+        observation_id=bundle["tag_obs_id"],
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+    )
+    ev = authenticate_tag_binding_evidence(
+        tag=tag,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(bundle["rect_obs_id"],),  # Not a leader segment!
+        source_observation_authority=bundle["authority"],
+    )
+    assert ev.status == EvidenceResolutionStatus.ABSTAINED
+    assert ev._seal is None
+    assert "relation_observation_does_not_establish_leader_from_tag_to_candidate" in ev.reason_codes
+
+
+def test_mutation_8_leader_observation_exists_but_does_not_terminate_on_candidate_unresolved() -> None:
+    """8. Leader observation exists but does not terminate on candidate -> UNRESOLVED."""
+    bundle = build_source_test_bundle(
+        tag_pt=(50.0, 50.0),
+        leader_start=(50.0, 50.0),
+        leader_end=(500.0, 500.0),
+        rect_bbox=(100.0, 100.0, 140.0, 140.0),
+    )
+    cand = make_candidate(
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    tag = make_tag_obs(
+        tag_text="D1",
+        center=(50.0, 50.0),
+        observation_id=bundle["tag_obs_id"],
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+    )
+    ev = authenticate_tag_binding_evidence(
+        tag=tag,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(bundle["leader_obs_id"],),
+        source_observation_authority=bundle["authority"],
+    )
+    assert ev.status == EvidenceResolutionStatus.ABSTAINED
+    assert "leader_observation_exists_but_does_not_terminate_on_candidate" in ev.reason_codes
+
+    result = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[tag],
+        binding_evidences=[ev],
+        expected_semantic_family="doors",
+        source_observation_authority=bundle["authority"],
+    )
+    assert result.identity_state == IdentityState.UNRESOLVED
+
+
+def test_mutation_9_authenticated_leader_genuinely_links_tag_to_candidate_corroborated() -> None:
+    """9. Authenticated leader genuinely links tag to candidate -> CORROBORATED / PROVEN_SAME."""
+    bundle = build_source_test_bundle(
+        tag_pt=(120.0, 120.0),
+        leader_start=(120.0, 120.0),
+        leader_end=(100.0, 100.0),
+        rect_bbox=(100.0, 100.0, 140.0, 140.0),
+    )
+    cand = make_candidate(
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    tag = make_tag_obs(
+        tag_text="D1",
+        center=(120.0, 120.0),
+        observation_id=bundle["tag_obs_id"],
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+    )
+    ev = authenticate_tag_binding_evidence(
+        tag=tag,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(bundle["leader_obs_id"],),
+        source_observation_authority=bundle["authority"],
+    )
+    assert ev.status == EvidenceResolutionStatus.CORROBORATED
+    assert "authenticated_leader_genuinely_links_tag_to_candidate" in ev.reason_codes
+
+    result = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[tag],
+        binding_evidences=[ev],
+        expected_semantic_family="doors",
+        source_observation_authority=bundle["authority"],
+    )
+    assert result.identity_state == IdentityState.PROVEN_SAME
+    assert result.status == EvidenceResolutionStatus.CORROBORATED
+    assert result.bound_mark == "D1"
+
+
+def test_mutation_10_candidates_share_fabricated_lineage_no_authority_unresolved() -> None:
+    """10. Two candidates share fabricated lineage string but no SourceObservationAuthority -> UNRESOLVED."""
+    cand_a = make_candidate(
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        source_lineage_root_ids=("fabricated_shared_root_id",),
+    )
+    cand_b = make_candidate(
+        geometry=(100.1, 100.1, 140.1, 140.1),
+        source_lineage_root_ids=("fabricated_shared_root_id",),
+    )
+    result = OpeningIdentityResolver.compare_candidates(cand_a, cand_b, source_observation_authority=None)
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert "shared_lineage_unauthenticated_without_source_observation_authority" in result.reason_codes
+
+
+def test_mutation_11_candidates_share_fabricated_lineage_not_in_authority_unresolved() -> None:
+    """11. Two candidates share fabricated lineage string not found in authority -> UNRESOLVED."""
+    bundle = build_source_test_bundle()
+    cand_a = make_candidate(
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_lineage_root_ids=("fabricated_unregistered_obs_id",),
+    )
+    cand_b = make_candidate(
+        geometry=(100.1, 100.1, 140.1, 140.1),
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_lineage_root_ids=("fabricated_unregistered_obs_id",),
+    )
+    result = OpeningIdentityResolver.compare_candidates(
+        cand_a,
+        cand_b,
+        source_observation_authority=bundle["authority"],
+    )
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert "shared_lineage_not_found_or_unauthenticated_in_source_authority" in result.reason_codes
+
+
+def test_mutation_12_candidates_share_authenticated_source_observation_matching_scope_proven_same() -> None:
+    """12. Two candidates share authenticated source observation under matching scope -> PROVEN_SAME."""
+    bundle = build_source_test_bundle()
+    cand_a = make_candidate(
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+        source_lineage_root_ids=(bundle["rect_obs_id"],),
+    )
+    cand_b = make_candidate(
+        geometry=(100.2, 100.2, 140.2, 140.2),
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+        source_lineage_root_ids=(bundle["rect_obs_id"],),
+    )
+    result = OpeningIdentityResolver.compare_candidates(
+        cand_a,
+        cand_b,
+        source_observation_authority=bundle["authority"],
+    )
+    assert result.proven_same is True
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_RESOLVED
+    assert result.status == EvidenceResolutionStatus.CORROBORATED
+    assert "shared_authenticated_lineage_with_coincident_geometry" in result.reason_codes
+
+
+def test_mutation_13_same_observation_id_different_source_sha_unresolved() -> None:
+    """13. Same observation ID but different source SHA -> UNRESOLVED."""
+    bundle = build_source_test_bundle()
+    cand_a = make_candidate(
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    cand_b = make_candidate(
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        revision_id=bundle["revision_id"],
+        source_sha256="b" * 64,  # Mismatched SHA!
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    result = OpeningIdentityResolver.compare_candidates(
+        cand_a,
+        cand_b,
+        source_observation_authority=bundle["authority"],
+    )
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert "source_sha256_mismatch_unresolved" in result.reason_codes
+
+
+def test_mutation_14_same_observation_id_different_revision_unresolved() -> None:
+    """14. Same observation ID but different revision -> UNRESOLVED."""
+    bundle = build_source_test_bundle()
+    cand_a = make_candidate(
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    cand_b = make_candidate(
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        revision_id="rev_diff_999",  # Mismatched revision!
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    result = OpeningIdentityResolver.compare_candidates(
+        cand_a,
+        cand_b,
+        source_observation_authority=bundle["authority"],
+    )
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert "cross_revision_identity_unresolved" in result.reason_codes
+
+
+def test_mutation_15_same_observation_id_different_snapshot_unresolved() -> None:
+    """15. Same observation ID but different snapshot -> UNRESOLVED."""
+    bundle = build_source_test_bundle()
+    cand_a = make_candidate(
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    cand_b = make_candidate(
+        geometry=(100.0, 100.0, 140.0, 140.0),
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id="snap_diff_999",  # Mismatched snapshot!
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    result = OpeningIdentityResolver.compare_candidates(
+        cand_a,
+        cand_b,
+        source_observation_authority=bundle["authority"],
+    )
+    assert result.proven_same is False
+    assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
+    assert "snapshot_id_mismatch_unresolved" in result.reason_codes
+
 
