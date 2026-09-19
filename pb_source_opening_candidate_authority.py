@@ -536,6 +536,20 @@ class CandidateContextFilter:
 # 4. Tag Observation & Typed Tag Binding Evidence
 # ---------------------------------------------------------------------------
 
+VALID_TAG_OBSERVATION_KINDS: frozenset[str] = frozenset({
+    "native_pdf_word",
+    "native_pdf_text",
+    "ocr_word",
+    "ocr_text",
+    "text",
+    "word",
+    "tag_text",
+    "vector_text",
+    "annotation_text",
+})
+
+_TAG_OBSERVATION_SEAL = object()
+
 
 @dataclass(frozen=True)
 class TagObservation:
@@ -553,12 +567,66 @@ class TagObservation:
     source_observation_ids: Tuple[str, ...] = ()
     source_lineage_root_ids: Tuple[str, ...] = ()
     schema_version: str = SOURCE_OPENING_CANDIDATE_SCHEMA_VERSION
+    _seal: object = field(default=None, repr=False, compare=False)
+
+    @classmethod
+    def from_source_observation(
+        cls,
+        record: SourceObservationRecord,
+        *,
+        viewport_id: str,
+    ) -> "TagObservation":
+        """Construct an authenticated TagObservation directly from a SourceObservationRecord."""
+        if record.observation_kind not in VALID_TAG_OBSERVATION_KINDS:
+            raise ValueError(
+                f"Source observation kind '{record.observation_kind}' is not a valid textual tag observation kind. "
+                f"Allowed kinds: {sorted(VALID_TAG_OBSERVATION_KINDS)}"
+            )
+        if len(record.geometry) < 4:
+            raise ValueError(
+                f"Source observation geometry must have at least 4 coordinates for bounding box, got {record.geometry}"
+            )
+        bbox = (
+            float(record.geometry[0]),
+            float(record.geometry[1]),
+            float(record.geometry[2]),
+            float(record.geometry[3]),
+        )
+        return cls(
+            observation_id=record.observation_id,
+            raw_tag_text=record.raw_text,
+            bounding_box=bbox,
+            document_id=record.document_id,
+            revision_id=record.revision_id,
+            source_sha256=record.source_sha256,
+            snapshot_id=record.snapshot_id,
+            page_id=record.page_id,
+            viewport_id=viewport_id,
+            source_observation_ids=(record.observation_id,),
+            source_lineage_root_ids=(record.observation_id,),
+            _seal=_TAG_OBSERVATION_SEAL,
+        )
 
     def center(self) -> Tuple[float, float]:
         return (
             0.5 * (self.bounding_box[0] + self.bounding_box[2]),
             0.5 * (self.bounding_box[1] + self.bounding_box[3]),
         )
+
+
+def produce_tag_observation(
+    authority: SourceObservationAuthority,
+    selector: ObservationSelector,
+    *,
+    viewport_id: str,
+) -> TagObservation:
+    """Produce an authenticated TagObservation by resolving selector in SourceObservationAuthority."""
+    res = authority.resolve(selector)
+    if res.status != EvidenceResolutionStatus.CORROBORATED or res.observation is None:
+        raise ValueError(
+            f"Observation {selector.observation_id} could not be corroborated by authority: {res.reason_codes}"
+        )
+    return TagObservation.from_source_observation(res.observation, viewport_id=viewport_id)
 
 
 _TAG_RELATION_SEAL = object()
@@ -647,11 +715,17 @@ def _validate_tag_binding_relation(
         max(candidate.geometry[0], candidate.geometry[2]),
         max(candidate.geometry[1], candidate.geometry[3]),
     )
+    if len(tag_record.geometry) < 4:
+        return False, "tag_record_missing_geometry"
     t_bbox = (
-        min(tag.bounding_box[0], tag.bounding_box[2]),
-        min(tag.bounding_box[1], tag.bounding_box[3]),
-        max(tag.bounding_box[0], tag.bounding_box[2]),
-        max(tag.bounding_box[1], tag.bounding_box[3]),
+        min(tag_record.geometry[0], tag_record.geometry[2]),
+        min(tag_record.geometry[1], tag_record.geometry[3]),
+        max(tag_record.geometry[0], tag_record.geometry[2]),
+        max(tag_record.geometry[1], tag_record.geometry[3]),
+    )
+    t_center = (
+        0.5 * (t_bbox[0] + t_bbox[2]),
+        0.5 * (t_bbox[1] + t_bbox[3]),
     )
 
     if relation_kind == TagBindingRelationKind.LEADER_TO_OPENING:
@@ -689,8 +763,7 @@ def _validate_tag_binding_relation(
         return False, "no_authenticated_shared_annotation_lineage_linking_tag_and_candidate"
 
     if relation_kind == TagBindingRelationKind.EXPLICIT_APERTURE_TAG:
-        tag_center = tag.center()
-        tag_inside = _point_near_bbox(tag_center, c_bbox, tolerance_pt)
+        tag_inside = _point_near_bbox(t_center, c_bbox, tolerance_pt)
         ix0 = max(c_bbox[0], t_bbox[0])
         iy0 = max(c_bbox[1], t_bbox[1])
         ix1 = min(c_bbox[2], t_bbox[2])
@@ -828,6 +901,85 @@ def authenticate_tag_binding_evidence(
             source_lineage_root_ids=tuple(source_lineage_root_ids),
             status=EvidenceResolutionStatus.ABSTAINED,
             reason_codes=(f"scope_mismatch_for_tag_observation_{tag.observation_id}",),
+        )
+
+    # 4b. Authenticate tag observation kind
+    if tag_rec.observation_kind not in VALID_TAG_OBSERVATION_KINDS:
+        return TagBindingEvidence(
+            tag_observation_id=tag.observation_id,
+            candidate_id=candidate.candidate_id,
+            relation_kind=relation_kind,
+            document_id=candidate.document_id,
+            revision_id=candidate.revision_id,
+            source_sha256=candidate.source_sha256,
+            snapshot_id=candidate.snapshot_id,
+            page_id=candidate.page_id,
+            viewport_id=candidate.viewport_id,
+            relation_observation_ids=clean_rel_obs,
+            source_lineage_root_ids=tuple(source_lineage_root_ids),
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(f"invalid_tag_observation_kind_{tag_rec.observation_kind}",),
+        )
+
+    # 4c. Authenticate tag text body equality
+    if tag.raw_tag_text.strip() != tag_rec.raw_text.strip():
+        return TagBindingEvidence(
+            tag_observation_id=tag.observation_id,
+            candidate_id=candidate.candidate_id,
+            relation_kind=relation_kind,
+            document_id=candidate.document_id,
+            revision_id=candidate.revision_id,
+            source_sha256=candidate.source_sha256,
+            snapshot_id=candidate.snapshot_id,
+            page_id=candidate.page_id,
+            viewport_id=candidate.viewport_id,
+            relation_observation_ids=clean_rel_obs,
+            source_lineage_root_ids=tuple(source_lineage_root_ids),
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(
+                f"tag_text_mismatch_caller_{tag.raw_tag_text!r}_vs_source_{tag_rec.raw_text!r}",
+            ),
+        )
+
+    # 4d. Authenticate tag bounding geometry equality
+    if len(tag_rec.geometry) < 4:
+        return TagBindingEvidence(
+            tag_observation_id=tag.observation_id,
+            candidate_id=candidate.candidate_id,
+            relation_kind=relation_kind,
+            document_id=candidate.document_id,
+            revision_id=candidate.revision_id,
+            source_sha256=candidate.source_sha256,
+            snapshot_id=candidate.snapshot_id,
+            page_id=candidate.page_id,
+            viewport_id=candidate.viewport_id,
+            relation_observation_ids=clean_rel_obs,
+            source_lineage_root_ids=tuple(source_lineage_root_ids),
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=("source_tag_observation_missing_bounding_geometry",),
+        )
+
+    rec_bbox = (
+        float(tag_rec.geometry[0]),
+        float(tag_rec.geometry[1]),
+        float(tag_rec.geometry[2]),
+        float(tag_rec.geometry[3]),
+    )
+    if not all(math.isclose(a, b, abs_tol=1e-3) for a, b in zip(tag.bounding_box, rec_bbox)):
+        return TagBindingEvidence(
+            tag_observation_id=tag.observation_id,
+            candidate_id=candidate.candidate_id,
+            relation_kind=relation_kind,
+            document_id=candidate.document_id,
+            revision_id=candidate.revision_id,
+            source_sha256=candidate.source_sha256,
+            snapshot_id=candidate.snapshot_id,
+            page_id=candidate.page_id,
+            viewport_id=candidate.viewport_id,
+            relation_observation_ids=clean_rel_obs,
+            source_lineage_root_ids=tuple(source_lineage_root_ids),
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=("tag_geometry_mismatch_with_source_observation",),
         )
 
     # 5. Verify every relation observation in SourceObservationAuthority
@@ -1280,6 +1432,79 @@ def create_opening_candidate(
     )
 
 
+def _observation_supports_candidate(
+    obs: SourceObservationRecord,
+    cand: PhysicalOpeningCandidateRecord,
+) -> bool:
+    """Verify that an authenticated source observation genuinely supports candidate geometry.
+
+    Proves:
+    1. Scope agreement (document, revision, sha, snapshot, page).
+    2. Observation is actually referenced in candidate's lineage.
+    3. Observation kind is an appropriate geometric or constituent linework entity (rejects whole-page / container kinds).
+    4. Observation geometry spatially reconciles against candidate aperture geometry within derived tolerance.
+    """
+    # 1. Scope agreement
+    if (
+        obs.document_id != cand.document_id
+        or obs.revision_id != cand.revision_id
+        or obs.source_sha256 != cand.source_sha256
+        or obs.snapshot_id != cand.snapshot_id
+        or not _page_ids_compatible(obs.page_id, cand.page_id)
+    ):
+        return False
+
+    # 2. Lineage reference
+    in_obs = obs.observation_id in cand.source_observation_ids
+    in_roots = obs.observation_id in cand.source_lineage_root_ids
+    if not (in_obs or in_roots):
+        return False
+
+    # 3. Kind check: whole-page / container observations cannot localize or support opening linework
+    if obs.observation_kind in ("native_pdf_page", "page", "sheet", "document"):
+        return False
+
+    # 4. Geometry check
+    if not obs.geometry or len(obs.geometry) < 2:
+        return False
+
+    c_min_x = min(cand.geometry[0], cand.geometry[2])
+    c_min_y = min(cand.geometry[1], cand.geometry[3])
+    c_max_x = max(cand.geometry[0], cand.geometry[2])
+    c_max_y = max(cand.geometry[1], cand.geometry[3])
+    c_bbox = (c_min_x, c_min_y, c_max_x, c_max_y)
+    tol = cand.tolerance_provenance.derived_tolerance_pt
+
+    if len(obs.geometry) >= 4:
+        o_min_x = min(obs.geometry[0], obs.geometry[2])
+        o_min_y = min(obs.geometry[1], obs.geometry[3])
+        o_max_x = max(obs.geometry[0], obs.geometry[2])
+        o_max_y = max(obs.geometry[1], obs.geometry[3])
+
+        dx = max(0.0, c_min_x - o_max_x, o_min_x - c_max_x)
+        dy = max(0.0, c_min_y - o_max_y, o_min_y - c_max_y)
+        gap = math.hypot(dx, dy)
+        if gap > tol:
+            return False
+
+        for i in range(0, len(obs.geometry) - 1, 2):
+            pt = (obs.geometry[i], obs.geometry[i + 1])
+            if not _point_near_bbox(pt, c_bbox, tol):
+                return False
+
+        c_center = (0.5 * (c_min_x + c_max_x), 0.5 * (c_min_y + c_max_y))
+        o_center = (0.5 * (o_min_x + o_max_x), 0.5 * (o_min_y + o_max_y))
+        c_diag = math.hypot(c_max_x - c_min_x, c_max_y - c_min_y)
+        center_dist = math.hypot(c_center[0] - o_center[0], c_center[1] - o_center[1])
+        if center_dist > 0.5 * c_diag + tol:
+            return False
+
+        return True
+
+    pt = (obs.geometry[0], obs.geometry[1])
+    return _point_near_bbox(pt, c_bbox, tol)
+
+
 # ---------------------------------------------------------------------------
 # 8. Tag Binding & Candidate Identity Resolution
 # ---------------------------------------------------------------------------
@@ -1484,6 +1709,20 @@ class OpeningIdentityResolver:
                 if tag_res.status != EvidenceResolutionStatus.CORROBORATED or tag_res.observation is None:
                     relation_codes.append(f"unauthenticated_tag_observation_{target_tag.observation_id}")
                     relation_codes.append("unauthenticated_lineage_strings_cannot_bridge_identity")
+                elif tag_res.observation.observation_kind not in VALID_TAG_OBSERVATION_KINDS:
+                    relation_codes.append(f"invalid_tag_observation_kind_{tag_res.observation.observation_kind}")
+                    relation_codes.append("unauthenticated_lineage_strings_cannot_bridge_identity")
+                elif target_tag.raw_tag_text.strip() != tag_res.observation.raw_text.strip():
+                    relation_codes.append(
+                        f"tag_text_mismatch_caller_{target_tag.raw_tag_text!r}_vs_source_{tag_res.observation.raw_text!r}"
+                    )
+                    relation_codes.append("unauthenticated_lineage_strings_cannot_bridge_identity")
+                elif len(tag_res.observation.geometry) >= 4 and not all(
+                    math.isclose(a, b, abs_tol=1e-3)
+                    for a, b in zip(target_tag.bounding_box, tag_res.observation.geometry[:4])
+                ):
+                    relation_codes.append("tag_geometry_mismatch_with_source_observation")
+                    relation_codes.append("unauthenticated_lineage_strings_cannot_bridge_identity")
                 else:
                     lineage_authenticated = False
                     for lid in sorted(shared_lineage_ids):
@@ -1503,6 +1742,7 @@ class OpeningIdentityResolver:
                                 and obs.source_sha256 == candidate.source_sha256
                                 and obs.snapshot_id == candidate.snapshot_id
                                 and _page_ids_compatible(obs.page_id, candidate.page_id)
+                                and _observation_supports_candidate(obs, candidate)
                             ):
                                 lineage_authenticated = True
                                 break
@@ -1797,6 +2037,8 @@ class OpeningIdentityResolver:
                     and obs.source_sha256 == cand_a.source_sha256
                     and obs.snapshot_id == cand_a.snapshot_id
                     and _page_ids_compatible(obs.page_id, cand_a.page_id)
+                    and _observation_supports_candidate(obs, cand_a)
+                    and _observation_supports_candidate(obs, cand_b)
                 ):
                     corroborated_shared_ids.append(shared_id)
 
@@ -1817,6 +2059,7 @@ class OpeningIdentityResolver:
             proven_same=False,
             reason_codes=(
                 "shared_lineage_not_found_or_unauthenticated_in_source_authority",
+                "shared_lineage_geometry_does_not_support_candidate",
                 "proximate_candidates_with_unauthenticated_lineage_ambiguous",
             ),
         )
@@ -1834,9 +2077,12 @@ __all__ = [
     "TagBindingEvidence",
     "TagBindingRelationKind",
     "TagObservation",
+    "VALID_TAG_OBSERVATION_KINDS",
     "authenticate_tag_binding_evidence",
     "authenticate_viewport_decision",
     "create_opening_candidate",
     "derive_deterministic_candidate_id",
+    "produce_tag_observation",
     "validate_opening_decision_viewport",
 ]
+
