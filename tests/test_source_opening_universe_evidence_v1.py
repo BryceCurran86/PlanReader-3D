@@ -76,6 +76,7 @@ from pb_source_opening_candidate_authority import (
     TagBindingRelationKind,
     TagObservation,
     VALID_TAG_OBSERVATION_KINDS,
+    _TAG_OBSERVATION_SEAL,
     authenticate_tag_binding_evidence,
     authenticate_viewport_decision,
     create_opening_candidate,
@@ -338,6 +339,7 @@ def make_tag_obs(
     viewport_id: str = "vp_floor_plan_p1",
     source_observation_ids: Sequence[str] = (),
     source_lineage_root_ids: Sequence[str] = (),
+    _seal: object = _TAG_OBSERVATION_SEAL,
 ) -> TagObservation:
     """Helper to construct TagObservation with authentic scope."""
     if bounding_box is None:
@@ -355,6 +357,7 @@ def make_tag_obs(
         viewport_id=viewport_id,
         source_observation_ids=tuple(source_observation_ids),
         source_lineage_root_ids=tuple(source_lineage_root_ids),
+        _seal=_seal,
     )
 
 
@@ -2803,6 +2806,290 @@ def test_mutation_24_source_obs_geometry_altered_under_same_id_unresolved() -> N
     assert result.physical_opening_identity == PHYSICAL_OPENING_IDENTITY_UNRESOLVED
     assert result.status == EvidenceResolutionStatus.ABSTAINED
     assert "shared_lineage_geometry_does_not_support_candidate" in result.reason_codes
+
+
+def test_mutation_25_genuine_sealed_relation_unsealed_cloned_tag_cannot_proven_same() -> None:
+    """25. Genuine sealed relation + unsealed cloned TagObservation with same ID/scope -> cannot PROVEN_SAME."""
+    from dataclasses import replace
+    bundle = build_source_test_bundle()
+    cand = make_candidate(
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    tag_obs = bundle["tag_observation"]
+    evidence = authenticate_tag_binding_evidence(
+        tag=tag_obs,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(bundle["leader_obs_id"],),
+        source_observation_authority=bundle["authority"],
+    )
+    # Clone tag_obs without seal
+    unsealed_tag = replace(tag_obs, _seal=None)
+
+    result = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[unsealed_tag],
+        binding_evidences=[evidence],
+        expected_semantic_family="doors",
+        source_observation_authority=bundle["authority"],
+    )
+    assert result.identity_state != IdentityState.PROVEN_SAME
+    assert result.identity_state == IdentityState.UNRESOLVED
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert result.bound_tag is None
+    assert "unauthenticated_tag_observation_cannot_bind_identity" in result.reason_codes
+
+
+def test_mutation_26_genuine_sealed_relation_altered_raw_text_rejected() -> None:
+    """26. Genuine sealed relation + same ID but altered raw text -> UNRESOLVED / rejected."""
+    from dataclasses import replace
+    bundle = build_source_test_bundle()
+    cand = make_candidate(
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    tag_obs = bundle["tag_observation"]
+    evidence = authenticate_tag_binding_evidence(
+        tag=tag_obs,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(bundle["leader_obs_id"],),
+        source_observation_authority=bundle["authority"],
+    )
+    # Tag has same ID and valid seal, but caller altered raw text to "D2"
+    altered_tag = replace(tag_obs, raw_tag_text="D2")
+
+    result = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[altered_tag],
+        binding_evidences=[evidence],
+        expected_semantic_family="doors",
+        source_observation_authority=bundle["authority"],
+    )
+    assert result.identity_state == IdentityState.UNRESOLVED
+    assert result.status != EvidenceResolutionStatus.CORROBORATED
+    assert result.bound_tag is None
+
+
+def test_mutation_27_genuine_sealed_relation_moved_bbox_rejected() -> None:
+    """27. Genuine sealed relation + same ID but moved bbox -> UNRESOLVED / rejected."""
+    from dataclasses import replace
+    bundle = build_source_test_bundle()
+    cand = make_candidate(
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    tag_obs = bundle["tag_observation"]
+    evidence = authenticate_tag_binding_evidence(
+        tag=tag_obs,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(bundle["leader_obs_id"],),
+        source_observation_authority=bundle["authority"],
+    )
+    # Caller shifted bbox coordinates away from source observation
+    b = tag_obs.bounding_box
+    moved_tag = replace(tag_obs, bounding_box=(b[0] + 50.0, b[1] + 50.0, b[2] + 50.0, b[3] + 50.0))
+
+    result = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[moved_tag],
+        binding_evidences=[evidence],
+        expected_semantic_family="doors",
+        source_observation_authority=bundle["authority"],
+    )
+    assert result.identity_state == IdentityState.UNRESOLVED
+    assert result.status != EvidenceResolutionStatus.CORROBORATED
+    assert result.bound_tag is None
+
+
+def test_mutation_28_genuine_sealed_relation_correct_sealed_tag_proven_same() -> None:
+    """28. Genuine sealed relation + correct sealed TagObservation -> PROVEN_SAME."""
+    bundle = build_source_test_bundle()
+    cand = make_candidate(
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    tag_obs = bundle["tag_observation"]
+    evidence = authenticate_tag_binding_evidence(
+        tag=tag_obs,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(bundle["leader_obs_id"],),
+        source_observation_authority=bundle["authority"],
+    )
+
+    result = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[tag_obs],
+        binding_evidences=[evidence],
+        expected_semantic_family="doors",
+        source_observation_authority=bundle["authority"],
+    )
+    assert result.identity_state == IdentityState.PROVEN_SAME
+    assert result.status == EvidenceResolutionStatus.CORROBORATED
+    assert result.bound_mark == "D1"
+    assert "relation_leader_to_opening" in result.reason_codes
+
+
+def test_mutation_29_sealed_tag_source_authority_omitted_cannot_authority_resolve() -> None:
+    """29. Sealed TagObservation but SourceObservationAuthority omitted -> cannot authority-resolve binding."""
+    bundle = build_source_test_bundle()
+    cand = make_candidate(
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    tag_obs = bundle["tag_observation"]
+    evidence = authenticate_tag_binding_evidence(
+        tag=tag_obs,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(bundle["leader_obs_id"],),
+        source_observation_authority=bundle["authority"],
+    )
+
+    result = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[tag_obs],
+        binding_evidences=[evidence],
+        expected_semantic_family="doors",
+        source_observation_authority=None,
+    )
+    assert result.identity_state == IdentityState.UNRESOLVED
+    assert result.status != EvidenceResolutionStatus.CORROBORATED
+    assert result.bound_tag is None
+    assert "missing_source_observation_authority_cannot_corroborate_binding" in result.reason_codes
+
+
+def test_mutation_30_source_record_text_changes_payload_fingerprint_mismatch_fails_replay() -> None:
+    """30. Source record text changes / payload fingerprint differs from relation evidence -> relation cannot replay."""
+    from dataclasses import replace
+    from pb_source_observation_authority import _content_sha256, _record_payload
+    bundle = build_source_test_bundle()
+    cand = make_candidate(
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    tag_obs = bundle["tag_observation"]
+    evidence = authenticate_tag_binding_evidence(
+        tag=tag_obs,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(bundle["leader_obs_id"],),
+        source_observation_authority=bundle["authority"],
+    )
+
+    # Mutate the source record text in the store
+    snap_id = bundle["snapshot_id"]
+    tag_id = bundle["tag_obs_id"]
+    existing_rec = bundle["authority"]._store.observations[(snap_id, tag_id)]
+    altered_rec = replace(existing_rec, raw_text="D99")
+    actual_hash = _content_sha256(_record_payload(altered_rec))
+    altered_rec = replace(altered_rec, observation_payload_sha256=actual_hash)
+    bundle["authority"]._store.observations[(snap_id, tag_id)] = altered_rec
+    bundle["authority"]._store.record_fingerprints[(snap_id, tag_id)] = actual_hash
+
+    mutated_tag = TagObservation.from_source_observation(altered_rec, viewport_id="vp_floor_plan_p1")
+
+    # Pass the previous evidence (which was sealed with old payload sha)
+    result = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[mutated_tag],
+        binding_evidences=[evidence],
+        expected_semantic_family="doors",
+        source_observation_authority=bundle["authority"],
+    )
+    assert result.identity_state == IdentityState.UNRESOLVED
+    assert result.status != EvidenceResolutionStatus.CORROBORATED
+    assert result.bound_tag is None
+    assert "tag_observation_payload_fingerprint_mismatch" in result.reason_codes
+
+
+def test_mutation_31_source_record_geometry_changes_fails_replay() -> None:
+    """31. Source record geometry changes -> relation cannot replay."""
+    from dataclasses import replace
+    from pb_source_observation_authority import _content_sha256, _record_payload
+    bundle = build_source_test_bundle()
+    cand = make_candidate(
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    tag_obs = bundle["tag_observation"]
+    evidence = authenticate_tag_binding_evidence(
+        tag=tag_obs,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(bundle["leader_obs_id"],),
+        source_observation_authority=bundle["authority"],
+    )
+
+    # Mutate geometry of tag observation in store
+    snap_id = bundle["snapshot_id"]
+    tag_id = bundle["tag_obs_id"]
+    existing_rec = bundle["authority"]._store.observations[(snap_id, tag_id)]
+    altered_rec = replace(existing_rec, geometry=(500.0, 500.0, 520.0, 520.0))
+    actual_hash = _content_sha256(_record_payload(altered_rec))
+    altered_rec = replace(altered_rec, observation_payload_sha256=actual_hash)
+    bundle["authority"]._store.observations[(snap_id, tag_id)] = altered_rec
+    bundle["authority"]._store.record_fingerprints[(snap_id, tag_id)] = actual_hash
+
+    mutated_tag = TagObservation.from_source_observation(altered_rec, viewport_id="vp_floor_plan_p1")
+
+    result = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[mutated_tag],
+        binding_evidences=[evidence],
+        expected_semantic_family="doors",
+        source_observation_authority=bundle["authority"],
+    )
+    assert result.identity_state == IdentityState.UNRESOLVED
+    assert result.status != EvidenceResolutionStatus.CORROBORATED
+    assert result.bound_tag is None
+
+
+def test_mutation_32_bound_mark_equals_normalized_authenticated_source_record_text() -> None:
+    """32. bound_mark equals normalized authenticated source record text."""
+    bundle = build_source_test_bundle(tag_text="D-101")
+    cand = make_candidate(
+        revision_id=bundle["revision_id"],
+        source_sha256=bundle["source_sha256"],
+        snapshot_id=bundle["snapshot_id"],
+        source_observation_ids=(bundle["rect_obs_id"],),
+    )
+    tag_obs = bundle["tag_observation"]
+    evidence = authenticate_tag_binding_evidence(
+        tag=tag_obs,
+        candidate=cand,
+        relation_kind=TagBindingRelationKind.LEADER_TO_OPENING,
+        relation_observation_ids=(bundle["leader_obs_id"],),
+        source_observation_authority=bundle["authority"],
+    )
+
+    result = OpeningIdentityResolver.resolve_tag_binding(
+        candidate=cand,
+        nearby_tags=[tag_obs],
+        binding_evidences=[evidence],
+        expected_semantic_family="doors",
+        source_observation_authority=bundle["authority"],
+    )
+    assert result.identity_state == IdentityState.PROVEN_SAME
+    assert result.status == EvidenceResolutionStatus.CORROBORATED
+    assert result.bound_mark == "D101"
 
 
 

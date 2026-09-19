@@ -647,6 +647,7 @@ class TagBindingEvidence:
     viewport_id: str
     relation_observation_ids: Tuple[str, ...]
     source_lineage_root_ids: Tuple[str, ...] = ()
+    tag_observation_payload_sha256: Optional[str] = None
     status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
     reason_codes: Tuple[str, ...] = ()
     schema_version: str = SOURCE_OPENING_CANDIDATE_SCHEMA_VERSION
@@ -662,6 +663,10 @@ class TagBindingEvidence:
             if not self.relation_observation_ids:
                 raise ValueError(
                     "relation_observation_ids must be non-empty to corroborate tag binding relation"
+                )
+            if not self.tag_observation_payload_sha256:
+                raise ValueError(
+                    "tag_observation_payload_sha256 must be present to corroborate tag binding relation"
                 )
 
 
@@ -826,6 +831,24 @@ def authenticate_tag_binding_evidence(
             source_lineage_root_ids=tuple(source_lineage_root_ids),
             status=EvidenceResolutionStatus.ABSTAINED,
             reason_codes=tuple(initial_reasons),
+        )
+
+    # 2b. Require authenticated tag observation seal
+    if tag._seal is not _TAG_OBSERVATION_SEAL:
+        return TagBindingEvidence(
+            tag_observation_id=tag.observation_id,
+            candidate_id=candidate.candidate_id,
+            relation_kind=relation_kind,
+            document_id=candidate.document_id,
+            revision_id=candidate.revision_id,
+            source_sha256=candidate.source_sha256,
+            snapshot_id=candidate.snapshot_id,
+            page_id=candidate.page_id,
+            viewport_id=candidate.viewport_id,
+            relation_observation_ids=clean_rel_obs,
+            source_lineage_root_ids=tuple(source_lineage_root_ids),
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=("unauthenticated_tag_observation_cannot_bind_relation",),
         )
 
     # 3. Scope agreement check between tag and candidate
@@ -1073,6 +1096,7 @@ def authenticate_tag_binding_evidence(
         viewport_id=candidate.viewport_id,
         relation_observation_ids=clean_rel_obs,
         source_lineage_root_ids=tuple(source_lineage_root_ids),
+        tag_observation_payload_sha256=tag_rec.observation_payload_sha256,
         status=EvidenceResolutionStatus.CORROBORATED,
         reason_codes=(rel_msg, "authenticated_tag_binding_relation_established"),
         _seal=_TAG_RELATION_SEAL,
@@ -1588,10 +1612,23 @@ class OpeningIdentityResolver:
         gx0, gy0, gx1, gy1 = candidate.geometry
         tol_pt = candidate.tolerance_provenance.derived_tolerance_pt
 
+        # 1. Require authenticated tag observation seal before matching or normalization
+        authenticated_tags = [t for t in nearby_tags if getattr(t, "_seal", None) is _TAG_OBSERVATION_SEAL]
+        if not authenticated_tags:
+            return OpeningTagBindingResult(
+                candidate_id=candidate.candidate_id,
+                tag_observation_id=None,
+                bound_mark=None,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                identity_state=IdentityState.UNRESOLVED,
+                reason_codes=("unauthenticated_tag_observation_cannot_bind_identity",),
+            )
+
         matching_tags: list[TagObservation] = []
         matching_marks: list[str] = []
+        matching_records: dict[str, SourceObservationRecord] = {}
 
-        for item in nearby_tags:
+        for item in authenticated_tags:
             # Hard source-scope check
             if (
                 item.document_id != candidate.document_id
@@ -1603,8 +1640,45 @@ class OpeningIdentityResolver:
             ):
                 continue  # Incompatible scope
 
-            tag_str = item.raw_tag_text
-            tx, ty = item.center()
+            rec: Optional[SourceObservationRecord] = None
+            if source_observation_authority is not None:
+                sel = ObservationSelector(
+                    document_id=item.document_id,
+                    revision_id=item.revision_id,
+                    source_sha256=item.source_sha256,
+                    snapshot_id=item.snapshot_id,
+                    observation_id=item.observation_id,
+                )
+                auth_res = source_observation_authority.resolve(sel)
+                if (
+                    auth_res.status == EvidenceResolutionStatus.CORROBORATED
+                    and auth_res.observation is not None
+                    and auth_res.observation.observation_kind in VALID_TAG_OBSERVATION_KINDS
+                    and _page_ids_compatible(auth_res.observation.page_id, item.page_id)
+                    and item.raw_tag_text.strip() == auth_res.observation.raw_text.strip()
+                    and len(item.bounding_box) == 4
+                    and len(auth_res.observation.geometry) >= 4
+                    and all(
+                        math.isclose(a, b, abs_tol=1e-3)
+                        for a, b in zip(item.bounding_box, auth_res.observation.geometry[:4])
+                    )
+                ):
+                    rec = auth_res.observation
+
+            if rec is not None:
+                tag_str = rec.raw_text
+                t_geom = rec.geometry[:4]
+                t_bbox = (
+                    min(t_geom[0], t_geom[2]),
+                    min(t_geom[1], t_geom[3]),
+                    max(t_geom[0], t_geom[2]),
+                    max(t_geom[1], t_geom[3]),
+                )
+                tx = 0.5 * (t_bbox[0] + t_bbox[2])
+                ty = 0.5 * (t_bbox[1] + t_bbox[3])
+            else:
+                tag_str = item.raw_tag_text
+                tx, ty = item.center()
 
             # Validate semantic family compatibility
             norm = normalize_opening_tag(tag_str)
@@ -1620,6 +1694,8 @@ class OpeningIdentityResolver:
                 mark = norm.tag if norm else tag_str
                 matching_tags.append(item)
                 matching_marks.append(mark)
+                if rec is not None:
+                    matching_records[item.observation_id] = rec
 
         if not matching_tags:
             return OpeningTagBindingResult(
@@ -1648,116 +1724,219 @@ class OpeningIdentityResolver:
 
         # Exactly one candidate tag mark within tolerance
         target_tag = matching_tags[0]
-        target_mark = unique_marks[0]
 
         # Check for typed relation evidence
         has_typed_relation = False
         relation_codes: list[str] = []
+        verified_tag_rec: Optional[SourceObservationRecord] = None
 
-        for ev in binding_evidences:
-            if not isinstance(ev, TagBindingEvidence):
-                continue
-            if (
-                ev.status != EvidenceResolutionStatus.CORROBORATED
-                or ev._seal is not _TAG_RELATION_SEAL
-            ):
-                continue
-            if not ev.relation_observation_ids:
-                continue
-
-            # Provenance checks: must match candidate and target tag
-            if (
-                ev.tag_observation_id != target_tag.observation_id
-                or ev.candidate_id != candidate.candidate_id
-                or ev.document_id != candidate.document_id
-                or ev.document_id != target_tag.document_id
-                or ev.revision_id != candidate.revision_id
-                or ev.revision_id != target_tag.revision_id
-                or ev.source_sha256 != candidate.source_sha256
-                or ev.source_sha256 != target_tag.source_sha256
-                or ev.snapshot_id != candidate.snapshot_id
-                or ev.snapshot_id != target_tag.snapshot_id
-                or not _page_ids_compatible(ev.page_id, candidate.page_id)
-                or not _page_ids_compatible(ev.page_id, target_tag.page_id)
-                or ev.viewport_id != candidate.viewport_id
-                or ev.viewport_id != target_tag.viewport_id
-            ):
-                continue
-
-            has_typed_relation = True
-            relation_codes.append(f"relation_{ev.relation_kind.value}")
-
-        # Check for shared explicit lineage between candidate and tag observation
-        shared_lineage_ids = (
-            set(candidate.source_lineage_root_ids) & set(target_tag.source_lineage_root_ids)
-        ) | (
-            set(candidate.source_observation_ids) & set(target_tag.source_observation_ids)
-        )
-
-        if shared_lineage_ids:
-            if source_observation_authority is None:
+        if source_observation_authority is None:
+            if binding_evidences:
+                relation_codes.append("missing_source_observation_authority_cannot_corroborate_binding")
+            shared_lineage_ids = (
+                set(candidate.source_lineage_root_ids) & set(target_tag.source_lineage_root_ids)
+            ) | (
+                set(candidate.source_observation_ids) & set(target_tag.source_observation_ids)
+            )
+            if shared_lineage_ids:
                 relation_codes.append("unauthenticated_lineage_strings_cannot_bridge_identity")
-            else:
-                tag_sel = ObservationSelector(
-                    document_id=target_tag.document_id,
-                    revision_id=target_tag.revision_id,
-                    source_sha256=target_tag.source_sha256,
-                    snapshot_id=target_tag.snapshot_id,
-                    observation_id=target_tag.observation_id,
-                )
-                tag_res = source_observation_authority.resolve(tag_sel)
-                if tag_res.status != EvidenceResolutionStatus.CORROBORATED or tag_res.observation is None:
-                    relation_codes.append(f"unauthenticated_tag_observation_{target_tag.observation_id}")
-                    relation_codes.append("unauthenticated_lineage_strings_cannot_bridge_identity")
-                elif tag_res.observation.observation_kind not in VALID_TAG_OBSERVATION_KINDS:
-                    relation_codes.append(f"invalid_tag_observation_kind_{tag_res.observation.observation_kind}")
-                    relation_codes.append("unauthenticated_lineage_strings_cannot_bridge_identity")
-                elif target_tag.raw_tag_text.strip() != tag_res.observation.raw_text.strip():
-                    relation_codes.append(
-                        f"tag_text_mismatch_caller_{target_tag.raw_tag_text!r}_vs_source_{tag_res.observation.raw_text!r}"
+        else:
+            for ev in binding_evidences:
+                if not isinstance(ev, TagBindingEvidence):
+                    continue
+                if (
+                    ev.status != EvidenceResolutionStatus.CORROBORATED
+                    or ev._seal is not _TAG_RELATION_SEAL
+                ):
+                    continue
+                if not ev.relation_observation_ids:
+                    continue
+
+                # Provenance checks: must match candidate and target tag
+                if (
+                    ev.tag_observation_id != target_tag.observation_id
+                    or ev.candidate_id != candidate.candidate_id
+                    or ev.document_id != candidate.document_id
+                    or ev.document_id != target_tag.document_id
+                    or ev.revision_id != candidate.revision_id
+                    or ev.revision_id != target_tag.revision_id
+                    or ev.source_sha256 != candidate.source_sha256
+                    or ev.source_sha256 != target_tag.source_sha256
+                    or ev.snapshot_id != candidate.snapshot_id
+                    or ev.snapshot_id != target_tag.snapshot_id
+                    or not _page_ids_compatible(ev.page_id, candidate.page_id)
+                    or not _page_ids_compatible(ev.page_id, target_tag.page_id)
+                    or ev.viewport_id != candidate.viewport_id
+                    or ev.viewport_id != target_tag.viewport_id
+                ):
+                    continue
+
+                # Re-resolve target tag in authority (Items 1, 3, 5)
+                cur_tag_rec = matching_records.get(target_tag.observation_id)
+                if cur_tag_rec is None:
+                    t_sel = ObservationSelector(
+                        document_id=target_tag.document_id,
+                        revision_id=target_tag.revision_id,
+                        source_sha256=target_tag.source_sha256,
+                        snapshot_id=target_tag.snapshot_id,
+                        observation_id=target_tag.observation_id,
                     )
-                    relation_codes.append("unauthenticated_lineage_strings_cannot_bridge_identity")
-                elif len(tag_res.observation.geometry) >= 4 and not all(
-                    math.isclose(a, b, abs_tol=1e-3)
-                    for a, b in zip(target_tag.bounding_box, tag_res.observation.geometry[:4])
+                    t_res = source_observation_authority.resolve(t_sel)
+                    if t_res.status != EvidenceResolutionStatus.CORROBORATED or t_res.observation is None:
+                        relation_codes.append(f"unauthenticated_tag_observation_{target_tag.observation_id}")
+                        continue
+                    cur_tag_rec = t_res.observation
+
+                if cur_tag_rec.observation_kind not in VALID_TAG_OBSERVATION_KINDS:
+                    relation_codes.append(f"invalid_tag_observation_kind_{cur_tag_rec.observation_kind}")
+                    continue
+
+                if (
+                    cur_tag_rec.document_id != target_tag.document_id
+                    or cur_tag_rec.revision_id != target_tag.revision_id
+                    or cur_tag_rec.source_sha256 != target_tag.source_sha256
+                    or cur_tag_rec.snapshot_id != target_tag.snapshot_id
+                    or not _page_ids_compatible(cur_tag_rec.page_id, target_tag.page_id)
+                ):
+                    relation_codes.append("scope_mismatch_for_target_tag")
+                    continue
+
+                if target_tag._seal is not _TAG_OBSERVATION_SEAL:
+                    relation_codes.append("unsealed_tag_observation_cannot_bind_identity")
+                    continue
+
+                if target_tag.raw_tag_text.strip() != cur_tag_rec.raw_text.strip():
+                    relation_codes.append("tag_text_mismatch_with_source_observation")
+                    continue
+
+                if len(target_tag.bounding_box) != 4 or len(cur_tag_rec.geometry) < 4 or not all(
+                    math.isclose(a, b, abs_tol=1e-3) for a, b in zip(target_tag.bounding_box, cur_tag_rec.geometry[:4])
                 ):
                     relation_codes.append("tag_geometry_mismatch_with_source_observation")
-                    relation_codes.append("unauthenticated_lineage_strings_cannot_bridge_identity")
-                else:
-                    lineage_authenticated = False
-                    for lid in sorted(shared_lineage_ids):
-                        sel = ObservationSelector(
-                            document_id=candidate.document_id,
-                            revision_id=candidate.revision_id,
-                            source_sha256=candidate.source_sha256,
-                            snapshot_id=candidate.snapshot_id,
-                            observation_id=lid,
+                    continue
+
+                # Payload fingerprint check against relation evidence (Item 5)
+                if ev.tag_observation_payload_sha256 and cur_tag_rec.observation_payload_sha256 != ev.tag_observation_payload_sha256:
+                    relation_codes.append("tag_observation_payload_fingerprint_mismatch")
+                    continue
+
+                # Re-verify relation observations in authority
+                rel_records: list[SourceObservationRecord] = []
+                rel_valid = True
+                for r_id in ev.relation_observation_ids:
+                    r_sel = ObservationSelector(
+                        document_id=candidate.document_id,
+                        revision_id=candidate.revision_id,
+                        source_sha256=candidate.source_sha256,
+                        snapshot_id=candidate.snapshot_id,
+                        observation_id=r_id,
+                    )
+                    r_res = source_observation_authority.resolve(r_sel)
+                    if r_res.status != EvidenceResolutionStatus.CORROBORATED or r_res.observation is None:
+                        rel_valid = False
+                        relation_codes.append(f"unauthenticated_relation_observation_{r_id}")
+                        break
+                    r_rec = r_res.observation
+                    if (
+                        r_rec.document_id != candidate.document_id
+                        or r_rec.revision_id != candidate.revision_id
+                        or r_rec.source_sha256 != candidate.source_sha256
+                        or r_rec.snapshot_id != candidate.snapshot_id
+                        or not _page_ids_compatible(r_rec.page_id, candidate.page_id)
+                    ):
+                        rel_valid = False
+                        relation_codes.append(f"scope_mismatch_for_relation_observation_{r_id}")
+                        break
+                    rel_records.append(r_rec)
+
+                if not rel_valid:
+                    continue
+
+                # Re-verify relation geometry against current source record
+                rel_ok, rel_msg = _validate_tag_binding_relation(
+                    relation_kind=ev.relation_kind,
+                    tag=target_tag,
+                    tag_record=cur_tag_rec,
+                    candidate=candidate,
+                    rel_records=rel_records,
+                    tolerance_pt=tol_pt,
+                )
+                if not rel_ok:
+                    relation_codes.append(rel_msg)
+                    continue
+
+                has_typed_relation = True
+                relation_codes.append(f"relation_{ev.relation_kind.value}")
+                verified_tag_rec = cur_tag_rec
+                break
+
+            # Check for shared explicit lineage between candidate and tag observation
+            if not has_typed_relation:
+                shared_lineage_ids = (
+                    set(candidate.source_lineage_root_ids) & set(target_tag.source_lineage_root_ids)
+                ) | (
+                    set(candidate.source_observation_ids) & set(target_tag.source_observation_ids)
+                )
+                if shared_lineage_ids:
+                    cur_tag_rec = matching_records.get(target_tag.observation_id)
+                    if cur_tag_rec is None:
+                        tag_sel = ObservationSelector(
+                            document_id=target_tag.document_id,
+                            revision_id=target_tag.revision_id,
+                            source_sha256=target_tag.source_sha256,
+                            snapshot_id=target_tag.snapshot_id,
+                            observation_id=target_tag.observation_id,
                         )
-                        auth_res = source_observation_authority.resolve(sel)
-                        if auth_res.status == EvidenceResolutionStatus.CORROBORATED and auth_res.observation is not None:
-                            obs = auth_res.observation
-                            if (
-                                obs.document_id == candidate.document_id
-                                and obs.revision_id == candidate.revision_id
-                                and obs.source_sha256 == candidate.source_sha256
-                                and obs.snapshot_id == candidate.snapshot_id
-                                and _page_ids_compatible(obs.page_id, candidate.page_id)
-                                and _observation_supports_candidate(obs, candidate)
-                            ):
-                                lineage_authenticated = True
-                                break
-                    if lineage_authenticated:
-                        has_typed_relation = True
-                        relation_codes.append("shared_authenticated_source_lineage")
+                        tag_res = source_observation_authority.resolve(tag_sel)
+                        if tag_res.status == EvidenceResolutionStatus.CORROBORATED and tag_res.observation is not None:
+                            cur_tag_rec = tag_res.observation
+
+                    if (
+                        cur_tag_rec is not None
+                        and cur_tag_rec.observation_kind in VALID_TAG_OBSERVATION_KINDS
+                        and target_tag._seal is _TAG_OBSERVATION_SEAL
+                        and target_tag.raw_tag_text.strip() == cur_tag_rec.raw_text.strip()
+                        and len(target_tag.bounding_box) == 4
+                        and len(cur_tag_rec.geometry) >= 4
+                        and all(math.isclose(a, b, abs_tol=1e-3) for a, b in zip(target_tag.bounding_box, cur_tag_rec.geometry[:4]))
+                    ):
+                        lineage_authenticated = False
+                        for lid in sorted(shared_lineage_ids):
+                            sel = ObservationSelector(
+                                document_id=candidate.document_id,
+                                revision_id=candidate.revision_id,
+                                source_sha256=candidate.source_sha256,
+                                snapshot_id=candidate.snapshot_id,
+                                observation_id=lid,
+                            )
+                            auth_res = source_observation_authority.resolve(sel)
+                            if auth_res.status == EvidenceResolutionStatus.CORROBORATED and auth_res.observation is not None:
+                                obs = auth_res.observation
+                                if (
+                                    obs.document_id == candidate.document_id
+                                    and obs.revision_id == candidate.revision_id
+                                    and obs.source_sha256 == candidate.source_sha256
+                                    and obs.snapshot_id == candidate.snapshot_id
+                                    and _page_ids_compatible(obs.page_id, candidate.page_id)
+                                    and _observation_supports_candidate(obs, candidate)
+                                ):
+                                    lineage_authenticated = True
+                                    break
+                        if lineage_authenticated:
+                            has_typed_relation = True
+                            relation_codes.append("shared_authenticated_source_lineage")
+                            verified_tag_rec = cur_tag_rec
+                        else:
+                            relation_codes.append("unauthenticated_lineage_strings_cannot_bridge_identity")
                     else:
                         relation_codes.append("unauthenticated_lineage_strings_cannot_bridge_identity")
 
-        if not has_typed_relation:
+        if not has_typed_relation or verified_tag_rec is None:
             # Spatial proximity alone nominates candidate, but cannot prove binding authority
             return OpeningTagBindingResult(
                 candidate_id=candidate.candidate_id,
                 tag_observation_id=target_tag.observation_id,
-                bound_mark=target_mark,
+                bound_mark=None,
                 status=EvidenceResolutionStatus.ABSTAINED,
                 identity_state=IdentityState.UNRESOLVED,
                 reason_codes=(
@@ -1767,10 +1946,14 @@ class OpeningIdentityResolver:
                 ),
             )
 
+        # Authenticated mark derived strictly from verified SourceObservationRecord.raw_text
+        norm = normalize_opening_tag(verified_tag_rec.raw_text)
+        authoritative_mark = norm.tag if norm else verified_tag_rec.raw_text.strip()
+
         return OpeningTagBindingResult(
             candidate_id=candidate.candidate_id,
-            tag_observation_id=target_tag.observation_id,
-            bound_mark=target_mark,
+            tag_observation_id=verified_tag_rec.observation_id,
+            bound_mark=authoritative_mark,
             status=EvidenceResolutionStatus.CORROBORATED,
             identity_state=IdentityState.PROVEN_SAME,
             reason_codes=("authenticated_tag_relation_proven", *relation_codes),
