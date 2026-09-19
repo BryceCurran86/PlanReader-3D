@@ -21,19 +21,24 @@ from pb_portable_raster_ocr_authority import (
     NullOCRBackend,
     OCRLine,
     OCR_BACKEND_SELECTED_NONE_AVAILABLE,
+    OCR_BACKEND_SELECTED_RAPIDOCR_AVAILABLE,
     OCR_BACKEND_SELECTED_TESSERACT_AVAILABLE,
     OCR_BACKEND_SELECTED_WINOCR_AVAILABLE,
     PortableRasterOCRProducer,
     PortableRasterOCRSelector,
+    RapidOCRBackend,
     TesseractOCRBackend,
     WinOCRBackend,
     detect_ocr_capabilities,
 )
 
 
-def _patch_availability(monkeypatch: pytest.MonkeyPatch, *, tesseract: bool, winocr: bool) -> None:
+def _patch_availability(
+    monkeypatch: pytest.MonkeyPatch, *, tesseract: bool, winocr: bool, rapidocr: bool = False,
+) -> None:
     monkeypatch.setattr(TesseractOCRBackend, "is_available", lambda self: tesseract)
     monkeypatch.setattr(WinOCRBackend, "is_available", lambda self: winocr)
+    monkeypatch.setattr(RapidOCRBackend, "is_available", lambda self: rapidocr)
 
 
 def _sample_selector() -> PortableRasterOCRSelector:
@@ -90,12 +95,37 @@ def test_capability_non_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     # backend's own probe says.
     monkeypatch.setattr(TesseractOCRBackend, "is_available", lambda self: False)
     monkeypatch.setattr(WinOCRBackend, "is_available", lambda self: False)
+    monkeypatch.setattr(RapidOCRBackend, "is_available", lambda self: False)
     report = detect_ocr_capabilities()
     assert report.winocr_available is False
     assert report.available_backends == ()
 
 
+def test_capability_rapidocr_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_availability(monkeypatch, tesseract=False, winocr=False, rapidocr=True)
+    report = detect_ocr_capabilities()
+    assert report.rapidocr_available is True
+    assert report.available_backends == ("rapid_ocr",)
+    assert report.default_backend == "rapid_ocr"
+
+
+def test_capability_all_three_available_rapidocr_ranks_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_availability(monkeypatch, tesseract=True, winocr=True, rapidocr=True)
+    report = detect_ocr_capabilities()
+    assert report.available_backends == ("rapid_ocr", "tesseract", "win_ocr")
+    assert report.default_backend == "rapid_ocr"
+
+
 # ── from_environment() selection ────────────────────────────────────────────
+
+
+def test_from_environment_prefers_rapidocr_over_everything(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_availability(monkeypatch, tesseract=True, winocr=True, rapidocr=True)
+    producer = PortableRasterOCRProducer.from_environment(
+        page_images={"page_1": Image.new("RGB", (10, 10), "white")},
+    )
+    assert type(producer._backend) is RapidOCRBackend
+    assert producer.backend_selection_provenance == OCR_BACKEND_SELECTED_RAPIDOCR_AVAILABLE
 
 
 def test_from_environment_prefers_tesseract_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
