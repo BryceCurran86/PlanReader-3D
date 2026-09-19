@@ -278,6 +278,43 @@ def test_winocr_no_leaked_thread_after_running_loop_call(monkeypatch: pytest.Mon
     assert after == before
 
 
+def test_winocr_sync_call_genuinely_blocks_the_calling_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_run_sync's contract is that the calling thread is blocked until the
+    worker thread finishes -- it does NOT let the calling loop make
+    progress on other pending tasks in the meantime. This proves that
+    directly rather than only documenting it: a concurrent task scheduled
+    on the same running loop must make zero progress while extract_lines()
+    (called synchronously from that same loop) is in flight."""
+    from tests.test_win_ocr_backend_v1 import _install_fake_winrt
+
+    _install_fake_winrt(monkeypatch, line_specs=(("W-1", (0.0, 0.0, 10.0, 10.0)),))
+    backend = WinOCRBackend()
+    img = Image.new("RGB", (50, 50), "white")
+    progress: list[str] = []
+
+    async def ticker() -> None:
+        for _ in range(5):
+            await asyncio.sleep(0)
+            progress.append("tick")
+
+    async def main() -> None:
+        task = asyncio.ensure_future(ticker())
+        # Yield once so the ticker task is scheduled and starts running.
+        await asyncio.sleep(0)
+        progress_before_sync_call = list(progress)
+        backend.extract_lines(img)  # synchronous, must block this whole loop
+        # Any ticks that happened must have happened entirely BEFORE this
+        # blocking call, never interleaved with it.
+        assert progress == progress_before_sync_call, (
+            "the calling loop made progress on another task while "
+            "extract_lines() was supposedly blocking it"
+        )
+        await task
+
+    asyncio.run(main())
+    assert progress  # sanity: the ticker genuinely got to run, before/after
+
+
 def test_winocr_deterministic_lines_both_contexts(monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.test_win_ocr_backend_v1 import _install_fake_winrt
 

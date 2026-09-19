@@ -31,11 +31,28 @@ exists on the plan per earlier visual inspection, but its exact position
 was not confidently relocated at crop-quality resolution). Excluded from
 the corpus rather than guessed.
 
-**Known ambiguity discovered while building this corpus:** a region
-initially read as "W-6" from a lower-resolution wide crop was, on a
-1000 DPI re-check, conclusively a `W-2` (the digit's flat-bottomed "2"
-was misread as "6" at lower resolution). No `W-6` tag is confirmed to
-exist. This is recorded as a cautionary, real example of exactly the kind
-of misread this whole diagnostic effort needs to guard against -- ground
-truth here was fixed by re-inspection at higher resolution before being
-used in any evaluation, not asserted from a single glance.
+**W-6 RETRACTION (superseding the note below): a genuine, distinct `W-6`
+mark exists.** This corpus originally recorded a "W-6 was actually
+misread W-2" finding from an early, lower-resolution pass. A later,
+independent re-investigation (this same project, subsequent session)
+found the same alcove area on the source page and re-examined it at
+900-1400 DPI. At that resolution the "6" is unambiguous and clearly
+distinct from "2" -- this is not a rendering artifact or a close call.
+The alcove in question (top wall, near the small STORE room adjacent to
+the "Fan DP Switch"/"Cir F4" electrical annotations) carries **two
+separate, genuinely distinct labels**: `W-2` positioned at the wall line
+itself (adjacent to real orange wall-opening hatching), and `W-6`
+positioned lower, next to a solid-fill orange vertical stroke inside the
+room that is a duct/pipe riser symbol, not a wall-line hatch break.
+
+What remains correctly unresolved, and is NOT settled by this
+retraction: whether `W-6` denotes a physical window-type opening at all.
+No `W6` type is named anywhere in this drawing package's own window
+schedule or BOQ text (only W1-W4 are defined), and `W-6`'s position next
+to mechanical/riser geometry rather than a wall-line opening is evidence
+against it being a window instance -- but that is a physical-binding
+question, not an OCR-legibility one, and this corpus makes no claim
+about it either way. This note exists solely to correct the earlier,
+premature "misread" conclusion: the mark is real and legible, full stop.
+No production quantity has been published based on either the earlier or
+the corrected version of this finding, and none is published now.

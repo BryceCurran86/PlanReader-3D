@@ -133,10 +133,21 @@ def _run_sync(coro: Any) -> Any:
     loop is running here, ``asyncio.run`` is used directly (the ordinary
     case). When one IS already running (e.g. this is invoked from inside an
     async web/app request handler), the coroutine instead runs to
-    completion on a dedicated worker thread with its own fresh event loop;
-    this call blocks the calling thread until that finishes. The calling
-    thread's own loop is never touched, re-entered, or blocked from making
-    progress on other tasks queued before this call returns control to it.
+    completion on a dedicated worker thread with its own fresh event loop.
+
+    This function -- and therefore ``WinOCRBackend.extract_lines()``, which
+    is intentionally a synchronous method -- BLOCKS THE CALLING THREAD
+    until the worker thread finishes, in both branches above. That is a
+    deliberate consequence of exposing a synchronous OCR API, not a defect:
+    it never re-enters or touches the CALLING thread's own already-running
+    loop object (avoiding the nested-``asyncio.run()`` crash that would
+    otherwise occur), but it does not let that calling thread make progress
+    on anything else -- including its own loop's other pending tasks --
+    while it waits. A caller that needs the calling thread's event loop to
+    keep servicing other work while OCR runs must invoke this synchronous
+    path from a separate thread or an executor (e.g.
+    ``loop.run_in_executor(None, backend.extract_lines, image)``) rather
+    than calling it directly from within that loop's own coroutines.
     """
     try:
         asyncio.get_running_loop()
