@@ -3,9 +3,9 @@
 - **Benchmark ID**: `tenders_ke_umma_hostels`
 - **Organization**: Umma University
 - **Tender Reference**: `UUT/02/2026`
-- **Evaluation Timestamp**: `2026-09-09T18:41:31.187858+00:00`
+- **Evaluation Timestamp**: `2026-09-19T11:03:31.315135+00:00`
 - **Evaluation Status**: `scored`
-- **Source PDF**: `C:\Users\bryce\Documents\PB-PlanReader-3D\benchmarks\sources\umma-university-hostels-builders-work.pdf`
+- **Source PDF**: `C:\Users\bryce\Documents\worktrees\schedule-count-accuracy-v1\benchmarks\sources\umma-university-hostels-builders-work.pdf`
 
 ## 1. Executive Headline Metrics
 
