@@ -16,3 +16,41 @@ protobuf==7.35.1
 opencv-python-headless==4.14.0.94
 reportlab==5.0.0
 shapely==2.1.2
+
+# Windows.Media.Ocr bridge for the portable raster OCR authority
+# (pb_portable_raster_ocr_authority.WinOCRBackend). Windows-only (MIT
+# licensed, github.com/pywinrt/pywinrt); markers keep pip from even
+# attempting these on the Linux deployment target (Render) or Linux CI --
+# WinOCRBackend.is_available() already returns False there regardless.
+winrt-runtime==3.2.1; sys_platform == "win32"
+winrt-Windows.Foundation==3.2.1; sys_platform == "win32"
+winrt-Windows.Foundation.Collections==3.2.1; sys_platform == "win32"
+winrt-Windows.Globalization==3.2.1; sys_platform == "win32"
+winrt-Windows.Graphics.Imaging==3.2.1; sys_platform == "win32"
+winrt-Windows.Media==3.2.1; sys_platform == "win32"
+winrt-Windows.Media.Ocr==3.2.1; sys_platform == "win32"
+winrt-Windows.Storage.Streams==3.2.1; sys_platform == "win32"
+
+# RapidOCRBackend (pb_portable_raster_ocr_authority.RapidOCRBackend) is
+# implemented and tested, but its dependencies -- rapidocr, onnxruntime,
+# and their own transitive deps -- are DELIBERATELY NOT listed here.
+#
+# Deployment status: optional/local backend only. This file's own header
+# documents memory-optimization for the Render free tier (512MB); the
+# ~30MB of bundled ONNX detection/classification/recognition models plus
+# an onnxruntime process footprint have not been sized against that
+# budget or explicitly approved for the production deployment target.
+# RapidOCRBackend.is_available() correctly reports False wherever these
+# packages are not installed (Render production included, as things
+# stand today), and PortableRasterOCRProducer.from_environment()'s
+# auto-selection only prefers RapidOCR when is_available() is genuinely
+# True -- it does not assume or claim RapidOCR is present. On a real
+# Windows development machine with `pip install rapidocr onnxruntime`
+# done manually, it works today; it is not silently claimed available
+# anywhere it has not actually been installed.
+#
+# Promoting this to a listed, always-installed production dependency (or
+# to some other deployment shape -- an extras group installed on demand,
+# a separate OCR microservice, etc.) is a deployment-architecture decision
+# for whoever owns the Render memory budget, not something to do
+# unilaterally by adding it here.
