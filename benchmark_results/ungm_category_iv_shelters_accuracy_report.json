@@ -1,6 +1,6 @@
 {
   "benchmark_id": "ungm_category_iv_shelters",
-  "timestamp": "2026-09-19T11:03:52.972709+00:00",
+  "timestamp": "2026-09-19T11:23:51.511331+00:00",
   "project_name": "UNGM Category IV Shelters / House Units",
   "organization": "IOM / UNGM",
   "tender_reference": "RFP/2024/CAT4-S",
@@ -29,10 +29,10 @@
   "errors": [
     "unverified_candidate_seed_cannot_contribute_to_accuracy_metrics"
   ],
-  "run_id": "66c76ab56a3e43d4b61bfdaa36264ef0",
-  "evaluated_commit_sha": "bfc2e43ec283d7d274fe083850eb1b4722186494",
+  "run_id": "778af58fbdb0488f908f4030f2a58aa7",
+  "evaluated_commit_sha": "f962798e88114935209b81a898b86219091c95ac",
   "scoring_policy_identifier": "public_tender_exact_or_within_5pct_v1",
   "schema_version": "1.0.0",
   "evaluator_version": "pb_benchmark_accuracy_engine.v1",
-  "generated_at": "2026-09-19T11:03:53.115055+00:00"
+  "generated_at": "2026-09-19T11:23:51.648448+00:00"
 }

@@ -1,25 +1,25 @@
 # PlanReader Public Tender Benchmark — Executive Headline Accuracy Dashboard
 
-**Generated**: `2026-09-19T10:57:05.526677+00:00`
+**Generated**: `2026-09-19T11:23:04.775772+00:00`
 
-> **Official Headline Accuracy**: **`51.7%`** across `5` headline-verified public tender benchmark(s).  
-> **Strict Exact Accuracy** (zero-tolerance): **`41.7%`**.
+> **Official Headline Accuracy**: **`50.0%`** across `5` headline-verified public tender benchmark(s).  
+> **Strict Exact Accuracy** (zero-tolerance): **`40.0%`**.
 
 ## 1. Executive Headline Metrics (1:1 Material Scope Packages)
 
 | Metric | Value | Description |
 | :--- | :--- | :--- |
-| **Headline Overall Accuracy (<= 5% tol)** | **`51.7%`** | Combined exact matches and <= 5% tolerance across headline benchmarks |
-| **Headline Strict Exact Accuracy** | **`41.7%`** | Zero-tolerance exact numerical matches across headline benchmarks |
+| **Headline Overall Accuracy (<= 5% tol)** | **`50.0%`** | Combined exact matches and <= 5% tolerance across headline benchmarks |
+| **Headline Strict Exact Accuracy** | **`40.0%`** | Zero-tolerance exact numerical matches across headline benchmarks |
 | Scored Headline Benchmarks | `5` | Verified packages with 1:1 physical drawing-to-BOQ scope match |
 | Measurable Items Evaluated | `60` | Total expected architectural takeoff items |
 | Total Items Compared (Denominator) | `60` | Expected items + hallucinated extra predictions across packages |
-| Exact Matches | `25` | Exactly matched quantities |
+| Exact Matches | `24` | Exactly matched quantities |
 | Within 5% Tolerance | `6` | Minor variations within 5% tolerance |
 | Within 10% Tolerance | `0` | Minor variations (5% to 10%) |
 | Within 20% Tolerance | `0` | Moderate variations (10% to 20%) |
-| Gross Mismatches (> 20%) | `8` | Discrepancies exceeding 20% |
-| Missed in Extraction | `21` | BOQ items missing from drawing predictions |
+| Gross Mismatches (> 20%) | `7` | Discrepancies exceeding 20% |
+| Missed in Extraction | `23` | BOQ items missing from drawing predictions |
 | Hallucinated Extra Predictions | `0` | Predictions with no counterpart in BOQ |
 
 ## 2. Headline Benchmark Breakdown (1:1 Physical Scope Match)
@@ -27,7 +27,7 @@
 | Benchmark ID | Project Name | Scope | Expected | Compared | Exact | <= 5% | Gross | Missed | Halluc. | Accuracy | Strict % | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `tenders_ke_kstvet_cbc_classroom` | Proposed Construction of CBC Classroom and Integrated Resource Center | 1:1 Match | `13` | `13` | `2` | `2` | `1` | `8` | `0` | **`30.8%`** | `15.4%` | `verified_scored_benchmark` |
-| `tenders_ke_murera_science_lab` | Proposed Construction of a Science Laboratory at Murera Senior School | 1:1 Match | `10` | `10` | `2` | `0` | `6` | `2` | `0` | **`20.0%`** | `20.0%` | `verified_scored_benchmark` |
+| `tenders_ke_murera_science_lab` | Proposed Construction of a Science Laboratory at Murera Senior School | 1:1 Match | `10` | `10` | `1` | `0` | `5` | `4` | `0` | **`10.0%`** | `10.0%` | `verified_scored_benchmark` |
 | `tenders_ke_ghazi_science_lab` | Proposed Construction of a Science Laboratory at Ghazi Primary School | 1:1 Match | `13` | `13` | `4` | `3` | `0` | `6` | `0` | **`53.9%`** | `30.8%` | `verified_scored_benchmark` |
 | `tenders_ke_umma_hostels` | Proposed Student Hostels for Umma University in Kajiado | 1:1 Match | `15` | `15` | `15` | `0` | `0` | `0` | `0` | **`100.0%`** | `100.0%` | `verified_scored_benchmark` |
 | `tenders_ke_lamu_ishakani_ecd_classrooms` | Proposed Construction of 2No. ECD Classrooms and 2 Doors VIP Toilets at Ishakani Primary School | 1:1 Match | `9` | `9` | `2` | `1` | `1` | `5` | `0` | **`33.3%`** | `22.2%` | `verified_scored_benchmark` |

@@ -30,7 +30,7 @@
         "within_5_percent": 0
       },
       "tender_reference": "ITB/2023/45890",
-      "timestamp": "2026-09-19T11:03:52.970946+00:00"
+      "timestamp": "2026-09-19T11:23:51.510273+00:00"
     },
     {
       "benchmark_id": "ungm_category_iv_housing_units",
@@ -62,7 +62,7 @@
         "within_5_percent": 0
       },
       "tender_reference": "ITB/2023/CAT4-H",
-      "timestamp": "2026-09-19T11:03:52.972013+00:00"
+      "timestamp": "2026-09-19T11:23:51.510940+00:00"
     },
     {
       "benchmark_id": "ungm_category_iv_shelters",
@@ -94,7 +94,7 @@
         "within_5_percent": 0
       },
       "tender_reference": "RFP/2024/CAT4-S",
-      "timestamp": "2026-09-19T11:03:52.972709+00:00"
+      "timestamp": "2026-09-19T11:23:51.511331+00:00"
     },
     {
       "benchmark_id": "ungm_fmns_faculty_building",
@@ -126,7 +126,7 @@
         "within_5_percent": 0
       },
       "tender_reference": "ITB/2023/FMNS-08",
-      "timestamp": "2026-09-19T11:03:52.973314+00:00"
+      "timestamp": "2026-09-19T11:23:51.511679+00:00"
     },
     {
       "benchmark_id": "ungm_al_qayarah_hospital_renovation",
@@ -158,7 +158,7 @@
         "within_5_percent": 0
       },
       "tender_reference": "RFP/2024/78912",
-      "timestamp": "2026-09-19T11:03:52.973873+00:00"
+      "timestamp": "2026-09-19T11:23:51.512010+00:00"
     },
     {
       "benchmark_id": "king_st_122_126",
@@ -190,19 +190,19 @@
         "within_5_percent": 0
       },
       "tender_reference": "23-060",
-      "timestamp": "2026-09-19T11:03:52.974495+00:00"
+      "timestamp": "2026-09-19T11:23:51.512341+00:00"
     }
   ],
-  "evaluated_commit_sha": "bfc2e43ec283d7d274fe083850eb1b4722186494",
+  "evaluated_commit_sha": "f962798e88114935209b81a898b86219091c95ac",
   "evaluator_version": "pb_benchmark_accuracy_engine.v1",
-  "generated_at": "2026-09-19T11:03:53.101946+00:00",
+  "generated_at": "2026-09-19T11:23:51.641920+00:00",
   "headline_metrics": {
-    "exact_matches": 25,
-    "gross_mismatches": 8,
+    "exact_matches": 24,
+    "gross_mismatches": 7,
     "hallucinated_items": 0,
-    "missed_items": 21,
-    "overall_accuracy_percentage": 51.67,
-    "strict_exact_accuracy_percentage": 41.67,
+    "missed_items": 23,
+    "overall_accuracy_percentage": 50.0,
+    "strict_exact_accuracy_percentage": 40.0,
     "total_headline_benchmarks": 5,
     "total_items_compared": 60,
     "total_measurable_expected": 60,
@@ -435,7 +435,7 @@
         "within_5_percent": 2
       },
       "tender_reference": "KSTVET/008/24",
-      "timestamp": "2026-09-19T10:57:05.526769+00:00"
+      "timestamp": "2026-09-19T11:23:04.775788+00:00"
     },
     {
       "benchmark_id": "tenders_ke_murera_science_lab",
@@ -565,32 +565,32 @@
         },
         {
           "category": "schedule_extractable",
-          "delta": -1.0,
+          "delta": null,
           "description": "Steel casement windows W1, W2, W3, W4 complete with glazing",
           "drawing_page": 223,
           "drawing_sheet": "Window Schedule",
           "expected_quantity": 12.0,
-          "extracted_quantity": 11.0,
+          "extracted_quantity": null,
           "item_id": "steel_casement_windows",
-          "notes": "Comparison evaluated against 12.0 NO",
-          "pct_error": 8.33,
-          "status": "gross_mismatch",
-          "tolerance_tier": "gross",
+          "notes": "Item present in BOQ but absent from extraction predictions",
+          "pct_error": null,
+          "status": "missed_in_extraction",
+          "tolerance_tier": "missed",
           "unit": "NO"
         },
         {
           "category": "schedule_extractable",
-          "delta": 0.0,
+          "delta": null,
           "description": "Single flush doors and double steel casement doors",
           "drawing_page": 223,
           "drawing_sheet": "Door Schedule",
           "expected_quantity": 5.0,
-          "extracted_quantity": 5.0,
+          "extracted_quantity": null,
           "item_id": "doors_complete",
-          "notes": "Comparison evaluated against 5.0 NO",
-          "pct_error": 0.0,
-          "status": "exact_match",
-          "tolerance_tier": "exact",
+          "notes": "Item present in BOQ but absent from extraction predictions",
+          "pct_error": null,
+          "status": "missed_in_extraction",
+          "tolerance_tier": "missed",
           "unit": "NO"
         }
       ],
@@ -599,15 +599,15 @@
       "source_pdf": "C:\\Users\\bryce\\Documents\\worktrees\\schedule-count-accuracy-v1\\benchmarks\\sources\\1785347143869-bqs-drawings.pdf",
       "status": "scored",
       "summary": {
-        "exact_matches": 2,
-        "gross_mismatches": 6,
+        "exact_matches": 1,
+        "gross_mismatches": 5,
         "hallucinated_items": 0,
-        "missed_items": 2,
+        "missed_items": 4,
         "non_architectural_excluded": 0,
-        "overall_accuracy_percentage": 20.0,
+        "overall_accuracy_percentage": 10.0,
         "preliminaries_excluded": 0,
         "provisional_sums_excluded": 0,
-        "strict_exact_accuracy_percentage": 20.0,
+        "strict_exact_accuracy_percentage": 10.0,
         "total_boq_items": 58,
         "total_items_compared": 10,
         "total_measurable_expected": 10,
@@ -616,7 +616,7 @@
         "within_5_percent": 0
       },
       "tender_reference": "MOE/SEEQIP/C012/01/2026-2027",
-      "timestamp": "2026-09-19T10:57:34.078724+00:00"
+      "timestamp": "2026-09-19T11:23:27.461515+00:00"
     },
     {
       "benchmark_id": "tenders_ke_ghazi_science_lab",
@@ -842,7 +842,7 @@
         "within_5_percent": 3
       },
       "tender_reference": "NG-CDF/VOI/GZ/34/2023-2024",
-      "timestamp": "2026-09-19T11:03:27.891924+00:00"
+      "timestamp": "2026-09-19T11:23:32.303883+00:00"
     },
     {
       "benchmark_id": "tenders_ke_umma_hostels",
@@ -1098,7 +1098,7 @@
         "within_5_percent": 0
       },
       "tender_reference": "UUT/02/2026",
-      "timestamp": "2026-09-19T11:03:31.315135+00:00"
+      "timestamp": "2026-09-19T11:23:35.674421+00:00"
     },
     {
       "benchmark_id": "tenders_ke_lamu_ishakani_ecd_classrooms",
@@ -1264,7 +1264,7 @@
         "within_5_percent": 1
       },
       "tender_reference": "N/A (no tender reference number printed on this document)",
-      "timestamp": "2026-09-19T11:03:36.685555+00:00"
+      "timestamp": "2026-09-19T11:23:39.753542+00:00"
     }
   ],
   "non_penalized_exclusions": {
@@ -1272,7 +1272,7 @@
     "preliminaries_excluded": 0,
     "provisional_sums_excluded": 1
   },
-  "run_id": "66c76ab56a3e43d4b61bfdaa36264ef0",
+  "run_id": "778af58fbdb0488f908f4030f2a58aa7",
   "schema_version": "1.0.0",
   "scoring_policy_identifier": "public_tender_exact_or_within_5pct_v1",
   "stress_test_reports": [
@@ -1306,7 +1306,7 @@
         "within_5_percent": 0
       },
       "tender_reference": "2028763-2025/2026",
-      "timestamp": "2026-09-19T11:03:27.878371+00:00"
+      "timestamp": "2026-09-19T11:23:32.296467+00:00"
     }
   ],
   "summary_counts": {
@@ -1318,5 +1318,5 @@
     "stress_test_benchmarks": 1,
     "total_registered": 12
   },
-  "timestamp": "2026-09-19T10:57:05.526677+00:00"
+  "timestamp": "2026-09-19T11:23:04.775772+00:00"
 }

@@ -3,7 +3,7 @@
 - **Benchmark ID**: `ungm_category_iv_housing_units`
 - **Organization**: UN-Habitat
 - **Tender Reference**: `ITB/2023/CAT4-H`
-- **Evaluation Timestamp**: `2026-09-19T11:03:52.972013+00:00`
+- **Evaluation Timestamp**: `2026-09-19T11:23:51.510940+00:00`
 - **Evaluation Status**: `candidate_unverified`
 - **Source PDF**: `None / Not supplied`
 

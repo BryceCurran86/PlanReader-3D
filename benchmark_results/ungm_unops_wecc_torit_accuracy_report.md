@@ -3,7 +3,7 @@
 - **Benchmark ID**: `ungm_unops_wecc_torit`
 - **Organization**: UNOPS
 - **Tender Reference**: `ITB/2023/45890`
-- **Evaluation Timestamp**: `2026-09-19T11:03:52.970946+00:00`
+- **Evaluation Timestamp**: `2026-09-19T11:23:51.510273+00:00`
 - **Evaluation Status**: `candidate_unverified`
 - **Source PDF**: `None / Not supplied`
 

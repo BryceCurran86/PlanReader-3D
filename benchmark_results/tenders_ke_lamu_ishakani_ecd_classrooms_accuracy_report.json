@@ -1,6 +1,6 @@
 {
   "benchmark_id": "tenders_ke_lamu_ishakani_ecd_classrooms",
-  "timestamp": "2026-09-19T11:03:36.685555+00:00",
+  "timestamp": "2026-09-19T11:23:39.753542+00:00",
   "project_name": "Proposed Construction of 2No. ECD Classrooms and 2 Doors VIP Toilets at Ishakani Primary School",
   "organization": "Lamu County Government, Department of Public Works",
   "tender_reference": "N/A (no tender reference number printed on this document)",
@@ -163,10 +163,10 @@
     }
   ],
   "errors": [],
-  "run_id": "66c76ab56a3e43d4b61bfdaa36264ef0",
-  "evaluated_commit_sha": "bfc2e43ec283d7d274fe083850eb1b4722186494",
+  "run_id": "778af58fbdb0488f908f4030f2a58aa7",
+  "evaluated_commit_sha": "f962798e88114935209b81a898b86219091c95ac",
   "scoring_policy_identifier": "public_tender_exact_or_within_5pct_v1",
   "schema_version": "1.0.0",
   "evaluator_version": "pb_benchmark_accuracy_engine.v1",
-  "generated_at": "2026-09-19T11:03:53.111547+00:00"
+  "generated_at": "2026-09-19T11:23:51.646227+00:00"
 }

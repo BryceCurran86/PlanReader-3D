@@ -465,40 +465,6 @@ def extract_marks_from_page(page: fitz.Page, page_num: int) -> List[PlanInstance
     return _nms(hits, dist=12.0)
 
 
-def _drop_marks_after_numbering_gap(marks: Sequence[PlanInstanceMark]) -> List[PlanInstanceMark]:
-    """Keep only marks whose type index continues a contiguous run from 1.
-
-    Architectural opening schedules number a type family sequentially
-    (W1, W2, W3, ...) without gaps. A hyphenated type index recovered from
-    the plan that appears only after a break in that sequence -- W1-W4
-    present, W5 absent, W6 present -- is more likely OCR misreading an
-    unrelated annotation (a service/mechanical callout, a stray digit) as a
-    same-family opening tag than a genuine, undocumented extra member of
-    the family, so it is excluded from the aggregate rather than trusted at
-    face value. Untyped placeholders ("W?"/"D?", OCR dropped the digit) are
-    left as-is since they assert no specific index to evaluate.
-    """
-    indices: set[int] = set()
-    for mark in marks:
-        if not mark.complete:
-            continue
-        match = re.search(r"(\d+)", mark.tag)
-        if match:
-            indices.add(int(match.group(1)))
-    kept = set()
-    n = 1
-    while n in indices:
-        kept.add(n)
-        n += 1
-    out = []
-    for mark in marks:
-        match = re.search(r"(\d+)", mark.tag)
-        if match and int(match.group(1)) not in kept:
-            continue
-        out.append(mark)
-    return out
-
-
 def extract_plan_instance_opening_totals(
     doc: fitz.Document,
     pages: Sequence[int],
@@ -535,8 +501,8 @@ def extract_plan_instance_opening_totals(
         return windows, len(marks)
 
     source_page, marks = max(by_page.items(), key=richness)
-    windows = _drop_marks_after_numbering_gap([mark for mark in marks if mark.trade == "windows"])
-    doors = _drop_marks_after_numbering_gap([mark for mark in marks if mark.trade == "doors"])
+    windows = [mark for mark in marks if mark.trade == "windows"]
+    doors = [mark for mark in marks if mark.trade == "doors"]
     window_types = tuple(sorted({mark.tag for mark in windows if mark.complete}))
     door_types = tuple(sorted({mark.tag for mark in doors if mark.complete}))
     evidence = "; ".join(

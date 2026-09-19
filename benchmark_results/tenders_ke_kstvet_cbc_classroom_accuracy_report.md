@@ -3,7 +3,7 @@
 - **Benchmark ID**: `tenders_ke_kstvet_cbc_classroom`
 - **Organization**: Kenya School of TVET / Ministry of Education
 - **Tender Reference**: `KSTVET/008/24`
-- **Evaluation Timestamp**: `2026-09-19T10:57:05.526769+00:00`
+- **Evaluation Timestamp**: `2026-09-19T11:23:04.775788+00:00`
 - **Evaluation Status**: `scored`
 - **Source PDF**: `C:\Users\bryce\Documents\worktrees\schedule-count-accuracy-v1\benchmarks\sources\1727358888238-bq-nd-drawing.pdf`
 

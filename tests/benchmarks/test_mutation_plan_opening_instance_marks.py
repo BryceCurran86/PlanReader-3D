@@ -19,10 +19,13 @@ from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
 from tests.benchmarks._ocr_backend import OCR_AVAILABLE
 
 
-def _font(size: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size
-    )
+def _font(size: int) -> ImageFont.ImageFont:
+    try:
+        return ImageFont.truetype(
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size
+        )
+    except OSError:
+        return ImageFont.load_default()
 
 
 def _label_image(labels: list[tuple[str, int, int]], width: int = 900, height: int = 220) -> Image.Image:
@@ -103,7 +106,21 @@ def test_lone_hyphen_digit_promotes_on_window_band() -> None:
 
 
 @pytest.mark.skipif(not OCR_AVAILABLE, reason="no usable Tesseract backend in this environment")
-def test_raster_plan_stamps_emit_casement_total_and_mutate(tmp_path: Path) -> None:
+def test_raster_plan_stamps_aggregate_correctly_at_module_level(tmp_path: Path) -> None:
+    """extract_plan_instance_opening_totals + should_emit_casement_window_total
+    still compute the right aggregate from plan stamps in isolation -- this
+    capability is real and correct. It is intentionally NOT wired to publish
+    a commercial quantity from the full extractor (see
+    test_extractor_does_not_publish_opening_marks_as_commercial_quantity):
+    a recovered tag count alone cannot prove the physical opening universe is
+    complete without a physical door/window geometry backbone binding each
+    tag to a real wall-opening symbol.
+    """
+    from pb_plan_opening_instance_marks import (
+        extract_plan_instance_opening_totals,
+        should_emit_casement_window_total,
+    )
+
     first_labels = [
         ("W-1", 20, 30),
         ("W-1", 160, 30),
@@ -114,24 +131,48 @@ def test_raster_plan_stamps_emit_casement_total_and_mutate(tmp_path: Path) -> No
     ]
     second_labels = first_labels + [("W-4", 440, 110)]
     extra = "Steel casement frames (25x25x3mm Z & T Sections) with 4mm thick glass."
-    first = {
+
+    import fitz as _fitz
+
+    first_doc = _fitz.open(_pdf_with_raster(tmp_path, "six.pdf", first_labels, extra))
+    second_doc = _fitz.open(_pdf_with_raster(tmp_path, "seven.pdf", second_labels, extra))
+    first_totals = extract_plan_instance_opening_totals(first_doc, list(range(len(first_doc))))
+    second_totals = extract_plan_instance_opening_totals(second_doc, list(range(len(second_doc))))
+    first_doc.close()
+    second_doc.close()
+
+    assert first_totals is not None and second_totals is not None
+    assert should_emit_casement_window_total(first_totals, [])
+    assert should_emit_casement_window_total(second_totals, [])
+    assert first_totals.window_count == 6
+    assert second_totals.window_count == 7
+
+
+def test_extractor_does_not_publish_opening_marks_as_commercial_quantity(tmp_path: Path) -> None:
+    """Regression guard: pb_plan_opening_instance_marks evidence must not
+    surface as steel_casement_windows / doors_complete until a physical
+    geometry backbone can prove the tag-bound opening universe is complete.
+    Uses synthetic labels rich enough to satisfy should_emit_*_total's own
+    thresholds, so this fails loudly if publication wiring is reintroduced
+    without that backbone.
+    """
+    labels = [
+        ("W-1", 20, 30), ("W-1", 160, 30), ("W-2", 300, 30),
+        ("W-3", 20, 110), ("W-3", 160, 110), ("W-4", 300, 110),
+        ("D-1", 20, 190), ("D-1", 160, 190), ("D-2", 300, 190),
+    ]
+    extra = (
+        "Steel casement frames (25x25x3mm Z & T Sections) with 4mm thick glass. "
+        "Flush doors and steel casement doors complete."
+    )
+    preds = {
         p.tag: p
         for p in GenericPlanReaderExtractor().extract_from_pdf(
-            _pdf_with_raster(tmp_path, "six.pdf", first_labels, extra)
+            _pdf_with_raster(tmp_path, "nine.pdf", labels, extra)
         )
     }
-    second = {
-        p.tag: p
-        for p in GenericPlanReaderExtractor().extract_from_pdf(
-            _pdf_with_raster(tmp_path, "seven.pdf", second_labels, extra)
-        )
-    }
-    assert first["steel_casement_windows"].quantity == 6.0
-    assert second["steel_casement_windows"].quantity == 7.0
-    assert "W1" not in first
-    assert "W2" not in first
-    assert "W3" not in first
-    assert "W4" not in first
+    assert "steel_casement_windows" not in preds
+    assert "doors_complete" not in preds
 
 
 def test_normalize_mark_token_strips_pv_glue() -> None:
