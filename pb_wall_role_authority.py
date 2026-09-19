@@ -29,10 +29,11 @@ Authority invariants:
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
-from typing import Dict, Mapping, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
 from pb_migration_contracts import (
     EvidenceResolutionStatus,
@@ -41,7 +42,18 @@ from pb_migration_contracts import (
 from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateAuthority,
     PhysicalWallCandidateSelector,
+    _decision_scope_id,
+    _source_page_segments,
 )
+from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_wall_room_topology_room_faces import reconstruct_room_candidates
+from pb_wall_room_topology_room_wall_relationships import (
+    compute_wall_usage,
+    derive_room_wall_relationships,
+)
+from pb_wall_room_topology_junction_classifier import classify_junctions
+from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
+from pb_wall_room_topology_wall_assembly import assemble_wall_candidates
 
 
 WALL_ROLE_SCHEMA_VERSION = "1.0.0"
@@ -252,6 +264,174 @@ class WallTopologyProducer:
 
     def authority(self) -> WallTopologyAuthority:
         return WallTopologyAuthority(self._records, _seal=_AUTHORITY_SEAL)
+
+    @classmethod
+    def from_physical_wall_candidate_authority(
+        cls,
+        *,
+        source_visibility_producer: SourceVisibilityProducer,
+        physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
+    ) -> "WallTopologyProducer":
+        """The only legitimate way real WallTopologyEvidence comes to exist.
+
+        Reuses the existing, already-tested W2-W6 pipeline unmodified --
+        no new geometric inference happens here. Because
+        ``PhysicalWallCandidateAuthority`` does not expose the intermediate
+        Stage-A graph / edge-to-wall-candidate mapping that W5 (room-face
+        reconstruction) and W6 (room<->wall relationships) need, this
+        re-invokes the exact same real W2-W4 calls the candidate authority
+        itself uses (see ``pb_physical_wall_candidate_authority._build_scope_result``)
+        to obtain them.
+
+        This is reconciliation, not re-authoring: a wall's topology evidence
+        is only ever emitted when its independently-rederived
+        ``candidate_id`` exactly matches one already present in the CALLER'S
+        OWN already-authenticated ``physical_wall_candidate_authority``
+        result for that same page. Any wall id that does not reconcile is
+        silently excluded -- never guessed into alignment -- and a wall
+        whose W6-resolved ``interior_exterior`` is still ``"unresolved"``,
+        or flagged with an anomalous-usage reason code, never produces
+        evidence either.
+        """
+        if type(source_visibility_producer) is not SourceVisibilityProducer:
+            raise TypeError("source_visibility_producer must be an actual SourceVisibilityProducer")
+        if type(physical_wall_candidate_authority) is not PhysicalWallCandidateAuthority:
+            raise TypeError(
+                "physical_wall_candidate_authority must be a producer-owned PhysicalWallCandidateAuthority"
+            )
+
+        producer = cls(_seal=_PRODUCER_SEAL)
+        published_by_revision = dict(source_visibility_producer._published_by_revision)
+        store = source_visibility_producer._producer._store
+
+        for revision_id, published in sorted(published_by_revision.items()):
+            if (
+                source_visibility_producer._producer.current_revision_id(
+                    published.revision.document_id
+                )
+                != revision_id
+            ):
+                continue
+            source_bytes = store.source_bytes_by_revision.get(revision_id)
+            if source_bytes is None:
+                continue
+            digest = hashlib.sha256(source_bytes).hexdigest()
+            if digest != published.revision.source_sha256:
+                continue
+
+            for page_number in published.coverage.decoded_pages:
+                page_id = str(page_number)
+                scope_id = _decision_scope_id(page_id)
+                trusted_sel = PhysicalWallCandidateSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    page_id=page_id,
+                    decision_scope_id=scope_id,
+                )
+                trusted_result = physical_wall_candidate_authority.resolve_scope(trusted_sel)
+                if trusted_result.status is not EvidenceResolutionStatus.CORROBORATED:
+                    continue
+                trusted_wall_ids = {r.wall_candidate_id for r in trusted_result.records}
+                if not trusted_wall_ids:
+                    continue
+
+                try:
+                    segments, _source_observation_ids, _page_w, _page_h = _source_page_segments(
+                        source_producer=source_visibility_producer,
+                        published=published,
+                        source_bytes=source_bytes,
+                        page_id=page_id,
+                        decision_scope_id=scope_id,
+                    )
+                except RuntimeError:
+                    continue
+
+                graph = build_wall_graph_for_viewport(segments)
+                junctions, relationships = classify_junctions(
+                    graph,
+                    document_id=published.revision.document_id,
+                    page_id=page_id,
+                    viewport_id=scope_id,
+                )
+                walls, edge_id_to_wall_candidate_id = assemble_wall_candidates(
+                    graph, junctions, relationships, viewport_id=scope_id
+                )
+
+                # Only proceed with room-face/relationship reconstruction
+                # using walls that reconcile with the trusted authority --
+                # an unreconciled independent re-derivation is never a
+                # legitimate basis for room topology either.
+                reconciled_walls = [w for w in walls if w.candidate_id in trusted_wall_ids]
+                if not reconciled_walls:
+                    continue
+
+                rooms = reconstruct_room_candidates(
+                    graph,
+                    edge_id_to_wall_candidate_id,
+                    document_id=published.revision.document_id,
+                    viewport_id=scope_id,
+                    source_page=page_number,
+                )
+                if not rooms:
+                    continue
+                wall_usage = compute_wall_usage(rooms)
+                _updated_rooms, updated_walls, _relationships = derive_room_wall_relationships(
+                    rooms, reconciled_walls
+                )
+
+                for wall in updated_walls:
+                    if wall.candidate_id not in trusted_wall_ids:
+                        continue
+                    if wall.interior_exterior not in ("interior", "exterior"):
+                        continue
+                    room_refs = tuple(dict.fromkeys(wall_usage.get(wall.candidate_id, ())))
+                    bounds_exterior = wall.interior_exterior == "exterior"
+                    expected_count = 1 if bounds_exterior else 2
+                    if len(room_refs) != expected_count:
+                        # W6 already proved this classification from exact
+                        # room-usage counts; a mismatch here would mean this
+                        # adapter's own bookkeeping disagrees with W6's --
+                        # fail closed rather than publish a self-contradiction.
+                        continue
+
+                    payload = {
+                        "document_id": published.revision.document_id,
+                        "revision_id": published.revision.revision_id,
+                        "source_sha256": published.revision.source_sha256,
+                        "snapshot_id": published.snapshot.snapshot_id,
+                        "page_id": page_id,
+                        "physical_wall_id": wall.candidate_id,
+                        "bounds_exterior": bounds_exterior,
+                        "enclosed_space_count": expected_count,
+                        "enclosed_space_ids": room_refs,
+                    }
+                    evidence_id = stable_contract_id("wall_topology", payload, digest_chars=32)
+                    evidence = WallTopologyEvidence(
+                        evidence_id=evidence_id,
+                        document_id=published.revision.document_id,
+                        revision_id=published.revision.revision_id,
+                        source_sha256=published.revision.source_sha256,
+                        snapshot_id=published.snapshot.snapshot_id,
+                        page_id=page_id,
+                        physical_wall_id=wall.candidate_id,
+                        bounds_exterior=bounds_exterior,
+                        enclosed_space_count=expected_count,
+                        enclosed_space_ids=room_refs,
+                        is_ambiguous=False,
+                    )
+                    key = (
+                        evidence.document_id,
+                        evidence.revision_id,
+                        evidence.source_sha256,
+                        evidence.snapshot_id,
+                        evidence.page_id,
+                        evidence.physical_wall_id,
+                    )
+                    producer._records[key] = evidence
+
+        return producer
 
 
 @dataclass(frozen=True)
@@ -464,23 +644,29 @@ class WallRoleProducer:
         if structural_cross_sheet_authority is not None and type(structural_cross_sheet_authority) is not StructuralCrossSheetAuthority:
             raise TypeError("structural_cross_sheet_authority must be a producer-owned StructuralCrossSheetAuthority")
 
-        # These three authority classes currently wrap publicly constructible
-        # evidence records. A sealed wrapper does not establish provenance.
-        # Reject every positive injection path until source-derived producers
-        # (room/envelope topology, annotation extraction, registered structural
-        # evidence) exist and can be consumed directly.
-        if (
-            wall_topology_authority is not None
-            or wall_annotation_authority is not None
-            or structural_cross_sheet_authority is not None
-        ):
+        # WallAnnotationAuthority/StructuralCrossSheetAuthority still wrap
+        # publicly constructible evidence records with no source-derived
+        # producer behind them -- a sealed wrapper alone does not establish
+        # provenance for those two, so every positive injection path for
+        # them remains rejected until a genuine annotation-extraction /
+        # registered-structural-evidence producer exists.
+        #
+        # WallTopologyAuthority is different: its ONLY legitimate
+        # construction path is now WallTopologyProducer.
+        # from_physical_wall_candidate_authority(), which forces real
+        # re-derivation from the existing W2-W6 pipeline and only ever
+        # stores a record when it reconciles exactly against this same
+        # physical_wall_candidate_authority's own authenticated wall ids
+        # (see that method's docstring). A well-typed instance is therefore
+        # real proof, not a caller-supplied bypass.
+        if wall_annotation_authority is not None or structural_cross_sheet_authority is not None:
             raise TypeError(
                 "caller-constructible role evidence authorities are not accepted; "
                 "source-derived role evidence producer unavailable"
             )
 
         self._wall_candidates = physical_wall_candidate_authority
-        self._wall_topology = None
+        self._wall_topology = wall_topology_authority
         self._wall_annotations = None
         self._structural_evidence = None
         self._results: Dict[_Key, WallRoleResult] = {}
@@ -573,16 +759,7 @@ class WallRoleProducer:
         ):
             diagnostic_reasons.append(WALL_ROLE_PERIMETER_ONLY_REJECTED)
 
-        # No positive role evidence source is currently authentic enough to
-        # cross this boundary. Candidate metadata remains diagnostic only.
-        return self._store(
-            selector,
-            _abstained(WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE, *diagnostic_reasons),
-        )
-
-        # 3. Query independent producer-owned evidence sources (intentionally
-        # unreachable until a future source-derived role-evidence producer is
-        # wired and independently reviewed).
+        # 3. Query independent producer-owned evidence sources.
         propositions: list[tuple[WallRoleClassification, str]] = []
         corroborating_ids: list[str] = []
         stale_reasons: list[str] = []

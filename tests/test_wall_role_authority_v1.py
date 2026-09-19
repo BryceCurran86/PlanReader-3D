@@ -235,7 +235,7 @@ def test_attack_1_caller_says_external_cannot_mint() -> None:
 
     res = producer.publish(sel)
     assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE in res.reason_codes
+    assert WALL_ROLE_UNRESOLVED in res.reason_codes
     assert res.record is None
 
 
@@ -251,7 +251,7 @@ def test_attack_2_candidate_says_external_cannot_mint() -> None:
 
     res = producer.publish(sel)
     assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE in res.reason_codes
+    assert WALL_ROLE_UNRESOLVED in res.reason_codes
     assert WALL_ROLE_CANDIDATE_LABEL_REJECTED in res.reason_codes
     assert res.record is None
 
@@ -283,7 +283,7 @@ def test_attack_4_candidate_says_gable_no_authority() -> None:
 
     res = producer.publish(sel)
     assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE in res.reason_codes
+    assert WALL_ROLE_UNRESOLVED in res.reason_codes
     assert WALL_ROLE_CANDIDATE_LABEL_REJECTED in res.reason_codes
     assert res.record is None
 
@@ -299,7 +299,7 @@ def test_attack_5_candidate_says_party_no_authority() -> None:
 
     res = producer.publish(sel)
     assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE in res.reason_codes
+    assert WALL_ROLE_UNRESOLVED in res.reason_codes
     assert WALL_ROLE_CANDIDATE_LABEL_REJECTED in res.reason_codes
     assert res.record is None
 
@@ -319,7 +319,7 @@ def test_attack_6_perimeter_rank_only_no_authority() -> None:
 
     res = producer.publish(sel)
     assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE in res.reason_codes
+    assert WALL_ROLE_UNRESOLVED in res.reason_codes
     assert WALL_ROLE_PERIMETER_ONLY_REJECTED in res.reason_codes
     assert res.record is None
 
@@ -335,7 +335,7 @@ def test_attack_7_thickness_only_no_role() -> None:
 
     res = producer.publish(sel)
     assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE in res.reason_codes
+    assert WALL_ROLE_UNRESOLVED in res.reason_codes
     assert WALL_ROLE_THICKNESS_ONLY_REJECTED in res.reason_codes
     assert res.record is None
 
@@ -400,7 +400,7 @@ def test_attack_12_exact_producer_owned_positive_external() -> None:
     producer = WallRoleProducer.from_authorities(physical_wall_candidate_authority=cand_auth)
     res = producer.publish(_selector(WALL_1))
     assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE in res.reason_codes
+    assert WALL_ROLE_UNRESOLVED in res.reason_codes
     assert res.record is None
 
 
@@ -409,7 +409,7 @@ def test_positive_internal_partition() -> None:
     producer = WallRoleProducer.from_authorities(physical_wall_candidate_authority=cand_auth)
     res = producer.publish(_selector(WALL_1))
     assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE in res.reason_codes
+    assert WALL_ROLE_UNRESOLVED in res.reason_codes
     assert res.record is None
 
 
@@ -489,5 +489,5 @@ def test_raster_candidate_geometry_cannot_mint_wall_role() -> None:
     producer = WallRoleProducer.from_authorities(physical_wall_candidate_authority=cand_auth)
     res = producer.publish(_selector("raster-wall-cand-1"))
     assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE in res.reason_codes
+    assert WALL_ROLE_UNRESOLVED in res.reason_codes
     assert res.record is None
