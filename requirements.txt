@@ -16,3 +16,17 @@ protobuf==7.35.1
 opencv-python-headless==4.14.0.94
 reportlab==5.0.0
 shapely==2.1.2
+
+# Windows.Media.Ocr bridge for the portable raster OCR authority
+# (pb_portable_raster_ocr_authority.WinOCRBackend). Windows-only (MIT
+# licensed, github.com/pywinrt/pywinrt); markers keep pip from even
+# attempting these on the Linux deployment target (Render) or Linux CI --
+# WinOCRBackend.is_available() already returns False there regardless.
+winrt-runtime==3.2.1; sys_platform == "win32"
+winrt-Windows.Foundation==3.2.1; sys_platform == "win32"
+winrt-Windows.Foundation.Collections==3.2.1; sys_platform == "win32"
+winrt-Windows.Globalization==3.2.1; sys_platform == "win32"
+winrt-Windows.Graphics.Imaging==3.2.1; sys_platform == "win32"
+winrt-Windows.Media==3.2.1; sys_platform == "win32"
+winrt-Windows.Media.Ocr==3.2.1; sys_platform == "win32"
+winrt-Windows.Storage.Streams==3.2.1; sys_platform == "win32"

@@ -49,6 +49,7 @@ OCR_SOURCE_IMAGE_MISSING = "ocr_source_image_missing"
 OCR_CALLER_PAGE_IMAGES_NOT_AUTHORITY = "ocr_caller_page_images_not_authority"
 OCR_CALLER_NATIVE_TEXT_NOT_AUTHORITY = "ocr_caller_native_text_not_authority"
 OCR_PROVISIONAL_CANDIDATE_ONLY = "ocr_provisional_candidate_only"
+OCR_CONFIDENCE_UNAVAILABLE_FROM_BACKEND = "ocr_confidence_unavailable_from_backend"
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
@@ -71,15 +72,23 @@ def _require_nonempty(value: object, name: str) -> str:
 
 @dataclass(frozen=True)
 class OCRLine:
-    """One recognized line of text with bounding box and confidence."""
+    """One recognized line of text with bounding box and confidence.
+
+    ``confidence`` is ``None`` when the backend engine does not expose a
+    numerical confidence score at all (e.g. Windows.Media.Ocr, whose
+    ``OcrWord``/``OcrLine`` types carry only ``text`` and
+    ``bounding_rect`` -- no score). ``None`` must never be silently
+    coerced to an invented value such as 0.5; callers that need a number
+    must treat ``None`` as "not measured", not "average confidence".
+    """
 
     text: str
-    confidence: float
+    confidence: Optional[float]
     bbox_px: tuple[float, float, float, float]  # (x0, y0, x1, y1) in image pixels
     bbox_pt: Optional[tuple[float, float, float, float]] = None  # in PDF points
 
     def __post_init__(self) -> None:
-        if not (0.0 <= self.confidence <= 1.0):
+        if self.confidence is not None and not (0.0 <= self.confidence <= 1.0):
             raise ValueError("confidence must be between 0.0 and 1.0")
 
 
@@ -128,7 +137,17 @@ class NullOCRBackend(RasterOCRBackend):
 
 
 class WinOCRBackend(RasterOCRBackend):
-    """Windows Media OCR backend (optional native Windows runtime)."""
+    """Windows.Media.Ocr backend (optional native Windows runtime).
+
+    Bridges a PIL image to a WinRT ``SoftwareBitmap`` via an in-memory PNG
+    round-trip (``BitmapDecoder`` decodes real image bytes -- no bounding
+    box or pixel data is invented), runs ``OcrEngine.recognize_async``, and
+    converts each recognized line's own word bounding rectangles into an
+    ``OCRLine``. ``Windows.Media.Ocr``'s ``OcrWord``/``OcrLine`` types
+    expose only ``text`` and ``bounding_rect`` -- no confidence score of
+    any kind -- so every line from this backend carries
+    ``confidence=None``, never a fabricated number.
+    """
 
     @property
     def name(self) -> str:
@@ -150,7 +169,69 @@ class WinOCRBackend(RasterOCRBackend):
     def extract_lines(self, image: Image.Image, dpi: int = 150) -> tuple[OCRLine, ...]:
         if not self.is_available():
             raise RuntimeError("WinOCR backend is not available")
-        return ()
+        import asyncio
+
+        return asyncio.run(self._extract_lines_async(image, dpi))
+
+    async def _extract_lines_async(self, image: Image.Image, dpi: int) -> tuple[OCRLine, ...]:
+        import io
+
+        from winrt.windows.graphics.imaging import BitmapDecoder, BitmapPixelFormat, SoftwareBitmap
+        from winrt.windows.media.ocr import OcrEngine
+        from winrt.windows.storage.streams import DataWriter, InMemoryRandomAccessStream
+
+        buf = io.BytesIO()
+        image.convert("RGB").save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+
+        stream = InMemoryRandomAccessStream()
+        writer = DataWriter(stream)
+        try:
+            writer.write_bytes(png_bytes)
+            await writer.store_async()
+            await writer.flush_async()
+        finally:
+            writer.detach_stream()
+        stream.seek(0)
+
+        decoder = await BitmapDecoder.create_async(stream)
+        bitmap = await decoder.get_software_bitmap_async()
+        bitmap = SoftwareBitmap.convert(bitmap, BitmapPixelFormat.GRAY8)
+
+        engine = OcrEngine.try_create_from_user_profile_languages()
+        if engine is None:
+            raise RuntimeError(
+                "no Windows OCR language is installed for the current user profile"
+            )
+
+        result = await engine.recognize_async(bitmap)
+
+        scale_to_pt = 72.0 / float(dpi) if dpi > 0 else 1.0
+        lines: list[OCRLine] = []
+        for line in result.lines:
+            words = list(line.words)
+            if not words:
+                continue
+            x0 = min(w.bounding_rect.x for w in words)
+            y0 = min(w.bounding_rect.y for w in words)
+            x1 = max(w.bounding_rect.x + w.bounding_rect.width for w in words)
+            y1 = max(w.bounding_rect.y + w.bounding_rect.height for w in words)
+            bbox_px = (float(x0), float(y0), float(x1), float(y1))
+            bbox_pt = (
+                round(x0 * scale_to_pt, 4),
+                round(y0 * scale_to_pt, 4),
+                round(x1 * scale_to_pt, 4),
+                round(y1 * scale_to_pt, 4),
+            )
+            lines.append(
+                OCRLine(
+                    text=str(line.text),
+                    confidence=None,
+                    bbox_px=bbox_px,
+                    bbox_pt=bbox_pt,
+                )
+            )
+        return tuple(lines)
 
 
 OCRBackend = RasterOCRBackend
@@ -399,7 +480,9 @@ class RasterOCREvidenceRecord:
     dpi: int
     is_ocr_derived: bool = True
     extraction_method: str = "raster_ocr"
-    confidence: float = 0.5
+    # None when the backend supplied no numerical confidence for ANY line
+    # (e.g. WinOCR) -- never fabricated as an invented average.
+    confidence: Optional[float] = None
     reconciliation_status: str = "provisional"
     schema_version: str = PORTABLE_RASTER_OCR_SCHEMA_VERSION
 
@@ -737,11 +820,15 @@ class PortableRasterOCRProducer:
                 ),
             )
 
-        # Average confidence across lines
-        avg_conf = (
-            sum(line.confidence for line in raw_lines) / len(raw_lines)
-            if raw_lines
-            else 0.0
+        # Average confidence only across lines that actually carry one --
+        # a backend that supplies no confidence at all (e.g. WinOCR) must
+        # never have one invented via an average that includes fabricated
+        # zeros or defaults.
+        scored_confidences = [line.confidence for line in raw_lines if line.confidence is not None]
+        avg_conf: Optional[float] = (
+            round(sum(scored_confidences) / len(scored_confidences), 4)
+            if scored_confidences
+            else None
         )
 
         # 6. Publish RasterOCREvidenceRecord
@@ -757,7 +844,7 @@ class PortableRasterOCRProducer:
             "backend_name": self._backend.name,
             "backend_version": self._backend.version,
             "dpi": self._dpi,
-            "confidence": round(avg_conf, 4),
+            "confidence": avg_conf,
             "reconciliation_status": recon_status,
         }
         record_id = stable_contract_id(
@@ -772,6 +859,8 @@ class PortableRasterOCRProducer:
         # caller native-text maps are diagnostic inputs only.
         reasons: list[str] = [OCR_EXTRACTION_RESOLVED, OCR_PROVISIONAL_CANDIDATE_ONLY]
         reasons.extend(recon_reasons)
+        if avg_conf is None:
+            reasons.append(OCR_CONFIDENCE_UNAVAILABLE_FROM_BACKEND)
         if self._caller_page_images:
             reasons.append(OCR_CALLER_PAGE_IMAGES_NOT_AUTHORITY)
         if self._caller_native_texts:
@@ -799,6 +888,7 @@ __all__ = [
     "OCR_NATIVE_CONFLICT",
     "OCR_NO_TEXT_DETECTED",
     "OCR_PROVISIONAL_CANDIDATE_ONLY",
+    "OCR_CONFIDENCE_UNAVAILABLE_FROM_BACKEND",
     "OCR_SCOPE_UNAVAILABLE",
     "OCR_SOURCE_IMAGE_MISSING",
     "PORTABLE_RASTER_OCR_SCHEMA_VERSION",
