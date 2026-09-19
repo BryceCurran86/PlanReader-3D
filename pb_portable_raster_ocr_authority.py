@@ -22,10 +22,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+import asyncio
 import hashlib
 import math
 import os
 import shutil
+import threading
 from types import MappingProxyType
 from typing import Any, Optional
 
@@ -50,6 +52,9 @@ OCR_CALLER_PAGE_IMAGES_NOT_AUTHORITY = "ocr_caller_page_images_not_authority"
 OCR_CALLER_NATIVE_TEXT_NOT_AUTHORITY = "ocr_caller_native_text_not_authority"
 OCR_PROVISIONAL_CANDIDATE_ONLY = "ocr_provisional_candidate_only"
 OCR_CONFIDENCE_UNAVAILABLE_FROM_BACKEND = "ocr_confidence_unavailable_from_backend"
+OCR_BACKEND_SELECTED_TESSERACT_AVAILABLE = "ocr_backend_selected:tesseract_available"
+OCR_BACKEND_SELECTED_WINOCR_AVAILABLE = "ocr_backend_selected:tesseract_unavailable_winocr_available"
+OCR_BACKEND_SELECTED_NONE_AVAILABLE = "ocr_backend_selected:no_production_ocr_backend_available"
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
@@ -118,6 +123,42 @@ class RasterOCRBackend(ABC):
         ...
 
 
+def _run_sync(coro: Any) -> Any:
+    """Run an async coroutine from synchronous code, safely, whether or not
+    the calling thread already has a running asyncio event loop.
+
+    No monkey-patching (no ``nest_asyncio``) and no nested ``asyncio.run()``
+    call, which raises if a loop is already running in this thread. When no
+    loop is running here, ``asyncio.run`` is used directly (the ordinary
+    case). When one IS already running (e.g. this is invoked from inside an
+    async web/app request handler), the coroutine instead runs to
+    completion on a dedicated worker thread with its own fresh event loop;
+    this call blocks the calling thread until that finishes. The calling
+    thread's own loop is never touched, re-entered, or blocked from making
+    progress on other tasks queued before this call returns control to it.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    result_box: dict[str, Any] = {}
+
+    def _worker() -> None:
+        try:
+            result_box["result"] = asyncio.run(coro)
+        except BaseException as exc:  # re-raised on the caller's thread below
+            result_box["error"] = exc
+
+    thread = threading.Thread(target=_worker, name="winocr-sync-bridge", daemon=True)
+    thread.start()
+    thread.join()
+
+    if "error" in result_box:
+        raise result_box["error"]
+    return result_box["result"]
+
+
 class NullOCRBackend(RasterOCRBackend):
     """Null object backend for environments without an installed OCR engine."""
 
@@ -169,9 +210,7 @@ class WinOCRBackend(RasterOCRBackend):
     def extract_lines(self, image: Image.Image, dpi: int = 150) -> tuple[OCRLine, ...]:
         if not self.is_available():
             raise RuntimeError("WinOCR backend is not available")
-        import asyncio
-
-        return asyncio.run(self._extract_lines_async(image, dpi))
+        return _run_sync(self._extract_lines_async(image, dpi))
 
     async def _extract_lines_async(self, image: Image.Image, dpi: int) -> tuple[OCRLine, ...]:
         import io
@@ -364,11 +403,19 @@ _PRODUCTION_BACKEND_TYPES = (NullOCRBackend, TesseractOCRBackend, WinOCRBackend)
 
 @dataclass(frozen=True)
 class OCRCapabilityReport:
-    """Environment capability probe report."""
+    """Environment capability probe report.
+
+    ``available_backends`` and ``default_backend`` reflect the SAME
+    preference order ``PortableRasterOCRProducer.from_environment()`` uses
+    to select a production backend, so a caller inspecting this report and
+    a caller using the factory never disagree about what is "the" backend
+    for this environment.
+    """
 
     available_backends: tuple[str, ...]
     default_backend: Optional[str]
     tesseract_available: bool
+    winocr_available: bool
     pillow_available: bool
 
     @property
@@ -384,18 +431,25 @@ def detect_ocr_capabilities() -> OCRCapabilityReport:
     except ImportError:
         pillow_ok = False
 
-    tess = TesseractOCRBackend()
-    tess_ok = tess.is_available()
+    tess_ok = TesseractOCRBackend().is_available()
+    winocr_ok = WinOCRBackend().is_available()
 
+    # Deterministic order matches from_environment()'s own preference:
+    # Tesseract first (a known-good, cross-platform, per-word-confidence
+    # engine) wherever it is genuinely installed, then WinOCR on Windows
+    # when Tesseract is not present.
     backends: list[str] = []
     if tess_ok:
         backends.append("tesseract")
+    if winocr_ok:
+        backends.append("win_ocr")
 
     default = backends[0] if backends else None
     return OCRCapabilityReport(
         available_backends=tuple(backends),
         default_backend=default,
         tesseract_available=tess_ok,
+        winocr_available=winocr_ok,
         pillow_available=pillow_ok,
     )
 
@@ -635,6 +689,17 @@ class PortableRasterOCRProducer:
         self._dpi = default_dpi
         self._snapshot = snapshot
         self._results: dict[_Key, PortableRasterOCRResult] = {}
+        self._selection_provenance: Optional[str] = None
+
+    @property
+    def backend_selection_provenance(self) -> Optional[str]:
+        """Why this producer's backend was chosen.
+
+        ``None`` for an explicitly-supplied backend (``from_backend`` /
+        ``from_backend_for_tests``) -- explicit selection needs no
+        justification. Set only by ``from_environment()``.
+        """
+        return self._selection_provenance
 
     @classmethod
     def from_backend(
@@ -645,6 +710,11 @@ class PortableRasterOCRProducer:
         default_dpi: int = 150,
         snapshot: Optional[PublishedSourceSnapshot] = None,
     ) -> "PortableRasterOCRProducer":
+        """Explicit backend selection. A caller-chosen backend is used
+        exactly as given -- this method never substitutes a different one
+        and never auto-detects the environment. Passing ``None`` here means
+        "no OCR", not "pick one for me" -- use ``from_environment()`` for
+        automatic production selection."""
         active_backend = backend if backend is not None else NullOCRBackend()
         return cls(
             backend=active_backend,
@@ -655,6 +725,57 @@ class PortableRasterOCRProducer:
             _allow_test_backend=False,
             _seal=_PRODUCER_SEAL,
         )
+
+    @classmethod
+    def from_environment(
+        cls,
+        page_images: Optional[Mapping[str, Image.Image]] = None,
+        native_texts: Optional[Mapping[tuple[str, Optional[str]], str]] = None,
+        default_dpi: int = 150,
+        snapshot: Optional[PublishedSourceSnapshot] = None,
+    ) -> "PortableRasterOCRProducer":
+        """Detect installed production backends and choose one deterministically.
+
+        Preference order (matches ``detect_ocr_capabilities()``'s own
+        ``available_backends`` ordering, so the two never disagree):
+
+        1. Tesseract, wherever it is genuinely installed and passes its own
+           ``is_available()`` self-test (cross-platform, has real per-word
+           confidence).
+        2. ``WinOCRBackend``, only when its own ``is_available()`` is True
+           (which already requires ``os.name == "nt"`` and a real ``winrt``
+           install -- never assumed from "we are probably on Windows").
+        3. ``NullOCRBackend`` -- fail closed, never guesses a backend into
+           existence.
+
+        This is the ONLY place backend auto-selection happens. Explicit
+        ``from_backend(backend=...)`` calls are never affected by this
+        method or by what is installed in the environment.
+        """
+        tess = TesseractOCRBackend()
+        if tess.is_available():
+            chosen: RasterOCRBackend = tess
+            reason = OCR_BACKEND_SELECTED_TESSERACT_AVAILABLE
+        else:
+            win = WinOCRBackend()
+            if win.is_available():
+                chosen = win
+                reason = OCR_BACKEND_SELECTED_WINOCR_AVAILABLE
+            else:
+                chosen = NullOCRBackend()
+                reason = OCR_BACKEND_SELECTED_NONE_AVAILABLE
+
+        producer = cls(
+            backend=chosen,
+            page_images=page_images or {},
+            native_texts=native_texts,
+            default_dpi=default_dpi,
+            snapshot=snapshot,
+            _allow_test_backend=False,
+            _seal=_PRODUCER_SEAL,
+        )
+        producer._selection_provenance = reason
+        return producer
 
     @classmethod
     def from_backend_for_tests(
@@ -720,12 +841,15 @@ class PortableRasterOCRProducer:
 
         # 2. Check Backend Availability: Fail Closed
         if not self._backend.is_available():
+            extra = [f"backend_{self._backend.name}_not_installed"]
+            if self._selection_provenance is not None:
+                extra.append(self._selection_provenance)
             return self._store(
                 selector,
                 _blocked(
                     EvidenceResolutionStatus.ABSTAINED,
                     OCR_BACKEND_UNAVAILABLE,
-                    f"backend_{self._backend.name}_not_installed",
+                    *extra,
                 ),
             )
 
@@ -865,6 +989,8 @@ class PortableRasterOCRProducer:
             reasons.append(OCR_CALLER_PAGE_IMAGES_NOT_AUTHORITY)
         if self._caller_native_texts:
             reasons.append(OCR_CALLER_NATIVE_TEXT_NOT_AUTHORITY)
+        if self._selection_provenance is not None:
+            reasons.append(self._selection_provenance)
         result = PortableRasterOCRResult(
             status=EvidenceResolutionStatus.CANDIDATE,
             reason_codes=tuple(dict.fromkeys(reasons)),
@@ -889,6 +1015,9 @@ __all__ = [
     "OCR_NO_TEXT_DETECTED",
     "OCR_PROVISIONAL_CANDIDATE_ONLY",
     "OCR_CONFIDENCE_UNAVAILABLE_FROM_BACKEND",
+    "OCR_BACKEND_SELECTED_TESSERACT_AVAILABLE",
+    "OCR_BACKEND_SELECTED_WINOCR_AVAILABLE",
+    "OCR_BACKEND_SELECTED_NONE_AVAILABLE",
     "OCR_SCOPE_UNAVAILABLE",
     "OCR_SOURCE_IMAGE_MISSING",
     "PORTABLE_RASTER_OCR_SCHEMA_VERSION",
