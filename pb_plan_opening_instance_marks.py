@@ -47,6 +47,7 @@ except ImportError:  # pragma: no cover - exercised only where the optional
     pytesseract = None
 
 from pb_opening_tag_normalization import normalize_opening_tag
+from pb_portable_raster_ocr_authority import RapidOCRBackend
 
 _FULL_RE = re.compile(r"^([WD])-([0-9]{1,2})$")
 _FRAG_RE = re.compile(r"^(?:[WD]|[WD]-|-[0-9]{1,2}|[0-9]{1,2}|-)$")
@@ -62,6 +63,8 @@ _DOOR_SYSTEM_RE = re.compile(
 )
 _MIN_WINDOW_TYPES = 2
 _MIN_WINDOW_INSTANCES = 3
+_MIN_DOOR_TYPES = 2
+_MIN_DOOR_INSTANCES = 3
 _MAX_MARK_INDEX = 12
 
 
@@ -187,10 +190,59 @@ def _ocr_parts_from_ink(ink: np.ndarray, min_conf: float = 20.0) -> List[dict]:
     return parts
 
 
+def _rapidocr_parts_from_array(arr: np.ndarray, min_conf: float = 20.0) -> List[dict]:
+    """RapidOCR recovery, portable (no external binary) and cross-platform.
+
+    Tesseract requires a separately installed system binary that is absent
+    in CI and on most deployment targets, so ``_ocr_parts_from_ink`` above is
+    silently a no-op there. RapidOCR (ONNX Runtime + bundled PP-OCR models)
+    ships as a pure pip dependency and empirically recognizes short
+    hyphenated marks ("W-1", "D-2") that general-purpose engines miss.
+    Unlike the Tesseract path this reads whole-line text directly rather
+    than word fragments, since RapidOCR already segments these short marks
+    as complete lines.
+
+    ``arr`` may be the raw RGB render or one of the ink-isolated /
+    dark-luminance masks below -- a black-on-orange door-swing stamp (e.g.
+    "D-1" drawn across an orange door-swing arc) is only reliably detected
+    once the chromatic arc is stripped, confirmed empirically: RapidOCR
+    finds zero "D-1" instances on the raw full-page render at any tested
+    DPI, but finds them once fed the same ink mask the Tesseract path uses.
+    """
+    backend = RapidOCRBackend()
+    if not backend.is_available():
+        return []
+    image = Image.fromarray(arr)
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    try:
+        lines = backend.extract_lines(image, dpi=150)
+    except Exception:
+        return []
+    parts: List[dict] = []
+    for line in lines:
+        token = _normalize_mark_token(line.text.strip())
+        if not token:
+            continue
+        conf = 100.0 if line.confidence is None else float(line.confidence) * 100.0
+        if conf < min_conf:
+            continue
+        x0, y0, x1, y1 = line.bbox_px
+        parts.append(
+            {"t": token, "conf": conf, "x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0}
+        )
+    return parts
+
+
 def _ocr_parts(rgb: np.ndarray, min_conf: float = 20.0) -> List[dict]:
     """OCR dark non-chromatic ink and dark luminance (labels on coloured fills)."""
-    parts = _ocr_parts_from_ink(_isolate_ink(rgb), min_conf=min_conf)
-    parts.extend(_ocr_parts_from_ink(_isolate_dark_luma(rgb), min_conf=min_conf))
+    ink = _isolate_ink(rgb)
+    dark_luma = _isolate_dark_luma(rgb)
+    parts = _ocr_parts_from_ink(ink, min_conf=min_conf)
+    parts.extend(_ocr_parts_from_ink(dark_luma, min_conf=min_conf))
+    parts.extend(_rapidocr_parts_from_array(rgb, min_conf=min_conf))
+    parts.extend(_rapidocr_parts_from_array(ink, min_conf=min_conf))
+    parts.extend(_rapidocr_parts_from_array(dark_luma, min_conf=min_conf))
     return parts
 
 
@@ -476,5 +528,19 @@ def should_emit_casement_window_total(
     if len(totals.window_types) < _MIN_WINDOW_TYPES:
         return False
     if totals.window_count < _MIN_WINDOW_INSTANCES:
+        return False
+    return True
+
+
+def should_emit_door_system_total(
+    totals: PlanInstanceOpeningTotals,
+    existing_tags: Iterable[str],
+) -> bool:
+    """True when plan stamps should become a lumped door-system total."""
+    if any(normalize_opening_tag(tag) for tag in existing_tags):
+        return False
+    if len(totals.door_types) < _MIN_DOOR_TYPES:
+        return False
+    if totals.door_count < _MIN_DOOR_INSTANCES:
         return False
     return True
