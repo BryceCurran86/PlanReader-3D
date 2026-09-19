@@ -17,12 +17,21 @@ Raw native observations remain preserved by ``SourceObservationProducer``.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import hashlib
 import math
 from typing import Mapping, Optional, Sequence
 
 import fitz
+from PIL import Image
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_portable_raster_ocr_authority import (
+    NullOCRBackend,
+    RapidOCRBackend,
+    RasterOCRBackend,
+    TesseractOCRBackend,
+    WinOCRBackend,
+)
 from pb_pdf_text_integrity_authority import (
     PdfTextIntegrityAuthority,
     PdfTextIntegrityReceipt,
@@ -50,6 +59,15 @@ SOURCE_VISIBILITY_SCHEMA_VERSION = "1.0.0"
 NATIVE_PDF_VISIBLE_SEGMENT = "native_pdf_visible_segment"
 VISIBLE_SEGMENT_ORIGIN_KIND = "producer_visibility_no_active_clip"
 VISIBLE_SOURCE_OBSERVATION_EXISTS = "visible_source_observation_exists"
+RASTER_OCR_SOURCE_OBSERVATION_EXISTS = "raster_ocr_source_observation_exists"
+RASTER_OCR_ORIGIN_KIND = "producer_raster_ocr"
+RASTER_OCR_OBSERVATION_KIND = "ocr_text"
+RASTER_OCR_PUBLISHED_CANDIDATE_ONLY = "raster_ocr_published_candidate_only"
+RASTER_OCR_BACKEND_UNAVAILABLE = "raster_ocr_backend_unavailable"
+RASTER_OCR_EXTRACTION_FAILED = "raster_ocr_extraction_failed"
+RASTER_OCR_NO_TEXT = "raster_ocr_no_text"
+RASTER_OCR_SCOPE_MISMATCH = "raster_ocr_scope_mismatch"
+RASTER_OCR_SOURCE_BYTES_MISMATCH = "raster_ocr_source_bytes_mismatch"
 
 VISIBILITY_CLIP_ASSOCIATION_UNKNOWN = "visibility_clip_association_unknown"
 VISIBILITY_ACTIVE_CLIP_UNRESOLVED = "visibility_active_clip_unresolved"
@@ -63,6 +81,7 @@ VISIBILITY_PARENT_MISMATCH = "visibility_parent_mismatch"
 # against equal-privilege Python code; it prevents ordinary caller-provided
 # receipt maps from self-certifying visibility through the public constructor.
 _VISIBILITY_AUTHORITY_SEAL = object()
+_RASTER_OCR_AUTHORITY_SEAL = object()
 
 
 @dataclass(frozen=True)
@@ -80,6 +99,38 @@ class PublishedVisibleSourceSnapshot:
     base_source_snapshot_id: str
     visible_observation_ids: tuple[str, ...]
     text_observation_ids: tuple[str, ...] = ()
+    schema_version: str = SOURCE_VISIBILITY_SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
+class RasterOCRObservationReceipt:
+    observation_id: str
+    parent_observation_id: str
+    raw_text: str
+    geometry: tuple[float, float, float, float]
+    backend_name: str
+    backend_version: str
+    dpi: int
+
+
+@dataclass(frozen=True)
+class PublishedRasterOCRSourceSnapshot:
+    revision: SourceRevisionRecord
+    coverage: SourceDecodeCoverageRecord
+    snapshot: ProducerSnapshotRecord
+    page_id: str
+    backend_name: str
+    backend_version: str
+    dpi: int
+    ocr_observation_ids: tuple[str, ...]
+    schema_version: str = SOURCE_VISIBILITY_SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
+class RasterOCRSourcePublishResult:
+    status: EvidenceResolutionStatus
+    reason_codes: tuple[str, ...]
+    published: Optional[PublishedRasterOCRSourceSnapshot] = None
     schema_version: str = SOURCE_VISIBILITY_SCHEMA_VERSION
 
 
@@ -236,6 +287,12 @@ class SourceVisibilityProducer:
             tuple[str, str], PdfTextIntegrityReceipt
         ] = {}
         self._published_by_revision: dict[str, PublishedVisibleSourceSnapshot] = {}
+        self._raster_ocr_receipts: dict[
+            tuple[str, str], RasterOCRObservationReceipt
+        ] = {}
+        self._raster_ocr_cache: dict[
+            tuple[str, str, str, str, str, int], RasterOCRSourcePublishResult
+        ] = {}
 
     def authority(self) -> "SourceVisibilityAuthority":
         return SourceVisibilityAuthority(
@@ -249,6 +306,18 @@ class SourceVisibilityProducer:
             self._producer.authority(),
             self._text_integrity_receipts,
             _seal=_PDF_TEXT_AUTHORITY_SEAL,
+        )
+
+    def source_observation_authority(self) -> SourceObservationAuthority:
+        """Return a read-only source authority bound to this producer."""
+        return self._producer.authority()
+
+    def raster_ocr_authority(self) -> "SourceRasterOCRAuthority":
+        """Return the read-only authority for producer-rendered OCR."""
+        return SourceRasterOCRAuthority(
+            self._producer.authority(),
+            self._raster_ocr_receipts,
+            _seal=_RASTER_OCR_AUTHORITY_SEAL,
         )
 
     def published_snapshot_for_revision(
@@ -444,6 +513,294 @@ class SourceVisibilityProducer:
         return published
 
 
+    def publish_page_raster_ocr_observations(
+        self,
+        *,
+        revision_id: str,
+        expected_snapshot_id: str,
+        page_id: str,
+        backend: RasterOCRBackend,
+        dpi: int = 300,
+    ) -> RasterOCRSourcePublishResult:
+        """Render one page from this producer's immutable PDF bytes and OCR it.
+
+        Caller-supplied page images are never accepted. Each OCR record is
+        derived from the producer-owned native PDF page observation. The result
+        remains evidence-only: observing OCR text does not prove an opening,
+        a tag identity, a complete opening universe, or a commercial quantity.
+
+        Call this before creating snapshot-bound viewport/opening authorities
+        that are intended to consume these OCR observations.
+        """
+        revision_id = str(revision_id or "").strip()
+        expected_snapshot_id = str(expected_snapshot_id or "").strip()
+        page_id = str(page_id or "").strip()
+        if not revision_id or not expected_snapshot_id or not page_id:
+            return RasterOCRSourcePublishResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(RASTER_OCR_SCOPE_MISMATCH,),
+            )
+        if not isinstance(dpi, int) or dpi <= 0:
+            return RasterOCRSourcePublishResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(RASTER_OCR_SCOPE_MISMATCH, "dpi_must_be_positive_integer"),
+            )
+
+        production_types = (
+            RapidOCRBackend,
+            TesseractOCRBackend,
+            WinOCRBackend,
+            NullOCRBackend,
+        )
+        if type(backend) not in production_types:
+            raise TypeError(
+                "backend must be an exact production OCR backend type; "
+                "mock or arbitrary subclasses cannot publish producer-owned OCR observations"
+            )
+
+        published = self._published_by_revision.get(revision_id)
+        if published is None or published.snapshot.snapshot_id != expected_snapshot_id:
+            return RasterOCRSourcePublishResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(RASTER_OCR_SCOPE_MISMATCH,),
+            )
+
+        backend_name = str(backend.name)
+        backend_version = str(backend.version)
+        cache_key = (
+            revision_id,
+            expected_snapshot_id,
+            page_id,
+            backend_name,
+            backend_version,
+            dpi,
+        )
+        cached = self._raster_ocr_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        if not backend.is_available():
+            result = RasterOCRSourcePublishResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(RASTER_OCR_BACKEND_UNAVAILABLE,),
+            )
+            self._raster_ocr_cache[cache_key] = result
+            return result
+
+        source_bytes = self._producer._store.source_bytes_by_revision.get(revision_id)
+        if source_bytes is None:
+            result = RasterOCRSourcePublishResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(RASTER_OCR_SOURCE_BYTES_MISMATCH,),
+            )
+            self._raster_ocr_cache[cache_key] = result
+            return result
+        immutable_bytes = bytes(source_bytes)
+        if hashlib.sha256(immutable_bytes).hexdigest() != published.revision.source_sha256:
+            result = RasterOCRSourcePublishResult(
+                status=EvidenceResolutionStatus.CONFLICT,
+                reason_codes=(RASTER_OCR_SOURCE_BYTES_MISMATCH,),
+            )
+            self._raster_ocr_cache[cache_key] = result
+            return result
+
+        try:
+            page_number = int(page_id)
+        except (TypeError, ValueError):
+            result = RasterOCRSourcePublishResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(RASTER_OCR_SCOPE_MISMATCH, "page_id_must_be_canonical_numeric_page"),
+            )
+            self._raster_ocr_cache[cache_key] = result
+            return result
+        if page_number not in published.coverage.decoded_pages:
+            result = RasterOCRSourcePublishResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(RASTER_OCR_SCOPE_MISMATCH, "page_not_in_decoded_coverage"),
+            )
+            self._raster_ocr_cache[cache_key] = result
+            return result
+
+        source_authority = self._producer.authority()
+        page_parent = None
+        for observation_id in published.snapshot.observation_ids:
+            resolved = source_authority.resolve(
+                ObservationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    observation_id=observation_id,
+                )
+            )
+            observation = resolved.observation
+            if (
+                resolved.status == EvidenceResolutionStatus.CORROBORATED
+                and observation is not None
+                and observation.observation_kind == "native_pdf_page"
+                and observation.origin_kind == "native"
+                and observation.page_id == page_id
+            ):
+                page_parent = observation
+                break
+        if page_parent is None:
+            result = RasterOCRSourcePublishResult(
+                status=EvidenceResolutionStatus.CONFLICT,
+                reason_codes=(PRODUCER_INTEGRITY_FAILURE, "native_page_parent_missing"),
+            )
+            self._raster_ocr_cache[cache_key] = result
+            return result
+
+        pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
+        try:
+            if page_number < 1 or page_number > int(pdf.page_count):
+                result = RasterOCRSourcePublishResult(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(RASTER_OCR_SCOPE_MISMATCH, "page_out_of_range"),
+                )
+                self._raster_ocr_cache[cache_key] = result
+                return result
+            page = pdf.load_page(page_number - 1)
+            scale = float(dpi) / 72.0
+            pix = page.get_pixmap(
+                matrix=fitz.Matrix(scale, scale),
+                colorspace=fitz.csRGB,
+                alpha=False,
+            )
+            image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            try:
+                raw_lines = tuple(backend.extract_lines(image, dpi=dpi))
+            except Exception as exc:
+                result = RasterOCRSourcePublishResult(
+                    status=EvidenceResolutionStatus.CONFLICT,
+                    reason_codes=(RASTER_OCR_EXTRACTION_FAILED, f"backend_error:{type(exc).__name__}"),
+                )
+                self._raster_ocr_cache[cache_key] = result
+                return result
+        finally:
+            pdf.close()
+
+        unique_lines = []
+        seen_line_keys: set[tuple[str, tuple[float, float, float, float]]] = set()
+        for line in raw_lines:
+            text_value = str(line.text or "").strip()
+            if not text_value or line.bbox_pt is None or len(line.bbox_pt) != 4:
+                continue
+            bbox = tuple(round(float(v), 4) for v in line.bbox_pt)
+            if (
+                not all(math.isfinite(v) for v in bbox)
+                or bbox[2] <= bbox[0]
+                or bbox[3] <= bbox[1]
+            ):
+                continue
+            line_key = (text_value, bbox)
+            if line_key in seen_line_keys:
+                continue
+            seen_line_keys.add(line_key)
+            unique_lines.append((text_value, bbox))
+
+        if not unique_lines:
+            result = RasterOCRSourcePublishResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(RASTER_OCR_NO_TEXT,),
+            )
+            self._raster_ocr_cache[cache_key] = result
+            return result
+
+        old_snapshot_id = published.snapshot.snapshot_id
+        snapshot = published.snapshot
+        receipts: list[RasterOCRObservationReceipt] = []
+        observation_ids: list[str] = []
+        for text_value, bbox in unique_lines:
+            payload = {
+                "document_id": published.revision.document_id,
+                "revision_id": published.revision.revision_id,
+                "source_sha256": published.revision.source_sha256,
+                "parent_observation_id": page_parent.observation_id,
+                "page_id": page_id,
+                "raw_text": text_value,
+                "geometry": bbox,
+                "backend_name": backend_name,
+                "backend_version": backend_version,
+                "dpi": dpi,
+            }
+            observation_id = stable_contract_id(
+                "producer_raster_ocr_observation", payload, digest_chars=32
+            )
+            primitive_ref = f"ocr:{backend_name}:{observation_id}"
+            snapshot = self._producer.publish_derived_observation(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                base_snapshot_id=snapshot.snapshot_id,
+                page_id=page_id,
+                source_partition_id=page_parent.source_partition_id,
+                observation_kind=RASTER_OCR_OBSERVATION_KIND,
+                source_primitive_ref=primitive_ref,
+                origin_kind=RASTER_OCR_ORIGIN_KIND,
+                parent_observation_ids=(page_parent.observation_id,),
+                raw_text=text_value,
+                geometry=bbox,
+                viewport_id=None,
+                observation_id=observation_id,
+            )
+            observation_ids.append(observation_id)
+            receipts.append(
+                RasterOCRObservationReceipt(
+                    observation_id=observation_id,
+                    parent_observation_id=page_parent.observation_id,
+                    raw_text=text_value,
+                    geometry=bbox,
+                    backend_name=backend_name,
+                    backend_version=backend_version,
+                    dpi=dpi,
+                )
+            )
+
+        final_snapshot_id = snapshot.snapshot_id
+
+        for observation_id in published.visible_observation_ids:
+            prior = self._visibility_receipts.get((old_snapshot_id, observation_id))
+            if prior is not None:
+                self._visibility_receipts[(final_snapshot_id, observation_id)] = prior
+        for observation_id in published.text_observation_ids:
+            prior = self._text_integrity_receipts.get((old_snapshot_id, observation_id))
+            if prior is not None:
+                self._text_integrity_receipts[(final_snapshot_id, observation_id)] = prior
+        for (snapshot_id, observation_id), receipt in list(self._raster_ocr_receipts.items()):
+            if snapshot_id == old_snapshot_id:
+                self._raster_ocr_receipts[(final_snapshot_id, observation_id)] = receipt
+        for receipt in receipts:
+            self._raster_ocr_receipts[(final_snapshot_id, receipt.observation_id)] = receipt
+
+        updated_visible = PublishedVisibleSourceSnapshot(
+            revision=replace(published.revision),
+            coverage=replace(published.coverage),
+            snapshot=replace(snapshot),
+            base_source_snapshot_id=published.base_source_snapshot_id,
+            visible_observation_ids=published.visible_observation_ids,
+            text_observation_ids=published.text_observation_ids,
+        )
+        self._published_by_revision[revision_id] = updated_visible
+
+        ocr_published = PublishedRasterOCRSourceSnapshot(
+            revision=replace(updated_visible.revision),
+            coverage=replace(updated_visible.coverage),
+            snapshot=replace(updated_visible.snapshot),
+            page_id=page_id,
+            backend_name=backend_name,
+            backend_version=backend_version,
+            dpi=dpi,
+            ocr_observation_ids=tuple(observation_ids),
+        )
+        result = RasterOCRSourcePublishResult(
+            status=EvidenceResolutionStatus.CANDIDATE,
+            reason_codes=(RASTER_OCR_PUBLISHED_CANDIDATE_ONLY,),
+            published=ocr_published,
+        )
+        self._raster_ocr_cache[cache_key] = result
+        return result
+
+
 class SourceVisibilityAuthority:
     """Read-only authority for producer-receipted visible segment observations.
 
@@ -533,8 +890,102 @@ class SourceVisibilityAuthority:
         )
 
 
+class SourceRasterOCRAuthority:
+    """Read-only receipt authority for producer-rendered OCR observations.
+
+    This proves only that the trusted producer observed text at a geometry
+    while rasterizing the exact ingested PDF page. It does not prove OCR
+    semantic correctness, physical-opening existence, identity, completeness,
+    or any commercial quantity.
+    """
+
+    def __init__(
+        self,
+        source_authority: SourceObservationAuthority,
+        receipts: Mapping[tuple[str, str], RasterOCRObservationReceipt],
+        *,
+        _seal: object = None,
+    ) -> None:
+        if _seal is not _RASTER_OCR_AUTHORITY_SEAL:
+            raise TypeError(
+                "SourceRasterOCRAuthority must be obtained from "
+                "SourceVisibilityProducer.raster_ocr_authority()"
+            )
+        self._source_authority = source_authority
+        self._receipts = receipts
+
+    def resolve_ocr(self, selector: ObservationSelector) -> SourceObservationAuthorityResult:
+        receipt = self._receipts.get((selector.snapshot_id, selector.observation_id))
+        if receipt is None:
+            return SourceObservationAuthorityResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=(VISIBILITY_RECEIPT_UNAVAILABLE, "raster_ocr_receipt_unavailable"),
+            )
+
+        result = self._source_authority.resolve(selector)
+        observation = result.observation
+        if observation is None or result.status != EvidenceResolutionStatus.CORROBORATED:
+            return result
+        if (
+            observation.observation_kind != RASTER_OCR_OBSERVATION_KIND
+            or observation.origin_kind != RASTER_OCR_ORIGIN_KIND
+            or observation.derivation_parent_ids != (receipt.parent_observation_id,)
+            or observation.raw_text != receipt.raw_text
+            or tuple(observation.geometry) != tuple(receipt.geometry)
+        ):
+            return SourceObservationAuthorityResult(
+                status=EvidenceResolutionStatus.CONFLICT,
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=(PRODUCER_INTEGRITY_FAILURE,),
+            )
+
+        parent_result = self._source_authority.resolve(
+            ObservationSelector(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                observation_id=receipt.parent_observation_id,
+            )
+        )
+        parent = parent_result.observation
+        if (
+            parent is None
+            or parent_result.status != EvidenceResolutionStatus.CORROBORATED
+            or parent.observation_kind != "native_pdf_page"
+            or parent.origin_kind != "native"
+            or parent.page_id != observation.page_id
+            or parent.source_partition_id != observation.source_partition_id
+        ):
+            return SourceObservationAuthorityResult(
+                status=EvidenceResolutionStatus.CONFLICT,
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=(PRODUCER_INTEGRITY_FAILURE, "raster_ocr_parent_mismatch"),
+            )
+
+        return replace(
+            result,
+            proposition=RASTER_OCR_SOURCE_OBSERVATION_EXISTS,
+            physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+            reason_codes=("producer_owned_raster_ocr_source_observation_resolved",),
+        )
+
+
 __all__ = [
     "NATIVE_PDF_VISIBLE_SEGMENT",
+    "RASTER_OCR_BACKEND_UNAVAILABLE",
+    "RASTER_OCR_EXTRACTION_FAILED",
+    "RASTER_OCR_NO_TEXT",
+    "RASTER_OCR_OBSERVATION_KIND",
+    "RASTER_OCR_ORIGIN_KIND",
+    "RASTER_OCR_PUBLISHED_CANDIDATE_ONLY",
+    "RASTER_OCR_SCOPE_MISMATCH",
+    "RASTER_OCR_SOURCE_BYTES_MISMATCH",
+    "RASTER_OCR_SOURCE_OBSERVATION_EXISTS",
     "SOURCE_VISIBILITY_SCHEMA_VERSION",
     "VISIBLE_SEGMENT_ORIGIN_KIND",
     "VISIBLE_SOURCE_OBSERVATION_EXISTS",
@@ -546,7 +997,11 @@ __all__ = [
     "VISIBILITY_PROVEN_NO_ACTIVE_CLIP",
     "VISIBILITY_RECEIPT_UNAVAILABLE",
     "NativeSegmentVisibilityDecision",
+    "PublishedRasterOCRSourceSnapshot",
     "PublishedVisibleSourceSnapshot",
+    "RasterOCRObservationReceipt",
+    "RasterOCRSourcePublishResult",
+    "SourceRasterOCRAuthority",
     "SourceVisibilityAuthority",
     "SourceVisibilityProducer",
     "classify_native_segment_visibility",
