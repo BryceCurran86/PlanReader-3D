@@ -1590,34 +1590,21 @@ class GenericPlanReaderExtractor:
                         metadata=dict(_internal_face_derivation),
                     )
 
-                # External key pointing: at least the correct FACE (external,
-                # like perimeter_walling itself), but still triggered purely
-                # by a keyword appearing somewhere in the page text with no
-                # geometric evidence of its own extent -- never as confident
-                # as a directly measured quantity.
+                # External key pointing / exposed-masonry finish: a page-wide
+                # keyword such as "key to finish externally" proves at most that
+                # this finish is specified somewhere on the drawing. It does not
+                # prove which physical wall faces receive it or their measured
+                # extent, so copying perimeter_walling's quantity here would
+                # mint a finish-face area with no independent binding of its
+                # own. Keep the keyword as visible diagnostic evidence and fail
+                # closed until a producer-owned finish/face-binding authority
+                # can supply an independently measured extent.
                 if any(k in pt_norm for k in (
                     "key pointing", "key finish", "pointing externally",
                     "key to finish", "keyed pointing",
                 )):
-                    pred_dict["external_key_pointing"] = ExtractedPrediction(
-                        tag="external_key_pointing",
-                        trade_type="finishes",
-                        description="External key pointing to exposed stone/block masonry",
-                        quantity=cur_wall,
-                        unit="SM",
-                        confidence=0.5,
-                        source_page=page_num,
-                        sheet_number=sheet_no,
-                        metadata={
-                            "derivation": "external_wall_area_copy_keyword_triggered",
-                            "wall_height_authority": wall_height_authority,
-                            "note": (
-                                "Triggered by a key-pointing keyword in the page text "
-                                "with no independent measurement of its own extent; "
-                                "reuses the external wall area and should be treated "
-                                "as provisional."
-                            ),
-                        },
+                    self.extraction_status["external_key_pointing"] = (
+                        "evidence_present_unresolved"
                     )
 
                 # DPC from evidenced external envelope perimeter.
