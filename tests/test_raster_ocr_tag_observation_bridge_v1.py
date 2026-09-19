@@ -188,7 +188,7 @@ def test_mock_or_arbitrary_backend_cannot_publish_source_observations() -> None:
             revision_id=published.revision.revision_id,
             expected_snapshot_id=published.snapshot.snapshot_id,
             page_id="1",
-            backend=MockOCRBackend(lines=()),
+            backend=MockOCRBackend(canned_lines=()),
             dpi=300,
         )
 
