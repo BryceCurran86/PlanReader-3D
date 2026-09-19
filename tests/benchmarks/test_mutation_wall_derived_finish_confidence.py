@@ -68,6 +68,13 @@ def _extract(tmp_path: Path, **kwargs) -> dict:
     return {p.tag: p for p in preds}
 
 
+def _extract_with_extractor(tmp_path: Path, **kwargs) -> tuple[dict, GenericPlanReaderExtractor]:
+    pdf_path = _make_synthetic_plan_pdf(tmp_path, **kwargs)
+    extractor = GenericPlanReaderExtractor()
+    preds = extractor.extract_from_pdf(pdf_path)
+    return {p.tag: p for p in preds}, extractor
+
+
 class TestDerivedFinishQuantitiesAreHonestlyLowConfidence:
     def test_perimeter_walling_keeps_its_own_independently_measured_confidence(self, tmp_path: Path) -> None:
         pred_map = _extract(tmp_path, include_plaster=True, include_key_pointing=True)
@@ -87,23 +94,32 @@ class TestDerivedFinishQuantitiesAreHonestlyLowConfidence:
             assert pred.metadata["derivation"] == "external_wall_area_proxy_no_internal_face_evidence"
             assert "internal face area" in pred.metadata["note"]
 
-    def test_external_key_pointing_is_marked_as_keyword_triggered(self, tmp_path: Path) -> None:
-        pred_map = _extract(tmp_path, include_plaster=False, include_key_pointing=True)
-        assert "external_key_pointing" in pred_map
-        pred = pred_map["external_key_pointing"]
-        assert pred.confidence == 0.5
-        assert pred.confidence < pred_map["perimeter_walling"].confidence
-        assert pred.metadata["derivation"] == "external_wall_area_copy_keyword_triggered"
+    def test_external_key_pointing_fails_closed_with_diagnostic_status(self, tmp_path: Path) -> None:
+        # Superseded fix (see claude/external-key-pointing-failclosed-v1):
+        # lowering confidence on a blind copy was only a partial honesty
+        # improvement. A keyword proves a finish is specified, not which
+        # wall faces receive it or their extent, so no quantity publishes
+        # at all now -- the keyword is kept as visible diagnostic evidence
+        # instead of a confidence-discounted copy.
+        pred_map, extractor = _extract_with_extractor(
+            tmp_path, include_plaster=False, include_key_pointing=True
+        )
+        assert "external_key_pointing" not in pred_map
+        assert (
+            extractor.extraction_status.get("external_key_pointing")
+            == "evidence_present_unresolved"
+        )
 
     def test_derived_quantities_still_equal_the_source_wall_area_unchanged(self, tmp_path: Path) -> None:
-        # The fix must only ever change confidence/metadata honesty, never
-        # the quantity itself -- benchmark scoring must be byte-for-byte
-        # unaffected by this change.
+        # The internal_plaster/internal_paint proxy fix must only ever
+        # change confidence/metadata honesty, never the quantity itself --
+        # benchmark scoring must be byte-for-byte unaffected by this change.
+        # external_key_pointing is excluded here: it no longer publishes a
+        # quantity at all (see test_external_key_pointing_fails_closed_with_diagnostic_status).
         pred_map = _extract(tmp_path, include_plaster=True, include_key_pointing=True)
         wall_qty = pred_map["perimeter_walling"].quantity
         assert pred_map["internal_plaster"].quantity == wall_qty
         assert pred_map["internal_paint"].quantity == wall_qty
-        assert pred_map["external_key_pointing"].quantity == wall_qty
 
     def test_neither_finish_keyword_present_emits_no_derived_predictions(self, tmp_path: Path) -> None:
         pred_map = _extract(tmp_path, include_plaster=False, include_key_pointing=False)

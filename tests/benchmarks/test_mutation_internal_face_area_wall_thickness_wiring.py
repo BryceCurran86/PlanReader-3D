@@ -50,6 +50,15 @@ def _extract(tmp_path: Path, *, with_wall_thickness_evidence: bool) -> dict:
     return {p.tag: p for p in preds}
 
 
+def _extract_with_extractor(
+    tmp_path: Path, *, with_wall_thickness_evidence: bool
+) -> tuple[dict, GenericPlanReaderExtractor]:
+    pdf_path = _build_pdf(tmp_path, with_wall_thickness_evidence=with_wall_thickness_evidence)
+    extractor = GenericPlanReaderExtractor()
+    preds = extractor.extract_from_pdf(pdf_path)
+    return {p.tag: p for p in preds}, extractor
+
+
 class TestInternalFaceAreaWiring:
     def test_no_corroborated_thickness_keeps_unchanged_proxy_behaviour(self, tmp_path: Path) -> None:
         pred_map = _extract(tmp_path, with_wall_thickness_evidence=False)
@@ -90,9 +99,24 @@ class TestInternalFaceAreaWiring:
         )
 
     def test_external_key_pointing_is_never_affected_by_internal_face_area(self, tmp_path: Path) -> None:
-        pred_map_without = _extract(tmp_path, with_wall_thickness_evidence=False)
-        pred_map_with = _extract(tmp_path, with_wall_thickness_evidence=True)
-        kp_without = pred_map_without["external_key_pointing"]
-        kp_with = pred_map_with["external_key_pointing"]
-        assert kp_without.quantity == kp_with.quantity
-        assert kp_with.quantity == pred_map_with["perimeter_walling"].quantity
+        # external_key_pointing (see claude/external-key-pointing-failclosed-v1)
+        # no longer publishes a quantity at all -- a keyword proves a finish
+        # is specified, not its measured wall-face extent. This regression
+        # guard now verifies that stays true (fails closed, with the
+        # keyword kept as diagnostic evidence) regardless of whether
+        # internal-face-area wiring finds corroborated wall-thickness
+        # evidence, i.e. that the two code paths remain genuinely
+        # independent in both directions.
+        pred_map_without, extractor_without = _extract_with_extractor(
+            tmp_path, with_wall_thickness_evidence=False
+        )
+        pred_map_with, extractor_with = _extract_with_extractor(
+            tmp_path, with_wall_thickness_evidence=True
+        )
+        assert "external_key_pointing" not in pred_map_without
+        assert "external_key_pointing" not in pred_map_with
+        for extractor in (extractor_without, extractor_with):
+            assert (
+                extractor.extraction_status.get("external_key_pointing")
+                == "evidence_present_unresolved"
+            )
