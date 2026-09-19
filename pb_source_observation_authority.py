@@ -204,6 +204,116 @@ class SourceObservationProducer:
     def current_revision_id(self, document_id: str) -> Optional[str]:
         return self._store.current_revision_by_document.get(str(document_id))
 
+    def render_native_page_png(
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        source_sha256: str,
+        snapshot_id: str,
+        page_id: str,
+        dpi: float = 300.0,
+    ) -> tuple[bytes, SourceObservationRecord]:
+        """Render one page from the exact immutable PDF bytes this producer ingested.
+
+        This is the producer-owned raster boundary for downstream OCR. Callers
+        address the page by immutable lineage only; they cannot supply page pixels,
+        a page-parent observation id, or a source partition id. The native page
+        parent and partition are resolved internally from snapshot_id and the
+        producer's own observation store.
+
+        Returns (png_bytes, native_pdf_page_observation). The returned observation
+        is a defensive copy scoped to the requested snapshot.
+        """
+
+        document_id = _nonempty(document_id, "document_id")
+        revision_id = _nonempty(revision_id, "revision_id")
+        source_sha256 = _nonempty(source_sha256, "source_sha256")
+        snapshot_id = _nonempty(snapshot_id, "snapshot_id")
+        page_id = _nonempty(page_id, "page_id")
+        dpi_value = float(dpi)
+        if not math.isfinite(dpi_value) or dpi_value <= 0.0:
+            raise ValueError("dpi must be a positive finite number")
+
+        current = self._store.current_revision_by_document.get(document_id)
+        if current is None:
+            raise ValueError(SOURCE_UNAVAILABLE)
+        if current != revision_id:
+            raise ValueError(f"{STALE_REVISION}: revision is not current")
+
+        revision = self._store.revisions.get(revision_id)
+        source_bytes = self._store.source_bytes_by_revision.get(revision_id)
+        if revision is None or source_bytes is None:
+            raise ProducerIntegrityError(
+                f"{PRODUCER_INTEGRITY_FAILURE}: source lineage unavailable"
+            )
+        if hashlib.sha256(source_bytes).hexdigest() != revision.source_sha256:
+            raise ProducerIntegrityError(
+                f"{PRODUCER_INTEGRITY_FAILURE}: immutable source hash changed"
+            )
+        if source_sha256 != revision.source_sha256:
+            raise ValueError(SOURCE_HASH_MISMATCH)
+
+        snapshot = self._store.snapshots.get(snapshot_id)
+        if (
+            snapshot is None
+            or snapshot.document_id != document_id
+            or snapshot.revision_id != revision_id
+            or snapshot.source_sha256 != source_sha256
+        ):
+            raise ValueError(SNAPSHOT_MISMATCH)
+
+        page_parents: list[SourceObservationRecord] = []
+        for observation_id in snapshot.observation_ids:
+            record = self._store.observations.get((snapshot_id, observation_id))
+            if (
+                record is not None
+                and record.observation_kind == "native_pdf_page"
+                and record.origin_kind == "native"
+                and record.page_id == page_id
+                and not record.derivation_parent_ids
+            ):
+                page_parents.append(record)
+
+        if len(page_parents) != 1:
+            raise ValueError(
+                f"{LINEAGE_UNAVAILABLE}: expected exactly one native_pdf_page "
+                f"parent for page {page_id}, found {len(page_parents)}"
+            )
+        page_parent = page_parents[0]
+        if page_parent.source_partition_id not in revision.partition_ids:
+            raise ProducerIntegrityError(
+                f"{PRODUCER_INTEGRITY_FAILURE}: native page partition not in revision"
+            )
+
+        coverage = self._store.coverage_by_revision.get(revision_id)
+        try:
+            page_number = int(page_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{SOURCE_UNAVAILABLE}: invalid page id {page_id!r}") from exc
+        if str(page_number) != page_id or page_number < 1:
+            raise ValueError(f"{SOURCE_UNAVAILABLE}: invalid page id {page_id!r}")
+        if coverage is None or page_number not in coverage.decoded_pages:
+            raise ValueError(f"{SOURCE_UNAVAILABLE}: page {page_id} was not decoded")
+
+        try:
+            pdf = fitz.open(stream=source_bytes, filetype="pdf")
+        except Exception as exc:
+            raise ProducerIntegrityError(
+                f"{PRODUCER_INTEGRITY_FAILURE}: stored PDF no longer decodes"
+            ) from exc
+        try:
+            if page_number > int(pdf.page_count):
+                raise ValueError(f"{SOURCE_UNAVAILABLE}: page {page_id} out of range")
+            page = pdf.load_page(page_number - 1)
+            scale = dpi_value / 72.0
+            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            png_bytes = pix.tobytes("png")
+        finally:
+            pdf.close()
+
+        return png_bytes, replace(page_parent)
+
     def ingest_native_pdf_bytes(
         self,
         *,
