@@ -52,6 +52,7 @@ OCR_CALLER_PAGE_IMAGES_NOT_AUTHORITY = "ocr_caller_page_images_not_authority"
 OCR_CALLER_NATIVE_TEXT_NOT_AUTHORITY = "ocr_caller_native_text_not_authority"
 OCR_PROVISIONAL_CANDIDATE_ONLY = "ocr_provisional_candidate_only"
 OCR_CONFIDENCE_UNAVAILABLE_FROM_BACKEND = "ocr_confidence_unavailable_from_backend"
+OCR_BACKEND_SELECTED_RAPIDOCR_AVAILABLE = "ocr_backend_selected:rapidocr_available"
 OCR_BACKEND_SELECTED_TESSERACT_AVAILABLE = "ocr_backend_selected:tesseract_available"
 OCR_BACKEND_SELECTED_WINOCR_AVAILABLE = "ocr_backend_selected:tesseract_unavailable_winocr_available"
 OCR_BACKEND_SELECTED_NONE_AVAILABLE = "ocr_backend_selected:no_production_ocr_backend_available"
@@ -374,7 +375,10 @@ class TesseractOCRBackend(RasterOCRBackend):
             if not text:
                 continue
             conf_raw = float(data.get("conf", [0])[i])
-            conf = max(0.0, min(1.0, conf_raw / 100.0)) if conf_raw >= 0 else 0.5
+            # Tesseract reports -1 for entries with no real confidence
+            # (typically block/paragraph-level groupings, not text) --
+            # that must read as "not measured", never a fabricated 0.5.
+            conf = max(0.0, min(1.0, conf_raw / 100.0)) if conf_raw >= 0 else None
             x = float(data.get("left", [0])[i])
             y = float(data.get("top", [0])[i])
             w = float(data.get("width", [0])[i])
@@ -397,8 +401,101 @@ class TesseractOCRBackend(RasterOCRBackend):
         return tuple(lines)
 
 
+class RapidOCRBackend(RasterOCRBackend):
+    """RapidOCR (ONNX Runtime, PP-OCR models) backend.
+
+    Cross-platform, pip-installable, no external binary and no
+    Windows-only runtime dependency (unlike Tesseract and WinOCR
+    respectively) -- ``is_available()`` and ``extract_lines()`` behave
+    identically on Windows, Linux, and macOS. Apache-2.0 licensed
+    (github.com/RapidAI/RapidOCR).
+
+    Engine construction (~30MB of bundled ONNX detection/classification/
+    recognition models) is genuinely expensive -- observed ~7s on first
+    use -- so it is done at most once per process via a lazily-created,
+    class-level cached instance, never per ``extract_lines()`` call.
+    ``is_available()`` deliberately does NOT construct the engine (that
+    would pay the full cost just to answer "is this installed" -- it only
+    checks that the package itself imports). A genuine construction or
+    inference failure (e.g. corrupt/missing model files) surfaces as a
+    real exception from ``extract_lines()``, which the producer already
+    catches and reports as a CONFLICT -- the same fail-closed path every
+    other backend's real extraction errors already go through.
+    """
+
+    _engine_cache: Any = None
+
+    @property
+    def name(self) -> str:
+        return "rapid_ocr"
+
+    @property
+    def version(self) -> str:
+        try:
+            import rapidocr
+            return str(getattr(rapidocr, "__version__", "unknown"))
+        except Exception:
+            return "unknown"
+
+    def is_available(self) -> bool:
+        try:
+            import rapidocr  # noqa: F401
+            import onnxruntime  # noqa: F401
+            return True
+        except Exception:
+            return False
+
+    @classmethod
+    def _get_engine(cls) -> Any:
+        if cls._engine_cache is None:
+            from rapidocr import RapidOCR
+            cls._engine_cache = RapidOCR()
+        return cls._engine_cache
+
+    @classmethod
+    def _reset_engine_cache_for_tests(cls) -> None:
+        """Test-only: clear the cached engine so a test's mock construction
+        is not silently reused by a later, unrelated test."""
+        cls._engine_cache = None
+
+    def extract_lines(self, image: Image.Image, dpi: int = 150) -> tuple[OCRLine, ...]:
+        if not self.is_available():
+            raise RuntimeError("RapidOCR backend is not available")
+        import numpy as np
+
+        engine = self._get_engine()
+        array = np.array(image.convert("RGB"))
+        result = engine(array)
+
+        scale_to_pt = 72.0 / float(dpi) if dpi > 0 else 1.0
+        lines: list[OCRLine] = []
+        texts = getattr(result, "txts", None) if result is not None else None
+        if not texts:
+            return ()
+        boxes = result.boxes
+        scores = result.scores
+        for text, box, score in zip(texts, boxes, scores):
+            text = str(text).strip()
+            if not text:
+                continue
+            xs = [float(pt[0]) for pt in box]
+            ys = [float(pt[1]) for pt in box]
+            bbox_px = (min(xs), min(ys), max(xs), max(ys))
+            bbox_pt = tuple(round(v * scale_to_pt, 4) for v in bbox_px)
+            confidence = float(score) if score is not None else None
+            lines.append(
+                OCRLine(
+                    text=text,
+                    confidence=confidence,
+                    bbox_px=bbox_px,
+                    bbox_pt=bbox_pt,
+                )
+            )
+        return tuple(lines)
+
+
 # Exact production backends only — Mock and arbitrary subclasses are not authority.
-_PRODUCTION_BACKEND_TYPES = (NullOCRBackend, TesseractOCRBackend, WinOCRBackend)
+_PRODUCTION_BACKEND_TYPES = (NullOCRBackend, TesseractOCRBackend, WinOCRBackend, RapidOCRBackend)
 
 
 @dataclass(frozen=True)
@@ -416,6 +513,7 @@ class OCRCapabilityReport:
     default_backend: Optional[str]
     tesseract_available: bool
     winocr_available: bool
+    rapidocr_available: bool
     pillow_available: bool
 
     @property
@@ -433,12 +531,13 @@ def detect_ocr_capabilities() -> OCRCapabilityReport:
 
     tess_ok = TesseractOCRBackend().is_available()
     winocr_ok = WinOCRBackend().is_available()
+    rapidocr_ok = RapidOCRBackend().is_available()
 
-    # Deterministic order matches from_environment()'s own preference:
-    # Tesseract first (a known-good, cross-platform, per-word-confidence
-    # engine) wherever it is genuinely installed, then WinOCR on Windows
-    # when Tesseract is not present.
+    # Deterministic order matches from_environment()'s own preference --
+    # see that method's docstring for why RapidOCR now ranks first.
     backends: list[str] = []
+    if rapidocr_ok:
+        backends.append("rapid_ocr")
     if tess_ok:
         backends.append("tesseract")
     if winocr_ok:
@@ -450,6 +549,7 @@ def detect_ocr_capabilities() -> OCRCapabilityReport:
         default_backend=default,
         tesseract_available=tess_ok,
         winocr_available=winocr_ok,
+        rapidocr_available=rapidocr_ok,
         pillow_available=pillow_ok,
     )
 
@@ -739,31 +839,44 @@ class PortableRasterOCRProducer:
         Preference order (matches ``detect_ocr_capabilities()``'s own
         ``available_backends`` ordering, so the two never disagree):
 
-        1. Tesseract, wherever it is genuinely installed and passes its own
+        1. ``RapidOCRBackend`` (ONNX Runtime + PP-OCR models), wherever it
+           is genuinely installed. Cross-platform (works identically on
+           Windows/Linux/macOS -- no external binary, no OS-specific
+           runtime), Apache-2.0 licensed, and empirically the only one of
+           the three that correctly recognizes short hyphenated
+           architectural marks ("W-1", "D-2", etc.) against real drawing
+           pages -- Tesseract was not installed in that evaluation and
+           WinOCR recognized zero of them. Ranked first on that evidence,
+           not merely because it happened to help one benchmark project.
+        2. Tesseract, wherever it is genuinely installed and passes its own
            ``is_available()`` self-test (cross-platform, has real per-word
-           confidence).
-        2. ``WinOCRBackend``, only when its own ``is_available()`` is True
+           confidence) -- kept as the second choice for environments where
+           a user has already deliberately installed/tuned it.
+        3. ``WinOCRBackend``, only when its own ``is_available()`` is True
            (which already requires ``os.name == "nt"`` and a real ``winrt``
            install -- never assumed from "we are probably on Windows").
-        3. ``NullOCRBackend`` -- fail closed, never guesses a backend into
+        4. ``NullOCRBackend`` -- fail closed, never guesses a backend into
            existence.
 
         This is the ONLY place backend auto-selection happens. Explicit
         ``from_backend(backend=...)`` calls are never affected by this
         method or by what is installed in the environment.
         """
+        rapid = RapidOCRBackend()
         tess = TesseractOCRBackend()
-        if tess.is_available():
-            chosen: RasterOCRBackend = tess
+        win = WinOCRBackend()
+        if rapid.is_available():
+            chosen: RasterOCRBackend = rapid
+            reason = OCR_BACKEND_SELECTED_RAPIDOCR_AVAILABLE
+        elif tess.is_available():
+            chosen = tess
             reason = OCR_BACKEND_SELECTED_TESSERACT_AVAILABLE
+        elif win.is_available():
+            chosen = win
+            reason = OCR_BACKEND_SELECTED_WINOCR_AVAILABLE
         else:
-            win = WinOCRBackend()
-            if win.is_available():
-                chosen = win
-                reason = OCR_BACKEND_SELECTED_WINOCR_AVAILABLE
-            else:
-                chosen = NullOCRBackend()
-                reason = OCR_BACKEND_SELECTED_NONE_AVAILABLE
+            chosen = NullOCRBackend()
+            reason = OCR_BACKEND_SELECTED_NONE_AVAILABLE
 
         producer = cls(
             backend=chosen,
@@ -1015,6 +1128,7 @@ __all__ = [
     "OCR_NO_TEXT_DETECTED",
     "OCR_PROVISIONAL_CANDIDATE_ONLY",
     "OCR_CONFIDENCE_UNAVAILABLE_FROM_BACKEND",
+    "OCR_BACKEND_SELECTED_RAPIDOCR_AVAILABLE",
     "OCR_BACKEND_SELECTED_TESSERACT_AVAILABLE",
     "OCR_BACKEND_SELECTED_WINOCR_AVAILABLE",
     "OCR_BACKEND_SELECTED_NONE_AVAILABLE",
@@ -1025,6 +1139,7 @@ __all__ = [
     "PortableRasterOCRProducer",
     "PortableRasterOCRResult",
     "PortableRasterOCRSelector",
+    "RapidOCRBackend",
     "RasterOCRBackend",
     "RasterOCREvidenceRecord",
     "TesseractOCRBackend",
