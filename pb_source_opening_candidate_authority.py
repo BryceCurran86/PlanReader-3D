@@ -2,20 +2,21 @@
 
 Phase F.23 / Item 23 replacement authority:
 1. Reuses existing upstream authority contracts (pb_viewport_view_class_authority,
-   pb_physical_opening_authority, pb_opening_universe_completeness_authority)
-   without creating duplicate or competing authority seals.
+   pb_physical_opening_authority) without creating duplicate or competing authority seals.
 2. SourceToleranceProvenance: mathematically grounded tolerance provenance recording measurement units,
    sample population, residual distribution, robust scale estimator, coverage quantile rule, and frame conversions.
-   Never uses unexplained fixed numbers.
+   Never uses unexplained fixed numbers or unsourced defaults.
 3. CandidateContextFilter: discriminates genuine floor-plan openings from title block logos, furniture arcs,
    sanitary fixtures, and schedule/detail viewports.
 4. PhysicalOpeningCandidateRecord: stores candidate linework anchored to CandidateSemanticOpening and
    authenticated lineage roots in status CANDIDATE or RAW, never CORROBORATED directly from detector.
    Tag bindings are strictly None unless validated by OpeningIdentityResolver.
-5. create_opening_candidate: lawful candidate constructor that mandatorily enforces context filters and
-   derives deterministic candidate IDs from immutable evidence.
-6. OpeningIdentityResolver: proves tag binding fail-closed with OpeningTagBindingResult, and candidate identity
-   via PhysicalOpeningIdentityResult. Rejects nearest-neighbor / Hungarian guessing.
+5. create_opening_candidate: lawful candidate constructor that mandatorily enforces context filters,
+   requires authenticated viewport authority and safety inputs, and derives deterministic candidate IDs
+   from immutable evidence. Arbitrary caller-supplied candidate IDs are rejected.
+6. OpeningIdentityResolver: proves tag binding fail-closed with OpeningTagBindingResult (requiring typed
+   TagBindingEvidence or shared explicit lineage beyond spatial proximity), and candidate identity via
+   PhysicalOpeningIdentityResult. Rejects nearest-neighbor / Hungarian guessing.
 7. validate_opening_decision_viewport: validates viewport ownership, view class, and crop boundary state
    via ViewportViewClassAuthority and SegmentedViewport.
 """
@@ -52,7 +53,7 @@ from pb_viewport_view_class_authority import (
     ViewportViewClassSelector,
 )
 
-SOURCE_OPENING_CANDIDATE_SCHEMA_VERSION = "2.1.0"
+SOURCE_OPENING_CANDIDATE_SCHEMA_VERSION = "2.2.0"
 
 PT_TO_MM = 25.4 / 72.0
 MM_TO_PT = 72.0 / 25.4
@@ -64,6 +65,15 @@ class IdentityState(str, Enum):
     PROVEN_SAME = "proven_same"
     PROVEN_DISTINCT = "proven_distinct"
     UNRESOLVED = "unresolved"
+
+
+class TagBindingRelationKind(str, Enum):
+    """Authenticated structural/semantic relation between a tag observation and an opening candidate."""
+
+    LEADER_TO_OPENING = "leader_to_opening"
+    SHARED_ANNOTATION = "shared_annotation"
+    EXPLICIT_APERTURE_TAG = "explicit_aperture_tag"
+    OTHER_AUTHENTICATED_RELATION = "other_authenticated_relation"
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +128,7 @@ class SourceToleranceProvenance:
         cls,
         *,
         scale_ratio: float,
-        stroke_width_pt: float = 0.7,
+        stroke_width_pt: Optional[float] = None,
         scale_residual_mm: Optional[float] = None,
         raster_dpi: Optional[float] = None,
         target_unit: str = "pt",
@@ -126,19 +136,43 @@ class SourceToleranceProvenance:
         """Derive tolerance from physical scale calibration residual, stroke width, and raster DPI.
 
         Converts all components to the common physical unit (mm world) before computing maximum.
+        Requires authenticated source inputs; fails closed if no source evidence is provided.
         """
         if scale_ratio <= 0.0:
             raise ValueError("scale_ratio must be positive")
 
-        stroke_width_mm = stroke_width_pt * PT_TO_MM * scale_ratio
-        raster_pixel_mm = (25.4 / raster_dpi * scale_ratio) if raster_dpi and raster_dpi > 0 else 0.0
-        # If scale calibration residual is present, use 3-sigma equivalent coverage (k=2.576 or 3.0)
-        k_coverage = 3.0
-        residual_term_mm = (k_coverage * scale_residual_mm) if scale_residual_mm is not None and scale_residual_mm > 0 else 0.0
+        if (
+            stroke_width_pt is None
+            and scale_residual_mm is None
+            and (raster_dpi is None or raster_dpi <= 0)
+        ):
+            raise ValueError(
+                "Cannot derive tolerance from zero or missing source evidence: "
+                "stroke_width_pt, scale_residual_mm, or raster_dpi must be provided"
+            )
+
+        stroke_width_mm = (
+            (stroke_width_pt * PT_TO_MM * scale_ratio)
+            if stroke_width_pt is not None and stroke_width_pt > 0
+            else 0.0
+        )
+        raster_pixel_mm = (
+            (25.4 / raster_dpi * scale_ratio)
+            if raster_dpi is not None and raster_dpi > 0
+            else 0.0
+        )
+
+        # Model assumption: k=2.576 for Gaussian 99% coverage when scale residual is provided.
+        k_coverage = 2.576
+        residual_term_mm = (
+            (k_coverage * scale_residual_mm)
+            if scale_residual_mm is not None and scale_residual_mm > 0
+            else 0.0
+        )
 
         derived_mm = max(residual_term_mm, raster_pixel_mm, stroke_width_mm)
         if derived_mm <= 0.0:
-            raise ValueError("Cannot derive tolerance from zero or missing source evidence")
+            raise ValueError("Cannot derive tolerance from zero or non-positive source evidence")
 
         derived_pt = derived_mm / (scale_ratio * PT_TO_MM)
         target_val = derived_pt if target_unit == "pt" else derived_mm
@@ -147,9 +181,9 @@ class SourceToleranceProvenance:
         if math.isclose(derived_mm, residual_term_mm, rel_tol=1e-6):
             estimator = "calibrated_residual"
             dist = "calibrated_residual"
-            cov_rule = f"scale_residual_k{k_coverage:.1f}"
+            cov_rule = f"scale_residual_k{k_coverage:.3f}"
             cov_factor = k_coverage
-            sample_count = 2  # Two reference endpoints calibrated
+            sample_count = 2
         elif math.isclose(derived_mm, raster_pixel_mm, rel_tol=1e-6):
             estimator = "pixel_pitch"
             dist = "raster_grid"
@@ -194,13 +228,14 @@ class SourceToleranceProvenance:
         scale_ratio: float,
         residuals_pt: Sequence[float],
         target_unit: str = "pt",
-        stroke_width_pt: Optional[float] = 0.7,
+        stroke_width_pt: Optional[float] = None,
     ) -> "SourceToleranceProvenance":
         """Derive tolerance from empirical sample residuals.
 
         Applies empirical 99th percentile when N >= 30;
         applies Median Absolute Deviation (MAD) with Gaussian 99% coverage factor (k=2.576) when 10 <= N < 30;
         fails closed if N < 10.
+        Does not apply arbitrary fixed numerical floors.
         """
         n = len(residuals_pt)
         if n < 10:
@@ -217,23 +252,31 @@ class SourceToleranceProvenance:
         if n >= 30:
             # Empirical 99th percentile
             idx = min(int(math.ceil(0.99 * n)) - 1, n - 1)
-            derived_pt = max(clean_residuals[idx], 0.5)
+            derived_pt = clean_residuals[idx]
             estimator = "empirical_quantile"
             cov_rule = "empirical_p99"
             cov_factor = 0.99
             dist = "empirical"
         else:
             # Robust MAD with Gaussian-equivalent 99% coverage factor k=2.576
+            # Model assumption: k=2.576 corresponds to Gaussian 99% two-sided coverage under
+            # the normal-consistency assumption (sigma_norm = 1.4826 * MAD).
+            # Used for candidate acceptance envelope gating, not physical source ground truth.
             med = statistics.median(clean_residuals)
             mad = statistics.median(abs(r - med) for r in clean_residuals)
-            # Normal consistency factor = 1.4826 * MAD; 99% coverage = 2.576 * sigma
             sigma_norm = 1.4826 * mad
             k = 2.576
-            derived_pt = max(k * sigma_norm, 0.5)
+            derived_pt = k * sigma_norm
             estimator = "median_absolute_deviation"
             cov_rule = "mad_gaussian_k2.576"
             cov_factor = k
             dist = "gaussian_assumed"
+
+        if derived_pt <= 0.0:
+            if stroke_width_pt is not None and stroke_width_pt > 0:
+                derived_pt = stroke_width_pt
+            else:
+                raise ValueError("derived_tolerance_zero_without_source_stroke_or_quantization")
 
         derived_mm = derived_pt * PT_TO_MM * scale_ratio
         target_val = derived_pt if target_unit == "pt" else derived_mm
@@ -260,6 +303,18 @@ class SourceToleranceProvenance:
 # ---------------------------------------------------------------------------
 # 2. Viewport Decision Scope Validation (Reuses ViewportViewClassAuthority)
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AuthenticatedViewportDecision:
+    """Authenticated viewport decision linking a SegmentedViewport and resolved view kind."""
+
+    viewport: SegmentedViewport
+    view_kind: str
+    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CORROBORATED
+    is_uncropped: bool = True
+    reason_codes: Tuple[str, ...] = ()
+    schema_version: str = SOURCE_OPENING_CANDIDATE_SCHEMA_VERSION
 
 
 def validate_opening_decision_viewport(
@@ -379,7 +434,7 @@ class CandidateContextFilter:
 
 
 # ---------------------------------------------------------------------------
-# 4. Tag Observation & Validated Tag Binding Result
+# 4. Tag Observation & Typed Tag Binding Evidence
 # ---------------------------------------------------------------------------
 
 
@@ -408,6 +463,18 @@ class TagObservation:
 
 
 @dataclass(frozen=True)
+class TagBindingEvidence:
+    """Typed affirmative evidence establishing a relationship between a tag observation and candidate."""
+
+    tag_observation_id: str
+    candidate_id: str
+    relation_kind: TagBindingRelationKind
+    relation_observation_ids: Tuple[str, ...] = ()
+    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CORROBORATED
+    schema_version: str = SOURCE_OPENING_CANDIDATE_SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
 class OpeningTagBindingResult:
     """Result of binding an opening candidate to an authenticated TagObservation."""
 
@@ -422,7 +489,6 @@ class OpeningTagBindingResult:
     @property
     def bound_tag(self) -> Optional[str]:
         return self.bound_mark
-
 
 
 # ---------------------------------------------------------------------------
@@ -446,7 +512,7 @@ def derive_deterministic_candidate_id(
     """Derive a deterministic candidate ID from immutable evidence.
 
     Candidate ID represents 'this deterministic source observation candidate',
-    never a proven physical object.
+    never an arbitrary caller-assigned string or proven physical identity.
     """
     payload = {
         "document_id": document_id,
@@ -505,6 +571,16 @@ class PhysicalOpeningCandidateRecord:
             )
         if not self.candidate_id or not str(self.candidate_id).strip():
             raise ValueError("candidate_id must be a non-empty string derived deterministically")
+        if not self.candidate_id.startswith("cand_op_"):
+            raise ValueError(
+                f"candidate_id must follow deterministic contract format 'cand_op_<hash>', got '{self.candidate_id}'"
+            )
+
+    def center(self) -> Tuple[float, float]:
+        return (
+            0.5 * (self.geometry[0] + self.geometry[2]),
+            0.5 * (self.geometry[1] + self.geometry[3]),
+        )
 
     def to_candidate_semantic_opening(self) -> CandidateSemanticOpening:
         """Convert to upstream CandidateSemanticOpening contract."""
@@ -543,7 +619,10 @@ def create_opening_candidate(
     source_lineage_root_ids: Sequence[str],
     tolerance_provenance: SourceToleranceProvenance,
     context_kind: str = "floor_plan_opening",
-    view_kind: str = VIEW_KIND_FLOOR_PLAN,
+    viewport_decision: Optional[AuthenticatedViewportDecision] = None,
+    viewport: Optional[SegmentedViewport] = None,
+    view_class_authority: Optional[ViewportViewClassAuthority] = None,
+    view_class_selector: Optional[ViewportViewClassSelector] = None,
     viewport_bbox: Optional[Tuple[float, float, float, float]] = None,
     title_block_bbox: Optional[Tuple[float, float, float, float]] = None,
     wall_lines: Optional[Sequence[Tuple[float, float, float, float]]] = None,
@@ -555,62 +634,118 @@ def create_opening_candidate(
 ) -> PhysicalOpeningCandidateRecord:
     """Lawful candidate constructor that mandatorily enforces context filters.
 
-    Rejects non-floor-plan viewports, title block logos, sanitary fixtures, and furniture arcs.
-    Derives deterministic candidate IDs from immutable evidence when candidate_id is omitted.
+    Safety requirements:
+    1. Derives deterministic candidate IDs from immutable evidence. Arbitrary caller-supplied
+       IDs (e.g. 'D1', 'my_cand') are strictly rejected.
+    2. Consumes authenticated viewport authority (via AuthenticatedViewportDecision or
+       ViewportViewClassAuthority validation). If viewport authority is unresolved or unauthenticated,
+       the candidate is demoted to RAW status.
+    3. Mandatory safety inputs:
+       - Missing viewport_bbox fails closed / demotes to RAW.
+       - Door swing candidates missing authenticated wall_lines fail closed / demote to RAW.
+    4. Evaluates context filters (title block / logo, sanitary fixtures, furniture arcs, non-floor-plan).
     """
+    derived_id = derive_deterministic_candidate_id(
+        document_id=document_id,
+        revision_id=revision_id,
+        source_sha256=source_sha256,
+        snapshot_id=snapshot_id,
+        page_id=page_id,
+        viewport_id=viewport_id,
+        geometry=geometry,
+        structural_pattern=structural_pattern,
+        source_observation_ids=source_observation_ids,
+        source_lineage_root_ids=source_lineage_root_ids,
+    )
+
+    # 1. Reject arbitrary caller IDs
+    if candidate_id is not None and candidate_id != derived_id:
+        raise ValueError(
+            f"caller_supplied_candidate_id_mismatch: provided '{candidate_id}' != derived '{derived_id}'"
+        )
+
     reason_codes: list[str] = []
     status = EvidenceResolutionStatus.CANDIDATE
 
-    # 1. Schedule / Detail / Elevation / Section context filter
-    if CandidateContextFilter.is_schedule_or_detail_context(view_kind):
-        status = EvidenceResolutionStatus.ABSTAINED
-        reason_codes.append(f"non_floor_plan_context_{view_kind}")
+    # 2. Viewport Authority Validation
+    vp_authenticated = False
+    effective_viewport_bbox = viewport_bbox
 
-    # 2. Title block / Logo / Out of viewport filter
-    if viewport_bbox is not None and CandidateContextFilter.is_title_block_or_logo(
-        geometry, viewport_bbox, title_block_bbox
+    if viewport_decision is not None:
+        if (
+            viewport_decision.status == EvidenceResolutionStatus.CORROBORATED
+            and viewport_decision.view_kind == VIEW_KIND_FLOOR_PLAN
+            and viewport_decision.is_uncropped
+        ):
+            vp_authenticated = True
+            if effective_viewport_bbox is None and viewport_decision.viewport.bounding_box:
+                effective_viewport_bbox = tuple(viewport_decision.viewport.bounding_box)  # type: ignore[assignment]
+        else:
+            reason_codes.append(f"viewport_decision_rejected_{viewport_decision.view_kind}")
+    elif (
+        viewport is not None
+        and view_class_authority is not None
+        and view_class_selector is not None
     ):
-        status = EvidenceResolutionStatus.ABSTAINED
-        reason_codes.append("title_block_or_outside_viewport")
+        vp_valid, vp_msg = validate_opening_decision_viewport(
+            viewport=viewport,
+            view_class_authority=view_class_authority,
+            selector=view_class_selector,
+        )
+        if vp_valid:
+            vp_authenticated = True
+            if effective_viewport_bbox is None and viewport.bounding_box:
+                effective_viewport_bbox = tuple(viewport.bounding_box)  # type: ignore[assignment]
+        else:
+            reason_codes.append(f"viewport_validation_failed_{vp_msg}")
+    else:
+        reason_codes.append("missing_authenticated_viewport_decision")
 
-    # 3. Sanitary fixture filter
+    if not vp_authenticated:
+        status = EvidenceResolutionStatus.RAW
+
+    # 3. Mandatory Safety Input: viewport_bbox for title block / boundary check
+    if effective_viewport_bbox is None:
+        status = EvidenceResolutionStatus.RAW
+        reason_codes.append("missing_viewport_bbox_safety_input")
+    else:
+        if CandidateContextFilter.is_title_block_or_logo(
+            geometry, effective_viewport_bbox, title_block_bbox
+        ):
+            status = EvidenceResolutionStatus.ABSTAINED
+            reason_codes.append("title_block_or_outside_viewport")
+
+    # 4. Mandatory Safety Input: wall-host context for door swing arcs
+    is_door = (
+        structural_pattern in ("door_swing_arc", "paired_door_swing")
+        or semantic_family == "doors"
+    )
+    if is_door:
+        if wall_lines is None or len(wall_lines) == 0:
+            status = EvidenceResolutionStatus.RAW
+            reason_codes.append("door_swing_missing_wall_host_context")
+        else:
+            cx = 0.5 * (geometry[0] + geometry[2])
+            cy = 0.5 * (geometry[1] + geometry[3])
+            r = max(abs(geometry[2] - geometry[0]), abs(geometry[3] - geometry[1]))
+            if CandidateContextFilter.is_furniture_arc(
+                arc_center=(cx, cy),
+                arc_radius=r,
+                wall_lines=wall_lines,
+                tolerance_pt=tolerance_provenance.derived_tolerance_pt,
+            ):
+                status = EvidenceResolutionStatus.ABSTAINED
+                reason_codes.append("furniture_arc_not_at_wall_jamb")
+
+    # 5. Sanitary fixture context filter
     if CandidateContextFilter.is_sanitary_fixture(
         structural_pattern, layer=layer, nearby_text=nearby_text
     ):
         status = EvidenceResolutionStatus.ABSTAINED
         reason_codes.append("sanitary_fixture_context")
 
-    # 4. Furniture arc filter
-    if structural_pattern in ("door_swing_arc", "paired_door_swing") and wall_lines is not None:
-        cx = 0.5 * (geometry[0] + geometry[2])
-        cy = 0.5 * (geometry[1] + geometry[3])
-        r = max(abs(geometry[2] - geometry[0]), abs(geometry[3] - geometry[1]))
-        if CandidateContextFilter.is_furniture_arc(
-            arc_center=(cx, cy),
-            arc_radius=r,
-            wall_lines=wall_lines,
-            tolerance_pt=tolerance_provenance.derived_tolerance_pt,
-        ):
-            status = EvidenceResolutionStatus.ABSTAINED
-            reason_codes.append("furniture_arc_not_at_wall_jamb")
-
-    # Derive deterministic candidate ID if not provided
-    if not candidate_id:
-        candidate_id = derive_deterministic_candidate_id(
-            document_id=document_id,
-            revision_id=revision_id,
-            source_sha256=source_sha256,
-            snapshot_id=snapshot_id,
-            page_id=page_id,
-            viewport_id=viewport_id,
-            geometry=geometry,
-            structural_pattern=structural_pattern,
-            source_observation_ids=source_observation_ids,
-            source_lineage_root_ids=source_lineage_root_ids,
-        )
-
     return PhysicalOpeningCandidateRecord(
-        candidate_id=candidate_id,
+        candidate_id=derived_id,
         document_id=document_id,
         revision_id=revision_id,
         source_sha256=source_sha256,
@@ -643,31 +778,41 @@ class OpeningIdentityResolver:
     def resolve_tag_binding(
         *,
         candidate: PhysicalOpeningCandidateRecord,
-        nearby_tags: Sequence[Union[TagObservation, Tuple[str, Tuple[float, float]]]],
+        nearby_tags: Sequence[TagObservation],
+        binding_evidences: Sequence[TagBindingEvidence] = (),
         expected_semantic_family: str = "doors",
         viewport_authenticated: bool = True,
         revision_authenticated: bool = True,
     ) -> OpeningTagBindingResult:
-        """Bind an opening candidate to a nearby tag callout using source-derived tolerance.
+        """Bind an opening candidate to an authenticated TagObservation using typed evidence.
 
         Hard evidence requirements:
-        - Candidate must be an active CANDIDATE (not ABSTAINED/rejected).
-        - Viewport must be authenticated (VIEW_KIND_FLOOR_PLAN).
+        - Candidate must be an active CANDIDATE (not RAW or ABSTAINED).
+        - Viewport must be authenticated.
         - Revision must match.
-        - Source scope (document, revision, page, viewport) between candidate and tag observation must agree.
-        - Semantic family must match (e.g. door tag for door swing).
+        - Source scope (document, revision, sha, snapshot, page, viewport) between candidate and tag observation must agree.
+        - Semantic family must match (e.g. door tag for door candidate).
         - Tag callout must be inside candidate aperture or within derived tolerance.
         - Multiple competing tags fail closed as CONFLICT.
-        - Zero tags fail closed as ABSTAINED without guessing (never assume D1 or W1).
+        - Spatial proximity alone is candidate evidence, NOT identity authority. PROVEN_SAME strictly
+          requires typed TagBindingEvidence (e.g. leader, shared annotation, explicit aperture tag)
+          or shared explicit source lineage. A nearby tag without an authenticated relation returns UNRESOLVED.
         """
-        if candidate.status == EvidenceResolutionStatus.ABSTAINED:
+        # Strictly reject naked strings or raw tuples
+        for tag in nearby_tags:
+            if not isinstance(tag, TagObservation):
+                raise TypeError(
+                    f"nearby_tags must contain only TagObservation instances, got {type(tag).__name__}"
+                )
+
+        if candidate.status in (EvidenceResolutionStatus.ABSTAINED, EvidenceResolutionStatus.RAW):
             return OpeningTagBindingResult(
                 candidate_id=candidate.candidate_id,
                 tag_observation_id=None,
                 bound_mark=None,
                 status=EvidenceResolutionStatus.ABSTAINED,
                 identity_state=IdentityState.UNRESOLVED,
-                reason_codes=("rejected_candidate_cannot_bind_tag",),
+                reason_codes=("non_candidate_cannot_bind_tag",),
             )
 
         if not viewport_authenticated:
@@ -703,34 +848,29 @@ class OpeningIdentityResolver:
         gx0, gy0, gx1, gy1 = candidate.geometry
         tol_pt = candidate.tolerance_provenance.derived_tolerance_pt
 
-        # Collect matching tags
+        matching_tags: list[TagObservation] = []
         matching_marks: list[str] = []
-        matching_obs_ids: list[Optional[str]] = []
 
         for item in nearby_tags:
-            if isinstance(item, TagObservation):
-                # Hard source-scope check
-                if (
-                    item.document_id != candidate.document_id
-                    or item.revision_id != candidate.revision_id
-                    or item.source_sha256 != candidate.source_sha256
-                    or item.snapshot_id != candidate.snapshot_id
-                    or item.page_id != candidate.page_id
-                    or item.viewport_id != candidate.viewport_id
-                ):
-                    continue  # Incompatible scope
-                tag_str = item.raw_tag_text
-                tx, ty = item.center()
-                obs_id: Optional[str] = item.observation_id
-            else:
-                tag_str, (tx, ty) = item
-                obs_id = None
+            # Hard source-scope check
+            if (
+                item.document_id != candidate.document_id
+                or item.revision_id != candidate.revision_id
+                or item.source_sha256 != candidate.source_sha256
+                or item.snapshot_id != candidate.snapshot_id
+                or item.page_id != candidate.page_id
+                or item.viewport_id != candidate.viewport_id
+            ):
+                continue  # Incompatible scope
+
+            tag_str = item.raw_tag_text
+            tx, ty = item.center()
 
             # Validate semantic family compatibility
             norm = normalize_opening_tag(tag_str)
             if norm is not None and expected_semantic_family != "openings":
                 if norm.trade_type != expected_semantic_family:
-                    continue  # Ignore incompatible trade tags (e.g. window tag beside door swing)
+                    continue  # Incompatible trade tag
 
             # Distance from point (tx, ty) to aperture rectangle [gx0, gy0, gx1, gy1]
             dx = max(0.0, gx0 - tx, tx - gx1)
@@ -738,11 +878,10 @@ class OpeningIdentityResolver:
             dist = math.hypot(dx, dy)
             if dist <= tol_pt:
                 mark = norm.tag if norm else tag_str
+                matching_tags.append(item)
                 matching_marks.append(mark)
-                matching_obs_ids.append(obs_id)
 
-
-        if not matching_marks:
+        if not matching_tags:
             return OpeningTagBindingResult(
                 candidate_id=candidate.candidate_id,
                 tag_observation_id=None,
@@ -753,27 +892,67 @@ class OpeningIdentityResolver:
             )
 
         unique_marks = list(dict.fromkeys(matching_marks))
-        if len(unique_marks) == 1:
+        if len(unique_marks) > 1:
+            # Multiple competing distinct tags within tolerance -> CONFLICT -> Fail closed!
             return OpeningTagBindingResult(
                 candidate_id=candidate.candidate_id,
-                tag_observation_id=matching_obs_ids[0],
-                bound_mark=unique_marks[0],
-                status=EvidenceResolutionStatus.CORROBORATED,
-                identity_state=IdentityState.PROVEN_SAME,
-                reason_codes=("unambiguous_tag_proven",),
+                tag_observation_id=None,
+                bound_mark=None,
+                status=EvidenceResolutionStatus.CONFLICT,
+                identity_state=IdentityState.UNRESOLVED,
+                reason_codes=(
+                    "competing_tags_ambiguous",
+                    f"candidates: {', '.join(unique_marks)}",
+                ),
             )
 
-        # Multiple distinct tags within tolerance -> Ambiguous -> Fail closed!
+        # Exactly one candidate tag mark within tolerance
+        target_tag = matching_tags[0]
+        target_mark = unique_marks[0]
+
+        # Check for typed relation evidence
+        has_typed_relation = False
+        relation_codes: list[str] = []
+
+        for ev in binding_evidences:
+            if (
+                ev.tag_observation_id == target_tag.observation_id
+                and ev.candidate_id == candidate.candidate_id
+                and ev.status == EvidenceResolutionStatus.CORROBORATED
+            ):
+                has_typed_relation = True
+                relation_codes.append(f"relation_{ev.relation_kind.value}")
+
+        # Check for shared explicit lineage between candidate and tag observation
+        shared_lineage = bool(
+            set(candidate.source_lineage_root_ids) & set(target_tag.source_lineage_root_ids)
+            or set(candidate.source_observation_ids) & set(target_tag.source_observation_ids)
+        )
+        if shared_lineage:
+            has_typed_relation = True
+            relation_codes.append("shared_explicit_source_lineage")
+
+        if not has_typed_relation:
+            # Spatial proximity alone nominates candidate, but cannot prove binding authority
+            return OpeningTagBindingResult(
+                candidate_id=candidate.candidate_id,
+                tag_observation_id=target_tag.observation_id,
+                bound_mark=target_mark,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                identity_state=IdentityState.UNRESOLVED,
+                reason_codes=(
+                    "spatial_proximity_without_authenticated_relation_ambiguous",
+                    "proximity_is_candidate_evidence_not_identity_authority",
+                ),
+            )
+
         return OpeningTagBindingResult(
             candidate_id=candidate.candidate_id,
-            tag_observation_id=None,
-            bound_mark=None,
-            status=EvidenceResolutionStatus.CONFLICT,
-            identity_state=IdentityState.UNRESOLVED,
-            reason_codes=(
-                "competing_tags_ambiguous",
-                f"candidates: {', '.join(unique_marks)}",
-            ),
+            tag_observation_id=target_tag.observation_id,
+            bound_mark=target_mark,
+            status=EvidenceResolutionStatus.CORROBORATED,
+            identity_state=IdentityState.PROVEN_SAME,
+            reason_codes=("authenticated_tag_relation_proven", *relation_codes),
         )
 
     @staticmethod
@@ -785,23 +964,24 @@ class OpeningIdentityResolver:
 
         Returns the official PhysicalOpeningIdentityResult from pb_physical_opening_authority.
 
-        Hard rules:
-        1. Source compatibility (document_id, revision_id, source_sha256, snapshot_id, page_id, viewport_id)
-           is mandatory before ANY PROVEN_SAME result. Source mismatch fails closed as UNRESOLVED.
-        2. PROVEN_SAME strictly requires shared authenticated observation lineage AND matching scope
-           AND coincident geometry within derived tolerance. Proximity or coincidence alone with disjoint
-           lineage NEVER produces PROVEN_SAME (returns UNRESOLVED).
-        3. PROVEN_DISTINCT requires affirmative proof of distinctness:
-           - Different context kinds (e.g. schedule type definition vs floor plan physical instance)
-           - Conflicting semantic families (e.g. door vs window)
-           - Conflicting structural patterns (e.g. single swing vs paired swing)
-           - Conflicting validated tag bindings (e.g. D1 vs D2)
-           - Conflicting structural orientations (e.g. perpendicular doors at a corner)
-           - Conflicting explicit dimensions exceeding tolerance
-           - Distinct spatial locations where distance between centers exceeds derived tolerance
-        4. Identical type mark (e.g. two W1 windows) NEVER collapses distinct instances into one.
+        Conservative Principles:
+        1. PROVEN_SAME requires affirmative proof of identical physical identity:
+           - Strict identical scope (document_id, revision_id, source_sha256, snapshot_id, page_id, viewport_id)
+           - Coincident/proximate spatial location within derived tolerance
+           - Shared authenticated observation lineage
+           - Non-conflicting classifications
+        2. PROVEN_DISTINCT requires affirmative proof of physical separation:
+           - Non-overlapping physical apertures at different spatial locations exceeding derived tolerance
+             inside the same authenticated viewport.
+        3. UNRESOLVED handles conflicting or insufficient evidence:
+           - Different context kinds (type definition in schedule vs physical floor plan instance) are
+             not comparable for physical instance identity -> UNRESOLVED.
+           - Conflicting classifications (semantic family, structural pattern, conflicting tags, conflicting
+             dimensions) at coincident/proximate locations indicate detector or annotation conflict,
+             NOT two separate physical objects -> UNRESOLVED.
+           - Proximate candidates with disjoint lineage -> UNRESOLVED.
         """
-        # 1. Cross-Document check: source mismatch -> never PROVEN_SAME
+        # 1. Cross-Document check
         if cand_a.document_id != cand_b.document_id:
             return PhysicalOpeningIdentityResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
@@ -810,7 +990,7 @@ class OpeningIdentityResolver:
                 reason_codes=("cross_document_identity_unresolved",),
             )
 
-        # 2. Cross-Revision check: revision mismatch -> never PROVEN_SAME
+        # 2. Cross-Revision check
         if cand_a.revision_id != cand_b.revision_id:
             return PhysicalOpeningIdentityResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
@@ -819,7 +999,7 @@ class OpeningIdentityResolver:
                 reason_codes=("cross_revision_identity_unresolved",),
             )
 
-        # 3. Source SHA256 check: hash mismatch -> never PROVEN_SAME
+        # 3. Source SHA256 check
         if cand_a.source_sha256 != cand_b.source_sha256:
             return PhysicalOpeningIdentityResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
@@ -828,7 +1008,7 @@ class OpeningIdentityResolver:
                 reason_codes=("source_sha256_mismatch_unresolved",),
             )
 
-        # 4. Snapshot ID check: snapshot mismatch -> never PROVEN_SAME
+        # 4. Snapshot ID check
         if cand_a.snapshot_id != cand_b.snapshot_id:
             return PhysicalOpeningIdentityResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
@@ -837,19 +1017,18 @@ class OpeningIdentityResolver:
                 reason_codes=("snapshot_id_mismatch_unresolved",),
             )
 
-        # 5. Context check: schedule/detail type definition vs floor plan physical room instance
-        # A schedule row / type card is a TYPE DEFINITION, not a physical room instance -> PROVEN_DISTINCT
+        # 5. Context Kind Check: Schedule type definition vs floor plan physical room instance
+        # A schedule type definition is not a physical instance; they cannot be compared for physical instance identity.
         if cand_a.context_kind != cand_b.context_kind:
             return PhysicalOpeningIdentityResult(
-                status=EvidenceResolutionStatus.CORROBORATED,
-                physical_opening_identity=PHYSICAL_OPENING_IDENTITIES_DISTINCT,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                physical_opening_identity=PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
                 proven_same=False,
                 reason_codes=(
-                    "different_context_kinds",
-                    "different_context_kinds_type_definition_vs_instance",
+                    "different_context_kinds_not_comparable_for_physical_instance_identity",
+                    f"context_a_{cand_a.context_kind}_vs_context_b_{cand_b.context_kind}",
                 ),
             )
-
 
         # 6. Cross-Page check: different pages without cross-sheet authority -> UNRESOLVED
         if cand_a.page_id != cand_b.page_id:
@@ -869,52 +1048,77 @@ class OpeningIdentityResolver:
                 reason_codes=("cross_viewport_unresolved_without_cross_view_authority",),
             )
 
+        # 8. Spatial distance between aperture centers
+        cax, cay = cand_a.center()
+        cbx, cby = cand_b.center()
+        dist = math.hypot(cax - cbx, cay - cby)
+        tol = max(
+            cand_a.tolerance_provenance.derived_tolerance_pt,
+            cand_b.tolerance_provenance.derived_tolerance_pt,
+        )
 
-        # 8. Semantic family check (doors vs windows)
+        # Affirmative Physical Separation: distance exceeds tolerance envelope
+        if dist > tol:
+            return PhysicalOpeningIdentityResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                physical_opening_identity=PHYSICAL_OPENING_IDENTITIES_DISTINCT,
+                proven_same=False,
+                reason_codes=(
+                    f"distinct_physical_locations_delta_{dist:.2f}pt_exceeds_tol_{tol:.2f}pt",
+                ),
+            )
+
+        # Proximate or Coincident Candidates (dist <= tol):
+        # Disagreements here represent conflicting observations or differing detector modalities,
+        # NOT two distinct physical objects.
+
+        # Conflicting semantic families at same location (e.g. door vs window detector mismatch)
         if cand_a.semantic_family != cand_b.semantic_family:
             return PhysicalOpeningIdentityResult(
-                status=EvidenceResolutionStatus.CORROBORATED,
-                physical_opening_identity=PHYSICAL_OPENING_IDENTITIES_DISTINCT,
+                status=EvidenceResolutionStatus.CONFLICT,
+                physical_opening_identity=PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
                 proven_same=False,
-                reason_codes=("conflicting_semantic_families",),
+                reason_codes=(
+                    "conflicting_semantic_family_classifications_at_same_location",
+                    f"family_{cand_a.semantic_family}_vs_{cand_b.semantic_family}",
+                ),
             )
 
-        # 9. Structural pattern check (single door vs paired door vs window)
+        # Conflicting structural patterns at same location (e.g. swing arc vs jamb interruption)
         if cand_a.structural_pattern != cand_b.structural_pattern:
             return PhysicalOpeningIdentityResult(
-                status=EvidenceResolutionStatus.CORROBORATED,
-                physical_opening_identity=PHYSICAL_OPENING_IDENTITIES_DISTINCT,
+                status=EvidenceResolutionStatus.CONFLICT,
+                physical_opening_identity=PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
                 proven_same=False,
-                reason_codes=("conflicting_structural_patterns",),
+                reason_codes=(
+                    "differing_detector_modalities_at_same_location_ambiguous",
+                    f"pattern_{cand_a.structural_pattern}_vs_{cand_b.structural_pattern}",
+                ),
             )
 
-        # 10. Validated tag conflict check
-        mark_a = cand_a.tag_binding.bound_mark if cand_a.tag_binding and cand_a.tag_binding.bound_mark else None
-        mark_b = cand_b.tag_binding.bound_mark if cand_b.tag_binding and cand_b.tag_binding.bound_mark else None
+        # Conflicting validated tags at same location (e.g. D1 vs D2 annotations)
+        mark_a = (
+            cand_a.tag_binding.bound_mark
+            if cand_a.tag_binding and cand_a.tag_binding.bound_mark
+            else None
+        )
+        mark_b = (
+            cand_b.tag_binding.bound_mark
+            if cand_b.tag_binding and cand_b.tag_binding.bound_mark
+            else None
+        )
         if mark_a is not None and mark_b is not None and mark_a != mark_b:
             return PhysicalOpeningIdentityResult(
-                status=EvidenceResolutionStatus.CORROBORATED,
-                physical_opening_identity=PHYSICAL_OPENING_IDENTITIES_DISTINCT,
+                status=EvidenceResolutionStatus.CONFLICT,
+                physical_opening_identity=PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
                 proven_same=False,
-                reason_codes=(f"conflicting_validated_tags_{mark_a}_vs_{mark_b}",),
+                reason_codes=(
+                    "conflicting_tag_annotations_at_same_location",
+                    f"tag_{mark_a}_vs_{mark_b}",
+                ),
             )
 
-        # 11. Structural orientation / aspect ratio check (perpendicular openings)
-        wa = abs(cand_a.geometry[2] - cand_a.geometry[0])
-        ha = abs(cand_a.geometry[3] - cand_a.geometry[1])
-        wb = abs(cand_b.geometry[2] - cand_b.geometry[0])
-        hb = abs(cand_b.geometry[3] - cand_b.geometry[1])
-        orient_a = "H" if wa > 1.3 * ha else ("V" if ha > 1.3 * wa else "N")
-        orient_b = "H" if wb > 1.3 * hb else ("V" if hb > 1.3 * wb else "N")
-        if orient_a != "N" and orient_b != "N" and orient_a != orient_b:
-            return PhysicalOpeningIdentityResult(
-                status=EvidenceResolutionStatus.CORROBORATED,
-                physical_opening_identity=PHYSICAL_OPENING_IDENTITIES_DISTINCT,
-                proven_same=False,
-                reason_codes=("conflicting_structural_orientations_perpendicular",),
-            )
-
-        # 12. Explicit dimension conflict check
+        # Conflicting explicit dimensions at same location
         if cand_a.dimension_mm is not None and cand_b.dimension_mm is not None:
             tol_mm = max(
                 cand_a.tolerance_provenance.derived_tolerance_mm,
@@ -924,38 +1128,16 @@ class OpeningIdentityResolver:
             dim_diff_1 = abs(cand_a.dimension_mm[1] - cand_b.dimension_mm[1])
             if dim_diff_0 > tol_mm or dim_diff_1 > tol_mm:
                 return PhysicalOpeningIdentityResult(
-                    status=EvidenceResolutionStatus.CORROBORATED,
-                    physical_opening_identity=PHYSICAL_OPENING_IDENTITIES_DISTINCT,
+                    status=EvidenceResolutionStatus.CONFLICT,
+                    physical_opening_identity=PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
                     proven_same=False,
                     reason_codes=(
-                        "conflicting_dimensions_delta_exceeds_tolerance",
+                        "conflicting_dimensions_at_same_location_ambiguous",
                         f"delta_max_{max(dim_diff_0, dim_diff_1):.1f}mm_tol_{tol_mm:.1f}mm",
                     ),
                 )
 
-        # 13. Spatial distance between centers
-        cax = 0.5 * (cand_a.geometry[0] + cand_a.geometry[2])
-        cay = 0.5 * (cand_a.geometry[1] + cand_a.geometry[3])
-        cbx = 0.5 * (cand_b.geometry[0] + cand_b.geometry[2])
-        cby = 0.5 * (cand_b.geometry[1] + cand_b.geometry[3])
-        dist = math.hypot(cax - cbx, cay - cby)
-
-        tol = max(
-            cand_a.tolerance_provenance.derived_tolerance_pt,
-            cand_b.tolerance_provenance.derived_tolerance_pt,
-        )
-
-        if dist > tol:
-            return PhysicalOpeningIdentityResult(
-                status=EvidenceResolutionStatus.CORROBORATED,
-                physical_opening_identity=PHYSICAL_OPENING_IDENTITIES_DISTINCT,
-                proven_same=False,
-                reason_codes=(f"distinct_locations_delta_{dist:.2f}pt_exceeds_tol_{tol:.2f}pt",),
-            )
-
-        # 14 & 15. Proximity / coincidence inside tolerance envelope.
-        # Hard Requirement: Lineage participation is MANDATORY for PROVEN_SAME.
-        # Proximity or coincident geometry with disjoint lineage MUST FAIL CLOSED as UNRESOLVED.
+        # PROVEN_SAME strictly requires shared authenticated observation lineage
         shared_lineage = bool(
             set(cand_a.source_lineage_root_ids) & set(cand_b.source_lineage_root_ids)
             or set(cand_a.source_observation_ids) & set(cand_b.source_observation_ids)
@@ -969,7 +1151,7 @@ class OpeningIdentityResolver:
                 reason_codes=("shared_authenticated_lineage_with_coincident_geometry",),
             )
 
-        # Disjoint lineage inside tolerance -> ambiguous cluster / lack of identity proof -> UNRESOLVED
+        # Proximate/coincident without shared lineage -> UNRESOLVED
         return PhysicalOpeningIdentityResult(
             status=EvidenceResolutionStatus.ABSTAINED,
             physical_opening_identity=PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
@@ -981,8 +1163,8 @@ class OpeningIdentityResolver:
         )
 
 
-
 __all__ = [
+    "AuthenticatedViewportDecision",
     "CandidateContextFilter",
     "IdentityState",
     "OpeningIdentityResolver",
@@ -990,6 +1172,8 @@ __all__ = [
     "PhysicalOpeningCandidateRecord",
     "SOURCE_OPENING_CANDIDATE_SCHEMA_VERSION",
     "SourceToleranceProvenance",
+    "TagBindingEvidence",
+    "TagBindingRelationKind",
     "TagObservation",
     "create_opening_candidate",
     "derive_deterministic_candidate_id",
