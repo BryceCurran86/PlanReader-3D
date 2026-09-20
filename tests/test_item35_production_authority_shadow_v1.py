@@ -82,3 +82,22 @@ def test_live_extractor_populates_item35_shadow_without_publishing_opening_count
     assert shadow["semantic_opening_count"] == 1
     assert shadow["commercial_count_unlocked"] is False
     assert extractor.extraction_status["item35_authority_shadow"] == "evidence_present"
+
+
+def test_scoped_live_extraction_does_not_expand_item35_shadow_to_full_document(tmp_path) -> None:
+    pdf_path = tmp_path / "scoped-live-item35-shadow.pdf"
+    _write_minimal_drawing(pdf_path)
+
+    extractor = GenericPlanReaderExtractor()
+    predictions = extractor.extract_from_pdf(pdf_path, pages=[0])
+
+    assert not [
+        prediction
+        for prediction in predictions
+        if prediction.trade_type in {"doors", "windows"}
+    ]
+    shadow = extractor.item35_authority_shadow
+    assert shadow["status"] == "abstained"
+    assert shadow["reason"] == "scoped_extraction_semantic_shadow_unavailable"
+    assert shadow["commercial_count_unlocked"] is False
+    assert extractor.extraction_status["item35_authority_shadow"] == "abstained"
