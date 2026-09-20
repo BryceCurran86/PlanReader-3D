@@ -92,6 +92,12 @@ class ScheduleOpeningInstanceBindingRecord:
     schedule_row_type_mark: str
     schedule_row_width_mm: int | None
     schedule_row_height_mm: int | None
+    # A schedule parser historically defaults count to 1 when no quantity
+    # column exists.  Preserve that diagnostic value separately, but expose
+    # whether the count was explicitly source-backed so downstream commercial
+    # reconciliation can never treat the default as evidence.
+    schedule_row_count: int | None = None
+    schedule_row_count_explicit: bool = False
     schema_version: str = SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION
 
 
@@ -752,6 +758,8 @@ class ScheduleOpeningInstanceBindingProducer:
             "schedule_row_type_mark": entry.type_mark,
             "schedule_row_width_mm": entry.width_mm,
             "schedule_row_height_mm": entry.height_mm,
+            "schedule_row_count": entry.count if entry.count_explicit else None,
+            "schedule_row_count_explicit": bool(entry.count_explicit),
         }
         record = ScheduleOpeningInstanceBindingRecord(
             record_id=stable_contract_id(
@@ -772,6 +780,8 @@ class ScheduleOpeningInstanceBindingProducer:
             schedule_row_type_mark=entry.type_mark,
             schedule_row_width_mm=entry.width_mm,
             schedule_row_height_mm=entry.height_mm,
+            schedule_row_count=entry.count if entry.count_explicit else None,
+            schedule_row_count_explicit=bool(entry.count_explicit),
         )
         return self._store(
             key,

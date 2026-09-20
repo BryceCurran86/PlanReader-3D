@@ -7,13 +7,52 @@ instance universe; they never manufacture missing physical openings.
 Authority rules:
 - Physical instance identity is preserved; duplicate observations count once.
 - Distinct equal-size openings count separately.
+- Record-id dedup is never trusted alone: every pair of distinct openings is
+  independently re-proven via ``PhysicalOpeningAuthority.compare_identity()``;
+  an unresolved pair ABSTAINS and a contradiction (proven same despite
+  distinct record ids) CONFLICTs.
 - Caller ``non_plan_viewport_ids`` / ``schedule_declared_counts`` are diagnostic
   only and never decide authority.
 - Viewport class comes from producer-owned ``ViewportViewClassAuthority``.
-- Schedule quantity comes from producer-owned ``ScheduleRowQuantityAuthority``.
-- Schedule vs physical mismatch fails closed with CONFLICT.
+- Schedule quantity comes from producer-owned ``ScheduleRowQuantityAuthority``,
+  keyed by exact schedule-row observation ids; distinct rows that happen to
+  declare the same value never collapse into one agreeing count.
+- Schedule vs physical mismatch fails closed with CONFLICT. Never
+  ``min()``/``max()``.
 - Incomplete schedule or opening universes ABSTAIN.
 - Unknown count is not zero.
+
+Source coverage and the OCR/raster extension point:
+This authority is source-agnostic by construction -- ``publish()`` only ever
+calls the public ``PhysicalOpeningAuthority`` / ``ScheduleOpeningInstanceBindingAuthority``
+/ ``OpeningUniverseCompletenessAuthority`` contracts, never anything specific
+to native-vector PDFs. The current native-vector source adapter intentionally authenticates only
+raw visible-segment coverage; it does NOT claim semantic physical-opening
+completeness and therefore never attaches this module's private commercial
+completeness seal. Until a producer-owned semantic opening enumerator exists,
+the real source-derived path ABSTAINS via
+``GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED``. This is
+intentional fail-closed behavior: complete source decoding is not the same
+proposition as a complete semantic opening universe.
+
+Extending to raster/OCR requires no change to this module. It requires two
+new producers, each satisfying an existing contract from OCR-derived
+evidence instead of native-vector evidence:
+1. A raster-backed ``SourceVisibilityAuthority`` (or ``SourceObservationAuthority``)
+   populated from OCR/raster-vectorized segments, so
+   ``PhysicalOpeningAuthority(raster_visibility_authority)`` is a real,
+   strictly-typed ``PhysicalOpeningAuthority`` instance G17's existing
+   matching logic (``prove_existence`` / ``compare_identity``) already knows
+   how to run against -- reusing G17's deterministic geometry matching
+   rather than duplicating it for raster.
+2. An OCR-sourced binder mirroring ``ScheduleOpeningInstanceBindingProducer``'s
+   own discipline: independently re-derive the tag/row match from raw OCR
+   text each call, never trust a caller-supplied pre-computed binding (the
+   same rule ``OpeningTagBindingResult`` already needs elsewhere in this
+   codebase, since it carries no seal of its own).
+Once both exist, ``GenericOpeningCountProducer.from_authorities()`` accepts
+them unchanged -- the strict ``type(x) is PhysicalOpeningAuthority`` checks
+below only require the concrete class, not a vector-specific origin.
 """
 from __future__ import annotations
 
@@ -79,6 +118,15 @@ GENERIC_OPENING_COUNT_CALLER_SCHEDULE_COUNTS_NOT_AUTHORITY = (
 )
 GENERIC_OPENING_COUNT_SCHEDULE_ONLY_NOT_PHYSICAL = (
     "generic_opening_count_schedule_only_does_not_mint_physical_instances"
+)
+GENERIC_OPENING_COUNT_IDENTITY_CONTRADICTION = (
+    "generic_opening_count_identity_contradiction"
+)
+GENERIC_OPENING_COUNT_IDENTITY_PAIRWISE_UNRESOLVED = (
+    "generic_opening_count_identity_pairwise_unresolved"
+)
+GENERIC_OPENING_COUNT_SCHEDULE_ROW_DUPLICATE = (
+    "generic_opening_count_schedule_row_duplicate"
 )
 
 _COUNT_PRODUCER_SEAL = object()
@@ -426,6 +474,7 @@ class GenericOpeningCountProducer:
         opening_families: dict[str, str] = {}
         schedule_row_ids: list[str] = []
         binding_by_opening: dict[str, Any] = {}
+        representative_selectors: dict[str, ObservationSelector] = {}
 
         for member_id in accounted_ids:
             obs_sel = ObservationSelector(
@@ -511,6 +560,7 @@ class GenericOpeningCountProducer:
                 )
 
             distinct_openings[p_rec.record_id] = p_rec
+            representative_selectors.setdefault(p_rec.record_id, obs_sel)
 
             mark: Optional[str] = None
             family: str = "unknown"
@@ -560,6 +610,43 @@ class GenericOpeningCountProducer:
             opening_marks[p_rec.record_id] = mark
             opening_families[p_rec.record_id] = family
 
+        # Defense-in-depth: G17 record_id equality is the cheap dedup signal
+        # used above, but it is only trustworthy if independently re-proven
+        # existence agrees with it for every pair of distinct openings.
+        # compare_identity() re-derives existence from scratch for each side
+        # and never reuses the loop's cached PhysicalOpeningExistenceRecord,
+        # so this catches non-determinism or scope-matching bugs the cheap
+        # dict-keyed dedup above could not detect on its own.
+        distinct_ids = sorted(distinct_openings.keys())
+        for i in range(len(distinct_ids)):
+            for j in range(i + 1, len(distinct_ids)):
+                left_id, right_id = distinct_ids[i], distinct_ids[j]
+                identity_cmp = self._physical.compare_identity(
+                    representative_selectors[left_id],
+                    representative_selectors[right_id],
+                )
+                if identity_cmp.status is not EvidenceResolutionStatus.CORROBORATED:
+                    return self._store(
+                        selector,
+                        _blocked(
+                            EvidenceResolutionStatus.ABSTAINED,
+                            GENERIC_OPENING_COUNT_IDENTITY_PAIRWISE_UNRESOLVED,
+                            f"{left_id}_vs_{right_id}",
+                            *(identity_cmp.reason_codes or ()),
+                            *diagnostic_reasons,
+                        ),
+                    )
+                if identity_cmp.proven_same:
+                    return self._store(
+                        selector,
+                        _blocked(
+                            EvidenceResolutionStatus.CONFLICT,
+                            GENERIC_OPENING_COUNT_IDENTITY_CONTRADICTION,
+                            f"{left_id}_vs_{right_id}",
+                            *diagnostic_reasons,
+                        ),
+                    )
+
         matched_instance_ids: list[str] = []
         for op_id in sorted(distinct_openings.keys()):
             op_fam = opening_families.get(op_id, "unknown")
@@ -581,7 +668,12 @@ class GenericOpeningCountProducer:
             and self._schedule_qty is not None
             and matched_instance_ids
         ):
-            qty_values: set[int] = set()
+            # Keyed by the exact row-observation-id set, never by the
+            # declared value alone: two DISTINCT schedule rows that happen
+            # to declare the same count must never collapse into one
+            # agreeing value -- that would hide a real duplicate/conflicting
+            # schedule entry behind a coincidental match.
+            qty_by_row: dict[tuple[str, ...], int] = {}
             for op_id in matched_instance_ids:
                 b_rec = binding_by_opening.get(op_id)
                 if b_rec is None:
@@ -605,19 +697,19 @@ class GenericOpeningCountProducer:
                     q_res.status is EvidenceResolutionStatus.CORROBORATED
                     and q_res.record is not None
                 ):
-                    qty_values.add(int(q_res.record.declared_count))
-            if len(qty_values) > 1:
+                    qty_by_row[row_ids] = int(q_res.record.declared_count)
+            if len(qty_by_row) > 1:
                 return self._store(
                     selector,
                     _blocked(
                         EvidenceResolutionStatus.CONFLICT,
-                        GENERIC_OPENING_COUNT_AMBIGUOUS,
-                        "schedule_row_quantity_conflict",
+                        GENERIC_OPENING_COUNT_SCHEDULE_ROW_DUPLICATE,
+                        "schedule_row_quantity_multiple_distinct_rows",
                         *diagnostic_reasons,
                     ),
                 )
-            if len(qty_values) == 1:
-                declared = next(iter(qty_values))
+            if len(qty_by_row) == 1:
+                declared = next(iter(qty_by_row.values()))
                 if declared != count:
                     return self._store(
                         selector,
@@ -673,10 +765,16 @@ class GenericOpeningCountProducer:
             "count": count,
             "matched_ids": matched_instance_ids,
         }
-        evidence_ids = tuple(
+        physical_evidence_ids = tuple(
             obs_id
             for op_id in matched_instance_ids
             for obs_id in distinct_openings[op_id].source_observation_ids
+        )
+        corroborating_schedule_ids = (
+            tuple(sorted(set(schedule_row_ids))) if schedule_corroborated else ()
+        )
+        evidence_ids = tuple(
+            dict.fromkeys((*physical_evidence_ids, *corroborating_schedule_ids))
         )
         qty = QuantityEvidence(
             quantity_id=stable_contract_id("qty_opening_count", qty_payload),
@@ -735,6 +833,8 @@ __all__ = [
     "GENERIC_OPENING_COUNT_CALLER_NON_PLAN_NOT_AUTHORITY",
     "GENERIC_OPENING_COUNT_CALLER_SCHEDULE_COUNTS_NOT_AUTHORITY",
     "GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED",
+    "GENERIC_OPENING_COUNT_IDENTITY_CONTRADICTION",
+    "GENERIC_OPENING_COUNT_IDENTITY_PAIRWISE_UNRESOLVED",
     "GENERIC_OPENING_COUNT_LINEAGE_MISMATCH",
     "GENERIC_OPENING_COUNT_NON_PLAN_VIEW",
     "GENERIC_OPENING_COUNT_NO_PHYSICAL_INSTANCES",
@@ -742,6 +842,7 @@ __all__ = [
     "GENERIC_OPENING_COUNT_RESOLVED",
     "GENERIC_OPENING_COUNT_SCHEDULE_MISMATCH",
     "GENERIC_OPENING_COUNT_SCHEDULE_ONLY_NOT_PHYSICAL",
+    "GENERIC_OPENING_COUNT_SCHEDULE_ROW_DUPLICATE",
     "GENERIC_OPENING_COUNT_SCHEMA_VERSION",
     "GENERIC_OPENING_COUNT_SCOPE_INCOMPLETE",
     "GENERIC_OPENING_COUNT_UNAVAILABLE",

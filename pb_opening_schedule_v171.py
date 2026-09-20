@@ -45,6 +45,11 @@ class ScheduleEntry:
     height_mm: Optional[int] = None
     description: str = ""
     count: int = 1
+    # True only when a schedule count/quantity cell was explicitly present
+    # and parsed.  The historical default count=1 is retained for backwards
+    # compatibility but must never be treated as independent commercial
+    # quantity evidence when this flag is False.
+    count_explicit: bool = False
     page_no: int = 0
     bbox: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     parse_source: str = ""      # "header_dims", "header_separate", "heuristic"
@@ -441,11 +446,17 @@ def parse_schedule_rows(
                 parse_source = ""
 
         count = 1
+        count_explicit = False
         if "count" in col_map and col_map["count"] < len(cells):
             try:
-                count = max(1, int(cells[col_map["count"]].replace("x", "").strip()))
+                raw_count = cells[col_map["count"]].lower().replace("x", "").strip()
+                parsed_count = int(raw_count)
+                if parsed_count >= 1:
+                    count = parsed_count
+                    count_explicit = True
             except (ValueError, TypeError):
                 count = 1
+                count_explicit = False
 
         desc = ""
         if "desc" in col_map and col_map["desc"] < len(cells):
@@ -457,6 +468,7 @@ def parse_schedule_rows(
             height_mm=height_mm,
             description=desc,
             count=count,
+            count_explicit=count_explicit,
             page_no=page_no,
             bbox=tuple(bbox) if len(bbox) >= 4 else (0, 0, 0, 0),
             parse_source=parse_source,
