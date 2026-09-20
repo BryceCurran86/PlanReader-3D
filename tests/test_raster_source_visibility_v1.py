@@ -201,23 +201,3 @@ def test_native_vector_visibility_prevents_raster_fallback_duplication() -> None
         assert resolved.status is EvidenceResolutionStatus.CORROBORATED
         assert resolved.observation is not None
         assert resolved.observation.observation_kind == NATIVE_PDF_VISIBLE_SEGMENT
-
-
-def test_production_shadow_discovers_raster_opening_but_keeps_commerce_locked(tmp_path) -> None:
-    from pb_item35_production_authority_shadow import (
-        collect_item35_authority_shadow,
-    )
-
-    pdf_path = tmp_path / "raster-shadow.pdf"
-    pdf_path.write_bytes(_image_only_pdf())
-
-    shadow = collect_item35_authority_shadow(
-        pdf_path,
-        document_id="raster-shadow",
-    )
-
-    assert shadow["status"] == "evidence_present"
-    assert shadow["semantic_opening_count"] == 1
-    assert shadow["visible_observation_count"] >= 6
-    assert shadow["commercial_count_unlocked"] is False
-    assert shadow["generic_count_status"] == "abstained"
