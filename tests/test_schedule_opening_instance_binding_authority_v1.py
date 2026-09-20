@@ -607,3 +607,46 @@ def test_side_by_side_other_mark_does_not_contaminate_matching_table() -> None:
     assert result.record.schedule_row_type_mark == "W1"
     assert result.record.schedule_row_width_mm == 900
     assert result.record.schedule_row_height_mm == 2100
+
+
+def test_compound_door_type_header_is_one_table_not_two() -> None:
+    """DOOR + TYPE are two mark-role words in one header, not two tables."""
+    doc = fitz.open()
+    page = doc.new_page(width=760, height=650)
+    _draw_opening(
+        page,
+        x0=20.0,
+        gap0=100.0,
+        gap1=140.0,
+        x1=220.0,
+        y0=100.0,
+        y1=110.0,
+    )
+    page.insert_text(fitz.Point(112, TAG_Y), "D01", color=(0, 0, 0))
+    header = ("DOOR", "TYPE", "WIDTH", "HEIGHT")
+    row = ("D01", "HINGED", "820", "2040")
+    xs = (40.0, 105.0, 185.0, 270.0)
+    for cell, x in zip(header, xs):
+        page.insert_text(fitz.Point(x, SCHEDULE_HEADER_Y), cell, color=(0, 0, 0))
+    for cell, x in zip(row, xs):
+        page.insert_text(
+            fitz.Point(x, SCHEDULE_HEADER_Y + SCHEDULE_ROW_DY),
+            cell,
+            color=(0, 0, 0),
+        )
+    payload = doc.tobytes()
+    doc.close()
+
+    src = SourceVisibilityProducer(
+        producer_method="sched-bind-test",
+        producer_version="1.0",
+    )
+    published = _ingest(src, payload, "sched-compound-mark-header")
+    opening_selector = _opening_selector(published, src.authority())
+    result = _bind(src, opening_selector)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED, result.reason_codes
+    assert result.record is not None
+    assert result.record.tag_mark == "D01"
+    assert result.record.schedule_row_width_mm == 820
+    assert result.record.schedule_row_height_mm == 2040
