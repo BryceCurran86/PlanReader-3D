@@ -91,7 +91,7 @@ from pb_viewport_view_class_authority import (
     ViewportViewClassSelector,
 )
 
-GENERIC_OPENING_COUNT_SCHEMA_VERSION = "1.0.0"
+GENERIC_OPENING_COUNT_SCHEMA_VERSION = "1.1.0"
 
 GENERIC_OPENING_COUNT_RESOLVED = "generic_opening_count_resolved"
 GENERIC_OPENING_COUNT_UNAVAILABLE = "generic_opening_count_unavailable"
@@ -226,6 +226,9 @@ class GenericOpeningCountRecord:
     count: int
     physical_instance_record_ids: tuple[str, ...]
     schedule_corroborated: bool
+    completeness_record_id: str = ""
+    schedule_binding_record_ids: tuple[str, ...] = ()
+    schedule_quantity_record_ids: tuple[str, ...] = ()
     schedule_row_ids: tuple[str, ...] = ()
     quantity_evidence: Optional[QuantityEvidence] = None
     schema_version: str = GENERIC_OPENING_COUNT_SCHEMA_VERSION
@@ -245,6 +248,17 @@ class GenericOpeningCountRecord:
             self.physical_instance_record_ids
         ):
             raise ValueError("physical_instance_record_ids must be unique")
+        _require_nonempty(self.completeness_record_id, "completeness_record_id")
+        for field_name in (
+            "schedule_binding_record_ids",
+            "schedule_quantity_record_ids",
+            "schedule_row_ids",
+        ):
+            values = tuple(getattr(self, field_name))
+            if len(set(values)) != len(values):
+                raise ValueError(f"{field_name} must be unique")
+            for value in values:
+                _require_nonempty(value, field_name[:-1])
 
 
 @dataclass(frozen=True)
@@ -475,7 +489,6 @@ class GenericOpeningCountProducer:
         distinct_openings: dict[str, PhysicalOpeningExistenceRecord] = {}
         opening_marks: dict[str, Optional[str]] = {}
         opening_families: dict[str, str] = {}
-        schedule_row_ids: list[str] = []
         binding_by_opening: dict[str, Any] = {}
         representative_selectors: dict[str, ObservationSelector] = {}
 
@@ -599,9 +612,6 @@ class GenericOpeningCountProducer:
                     )
                     if mark:
                         mark = str(mark).strip().upper()
-                    row_obs = getattr(b_rec, "schedule_row_observation_ids", ()) or ()
-                    if row_obs:
-                        schedule_row_ids.extend(str(x) for x in row_obs)
                     if mark:
                         if mark.startswith("D") and not mark.startswith("DW"):
                             family = "door"
@@ -717,6 +727,7 @@ class GenericOpeningCountProducer:
             # agreeing value -- that would hide a real duplicate/conflicting
             # schedule entry behind a coincidental match.
             qty_by_row: dict[tuple[str, ...], int] = {}
+            qty_record_id_by_row: dict[tuple[str, ...], str] = {}
             for op_id in matched_instance_ids:
                 b_rec = binding_by_opening.get(op_id)
                 if b_rec is None:
@@ -741,6 +752,7 @@ class GenericOpeningCountProducer:
                     and q_res.record is not None
                 ):
                     qty_by_row[row_ids] = int(q_res.record.declared_count)
+                    qty_record_id_by_row[row_ids] = str(q_res.record.record_id)
             if len(qty_by_row) > 1:
                 return self._store(
                     selector,
@@ -798,6 +810,62 @@ class GenericOpeningCountProducer:
         if selector.opening_mark:
             semantic_key += f":{selector.opening_mark}"
 
+        # Authority lineage used by this exact commercial proposition.
+        # A filtered count relies on bindings for the whole physical universe:
+        # non-matching members must be affirmatively classified so they can be
+        # ruled out. An unfiltered physical count does not rely on semantic
+        # binding and therefore excludes those records from its lineage.
+        classification_binding_records = (
+            tuple(
+                binding_by_opening[op_id]
+                for op_id in sorted(distinct_openings)
+                if op_id in binding_by_opening
+            )
+            if selector.opening_mark is not None
+            or selector.opening_family is not None
+            else ()
+        )
+        schedule_binding_record_ids = tuple(
+            sorted(
+                {
+                    str(record.record_id)
+                    for record in classification_binding_records
+                    if str(getattr(record, "record_id", "")).strip()
+                }
+            )
+        )
+        classification_tag_ids = tuple(
+            sorted(
+                {
+                    str(record.tag_observation_id)
+                    for record in classification_binding_records
+                    if str(getattr(record, "tag_observation_id", "")).strip()
+                }
+            )
+        )
+        classification_schedule_row_ids = tuple(
+            sorted(
+                {
+                    str(observation_id)
+                    for record in classification_binding_records
+                    for observation_id in (
+                        getattr(record, "schedule_row_observation_ids", ()) or ()
+                    )
+                    if str(observation_id).strip()
+                }
+            )
+        )
+        schedule_quantity_record_ids = (
+            tuple(sorted(set(qty_record_id_by_row.values())))
+            if schedule_corroborated
+            else ()
+        )
+        corroborating_schedule_ids = (
+            tuple(sorted(qty_by_row.keys())[0])
+            if schedule_corroborated and len(qty_by_row) == 1
+            else ()
+        )
+
         qty_payload = {
             "family": "opening_count",
             "semantic_key": semantic_key,
@@ -805,19 +873,32 @@ class GenericOpeningCountProducer:
             "revision_id": selector.revision_id,
             "source_sha256": selector.source_sha256,
             "snapshot_id": selector.snapshot_id,
+            "decision_scope_id": selector.decision_scope_id,
             "count": count,
             "matched_ids": matched_instance_ids,
+            "completeness_record_id": univ_rec.record_id,
+            "schedule_binding_record_ids": schedule_binding_record_ids,
+            "schedule_quantity_record_ids": schedule_quantity_record_ids,
+            "schedule_row_ids": classification_schedule_row_ids,
+            "schedule_corroborated": schedule_corroborated,
         }
         physical_evidence_ids = tuple(
             obs_id
             for op_id in matched_instance_ids
             for obs_id in distinct_openings[op_id].source_observation_ids
         )
-        corroborating_schedule_ids = (
-            tuple(sorted(set(schedule_row_ids))) if schedule_corroborated else ()
-        )
         evidence_ids = tuple(
-            dict.fromkeys((*physical_evidence_ids, *corroborating_schedule_ids))
+            dict.fromkeys(
+                (
+                    str(univ_rec.record_id),
+                    *physical_evidence_ids,
+                    *schedule_binding_record_ids,
+                    *classification_tag_ids,
+                    *classification_schedule_row_ids,
+                    *schedule_quantity_record_ids,
+                    *corroborating_schedule_ids,
+                )
+            )
         )
         qty = QuantityEvidence(
             quantity_id=stable_contract_id("qty_opening_count", qty_payload),
@@ -837,6 +918,13 @@ class GenericOpeningCountProducer:
                 "schedule_corroborated": schedule_corroborated,
                 "opening_mark": selector.opening_mark,
                 "opening_family": selector.opening_family,
+                "decision_scope_id": selector.decision_scope_id,
+                "source_sha256": selector.source_sha256,
+                "snapshot_id": selector.snapshot_id,
+                "completeness_record_id": univ_rec.record_id,
+                "schedule_binding_record_ids": schedule_binding_record_ids,
+                "schedule_quantity_record_ids": schedule_quantity_record_ids,
+                "schedule_row_ids": classification_schedule_row_ids,
             },
         )
 
@@ -851,7 +939,10 @@ class GenericOpeningCountProducer:
             "count": count,
             "physical_instance_record_ids": tuple(matched_instance_ids),
             "schedule_corroborated": schedule_corroborated,
-            "schedule_row_ids": tuple(sorted(set(schedule_row_ids))),
+            "completeness_record_id": str(univ_rec.record_id),
+            "schedule_binding_record_ids": schedule_binding_record_ids,
+            "schedule_quantity_record_ids": schedule_quantity_record_ids,
+            "schedule_row_ids": classification_schedule_row_ids,
         }
         record = GenericOpeningCountRecord(
             record_id=stable_contract_id(
