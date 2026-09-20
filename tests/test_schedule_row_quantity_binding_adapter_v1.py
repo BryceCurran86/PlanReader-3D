@@ -1,6 +1,8 @@
 """Tests for the authority-resolved schedule quantity bridge."""
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -94,7 +96,6 @@ def test_explicit_count_publishes_only_after_authority_resolution() -> None:
         schedule_row_quantity_producer=producer,
         schedule_binding_authority=binding,
         binding_selector=_binding_selector(),
-        universe_complete=True,
     )
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.record is not None
@@ -140,7 +141,6 @@ def test_unresolved_binding_authority_cannot_publish_quantity() -> None:
         schedule_row_quantity_producer=producer,
         schedule_binding_authority=binding,
         binding_selector=_binding_selector(),
-        universe_complete=True,
     )
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.record is None
@@ -155,7 +155,6 @@ def test_implicit_default_count_never_published_as_evidence() -> None:
         schedule_row_quantity_producer=producer,
         schedule_binding_authority=binding,
         binding_selector=_binding_selector(),
-        universe_complete=True,
     )
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.record is None
@@ -170,7 +169,6 @@ def test_missing_count_value_abstains() -> None:
         schedule_row_quantity_producer=producer,
         schedule_binding_authority=binding,
         binding_selector=_binding_selector(),
-        universe_complete=True,
     )
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.record is None
@@ -184,7 +182,6 @@ def test_incomplete_universe_forces_abstain_even_with_explicit_count() -> None:
         schedule_row_quantity_producer=producer,
         schedule_binding_authority=binding,
         binding_selector=_binding_selector(),
-        universe_complete=False,
     )
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.record is None
@@ -200,14 +197,12 @@ def test_rejects_non_producer_owned_arguments() -> None:
             schedule_row_quantity_producer=object(),  # type: ignore[arg-type]
             schedule_binding_authority=binding,
             binding_selector=selector,
-            universe_complete=True,
         )
     with pytest.raises(TypeError):
         publish_schedule_row_quantity_from_binding(
             schedule_row_quantity_producer=producer,
             schedule_binding_authority=object(),  # type: ignore[arg-type]
             binding_selector=selector,
-            universe_complete=True,
         )
     with pytest.raises(TypeError):
         publish_schedule_row_quantity_from_binding(
