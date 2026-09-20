@@ -15,7 +15,10 @@ from pb_generic_opening_count_authority import (
     _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
-from pb_opening_universe_completeness_authority import OpeningUniverseSelector
+from pb_opening_universe_completeness_authority import (
+    SEMANTIC_ENUMERATION_INCOMPLETE,
+    OpeningUniverseSelector,
+)
 from pb_opening_universe_completeness_source_adapter import (
     build_source_authenticated_opening_universe_completeness,
 )
@@ -54,7 +57,7 @@ def _ingest(producer: SourceVisibilityProducer, payload: bytes, document_id: str
     )
 
 
-def test_real_source_decode_yields_corroborated_sealed_completeness() -> None:
+def test_real_source_decode_is_authenticated_but_semantically_incomplete() -> None:
     src = SourceVisibilityProducer(producer_method="completeness-adapter-test", producer_version="1.0")
     payload = _tag_pdf()
     ingestion = _ingest(src, payload, "doc-real")
@@ -83,10 +86,15 @@ def test_real_source_decode_yields_corroborated_sealed_completeness() -> None:
             decision_scope_id=SCOPE,
         )
     )
-    assert res.status is EvidenceResolutionStatus.CORROBORATED
+    # Six raw G17 support segments are authenticated source primitives, not
+    # six semantic opening instances. Source authentication alone must never
+    # turn raw primitive equality into commercial opening completeness.
+    assert res.status is not EvidenceResolutionStatus.CORROBORATED
     assert res.record is not None
-    assert res.record.decision_scope_complete is True
-    assert res.record.reason_codes == ()
+    assert res.record.source_decode_complete is True
+    assert res.record.semantic_enumeration_complete is False
+    assert res.record.decision_scope_complete is False
+    assert SEMANTIC_ENUMERATION_INCOMPLETE in res.record.reason_codes
     assert len(res.record.accounted_member_ids) == 6
 
 
@@ -183,6 +191,9 @@ def test_page_scoping_excludes_geometry_on_other_pages() -> None:
         )
     )
     assert res.record is not None
+    assert res.record.semantic_enumeration_complete is False
+    assert res.record.decision_scope_complete is False
+    assert SEMANTIC_ENUMERATION_INCOMPLETE in res.record.reason_codes
     assert len(res.record.accounted_member_ids) == 6
     for member_id in res.record.accounted_member_ids:
         assert member_id.strip()
