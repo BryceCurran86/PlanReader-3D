@@ -24,6 +24,10 @@ from pb_physical_opening_authority import (
     PHYSICAL_OPENING_EXISTS,
     PhysicalOpeningAuthority,
 )
+from pb_schedule_row_equivalence_authority import (
+    ScheduleRowEquivalenceAuthority,
+    ScheduleRowSelector,
+)
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
 from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -38,6 +42,9 @@ BINDING_NO_CONTAINED_TAG = "schedule_opening_instance_binding_no_contained_tag"
 BINDING_AMBIGUOUS_TAGS = "schedule_opening_instance_binding_ambiguous_tags"
 BINDING_NO_MATCHING_ROW = "schedule_opening_instance_binding_no_matching_row"
 BINDING_AMBIGUOUS_ROWS = "schedule_opening_instance_binding_ambiguous_rows"
+BINDING_ROW_EQUIVALENCE_UNRESOLVED = (
+    "schedule_opening_instance_binding_row_equivalence_unresolved"
+)
 
 _BINDING_PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
@@ -857,12 +864,65 @@ class ScheduleOpeningInstanceBindingProducer:
                     BINDING_NO_MATCHING_ROW,
                 ),
             )
-        if len(matching_rows) != 1:
-            return self._store(
-                key,
-                _blocked(
-                    EvidenceResolutionStatus.CONFLICT,
-                    BINDING_AMBIGUOUS_ROWS,
+
+        if len(matching_rows) > 1:
+            equivalence = (
+                ScheduleRowEquivalenceAuthority.from_source_visibility_producer(
+                    self._source_visibility_producer
+                )
+            )
+            canonical = matching_rows[0]
+            canonical_selector = ScheduleRowSelector(
+                document_id=opening.document_id,
+                revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,
+                snapshot_id=opening.snapshot_id,
+                schedule_page_id=canonical[2],
+                schedule_row_observation_ids=tuple(canonical[1]),
+            )
+            all_equivalent = True
+            for candidate in matching_rows[1:]:
+                candidate_selector = ScheduleRowSelector(
+                    document_id=opening.document_id,
+                    revision_id=opening.revision_id,
+                    source_sha256=opening.source_sha256,
+                    snapshot_id=opening.snapshot_id,
+                    schedule_page_id=candidate[2],
+                    schedule_row_observation_ids=tuple(candidate[1]),
+                )
+                comparison = equivalence.compare(
+                    canonical_selector,
+                    candidate_selector,
+                )
+                if comparison.status is not EvidenceResolutionStatus.CORROBORATED:
+                    return self._store(
+                        key,
+                        _blocked(
+                            EvidenceResolutionStatus.ABSTAINED,
+                            BINDING_ROW_EQUIVALENCE_UNRESOLVED,
+                            *comparison.reason_codes,
+                        ),
+                    )
+                if not comparison.proven_same:
+                    all_equivalent = False
+                    break
+
+            if not all_equivalent:
+                return self._store(
+                    key,
+                    _blocked(
+                        EvidenceResolutionStatus.CONFLICT,
+                        BINDING_AMBIGUOUS_ROWS,
+                    ),
+                )
+
+            matching_rows = (
+                min(
+                    matching_rows,
+                    key=lambda item: (
+                        str(item[2]),
+                        tuple(sorted(item[1])),
+                    ),
                 ),
             )
 
@@ -943,6 +1003,7 @@ __all__ = [
     "BINDING_NO_MATCHING_ROW",
     "BINDING_OPENING_UNRESOLVED",
     "BINDING_PARTIAL_SOURCE_COVERAGE",
+    "BINDING_ROW_EQUIVALENCE_UNRESOLVED",
     "BINDING_RESOLVED",
     "BINDING_SOURCE_SCOPE_UNAVAILABLE",
     "SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION",
