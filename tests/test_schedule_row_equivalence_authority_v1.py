@@ -84,6 +84,24 @@ def _trusted_cells(src, published):
     return result
 
 
+def _page_row_bands(cells, page_id: str):
+    by_y = defaultdict(list)
+    for observation_id, text, geometry, cell_page_id in cells:
+        if cell_page_id != page_id:
+            continue
+        center_y = round((float(geometry[1]) + float(geometry[3])) / 2.0, 3)
+        by_y[center_y].append((observation_id, text, geometry))
+    return [by_y[key] for key in sorted(by_y)]
+
+
+def _one_id_per_rendered_cell(row_cells):
+    by_cell = defaultdict(list)
+    for observation_id, text, geometry in row_cells:
+        by_cell[(text, geometry)].append(observation_id)
+    ordered = sorted(by_cell.items(), key=lambda item: (item[0][1][0], item[0][0]))
+    return tuple(ids[0] for _key, ids in ordered)
+
+
 def _selector(published, page_id: str, ids: tuple[str, ...]) -> ScheduleRowSelector:
     return ScheduleRowSelector(
         document_id=published.revision.document_id,
@@ -99,15 +117,18 @@ def test_duplicate_text_layer_rows_are_proven_same_by_authenticated_text_and_geo
     src, published = _ingest()
     cells = _trusted_cells(src, published)
 
+    row_bands = _page_row_bands(cells, "1")
+    assert len(row_bands) == 2
+    duplicate_row = max(row_bands, key=len)
+
     by_key = defaultdict(list)
-    for observation_id, text, geometry, page_id in cells:
-        if page_id == "1" and geometry[1] == 500.0:
-            by_key[(text, geometry)].append(observation_id)
+    for observation_id, text, geometry in duplicate_row:
+        by_key[(text, geometry)].append(observation_id)
 
     assert len(by_key) == 3
     assert all(len(ids) == 2 for ids in by_key.values())
 
-    ordered = sorted(by_key.items(), key=lambda item: item[0][1][0])
+    ordered = sorted(by_key.items(), key=lambda item: (item[0][1][0], item[0][0]))
     left_ids = tuple(ids[0] for _key, ids in ordered)
     right_ids = tuple(ids[1] for _key, ids in ordered)
 
@@ -125,16 +146,12 @@ def test_equal_row_values_at_different_geometry_are_proven_distinct() -> None:
     src, published = _ingest()
     cells = _trusted_cells(src, published)
 
-    row_500 = tuple(
-        observation_id
-        for observation_id, _text, geometry, page_id in cells
-        if page_id == "1" and geometry[1] == 500.0
-    )[:3]
-    row_540 = tuple(
-        observation_id
-        for observation_id, _text, geometry, page_id in cells
-        if page_id == "1" and geometry[1] == 540.0
-    )
+    row_bands = _page_row_bands(cells, "1")
+    assert len(row_bands) == 2
+    duplicate_row = max(row_bands, key=len)
+    independent_row = min(row_bands, key=len)
+    row_500 = _one_id_per_rendered_cell(duplicate_row)
+    row_540 = _one_id_per_rendered_cell(independent_row)
 
     authority = ScheduleRowEquivalenceAuthority.from_source_visibility_producer(src)
     result = authority.compare(
@@ -151,16 +168,12 @@ def test_equal_row_values_on_different_pages_are_proven_distinct_scope() -> None
     src, published = _ingest()
     cells = _trusted_cells(src, published)
 
-    row_page1 = tuple(
-        observation_id
-        for observation_id, _text, geometry, page_id in cells
-        if page_id == "1" and geometry[1] == 500.0
-    )[:3]
-    row_page2 = tuple(
-        observation_id
-        for observation_id, _text, geometry, page_id in cells
-        if page_id == "2" and geometry[1] == 500.0
-    )
+    page1_bands = _page_row_bands(cells, "1")
+    page2_bands = _page_row_bands(cells, "2")
+    assert len(page1_bands) == 2
+    assert len(page2_bands) == 1
+    row_page1 = _one_id_per_rendered_cell(max(page1_bands, key=len))
+    row_page2 = _one_id_per_rendered_cell(page2_bands[0])
 
     authority = ScheduleRowEquivalenceAuthority.from_source_visibility_producer(src)
     result = authority.compare(
@@ -177,11 +190,10 @@ def test_equal_row_values_on_different_pages_are_proven_distinct_scope() -> None
 def test_unresolvable_row_observation_abstains() -> None:
     src, published = _ingest()
     cells = _trusted_cells(src, published)
-    real_id = next(
-        observation_id
-        for observation_id, _text, geometry, page_id in cells
-        if page_id == "1" and geometry[1] == 540.0
-    )
+    row_bands = _page_row_bands(cells, "1")
+    assert len(row_bands) == 2
+    independent_row = min(row_bands, key=len)
+    real_id = independent_row[0][0]
 
     authority = ScheduleRowEquivalenceAuthority.from_source_visibility_producer(src)
     result = authority.compare(
