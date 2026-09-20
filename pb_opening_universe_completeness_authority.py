@@ -38,6 +38,11 @@ SEMANTIC_ENUMERATION_INCOMPLETE = "semantic_enumeration_incomplete"
 SEMANTIC_MEMBER_INVALID = "semantic_member_invalid"
 SEMANTIC_MEMBER_SCOPE_MISMATCH = "semantic_member_scope_mismatch"
 SEMANTIC_MEMBER_DUPLICATE_CONFLICT = "semantic_member_duplicate_conflict"
+SEMANTIC_DISPOSITION_INVALID = "semantic_opening_disposition_invalid"
+SEMANTIC_SOURCE_MEMBER_UNDISPOSITIONED = "semantic_source_member_undispositioned"
+SEMANTIC_SOURCE_MEMBER_UNRESOLVED = "semantic_source_member_unresolved"
+SEMANTIC_SELECTOR_OUTSIDE_SOURCE = "semantic_opening_selector_outside_source"
+SEMANTIC_DISPOSITION_DUPLICATE_CONFLICT = "semantic_disposition_duplicate_conflict"
 CLIP_STATE_UNKNOWN = "opening_universe_clip_state_unknown"
 ACTIVE_CLIP_UNRESOLVED = "opening_universe_active_clip_unresolved"
 OPTIONAL_CONTENT_UNRESOLVED = "opening_universe_optional_content_unresolved"
@@ -52,6 +57,43 @@ class SourceEnumerationState(str, Enum):
 
     COMPLETE = "complete"
     INCOMPLETE = "incomplete"
+
+
+class SemanticSourceDispositionState(str, Enum):
+    """Disposition of one authenticated source primitive for opening semantics."""
+
+    OPENING_MEMBER = "opening_member"
+    NON_OPENING = "non_opening"
+    UNRESOLVED = "unresolved"
+
+
+@dataclass(frozen=True)
+class SemanticOpeningMemberDisposition:
+    """Producer-side semantic disposition for one authenticated source primitive.
+
+    Many source primitives may map to the same opening selector observation id.
+    This permits a multi-segment source pattern to become one semantic opening
+    while preserving complete source coverage.  The selector id must be one of
+    the authenticated source primitive ids so PhysicalOpeningAuthority can replay it.
+    """
+
+    source_primitive_id: str
+    state: str
+    opening_selector_observation_id: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        source_id = str(self.source_primitive_id or "").strip()
+        if not source_id:
+            raise ValueError("semantic disposition source_primitive_id is unbound")
+        try:
+            state = SemanticSourceDispositionState(str(self.state))
+        except ValueError as exc:
+            raise ValueError("semantic disposition state is invalid") from exc
+        selector_id = str(self.opening_selector_observation_id or "").strip()
+        if state is SemanticSourceDispositionState.OPENING_MEMBER and not selector_id:
+            raise ValueError("opening-member disposition requires selector observation id")
+        if state is not SemanticSourceDispositionState.OPENING_MEMBER and selector_id:
+            raise ValueError("non-opening/unresolved disposition cannot carry opening selector id")
 
 
 @dataclass(frozen=True)
