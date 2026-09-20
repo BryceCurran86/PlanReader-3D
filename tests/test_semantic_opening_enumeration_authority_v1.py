@@ -235,6 +235,7 @@ def test_geometry_mutation_changes_semantic_inventory_identity() -> None:
         producer_version="1.0",
     )
     first = _ingest(src, _pdf(), "semantic-mutation")
+    _, first_result = _enumerate(src, first.revision.revision_id)
 
     doc = fitz.open()
     page = doc.new_page(width=700, height=650)
@@ -242,8 +243,6 @@ def test_geometry_mutation_changes_semantic_inventory_identity() -> None:
     mutated = doc.tobytes()
     doc.close()
     second = _ingest(src, mutated, "semantic-mutation")
-
-    _, first_result = _enumerate(src, first.revision.revision_id)
     _, second_result = _enumerate(src, second.revision.revision_id)
 
     assert first_result.record is not None
