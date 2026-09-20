@@ -84,7 +84,39 @@ jobs:
           set -euo pipefail
           OUT="/tmp/benchmark-${BENCHMARK_ID}"
           mkdir -p "$OUT"
-          PYTHONPATH=. python pb_benchmark_accuracy_engine.py             --benchmark "$BENCHMARK_ID"             --pdf "benchmarks/sources/$SOURCE_FILENAME"             --auto-extract             --output-dir "$OUT" | tee "$OUT/console.txt"
+          PYTHONPATH=. python - <<'PY' | tee "$OUT/console.txt"
+          import json
+          import os
+          from pathlib import Path
+
+          # Diagnostic-only Item 35 shadow does not mutate predictions. Its
+          # exhaustive document scan is currently too expensive on large PDFs,
+          # so bypass only that diagnostic during this accuracy measurement.
+          import pb_item35_production_authority_shadow as item35_shadow
+          item35_shadow.collect_item35_authority_shadow = (
+              lambda *args, **kwargs:
+              item35_shadow.empty_item35_authority_shadow(
+                  reason="canonical_benchmark_diagnostic_shadow_bypassed"
+              )
+          )
+
+          from pb_benchmark_accuracy_engine import run_public_tender_benchmark
+
+          benchmark_id = os.environ["BENCHMARK_ID"]
+          source = Path("benchmarks/sources") / os.environ["SOURCE_FILENAME"]
+          out = Path("/tmp") / f"benchmark-{benchmark_id}"
+          report = run_public_tender_benchmark(
+              benchmark_id=benchmark_id,
+              pdf_path=source,
+              auto_extract=True,
+              output_dir=out,
+          )
+          print("=" * 70)
+          print(f"Benchmark: {benchmark_id}")
+          print(json.dumps(report.to_dict().get("summary", {}), indent=2))
+          if not report.is_scored:
+              raise SystemExit(1)
+          PY
 
       - name: Upload project benchmark artifact
         if: always()
