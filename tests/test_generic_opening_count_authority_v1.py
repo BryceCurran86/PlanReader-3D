@@ -108,10 +108,12 @@ def _setup(
     schedule_qty: dict[tuple[str, ...], tuple[str, int]] | None = None,
     diagnostic: OpeningCountDiagnosticRequest | None = None,
     schedule_qty_complete: bool = True,
+    universe_record_id: str = "univ-1",
+    binding_record_prefix: str = "bind",
 ) -> tuple[GenericOpeningCountProducer, GenericOpeningCountSelector]:
     member_ids = tuple(op.record_id for op in openings)
     univ_rec = OpeningUniverseCompletenessRecord(
-        record_id="univ-1",
+        record_id=universe_record_id,
         decision_scope_id=SCOPE,
         decision_scope_kind="viewport",
         document_id=DOC,
@@ -197,7 +199,7 @@ def _setup(
             status=EvidenceResolutionStatus.CORROBORATED,
             reason_codes=("binding_resolved",),
             record=ScheduleOpeningInstanceBindingRecord(
-                record_id=f"bind-{op_id}",
+                record_id=f"{binding_record_prefix}-{op_id}",
                 document_id=DOC,
                 revision_id=REV,
                 source_sha256=SHA,
@@ -949,3 +951,201 @@ def test_known_other_mark_can_be_ruled_out_without_blocking_w1_count() -> None:
     assert result.record is not None
     assert result.record.count == 1
     assert result.record.physical_instance_record_ids == ("w1-known",)
+
+
+def test_commercial_quantity_carries_complete_authority_lineage() -> None:
+    openings = tuple(_physical(f"lineage-{i}") for i in range(2))
+    bindings = tuple((f"lineage-{i}", "W1", "row-w1") for i in range(2))
+    producer, _ = _setup(
+        openings=openings,
+        bindings=bindings,
+        schedule_qty={("row-w1",): ("W1", 2)},
+    )
+    result = producer.publish(
+        GenericOpeningCountSelector(
+            document_id=DOC,
+            revision_id=REV,
+            source_sha256=SHA,
+            snapshot_id=SNAP,
+            decision_scope_id=SCOPE,
+            opening_mark="W1",
+        )
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.record is not None
+    record = result.record
+    assert record.completeness_record_id == "univ-1"
+    assert set(record.schedule_binding_record_ids) == {
+        "bind-lineage-0",
+        "bind-lineage-1",
+    }
+    assert len(record.schedule_quantity_record_ids) == 1
+    assert record.schedule_row_ids == ("row-w1",)
+
+    quantity = record.quantity_evidence
+    assert quantity is not None
+    assert "univ-1" in quantity.evidence_ids
+    assert "bind-lineage-0" in quantity.evidence_ids
+    assert "bind-lineage-1" in quantity.evidence_ids
+    assert "tag-lineage-0" in quantity.evidence_ids
+    assert "tag-lineage-1" in quantity.evidence_ids
+    assert "row-w1" in quantity.evidence_ids
+    assert set(record.schedule_quantity_record_ids).issubset(
+        set(quantity.evidence_ids)
+    )
+    assert quantity.metadata["completeness_record_id"] == "univ-1"
+    assert tuple(quantity.metadata["schedule_binding_record_ids"]) == (
+        record.schedule_binding_record_ids
+    )
+    assert tuple(quantity.metadata["schedule_quantity_record_ids"]) == (
+        record.schedule_quantity_record_ids
+    )
+
+
+def test_completeness_record_identity_changes_commercial_record_and_quantity_ids() -> None:
+    opening = _physical("lineage-completeness")
+    bindings = (("lineage-completeness", "W1", "row-w1"),)
+
+    producer_a, _ = _setup(
+        openings=(opening,),
+        bindings=bindings,
+        schedule_qty={("row-w1",): ("W1", 1)},
+        universe_record_id="univ-a",
+    )
+    producer_b, _ = _setup(
+        openings=(opening,),
+        bindings=bindings,
+        schedule_qty={("row-w1",): ("W1", 1)},
+        universe_record_id="univ-b",
+    )
+    selector = GenericOpeningCountSelector(
+        document_id=DOC,
+        revision_id=REV,
+        source_sha256=SHA,
+        snapshot_id=SNAP,
+        decision_scope_id=SCOPE,
+        opening_mark="W1",
+    )
+    result_a = producer_a.publish(selector)
+    result_b = producer_b.publish(selector)
+
+    assert result_a.record is not None
+    assert result_b.record is not None
+    assert result_a.record.record_id != result_b.record.record_id
+    assert result_a.record.quantity_evidence is not None
+    assert result_b.record.quantity_evidence is not None
+    assert (
+        result_a.record.quantity_evidence.quantity_id
+        != result_b.record.quantity_evidence.quantity_id
+    )
+
+
+def test_binding_record_identity_changes_commercial_record_and_quantity_ids() -> None:
+    opening = _physical("lineage-binding")
+    bindings = (("lineage-binding", "W1", "row-w1"),)
+
+    producer_a, _ = _setup(
+        openings=(opening,),
+        bindings=bindings,
+        schedule_qty={("row-w1",): ("W1", 1)},
+        binding_record_prefix="binding-a",
+    )
+    producer_b, _ = _setup(
+        openings=(opening,),
+        bindings=bindings,
+        schedule_qty={("row-w1",): ("W1", 1)},
+        binding_record_prefix="binding-b",
+    )
+    selector = GenericOpeningCountSelector(
+        document_id=DOC,
+        revision_id=REV,
+        source_sha256=SHA,
+        snapshot_id=SNAP,
+        decision_scope_id=SCOPE,
+        opening_mark="W1",
+    )
+    result_a = producer_a.publish(selector)
+    result_b = producer_b.publish(selector)
+
+    assert result_a.record is not None
+    assert result_b.record is not None
+    assert result_a.record.schedule_binding_record_ids != (
+        result_b.record.schedule_binding_record_ids
+    )
+    assert result_a.record.record_id != result_b.record.record_id
+    assert result_a.record.quantity_evidence is not None
+    assert result_b.record.quantity_evidence is not None
+    assert (
+        result_a.record.quantity_evidence.quantity_id
+        != result_b.record.quantity_evidence.quantity_id
+    )
+
+
+def test_filtered_count_lineage_keeps_exclusion_bindings_but_not_other_mark_quantity() -> None:
+    w1 = _physical("lineage-w1")
+    d1 = _physical("lineage-d1")
+    producer, _ = _setup(
+        openings=(w1, d1),
+        bindings=(
+            ("lineage-w1", "W1", "row-w1"),
+            ("lineage-d1", "D1", "row-d1"),
+        ),
+        schedule_qty={
+            ("row-w1",): ("W1", 1),
+            ("row-d1",): ("D1", 1),
+        },
+    )
+    result = producer.publish(
+        GenericOpeningCountSelector(
+            document_id=DOC,
+            revision_id=REV,
+            source_sha256=SHA,
+            snapshot_id=SNAP,
+            decision_scope_id=SCOPE,
+            opening_mark="W1",
+        )
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.record is not None
+    record = result.record
+
+    # D1's binding is material: it is the affirmative evidence that lets the
+    # complete universe rule that physical opening OUT of the W1 subset.
+    assert set(record.schedule_binding_record_ids) == {
+        "bind-lineage-w1",
+        "bind-lineage-d1",
+    }
+    assert set(record.schedule_row_ids) == {"row-w1", "row-d1"}
+
+    # Only W1's schedule quantity corroborates the W1 commercial count.
+    assert len(record.schedule_quantity_record_ids) == 1
+    quantity = record.quantity_evidence
+    assert quantity is not None
+    assert quantity.metadata["schedule_corroborated"] is True
+    assert "row-d1" in quantity.evidence_ids
+    # The D1 row is classification evidence, not a second quantity authority:
+    # only one schedule quantity record participates in this W1 result.
+    assert len(quantity.metadata["schedule_quantity_record_ids"]) == 1
+
+
+def test_unfiltered_physical_count_excludes_unused_schedule_binding_lineage() -> None:
+    openings = (_physical("raw-a"), _physical("raw-b"))
+    producer, selector = _setup(
+        openings=openings,
+        bindings=(
+            ("raw-a", "W1", "row-w1"),
+            ("raw-b", "D1", "row-d1"),
+        ),
+    )
+    result = producer.publish(selector)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.record is not None
+    assert result.record.count == 2
+    assert result.record.schedule_binding_record_ids == ()
+    assert result.record.schedule_quantity_record_ids == ()
+    assert result.record.schedule_row_ids == ()
+    assert result.record.quantity_evidence is not None
+    assert result.record.quantity_evidence.metadata["schedule_binding_record_ids"] == ()
