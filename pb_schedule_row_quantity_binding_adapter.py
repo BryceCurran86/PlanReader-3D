@@ -29,6 +29,7 @@ treated as an authenticated declared count.
 """
 from __future__ import annotations
 
+from pb_migration_contracts import EvidenceResolutionStatus
 from pb_schedule_opening_instance_binding_authority import (
     ScheduleOpeningInstanceBindingAuthority,
     ScheduleOpeningInstanceBindingSelector,
