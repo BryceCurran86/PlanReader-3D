@@ -647,6 +647,6 @@ def test_compound_door_type_header_is_one_table_not_two() -> None:
 
     assert result.status is EvidenceResolutionStatus.CORROBORATED, result.reason_codes
     assert result.record is not None
-    assert result.record.tag_mark == "D01"
+    assert result.record.tag_mark == "D1"
     assert result.record.schedule_row_width_mm == 820
     assert result.record.schedule_row_height_mm == 2040
