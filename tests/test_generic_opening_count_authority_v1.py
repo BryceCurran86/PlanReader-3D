@@ -41,6 +41,7 @@ from pb_generic_opening_count_authority import (
     GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED,
     GENERIC_OPENING_COUNT_IDENTITY_CONTRADICTION,
     GENERIC_OPENING_COUNT_IDENTITY_PAIRWISE_UNRESOLVED,
+    GENERIC_OPENING_COUNT_MEMBER_CLASSIFICATION_UNRESOLVED,
     GENERIC_OPENING_COUNT_NON_PLAN_VIEW,
     GENERIC_OPENING_COUNT_NO_PHYSICAL_INSTANCES,
     GENERIC_OPENING_COUNT_PHYSICAL_INSTANCE_UNRESOLVED,
@@ -837,3 +838,95 @@ def test_one_unresolvable_member_blocks_entire_count_even_if_others_match_schedu
     assert res.status is not EvidenceResolutionStatus.CORROBORATED
     assert res.record is None
     assert GENERIC_OPENING_COUNT_PHYSICAL_INSTANCE_UNRESOLVED in res.reason_codes
+
+
+def test_mark_filtered_count_abstains_when_any_physical_member_mark_is_unresolved() -> None:
+    """Known W1 members are not the same proposition as all W1 members.
+
+    A second independently proven physical opening with no authenticated
+    tag/schedule binding could still be W1, so the filtered count must abstain
+    rather than silently dropping that universe member.
+    """
+    openings = (_physical("w1-known"), _physical("mark-unknown"))
+    producer, _ = _setup(
+        openings=openings,
+        bindings=(("w1-known", "W1", "row-w1"),),
+    )
+    result = producer.publish(
+        GenericOpeningCountSelector(
+            document_id=DOC,
+            revision_id=REV,
+            source_sha256=SHA,
+            snapshot_id=SNAP,
+            decision_scope_id=SCOPE,
+            opening_mark="W1",
+        )
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+    assert (
+        GENERIC_OPENING_COUNT_MEMBER_CLASSIFICATION_UNRESOLVED
+        in result.reason_codes
+    )
+    assert any(
+        "mark-unknown" in reason
+        for reason in result.reason_codes
+    )
+
+
+def test_family_filtered_count_abstains_when_any_physical_member_family_is_unresolved() -> None:
+    """A proven but unclassified opening may still belong to the requested family."""
+    openings = (_physical("door-known"), _physical("family-unknown"))
+    producer, _ = _setup(
+        openings=openings,
+        bindings=(("door-known", "D1", "row-d1"),),
+    )
+    result = producer.publish(
+        GenericOpeningCountSelector(
+            document_id=DOC,
+            revision_id=REV,
+            source_sha256=SHA,
+            snapshot_id=SNAP,
+            decision_scope_id=SCOPE,
+            opening_family="door",
+        )
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+    assert (
+        GENERIC_OPENING_COUNT_MEMBER_CLASSIFICATION_UNRESOLVED
+        in result.reason_codes
+    )
+    assert any(
+        "family-unknown" in reason
+        for reason in result.reason_codes
+    )
+
+
+def test_known_other_mark_can_be_ruled_out_without_blocking_w1_count() -> None:
+    """Complete classification may exclude a known W2 while publishing W1."""
+    openings = (_physical("w1-known"), _physical("w2-known"))
+    producer, _ = _setup(
+        openings=openings,
+        bindings=(
+            ("w1-known", "W1", "row-w1"),
+            ("w2-known", "W2", "row-w2"),
+        ),
+    )
+    result = producer.publish(
+        GenericOpeningCountSelector(
+            document_id=DOC,
+            revision_id=REV,
+            source_sha256=SHA,
+            snapshot_id=SNAP,
+            decision_scope_id=SCOPE,
+            opening_mark="W1",
+        )
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.record is not None
+    assert result.record.count == 1
+    assert result.record.physical_instance_record_ids == ("w1-known",)
