@@ -17,12 +17,17 @@ Raw native observations remain preserved by ``SourceObservationProducer``.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import hashlib
 import math
 from typing import Mapping, Optional, Sequence
 
 import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_raster_visible_segment_detector import (
+    RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION,
+    detect_axis_aligned_raster_segments,
+)
 from pb_pdf_text_integrity_authority import (
     PdfTextIntegrityAuthority,
     PdfTextIntegrityReceipt,
@@ -46,10 +51,15 @@ from pb_source_observation_authority import (
 from pb_vector_geometry_v130 import extract_native_page
 
 
-SOURCE_VISIBILITY_SCHEMA_VERSION = "1.0.0"
+SOURCE_VISIBILITY_SCHEMA_VERSION = "1.1.0"
 NATIVE_PDF_VISIBLE_SEGMENT = "native_pdf_visible_segment"
+RASTER_PDF_SEGMENT = "raster_pdf_segment"
+RASTER_PDF_VISIBLE_SEGMENT = "raster_pdf_visible_segment"
 VISIBLE_SEGMENT_ORIGIN_KIND = "producer_visibility_no_active_clip"
+RASTER_SEGMENT_ORIGIN_KIND = "producer_raster_page_render_segment"
+RASTER_VISIBLE_SEGMENT_ORIGIN_KIND = "producer_raster_visibility"
 VISIBLE_SOURCE_OBSERVATION_EXISTS = "visible_source_observation_exists"
+RASTER_RENDER_DPI = 144
 
 VISIBILITY_CLIP_ASSOCIATION_UNKNOWN = "visibility_clip_association_unknown"
 VISIBILITY_ACTIVE_CLIP_UNRESOLVED = "visibility_active_clip_unresolved"
@@ -70,6 +80,22 @@ class NativeSegmentVisibilityDecision:
     visible: bool
     geometry: tuple[float, float, float, float]
     reason_codes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RasterSegmentVisibilityReceipt:
+    parent_observation_id: str
+    page_parent_observation_id: str
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    page_id: str
+    source_partition_id: str
+    image_sha256: str
+    dpi: int
+    pixel_geometry: tuple[float, float, float, float]
+    geometry: tuple[float, float, float, float]
+    detector_version: str = RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION
 
 
 @dataclass(frozen=True)
@@ -219,6 +245,55 @@ def _visible_observation_id(
     return stable_contract_id("source_observation", payload, digest_chars=32)
 
 
+def _raster_segment_observation_id(
+    *,
+    document_id: str,
+    revision_id: str,
+    page_id: str,
+    partition_id: str,
+    image_sha256: str,
+    detector_version: str,
+    pixel_geometry: Sequence[float],
+    geometry: Sequence[float],
+    index: int,
+) -> str:
+    payload = {
+        "document_id": document_id,
+        "revision_id": revision_id,
+        "page_id": page_id,
+        "partition_id": partition_id,
+        "kind": RASTER_PDF_SEGMENT,
+        "image_sha256": image_sha256,
+        "detector_version": detector_version,
+        "pixel_geometry": tuple(float(v) for v in pixel_geometry),
+        "geometry": tuple(float(v) for v in geometry),
+        "index": int(index),
+    }
+    return stable_contract_id("source_observation", payload, digest_chars=32)
+
+
+def _raster_visible_observation_id(
+    *,
+    document_id: str,
+    revision_id: str,
+    page_id: str,
+    partition_id: str,
+    parent_observation_id: str,
+    geometry: Sequence[float],
+) -> str:
+    payload = {
+        "document_id": document_id,
+        "revision_id": revision_id,
+        "page_id": page_id,
+        "partition_id": partition_id,
+        "kind": RASTER_PDF_VISIBLE_SEGMENT,
+        "origin_kind": RASTER_VISIBLE_SEGMENT_ORIGIN_KIND,
+        "parents": (parent_observation_id,),
+        "geometry": tuple(float(v) for v in geometry),
+    }
+    return stable_contract_id("source_observation", payload, digest_chars=32)
+
+
 class SourceVisibilityProducer:
     """Trusted producer wrapper that mints visibility receipts from PDF bytes.
 
@@ -232,6 +307,9 @@ class SourceVisibilityProducer:
             producer_version=producer_version,
         )
         self._visibility_receipts: dict[tuple[str, str], str] = {}
+        self._raster_visibility_receipts: dict[
+            tuple[str, str], RasterSegmentVisibilityReceipt
+        ] = {}
         self._text_integrity_receipts: dict[
             tuple[str, str], PdfTextIntegrityReceipt
         ] = {}
@@ -241,6 +319,7 @@ class SourceVisibilityProducer:
         return SourceVisibilityAuthority(
             self._producer.authority(),
             self._visibility_receipts,
+            self._raster_visibility_receipts,
             _seal=_VISIBILITY_AUTHORITY_SEAL,
         )
 
