@@ -26,16 +26,14 @@ Source coverage and the OCR/raster extension point:
 This authority is source-agnostic by construction -- ``publish()`` only ever
 calls the public ``PhysicalOpeningAuthority`` / ``ScheduleOpeningInstanceBindingAuthority``
 / ``OpeningUniverseCompletenessAuthority`` contracts, never anything specific
-to native-vector PDFs. Today every producer that can legally construct those
-three authorities happens to be vector-sourced
-(``pb_opening_universe_completeness_source_adapter.py`` derives completeness
-from ``SourceVisibilityProducer``'s clip-verified native segments;
-``ScheduleOpeningInstanceBindingProducer`` binds via
-``PdfTextIntegrityAuthority``'s trusted native text). A raster/OCR page is
-therefore always ABSTAINED today via
-``GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED`` or
-``GENERIC_OPENING_COUNT_PHYSICAL_INSTANCE_UNRESOLVED`` -- correctly fail-closed,
-not a bug.
+to native-vector PDFs. The current native-vector source adapter intentionally authenticates only
+raw visible-segment coverage; it does NOT claim semantic physical-opening
+completeness and therefore never attaches this module's private commercial
+completeness seal. Until a producer-owned semantic opening enumerator exists,
+the real source-derived path ABSTAINS via
+``GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED``. This is
+intentional fail-closed behavior: complete source decoding is not the same
+proposition as a complete semantic opening universe.
 
 Extending to raster/OCR requires no change to this module. It requires two
 new producers, each satisfying an existing contract from OCR-derived
