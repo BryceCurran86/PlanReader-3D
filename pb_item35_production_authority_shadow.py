@@ -35,7 +35,7 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_viewport_view_class_authority import ViewportViewClassProducer
 
 
-ITEM35_PRODUCTION_SHADOW_SCHEMA_VERSION = "1.1.0"
+ITEM35_PRODUCTION_SHADOW_SCHEMA_VERSION = "1.0.0"
 
 
 def empty_item35_authority_shadow(*, reason: str) -> dict[str, Any]:
@@ -90,9 +90,6 @@ def collect_item35_authority_shadow(
         document_id=doc_id,
         source_bytes=payload,
         source_locator=str(path),
-    )
-    published = source.augment_with_raster_visible_segments(
-        published.revision.revision_id
     )
 
     semantic_producer = (
