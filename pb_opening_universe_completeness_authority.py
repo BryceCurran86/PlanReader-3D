@@ -624,6 +624,190 @@ class OpeningUniverseCompletenessProducer:
         self._records[key] = record
         return record
 
+    def publish_semantic_enumeration(
+        self,
+        *,
+        decision_scope_id: str,
+        decision_scope_kind: str,
+        document_id: str,
+        revision_id: str,
+        source_sha256: str,
+        snapshot_id: str,
+        page_ids: Sequence[str],
+        viewport_id: Optional[str],
+        coverage: SourceDecodeCoverageRecord,
+        source_primitives: Sequence[object],
+        dispositions: Sequence[SemanticOpeningMemberDisposition],
+        optional_content_state: str,
+        xobject_traversal_truncated: bool,
+    ) -> OpeningUniverseCompletenessRecord:
+        """Publish semantic completeness from exhaustive source dispositions.
+
+        This path permits many authenticated source primitives to coalesce onto
+        one physical-opening selector observation id.  Every source primitive
+        must be dispositioned as opening_member, non_opening, or unresolved.
+        Missing, unresolved, conflicting, or out-of-scope dispositions fail closed.
+
+        This generic producer does not by itself authenticate the semantic
+        classifier.  A source-bound adapter must still earn any private commercial
+        completeness seal after deriving these dispositions from producer-owned
+        source evidence.
+        """
+        scope = build_opening_universe_scope(
+            decision_scope_id=decision_scope_id,
+            decision_scope_kind=decision_scope_kind,
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=source_sha256,
+            snapshot_id=snapshot_id,
+            page_ids=page_ids,
+            viewport_id=viewport_id,
+        )
+        source_members, source_reasons = _dedupe_members(tuple(source_primitives))
+        reasons: list[str] = list(source_reasons)
+        decode_complete, decode_reasons = _coverage_complete(coverage, scope)
+        reasons.extend(decode_reasons)
+        reasons.extend(_scope_member_reasons(scope, source_members, ()))
+
+        source_ids = {member.primitive_id for member in source_members}
+        by_source: dict[str, SemanticOpeningMemberDisposition] = {}
+        for disposition in dispositions:
+            if type(disposition) is not SemanticOpeningMemberDisposition:
+                reasons.append(SEMANTIC_DISPOSITION_INVALID)
+                continue
+            source_id = _clean(disposition.source_primitive_id)
+            if source_id not in source_ids:
+                reasons.append(SEMANTIC_DISPOSITION_INVALID)
+                continue
+            prior = by_source.get(source_id)
+            if prior is not None and prior != disposition:
+                reasons.append(SEMANTIC_DISPOSITION_DUPLICATE_CONFLICT)
+                continue
+            by_source[source_id] = disposition
+
+        if source_ids - set(by_source):
+            reasons.append(SEMANTIC_SOURCE_MEMBER_UNDISPOSITIONED)
+
+        opening_selector_ids: set[str] = set()
+        for disposition in by_source.values():
+            try:
+                state = SemanticSourceDispositionState(str(disposition.state))
+            except ValueError:
+                reasons.append(SEMANTIC_DISPOSITION_INVALID)
+                continue
+            if state is SemanticSourceDispositionState.UNRESOLVED:
+                reasons.append(SEMANTIC_SOURCE_MEMBER_UNRESOLVED)
+            elif state is SemanticSourceDispositionState.OPENING_MEMBER:
+                selector_id = _clean(disposition.opening_selector_observation_id)
+                if selector_id not in source_ids:
+                    reasons.append(SEMANTIC_SELECTOR_OUTSIDE_SOURCE)
+                else:
+                    opening_selector_ids.add(selector_id)
+
+        if _clean(optional_content_state) != "known_visible":
+            reasons.append(OPTIONAL_CONTENT_UNRESOLVED)
+        if bool(xobject_traversal_truncated):
+            reasons.append(XOBJECT_TRAVERSAL_TRUNCATED)
+        if scope.viewport_id is not None:
+            reasons.append(VIEWPORT_LIMITED_SCOPE)
+
+        unique_reasons = _ordered_unique(reasons)
+        blocking_semantic_reasons = {
+            SEMANTIC_MEMBER_INVALID,
+            SEMANTIC_MEMBER_SCOPE_MISMATCH,
+            SEMANTIC_MEMBER_DUPLICATE_CONFLICT,
+            SEMANTIC_DISPOSITION_INVALID,
+            SEMANTIC_SOURCE_MEMBER_UNDISPOSITIONED,
+            SEMANTIC_SOURCE_MEMBER_UNRESOLVED,
+            SEMANTIC_SELECTOR_OUTSIDE_SOURCE,
+            SEMANTIC_DISPOSITION_DUPLICATE_CONFLICT,
+            CLIP_STATE_UNKNOWN,
+            ACTIVE_CLIP_UNRESOLVED,
+            OPTIONAL_CONTENT_UNRESOLVED,
+            XOBJECT_TRAVERSAL_TRUNCATED,
+            VIEWPORT_LIMITED_SCOPE,
+        }
+        semantic_complete = not any(
+            reason in blocking_semantic_reasons for reason in unique_reasons
+        )
+        if not semantic_complete:
+            unique_reasons = _ordered_unique(
+                (*unique_reasons, SEMANTIC_ENUMERATION_INCOMPLETE)
+            )
+
+        decision_complete = decode_complete and semantic_complete and not unique_reasons
+        enumeration_state = (
+            SourceEnumerationState.COMPLETE.value
+            if decision_complete
+            else SourceEnumerationState.INCOMPLETE.value
+        )
+        accounted_ids = tuple(sorted(opening_selector_ids))
+        disposition_payload = tuple(
+            sorted(
+                (
+                    source_id,
+                    disposition.state,
+                    disposition.opening_selector_observation_id or "",
+                )
+                for source_id, disposition in by_source.items()
+            )
+        )
+        universe_fingerprint = stable_contract_id(
+            "semantic_opening_universe",
+            {
+                "schema_version": OPENING_UNIVERSE_COMPLETENESS_SCHEMA_VERSION,
+                "source_fingerprint": _universe_fingerprint(source_members),
+                "dispositions": disposition_payload,
+                "opening_selector_ids": accounted_ids,
+            },
+            digest_chars=64,
+        )
+        record_payload = {
+            "schema_version": OPENING_UNIVERSE_COMPLETENESS_SCHEMA_VERSION,
+            "producer_method": self._producer_method,
+            "producer_version": self._producer_version,
+            "scope": scope,
+            "enumeration_state": enumeration_state,
+            "source_decode_complete": decode_complete,
+            "semantic_enumeration_complete": semantic_complete,
+            "decision_scope_complete": decision_complete,
+            "accounted_member_ids": accounted_ids,
+            "universe_fingerprint": universe_fingerprint,
+            "reason_codes": unique_reasons,
+        }
+        record = OpeningUniverseCompletenessRecord(
+            record_id=stable_contract_id(
+                "opening_universe_completeness", record_payload, digest_chars=32
+            ),
+            decision_scope_id=scope.decision_scope_id,
+            decision_scope_kind=scope.decision_scope_kind,
+            document_id=scope.document_id,
+            revision_id=scope.revision_id,
+            source_sha256=scope.source_sha256,
+            snapshot_id=scope.snapshot_id,
+            page_ids=scope.page_ids,
+            viewport_id=scope.viewport_id,
+            enumeration_state=enumeration_state,
+            source_decode_complete=decode_complete,
+            semantic_enumeration_complete=semantic_complete,
+            decision_scope_complete=decision_complete,
+            accounted_member_ids=accounted_ids,
+            universe_fingerprint=universe_fingerprint,
+            reason_codes=unique_reasons,
+        )
+        key = _record_key(
+            document_id=scope.document_id,
+            revision_id=scope.revision_id,
+            source_sha256=scope.source_sha256,
+            snapshot_id=scope.snapshot_id,
+            decision_scope_id=scope.decision_scope_id,
+        )
+        prior = self._records.get(key)
+        if prior is not None and prior != record:
+            raise RuntimeError(PRODUCER_EQUIVOCATION)
+        self._records[key] = record
+        return record
+
     def authority(self) -> "OpeningUniverseCompletenessAuthority":
         return OpeningUniverseCompletenessAuthority(
             MappingProxyType(dict(self._records)),
@@ -701,6 +885,8 @@ __all__ = [
     "OpeningUniverseCompletenessProducer",
     "OpeningUniverseCompletenessRecord",
     "OpeningUniverseCompletenessResult",
+    "SemanticOpeningMemberDisposition",
+    "SemanticSourceDispositionState",
     "OpeningUniverseMember",
     "OpeningUniverseScope",
     "OpeningUniverseSelector",
