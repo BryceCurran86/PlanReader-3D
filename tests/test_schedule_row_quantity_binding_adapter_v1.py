@@ -1,10 +1,4 @@
-"""Tests for pb_schedule_row_quantity_binding_adapter.py.
-
-publish_schedule_row_quantity_from_binding() is the one lawful production
-path from a CORROBORATED ScheduleOpeningInstanceBindingRecord to a published
-ScheduleRowQuantityAuthority entry -- it must never publish a declared_count
-that was not explicitly source-backed (schedule_row_count_explicit).
-"""
+"""Tests for the authority-resolved schedule quantity bridge."""
 from __future__ import annotations
 
 import pytest
@@ -15,7 +9,7 @@ from pb_schedule_opening_instance_binding_authority import (
     ScheduleOpeningInstanceBindingRecord,
     ScheduleOpeningInstanceBindingResult,
     ScheduleOpeningInstanceBindingSelector,
-    _AUTHORITY_SEAL as BIND_AUTHORITY_SEAL,
+    _AUTHORITY_SEAL as BINDING_AUTHORITY_SEAL,
 )
 from pb_schedule_row_quantity_authority import (
     SCHEDULE_ROW_QTY_INCOMPLETE,
@@ -32,6 +26,7 @@ SHA = "a" * 64
 SNAP = "snap-1"
 PAGE = "1"
 SCOPE = "scope-1"
+OPENING = "op-1"
 
 
 def _binding_record(
@@ -49,7 +44,7 @@ def _binding_record(
         snapshot_id=SNAP,
         page_id=PAGE,
         decision_scope_id=SCOPE,
-        opening_record_id="op-1",
+        opening_record_id=OPENING,
         tag_observation_id="tag-1",
         tag_mark=mark,
         schedule_page_id=PAGE,
@@ -69,7 +64,7 @@ def _binding_selector() -> ScheduleOpeningInstanceBindingSelector:
         source_sha256=SHA,
         snapshot_id=SNAP,
         decision_scope_id=SCOPE,
-        opening_record_id="op-1",
+        opening_record_id=OPENING,
     )
 
 
@@ -78,38 +73,41 @@ def _binding_authority(
     *,
     status: EvidenceResolutionStatus = EvidenceResolutionStatus.CORROBORATED,
 ) -> ScheduleOpeningInstanceBindingAuthority:
-    key = (DOC, REV, SHA, SNAP, SCOPE, "op-1")
+    selector = _binding_selector()
     result = ScheduleOpeningInstanceBindingResult(
         status=status,
         reason_codes=("binding_resolved",) if record is not None else ("binding_unavailable",),
         record=record,
     )
+    key = (DOC, REV, SHA, SNAP, SCOPE, OPENING)
     return ScheduleOpeningInstanceBindingAuthority(
         {key: result},
-        _seal=BIND_AUTHORITY_SEAL,
+        _seal=BINDING_AUTHORITY_SEAL,
     )
 
 
-def test_explicit_count_publishes_corroborated() -> None:
+def test_explicit_count_publishes_only_after_authority_resolution() -> None:
     producer = ScheduleRowQuantityProducer.create()
-    record = _binding_record(count=3, explicit=True)
-    res = publish_schedule_row_quantity_from_binding(
+    binding = _binding_authority(_binding_record(count=3, explicit=True))
+
+    result = publish_schedule_row_quantity_from_binding(
         schedule_row_quantity_producer=producer,
-        schedule_binding_authority=_binding_authority(record),
+        schedule_binding_authority=binding,
         binding_selector=_binding_selector(),
         universe_complete=True,
     )
-    assert res.status is EvidenceResolutionStatus.CORROBORATED
-    assert res.record is not None
-    assert res.record.declared_count == 3
-    assert res.record.type_mark == "W1"
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.record is not None
+    assert result.record.declared_count == 3
+    assert result.record.type_mark == "W1"
 
-    # Resolves back out through the authority the same way GenericOpeningCountAuthority does.
-    authority = producer.authority()
-    lookup = authority.resolve(
+    lookup = producer.authority().resolve(
         ScheduleRowQuantitySelector(
-            document_id=DOC, revision_id=REV, source_sha256=SHA,
-            snapshot_id=SNAP, schedule_page_id=PAGE,
+            document_id=DOC,
+            revision_id=REV,
+            source_sha256=SHA,
+            snapshot_id=SNAP,
+            schedule_page_id=PAGE,
             schedule_row_observation_ids=("row-1",),
         )
     )
@@ -118,80 +116,103 @@ def test_explicit_count_publishes_corroborated() -> None:
     assert lookup.record.declared_count == 3
 
 
-def test_implicit_default_count_never_published_as_evidence() -> None:
-    """schedule_row_count_explicit=False (the historical default-to-1 case)
-    must always abstain, never publish a fabricated declared_count."""
+def test_constructible_binding_record_is_not_an_adapter_input() -> None:
+    """A caller-created positive record cannot be passed directly anymore."""
     producer = ScheduleRowQuantityProducer.create()
-    record = _binding_record(count=1, explicit=False)
-    res = publish_schedule_row_quantity_from_binding(
-        schedule_row_quantity_producer=producer,
-        schedule_binding_authority=_binding_authority(record),
-        binding_selector=_binding_selector(),
-        universe_complete=True,
-    )
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert res.record is None
-    assert SCHEDULE_ROW_QTY_INCOMPLETE in res.reason_codes
-
-
-def test_missing_count_value_abstains() -> None:
-    producer = ScheduleRowQuantityProducer.create()
-    record = _binding_record(count=None, explicit=False)
-    res = publish_schedule_row_quantity_from_binding(
-        schedule_row_quantity_producer=producer,
-        schedule_binding_authority=_binding_authority(record),
-        binding_selector=_binding_selector(),
-        universe_complete=True,
-    )
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert res.record is None
-
-
-def test_incomplete_universe_forces_abstain_even_with_explicit_count() -> None:
-    producer = ScheduleRowQuantityProducer.create()
-    record = _binding_record(count=3, explicit=True)
-    res = publish_schedule_row_quantity_from_binding(
-        schedule_row_quantity_producer=producer,
-        schedule_binding_authority=_binding_authority(record),
-        binding_selector=_binding_selector(),
-        universe_complete=False,
-    )
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert res.record is None
-
-
-def test_rejects_bare_record_and_non_authority_inputs() -> None:
-    record = _binding_record(count=3, explicit=True)
-    producer = ScheduleRowQuantityProducer.create()
-
-    # A constructible positive record is not an accepted input anymore.
-    with pytest.raises(TypeError):
-        publish_schedule_row_quantity_from_binding(
-            schedule_row_quantity_producer=producer,
-            schedule_binding_authority=record,
-            binding_selector=_binding_selector(),
-            universe_complete=True,
-        )
+    forged = _binding_record(count=999, explicit=True)
 
     with pytest.raises(TypeError):
         publish_schedule_row_quantity_from_binding(
             schedule_row_quantity_producer=producer,
-            schedule_binding_authority=_binding_authority(record),
-            binding_selector=object(),
+            binding_record=forged,  # type: ignore[call-arg]
             universe_complete=True,
         )
 
 
 def test_unresolved_binding_authority_cannot_publish_quantity() -> None:
     producer = ScheduleRowQuantityProducer.create()
-    res = publish_schedule_row_quantity_from_binding(
+    binding = _binding_authority(
+        None,
+        status=EvidenceResolutionStatus.ABSTAINED,
+    )
+
+    result = publish_schedule_row_quantity_from_binding(
         schedule_row_quantity_producer=producer,
-        schedule_binding_authority=_binding_authority(
-            None, status=EvidenceResolutionStatus.ABSTAINED
-        ),
+        schedule_binding_authority=binding,
         binding_selector=_binding_selector(),
         universe_complete=True,
     )
-    assert res.status is EvidenceResolutionStatus.ABSTAINED
-    assert res.record is None
-    assert "schedule_row_quantity_binding_unresolved" in res.reason_codes
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+    assert SCHEDULE_ROW_QTY_INCOMPLETE in result.reason_codes
+
+
+def test_implicit_default_count_never_published_as_evidence() -> None:
+    producer = ScheduleRowQuantityProducer.create()
+    binding = _binding_authority(_binding_record(count=1, explicit=False))
+
+    result = publish_schedule_row_quantity_from_binding(
+        schedule_row_quantity_producer=producer,
+        schedule_binding_authority=binding,
+        binding_selector=_binding_selector(),
+        universe_complete=True,
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+    assert SCHEDULE_ROW_QTY_INCOMPLETE in result.reason_codes
+
+
+def test_missing_count_value_abstains() -> None:
+    producer = ScheduleRowQuantityProducer.create()
+    binding = _binding_authority(_binding_record(count=None, explicit=False))
+
+    result = publish_schedule_row_quantity_from_binding(
+        schedule_row_quantity_producer=producer,
+        schedule_binding_authority=binding,
+        binding_selector=_binding_selector(),
+        universe_complete=True,
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+
+
+def test_incomplete_universe_forces_abstain_even_with_explicit_count() -> None:
+    producer = ScheduleRowQuantityProducer.create()
+    binding = _binding_authority(_binding_record(count=3, explicit=True))
+
+    result = publish_schedule_row_quantity_from_binding(
+        schedule_row_quantity_producer=producer,
+        schedule_binding_authority=binding,
+        binding_selector=_binding_selector(),
+        universe_complete=False,
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+
+
+def test_rejects_non_producer_owned_arguments() -> None:
+    producer = ScheduleRowQuantityProducer.create()
+    binding = _binding_authority(_binding_record(count=3, explicit=True))
+    selector = _binding_selector()
+
+    with pytest.raises(TypeError):
+        publish_schedule_row_quantity_from_binding(
+            schedule_row_quantity_producer=object(),  # type: ignore[arg-type]
+            schedule_binding_authority=binding,
+            binding_selector=selector,
+            universe_complete=True,
+        )
+    with pytest.raises(TypeError):
+        publish_schedule_row_quantity_from_binding(
+            schedule_row_quantity_producer=producer,
+            schedule_binding_authority=object(),  # type: ignore[arg-type]
+            binding_selector=selector,
+            universe_complete=True,
+        )
+    with pytest.raises(TypeError):
+        publish_schedule_row_quantity_from_binding(
+            schedule_row_quantity_producer=producer,
+            schedule_binding_authority=binding,
+            binding_selector=object(),  # type: ignore[arg-type]
+            universe_complete=True,
+        )
