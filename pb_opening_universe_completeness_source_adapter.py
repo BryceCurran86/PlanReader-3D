@@ -28,6 +28,10 @@ from pb_opening_universe_completeness_authority import (
     OpeningUniverseCompletenessAuthority,
     OpeningUniverseCompletenessProducer,
 )
+from pb_semantic_opening_enumeration_authority import (
+    SemanticOpeningEnumerationProducer,
+    SemanticOpeningEnumerationSelector,
+)
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -154,6 +158,120 @@ def build_source_authenticated_opening_universe_completeness(
     return producer.authority()
 
 
+def build_semantic_opening_inventory_completeness(
+    *,
+    source_visibility_producer: SourceVisibilityProducer,
+    revision_id: str,
+    decision_scope_id: str,
+    optional_content_known_visible: bool = False,
+    xobject_traversal_truncated: bool = False,
+) -> OpeningUniverseCompletenessAuthority:
+    """Project the semantic opening inventory into the completeness contract.
+
+    The semantic enumerator derives its inventory only from the producer-owned
+    complete visible-source snapshot and independently re-proven physical
+    openings.  Its representative observation ids therefore have the exact
+    shape GenericOpeningCountAuthority will eventually consume.
+
+    V1 intentionally remains commercially unsealed because
+    physical_opening_universe_complete is not yet provable.  This function is
+    an integration seam, not a shortcut around that missing proposition.
+    """
+
+    if type(source_visibility_producer) is not SourceVisibilityProducer:
+        raise TypeError("source_visibility_producer must be producer-owned")
+
+    semantic_producer = (
+        SemanticOpeningEnumerationProducer.from_source_visibility_producer(
+            source_visibility_producer
+        )
+    )
+    semantic_result = semantic_producer.publish_document_scope(
+        revision_id=revision_id,
+        decision_scope_id=decision_scope_id,
+    )
+
+    producer = OpeningUniverseCompletenessProducer(
+        producer_method="source_authenticated_semantic_opening_inventory_adapter",
+        producer_version="1.0.0",
+    )
+    published = source_visibility_producer.published_snapshot_for_revision(revision_id)
+    if (
+        published is None
+        or semantic_result.record is None
+        or semantic_result.status is EvidenceResolutionStatus.CONFLICT
+    ):
+        return producer.authority()
+
+    record = semantic_result.record
+    semantic_authority = semantic_producer.authority()
+    resolved = semantic_authority.resolve(
+        SemanticOpeningEnumerationSelector(
+            document_id=record.document_id,
+            revision_id=record.revision_id,
+            source_sha256=record.source_sha256,
+            snapshot_id=record.snapshot_id,
+            decision_scope_id=record.decision_scope_id,
+        )
+    )
+    if resolved.record is None:
+        return producer.authority()
+
+    visibility = source_visibility_producer.authority()
+    semantic_members: list[_RealVisiblePrimitive] = []
+    for observation_id in resolved.record.representative_observation_ids:
+        result = visibility.resolve_visible(
+            ObservationSelector(
+                document_id=record.document_id,
+                revision_id=record.revision_id,
+                source_sha256=record.source_sha256,
+                snapshot_id=record.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        if (
+            result.status is not EvidenceResolutionStatus.CORROBORATED
+            or result.observation is None
+        ):
+            return producer.authority()
+        observation = result.observation
+        semantic_members.append(
+            _RealVisiblePrimitive(
+                primitive_id=observation.observation_id,
+                page_id=observation.page_id,
+                geometry=observation.geometry,
+            )
+        )
+
+    producer.publish_enumeration(
+        decision_scope_id=record.decision_scope_id,
+        decision_scope_kind=record.decision_scope_kind,
+        document_id=record.document_id,
+        revision_id=record.revision_id,
+        source_sha256=record.source_sha256,
+        snapshot_id=record.snapshot_id,
+        page_ids=record.page_ids,
+        viewport_id=None,
+        coverage=published.coverage,
+        # At this seam the source universe is the producer-owned semantic
+        # inventory, not the raw segment universe.  The same semantic members
+        # are supplied on both sides only to fingerprint the inventory itself;
+        # semantic_enumeration_proven remains False until a stronger authority
+        # proves physical-opening universe exhaustiveness.
+        source_primitives=semantic_members,
+        enumerated_primitives=semantic_members,
+        optional_content_state=(
+            "known_visible" if optional_content_known_visible else "unresolved"
+        ),
+        xobject_traversal_truncated=xobject_traversal_truncated,
+        semantic_enumeration_proven=bool(
+            resolved.record.physical_opening_universe_complete
+        ),
+    )
+    return producer.authority()
+
+
 __all__ = [
+    "build_semantic_opening_inventory_completeness",
     "build_source_authenticated_opening_universe_completeness",
 ]
