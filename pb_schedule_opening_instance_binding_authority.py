@@ -463,15 +463,32 @@ def _header_table_specs(
     if not cells or len(bounds) != len(cells):
         return []
 
-    mark_starts = [
+    raw_mark_starts = [
         index
         for index, cell in enumerate(cells)
         if "mark" in detect_header([cell])
     ]
-    if not mark_starts:
+    if not raw_mark_starts:
         if not _is_header_row(cells):
             return []
         mark_starts = [0]
+    else:
+        # Header phrases such as "DOOR TYPE WIDTH HEIGHT" legitimately contain
+        # more than one token that individually maps to the mark role. Treat a
+        # later mark-like token as a new table only after the current slice has
+        # already established at least one non-mark schedule column.
+        mark_starts = [raw_mark_starts[0]]
+        for candidate_start in raw_mark_starts[1:]:
+            current_slice = cells[mark_starts[-1]:candidate_start]
+            current_mapping = detect_header(current_slice)
+            if (
+                "mark" in current_mapping
+                and any(
+                    key in current_mapping
+                    for key in ("dims", "width", "height", "count", "desc")
+                )
+            ):
+                mark_starts.append(candidate_start)
 
     specs: list[tuple[dict[str, Any], float, float]] = []
     for position, start in enumerate(mark_starts):
