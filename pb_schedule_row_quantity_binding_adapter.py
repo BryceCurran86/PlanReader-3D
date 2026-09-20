@@ -30,7 +30,8 @@ treated as an authenticated declared count.
 from __future__ import annotations
 
 from pb_schedule_opening_instance_binding_authority import (
-    ScheduleOpeningInstanceBindingRecord,
+    ScheduleOpeningInstanceBindingAuthority,
+    ScheduleOpeningInstanceBindingSelector,
 )
 from pb_schedule_row_quantity_authority import (
     ScheduleRowQuantityProducer,
@@ -42,25 +43,45 @@ from pb_schedule_row_quantity_authority import (
 def publish_schedule_row_quantity_from_binding(
     *,
     schedule_row_quantity_producer: ScheduleRowQuantityProducer,
-    binding_record: ScheduleOpeningInstanceBindingRecord,
+    schedule_binding_authority: ScheduleOpeningInstanceBindingAuthority,
+    binding_selector: ScheduleOpeningInstanceBindingSelector,
     universe_complete: bool,
 ) -> ScheduleRowQuantityResult:
-    """Republish a binding record's own authenticated count/mark into
-    ScheduleRowQuantityAuthority. Never derives a new value.
+    """Resolve producer-owned binding evidence before publishing quantity.
 
-    Fails closed (publishes an ABSTAINED result, never a fabricated count)
-    whenever `binding_record.schedule_row_count_explicit` is False.
+    Callers provide only an address-only selector; a constructible binding
+    record can no longer be supplied as positive evidence.
     """
     if type(schedule_row_quantity_producer) is not ScheduleRowQuantityProducer:
         raise TypeError(
             "schedule_row_quantity_producer must be producer-owned "
             "ScheduleRowQuantityProducer"
         )
-    if type(binding_record) is not ScheduleOpeningInstanceBindingRecord:
+    if type(schedule_binding_authority) is not ScheduleOpeningInstanceBindingAuthority:
         raise TypeError(
-            "binding_record must be a ScheduleOpeningInstanceBindingRecord"
+            "schedule_binding_authority must be producer-owned "
+            "ScheduleOpeningInstanceBindingAuthority"
+        )
+    if type(binding_selector) is not ScheduleOpeningInstanceBindingSelector:
+        raise TypeError("binding_selector must be ScheduleOpeningInstanceBindingSelector")
+
+    binding_result = schedule_binding_authority.resolve(binding_selector)
+    if (
+        binding_result.status is not EvidenceResolutionStatus.CORROBORATED
+        or binding_result.record is None
+    ):
+        status = (
+            EvidenceResolutionStatus.CONFLICT
+            if binding_result.status is EvidenceResolutionStatus.CONFLICT
+            else EvidenceResolutionStatus.ABSTAINED
+        )
+        return ScheduleRowQuantityResult(
+            status=status,
+            reason_codes=("schedule_row_quantity_binding_unresolved", *binding_result.reason_codes),
+            record=None,
         )
 
+    binding_record = binding_result.record
     selector = ScheduleRowQuantitySelector(
         document_id=binding_record.document_id,
         revision_id=binding_record.revision_id,
@@ -77,10 +98,7 @@ def publish_schedule_row_quantity_from_binding(
         or binding_record.schedule_row_count is None
     ):
         return schedule_row_quantity_producer.publish(
-            selector,
-            declared_count=0,
-            type_mark=None,
-            universe_complete=False,
+            selector, declared_count=0, type_mark=None, universe_complete=False
         )
 
     return schedule_row_quantity_producer.publish(
@@ -89,7 +107,6 @@ def publish_schedule_row_quantity_from_binding(
         type_mark=binding_record.schedule_row_type_mark,
         universe_complete=bool(universe_complete),
     )
-
 
 __all__ = [
     "publish_schedule_row_quantity_from_binding",
