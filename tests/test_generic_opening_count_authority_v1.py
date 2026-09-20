@@ -822,20 +822,24 @@ def test_one_unresolvable_member_blocks_entire_count_even_if_others_match_schedu
                 schedule_row_observation_ids=("row-w1",),
                 schedule_row_type_mark="W1",
                 schedule_row_width_mm=900, schedule_row_height_mm=2100,
+                schedule_row_count=3,
+                schedule_row_count_explicit=True,
             ),
         )
     bind_auth = ScheduleOpeningInstanceBindingAuthority(bind_results, _seal=BIND_SEAL)
 
     qty_prod = ScheduleRowQuantityProducer.create()
-    qty_prod.publish(
-        ScheduleRowQuantitySelector(
-            document_id=DOC, revision_id=REV, source_sha256=SHA,
-            snapshot_id=SNAP, schedule_page_id=PAGE,
-            schedule_row_observation_ids=("row-w1",),
+    publish_schedule_row_quantity_from_binding(
+        schedule_row_quantity_producer=qty_prod,
+        schedule_binding_authority=bind_auth,
+        binding_selector=ScheduleOpeningInstanceBindingSelector(
+            document_id=DOC,
+            revision_id=REV,
+            source_sha256=SHA,
+            snapshot_id=SNAP,
+            decision_scope_id=SCOPE,
+            opening_record_id="A",
         ),
-        declared_count=3,
-        type_mark="W1",
-        universe_complete=True,
     )
 
     producer = GenericOpeningCountProducer.from_authorities(
