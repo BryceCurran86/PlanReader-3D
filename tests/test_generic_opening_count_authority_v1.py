@@ -25,7 +25,9 @@ from pb_schedule_opening_instance_binding_authority import (
 )
 from pb_schedule_row_quantity_authority import (
     ScheduleRowQuantityProducer,
-    ScheduleRowQuantitySelector,
+)
+from pb_schedule_row_quantity_binding_adapter import (
+    publish_schedule_row_quantity_from_binding,
 )
 from pb_source_observation_authority import ObservationSelector, SourceObservationProducer
 from pb_viewport_view_class_authority import (
@@ -184,6 +186,12 @@ def _setup(
     bind_results: dict = {}
     for op_id, mark, row_id in bindings:
         key = (DOC, REV, SHA, SNAP, SCOPE, op_id)
+        schedule_spec = (
+            schedule_qty.get((row_id,))
+            if schedule_qty is not None
+            else None
+        )
+        explicit_count = int(schedule_spec[1]) if schedule_spec is not None else None
         bind_results[key] = ScheduleOpeningInstanceBindingResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             reason_codes=("binding_resolved",),
@@ -203,6 +211,8 @@ def _setup(
                 schedule_row_type_mark=mark,
                 schedule_row_width_mm=900,
                 schedule_row_height_mm=2100,
+                schedule_row_count=explicit_count,
+                schedule_row_count_explicit=schedule_spec is not None,
             ),
         )
     bind_auth = (
@@ -212,22 +222,26 @@ def _setup(
     )
 
     qty_auth = None
-    if schedule_qty:
+    if schedule_qty and bind_auth is not None and schedule_qty_complete:
         qty_prod = ScheduleRowQuantityProducer.create()
-        for row_ids, (mark, declared) in schedule_qty.items():
-            qty_prod.publish(
-                ScheduleRowQuantitySelector(
+        published_rows: set[tuple[str, ...]] = set()
+        for op_id, _mark, row_id in bindings:
+            row_ids = (row_id,)
+            if row_ids not in schedule_qty or row_ids in published_rows:
+                continue
+            publish_schedule_row_quantity_from_binding(
+                schedule_row_quantity_producer=qty_prod,
+                schedule_binding_authority=bind_auth,
+                binding_selector=ScheduleOpeningInstanceBindingSelector(
                     document_id=DOC,
                     revision_id=REV,
                     source_sha256=SHA,
                     snapshot_id=SNAP,
-                    schedule_page_id=PAGE,
-                    schedule_row_observation_ids=tuple(row_ids),
+                    decision_scope_id=SCOPE,
+                    opening_record_id=op_id,
                 ),
-                declared_count=declared,
-                type_mark=mark,
-                universe_complete=schedule_qty_complete,
             )
+            published_rows.add(row_ids)
         qty_auth = qty_prod.authority()
 
     producer = GenericOpeningCountProducer.from_authorities(
