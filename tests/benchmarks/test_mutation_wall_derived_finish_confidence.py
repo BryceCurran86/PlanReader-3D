@@ -1,15 +1,10 @@
 """tests/benchmarks/test_mutation_wall_derived_finish_confidence.py
 
-Mutation/red-team suite for a generic fail-closed fix in
-GenericPlanReaderExtractor.extract_from_pdf(): internal_plaster,
-internal_paint, and external_key_pointing are keyword-triggered and copy
-their quantity verbatim from perimeter_walling's own (independently,
-geometrically measured) net wall area -- this extractor has no
-wall-thickness evidence, so it cannot compute a true internal-face area
-distinct from the external one. Presenting a blind copy at the same
-confidence as an independent measurement is an honesty failure, not merely
-an accuracy one: it lets a "derived, unverified" quantity masquerade as
-equally authoritative as a directly measured one.
+Mutation/red-team suite for fail-closed wall-derived finishes in
+GenericPlanReaderExtractor.extract_from_pdf(). Internal plaster/paint may
+remain explicitly provisional when their geometry is only a proxy, but an
+external pointing keyword alone cannot establish a measurable finish extent
+and therefore must not publish a commercial quantity.
 
 Root-cause evidence (from running the real extractor against a real, if
 diagnostic-only, benchmark PDF during development): perimeter_walling,
@@ -87,13 +82,10 @@ class TestDerivedFinishQuantitiesAreHonestlyLowConfidence:
             assert pred.metadata["derivation"] == "external_wall_area_proxy_no_internal_face_evidence"
             assert "internal face area" in pred.metadata["note"]
 
-    def test_external_key_pointing_is_marked_as_keyword_triggered(self, tmp_path: Path) -> None:
+    def test_external_key_pointing_keyword_alone_does_not_publish_quantity(self, tmp_path: Path) -> None:
         pred_map = _extract(tmp_path, include_plaster=False, include_key_pointing=True)
-        assert "external_key_pointing" in pred_map
-        pred = pred_map["external_key_pointing"]
-        assert pred.confidence == 0.5
-        assert pred.confidence < pred_map["perimeter_walling"].confidence
-        assert pred.metadata["derivation"] == "external_wall_area_copy_keyword_triggered"
+        assert "perimeter_walling" in pred_map
+        assert "external_key_pointing" not in pred_map
 
     def test_derived_quantities_still_equal_the_source_wall_area_unchanged(self, tmp_path: Path) -> None:
         # The fix must only ever change confidence/metadata honesty, never
@@ -103,7 +95,7 @@ class TestDerivedFinishQuantitiesAreHonestlyLowConfidence:
         wall_qty = pred_map["perimeter_walling"].quantity
         assert pred_map["internal_plaster"].quantity == wall_qty
         assert pred_map["internal_paint"].quantity == wall_qty
-        assert pred_map["external_key_pointing"].quantity == wall_qty
+        assert "external_key_pointing" not in pred_map
 
     def test_neither_finish_keyword_present_emits_no_derived_predictions(self, tmp_path: Path) -> None:
         pred_map = _extract(tmp_path, include_plaster=False, include_key_pointing=False)
