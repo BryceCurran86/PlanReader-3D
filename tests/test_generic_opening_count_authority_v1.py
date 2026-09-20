@@ -39,11 +39,15 @@ from pb_generic_opening_count_authority import (
     GENERIC_OPENING_COUNT_CALLER_NON_PLAN_NOT_AUTHORITY,
     GENERIC_OPENING_COUNT_CALLER_SCHEDULE_COUNTS_NOT_AUTHORITY,
     GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED,
+    GENERIC_OPENING_COUNT_IDENTITY_CONTRADICTION,
+    GENERIC_OPENING_COUNT_IDENTITY_PAIRWISE_UNRESOLVED,
     GENERIC_OPENING_COUNT_NON_PLAN_VIEW,
     GENERIC_OPENING_COUNT_NO_PHYSICAL_INSTANCES,
+    GENERIC_OPENING_COUNT_PHYSICAL_INSTANCE_UNRESOLVED,
     GENERIC_OPENING_COUNT_RESOLVED,
     GENERIC_OPENING_COUNT_SCHEDULE_MISMATCH,
     GENERIC_OPENING_COUNT_SCHEDULE_ONLY_NOT_PHYSICAL,
+    GENERIC_OPENING_COUNT_SCHEDULE_ROW_DUPLICATE,
     GENERIC_OPENING_COUNT_SCOPE_INCOMPLETE,
     GENERIC_OPENING_COUNT_VIEWPORT_CLASS_UNAVAILABLE,
     GenericOpeningCountProducer,
@@ -528,6 +532,65 @@ def test_physical_plus_matching_schedule_corroborates() -> None:
     assert res.record.schedule_corroborated is True
     assert res.record.quantity_evidence is not None
     assert res.record.quantity_evidence.status == AuthorityStatus.FIRM.value
+    # Lineage now cites the corroborating schedule row alongside the
+    # physical geometry evidence, not physical geometry alone.
+    assert "row-d1" in res.record.quantity_evidence.evidence_ids
+    for i in range(4):
+        assert f"obs-op-{i}" in res.record.quantity_evidence.evidence_ids
+
+
+def test_uncorroborated_quantity_evidence_excludes_schedule_row_lineage() -> None:
+    """When the schedule does not corroborate (mismatch case is blocked
+    before a record publishes), an ABSTAINED/no-schedule count's evidence
+    lineage must not cite schedule rows it never actually relied on."""
+    openings = tuple(_physical(f"op-{i}") for i in range(2))
+    bindings = tuple((f"op-{i}", "D1", "row-d1") for i in range(2))
+    # No schedule_qty published at all -> schedule_corroborated stays False.
+    producer, _ = _setup(openings=openings, bindings=bindings)
+    sel = GenericOpeningCountSelector(
+        document_id=DOC, revision_id=REV, source_sha256=SHA,
+        snapshot_id=SNAP, decision_scope_id=SCOPE, opening_mark="D1",
+    )
+    res = producer.publish(sel)
+    assert res.status is EvidenceResolutionStatus.CORROBORATED
+    assert res.record is not None
+    assert res.record.schedule_corroborated is False
+    assert res.record.quantity_evidence is not None
+    assert "row-d1" not in res.record.quantity_evidence.evidence_ids
+
+
+def test_two_marks_on_same_page_do_not_cross_contaminate_counts() -> None:
+    w1_openings = tuple(_physical(f"w1-{i}") for i in range(2))
+    d1_openings = tuple(_physical(f"d1-{i}") for i in range(3))
+    bindings = tuple((op.record_id, "W1", "row-w1") for op in w1_openings) + tuple(
+        (op.record_id, "D1", "row-d1") for op in d1_openings
+    )
+    producer, _ = _setup(
+        openings=w1_openings + d1_openings,
+        bindings=bindings,
+        schedule_qty={("row-w1",): ("W1", 2), ("row-d1",): ("D1", 3)},
+    )
+    w1_res = producer.publish(
+        GenericOpeningCountSelector(
+            document_id=DOC, revision_id=REV, source_sha256=SHA,
+            snapshot_id=SNAP, decision_scope_id=SCOPE, opening_mark="W1",
+        )
+    )
+    d1_res = producer.publish(
+        GenericOpeningCountSelector(
+            document_id=DOC, revision_id=REV, source_sha256=SHA,
+            snapshot_id=SNAP, decision_scope_id=SCOPE, opening_mark="D1",
+        )
+    )
+    assert w1_res.status is EvidenceResolutionStatus.CORROBORATED
+    assert w1_res.record is not None
+    assert w1_res.record.count == 2
+    assert set(w1_res.record.physical_instance_record_ids) == {"w1-0", "w1-1"}
+
+    assert d1_res.status is EvidenceResolutionStatus.CORROBORATED
+    assert d1_res.record is not None
+    assert d1_res.record.count == 3
+    assert set(d1_res.record.physical_instance_record_ids) == {"d1-0", "d1-1", "d1-2"}
 
 
 def test_public_unsealed_completeness_cannot_unlock_firm_count() -> None:
@@ -575,3 +638,202 @@ def test_public_unsealed_completeness_cannot_unlock_firm_count() -> None:
     assert res.status is EvidenceResolutionStatus.ABSTAINED
     assert res.record is None
     assert GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED in res.reason_codes
+
+
+def test_pairwise_identity_contradiction_conflicts() -> None:
+    """record_id dedup says op-x and op-y are distinct; an independently
+    re-proven compare_identity() that disagrees must fail closed, never be
+    silently trusted away."""
+    openings = (_physical("op-x"), _physical("op-y"))
+    producer, selector = _setup(openings=openings)
+
+    from pb_physical_opening_authority import (
+        PHYSICAL_OPENING_IDENTITY_RESOLVED,
+        PhysicalOpeningIdentityResult,
+    )
+
+    def _forced_same(left_selector, right_selector):
+        return PhysicalOpeningIdentityResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            physical_opening_identity="op-x",
+            proven_same=True,
+            reason_codes=(PHYSICAL_OPENING_IDENTITY_RESOLVED,),
+        )
+
+    object.__setattr__(producer._physical, "compare_identity", _forced_same)
+    res = producer.publish(selector)
+    assert res.status is EvidenceResolutionStatus.CONFLICT
+    assert res.record is None
+    assert GENERIC_OPENING_COUNT_IDENTITY_CONTRADICTION in res.reason_codes
+
+
+def test_pairwise_identity_unresolved_abstains() -> None:
+    """An independently re-proven pairwise identity comparison that cannot
+    resolve must abstain the whole count, not silently keep the cheap
+    record_id-based dedup's answer."""
+    openings = (_physical("op-x"), _physical("op-y"))
+    producer, selector = _setup(openings=openings)
+
+    from pb_physical_opening_authority import (
+        PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
+        PhysicalOpeningIdentityResult,
+    )
+
+    def _unresolved(left_selector, right_selector):
+        return PhysicalOpeningIdentityResult(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            physical_opening_identity=PHYSICAL_OPENING_IDENTITY_UNRESOLVED,
+            proven_same=False,
+            reason_codes=(PHYSICAL_OPENING_IDENTITY_UNRESOLVED,),
+        )
+
+    object.__setattr__(producer._physical, "compare_identity", _unresolved)
+    res = producer.publish(selector)
+    assert res.status is EvidenceResolutionStatus.ABSTAINED
+    assert res.record is None
+    assert GENERIC_OPENING_COUNT_IDENTITY_PAIRWISE_UNRESOLVED in res.reason_codes
+
+
+def test_duplicate_schedule_rows_same_value_different_rows_conflicts() -> None:
+    """Two DISTINCT schedule rows that happen to declare the same count for
+    one mark must never collapse into one agreeing value — that would hide
+    a real duplicate/conflicting schedule entry."""
+    openings = (_physical("op-1"), _physical("op-2"))
+    bindings = (
+        ("op-1", "W1", "row-a"),
+        ("op-2", "W1", "row-b"),
+    )
+    producer, _ = _setup(
+        openings=openings,
+        bindings=bindings,
+        schedule_qty={("row-a",): ("W1", 2), ("row-b",): ("W1", 2)},
+    )
+    sel = GenericOpeningCountSelector(
+        document_id=DOC,
+        revision_id=REV,
+        source_sha256=SHA,
+        snapshot_id=SNAP,
+        decision_scope_id=SCOPE,
+        opening_mark="W1",
+    )
+    res = producer.publish(sel)
+    assert res.status is EvidenceResolutionStatus.CONFLICT
+    assert res.record is None
+    assert GENERIC_OPENING_COUNT_SCHEDULE_ROW_DUPLICATE in res.reason_codes
+
+
+def test_one_unresolvable_member_blocks_entire_count_even_if_others_match_schedule() -> None:
+    """Universe of 4 accounted members (A,B,C,D). A/B/C exist and bind to
+    W1; D's existence cannot be proven. Schedule declares W1=3 — the exact
+    count A/B/C alone would produce. The count must still NEVER corroborate:
+    an unresolvable member of a claimed-complete universe blocks the whole
+    scope rather than silently counting only the resolvable subset."""
+    a, b, c = _physical("A"), _physical("B"), _physical("C")
+    member_ids = ("A", "B", "C", "D")
+    univ_rec = OpeningUniverseCompletenessRecord(
+        record_id="univ-abcd",
+        decision_scope_id=SCOPE,
+        decision_scope_kind="viewport",
+        document_id=DOC,
+        revision_id=REV,
+        source_sha256=SHA,
+        snapshot_id=SNAP,
+        page_ids=(PAGE,),
+        viewport_id=VP_PLAN,
+        enumeration_state=SourceEnumerationState.COMPLETE.value,
+        source_decode_complete=True,
+        semantic_enumeration_complete=True,
+        decision_scope_complete=True,
+        accounted_member_ids=member_ids,
+        universe_fingerprint="fp-abcd",
+        reason_codes=(),
+    )
+    univ_auth = OpeningUniverseCompletenessAuthority(
+        {(DOC, REV, SHA, SNAP, SCOPE): univ_rec}, _seal=UNIV_SEAL
+    )
+    object.__setattr__(
+        univ_auth,
+        "_source_authentication_seal",
+        _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL,
+    )
+    src_auth = SourceObservationProducer(
+        producer_method="test", producer_version="1.0"
+    ).authority()
+    phys_auth = PhysicalOpeningAuthority(src_auth)
+    by_id = {op.record_id: op for op in (a, b, c)}
+
+    def _prove(sel: ObservationSelector) -> PhysicalOpeningExistenceResult:
+        rec = by_id.get(sel.observation_id)
+        if rec is None:
+            return PhysicalOpeningExistenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                proposition=None,
+                physical_opening_existence="unresolved",
+                reason_codes=("d_unresolvable",),
+            )
+        return PhysicalOpeningExistenceResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            proposition=PHYSICAL_OPENING_EXISTS,
+            physical_opening_existence="exists",
+            reason_codes=(),
+            existence_record=rec,
+        )
+
+    object.__setattr__(phys_auth, "prove_existence", _prove)
+
+    view_prod = ViewportViewClassProducer.create()
+    view_prod.publish(
+        ViewportViewClassSelector(
+            document_id=DOC, revision_id=REV, source_sha256=SHA,
+            snapshot_id=SNAP, viewport_id=VP_PLAN,
+        ),
+        view_kind=VIEW_KIND_FLOOR_PLAN,
+        evidence_observation_ids=("v1",),
+    )
+
+    bind_results = {}
+    for op_id in ("A", "B", "C"):
+        key = (DOC, REV, SHA, SNAP, SCOPE, op_id)
+        bind_results[key] = ScheduleOpeningInstanceBindingResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("binding_resolved",),
+            record=ScheduleOpeningInstanceBindingRecord(
+                record_id=f"bind-{op_id}",
+                document_id=DOC, revision_id=REV, source_sha256=SHA,
+                snapshot_id=SNAP, page_id=PAGE, decision_scope_id=SCOPE,
+                opening_record_id=op_id, tag_observation_id=f"tag-{op_id}",
+                tag_mark="W1", schedule_page_id=PAGE,
+                schedule_row_observation_ids=("row-w1",),
+                schedule_row_type_mark="W1",
+                schedule_row_width_mm=900, schedule_row_height_mm=2100,
+            ),
+        )
+    bind_auth = ScheduleOpeningInstanceBindingAuthority(bind_results, _seal=BIND_SEAL)
+
+    qty_prod = ScheduleRowQuantityProducer.create()
+    qty_prod.publish(
+        ScheduleRowQuantitySelector(
+            document_id=DOC, revision_id=REV, source_sha256=SHA,
+            snapshot_id=SNAP, schedule_page_id=PAGE,
+            schedule_row_observation_ids=("row-w1",),
+        ),
+        declared_count=3,
+        type_mark="W1",
+        universe_complete=True,
+    )
+
+    producer = GenericOpeningCountProducer.from_authorities(
+        opening_universe_authority=univ_auth,
+        physical_opening_authority=phys_auth,
+        viewport_view_class_authority=view_prod.authority(),
+        schedule_binding_authority=bind_auth,
+        schedule_row_quantity_authority=qty_prod.authority(),
+    )
+    sel = GenericOpeningCountSelector(
+        document_id=DOC, revision_id=REV, source_sha256=SHA,
+        snapshot_id=SNAP, decision_scope_id=SCOPE, opening_mark="W1",
+    )
+    res = producer.publish(sel)
+    assert res.status is not EvidenceResolutionStatus.CORROBORATED
+    assert res.record is None
+    assert GENERIC_OPENING_COUNT_PHYSICAL_INSTANCE_UNRESOLVED in res.reason_codes
