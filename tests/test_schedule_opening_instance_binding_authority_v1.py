@@ -506,3 +506,104 @@ def test_attack_h_tag_monotonicity_second_contained_tag_can_only_weaken() -> Non
     after = _bind(src2, _opening_selector(published_after, src2.authority()))
     assert after.status is EvidenceResolutionStatus.CONFLICT
     assert BINDING_AMBIGUOUS_TAGS in after.reason_codes
+
+
+def _insert_schedule_table_at(
+    page: fitz.Page,
+    rows: tuple[tuple[str, str, str], ...],
+    *,
+    xs: tuple[float, float, float],
+    y0: float = SCHEDULE_HEADER_Y,
+) -> None:
+    y = y0
+    for row in rows:
+        for cell, x in zip(row, xs):
+            page.insert_text(fitz.Point(x, y), cell, color=(0, 0, 0))
+        y += SCHEDULE_ROW_DY
+
+
+def test_side_by_side_matching_schedule_rows_are_both_discovered_and_conflict() -> None:
+    """Two horizontal tables at the same Y must never collapse into the first.
+
+    Both independently authenticated W1 rows are real competitors, even when
+    PDF reading order interleaves their cells on the same visual row.
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=760, height=650)
+    _draw_opening(
+        page,
+        x0=20.0,
+        gap0=100.0,
+        gap1=140.0,
+        x1=220.0,
+        y0=100.0,
+        y1=110.0,
+    )
+    page.insert_text(fitz.Point(112, TAG_Y), "W1", color=(0, 0, 0))
+    _insert_schedule_table_at(
+        page,
+        (("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "2100")),
+        xs=(40.0, 120.0, 200.0),
+    )
+    _insert_schedule_table_at(
+        page,
+        (("MARK", "WIDTH", "HEIGHT"), ("W1", "800", "2000")),
+        xs=(390.0, 470.0, 550.0),
+    )
+    payload = doc.tobytes()
+    doc.close()
+
+    src = SourceVisibilityProducer(
+        producer_method="sched-bind-test",
+        producer_version="1.0",
+    )
+    published = _ingest(src, payload, "sched-side-by-side-conflict")
+    opening_selector = _opening_selector(published, src.authority())
+    result = _bind(src, opening_selector)
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert BINDING_AMBIGUOUS_ROWS in result.reason_codes
+    assert result.record is None
+
+
+def test_side_by_side_other_mark_does_not_contaminate_matching_table() -> None:
+    """A neighboring W2 table must not shift or overwrite W1's row cells."""
+    doc = fitz.open()
+    page = doc.new_page(width=760, height=650)
+    _draw_opening(
+        page,
+        x0=20.0,
+        gap0=100.0,
+        gap1=140.0,
+        x1=220.0,
+        y0=100.0,
+        y1=110.0,
+    )
+    page.insert_text(fitz.Point(112, TAG_Y), "W1", color=(0, 0, 0))
+    _insert_schedule_table_at(
+        page,
+        (("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "2100")),
+        xs=(40.0, 120.0, 200.0),
+    )
+    _insert_schedule_table_at(
+        page,
+        (("MARK", "WIDTH", "HEIGHT"), ("W2", "1200", "1500")),
+        xs=(390.0, 470.0, 550.0),
+    )
+    payload = doc.tobytes()
+    doc.close()
+
+    src = SourceVisibilityProducer(
+        producer_method="sched-bind-test",
+        producer_version="1.0",
+    )
+    published = _ingest(src, payload, "sched-side-by-side-isolation")
+    opening_selector = _opening_selector(published, src.authority())
+    result = _bind(src, opening_selector)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED, result.reason_codes
+    assert result.record is not None
+    assert result.record.tag_mark == "W1"
+    assert result.record.schedule_row_type_mark == "W1"
+    assert result.record.schedule_row_width_mm == 900
+    assert result.record.schedule_row_height_mm == 2100
