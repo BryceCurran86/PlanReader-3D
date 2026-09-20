@@ -125,6 +125,9 @@ GENERIC_OPENING_COUNT_IDENTITY_CONTRADICTION = (
 GENERIC_OPENING_COUNT_IDENTITY_PAIRWISE_UNRESOLVED = (
     "generic_opening_count_identity_pairwise_unresolved"
 )
+GENERIC_OPENING_COUNT_MEMBER_CLASSIFICATION_UNRESOLVED = (
+    "generic_opening_count_member_classification_unresolved"
+)
 GENERIC_OPENING_COUNT_SCHEDULE_ROW_DUPLICATE = (
     "generic_opening_count_schedule_row_duplicate"
 )
@@ -647,6 +650,46 @@ class GenericOpeningCountProducer:
                         ),
                     )
 
+        # Filtered counts are only valid if every physical member in the
+        # claimed-complete universe can be ruled in or ruled out for that
+        # selector.  A physically proven opening with unresolved mark/family
+        # classification may still belong to the requested subset; silently
+        # skipping it would turn "known W1s" into "all W1s".
+        if selector.opening_mark is not None:
+            unresolved_mark_ids = tuple(
+                op_id
+                for op_id in sorted(distinct_openings)
+                if not opening_marks.get(op_id)
+            )
+            if unresolved_mark_ids:
+                return self._store(
+                    selector,
+                    _blocked(
+                        EvidenceResolutionStatus.ABSTAINED,
+                        GENERIC_OPENING_COUNT_MEMBER_CLASSIFICATION_UNRESOLVED,
+                        "opening_mark_unresolved_for_" + ",".join(unresolved_mark_ids),
+                        *diagnostic_reasons,
+                    ),
+                )
+
+        if selector.opening_family is not None:
+            unresolved_family_ids = tuple(
+                op_id
+                for op_id in sorted(distinct_openings)
+                if opening_families.get(op_id, "unknown") == "unknown"
+            )
+            if unresolved_family_ids:
+                return self._store(
+                    selector,
+                    _blocked(
+                        EvidenceResolutionStatus.ABSTAINED,
+                        GENERIC_OPENING_COUNT_MEMBER_CLASSIFICATION_UNRESOLVED,
+                        "opening_family_unresolved_for_"
+                        + ",".join(unresolved_family_ids),
+                        *diagnostic_reasons,
+                    ),
+                )
+
         matched_instance_ids: list[str] = []
         for op_id in sorted(distinct_openings.keys()):
             op_fam = opening_families.get(op_id, "unknown")
@@ -835,6 +878,7 @@ __all__ = [
     "GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED",
     "GENERIC_OPENING_COUNT_IDENTITY_CONTRADICTION",
     "GENERIC_OPENING_COUNT_IDENTITY_PAIRWISE_UNRESOLVED",
+    "GENERIC_OPENING_COUNT_MEMBER_CLASSIFICATION_UNRESOLVED",
     "GENERIC_OPENING_COUNT_LINEAGE_MISMATCH",
     "GENERIC_OPENING_COUNT_NON_PLAN_VIEW",
     "GENERIC_OPENING_COUNT_NO_PHYSICAL_INSTANCES",
