@@ -1,0 +1,127 @@
+name: Murera Substructure Diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  diagnose-murera-substructure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and verify Murera source
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          curl --fail --location --retry 4 --retry-delay 3             "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"             -o "benchmarks/sources/1785347143869-bqs-drawings.pdf"
+          echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  benchmarks/sources/1785347143869-bqs-drawings.pdf" | sha256sum -c -
+
+      - name: Diagnose production substructure evidence
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+          import fitz
+
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          from pb_explicit_floor_area_evidence import extract_explicit_floor_area_evidence
+          from pb_secondary_footprint_evidence import resolve_secondary_footprint_width_m
+          from pb_dimension_chain_evidence_extractor import extract_dimension_chains_from_page
+
+          path = Path("benchmarks/sources/1785347143869-bqs-drawings.pdf")
+          pages = list(range(218, 238))
+          extractor = GenericPlanReaderExtractor()
+          preds = extractor.extract_from_pdf(path, pages=pages)
+          wanted = {
+              "floor_screed",
+              "substructure_surface_bed",
+              "substructure_bed_dpm",
+              "substructure_a142_mesh",
+              "damp_proof_course",
+              "masonry_piers",
+              "verandah_pillars",
+              "structural_columns",
+          }
+          print("=" * 80)
+          print("CURRENT PRODUCTION PREDICTIONS")
+          for pred in preds:
+              if pred.tag in wanted:
+                  print(json.dumps(pred.to_dict(), indent=2, sort_keys=True, default=str))
+          print("extraction_status=", json.dumps(extractor.extraction_status, sort_keys=True))
+          print("=" * 80)
+
+          doc = fitz.open(path)
+          tokens = (
+              "veranda", "verandah", "surface bed", "ground slab", "floor slab",
+              "dpm", "polythene", "a142", "mesh", "dpc", "damp proof",
+              "floor area", "pier", "pillar", "column",
+          )
+          for pidx in pages:
+              page = doc[pidx]
+              text = page.get_text("text") or ""
+              normalized = re.sub(r"\s+", " ", text.lower())
+              drawing = extractor.is_drawing_page(text, page)
+              interesting = [tok for tok in tokens if tok in normalized]
+              if not drawing and not interesting:
+                  continue
+
+              dims = []
+              for major, minor in re.findall(r"\b(\d{1,2})[,.]?(\d{3})\b", text):
+                  value = float(major) + float(minor) / 1000.0
+                  if 0.2 <= value <= 40.0:
+                      dims.append(round(value, 3))
+
+              print("-" * 80)
+              print(
+                  f"PAGE={pidx+1} drawing={drawing} text_len={len(text.strip())} "
+                  f"drawings={len(page.get_drawings())} images={len(page.get_images(full=True))} "
+                  f"tokens={interesting}"
+              )
+              print("dims=", dims[:120])
+
+              area = extract_explicit_floor_area_evidence(text, source_page=pidx+1)
+              print("explicit_floor_area=", area)
+              try:
+                  sec = resolve_secondary_footprint_width_m(page, page_num=pidx+1)
+              except Exception as exc:
+                  sec = f"ERROR:{type(exc).__name__}:{exc}"
+              print("secondary_width=", sec)
+
+              try:
+                  chains = extract_dimension_chains_from_page(
+                      page, page_num=pidx+1, view_id=f"page_{pidx+1}"
+                  )
+                  print("dimension_chains=", [
+                      {
+                          "id": c.chain_id,
+                          "orientation": c.orientation,
+                          "values": [o.value_m for o in c.observations],
+                      }
+                      for c in chains
+                  ])
+              except Exception as exc:
+                  print("dimension_chains_error=", type(exc).__name__, str(exc))
+
+              lines = []
+              for raw in text.splitlines():
+                  low = raw.lower()
+                  if any(tok in low for tok in tokens):
+                      lines.append(raw.strip())
+              print("relevant_text_lines=", lines[:100])
+          doc.close()
+          PY
