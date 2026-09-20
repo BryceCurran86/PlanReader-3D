@@ -75,6 +75,7 @@ from pb_viewport_view_class_authority import (
     ViewportViewClassProducer,
     ViewportViewClassSelector,
 )
+from tests.test_source_opening_universe_evidence_v1 import make_candidate
 
 pytestmark = pytest.mark.filterwarnings("ignore")
 
@@ -165,9 +166,9 @@ def _build_environment(*, marks: list[str], page_ids: list[str] | None = None) -
         if pid not in pages_by_id:
             pages_by_id[pid] = doc.new_page(width=100.0 + spacing * n, height=100.0 + spacing * n)
         page = pages_by_id[pid]
-        ox = spacing * i
-        # Every instance also gets its own y-band (oy), not just its own
-        # x-range. G17's visible-existence matching treats ANY two mutually
+        # Every instance gets its own x-range AND its own y-band (oy tied
+        # to ox, not computed separately, so the two can never drift out of
+        # sync). G17's visible-existence matching treats ANY two mutually
         # collinear segments as one continuous face regardless of how far
         # apart they are -- with every instance's face lines at the SAME y,
         # face pieces from DIFFERENT instances are collinear with each
@@ -177,7 +178,7 @@ def _build_environment(*, marks: list[str], page_ids: list[str] | None = None) -
         # fixture) return CONFLICT for ambiguous candidate membership. A
         # distinct oy per instance keeps every instance's faces on their
         # own line, so only genuine same-instance segments are ever collinear.
-        oy = spacing * i
+        ox = oy = spacing * i
         # Two wall faces, each continuing visibly on both sides of one
         # common [100+ox, 140+ox] gap, plus two jambs -- the exact pattern
         # tests/test_g17_visible_opening_existence_v1.py proves resolves to
@@ -273,8 +274,7 @@ def _build_environment(*, marks: list[str], page_ids: list[str] | None = None) -
     physical = PhysicalOpeningAuthority(visibility)
     instances: list[_Instance] = []
     for i in range(n):
-        ox = spacing * i
-        oy = spacing * i
+        ox = oy = spacing * i
         existence_selector = existence_by_index[i]
 
         tag_resolved = source.resolve(sel(tag_obs_id_by_index[i]))
@@ -530,6 +530,36 @@ def test_incomplete_universe_abstains_despite_apparent_count_agreement() -> None
     assert COMMERCIAL_COUNT_UNIVERSE_INCOMPLETE in result.reason_codes
 
 
+def test_incomplete_universe_gates_evidence_evaluation_itself() -> None:
+    """Regression: publish_scope() must never replay instance_evidence at all
+    when the universe isn't complete -- not just report a different status
+    afterwards. A malformed bundle (nearby_tags containing something other
+    than a TagObservation, which the bundle's own construction never
+    validates) raises TypeError out of resolve_tag_binding() if evaluated;
+    proving it's never evaluated here is exactly proving the gate still
+    precedes evidence processing, not just count comparison."""
+    env = _build_environment(marks=["D1"])
+    universe = _empty_universe_authority()
+    schedule = _schedule_authority(env)
+    good = env["instances"][0]
+    malformed_bundle = OpeningInstanceEvidenceBundle(
+        existence_selector=good.existence_selector,
+        candidate=good.candidate,
+        nearby_tags=("not-a-tag-observation",),  # type: ignore[arg-type]
+        binding_evidences=(),
+        viewport_decision=env["viewport_decision"],
+        expected_semantic_family="openings",
+        source_observation_authority=env["source"],
+    )
+    result = _resolve(
+        env, "D1", universe_authority=universe, schedule_authority=schedule,
+        bundles=[malformed_bundle],
+    )
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert result.count is None
+    assert COMMERCIAL_COUNT_UNIVERSE_INCOMPLETE in result.reason_codes
+
+
 # ---------------------------------------------------------------------------
 # 6. COMPLETE universe, real proven physical instances, but no explicit
 #    schedule count at all -> ABSTAIN (Case F)
@@ -600,8 +630,8 @@ def test_tag_with_no_matching_schedule_row_abstains() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 10. Multiple independently discovered, non-equivalent schedule rows for
-#     one mark -> CONFLICT (never pick first/highest/sum/max/min)
+# 10. Multiple independently discovered schedule rows for one mark stating
+#     DIFFERENT counts -> CONFLICT (never pick first/highest/sum/max/min).
 # ---------------------------------------------------------------------------
 def test_ambiguous_duplicate_schedule_rows_conflicts() -> None:
     env = _build_environment(marks=["W2"])
@@ -609,12 +639,31 @@ def test_ambiguous_duplicate_schedule_rows_conflicts() -> None:
     schedule = _schedule_authority(
         env,
         ScheduleEntry(type_mark="W2", width_mm=1200, height_mm=1200, count=1, count_explicit=True),
-        ScheduleEntry(type_mark="W2", width_mm=1500, height_mm=1200, count=1, count_explicit=True, page_no=2),
+        ScheduleEntry(type_mark="W2", width_mm=1200, height_mm=1200, count=2, count_explicit=True, page_no=2),
     )
     result = _resolve(env, "W2", universe_authority=universe, schedule_authority=schedule)
     assert result.status == EvidenceResolutionStatus.CONFLICT
     assert result.count is None
     assert COMMERCIAL_COUNT_AMBIGUOUS_SCHEDULE_ROWS in result.reason_codes
+
+
+def test_duplicate_rows_agreeing_on_count_are_not_false_ambiguity() -> None:
+    """Two independently discovered rows that agree on the ONLY fact this
+    authority publishes (the count) must corroborate, not conflict, even if
+    an unrelated field (here: width_mm, which this authority never reads or
+    publishes) differs or failed to parse on one of them. Folding dimensions
+    into the ambiguity key would manufacture ambiguity out of a dimension-
+    parsing hiccup that has nothing to do with the stated count."""
+    env = _build_environment(marks=["W2"])
+    universe = _complete_universe(env)
+    schedule = _schedule_authority(
+        env,
+        ScheduleEntry(type_mark="W2", width_mm=1200, height_mm=1200, count=1, count_explicit=True),
+        ScheduleEntry(type_mark="W2", width_mm=None, height_mm=None, count=1, count_explicit=True, page_no=2),
+    )
+    result = _resolve(env, "W2", universe_authority=universe, schedule_authority=schedule)
+    assert result.status == EvidenceResolutionStatus.CORROBORATED
+    assert result.count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -681,12 +730,6 @@ def _fake_selector(observation_id: str) -> ObservationSelector:
     )
 
 
-@dataclass
-class _FakeEligible:
-    key: str
-    existence_selector: ObservationSelector
-
-
 def test_one_unresolved_identity_pair_blocks_entire_mark() -> None:
     a, b = _fake_selector("a"), _fake_selector("b")
     fake = _FakeIdentityAuthority({frozenset(("a", "b")): _unresolved()})
@@ -696,10 +739,10 @@ def test_one_unresolved_identity_pair_blocks_entire_mark() -> None:
         _EligibleInstance(key="a", mark="D1", existence_selector=a, existence_record_id="rec_a", tag_observation_id="tag_a"),
         _EligibleInstance(key="b", mark="D1", existence_selector=b, existence_record_id="rec_b", tag_observation_id="tag_b"),
     ]
-    count, status, _reasons = _resolve_physical_identity_count(
+    representatives, status, _reasons = _resolve_physical_identity_count(
         eligible, physical_opening_authority=fake
     )
-    assert count is None
+    assert representatives is None
     assert status == EvidenceResolutionStatus.ABSTAINED
 
 
@@ -715,14 +758,189 @@ def test_contradictory_same_same_distinct_graph_conflicts_not_collapses() -> Non
         _EligibleInstance(key=k, mark="D1", existence_selector=_fake_selector(k), existence_record_id=f"rec_{k}", tag_observation_id=f"tag_{k}")
         for k in ("a", "b", "c")
     ]
-    count, status, reasons = _resolve_physical_identity_count(
+    representatives, status, reasons = _resolve_physical_identity_count(
         eligible, physical_opening_authority=fake
     )
-    assert count is None
-    assert count != 1
-    assert count != 2
+    assert representatives is None
     assert status == EvidenceResolutionStatus.CONFLICT
     assert COMMERCIAL_COUNT_INCONSISTENT_IDENTITY_GRAPH in reasons
+
+
+def test_deduplication_returns_exactly_one_representative_per_distinct_root() -> None:
+    """A SAME B, C DISTINCT from both -> exactly 2 representatives (not 3,
+    not the raw eligible count), and the evidence-trail arrays built from
+    them can never desync from that count -- there is only one source of
+    truth for both."""
+    from pb_opening_commercial_instance_authority import _EligibleInstance
+
+    fake = _FakeIdentityAuthority({
+        frozenset(("a", "b")): _same(),
+        frozenset(("a", "c")): _distinct(),
+        frozenset(("b", "c")): _distinct(),
+    })
+    eligible = [
+        _EligibleInstance(key=k, mark="D1", existence_selector=_fake_selector(k), existence_record_id=f"rec_{k}", tag_observation_id=f"tag_{k}")
+        for k in ("a", "b", "c")
+    ]
+    representatives, status, _reasons = _resolve_physical_identity_count(
+        eligible, physical_opening_authority=fake
+    )
+    assert representatives is not None
+    assert status == EvidenceResolutionStatus.CORROBORATED
+    assert len(representatives) == 2
+    assert len({r.key for r in representatives}) == 2
+
+
+def test_duplicate_bundle_for_same_existence_selector_does_not_desync_evidence_arrays() -> None:
+    """Regression: instance_evidence carrying the same bundle (or two
+    bundles resolving to the same existence_selector) twice must not make
+    the published record's evidence-id arrays longer than commercial_count."""
+    env = _build_environment(marks=["D1"])
+    universe = _complete_universe(env)
+    schedule = _schedule_authority(
+        env, ScheduleEntry(type_mark="D1", width_mm=900, height_mm=2100, count=1, count_explicit=True)
+    )
+    instance = env["instances"][0]
+    duplicated_bundles = [_bundle(instance, env), _bundle(instance, env)]
+    result = _resolve(
+        env, "D1", universe_authority=universe, schedule_authority=schedule,
+        bundles=duplicated_bundles,
+    )
+    assert result.status == EvidenceResolutionStatus.CORROBORATED
+    assert result.count == 1
+    assert result.physical_count == 1
+    assert result.record is not None
+    assert len(result.record.physical_existence_record_ids) == 1
+    assert len(result.record.bound_tag_observation_ids) == 1
+
+
+def test_bundle_from_different_document_scope_is_excluded() -> None:
+    """A bundle whose existence_selector claims a document_id that doesn't
+    match the scope publish_scope() was actually called for must never
+    silently contribute -- even though prove_existence() would happily
+    resolve it on its own terms if asked directly. The SCOPE being decided
+    here is the real, working environment (so Gate 2/completeness passes
+    normally); only the bundle's own claimed document_id is foreign."""
+    env = _build_environment(marks=["D1"])
+    universe = _complete_universe(env)
+    schedule = _schedule_authority(
+        env, ScheduleEntry(type_mark="D1", width_mm=900, height_mm=2100, count=1, count_explicit=True)
+    )
+    instance = env["instances"][0]
+    real_bundle = _bundle(instance, env)
+    foreign_bundle = OpeningInstanceEvidenceBundle(
+        existence_selector=ObservationSelector(
+            document_id="a-completely-different-document",
+            revision_id=real_bundle.existence_selector.revision_id,
+            source_sha256=real_bundle.existence_selector.source_sha256,
+            snapshot_id=real_bundle.existence_selector.snapshot_id,
+            observation_id=real_bundle.existence_selector.observation_id,
+        ),
+        candidate=real_bundle.candidate,
+        nearby_tags=real_bundle.nearby_tags,
+        binding_evidences=real_bundle.binding_evidences,
+        viewport_decision=real_bundle.viewport_decision,
+        expected_semantic_family=real_bundle.expected_semantic_family,
+        source_observation_authority=real_bundle.source_observation_authority,
+    )
+    result = _resolve(
+        env, "D1", universe_authority=universe, schedule_authority=schedule,
+        bundles=[foreign_bundle],
+    )
+    assert result.status != EvidenceResolutionStatus.CORROBORATED
+    assert result.physical_count == 0
+
+
+def test_existence_and_candidate_lineage_mismatch_excludes_instance() -> None:
+    """A real G17-provable existence_selector and a real, independently
+    tag-bound candidate are two separate proofs joined only by sitting on
+    one bundle. Pairing instance 0's existence proof with instance 1's
+    (individually valid, genuinely mark-D2-bound) candidate/tag/binding-
+    evidence must not let one instance's identity "borrow" the other's
+    physical existence."""
+    env = _build_environment(marks=["D1", "D2"])
+    universe = _complete_universe(env)
+    schedule = _schedule_authority(
+        env, ScheduleEntry(type_mark="D2", width_mm=900, height_mm=2100, count=1, count_explicit=True)
+    )
+    existence_from_instance_0 = env["instances"][0].existence_selector
+    instance_1 = env["instances"][1]
+    mismatched_bundle = OpeningInstanceEvidenceBundle(
+        existence_selector=existence_from_instance_0,
+        candidate=instance_1.candidate,
+        nearby_tags=(instance_1.tag_observation,),
+        binding_evidences=(instance_1.binding_evidence,),
+        viewport_decision=env["viewport_decision"],
+        expected_semantic_family="openings",
+        source_observation_authority=env["source"],
+    )
+    result = _resolve(
+        env, "D2", universe_authority=universe, schedule_authority=schedule,
+        bundles=[mismatched_bundle],
+    )
+    assert result.status != EvidenceResolutionStatus.CORROBORATED
+    assert result.physical_count == 0
+
+
+def test_candidate_viewport_id_mismatch_excludes_instance() -> None:
+    """PhysicalOpeningCandidateRecord carries no seal -- a caller can
+    construct one directly (bypassing create_opening_candidate()'s own
+    viewport cross-check) claiming a viewport_id the bundle's
+    AuthenticatedViewportDecision never actually authenticated. A genuinely
+    CORROBORATED decision for "vp-1" must not authenticate a candidate/tag
+    pair that itself consistently claims a different, never-independently-
+    authenticated viewport ("vp-2") -- even though tag and candidate agree
+    with EACH OTHER and would satisfy every other check on their own terms."""
+    env = _build_environment(marks=["D1"])
+    universe = _complete_universe(env)
+    schedule = _schedule_authority(
+        env, ScheduleEntry(type_mark="D1", width_mm=900, height_mm=2100, count=1, count_explicit=True)
+    )
+    real = env["instances"][0]
+    fake_viewport_candidate = make_candidate(
+        document_id=env["document_id"],
+        revision_id=env["revision_id"],
+        source_sha256=env["source_sha256"],
+        snapshot_id=env["snapshot_id"],
+        page_id=real.page_id,
+        viewport_id="vp-2",
+        geometry=real.candidate.geometry,
+        source_observation_ids=(real.existence_selector.observation_id,),
+        source_lineage_root_ids=(real.existence_selector.observation_id,),
+    )
+    real_tag_record = env["source"].resolve(
+        ObservationSelector(
+            document_id=env["document_id"], revision_id=env["revision_id"],
+            source_sha256=env["source_sha256"], snapshot_id=env["snapshot_id"],
+            observation_id=real.tag_observation.observation_id,
+        )
+    ).observation
+    tag_for_vp2 = TagObservation.from_source_observation(real_tag_record, viewport_id="vp-2")
+    evidence_for_vp2 = authenticate_tag_binding_evidence(
+        tag=tag_for_vp2,
+        candidate=fake_viewport_candidate,
+        relation_kind=TagBindingRelationKind.EXPLICIT_APERTURE_TAG,
+        relation_observation_ids=(real.existence_selector.observation_id,),
+        source_observation_authority=env["source"],
+    )
+    # Sanity: internally consistent on its own terms (tag and candidate
+    # agree with each other) -- proves it's the cross-check against the
+    # bundle's OWN authenticated viewport_decision doing the excluding
+    # below, not some other unrelated failure.
+    assert evidence_for_vp2.status == EvidenceResolutionStatus.CORROBORATED
+
+    bundle = OpeningInstanceEvidenceBundle(
+        existence_selector=real.existence_selector,
+        candidate=fake_viewport_candidate,
+        nearby_tags=(tag_for_vp2,),
+        binding_evidences=(evidence_for_vp2,),
+        viewport_decision=env["viewport_decision"],  # authenticated for "vp-1", not "vp-2"
+        expected_semantic_family="openings",
+        source_observation_authority=env["source"],
+    )
+    result = _resolve(env, "D1", universe_authority=universe, schedule_authority=schedule, bundles=[bundle])
+    assert result.status != EvidenceResolutionStatus.CORROBORATED
+    assert result.physical_count == 0
 
 
 # ---------------------------------------------------------------------------

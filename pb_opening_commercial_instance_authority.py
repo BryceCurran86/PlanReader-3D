@@ -142,6 +142,11 @@ def _require_nonempty(value: object, field_name: str) -> str:
     return clean
 
 
+def _normalized_mark(raw: object) -> str:
+    normalized = normalize_opening_tag(str(raw))
+    return normalized.tag if normalized is not None else str(raw).strip()
+
+
 def _record_key(
     document_id: str,
     revision_id: str,
@@ -262,16 +267,40 @@ class _EligibleInstance:
 def _evaluate_instance_bundle(
     bundle: OpeningInstanceEvidenceBundle,
     *,
+    document_id: str,
+    revision_id: str,
+    source_sha256: str,
+    snapshot_id: str,
     physical_opening_authority: PhysicalOpeningAuthority,
 ) -> _EligibleInstance | None:
     """Gate 1 (existence) then a full replayed tag-binding resolution.
 
-    Returns None when either independently fails -- exclusion, not an
-    error: an instance that cannot prove existence or cannot prove a bound
-    mark simply does not contribute to any mark's physical_count. The mark
-    itself is discovered from the replay (`binding.bound_mark`), never
-    taken from the caller.
+    Returns None when any independent check fails -- exclusion, not an
+    error: an instance that cannot prove existence, cannot prove a bound
+    mark, or whose pieces of evidence do not authenticatedly refer to the
+    same physical thing in the same scope simply does not contribute to any
+    mark's physical_count. The mark itself is discovered from the replay
+    (`binding.bound_mark`), never taken from the caller.
     """
+    # prove_existence()/resolve_tag_binding() each validate internal
+    # consistency of what they're given, but neither knows about the scope
+    # `publish_scope()` was actually called for -- a bundle smuggled in from
+    # an unrelated document/revision/snapshot must never silently count
+    # (especially since a lone such instance never reaches the pairwise
+    # compare_identity() step, which is the only other place a scope
+    # mismatch would otherwise surface).
+    if (
+        bundle.existence_selector.document_id != document_id
+        or bundle.existence_selector.revision_id != revision_id
+        or bundle.existence_selector.source_sha256 != source_sha256
+        or bundle.existence_selector.snapshot_id != snapshot_id
+        or bundle.candidate.document_id != document_id
+        or bundle.candidate.revision_id != revision_id
+        or bundle.candidate.source_sha256 != source_sha256
+        or bundle.candidate.snapshot_id != snapshot_id
+    ):
+        return None
+
     existence = physical_opening_authority.prove_existence(bundle.existence_selector)
     if (
         existence.status != EvidenceResolutionStatus.CORROBORATED
@@ -280,8 +309,30 @@ def _evaluate_instance_bundle(
     ):
         return None
 
+    # existence_selector and candidate are two independent proofs joined
+    # only by sitting on one caller-supplied bundle -- nothing about calling
+    # both on the same bundle proves they describe the same physical
+    # opening. Require the candidate's own lineage to genuinely trace back
+    # to (at least one of) the same source observations the G17 existence
+    # record used: the same "shared lineage" test
+    # OpeningIdentityResolver.compare_candidates() already uses for the
+    # analogous same-instance question.
+    existence_lineage = set(existence.existence_record.source_observation_ids) | set(
+        existence.existence_record.source_lineage_root_ids
+    )
+    candidate_lineage = set(bundle.candidate.source_observation_ids) | set(
+        bundle.candidate.source_lineage_root_ids
+    )
+    if not (existence_lineage & candidate_lineage):
+        return None
+
+    # A genuine CORROBORATED viewport decision for one viewport must not
+    # authenticate a candidate/tag pair that itself claims a different,
+    # never-independently-authenticated viewport_id.
     viewport_authenticated = (
         bundle.viewport_decision.status == EvidenceResolutionStatus.CORROBORATED
+        and bundle.viewport_decision.selector is not None
+        and bundle.viewport_decision.selector.viewport_id == bundle.candidate.viewport_id
     )
     binding = OpeningIdentityResolver.resolve_tag_binding(
         candidate=bundle.candidate,
@@ -289,6 +340,9 @@ def _evaluate_instance_bundle(
         binding_evidences=bundle.binding_evidences,
         expected_semantic_family=bundle.expected_semantic_family,
         viewport_authenticated=viewport_authenticated,
+        # Already independently verified above against publish_scope()'s own
+        # revision_id (not a rubber stamp) -- resolve_tag_binding() has no
+        # separate revision-currency authority of its own to call instead.
         revision_authenticated=True,
         source_observation_authority=bundle.source_observation_authority,
     )
@@ -297,6 +351,7 @@ def _evaluate_instance_bundle(
         or binding.identity_state != IdentityState.PROVEN_SAME
         or not binding.bound_mark
         or binding.tag_observation_id is None
+        or normalize_opening_tag(binding.bound_mark) is None
     ):
         return None
 
@@ -313,20 +368,32 @@ def _resolve_physical_identity_count(
     eligible: Sequence[_EligibleInstance],
     *,
     physical_opening_authority: PhysicalOpeningAuthority,
-) -> tuple[int | None, EvidenceResolutionStatus, tuple[str, ...]]:
+) -> tuple[tuple[_EligibleInstance, ...] | None, EvidenceResolutionStatus, tuple[str, ...]]:
     """All-pairs G17 identity comparison -- never greedy, never transitive
-    shortcuts. Returns (physical_count, status, reason_codes).
+    shortcuts. Returns (representatives, status, reason_codes): exactly one
+    _EligibleInstance per distinct physical instance.
 
-    physical_count is None when any pair cannot be affirmatively resolved,
+    Deduplicates by `.key` (existence_selector.observation_id) FIRST, before
+    any comparison -- if `eligible` ever contains two entries for the same
+    key (e.g. instance_evidence carried a duplicate bundle), returning one
+    representative per distinct key, rather than counting distinct union-find
+    roots over a raw possibly-duplicated list, keeps the published evidence
+    arrays (built from these representatives downstream) impossible to
+    desync from the count derived from them -- there is only one place that
+    number comes from.
+
+    representatives is None when any pair cannot be affirmatively resolved,
     OR when the resolved SAME/DISTINCT graph is internally inconsistent
     (e.g. A SAME B, B SAME C, A DISTINCT C) -- the whole mark blocks rather
     than silently collapsing to any particular count.
     """
-    if not eligible:
-        return 0, EvidenceResolutionStatus.CORROBORATED, ()
+    by_key: dict[str, _EligibleInstance] = {}
+    for instance in eligible:
+        by_key.setdefault(instance.key, instance)
+    keys = sorted(by_key)
+    if not keys:
+        return (), EvidenceResolutionStatus.CORROBORATED, ()
 
-    keys = sorted(e.key for e in eligible)
-    by_key = {e.key: e for e in eligible}
     same_pairs: list[tuple[str, str]] = []
     distinct_pairs: list[tuple[str, str]] = []
 
@@ -361,8 +428,16 @@ def _resolve_physical_identity_count(
                 (COMMERCIAL_COUNT_INCONSISTENT_IDENTITY_GRAPH,),
             )
 
-    distinct_roots = {uf.find(key) for key in keys}
-    return len(distinct_roots), EvidenceResolutionStatus.CORROBORATED, ()
+    representative_key_by_root: dict[str, str] = {}
+    for key in keys:
+        root = uf.find(key)
+        if root not in representative_key_by_root:
+            representative_key_by_root[root] = key
+    representatives = tuple(
+        by_key[representative_key_by_root[root]]
+        for root in sorted(representative_key_by_root)
+    )
+    return representatives, EvidenceResolutionStatus.CORROBORATED, ()
 
 
 class OpeningCommercialInstanceAuthority:
@@ -442,11 +517,7 @@ class OpeningCommercialInstanceProducer:
         turn out to belong to a mark not in `marks`, or that never resolve
         at all -- both are silently excluded, not treated as errors.
         """
-        normalized_marks = sorted({
-            normalized.tag if (normalized := normalize_opening_tag(m)) is not None else str(m).strip()
-            for m in marks
-            if str(m).strip()
-        })
+        normalized_marks = sorted({_normalized_mark(m) for m in marks if str(m).strip()})
 
         completeness = universe_completeness_authority.resolve(
             OpeningUniverseSelector(
@@ -462,13 +533,27 @@ class OpeningCommercialInstanceProducer:
             completeness.record.record_id if completeness.record is not None else None
         )
 
+        # Gate 2 must guard evidence evaluation itself, not just which status
+        # gets reported: instance_evidence is never touched when the scope
+        # isn't complete, exactly like the single-mark version this replaced.
+        # Replaying every bundle unconditionally would mean one malformed
+        # OpeningInstanceEvidenceBundle (nearby_tags containing something
+        # other than a TagObservation, which nothing here validates at
+        # construction) raises out of resolve_tag_binding() and takes down
+        # every mark in this call, even ones whose gate already says ABSTAIN.
         eligible_by_mark: dict[str, list[_EligibleInstance]] = {}
-        for bundle in instance_evidence:
-            instance = _evaluate_instance_bundle(
-                bundle, physical_opening_authority=physical_opening_authority
-            )
-            if instance is not None:
-                eligible_by_mark.setdefault(instance.mark, []).append(instance)
+        if universe_complete:
+            for bundle in instance_evidence:
+                instance = _evaluate_instance_bundle(
+                    bundle,
+                    document_id=document_id,
+                    revision_id=revision_id,
+                    source_sha256=source_sha256,
+                    snapshot_id=snapshot_id,
+                    physical_opening_authority=physical_opening_authority,
+                )
+                if instance is not None:
+                    eligible_by_mark.setdefault(instance.mark, []).append(instance)
 
         produced: list[CommercialInstanceCountResult] = []
         for mark in normalized_marks:
@@ -518,10 +603,10 @@ class OpeningCommercialInstanceProducer:
         schedule_count_authority: OpeningScheduleCountAuthority,
         completeness_record_id: str | None,
     ) -> CommercialInstanceCountResult:
-        physical_count, identity_status, identity_reasons = _resolve_physical_identity_count(
+        representatives, identity_status, identity_reasons = _resolve_physical_identity_count(
             eligible, physical_opening_authority=physical_opening_authority
         )
-        if physical_count is None:
+        if representatives is None:
             return CommercialInstanceCountResult(
                 mark=mark,
                 status=identity_status,
@@ -530,6 +615,7 @@ class OpeningCommercialInstanceProducer:
                 schedule_count=None,
                 reason_codes=identity_reasons,
             )
+        physical_count = len(representatives)
 
         schedule_result = schedule_count_authority.resolve(
             OpeningScheduleCountSelector(
@@ -593,8 +679,8 @@ class OpeningCommercialInstanceProducer:
             "snapshot_id": snapshot_id,
             "decision_scope_id": decision_scope_id,
             "commercial_count": physical_count,
-            "physical_existence_record_ids": sorted(e.existence_record_id for e in eligible),
-            "bound_tag_observation_ids": sorted(e.tag_observation_id for e in eligible),
+            "physical_existence_record_ids": sorted(e.existence_record_id for e in representatives),
+            "bound_tag_observation_ids": sorted(e.tag_observation_id for e in representatives),
             "schedule_count_record_id": schedule_result.record.record_id,
         }
         record = CommercialInstanceCountRecord(
@@ -606,8 +692,8 @@ class OpeningCommercialInstanceProducer:
             snapshot_id=snapshot_id,
             decision_scope_id=decision_scope_id,
             commercial_count=physical_count,
-            physical_existence_record_ids=tuple(sorted(e.existence_record_id for e in eligible)),
-            bound_tag_observation_ids=tuple(sorted(e.tag_observation_id for e in eligible)),
+            physical_existence_record_ids=tuple(sorted(e.existence_record_id for e in representatives)),
+            bound_tag_observation_ids=tuple(sorted(e.tag_observation_id for e in representatives)),
             schedule_count_record_id=schedule_result.record.record_id,
             universe_completeness_record_id=completeness_record_id,
         )

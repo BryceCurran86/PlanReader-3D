@@ -449,7 +449,7 @@ def parse_schedule_rows(
         count_explicit = False
         if "count" in col_map and col_map["count"] < len(cells):
             try:
-                raw_count = cells[col_map["count"]].replace("x", "").strip()
+                raw_count = cells[col_map["count"]].lower().replace("x", "").strip()
                 parsed_count = int(raw_count)
                 if parsed_count >= 1:
                     count = parsed_count

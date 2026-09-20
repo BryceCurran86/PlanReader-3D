@@ -175,17 +175,23 @@ class OpeningScheduleCountProducer:
         discovery produced them. Rows with count_explicit=False never
         contribute -- the historical default-1 is invisible to this authority.
         """
-        by_mark: dict[str, dict[tuple[object, ...], tuple[ScheduleEntry, tuple[str, ...]]]] = {}
+        by_mark: dict[str, dict[int, tuple[ScheduleEntry, tuple[str, ...]]]] = {}
         for entry, ids in schedule_rows:
             if not entry.count_explicit:
                 continue
             normalized = normalize_opening_tag(entry.type_mark)
             if normalized is None:
                 continue
-            dedupe_key = (entry.count, entry.width_mm, entry.height_mm)
-            by_mark.setdefault(normalized.tag, {}).setdefault(
-                dedupe_key, (entry, tuple(sorted(str(i) for i in ids)))
-            )
+            # Dedupe on count alone: this authority's sole published fact is
+            # the explicit count, so two rows agreeing on count are
+            # corroborating, not ambiguous, even if their (unrelated,
+            # unpublished-by-this-module) width/height parsed differently or
+            # not at all. Folding dimensions into the ambiguity key would
+            # manufacture a false CONFLICT out of a dimension-parsing hiccup
+            # that has nothing to do with the count this module states.
+            mark_rows = by_mark.setdefault(normalized.tag, {})
+            if entry.count not in mark_rows:
+                mark_rows[entry.count] = (entry, tuple(sorted(str(i) for i in ids)))
 
         produced: list[OpeningScheduleCountResult] = []
         for mark in sorted(by_mark):
