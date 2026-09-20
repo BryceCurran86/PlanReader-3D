@@ -1,36 +1,28 @@
-"""Source-authenticated primitive coverage adapter for opening completeness.
+"""Source-authenticated primitive-coverage adapter for opening completeness.
 
-This module authenticates source-visible primitive coverage, but deliberately
-does NOT claim that those primitives form a complete semantic physical-opening
-universe. Commercial opening-count publication must remain blocked until a
-separate producer-owned semantic opening enumerator proves that transition.
+IMPORTANT: complete decoding of visible PDF segments is NOT proof that the
+semantic physical-opening universe is complete. This adapter intentionally
+publishes source coverage only and NEVER attaches the private
+`_SOURCE_AUTHENTICATED_COMPLETENESS_SEAL` consumed by
+`GenericOpeningCountAuthority`.
 
-GenericOpeningCountAuthority (pb_generic_opening_count_authority.py) refuses
-to reconcile anything unless the OpeningUniverseCompletenessAuthority it is
-given carries a private `_source_authentication_seal` attribute. That gate
-exists because OpeningUniverseCompletenessProducer.publish_enumeration()
-itself accepts arbitrary caller-supplied `source_primitives`/
-`enumerated_primitives` sequences -- nothing about calling it, by itself,
-proves the primitives genuinely came from a real source decode rather than a
-caller-fabricated list. Before this module, the only place in the repo that
-set `_source_authentication_seal` was test code, via
-`object.__setattr__(...)` -- test infrastructure, not a production path.
+The previous implementation fed the same visible-segment collection to both
+`source_primitives` and `enumerated_primitives`, then attached the commercial
+completeness seal. That could prove only "all decoded visible segments were
+accounted for", while downstream code interpreted the resulting member ids as
+physical-opening competitors. Six G17 support segments for one opening (plus
+ordinary wall/dimension/annotation geometry) therefore had the wrong semantic
+contract.
 
-This adapter earns only the source-authentication seal: every primitive it
-passes to OpeningUniverseCompletenessProducer comes from a real
-SourceVisibilityAuthority resolve. It intentionally passes
-semantic_enumeration_proven=False, so the resulting completeness record is
-fail-closed even when raw primitive coverage is perfect. A future semantic
-opening-enumeration producer may supply the missing proof; raw segment
-equality alone never can.
+A future source-authenticated semantic-opening enumerator must earn the
+commercial seal only after it proves a complete set of physical-opening
+competitors. Until that producer exists, this adapter remains deliberately
+fail-closed for commercial counts.
 """
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-from pb_generic_opening_count_authority import (
-    _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL,
-)
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_opening_universe_completeness_authority import (
     OpeningUniverseCompletenessAuthority,
@@ -41,14 +33,25 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 
 
 class _RealVisiblePrimitive:
-    """Duck-typed adapter over one real, already-clip-verified visible
-    segment observation -- exposes exactly the attributes
-    build_opening_universe_member_from_indexed_primitive() reads, populated
-    from a genuine SourceObservationRecord, never invented."""
+    """Adapter over one producer-owned, clip-verified visible segment."""
 
-    __slots__ = ("primitive_id", "page_id", "geometry", "layer", "clip_known", "clip_present", "clip")
+    __slots__ = (
+        "primitive_id",
+        "page_id",
+        "geometry",
+        "layer",
+        "clip_known",
+        "clip_present",
+        "clip",
+    )
 
-    def __init__(self, *, primitive_id: str, page_id: str, geometry: tuple[float, ...]) -> None:
+    def __init__(
+        self,
+        *,
+        primitive_id: str,
+        page_id: str,
+        geometry: tuple[float, ...],
+    ) -> None:
         self.primitive_id = primitive_id
         self.page_id = page_id
         self.geometry = geometry
@@ -68,32 +71,26 @@ def build_source_authenticated_opening_universe_completeness(
     optional_content_known_visible: bool = False,
     xobject_traversal_truncated: bool = False,
 ) -> OpeningUniverseCompletenessAuthority:
-    """Build source-authenticated primitive coverage without claiming
-    semantic physical-opening completeness.
+    """Publish authenticated primitive coverage, never semantic completeness.
 
-    GenericOpeningCountAuthority may inspect the returned authority because
-    its source derivation is authenticated, but decision_scope_complete stays
-    false until a separate semantic opening-enumeration proof exists.
+    This compatibility name is retained because callers/tests already import
+    it, but the returned authority is intentionally NOT commercially sealed.
 
-    `optional_content_known_visible` defaults to False (fail closed): the
-    caller must explicitly assert True only after confirming the source PDF
-    either has no optional-content groups, or that every relevant group's
-    visibility has been independently resolved -- this adapter has no way to
-    check that itself from an already-ingested SourceVisibilityProducer, so
-    it never assumes it.
+    `source_primitives` are the complete visible-segment observations in the
+    requested source scope. `enumerated_primitives` is intentionally empty:
+    this module has no authority to claim that raw segments have been
+    semantically enumerated into physical openings.
 
-    `xobject_traversal_truncated` defaults to False, matching
-    SourceVisibilityProducer.ingest_native_pdf_bytes()'s current behavior of
-    traversing every XObject it encounters with no depth/count limit; pass
-    True if a future ingestion path introduces one.
-
-    document_id/source_sha256/snapshot_id are read from the producer's own
-    published revision/snapshot records for `revision_id`, never taken as
-    separate caller-supplied arguments that could disagree with them.
+    Consequently the resulting completeness record is fail-closed with
+    `semantic_enumeration_complete=False` whenever a source snapshot exists.
     """
+
+    if type(source_visibility_producer) is not SourceVisibilityProducer:
+        raise TypeError("source_visibility_producer must be producer-owned")
+
     producer = OpeningUniverseCompletenessProducer(
-        producer_method="source_authenticated_completeness_adapter",
-        producer_version="1.0.0",
+        producer_method="source_authenticated_primitive_coverage_adapter",
+        producer_version="2.0.0",
     )
     published = source_visibility_producer.published_snapshot_for_revision(revision_id)
     if published is not None:
@@ -103,7 +100,7 @@ def build_source_authenticated_opening_universe_completeness(
         visibility = source_visibility_producer.authority()
 
         primitives: list[_RealVisiblePrimitive] = []
-        scoped_page_ids = set(str(p) for p in page_ids)
+        scoped_page_ids = {str(page_id) for page_id in page_ids}
         for observation_id in published.visible_observation_ids:
             result = visibility.resolve_visible(
                 ObservationSelector(
@@ -114,7 +111,10 @@ def build_source_authenticated_opening_universe_completeness(
                     observation_id=observation_id,
                 )
             )
-            if result.status != EvidenceResolutionStatus.CORROBORATED or result.observation is None:
+            if (
+                result.status is not EvidenceResolutionStatus.CORROBORATED
+                or result.observation is None
+            ):
                 continue
             observation = result.observation
             if str(observation.page_id) not in scoped_page_ids:
@@ -138,22 +138,19 @@ def build_source_authenticated_opening_universe_completeness(
             viewport_id=None,
             coverage=published.coverage,
             source_primitives=primitives,
-            enumerated_primitives=primitives,
-            optional_content_state="known_visible" if optional_content_known_visible else "unresolved",
+            # Deliberately empty. Visible primitive coverage is not semantic
+            # opening enumeration.
+            enumerated_primitives=(),
+            optional_content_state=(
+                "known_visible" if optional_content_known_visible else "unresolved"
+            ),
             xobject_traversal_truncated=xobject_traversal_truncated,
-            # Raw visible-segment coverage is not a proof that all semantic
-            # physical openings have been enumerated. Keep commercial
-            # completeness fail-closed until a producer-owned semantic
-            # opening enumerator establishes that proposition.
-            semantic_enumeration_proven=False,
         )
 
-    authority = producer.authority()
-    # This seal certifies only the source derivation path. It does NOT imply
-    # semantic opening completeness; the record itself remains incomplete
-    # because semantic_enumeration_proven=False above.
-    authority._source_authentication_seal = _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL
-    return authority
+    # Deliberately DO NOT attach GenericOpeningCountAuthority's
+    # _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL. Primitive coverage alone cannot
+    # unlock a commercial count.
+    return producer.authority()
 
 
 __all__ = [
