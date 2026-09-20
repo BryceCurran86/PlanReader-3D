@@ -716,6 +716,8 @@ class GenericOpeningCountProducer:
 
         # Caller schedule_declared_counts never decide corroboration or conflict.
         schedule_corroborated = False
+        qty_by_row: dict[tuple[str, ...], int] = {}
+        qty_record_id_by_row: dict[tuple[str, ...], str] = {}
         if (
             selector.opening_mark is not None
             and self._schedule_qty is not None
@@ -726,8 +728,6 @@ class GenericOpeningCountProducer:
             # to declare the same count must never collapse into one
             # agreeing value -- that would hide a real duplicate/conflicting
             # schedule entry behind a coincidental match.
-            qty_by_row: dict[tuple[str, ...], int] = {}
-            qty_record_id_by_row: dict[tuple[str, ...], str] = {}
             for op_id in matched_instance_ids:
                 b_rec = binding_by_opening.get(op_id)
                 if b_rec is None:
