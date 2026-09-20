@@ -19,6 +19,7 @@ from pb_schedule_opening_instance_binding_authority import (
 from pb_schedule_row_quantity_authority import (
     SCHEDULE_ROW_QTY_INCOMPLETE,
     ScheduleRowQuantityProducer,
+    _AUTHENTICATED_BINDING_SEAL,
     ScheduleRowQuantityResult,
     ScheduleRowQuantitySelector,
 )
@@ -29,15 +30,16 @@ def publish_schedule_row_quantity_from_binding(
     schedule_row_quantity_producer: ScheduleRowQuantityProducer,
     schedule_binding_authority: ScheduleOpeningInstanceBindingAuthority,
     binding_selector: ScheduleOpeningInstanceBindingSelector,
-    universe_complete: bool,
 ) -> ScheduleRowQuantityResult:
     """Resolve a producer-owned binding, then republish its explicit count.
 
     Consumers supply only an address (`binding_selector`). The positive
     binding record is obtained internally from `schedule_binding_authority`.
 
-    Missing/unresolved bindings, implicit historical default counts, and
-    incomplete universes fail closed and never publish a positive quantity.
+    Missing/unresolved bindings and implicit historical default counts fail
+    closed and never publish a positive quantity. A positive binding already
+    proves complete source coverage plus unique matching-row discovery, so no
+    caller-supplied universe-complete boolean exists on this API.
     """
 
     if type(schedule_row_quantity_producer) is not ScheduleRowQuantityProducer:
@@ -89,18 +91,17 @@ def publish_schedule_row_quantity_from_binding(
         not binding_record.schedule_row_count_explicit
         or binding_record.schedule_row_count is None
     ):
-        return schedule_row_quantity_producer.publish(
-            selector,
-            declared_count=0,
-            type_mark=None,
-            universe_complete=False,
+        return ScheduleRowQuantityResult(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(SCHEDULE_ROW_QTY_INCOMPLETE,),
+            record=None,
         )
 
-    return schedule_row_quantity_producer.publish(
+    return schedule_row_quantity_producer._publish_from_authenticated_binding(
         selector,
         declared_count=int(binding_record.schedule_row_count),
         type_mark=binding_record.schedule_row_type_mark,
-        universe_complete=bool(universe_complete),
+        _seal=_AUTHENTICATED_BINDING_SEAL,
     )
 
 

@@ -22,6 +22,7 @@ SCHEDULE_ROW_QTY_INVALID = "schedule_row_quantity_invalid"
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
+_AUTHENTICATED_BINDING_SEAL = object()
 
 _Key = tuple[str, str, str, str, str, tuple[str, ...]]
 
@@ -172,35 +173,39 @@ class ScheduleRowQuantityProducer:
     def authority(self) -> ScheduleRowQuantityAuthority:
         return ScheduleRowQuantityAuthority(self._results, _seal=_AUTHORITY_SEAL)
 
-    def publish(
+    def publish(self, *args, **kwargs) -> ScheduleRowQuantityResult:
+        """Reject legacy raw quantity publication.
+
+        A caller-supplied declared_count or universe_complete boolean is not
+        schedule authority. Positive schedule quantities must be republished
+        through the source-authenticated binding adapter.
+        """
+        raise TypeError(
+            "raw schedule quantity publication is not an authority path; "
+            "resolve ScheduleOpeningInstanceBindingAuthority first"
+        )
+
+    def _publish_from_authenticated_binding(
         self,
         selector: ScheduleRowQuantitySelector,
         *,
         declared_count: int,
         type_mark: Optional[str],
-        universe_complete: bool,
+        _seal: object = None,
     ) -> ScheduleRowQuantityResult:
-        """Publish a producer-owned schedule quantity for exact row observation IDs.
-
-        Incomplete schedule universes abstain. Missing type marks abstain.
-        Declared counts alone never mint physical opening instances.
-        """
+        """Internal positive path used only after producer-owned binding resolution."""
+        if _seal is not _AUTHENTICATED_BINDING_SEAL:
+            raise TypeError(
+                "schedule quantity must originate from authenticated binding resolution"
+            )
         if type(selector) is not ScheduleRowQuantitySelector:
             raise TypeError("selector must be ScheduleRowQuantitySelector")
-        if not isinstance(declared_count, int) or declared_count < 0:
+        if not isinstance(declared_count, int) or declared_count < 1:
             return self._store(
                 selector,
                 _blocked(
                     EvidenceResolutionStatus.ABSTAINED,
                     SCHEDULE_ROW_QTY_INVALID,
-                ),
-            )
-        if not universe_complete:
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    SCHEDULE_ROW_QTY_INCOMPLETE,
                 ),
             )
         mark = None if type_mark is None else str(type_mark).strip().upper()
@@ -224,6 +229,10 @@ class ScheduleRowQuantityProducer:
             ),
             "type_mark": mark,
             "declared_count": declared_count,
+            # A positive ScheduleOpeningInstanceBindingAuthority result is
+            # already derived from complete source coverage and exhaustive
+            # matching-row discovery. This is producer-derived, not a caller
+            # boolean.
             "universe_complete": True,
         }
         record = ScheduleRowQuantityRecord(
@@ -246,6 +255,9 @@ class ScheduleRowQuantityProducer:
         selector: ScheduleRowQuantitySelector,
         result: ScheduleRowQuantityResult,
     ) -> ScheduleRowQuantityResult:
+        prior = self._results.get(selector.key)
+        if prior is not None and prior != result:
+            raise RuntimeError("schedule row quantity producer equivocation")
         self._results[selector.key] = result
         return result
 
