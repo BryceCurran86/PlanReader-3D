@@ -1,5 +1,9 @@
-"""pb_opening_universe_completeness_source_adapter.py -- the one lawful
-producer-owned path to a SOURCE-AUTHENTICATED OpeningUniverseCompletenessAuthority.
+"""Source-authenticated primitive coverage adapter for opening completeness.
+
+This module authenticates source-visible primitive coverage, but deliberately
+does NOT claim that those primitives form a complete semantic physical-opening
+universe. Commercial opening-count publication must remain blocked until a
+separate producer-owned semantic opening enumerator proves that transition.
 
 GenericOpeningCountAuthority (pb_generic_opening_count_authority.py) refuses
 to reconcile anything unless the OpeningUniverseCompletenessAuthority it is
@@ -12,18 +16,13 @@ caller-fabricated list. Before this module, the only place in the repo that
 set `_source_authentication_seal` was test code, via
 `object.__setattr__(...)` -- test infrastructure, not a production path.
 
-This module is that missing production path. It earns the seal by deriving
-BOTH `source_primitives` and `enumerated_primitives` itself, directly from a
-real `SourceVisibilityAuthority`'s own already-clip-verified
-`NATIVE_PDF_VISIBLE_SEGMENT` observations (`classify_native_segment_visibility`
-in pb_source_visibility_authority.py already proves `clip_known=True,
-clip_present=False` for every one of them -- restating that here is not a
-new claim, it is the one this adapter is entitled to make because it only
-ever wraps observations resolved through `resolve_visible()`) -- never from
-a caller-supplied list. It deliberately does no further semantic coalescing
-beyond that: the completeness claim this adapter can honestly make is
-"every decoded, unclipped, visible segment in scope was accounted for," not
-a stronger claim about semantic opening enumeration.
+This adapter earns only the source-authentication seal: every primitive it
+passes to OpeningUniverseCompletenessProducer comes from a real
+SourceVisibilityAuthority resolve. It intentionally passes
+semantic_enumeration_proven=False, so the resulting completeness record is
+fail-closed even when raw primitive coverage is perfect. A future semantic
+opening-enumeration producer may supply the missing proof; raw segment
+equality alone never can.
 """
 from __future__ import annotations
 
@@ -69,8 +68,12 @@ def build_source_authenticated_opening_universe_completeness(
     optional_content_known_visible: bool = False,
     xobject_traversal_truncated: bool = False,
 ) -> OpeningUniverseCompletenessAuthority:
-    """The only lawful way to obtain a completeness Authority
-    GenericOpeningCountAuthority will accept.
+    """Build source-authenticated primitive coverage without claiming
+    semantic physical-opening completeness.
+
+    GenericOpeningCountAuthority may inspect the returned authority because
+    its source derivation is authenticated, but decision_scope_complete stays
+    false until a separate semantic opening-enumeration proof exists.
 
     `optional_content_known_visible` defaults to False (fail closed): the
     caller must explicitly assert True only after confirming the source PDF
@@ -138,16 +141,17 @@ def build_source_authenticated_opening_universe_completeness(
             enumerated_primitives=primitives,
             optional_content_state="known_visible" if optional_content_known_visible else "unresolved",
             xobject_traversal_truncated=xobject_traversal_truncated,
+            # Raw visible-segment coverage is not a proof that all semantic
+            # physical openings have been enumerated. Keep commercial
+            # completeness fail-closed until a producer-owned semantic
+            # opening enumerator establishes that proposition.
+            semantic_enumeration_proven=False,
         )
 
     authority = producer.authority()
-    # Legitimately earned here: this function is the only caller of
-    # publish_enumeration() with primitives it derived itself from a real
-    # SourceVisibilityAuthority, never from a caller-supplied list. A
-    # published==None revision still gets the seal -- the seal certifies
-    # the DERIVATION PATH was lawful, not that a complete universe was
-    # found; GenericOpeningCountAuthority's own resolve()/status checks are
-    # what correctly fail closed when nothing was published for the scope.
+    # This seal certifies only the source derivation path. It does NOT imply
+    # semantic opening completeness; the record itself remains incomplete
+    # because semantic_enumeration_proven=False above.
     authority._source_authentication_seal = _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL
     return authority
 
