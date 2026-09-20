@@ -710,6 +710,9 @@ class SourceVisibilityAuthority:
         self,
         source_authority: SourceObservationAuthority,
         visibility_receipts: Mapping[tuple[str, str], str],
+        raster_visibility_receipts: Mapping[
+            tuple[str, str], RasterSegmentVisibilityReceipt
+        ],
         *,
         _seal: object = None,
     ) -> None:
@@ -720,6 +723,7 @@ class SourceVisibilityAuthority:
             )
         self._source_authority = source_authority
         self._visibility_receipts = visibility_receipts
+        self._raster_visibility_receipts = raster_visibility_receipts
 
     def _blocked(self, reason: str) -> SourceObservationAuthorityResult:
         return SourceObservationAuthorityResult(
@@ -741,45 +745,120 @@ class SourceVisibilityAuthority:
         expected_parent = self._visibility_receipts.get(
             (selector.snapshot_id, selector.observation_id)
         )
-        if expected_parent is None:
+        raster_receipt = self._raster_visibility_receipts.get(
+            (selector.snapshot_id, selector.observation_id)
+        )
+        if expected_parent is None and raster_receipt is None:
             return self._blocked(VISIBILITY_RECEIPT_UNAVAILABLE)
 
         result = self._source_authority.resolve(selector)
         observation = result.observation
         if observation is None or result.status != EvidenceResolutionStatus.CORROBORATED:
             return result
-        if (
-            observation.observation_kind != NATIVE_PDF_VISIBLE_SEGMENT
-            or observation.origin_kind != VISIBLE_SEGMENT_ORIGIN_KIND
-            or observation.viewport_id is not None
-            or observation.derivation_parent_ids != (expected_parent,)
-        ):
-            return self._conflict(PRODUCER_INTEGRITY_FAILURE)
 
-        parent_result = self._source_authority.resolve(
-            ObservationSelector(
-                document_id=selector.document_id,
-                revision_id=selector.revision_id,
-                source_sha256=selector.source_sha256,
-                snapshot_id=selector.snapshot_id,
-                observation_id=expected_parent,
+        if expected_parent is not None:
+            if (
+                observation.observation_kind != NATIVE_PDF_VISIBLE_SEGMENT
+                or observation.origin_kind != VISIBLE_SEGMENT_ORIGIN_KIND
+                or observation.viewport_id is not None
+                or observation.derivation_parent_ids != (expected_parent,)
+            ):
+                return self._conflict(PRODUCER_INTEGRITY_FAILURE)
+
+            parent_result = self._source_authority.resolve(
+                ObservationSelector(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    observation_id=expected_parent,
+                )
             )
-        )
-        parent = parent_result.observation
-        if parent is None or parent_result.status != EvidenceResolutionStatus.CORROBORATED:
-            return self._blocked(OBSERVATION_UNAVAILABLE)
-        if (
-            parent.observation_kind != "native_pdf_segment"
-            or parent.origin_kind != "native"
-            or parent.document_id != observation.document_id
-            or parent.revision_id != observation.revision_id
-            or parent.source_sha256 != observation.source_sha256
-            or parent.page_id != observation.page_id
-            or parent.source_partition_id != observation.source_partition_id
-            or parent.geometry != observation.geometry
-            or observation.source_primitive_ref != f"visible:{parent.source_primitive_ref}"
-        ):
-            return self._conflict(VISIBILITY_PARENT_MISMATCH)
+            parent = parent_result.observation
+            if parent is None or parent_result.status != EvidenceResolutionStatus.CORROBORATED:
+                return self._blocked(OBSERVATION_UNAVAILABLE)
+            if (
+                parent.observation_kind != "native_pdf_segment"
+                or parent.origin_kind != "native"
+                or parent.document_id != observation.document_id
+                or parent.revision_id != observation.revision_id
+                or parent.source_sha256 != observation.source_sha256
+                or parent.page_id != observation.page_id
+                or parent.source_partition_id != observation.source_partition_id
+                or parent.geometry != observation.geometry
+                or observation.source_primitive_ref
+                != f"visible:{parent.source_primitive_ref}"
+            ):
+                return self._conflict(VISIBILITY_PARENT_MISMATCH)
+        else:
+            assert raster_receipt is not None
+            if (
+                observation.observation_kind != RASTER_PDF_VISIBLE_SEGMENT
+                or observation.origin_kind != RASTER_VISIBLE_SEGMENT_ORIGIN_KIND
+                or observation.viewport_id is not None
+                or observation.derivation_parent_ids
+                != (raster_receipt.parent_observation_id,)
+                or observation.document_id != raster_receipt.document_id
+                or observation.revision_id != raster_receipt.revision_id
+                or observation.source_sha256 != raster_receipt.source_sha256
+                or observation.page_id != raster_receipt.page_id
+                or observation.source_partition_id
+                != raster_receipt.source_partition_id
+                or tuple(observation.geometry) != tuple(raster_receipt.geometry)
+            ):
+                return self._conflict(PRODUCER_INTEGRITY_FAILURE)
+
+            parent_result = self._source_authority.resolve(
+                ObservationSelector(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    observation_id=raster_receipt.parent_observation_id,
+                )
+            )
+            parent = parent_result.observation
+            if parent is None or parent_result.status != EvidenceResolutionStatus.CORROBORATED:
+                return self._blocked(OBSERVATION_UNAVAILABLE)
+            if (
+                parent.observation_kind != RASTER_PDF_SEGMENT
+                or parent.origin_kind != RASTER_SEGMENT_ORIGIN_KIND
+                or parent.derivation_parent_ids
+                != (raster_receipt.page_parent_observation_id,)
+                or parent.document_id != observation.document_id
+                or parent.revision_id != observation.revision_id
+                or parent.source_sha256 != observation.source_sha256
+                or parent.page_id != observation.page_id
+                or parent.source_partition_id != observation.source_partition_id
+                or parent.geometry != observation.geometry
+                or observation.source_primitive_ref
+                != f"visible:{parent.source_primitive_ref}"
+            ):
+                return self._conflict(VISIBILITY_PARENT_MISMATCH)
+
+            page_result = self._source_authority.resolve(
+                ObservationSelector(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    observation_id=raster_receipt.page_parent_observation_id,
+                )
+            )
+            page_parent = page_result.observation
+            if page_parent is None or page_result.status != EvidenceResolutionStatus.CORROBORATED:
+                return self._blocked(OBSERVATION_UNAVAILABLE)
+            if (
+                page_parent.observation_kind != "native_pdf_page"
+                or page_parent.origin_kind != "native"
+                or page_parent.derivation_parent_ids
+                or page_parent.document_id != observation.document_id
+                or page_parent.revision_id != observation.revision_id
+                or page_parent.source_sha256 != observation.source_sha256
+                or page_parent.page_id != observation.page_id
+                or page_parent.source_partition_id != observation.source_partition_id
+            ):
+                return self._conflict(VISIBILITY_PARENT_MISMATCH)
 
         return replace(
             result,
@@ -790,6 +869,11 @@ class SourceVisibilityAuthority:
 
 __all__ = [
     "NATIVE_PDF_VISIBLE_SEGMENT",
+    "RASTER_PDF_SEGMENT",
+    "RASTER_PDF_VISIBLE_SEGMENT",
+    "RASTER_RENDER_DPI",
+    "RASTER_SEGMENT_ORIGIN_KIND",
+    "RASTER_VISIBLE_SEGMENT_ORIGIN_KIND",
     "SOURCE_VISIBILITY_SCHEMA_VERSION",
     "VISIBLE_SEGMENT_ORIGIN_KIND",
     "VISIBLE_SOURCE_OBSERVATION_EXISTS",
@@ -801,6 +885,7 @@ __all__ = [
     "VISIBILITY_PROVEN_NO_ACTIVE_CLIP",
     "VISIBILITY_RECEIPT_UNAVAILABLE",
     "NativeSegmentVisibilityDecision",
+    "RasterSegmentVisibilityReceipt",
     "PublishedVisibleSourceSnapshot",
     "SourceVisibilityAuthority",
     "SourceVisibilityProducer",
