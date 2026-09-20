@@ -638,6 +638,212 @@ class SourceObservationProducer:
         )
         return replace(snapshot)
 
+    def publish_derived_observations(
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        base_snapshot_id: str,
+        observations: Sequence[Mapping[str, Any]],
+    ) -> ProducerSnapshotRecord:
+        """Publish one producer-owned batch of derived observations.
+
+        Every observation's parents must already exist in base_snapshot_id.
+        The batch is committed as one immutable snapshot, avoiding repeated
+        whole-snapshot cloning when a trusted producer derives many siblings
+        from the same source evidence.
+        """
+
+        current = self._store.current_revision_by_document.get(document_id)
+        if current != revision_id:
+            raise ValueError(f"{STALE_REVISION}: revision is not current")
+        base = self._store.snapshots.get(base_snapshot_id)
+        if (
+            base is None
+            or base.revision_id != revision_id
+            or base.document_id != document_id
+        ):
+            raise ValueError(f"{SNAPSHOT_MISMATCH}: base snapshot mismatch")
+        if not observations:
+            raise ValueError("observations must be non-empty")
+
+        revision = self._store.revisions[revision_id]
+        coverage = self._store.coverage_by_revision[revision_id]
+        generation = self._store.next_generation()
+
+        prepared: list[dict[str, Any]] = []
+        derived_ids: list[str] = []
+        for raw in observations:
+            page_id = _nonempty(str(raw.get("page_id") or ""), "page_id")
+            source_partition_id = _nonempty(
+                str(raw.get("source_partition_id") or ""),
+                "source_partition_id",
+            )
+            observation_kind = _nonempty(
+                str(raw.get("observation_kind") or ""),
+                "observation_kind",
+            )
+            source_primitive_ref = _nonempty(
+                str(raw.get("source_primitive_ref") or ""),
+                "source_primitive_ref",
+            )
+            origin_kind = _nonempty(
+                str(raw.get("origin_kind") or ""),
+                "origin_kind",
+            )
+            parents = tuple(
+                str(parent)
+                for parent in (raw.get("parent_observation_ids") or ())
+            )
+            if not parents:
+                raise ValueError(
+                    f"{LINEAGE_UNAVAILABLE}: derived observation needs parent"
+                )
+            for parent_id in parents:
+                if (base_snapshot_id, parent_id) not in self._store.observations:
+                    raise ValueError(
+                        f"{LINEAGE_UNAVAILABLE}: parent not in base snapshot"
+                    )
+            raw_text = str(raw.get("raw_text") or "")
+            geometry = _finite_tuple(raw.get("geometry") or ())
+            viewport_value = raw.get("viewport_id")
+            viewport_id = (
+                str(viewport_value) if viewport_value is not None else None
+            )
+            payload = {
+                "document_id": document_id,
+                "revision_id": revision_id,
+                "page_id": page_id,
+                "partition_id": source_partition_id,
+                "kind": observation_kind,
+                "primitive_ref": source_primitive_ref,
+                "origin_kind": origin_kind,
+                "parents": parents,
+                "raw_text": raw_text,
+                "geometry": geometry,
+            }
+            supplied_id = raw.get("observation_id")
+            derived_id = (
+                str(supplied_id)
+                if supplied_id is not None
+                else stable_contract_id(
+                    "source_observation",
+                    payload,
+                    digest_chars=32,
+                )
+            )
+            if not derived_id:
+                raise ValueError("observation_id must be non-empty")
+            prepared.append(
+                {
+                    "observation_id": derived_id,
+                    "page_id": page_id,
+                    "source_partition_id": source_partition_id,
+                    "observation_kind": observation_kind,
+                    "source_primitive_ref": source_primitive_ref,
+                    "origin_kind": origin_kind,
+                    "parents": parents,
+                    "raw_text": raw_text,
+                    "geometry": geometry,
+                    "viewport_id": viewport_id,
+                }
+            )
+            derived_ids.append(derived_id)
+
+        if len(derived_ids) != len(set(derived_ids)):
+            raise ProducerIntegrityError(
+                f"{PRODUCER_INTEGRITY_FAILURE}: duplicate batch observation id"
+            )
+
+        snapshot_id = stable_contract_id(
+            "source_snapshot",
+            {
+                "revision_id": revision_id,
+                "base_snapshot_id": base_snapshot_id,
+                "derived_observation_ids": tuple(sorted(derived_ids)),
+                "generation": generation,
+            },
+            digest_chars=32,
+        )
+
+        cloned = [
+            replace(
+                self._store.observations[(base_snapshot_id, obs_id)],
+                snapshot_id=snapshot_id,
+                producer_generation=generation,
+            )
+            for obs_id in base.observation_ids
+        ]
+        derived_records: list[SourceObservationRecord] = []
+        for item in prepared:
+            record = SourceObservationRecord(
+                observation_id=item["observation_id"],
+                document_id=document_id,
+                revision_id=revision_id,
+                source_sha256=revision.source_sha256,
+                source_partition_id=item["source_partition_id"],
+                page_id=item["page_id"],
+                viewport_id=item["viewport_id"],
+                observation_kind=item["observation_kind"],
+                source_primitive_ref=item["source_primitive_ref"],
+                raw_text=item["raw_text"],
+                geometry=item["geometry"],
+                origin_kind=item["origin_kind"],
+                derivation_parent_ids=item["parents"],
+                producer_method=self._producer_method,
+                producer_version=self._producer_version,
+                producer_generation=generation,
+                snapshot_id=snapshot_id,
+                observation_payload_sha256="",
+            )
+            record = replace(
+                record,
+                observation_payload_sha256=_content_sha256(
+                    _record_payload(record)
+                ),
+            )
+            derived_records.append(record)
+
+        records = [*cloned, *derived_records]
+        ids = [record.observation_id for record in records]
+        if len(ids) != len(set(ids)):
+            by_id: dict[str, SourceObservationRecord] = {}
+            for record in records:
+                prior = by_id.get(record.observation_id)
+                if (
+                    prior is not None
+                    and _record_payload(prior) != _record_payload(record)
+                ):
+                    raise ProducerIntegrityError(
+                        f"{PRODUCER_INTEGRITY_FAILURE}: "
+                        "duplicate observation id differs"
+                    )
+                by_id[record.observation_id] = record
+            records = list(by_id.values())
+
+        snapshot = ProducerSnapshotRecord(
+            snapshot_id=snapshot_id,
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=revision.source_sha256,
+            observation_ids=tuple(
+                sorted(record.observation_id for record in records)
+            ),
+            producer_method=self._producer_method,
+            producer_version=self._producer_version,
+            producer_generation=generation,
+            parent_snapshot_id=base_snapshot_id,
+        )
+        self._commit(
+            revision=revision,
+            coverage=coverage,
+            snapshot=snapshot,
+            records=records,
+            source_bytes=self._store.source_bytes_by_revision[revision_id],
+            mark_source_snapshot=False,
+        )
+        return replace(snapshot)
+
     def _commit(
         self,
         *,
