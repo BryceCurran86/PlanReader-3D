@@ -353,6 +353,11 @@ class GenericPlanReaderExtractor:
             "reason": "not_collected",
             "openings": [],
         }
+        self.item35_authority_shadow: Dict[str, Any] = {
+            "status": "abstained",
+            "reason": "not_collected",
+            "commercial_count_unlocked": False,
+        }
         # Live extraction visibility: distinguish absence from failure/conflict.
         self.extraction_status: Dict[str, str] = {}
 
@@ -775,6 +780,11 @@ class GenericPlanReaderExtractor:
             "status": "abstained",
             "reason": "not_collected",
             "openings": [],
+        }
+        self.item35_authority_shadow = {
+            "status": "abstained",
+            "reason": "not_collected",
+            "commercial_count_unlocked": False,
         }
 
         # ------------------------------------------------------------------
@@ -2440,6 +2450,31 @@ class GenericPlanReaderExtractor:
                 "reason": "shadow_exception",
                 "openings": [],
             }
+
+        # Item 35 production-authority SHADOW only. This executes the real
+        # source-visibility -> semantic-opening -> commercial-count gate on the
+        # same PDF bytes, but never mutates pred_dict or the F.9 deduction path.
+        try:
+            from pb_item35_production_authority_shadow import (
+                collect_item35_authority_shadow,
+            )
+
+            self.item35_authority_shadow = collect_item35_authority_shadow(
+                p_path,
+                document_id=f"extractor:{p_path.name}",
+            )
+            self.extraction_status["item35_authority_shadow"] = str(
+                self.item35_authority_shadow.get("status") or "abstained"
+            )
+        except Exception as exc:
+            from pb_item35_production_authority_shadow import (
+                empty_item35_authority_shadow,
+            )
+
+            self.item35_authority_shadow = empty_item35_authority_shadow(
+                reason=f"shadow_exception:{type(exc).__name__}"
+            )
+            self.extraction_status["item35_authority_shadow"] = "extraction_failed"
 
         doc.close()
         return list(pred_dict.values())
