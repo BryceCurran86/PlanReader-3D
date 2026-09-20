@@ -12,6 +12,9 @@ from __future__ import annotations
 import fitz
 
 from pb_generic_opening_count_authority import (
+    GENERIC_OPENING_COUNT_SCOPE_INCOMPLETE,
+    GenericOpeningCountProducer,
+    GenericOpeningCountSelector,
     _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -22,7 +25,9 @@ from pb_opening_universe_completeness_authority import (
 from pb_opening_universe_completeness_source_adapter import (
     build_source_authenticated_opening_universe_completeness,
 )
+from pb_physical_opening_authority import PhysicalOpeningAuthority
 from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_viewport_view_class_authority import ViewportViewClassProducer
 
 SCOPE = "completeness-scope:page-1"
 
@@ -96,6 +101,44 @@ def test_real_source_decode_is_authenticated_but_semantically_incomplete() -> No
     assert res.record.decision_scope_complete is False
     assert SEMANTIC_ENUMERATION_INCOMPLETE in res.record.reason_codes
     assert len(res.record.accounted_member_ids) == 6
+
+
+def test_raw_primitive_coverage_cannot_unlock_commercial_count() -> None:
+    src = SourceVisibilityProducer(
+        producer_method="completeness-adapter-test",
+        producer_version="1.0",
+    )
+    ingestion = _ingest(src, _tag_pdf(), "doc-commercial-gate")
+    published = src.published_snapshot_for_revision(ingestion.revision.revision_id)
+    assert published is not None
+
+    completeness = build_source_authenticated_opening_universe_completeness(
+        source_visibility_producer=src,
+        revision_id=ingestion.revision.revision_id,
+        decision_scope_id=SCOPE,
+        decision_scope_kind="page",
+        page_ids=("1",),
+        optional_content_known_visible=True,
+    )
+    generic = GenericOpeningCountProducer.from_authorities(
+        opening_universe_authority=completeness,
+        physical_opening_authority=PhysicalOpeningAuthority(src.authority()),
+        viewport_view_class_authority=ViewportViewClassProducer.create().authority(),
+    )
+    result = generic.publish(
+        GenericOpeningCountSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            decision_scope_id=SCOPE,
+            opening_mark="W1",
+        )
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+    assert GENERIC_OPENING_COUNT_SCOPE_INCOMPLETE in result.reason_codes
 
 
 def test_optional_content_defaults_to_unresolved_and_fails_closed() -> None:
