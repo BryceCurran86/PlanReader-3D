@@ -1,0 +1,117 @@
+name: Canonical Five-Project Development Benchmark
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download registered development benchmark sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import requests
+
+          sources = [
+              (
+                  "1727358888238-bq-nd-drawing.pdf",
+                  "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf",
+                  "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              ),
+              (
+                  "1785347143869-bqs-drawings.pdf",
+                  "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf",
+                  "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b",
+              ),
+              (
+                  "1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf",
+                  "https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf",
+                  "c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f",
+              ),
+              (
+                  "lamu-ishakani-ecd-classrooms-boq.pdf",
+                  "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf",
+                  "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2",
+              ),
+              (
+                  "umma-university-hostels-builders-work.pdf",
+                  "https://umma.ac.ke/wp-content/uploads/2026/06/Builders-work.pdf",
+                  "f30711f69944e66ef993341180e35b49ccfcb36d6f402743284823ab588183af",
+              ),
+          ]
+
+          headers = {"User-Agent": "Mozilla/5.0 PlanReader-Benchmark/1.0"}
+          for filename, url, expected_sha in sources:
+              dest = Path("benchmarks/sources") / filename
+              print(f"Downloading {filename} ...", flush=True)
+              response = requests.get(url, headers=headers, timeout=120)
+              response.raise_for_status()
+              dest.write_bytes(response.content)
+              actual = hashlib.sha256(response.content).hexdigest()
+              print(f"{filename}: {len(response.content)} bytes sha256={actual}", flush=True)
+              if actual != expected_sha:
+                  raise SystemExit(
+                      f"SHA mismatch for {filename}: expected {expected_sha}, got {actual}"
+                  )
+          PY
+
+      - name: Run canonical public-tender development suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/planreader-benchmark-run
+          mkdir -p /tmp/planreader-benchmark-run
+          PYTHONPATH=. python pb_benchmark_accuracy_engine.py             --all             --require-local-sources             --output-dir /tmp/planreader-benchmark-run | tee /tmp/planreader-benchmark-run/console.txt
+
+      - name: Print exact benchmark summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          p = Path("/tmp/planreader-benchmark-run/headline_accuracy_dashboard.json")
+          if not p.exists():
+              print("headline dashboard missing")
+              raise SystemExit(0)
+          data = json.loads(p.read_text())
+          print(json.dumps(data.get("headline_metrics", {}), indent=2))
+          print("\nPer-project:")
+          for report in data.get("headline_reports", []):
+              print(
+                  report["benchmark_id"],
+                  json.dumps(report.get("summary", {}), sort_keys=True),
+              )
+          PY
+
+      - name: Upload canonical benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-five-project-development-benchmark
+          path: /tmp/planreader-benchmark-run
+          if-no-files-found: warn
+          retention-days: 7
