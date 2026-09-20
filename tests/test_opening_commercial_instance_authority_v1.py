@@ -35,11 +35,13 @@ from pb_opening_commercial_instance_authority import (
     COMMERCIAL_COUNT_INCONSISTENT_IDENTITY_GRAPH,
     COMMERCIAL_COUNT_NO_PHYSICAL_INSTANCES,
     COMMERCIAL_COUNT_NO_SCHEDULE_ROW,
+    COMMERCIAL_COUNT_RECORD_UNAVAILABLE,
     COMMERCIAL_COUNT_SCHEDULE_PHYSICAL_MISMATCH,
     COMMERCIAL_COUNT_UNIVERSE_INCOMPLETE,
+    OpeningCommercialInstanceProducer,
+    OpeningCommercialInstanceSelector,
     OpeningInstanceEvidenceBundle,
     _resolve_physical_identity_count,
-    resolve_opening_commercial_instance_count,
 )
 from pb_opening_schedule_count_authority import OpeningScheduleCountProducer
 from pb_opening_schedule_v171 import ScheduleEntry, parse_schedule_rows
@@ -398,20 +400,46 @@ def _schedule_authority(env: dict, *entries: ScheduleEntry) -> object:
 
 
 def _resolve(env: dict, mark: str, *, universe_authority, schedule_authority, bundles=None):
+    """Convenience: publish_scope() for a single mark, then resolve() it
+    straight back out through the real Selector/Authority boundary --
+    exercises the full producer-then-selector path, not a shortcut."""
+    results = _publish(
+        env, [mark], universe_authority=universe_authority,
+        schedule_authority=schedule_authority, bundles=bundles,
+    )
+    return results[0]
+
+
+def _publish(env: dict, marks: list[str], *, universe_authority, schedule_authority, bundles=None):
     if bundles is None:
         bundles = [_bundle(i, env) for i in env["instances"]]
-    return resolve_opening_commercial_instance_count(
+    producer = OpeningCommercialInstanceProducer.create()
+    producer.publish_scope(
         document_id=env["document_id"],
         revision_id=env["revision_id"],
         source_sha256=env["source_sha256"],
         snapshot_id=env["snapshot_id"],
         decision_scope_id=_DECISION_SCOPE_ID,
-        mark=mark,
+        marks=marks,
         instance_evidence=bundles,
         physical_opening_authority=env["physical_opening_authority"],
         universe_completeness_authority=universe_authority,
         schedule_count_authority=schedule_authority,
     )
+    authority = producer.authority()
+    return [
+        authority.resolve(
+            OpeningCommercialInstanceSelector(
+                document_id=env["document_id"],
+                revision_id=env["revision_id"],
+                source_sha256=env["source_sha256"],
+                snapshot_id=env["snapshot_id"],
+                decision_scope_id=_DECISION_SCOPE_ID,
+                normalized_mark=mark,
+            )
+        )
+        for mark in marks
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -665,8 +693,8 @@ def test_one_unresolved_identity_pair_blocks_entire_mark() -> None:
     from pb_opening_commercial_instance_authority import _EligibleInstance
 
     eligible = [
-        _EligibleInstance(key="a", existence_selector=a, existence_record_id="rec_a", tag_observation_id="tag_a"),
-        _EligibleInstance(key="b", existence_selector=b, existence_record_id="rec_b", tag_observation_id="tag_b"),
+        _EligibleInstance(key="a", mark="D1", existence_selector=a, existence_record_id="rec_a", tag_observation_id="tag_a"),
+        _EligibleInstance(key="b", mark="D1", existence_selector=b, existence_record_id="rec_b", tag_observation_id="tag_b"),
     ]
     count, status, _reasons = _resolve_physical_identity_count(
         eligible, physical_opening_authority=fake
@@ -684,7 +712,7 @@ def test_contradictory_same_same_distinct_graph_conflicts_not_collapses() -> Non
         frozenset(("a", "c")): _distinct(),
     })
     eligible = [
-        _EligibleInstance(key=k, existence_selector=_fake_selector(k), existence_record_id=f"rec_{k}", tag_observation_id=f"tag_{k}")
+        _EligibleInstance(key=k, mark="D1", existence_selector=_fake_selector(k), existence_record_id=f"rec_{k}", tag_observation_id=f"tag_{k}")
         for k in ("a", "b", "c")
     ]
     count, status, reasons = _resolve_physical_identity_count(
@@ -740,12 +768,54 @@ def test_two_marks_in_one_scope_do_not_cross_contaminate() -> None:
         ScheduleEntry(type_mark="D1", width_mm=900, height_mm=2100, count=2, count_explicit=True),
         ScheduleEntry(type_mark="W1", width_mm=1200, height_mm=1200, count=5, count_explicit=True),  # deliberate mismatch
     )
-    d1 = _resolve(env, "D1", universe_authority=universe, schedule_authority=schedule)
-    w1 = _resolve(env, "W1", universe_authority=universe, schedule_authority=schedule)
+    # One publish_scope() call for BOTH marks -- exercises the real
+    # multi-mark grouping (instances are replayed once and grouped by
+    # their discovered mark), not two independent single-mark calls.
+    d1, w1 = _publish(env, ["D1", "W1"], universe_authority=universe, schedule_authority=schedule)
     assert d1.status == EvidenceResolutionStatus.CORROBORATED
     assert d1.count == 2
     assert w1.status == EvidenceResolutionStatus.CONFLICT
     assert w1.count is None
+
+
+# ---------------------------------------------------------------------------
+# 17. A selector for a mark never included in publish_scope()'s `marks`
+#     resolves to a safe, explicit ABSTAIN -- never an exception, a stale
+#     result, or (worse) silently falling through to some other mark's data.
+# ---------------------------------------------------------------------------
+def test_unpublished_mark_selector_abstains_safely() -> None:
+    env = _build_environment(marks=["D1"])
+    universe = _complete_universe(env)
+    schedule = _schedule_authority(
+        env, ScheduleEntry(type_mark="D1", width_mm=900, height_mm=2100, count=1, count_explicit=True)
+    )
+    producer = OpeningCommercialInstanceProducer.create()
+    producer.publish_scope(
+        document_id=env["document_id"],
+        revision_id=env["revision_id"],
+        source_sha256=env["source_sha256"],
+        snapshot_id=env["snapshot_id"],
+        decision_scope_id=_DECISION_SCOPE_ID,
+        marks=["D1"],
+        instance_evidence=[_bundle(i, env) for i in env["instances"]],
+        physical_opening_authority=env["physical_opening_authority"],
+        universe_completeness_authority=universe,
+        schedule_count_authority=schedule,
+    )
+    authority = producer.authority()
+    never_asked_about = authority.resolve(
+        OpeningCommercialInstanceSelector(
+            document_id=env["document_id"],
+            revision_id=env["revision_id"],
+            source_sha256=env["source_sha256"],
+            snapshot_id=env["snapshot_id"],
+            decision_scope_id=_DECISION_SCOPE_ID,
+            normalized_mark="W9",
+        )
+    )
+    assert never_asked_about.status == EvidenceResolutionStatus.ABSTAINED
+    assert never_asked_about.count is None
+    assert COMMERCIAL_COUNT_RECORD_UNAVAILABLE in never_asked_about.reason_codes
 
 
 # ---------------------------------------------------------------------------
