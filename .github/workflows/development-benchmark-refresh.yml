@@ -108,6 +108,62 @@ jobs:
               )
           PY
 
+      - name: Print row movements versus committed dashboard
+        if: success()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          runtime = Path("benchmark_results_runtime")
+          committed = Path("benchmark_results")
+          project_ids = [
+              "tenders_ke_kstvet_cbc_classroom",
+              "tenders_ke_murera_science_lab",
+              "tenders_ke_ghazi_science_lab",
+              "tenders_ke_umma_hostels",
+              "tenders_ke_lamu_ishakani_ecd_classrooms",
+          ]
+
+          print("=" * 72)
+          print("ROW MOVEMENTS VS COMMITTED REPORTS")
+          for project_id in project_ids:
+              new_path = runtime / f"{project_id}_accuracy_report.json"
+              old_path = committed / f"{project_id}_accuracy_report.json"
+              if not new_path.exists() or not old_path.exists():
+                  print(f"{project_id}: comparison file unavailable")
+                  continue
+              new = json.loads(new_path.read_text(encoding="utf-8"))
+              old = json.loads(old_path.read_text(encoding="utf-8"))
+              old_rows = {row["item_id"]: row for row in old.get("item_results", [])}
+              new_rows = {row["item_id"]: row for row in new.get("item_results", [])}
+              moved = []
+              for item_id in sorted(set(old_rows) | set(new_rows)):
+                  before = old_rows.get(item_id, {})
+                  after = new_rows.get(item_id, {})
+                  before_status = before.get("status")
+                  after_status = after.get("status")
+                  before_qty = before.get("extracted_quantity")
+                  after_qty = after.get("extracted_quantity")
+                  if before_status != after_status or before_qty != after_qty:
+                      moved.append(
+                          (
+                              item_id,
+                              before_status,
+                              after_status,
+                              before_qty,
+                              after_qty,
+                          )
+                      )
+              print(f"{project_id}: {len(moved)} row(s) moved")
+              for item_id, before_status, after_status, before_qty, after_qty in moved:
+                  print(
+                      f"  {item_id}: {before_status} -> {after_status}; "
+                      f"qty {before_qty} -> {after_qty}"
+                  )
+          print("=" * 72)
+          PY
+
       - name: Upload benchmark reports
         if: always()
         uses: actions/upload-artifact@v4
