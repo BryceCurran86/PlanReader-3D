@@ -41,6 +41,7 @@ from pb_generic_opening_count_authority import (
     GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED,
     GENERIC_OPENING_COUNT_IDENTITY_CONTRADICTION,
     GENERIC_OPENING_COUNT_IDENTITY_PAIRWISE_UNRESOLVED,
+    GENERIC_OPENING_COUNT_LINEAGE_MISMATCH,
     GENERIC_OPENING_COUNT_NON_PLAN_VIEW,
     GENERIC_OPENING_COUNT_NO_PHYSICAL_INSTANCES,
     GENERIC_OPENING_COUNT_PHYSICAL_INSTANCE_UNRESOLVED,
@@ -837,3 +838,330 @@ def test_one_unresolvable_member_blocks_entire_count_even_if_others_match_schedu
     assert res.status is not EvidenceResolutionStatus.CORROBORATED
     assert res.record is None
     assert GENERIC_OPENING_COUNT_PHYSICAL_INSTANCE_UNRESOLVED in res.reason_codes
+
+def test_physical_exceeds_schedule_conflicts() -> None:
+    """physical > schedule must CONFLICT, never silently take the smaller
+    (schedule) number."""
+    openings = tuple(_physical(f"op-{i}") for i in range(6))
+    bindings = tuple((f"op-{i}", "W1", "row-w1") for i in range(6))
+    producer, _ = _setup(
+        openings=openings,
+        bindings=bindings,
+        schedule_qty={("row-w1",): ("W1", 4)},
+    )
+    sel = GenericOpeningCountSelector(
+        document_id=DOC, revision_id=REV, source_sha256=SHA,
+        snapshot_id=SNAP, decision_scope_id=SCOPE, opening_mark="W1",
+    )
+    res = producer.publish(sel)
+    assert res.status is EvidenceResolutionStatus.CONFLICT
+    assert res.record is None
+    assert GENERIC_OPENING_COUNT_SCHEDULE_MISMATCH in res.reason_codes
+
+
+def test_producer_signature_cannot_accept_caller_instance_bundles() -> None:
+    """Architectural guarantee, not just empirical behavior: the producer's
+    public construction surface has no parameter through which a caller
+    could hand it a hand-picked subset of instance/evidence bundles. The
+    only inputs are producer-owned Authorities; the universe's own
+    accounted_member_ids is what determines which members require
+    reconciliation, and omitting one is not expressible through this
+    signature."""
+    import inspect
+
+    params = set(inspect.signature(GenericOpeningCountProducer.from_authorities).parameters)
+    forbidden = {
+        "instance_evidence", "opening_instance_evidence", "instances",
+        "physical_instance_ids", "member_ids", "bundles", "candidates",
+    }
+    assert not (params & forbidden), (
+        f"from_authorities must not accept caller-selected instance params: {params & forbidden}"
+    )
+    assert params == {
+        "opening_universe_authority",
+        "physical_opening_authority",
+        "viewport_view_class_authority",
+        "schedule_binding_authority",
+        "schedule_row_quantity_authority",
+        "diagnostic_request",
+        "schedule_declared_counts",
+        "non_plan_viewport_ids",
+    }
+
+
+def test_stale_revision_lineage_fails() -> None:
+    """Distinct from the existing stale-snapshot test: a physical existence
+    record published under a different revision_id than the selector must
+    also fail closed via the same lineage cross-check."""
+    openings = (_physical("op-1"),)
+    member_ids = ("op-1",)
+    univ_rec = OpeningUniverseCompletenessRecord(
+        record_id="univ-stale-rev",
+        decision_scope_id=SCOPE,
+        decision_scope_kind="viewport",
+        document_id=DOC,
+        revision_id=REV,
+        source_sha256=SHA,
+        snapshot_id=SNAP,
+        page_ids=(PAGE,),
+        viewport_id=VP_PLAN,
+        enumeration_state=SourceEnumerationState.COMPLETE.value,
+        source_decode_complete=True,
+        semantic_enumeration_complete=True,
+        decision_scope_complete=True,
+        accounted_member_ids=member_ids,
+        universe_fingerprint="fp-stale-rev",
+        reason_codes=(),
+    )
+    univ_auth = OpeningUniverseCompletenessAuthority(
+        {(DOC, REV, SHA, SNAP, SCOPE): univ_rec}, _seal=UNIV_SEAL
+    )
+    object.__setattr__(
+        univ_auth, "_source_authentication_seal", _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL,
+    )
+    src_auth = SourceObservationProducer(producer_method="test", producer_version="1.0").authority()
+    phys_auth = PhysicalOpeningAuthority(src_auth)
+    # Existence record was published under a DIFFERENT revision_id than the
+    # selector queries -- must fail the lineage cross-check.
+    stale_rev_record = PhysicalOpeningExistenceRecord(
+        record_id="op-1",
+        source_observation_ids=("obs-op-1",),
+        source_lineage_root_ids=("root-op-1",),
+        document_id=DOC,
+        revision_id="rev-stale",
+        source_sha256=SHA,
+        snapshot_id=SNAP,
+        page_id=PAGE,
+        viewport_id=VP_PLAN,
+        semantic_class="opening",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        proposition=PHYSICAL_OPENING_EXISTS,
+        structural_pattern="jamb_bounded",
+        diagnostic_confidence=1.0,
+        blocking_reasons=(),
+        structural_reason_codes=(),
+        producer_method="native_vector",
+        producer_version="1.0.0",
+        producer_generation=1,
+    )
+
+    def _prove(sel: ObservationSelector) -> PhysicalOpeningExistenceResult:
+        return PhysicalOpeningExistenceResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            proposition=PHYSICAL_OPENING_EXISTS,
+            physical_opening_existence="exists",
+            reason_codes=(),
+            existence_record=stale_rev_record,
+        )
+
+    object.__setattr__(phys_auth, "prove_existence", _prove)
+    view_prod = ViewportViewClassProducer.create()
+    view_prod.publish(
+        ViewportViewClassSelector(
+            document_id=DOC, revision_id=REV, source_sha256=SHA,
+            snapshot_id=SNAP, viewport_id=VP_PLAN,
+        ),
+        view_kind=VIEW_KIND_FLOOR_PLAN,
+        evidence_observation_ids=("v1",),
+    )
+    producer = GenericOpeningCountProducer.from_authorities(
+        opening_universe_authority=univ_auth,
+        physical_opening_authority=phys_auth,
+        viewport_view_class_authority=view_prod.authority(),
+    )
+    res = producer.publish(
+        GenericOpeningCountSelector(
+            document_id=DOC, revision_id=REV, source_sha256=SHA,
+            snapshot_id=SNAP, decision_scope_id=SCOPE,
+        )
+    )
+    assert res.status is EvidenceResolutionStatus.CONFLICT
+    assert res.record is None
+    assert GENERIC_OPENING_COUNT_LINEAGE_MISMATCH in res.reason_codes
+
+
+def test_same_same_distinct_three_node_contradiction_conflicts() -> None:
+    """Literal 3-node inconsistency: A~B proven SAME, B~C proven SAME, but
+    A~C proven DISTINCT. Real G17 record-id equality is always transitively
+    consistent by construction (plain string equality), so this exact
+    contradiction cannot arise from the real dependency -- this test proves
+    the reconciliation code's own all-pairs check does not assume that
+    regardless, using a forced mock exactly like the deleted standalone
+    module's graph-consistency test did."""
+    openings = (_physical("op-a"), _physical("op-b"), _physical("op-c"))
+    producer, selector = _setup(openings=openings)
+
+    from pb_physical_opening_authority import (
+        PHYSICAL_OPENING_IDENTITY_RESOLVED,
+        PhysicalOpeningIdentityResult,
+    )
+
+    def _inconsistent_graph(left_selector, right_selector):
+        left_id = left_selector.observation_id
+        right_id = right_selector.observation_id
+        pair = {left_id, right_id}
+        if pair == {"op-a", "op-b"} or pair == {"op-b", "op-c"}:
+            proven_same = True
+        else:  # {"op-a", "op-c"}
+            proven_same = False
+        return PhysicalOpeningIdentityResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            physical_opening_identity="op-a" if proven_same else "distinct",
+            proven_same=proven_same,
+            reason_codes=(PHYSICAL_OPENING_IDENTITY_RESOLVED,),
+        )
+
+    object.__setattr__(producer._physical, "compare_identity", _inconsistent_graph)
+    res = producer.publish(selector)
+    assert res.status is EvidenceResolutionStatus.CONFLICT
+    assert res.record is None
+    assert GENERIC_OPENING_COUNT_IDENTITY_CONTRADICTION in res.reason_codes
+
+
+def test_unresolved_binding_excludes_member_from_mark_scoped_count() -> None:
+    """W6-shaped case: a physical opening genuinely exists but its
+    schedule/tag binding cannot resolve (no matching row, ambiguous, etc).
+    It must never contribute to a NAMED mark's count -- only openings with
+    a resolved binding can match a mark-scoped query."""
+    resolved = tuple(_physical(f"op-{i}") for i in range(3))
+    unresolved = _physical("op-unbound")
+    bindings = tuple((op.record_id, "W1", "row-w1") for op in resolved)
+    # op-unbound deliberately has no entry in `bindings` -> binding authority
+    # returns UNAVAILABLE (not CORROBORATED, not CONFLICT) for it.
+    producer, _ = _setup(
+        openings=resolved + (unresolved,),
+        bindings=bindings,
+        schedule_qty={("row-w1",): ("W1", 3)},
+    )
+    sel = GenericOpeningCountSelector(
+        document_id=DOC, revision_id=REV, source_sha256=SHA,
+        snapshot_id=SNAP, decision_scope_id=SCOPE, opening_mark="W1",
+    )
+    res = producer.publish(sel)
+    assert res.status is EvidenceResolutionStatus.CORROBORATED
+    assert res.record is not None
+    assert res.record.count == 3
+    assert "op-unbound" not in res.record.physical_instance_record_ids
+    assert res.record.schedule_corroborated is True
+
+
+def test_incomplete_universe_abstains_despite_apparent_schedule_equality() -> None:
+    """Physical count and schedule count would agree (2 == 2) if only
+    completeness held -- but the universe is INCOMPLETE, so apparent
+    numeric agreement must never substitute for a proven-complete universe."""
+    openings = tuple(_physical(f"op-{i}") for i in range(2))
+    bindings = tuple((f"op-{i}", "W1", "row-w1") for i in range(2))
+    producer, _ = _setup(
+        openings=openings,
+        bindings=bindings,
+        schedule_qty={("row-w1",): ("W1", 2)},
+        scope_complete=False,
+    )
+    sel = GenericOpeningCountSelector(
+        document_id=DOC, revision_id=REV, source_sha256=SHA,
+        snapshot_id=SNAP, decision_scope_id=SCOPE, opening_mark="W1",
+    )
+    res = producer.publish(sel)
+    assert res.status is EvidenceResolutionStatus.ABSTAINED
+    assert res.record is None
+    assert GENERIC_OPENING_COUNT_SCOPE_INCOMPLETE in res.reason_codes
+
+
+def test_differing_dimensions_do_not_affect_count_reconciliation() -> None:
+    """Two instances of the same mark whose binding records carry different
+    (independently, perhaps imprecisely parsed) width/height values must
+    still reconcile purely on mark + schedule-row-observation-id identity --
+    dimension fields are diagnostic on the binding record, never part of
+    the count reconciliation logic."""
+    op_a, op_b = _physical("op-dim-a"), _physical("op-dim-b")
+    member_ids = ("op-dim-a", "op-dim-b")
+    univ_rec = OpeningUniverseCompletenessRecord(
+        record_id="univ-dims",
+        decision_scope_id=SCOPE,
+        decision_scope_kind="viewport",
+        document_id=DOC, revision_id=REV, source_sha256=SHA, snapshot_id=SNAP,
+        page_ids=(PAGE,), viewport_id=VP_PLAN,
+        enumeration_state=SourceEnumerationState.COMPLETE.value,
+        source_decode_complete=True, semantic_enumeration_complete=True,
+        decision_scope_complete=True, accounted_member_ids=member_ids,
+        universe_fingerprint="fp-dims", reason_codes=(),
+    )
+    univ_auth = OpeningUniverseCompletenessAuthority(
+        {(DOC, REV, SHA, SNAP, SCOPE): univ_rec}, _seal=UNIV_SEAL
+    )
+    object.__setattr__(
+        univ_auth, "_source_authentication_seal", _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL,
+    )
+    src_auth = SourceObservationProducer(producer_method="test", producer_version="1.0").authority()
+    phys_auth = PhysicalOpeningAuthority(src_auth)
+    by_id = {op_a.record_id: op_a, op_b.record_id: op_b}
+
+    def _prove(sel: ObservationSelector) -> PhysicalOpeningExistenceResult:
+        return PhysicalOpeningExistenceResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            proposition=PHYSICAL_OPENING_EXISTS,
+            physical_opening_existence="exists",
+            reason_codes=(),
+            existence_record=by_id[sel.observation_id],
+        )
+
+    object.__setattr__(phys_auth, "prove_existence", _prove)
+    view_prod = ViewportViewClassProducer.create()
+    view_prod.publish(
+        ViewportViewClassSelector(
+            document_id=DOC, revision_id=REV, source_sha256=SHA,
+            snapshot_id=SNAP, viewport_id=VP_PLAN,
+        ),
+        view_kind=VIEW_KIND_FLOOR_PLAN, evidence_observation_ids=("v1",),
+    )
+    # Same mark, same schedule row -- but deliberately mismatched dimension
+    # fields on each binding record (e.g. one leaf parsed as rough opening,
+    # the other as frame size -- a real-world source of noisy dimension
+    # text unrelated to count truth).
+    bind_results = {}
+    for op_id, w, h in (("op-dim-a", 900, 2100), ("op-dim-b", 850, 2050)):
+        key = (DOC, REV, SHA, SNAP, SCOPE, op_id)
+        bind_results[key] = ScheduleOpeningInstanceBindingResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("binding_resolved",),
+            record=ScheduleOpeningInstanceBindingRecord(
+                record_id=f"bind-{op_id}",
+                document_id=DOC, revision_id=REV, source_sha256=SHA,
+                snapshot_id=SNAP, page_id=PAGE, decision_scope_id=SCOPE,
+                opening_record_id=op_id, tag_observation_id=f"tag-{op_id}",
+                tag_mark="W1", schedule_page_id=PAGE,
+                schedule_row_observation_ids=("row-w1",),
+                schedule_row_type_mark="W1",
+                schedule_row_width_mm=w, schedule_row_height_mm=h,
+            ),
+        )
+    bind_auth = ScheduleOpeningInstanceBindingAuthority(bind_results, _seal=BIND_SEAL)
+
+    qty_prod = ScheduleRowQuantityProducer.create()
+    qty_prod.publish(
+        ScheduleRowQuantitySelector(
+            document_id=DOC, revision_id=REV, source_sha256=SHA, snapshot_id=SNAP,
+            schedule_page_id=PAGE, schedule_row_observation_ids=("row-w1",),
+        ),
+        declared_count=2, type_mark="W1", universe_complete=True,
+    )
+
+    producer = GenericOpeningCountProducer.from_authorities(
+        opening_universe_authority=univ_auth,
+        physical_opening_authority=phys_auth,
+        viewport_view_class_authority=view_prod.authority(),
+        schedule_binding_authority=bind_auth,
+        schedule_row_quantity_authority=qty_prod.authority(),
+    )
+    res = producer.publish(
+        GenericOpeningCountSelector(
+            document_id=DOC, revision_id=REV, source_sha256=SHA,
+            snapshot_id=SNAP, decision_scope_id=SCOPE, opening_mark="W1",
+        )
+    )
+    assert res.status is EvidenceResolutionStatus.CORROBORATED
+    assert res.record is not None
+    assert res.record.count == 2
+    assert res.record.schedule_corroborated is True
+
+

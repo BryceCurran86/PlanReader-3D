@@ -283,6 +283,44 @@ class TestScheduleRowParsing(unittest.TestCase):
         self.assertEqual(len(entries), 2)
         self.assertEqual(entries[0].count, 4)
         self.assertEqual(entries[1].count, 2)
+        self.assertTrue(entries[0].count_explicit)
+        self.assertTrue(entries[1].count_explicit)
+
+    def test_uppercase_x_quantity_is_explicit(self):
+        """'2X' (uppercase multiplier suffix) must parse the same as '2' --
+        regression test for the count_explicit uppercase-X misparse fix."""
+        rows = [
+            _row("Mark\tDims\tQty"),
+            _row("W1\t1200x1500\t2X"),
+        ]
+        entries = parse_schedule_rows(rows)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].count, 2)
+        self.assertTrue(entries[0].count_explicit)
+
+    def test_malformed_quantity_is_not_explicit(self):
+        """A quantity cell that fails to parse as an integer must never be
+        treated as an authoritative, source-backed count."""
+        rows = [
+            _row("Mark\tDims\tQty"),
+            _row("W1\t1200x1500\tN/A"),
+        ]
+        entries = parse_schedule_rows(rows)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].count, 1)
+        self.assertFalse(entries[0].count_explicit)
+
+    def test_missing_quantity_column_is_not_explicit(self):
+        """No quantity column at all must default count to 1 but mark it
+        explicitly non-authoritative."""
+        rows = [
+            _row("Mark\tDims"),
+            _row("D01\t820x2040"),
+        ]
+        entries = parse_schedule_rows(rows)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].count, 1)
+        self.assertFalse(entries[0].count_explicit)
 
     def test_empty_rows_skipped(self):
         rows = [
