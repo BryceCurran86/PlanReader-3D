@@ -21,6 +21,7 @@ from pb_schedule_opening_instance_binding_authority import (
     ScheduleOpeningInstanceBindingAuthority,
     ScheduleOpeningInstanceBindingRecord,
     ScheduleOpeningInstanceBindingResult,
+    ScheduleOpeningInstanceBindingSelector,
     _AUTHORITY_SEAL as BIND_SEAL,
 )
 from pb_schedule_row_quantity_authority import (
