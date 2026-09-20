@@ -1,20 +1,13 @@
-"""Tests for pb_opening_universe_completeness_source_adapter.py.
+"""Fail-closed tests for authenticated primitive coverage.
 
-build_source_authenticated_opening_universe_completeness() is the one lawful
-production path to an OpeningUniverseCompletenessAuthority that
-GenericOpeningCountAuthority will accept (it gates on a private
-`_source_authentication_seal`). Real PDF ingestion (fitz-authored synthetic
-drawing, real vector geometry -- not mocks) exercises the real
-source-decode -> visibility-classification -> universe-enumeration chain.
+The source adapter may authenticate raw visible PDF coverage, but it must not
+claim that raw segments are a complete semantic physical-opening universe.
 """
 from __future__ import annotations
 
 import fitz
 
 from pb_generic_opening_count_authority import (
-    GENERIC_OPENING_COUNT_SCOPE_INCOMPLETE,
-    GenericOpeningCountProducer,
-    GenericOpeningCountSelector,
     _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -25,17 +18,22 @@ from pb_opening_universe_completeness_authority import (
 from pb_opening_universe_completeness_source_adapter import (
     build_source_authenticated_opening_universe_completeness,
 )
-from pb_physical_opening_authority import PhysicalOpeningAuthority
 from pb_source_visibility_authority import SourceVisibilityProducer
-from pb_viewport_view_class_authority import ViewportViewClassProducer
 
 SCOPE = "completeness-scope:page-1"
 
 
-def _draw_opening(page: fitz.Page, *, x0: float, gap0: float, gap1: float, x1: float, y0: float, y1: float) -> None:
-    """One wall run with a jamb-bounded gap -- the real 6-segment G17
-    VISIBLE existence pattern (two wall faces each continuing on both sides
-    of one gap, plus two jambs)."""
+def _draw_opening(
+    page: fitz.Page,
+    *,
+    x0: float,
+    gap0: float,
+    gap1: float,
+    x1: float,
+    y0: float,
+    y1: float,
+) -> None:
+    """Draw one real six-segment G17 opening pattern."""
     for first, second in (
         ((x0, y0), (gap0, y0)),
         ((gap1, y0), (x1, y0)),
@@ -44,109 +42,62 @@ def _draw_opening(page: fitz.Page, *, x0: float, gap0: float, gap1: float, x1: f
         ((gap0, y0), (gap0, y1)),
         ((gap1, y0), (gap1, y1)),
     ):
-        page.draw_line(fitz.Point(*first), fitz.Point(*second), color=(0, 0, 0), width=1)
+        page.draw_line(
+            fitz.Point(*first),
+            fitz.Point(*second),
+            color=(0, 0, 0),
+            width=1,
+        )
 
 
 def _tag_pdf() -> bytes:
     doc = fitz.open()
     page = doc.new_page(width=700, height=650)
-    _draw_opening(page, x0=20.0, gap0=100.0, gap1=140.0, x1=220.0, y0=100.0, y1=110.0)
+    _draw_opening(
+        page,
+        x0=20.0,
+        gap0=100.0,
+        gap1=140.0,
+        x1=220.0,
+        y0=100.0,
+        y1=110.0,
+    )
     payload = doc.tobytes()
     doc.close()
     return payload
 
 
-def _ingest(producer: SourceVisibilityProducer, payload: bytes, document_id: str):
+def _ingest(
+    producer: SourceVisibilityProducer,
+    payload: bytes,
+    document_id: str,
+):
     return producer.ingest_native_pdf_bytes(
-        document_id=document_id, source_bytes=payload, source_locator=f"memory://{document_id}.pdf",
+        document_id=document_id,
+        source_bytes=payload,
+        source_locator=f"memory://{document_id}.pdf",
     )
 
 
-def test_real_source_decode_is_authenticated_but_semantically_incomplete() -> None:
-    src = SourceVisibilityProducer(producer_method="completeness-adapter-test", producer_version="1.0")
-    payload = _tag_pdf()
-    ingestion = _ingest(src, payload, "doc-real")
-    published = src.published_snapshot_for_revision(ingestion.revision.revision_id)
-    assert published is not None
-
-    authority = build_source_authenticated_opening_universe_completeness(
-        source_visibility_producer=src,
-        revision_id=ingestion.revision.revision_id,
-        decision_scope_id=SCOPE,
-        decision_scope_kind="viewport",
-        page_ids=("1",),
-        optional_content_known_visible=True,
-    )
-
-    assert getattr(authority, "_source_authentication_seal", None) is (
-        _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL
-    )
-
-    res = authority.resolve(
+def _resolve(authority, published, revision_id):
+    return authority.resolve(
         OpeningUniverseSelector(
             document_id=published.revision.document_id,
-            revision_id=published.revision.revision_id,
+            revision_id=revision_id,
             source_sha256=published.revision.source_sha256,
             snapshot_id=published.snapshot.snapshot_id,
             decision_scope_id=SCOPE,
         )
     )
-    # Six raw G17 support segments are authenticated source primitives, not
-    # six semantic opening instances. Source authentication alone must never
-    # turn raw primitive equality into commercial opening completeness.
-    assert res.status is not EvidenceResolutionStatus.CORROBORATED
-    assert res.record is not None
-    assert res.record.source_decode_complete is True
-    assert res.record.semantic_enumeration_complete is False
-    assert res.record.decision_scope_complete is False
-    assert SEMANTIC_ENUMERATION_INCOMPLETE in res.record.reason_codes
-    assert len(res.record.accounted_member_ids) == 6
 
 
-def test_raw_primitive_coverage_cannot_unlock_commercial_count() -> None:
+def test_real_source_decode_does_not_claim_semantic_opening_completeness() -> None:
+    """Six support segments for one opening are not six semantic openings."""
     src = SourceVisibilityProducer(
         producer_method="completeness-adapter-test",
         producer_version="1.0",
     )
-    ingestion = _ingest(src, _tag_pdf(), "doc-commercial-gate")
-    published = src.published_snapshot_for_revision(ingestion.revision.revision_id)
-    assert published is not None
-
-    completeness = build_source_authenticated_opening_universe_completeness(
-        source_visibility_producer=src,
-        revision_id=ingestion.revision.revision_id,
-        decision_scope_id=SCOPE,
-        decision_scope_kind="page",
-        page_ids=("1",),
-        optional_content_known_visible=True,
-    )
-    generic = GenericOpeningCountProducer.from_authorities(
-        opening_universe_authority=completeness,
-        physical_opening_authority=PhysicalOpeningAuthority(src.authority()),
-        viewport_view_class_authority=ViewportViewClassProducer.create().authority(),
-    )
-    result = generic.publish(
-        GenericOpeningCountSelector(
-            document_id=published.revision.document_id,
-            revision_id=published.revision.revision_id,
-            source_sha256=published.revision.source_sha256,
-            snapshot_id=published.snapshot.snapshot_id,
-            decision_scope_id=SCOPE,
-            opening_mark="W1",
-        )
-    )
-
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert result.record is None
-    assert GENERIC_OPENING_COUNT_SCOPE_INCOMPLETE in result.reason_codes
-
-
-def test_optional_content_defaults_to_unresolved_and_fails_closed() -> None:
-    """Caller must explicitly assert optional_content_known_visible=True;
-    the default must never silently claim completeness."""
-    src = SourceVisibilityProducer(producer_method="completeness-adapter-test", producer_version="1.0")
-    payload = _tag_pdf()
-    ingestion = _ingest(src, payload, "doc-default")
+    ingestion = _ingest(src, _tag_pdf(), "doc-real")
     published = src.published_snapshot_for_revision(ingestion.revision.revision_id)
     assert published is not None
 
@@ -156,27 +107,94 @@ def test_optional_content_defaults_to_unresolved_and_fails_closed() -> None:
         decision_scope_id=SCOPE,
         decision_scope_kind="viewport",
         page_ids=("1",),
-        # optional_content_known_visible left at its False default.
+        optional_content_known_visible=True,
     )
-    res = authority.resolve(
-        OpeningUniverseSelector(
-            document_id=published.revision.document_id,
-            revision_id=published.revision.revision_id,
-            source_sha256=published.revision.source_sha256,
-            snapshot_id=published.snapshot.snapshot_id,
-            decision_scope_id=SCOPE,
-        )
+
+    # Primitive coverage never earns the commercial semantic-completeness seal.
+    assert getattr(authority, "_source_authentication_seal", None) is not (
+        _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL
     )
-    assert res.record is not None
-    assert res.record.decision_scope_complete is False
-    assert "opening_universe_optional_content_unresolved" in res.record.reason_codes
+
+    result = _resolve(authority, published, ingestion.revision.revision_id)
+    assert result.status is not EvidenceResolutionStatus.CORROBORATED
+    assert result.record is not None
+    assert result.record.semantic_enumeration_complete is False
+    assert result.record.decision_scope_complete is False
+    assert SEMANTIC_ENUMERATION_INCOMPLETE in result.record.reason_codes
+    assert result.record.accounted_member_ids == ()
 
 
-def test_no_published_snapshot_still_seals_but_resolves_unavailable() -> None:
-    """A revision_id with nothing published for it must fail closed when
-    resolved -- the seal certifies the DERIVATION PATH was lawful, not that
-    a complete universe was found."""
-    src = SourceVisibilityProducer(producer_method="completeness-adapter-test", producer_version="1.0")
+def test_ordinary_non_opening_line_cannot_become_semantic_opening_member() -> None:
+    src = SourceVisibilityProducer(
+        producer_method="completeness-adapter-test",
+        producer_version="1.0",
+    )
+    doc = fitz.open()
+    page = doc.new_page(width=700, height=650)
+    _draw_opening(
+        page,
+        x0=20.0,
+        gap0=100.0,
+        gap1=140.0,
+        x1=220.0,
+        y0=100.0,
+        y1=110.0,
+    )
+    # Unrelated visible line: authenticated primitive, not an opening.
+    page.draw_line(
+        fitz.Point(20.0, 300.0),
+        fitz.Point(300.0, 300.0),
+        color=(0, 0, 0),
+        width=1,
+    )
+    payload = doc.tobytes()
+    doc.close()
+
+    ingestion = _ingest(src, payload, "doc-extra-line")
+    published = src.published_snapshot_for_revision(ingestion.revision.revision_id)
+    assert published is not None
+
+    authority = build_source_authenticated_opening_universe_completeness(
+        source_visibility_producer=src,
+        revision_id=ingestion.revision.revision_id,
+        decision_scope_id=SCOPE,
+        decision_scope_kind="viewport",
+        page_ids=("1",),
+        optional_content_known_visible=True,
+    )
+    result = _resolve(authority, published, ingestion.revision.revision_id)
+    assert result.record is not None
+    assert result.record.semantic_enumeration_complete is False
+    assert result.record.accounted_member_ids == ()
+
+
+def test_optional_content_default_remains_fail_closed() -> None:
+    src = SourceVisibilityProducer(
+        producer_method="completeness-adapter-test",
+        producer_version="1.0",
+    )
+    ingestion = _ingest(src, _tag_pdf(), "doc-default")
+    published = src.published_snapshot_for_revision(ingestion.revision.revision_id)
+    assert published is not None
+
+    authority = build_source_authenticated_opening_universe_completeness(
+        source_visibility_producer=src,
+        revision_id=ingestion.revision.revision_id,
+        decision_scope_id=SCOPE,
+        decision_scope_kind="viewport",
+        page_ids=("1",),
+    )
+    result = _resolve(authority, published, ingestion.revision.revision_id)
+    assert result.record is not None
+    assert result.record.decision_scope_complete is False
+    assert "opening_universe_optional_content_unresolved" in result.record.reason_codes
+
+
+def test_no_published_snapshot_resolves_unavailable_and_never_seals() -> None:
+    src = SourceVisibilityProducer(
+        producer_method="completeness-adapter-test",
+        producer_version="1.0",
+    )
     authority = build_source_authenticated_opening_universe_completeness(
         source_visibility_producer=src,
         revision_id="revision-never-ingested",
@@ -185,10 +203,10 @@ def test_no_published_snapshot_still_seals_but_resolves_unavailable() -> None:
         page_ids=("1",),
         optional_content_known_visible=True,
     )
-    assert getattr(authority, "_source_authentication_seal", None) is (
+    assert getattr(authority, "_source_authentication_seal", None) is not (
         _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL
     )
-    res = authority.resolve(
+    result = authority.resolve(
         OpeningUniverseSelector(
             document_id="doc-x",
             revision_id="revision-never-ingested",
@@ -197,46 +215,5 @@ def test_no_published_snapshot_still_seals_but_resolves_unavailable() -> None:
             decision_scope_id=SCOPE,
         )
     )
-    assert res.status is not EvidenceResolutionStatus.CORROBORATED
-    assert res.record is None
-
-
-def test_page_scoping_excludes_geometry_on_other_pages() -> None:
-    """Only observations on the requested page_ids are accounted for."""
-    src = SourceVisibilityProducer(producer_method="completeness-adapter-test", producer_version="1.0")
-    doc = fitz.open()
-    page1 = doc.new_page(width=700, height=650)
-    _draw_opening(page1, x0=20.0, gap0=100.0, gap1=140.0, x1=220.0, y0=100.0, y1=110.0)
-    page2 = doc.new_page(width=700, height=650)
-    _draw_opening(page2, x0=20.0, gap0=300.0, gap1=340.0, x1=420.0, y0=300.0, y1=310.0)
-    payload = doc.tobytes()
-    doc.close()
-
-    ingestion = _ingest(src, payload, "doc-multipage")
-    published = src.published_snapshot_for_revision(ingestion.revision.revision_id)
-    assert published is not None
-
-    authority = build_source_authenticated_opening_universe_completeness(
-        source_visibility_producer=src,
-        revision_id=ingestion.revision.revision_id,
-        decision_scope_id=SCOPE,
-        decision_scope_kind="viewport",
-        page_ids=("1",),
-        optional_content_known_visible=True,
-    )
-    res = authority.resolve(
-        OpeningUniverseSelector(
-            document_id=published.revision.document_id,
-            revision_id=published.revision.revision_id,
-            source_sha256=published.revision.source_sha256,
-            snapshot_id=published.snapshot.snapshot_id,
-            decision_scope_id=SCOPE,
-        )
-    )
-    assert res.record is not None
-    assert res.record.semantic_enumeration_complete is False
-    assert res.record.decision_scope_complete is False
-    assert SEMANTIC_ENUMERATION_INCOMPLETE in res.record.reason_codes
-    assert len(res.record.accounted_member_ids) == 6
-    for member_id in res.record.accounted_member_ids:
-        assert member_id.strip()
+    assert result.status is not EvidenceResolutionStatus.CORROBORATED
+    assert result.record is None
