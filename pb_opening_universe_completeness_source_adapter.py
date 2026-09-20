@@ -145,6 +145,7 @@ def build_source_authenticated_opening_universe_completeness(
                 "known_visible" if optional_content_known_visible else "unresolved"
             ),
             xobject_traversal_truncated=xobject_traversal_truncated,
+            semantic_enumeration_proven=False,
         )
 
     # Deliberately DO NOT attach GenericOpeningCountAuthority's
