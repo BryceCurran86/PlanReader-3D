@@ -467,6 +467,7 @@ class OpeningUniverseCompletenessProducer:
         enumerated_primitives: Sequence[object],
         optional_content_state: str,
         xobject_traversal_truncated: bool,
+        semantic_enumeration_proven: bool = True,
     ) -> OpeningUniverseCompletenessRecord:
         scope = build_opening_universe_scope(
             decision_scope_id=decision_scope_id,
@@ -491,7 +492,8 @@ class OpeningUniverseCompletenessProducer:
         source_fingerprint = _universe_fingerprint(source_members)
         enumerated_fingerprint = _universe_fingerprint(enumerated_members)
         semantic_complete = (
-            not source_reasons
+            bool(semantic_enumeration_proven)
+            and not source_reasons
             and not enumeration_reasons
             and source_fingerprint == enumerated_fingerprint
         )
