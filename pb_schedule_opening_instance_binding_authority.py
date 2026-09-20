@@ -445,44 +445,152 @@ def _is_header_row(cells: Sequence[str]) -> bool:
     return "mark" in mapping or "dims" in mapping
 
 
+def _header_table_specs(
+    row: dict[str, Any],
+    ids: Sequence[str],
+) -> list[tuple[dict[str, Any], float, float]]:
+    """Split one visual header line into independent horizontal tables.
+
+    The page row grouper intentionally groups by Y only. Construction drawings
+    can place door and window schedules side-by-side at the same Y coordinates;
+    treating that visual line as one table can silently let the first header
+    consume cells from the second. This helper finds every MARK/TYPE-style
+    header start, validates each slice with the shared header rules, and gives
+    each table a non-overlapping horizontal source-derived window.
+    """
+    cells = [cell.strip() for cell in str(row.get("text", "")).split("\t")]
+    bounds = list(row.get("bounds", []) or [])
+    if not cells or len(bounds) != len(cells):
+        return []
+
+    mark_starts = [
+        index
+        for index, cell in enumerate(cells)
+        if "mark" in detect_header([cell])
+    ]
+    if not mark_starts:
+        if not _is_header_row(cells):
+            return []
+        mark_starts = [0]
+
+    specs: list[tuple[dict[str, Any], float, float]] = []
+    for position, start in enumerate(mark_starts):
+        end = mark_starts[position + 1] if position + 1 < len(mark_starts) else len(cells)
+        table_cells = cells[start:end]
+        mapping = detect_header(table_cells)
+        if "mark" not in mapping:
+            continue
+        if not any(key in mapping for key in ("dims", "width", "height", "count", "desc")):
+            continue
+
+        if position == 0:
+            left = float(bounds[start][0]) - 20.0
+        else:
+            left = (float(bounds[start - 1][1]) + float(bounds[start][0])) / 2.0
+
+        if position + 1 < len(mark_starts):
+            next_start = mark_starts[position + 1]
+            right = (
+                float(bounds[next_start - 1][1]) + float(bounds[next_start][0])
+            ) / 2.0
+        else:
+            right = math.inf
+
+        specs.append(
+            (
+                {
+                    "text": "\t".join(table_cells),
+                    "bounds": bounds[start:end],
+                    "center_y": row.get("center_y", -math.inf),
+                    "header_observation_ids": tuple(ids[start:end]),
+                },
+                left,
+                right,
+            )
+        )
+    return specs
+
+
+def _row_slice_for_window(
+    row: dict[str, Any],
+    ids: Sequence[str],
+    *,
+    left: float,
+    right: float,
+) -> tuple[dict[str, Any], tuple[str, ...]] | None:
+    cells = [cell.strip() for cell in str(row.get("text", "")).split("\t")]
+    bounds = list(row.get("bounds", []) or [])
+    if not cells or len(bounds) != len(cells) or len(ids) != len(cells):
+        return None
+
+    selected: list[tuple[str, tuple[float, float], str]] = []
+    for cell, bound, observation_id in zip(cells, bounds, ids):
+        center_x = (float(bound[0]) + float(bound[1])) / 2.0
+        if center_x < left or center_x >= right:
+            continue
+        selected.append(
+            (
+                cell,
+                (float(bound[0]), float(bound[1])),
+                str(observation_id),
+            )
+        )
+
+    if not selected:
+        return None
+    return (
+        {
+            "text": "\t".join(item[0] for item in selected),
+            "bounds": [item[1] for item in selected],
+            "center_y": row.get("center_y", math.inf),
+        },
+        tuple(item[2] for item in selected),
+    )
+
+
 def _schedule_entries_for_page(
     page_rows: Sequence[tuple[dict[str, Any], tuple[str, ...]]],
     page_no: int,
 ) -> list[tuple[ScheduleEntry, tuple[str, ...]]]:
-    header_index = -1
-    header_min_x = -math.inf
-    header_max_x = math.inf
-    
-    for index, (row, _ids) in enumerate(page_rows):
-        cells = [cell.strip() for cell in row["text"].split("\t")]
-        if _is_header_row(cells):
-            header_index = index
-            bounds = row.get("bounds", [])
-            if bounds:
-                header_min_x = bounds[0][0] - 20.0
-                header_max_x = bounds[-1][1] + 20.0
-            break
+    """Discover every authenticated schedule table on one page.
+
+    Each header gets an independent horizontal window. If two distinct source
+    rows bind the same mark, downstream authority sees both and fails closed
+    instead of silently choosing whichever table appeared first in reading
+    order.
+    """
+    header_specs: list[tuple[int, dict[str, Any], float, float]] = []
+    for index, (row, ids) in enumerate(page_rows):
+        for header_row, left, right in _header_table_specs(row, ids):
+            header_specs.append((index, header_row, left, right))
 
     result: list[tuple[ScheduleEntry, tuple[str, ...]]] = []
-    if header_index < 0:
+    if not header_specs:
         return result
 
-    header_row = page_rows[header_index][0]
-    last_y = header_row.get("center_y", -math.inf)
-    max_y_gap = 50.0  # Require contiguous schedule region
-    
-    for row, ids in page_rows[header_index + 1 :]:
-        current_y = row.get("center_y", math.inf)
-        if current_y - last_y > max_y_gap:
-            break  # Schedule table has ended
+    max_y_gap = 50.0
+    for header_index, header_row, left, right in header_specs:
+        last_y = float(header_row.get("center_y", -math.inf))
+        for row_index in range(header_index + 1, len(page_rows)):
+            row, ids = page_rows[row_index]
+            current_y = float(row.get("center_y", math.inf))
+            if current_y - last_y > max_y_gap:
+                break
 
-        bounds = row.get("bounds", [])
-        if bounds and (bounds[-1][1] < header_min_x or bounds[0][0] > header_max_x):
-            continue
-            
-        last_y = current_y
-        for entry in parse_schedule_rows([header_row, row], page_no=page_no):
-            result.append((entry, ids))
+            later_headers = _header_table_specs(row, ids)
+            if any(
+                not (candidate_right <= left or candidate_left >= right)
+                for _candidate, candidate_left, candidate_right in later_headers
+            ):
+                break
+
+            sliced = _row_slice_for_window(row, ids, left=left, right=right)
+            if sliced is None:
+                continue
+            table_row, table_ids = sliced
+            last_y = current_y
+            for entry in parse_schedule_rows([header_row, table_row], page_no=page_no):
+                result.append((entry, table_ids))
     return result
 
 
