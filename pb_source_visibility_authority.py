@@ -523,6 +523,182 @@ class SourceVisibilityProducer:
         return published
 
 
+
+    def augment_with_raster_visible_segments(
+        self,
+        revision_id: str,
+    ) -> PublishedVisibleSourceSnapshot:
+        """Add source-bound raster visible segments where native visibility is absent.
+
+        The caller supplies only the revision address. Page inventory, render
+        resolution, detector, segment coordinates, and lineage remain
+        producer-owned.
+        """
+
+        published = self._published_by_revision.get(str(revision_id))
+        if published is None:
+            raise ValueError(OBSERVATION_UNAVAILABLE)
+
+        source_authority = self._producer.authority()
+        old_snapshot_id = published.snapshot.snapshot_id
+        pages_with_visible: set[str] = set()
+        for observation_id in published.visible_observation_ids:
+            result = source_authority.resolve(
+                ObservationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=old_snapshot_id,
+                    observation_id=observation_id,
+                )
+            )
+            if result.observation is not None:
+                pages_with_visible.add(str(result.observation.page_id))
+
+        snapshot = published.snapshot
+        visible_ids = list(published.visible_observation_ids)
+        new_receipts: dict[str, RasterSegmentVisibilityReceipt] = {}
+
+        for page_number in sorted(
+            {int(value) for value in published.coverage.decoded_pages}
+        ):
+            page_id = str(page_number)
+            if page_id in pages_with_visible:
+                continue
+
+            png_bytes, page_parent = self._producer.render_native_page_png(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=snapshot.snapshot_id,
+                page_id=page_id,
+                dpi=float(RASTER_RENDER_DPI),
+            )
+            image_sha256 = hashlib.sha256(png_bytes).hexdigest()
+            segments = detect_axis_aligned_raster_segments(
+                png_bytes,
+                dpi=RASTER_RENDER_DPI,
+            )
+            if len(segments) < 6:
+                continue
+
+            for index, segment in enumerate(segments):
+                segment_id = _raster_segment_observation_id(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    page_id=page_id,
+                    partition_id=page_parent.source_partition_id,
+                    image_sha256=image_sha256,
+                    detector_version=RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION,
+                    pixel_geometry=segment.pixel_geometry,
+                    geometry=segment.geometry_pt,
+                    index=index,
+                )
+                segment_ref = (
+                    f"raster_segment:{image_sha256}:"
+                    f"{RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION}:{index}"
+                )
+                snapshot = self._producer.publish_derived_observation(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    base_snapshot_id=snapshot.snapshot_id,
+                    page_id=page_id,
+                    source_partition_id=page_parent.source_partition_id,
+                    observation_kind=RASTER_PDF_SEGMENT,
+                    source_primitive_ref=segment_ref,
+                    origin_kind=RASTER_SEGMENT_ORIGIN_KIND,
+                    parent_observation_ids=(page_parent.observation_id,),
+                    raw_text="",
+                    geometry=segment.geometry_pt,
+                    viewport_id=None,
+                    observation_id=segment_id,
+                )
+
+                visible_ref = f"visible:{segment_ref}"
+                visible_id = _raster_visible_observation_id(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    page_id=page_id,
+                    partition_id=page_parent.source_partition_id,
+                    parent_observation_id=segment_id,
+                    geometry=segment.geometry_pt,
+                )
+                snapshot = self._producer.publish_derived_observation(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    base_snapshot_id=snapshot.snapshot_id,
+                    page_id=page_id,
+                    source_partition_id=page_parent.source_partition_id,
+                    observation_kind=RASTER_PDF_VISIBLE_SEGMENT,
+                    source_primitive_ref=visible_ref,
+                    origin_kind=RASTER_VISIBLE_SEGMENT_ORIGIN_KIND,
+                    parent_observation_ids=(segment_id,),
+                    raw_text="",
+                    geometry=segment.geometry_pt,
+                    viewport_id=None,
+                    observation_id=visible_id,
+                )
+                visible_ids.append(visible_id)
+                new_receipts[visible_id] = RasterSegmentVisibilityReceipt(
+                    parent_observation_id=segment_id,
+                    page_parent_observation_id=page_parent.observation_id,
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    page_id=page_id,
+                    source_partition_id=page_parent.source_partition_id,
+                    image_sha256=image_sha256,
+                    dpi=RASTER_RENDER_DPI,
+                    pixel_geometry=tuple(segment.pixel_geometry),
+                    geometry=tuple(segment.geometry_pt),
+                )
+
+        if snapshot.snapshot_id == old_snapshot_id:
+            return published
+
+        final_snapshot_id = snapshot.snapshot_id
+        for observation_id in published.visible_observation_ids:
+            native_parent = self._visibility_receipts.get(
+                (old_snapshot_id, observation_id)
+            )
+            if native_parent is not None:
+                self._visibility_receipts[
+                    (final_snapshot_id, observation_id)
+                ] = native_parent
+            raster_receipt = self._raster_visibility_receipts.get(
+                (old_snapshot_id, observation_id)
+            )
+            if raster_receipt is not None:
+                self._raster_visibility_receipts[
+                    (final_snapshot_id, observation_id)
+                ] = raster_receipt
+
+        for observation_id in published.text_observation_ids:
+            receipt = self._text_integrity_receipts.get(
+                (old_snapshot_id, observation_id)
+            )
+            if receipt is not None:
+                self._text_integrity_receipts[
+                    (final_snapshot_id, observation_id)
+                ] = receipt
+
+        for observation_id, receipt in new_receipts.items():
+            self._raster_visibility_receipts[
+                (final_snapshot_id, observation_id)
+            ] = receipt
+
+        updated = PublishedVisibleSourceSnapshot(
+            revision=replace(published.revision),
+            coverage=replace(published.coverage),
+            snapshot=replace(snapshot),
+            base_source_snapshot_id=published.base_source_snapshot_id,
+            visible_observation_ids=tuple(sorted(set(visible_ids))),
+            text_observation_ids=tuple(published.text_observation_ids),
+        )
+        self._published_by_revision[updated.revision.revision_id] = updated
+        return updated
+
+
 class SourceVisibilityAuthority:
     """Read-only authority for producer-receipted visible segment observations.
 
