@@ -2,6 +2,8 @@ name: Development Benchmark Refresh
 # post-candidate-closure benchmark trigger
 
 on:
+  push:
+    branches: [gpt/post-candidate-closure-benchmark-v1]
   pull_request:
     branches: [main]
 
