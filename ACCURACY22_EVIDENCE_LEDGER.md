@@ -38,16 +38,16 @@ STATUS: ROOT CAUSE FOUND
 
 ITEM: LMU-E3-C  
 EXPECTED: 132 SM 1000-gauge polythene DPM.  
-CURRENT OUTPUT: Older committed report: absent.  
-SOURCE EVIDENCE: Lamu page 41 floor/slab footprint plus explicit DPM specification.  
-FIRST PIPELINE FAILURE: DPM specification/footprint association does not produce the commercial DPM row for this source.  
-ROOT CAUSE: Exact first loss still requires page-level trace; this is a slab-area/specification lane, not opening/schedule identity.  
-FIX: Trace explicit DPM note -> authoritative floor/footprint area -> slab-bound quantity publication with no default multiplier.  
-TESTS ADDED: Pending focused Lamu-neutral DPM scope/mutation fixture.  
-TEST RESULT: Pending.  
-EXPECTED BENCHMARK IMPACT: One row if explicit DPM scope binds to the existing evidenced floor area.  
-COMMIT/BRANCH: Pending.  
-STATUS: INVESTIGATING
+CURRENT OUTPUT: Older committed report: absent; canonical revalidation pending.  
+SOURCE EVIDENCE: Lamu structural/foundation sheet explicitly carries the DPM/polythene material note while the architectural plan supplies the independently derived floor-bed footprint.  
+FIRST PIPELINE FAILURE: `is_drawing_page()` rejected structural sheet titles such as FOUNDATION PLAN / FOUNDATION LAYOUT / SLAB DETAIL before the existing cross-page DPM evidence scan could inspect them.  
+ROOT CAUSE: Drawing-page classification excluded a legitimate structural evidence sheet; the DPM detector and slab-bound area path already existed.  
+FIX: PR #604 generically admits common foundation/slab structural drawing titles while preserving the existing BOQ/rate/amount exclusion. No quantity is inferred from the note itself.  
+TESTS ADDED: Foundation/slab-title classification; cross-sheet polythene note + independent plan footprint; membrane-absent abstention; BOQ-like false-positive rejection.  
+TEST RESULT: Full CI and Performance Fastpath green at `125340d1b4a9165c567199f185757a8e4b09d669`.  
+EXPECTED BENCHMARK IMPACT: Probable LMU-E3-C recovery once the repaired canonical benchmark validates the real source.  
+COMMIT/BRANCH: PR #604 — `gpt/accuracy22-lamu-dpm-structural-sheet-v1`.  
+STATUS: FIX IMPLEMENTED — AWAITING CANONICAL VALIDATION
 
 ## 3. LMU-E4-A
 
