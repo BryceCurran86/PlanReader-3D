@@ -471,7 +471,12 @@ class GenericOpeningCountProducer:
                 ),
             )
 
-        accounted_ids = tuple(univ_rec.accounted_member_ids or ())
+        accounted_ids = tuple(
+            getattr(univ_rec, "accounted_source_observation_ids", ()) or ()
+        )
+        if not accounted_ids:
+            # Backward-compatible fallback for legacy/test completeness records.
+            accounted_ids = tuple(univ_rec.accounted_member_ids or ())
         distinct_openings: dict[str, PhysicalOpeningExistenceRecord] = {}
         opening_marks: dict[str, Optional[str]] = {}
         opening_families: dict[str, str] = {}
