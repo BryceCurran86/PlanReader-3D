@@ -789,26 +789,14 @@ class PhysicalOpeningAuthority:
                     (gap_wall_b.x2, gap_wall_b.y2),
                 )
             )
-            for door in doors:
-                if door.wall_segment not in gap.wall_segments or door.jamb_segment is None:
-                    continue
-                door_center = midpoint(door.jamb_segment)
-                if math.hypot(
-                    door_center[0] - center[0], door_center[1] - center[1]
-                ) > max(float(door.jamb_segment.length), gap_width):
-                    continue
-                jamb_record = record_for(door.jamb_segment)
-                if jamb_record is None:
-                    continue
-                candidate = support_candidate(
-                    support_records=(
-                        gap_wall_records[0], gap_wall_records[1], jamb_record
-                    ),  # type: ignore[arg-type]
-                    structural_pattern=GAP_CORROBORATED_DOOR_JAMB_LEAF,
-                )
-                if candidate is not None:
-                    found[candidate.candidate_id] = candidate
 
+            # Resolve the stronger two-jamb representation first. A single
+            # perpendicular jamb can satisfy the generic door detector too,
+            # but once two corroborated parallel jambs bound this same gap,
+            # treating each jamb as a separate door identity would create a
+            # false ambiguity. Keep the stronger pair and suppress only the
+            # weaker door interpretations that reuse either paired jamb.
+            paired_window_jamb_ids: set[str] = set()
             for window in windows:
                 if window.wall_segment not in gap.wall_segments:
                     continue
@@ -834,6 +822,31 @@ class PhysicalOpeningAuthority:
                         first_record, second_record,
                     ),  # type: ignore[arg-type]
                     structural_pattern=GAP_CORROBORATED_WINDOW_JAMB_PAIR,
+                )
+                if candidate is not None:
+                    found[candidate.candidate_id] = candidate
+                    paired_window_jamb_ids.update(
+                        (first_record.observation_id, second_record.observation_id)
+                    )
+
+            for door in doors:
+                if door.wall_segment not in gap.wall_segments or door.jamb_segment is None:
+                    continue
+                door_center = midpoint(door.jamb_segment)
+                if math.hypot(
+                    door_center[0] - center[0], door_center[1] - center[1]
+                ) > max(float(door.jamb_segment.length), gap_width):
+                    continue
+                jamb_record = record_for(door.jamb_segment)
+                if jamb_record is None:
+                    continue
+                if jamb_record.observation_id in paired_window_jamb_ids:
+                    continue
+                candidate = support_candidate(
+                    support_records=(
+                        gap_wall_records[0], gap_wall_records[1], jamb_record
+                    ),  # type: ignore[arg-type]
+                    structural_pattern=GAP_CORROBORATED_DOOR_JAMB_LEAF,
                 )
                 if candidate is not None:
                     found[candidate.candidate_id] = candidate
