@@ -6,16 +6,17 @@ reuses PhysicalOpeningAuthority.prove_existence() as the only positive
 physical-existence proposition; OCR text, schedule rows, caller candidate lists,
 proximity ranking, and expected quantities never create an opening here.
 
-V1 has two deliberately separate completeness concepts:
+V2 keeps structural completeness separate from physical-opening-universe
+completeness.
 
-1. structural_enumeration_complete means every authority-visible segment in
-   the exact document snapshot participated in at least one independently proven
-   G17 physical-opening record and no source/physical conflict occurred.
-2. physical_opening_universe_complete remains False in V1. Exhaustively
-   enumerating one known structural representation is not proof that every
-   possible physical-opening representation has been covered. Commercial count
-   therefore remains fail-closed until a later authority proves that stronger
-   proposition.
+1. structural_enumeration_complete means every authority-visible segment in the
+   exact decision scope is either support for an independently proven physical
+   opening or producer-disposed, with no unresolved/conflicting source evidence.
+2. physical_opening_universe_complete additionally requires producer-owned
+   candidate closure: every wall-gap / door-jamb / window-jamb candidate emitted
+   by the registered visible-geometry path family on every scoped page must be
+   subsumed by a proven physical opening. Unmatched candidates remain residual
+   evidence and fail closed.
 
 The useful output of this authority is the producer-owned semantic inventory:
 unique physical-opening record ids, one representative source observation per
@@ -32,6 +33,7 @@ from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_opening_authority import (
     PHYSICAL_OPENING_DISPOSITION_CONFLICT,
     PHYSICAL_OPENING_DISPOSITION_NO_CANDIDATE,
+    PHYSICAL_OPENING_CANDIDATE_CLOSURE_UNRESOLVED,
     PHYSICAL_OPENING_DISPOSITION_OPENING_SUPPORT,
     PHYSICAL_OPENING_EXISTS,
     PhysicalOpeningAuthority,
@@ -41,7 +43,7 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-SEMANTIC_OPENING_ENUMERATION_SCHEMA_VERSION = "1.0.0"
+SEMANTIC_OPENING_ENUMERATION_SCHEMA_VERSION = "2.0.0"
 
 SEMANTIC_OPENING_ENUMERATION_RESOLVED = "semantic_opening_enumeration_resolved"
 SEMANTIC_OPENING_ENUMERATION_UNAVAILABLE = "semantic_opening_enumeration_unavailable"
@@ -61,6 +63,9 @@ SEMANTIC_OPENING_STRUCTURAL_ENUMERATION_COMPLETE = (
 )
 SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN = (
     "semantic_opening_universe_exhaustiveness_unproven"
+)
+SEMANTIC_OPENING_CANDIDATE_UNIVERSE_COMPLETE = (
+    "semantic_opening_candidate_universe_complete"
 )
 SEMANTIC_OPENING_NO_VISIBLE_SEGMENTS = "semantic_opening_no_visible_segments"
 SEMANTIC_OPENING_PRODUCER_EQUIVOCATION = "semantic_opening_producer_equivocation"
@@ -163,9 +168,12 @@ class SemanticOpeningEnumerationRecord:
             raise ValueError(
                 "opening support and residual visible observations must be disjoint"
             )
-        if self.physical_opening_universe_complete:
+        if (
+            self.physical_opening_universe_complete
+            and not self.structural_enumeration_complete
+        ):
             raise ValueError(
-                "v1 cannot prove full physical-opening universe exhaustiveness"
+                "physical opening universe cannot be complete when structural enumeration is incomplete"
             )
 
 
@@ -383,6 +391,7 @@ class SemanticOpeningEnumerationProducer:
         conflict_ids: set[str] = set()
         lineage_mismatch = False
         scoped_visible_ids: list[str] = []
+        page_representative_observation_ids: dict[str, str] = {}
         unknown_scope_resolution = False
 
         for observation_id in tuple(sorted(set(published.visible_observation_ids))):
@@ -412,6 +421,9 @@ class SemanticOpeningEnumerationProducer:
             if str(observation.page_id) not in allowed_pages:
                 continue
             scoped_visible_ids.append(observation_id)
+            page_representative_observation_ids.setdefault(
+                str(observation.page_id), observation_id
+            )
 
             if (
                 observation.document_id != selector.document_id
@@ -468,8 +480,42 @@ class SemanticOpeningEnumerationProducer:
         visible_ids = tuple(sorted(set(scoped_visible_ids)))
         # Residual evidence means unresolved opening-candidate evidence only.
         # Source-visible geometry examined as no_candidate_in_covered_path is
-        # semantically disposed for this covered path and is not residual.
+        # semantically disposed for the currently proven path, but V2 also
+        # performs page-level candidate closure below so unmatched composite
+        # gap/jamb candidates cannot disappear as isolated noncandidate lines.
         residual_ids = set(unresolved_visible_ids) - support_ids
+
+        candidate_closure_complete = True
+        for page_id in scoped_page_ids:
+            representative_id = page_representative_observation_ids.get(page_id)
+            if representative_id is None:
+                # A page with no authority-visible segments has no visible
+                # geometry candidate universe to close.
+                continue
+            closure = physical.assess_visible_candidate_closure(
+                ObservationSelector(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    observation_id=representative_id,
+                )
+            )
+            if closure.status is not EvidenceResolutionStatus.CORROBORATED:
+                candidate_closure_complete = False
+                unknown_scope_resolution = True
+                continue
+            if not closure.candidate_universe_complete:
+                candidate_closure_complete = False
+                unresolved_from_closure = set(
+                    closure.unresolved_observation_ids
+                )
+                overlapping_support = unresolved_from_closure & support_ids
+                if overlapping_support:
+                    conflict_ids.update(overlapping_support)
+                residual_ids.update(
+                    unresolved_from_closure - support_ids
+                )
 
         reasons: list[str] = []
         if not visible_ids:
@@ -492,7 +538,13 @@ class SemanticOpeningEnumerationProducer:
         if structural_complete:
             reasons.append(SEMANTIC_OPENING_STRUCTURAL_ENUMERATION_COMPLETE)
 
-        reasons.append(SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN)
+        physical_universe_complete = (
+            structural_complete and candidate_closure_complete
+        )
+        if physical_universe_complete:
+            reasons.append(SEMANTIC_OPENING_CANDIDATE_UNIVERSE_COMPLETE)
+        else:
+            reasons.append(SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN)
 
         opening_ids = tuple(sorted(opening_records))
         representative_ids = tuple(
@@ -515,7 +567,7 @@ class SemanticOpeningEnumerationProducer:
             "residual_visible_observation_ids": tuple(sorted(residual_ids)),
             "conflict_observation_ids": tuple(sorted(conflict_ids)),
             "structural_enumeration_complete": structural_complete,
-            "physical_opening_universe_complete": False,
+            "physical_opening_universe_complete": physical_universe_complete,
             "reason_codes": _ordered_unique(reasons),
         }
         record = SemanticOpeningEnumerationRecord(
@@ -538,7 +590,7 @@ class SemanticOpeningEnumerationProducer:
             residual_visible_observation_ids=tuple(sorted(residual_ids)),
             conflict_observation_ids=tuple(sorted(conflict_ids)),
             structural_enumeration_complete=structural_complete,
-            physical_opening_universe_complete=False,
+            physical_opening_universe_complete=physical_universe_complete,
             reason_codes=_ordered_unique(reasons),
         )
         status = (
@@ -559,6 +611,7 @@ class SemanticOpeningEnumerationProducer:
 
 
 __all__ = [
+    "SEMANTIC_OPENING_CANDIDATE_UNIVERSE_COMPLETE",
     "SEMANTIC_OPENING_ENUMERATION_RESOLVED",
     "SEMANTIC_OPENING_ENUMERATION_SCHEMA_VERSION",
     "SEMANTIC_OPENING_ENUMERATION_UNAVAILABLE",
