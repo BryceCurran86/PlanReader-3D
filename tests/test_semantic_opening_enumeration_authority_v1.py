@@ -156,7 +156,7 @@ def test_real_g17_support_is_grouped_into_one_semantic_opening() -> None:
     assert resolved == result
 
 
-def test_unclassified_visible_segment_remains_residual_and_blocks_structural_complete() -> None:
+def test_examined_noncandidate_visible_segment_is_disposed_for_covered_path() -> None:
     src = SourceVisibilityProducer(
         producer_method="semantic-enum-test",
         producer_version="1.0",
@@ -169,10 +169,10 @@ def test_unclassified_visible_segment_remains_residual_and_blocks_structural_com
     record = result.record
     assert len(record.physical_opening_record_ids) == 1
     assert len(record.opening_support_observation_ids) == 6
-    assert len(record.residual_visible_observation_ids) == 1
-    assert record.structural_enumeration_complete is False
+    assert record.residual_visible_observation_ids == ()
+    assert record.structural_enumeration_complete is True
     assert record.physical_opening_universe_complete is False
-    assert SEMANTIC_OPENING_RESIDUAL_SOURCE_EVIDENCE in record.reason_codes
+    assert SEMANTIC_OPENING_RESIDUAL_SOURCE_EVIDENCE not in record.reason_codes
     assert SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN in record.reason_codes
 
 
