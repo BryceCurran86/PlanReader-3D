@@ -50,6 +50,33 @@ def _image_only_pdf() -> bytes:
     return payload
 
 
+def _hybrid_pdf() -> bytes:
+    doc = fitz.open()
+    page = doc.new_page(width=400, height=250)
+    image_rect = fitz.Rect(20, 20, 320, 220)
+    page.insert_image(image_rect, stream=_opening_png(), keep_proportion=False)
+
+    # Unrelated vector title-block geometry outside the embedded raster plan.
+    for first, second in (
+        ((330.0, 20.0), (390.0, 20.0)),
+        ((390.0, 20.0), (390.0, 220.0)),
+        ((390.0, 220.0), (330.0, 220.0)),
+        ((330.0, 220.0), (330.0, 20.0)),
+        ((330.0, 60.0), (390.0, 60.0)),
+        ((330.0, 100.0), (390.0, 100.0)),
+    ):
+        page.draw_line(
+            fitz.Point(*first),
+            fitz.Point(*second),
+            color=(0, 0, 0),
+            width=1,
+        )
+
+    payload = doc.tobytes()
+    doc.close()
+    return payload
+
+
 def _vector_pdf() -> bytes:
     doc = fitz.open()
     page = doc.new_page(width=300, height=200)
@@ -212,3 +239,40 @@ def test_native_vector_visibility_prevents_raster_fallback_duplication() -> None
         assert resolved.status is EvidenceResolutionStatus.CORROBORATED
         assert resolved.observation is not None
         assert resolved.observation.observation_kind == NATIVE_PDF_VISIBLE_SEGMENT
+
+
+def test_hybrid_page_augments_only_source_owned_embedded_image_region() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="raster-visibility-test",
+        producer_version="1.0",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="hybrid-g17",
+        source_bytes=_hybrid_pdf(),
+        source_locator="memory://hybrid-g17.pdf",
+    )
+    assert published.visible_observation_ids
+
+    augmented = source.augment_with_raster_visible_segments(
+        published.revision.revision_id,
+        page_ids=("1",),
+    )
+    assert augmented.snapshot.snapshot_id != published.snapshot.snapshot_id
+
+    authority = source.authority()
+    raster_observations = []
+    for observation_id in augmented.visible_observation_ids:
+        resolved = authority.resolve_visible(_selector(augmented, observation_id))
+        if (
+            resolved.observation is not None
+            and resolved.observation.observation_kind == RASTER_PDF_VISIBLE_SEGMENT
+        ):
+            raster_observations.append(resolved.observation)
+
+    assert len(raster_observations) >= 6
+    for observation in raster_observations:
+        x0, y0, x1, y1 = observation.geometry
+        midpoint_x = (x0 + x1) / 2.0
+        midpoint_y = (y0 + y1) / 2.0
+        assert 20.0 <= midpoint_x <= 320.0
+        assert 20.0 <= midpoint_y <= 220.0

@@ -582,7 +582,14 @@ class SourceVisibilityProducer:
             {int(value) for value in selected_page_ids}
         ):
             page_id = str(page_number)
-            if page_id in pages_with_visible:
+            image_regions = self._producer.native_page_image_regions(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=snapshot.snapshot_id,
+                page_id=page_id,
+            )
+            if page_id in pages_with_visible and not image_regions:
                 continue
 
             png_bytes, page_parent = self._producer.render_native_page_png(
@@ -598,6 +605,22 @@ class SourceVisibilityProducer:
                 png_bytes,
                 dpi=RASTER_RENDER_DPI,
             )
+            if page_id in pages_with_visible and image_regions:
+                def _inside_image_region(segment) -> bool:
+                    x0, y0, x1, y1 = segment.geometry_pt
+                    midpoint_x = (x0 + x1) / 2.0
+                    midpoint_y = (y0 + y1) / 2.0
+                    for rx0, ry0, rx1, ry1 in image_regions:
+                        if (
+                            rx0 <= midpoint_x <= rx1
+                            and ry0 <= midpoint_y <= ry1
+                        ):
+                            return True
+                    return False
+
+                segments = tuple(
+                    segment for segment in segments if _inside_image_region(segment)
+                )
             if len(segments) < 6:
                 continue
 
