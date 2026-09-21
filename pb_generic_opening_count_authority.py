@@ -85,6 +85,7 @@ from pb_schedule_row_quantity_authority import (
     ScheduleRowQuantitySelector,
 )
 from pb_source_observation_authority import ObservationSelector
+from pb_page_view_class_source_adapter import page_viewport_id
 from pb_viewport_view_class_authority import (
     VIEW_KIND_FLOOR_PLAN,
     ViewportViewClassAuthority,
@@ -524,7 +525,13 @@ class GenericOpeningCountProducer:
                     ),
                 )
 
-            if p_rec.viewport_id is None:
+            resolved_viewport_id = p_rec.viewport_id
+            if (
+                resolved_viewport_id is None
+                and univ_rec.decision_scope_kind == "pages"
+            ):
+                resolved_viewport_id = page_viewport_id(p_rec.page_id)
+            if resolved_viewport_id is None:
                 return self._store(
                     selector,
                     _blocked(
@@ -540,7 +547,7 @@ class GenericOpeningCountProducer:
                 revision_id=selector.revision_id,
                 source_sha256=selector.source_sha256,
                 snapshot_id=selector.snapshot_id,
-                viewport_id=p_rec.viewport_id,
+                viewport_id=resolved_viewport_id,
             )
             vp_res = self._view_class.resolve(vp_sel)
             if (
