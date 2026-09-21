@@ -526,10 +526,12 @@ class GenericOpeningCountProducer:
                 )
 
             resolved_viewport_id = p_rec.viewport_id
-            if (
-                resolved_viewport_id is None
-                and univ_rec.decision_scope_kind == "pages"
-            ):
+            if resolved_viewport_id is None:
+                # Physical opening records are page-local source propositions
+                # and may not carry a finer segmented viewport id. In that
+                # case use the producer-owned authenticated page viewport for
+                # both document and explicit page scopes. The page view class
+                # authority still decides whether the page is a floor plan.
                 resolved_viewport_id = page_viewport_id(p_rec.page_id)
             if resolved_viewport_id is None:
                 return self._store(

@@ -343,6 +343,113 @@ class SourceVisibilityProducer:
         """
         return self._published_by_revision.get(str(revision_id))
 
+    def optional_content_state_for_scope(
+        self,
+        revision_id: str,
+        *,
+        page_ids: Sequence[str] | None = None,
+    ) -> str:
+        """Return producer-derived optional-content state for an exact source scope.
+
+        "known_visible" is returned only when the immutable stored PDF has no
+        Optional Content Groups at all. Any OCG presence, source mismatch, bad
+        page address, or decode error remains "unresolved".
+        """
+        published = self._published_by_revision.get(str(revision_id))
+        if published is None:
+            return "unresolved"
+        decoded = {str(int(value)) for value in published.coverage.decoded_pages}
+        requested = (
+            decoded
+            if page_ids is None
+            else {
+                str(page_id).strip()
+                for page_id in page_ids
+                if str(page_id).strip()
+            }
+        )
+        if not requested or not requested <= decoded:
+            return "unresolved"
+
+        source_bytes = self._producer._store.source_bytes_by_revision.get(
+            str(revision_id)
+        )
+        if not source_bytes:
+            return "unresolved"
+        if hashlib.sha256(source_bytes).hexdigest() != published.revision.source_sha256:
+            return "unresolved"
+
+        try:
+            pdf = fitz.open(stream=source_bytes, filetype="pdf")
+        except Exception:
+            return "unresolved"
+        try:
+            try:
+                ocgs = pdf.get_ocgs() or {}
+            except Exception:
+                return "unresolved"
+            return "known_visible" if not ocgs else "unresolved"
+        finally:
+            pdf.close()
+
+    def xobject_traversal_truncated_for_scope(
+        self,
+        revision_id: str,
+        *,
+        page_ids: Sequence[str] | None = None,
+    ) -> bool:
+        """Conservatively flag scopes containing unresolved Form XObjects.
+
+        Native page extraction currently has no producer receipt proving that
+        every Form XObject was semantically traversed. Therefore any Form
+        XObject in a requested page, invalid page address, source mismatch, or
+        decode failure is treated as truncated/unresolved. Image XObjects are
+        handled separately by the raster visibility augmentation path.
+        """
+        published = self._published_by_revision.get(str(revision_id))
+        if published is None:
+            return True
+        decoded = {str(int(value)) for value in published.coverage.decoded_pages}
+        requested = (
+            decoded
+            if page_ids is None
+            else {
+                str(page_id).strip()
+                for page_id in page_ids
+                if str(page_id).strip()
+            }
+        )
+        if not requested or not requested <= decoded:
+            return True
+
+        source_bytes = self._producer._store.source_bytes_by_revision.get(
+            str(revision_id)
+        )
+        if not source_bytes:
+            return True
+        if hashlib.sha256(source_bytes).hexdigest() != published.revision.source_sha256:
+            return True
+
+        try:
+            pdf = fitz.open(stream=source_bytes, filetype="pdf")
+        except Exception:
+            return True
+        try:
+            for page_id in requested:
+                try:
+                    page_index = int(page_id) - 1
+                except (TypeError, ValueError):
+                    return True
+                if page_index < 0 or page_index >= int(pdf.page_count):
+                    return True
+                try:
+                    if pdf.load_page(page_index).get_xobjects():
+                        return True
+                except Exception:
+                    return True
+            return False
+        finally:
+            pdf.close()
     def opening_dimension_authority(self):
         """Return the read-only dimension resolver bound to this producer."""
         from pb_opening_dimension_authority import (
