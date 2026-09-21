@@ -4,8 +4,8 @@ import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_semantic_opening_enumeration_authority import (
+    SEMANTIC_OPENING_CANDIDATE_UNIVERSE_COMPLETE,
     SEMANTIC_OPENING_STRUCTURAL_ENUMERATION_COMPLETE,
-    SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN,
     SemanticOpeningEnumerationProducer,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -59,6 +59,6 @@ def test_semantic_enumeration_disposes_examined_noncandidate_geometry() -> None:
     assert len(result.record.opening_support_observation_ids) == 6
     assert result.record.residual_visible_observation_ids == ()
     assert result.record.structural_enumeration_complete is True
-    assert result.record.physical_opening_universe_complete is False
+    assert result.record.physical_opening_universe_complete is True
     assert SEMANTIC_OPENING_STRUCTURAL_ENUMERATION_COMPLETE in result.reason_codes
-    assert SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN in result.reason_codes
+    assert SEMANTIC_OPENING_CANDIDATE_UNIVERSE_COMPLETE in result.reason_codes
