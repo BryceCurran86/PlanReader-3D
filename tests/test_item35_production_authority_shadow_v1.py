@@ -137,3 +137,54 @@ def test_scoped_live_extraction_runs_item35_only_on_requested_pages(tmp_path) ->
     assert shadow["generic_count_status"] == "corroborated"
     assert shadow["generic_count"] == 1
     assert extractor.extraction_status["item35_authority_shadow"] == "evidence_present"
+
+
+def _write_classified_schedule_drawing(path) -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=700, height=650)
+    page.insert_text(fitz.Point(40, 40), "GROUND FLOOR PLAN", color=(0, 0, 0))
+    _draw_opening(page)
+    page.insert_text(fitz.Point(112, 106), "W1", color=(0, 0, 0))
+    for text, x in zip(("MARK", "WIDTH", "HEIGHT"), (50.0, 150.0, 250.0)):
+        page.insert_text(fitz.Point(x, 500.0), text, color=(0, 0, 0))
+    for text, x in zip(("W1", "900", "2100"), (50.0, 150.0, 250.0)):
+        page.insert_text(fitz.Point(x, 530.0), text, color=(0, 0, 0))
+    doc.save(path)
+    doc.close()
+
+
+def test_item35_shadow_composes_opening_schedule_binding_and_family_count(tmp_path) -> None:
+    pdf_path = tmp_path / "item35-classified-window.pdf"
+    _write_classified_schedule_drawing(pdf_path)
+
+    shadow = collect_item35_authority_shadow(
+        pdf_path,
+        document_id="item35-classified-window",
+    )
+
+    assert shadow["status"] == "evidence_present"
+    assert shadow["physical_opening_universe_complete"] is True
+    assert shadow["generic_count_status"] == "corroborated"
+    assert shadow["generic_count"] == 1
+    assert shadow["classified_opening_count"] == 1
+    assert shadow["opening_family_counts"] == {"window": 1}
+    assert shadow["opening_mark_counts"] == {"W1": 1}
+    assert any(
+        item["status"] == "corroborated" and item["tag_mark"] == "W1"
+        for item in shadow["schedule_binding_statuses"]
+    )
+
+
+def test_live_extractor_keeps_classified_item35_count_shadow_only(tmp_path) -> None:
+    pdf_path = tmp_path / "live-item35-classified-window.pdf"
+    _write_classified_schedule_drawing(pdf_path)
+
+    extractor = GenericPlanReaderExtractor()
+    predictions = extractor.extract_from_pdf(pdf_path)
+
+    shadow = extractor.item35_authority_shadow
+    assert shadow["classified_opening_count"] == 1
+    assert shadow["opening_family_counts"] == {"window": 1}
+    # Item35 remains diagnostic here: this integration commit does not itself
+    # create a new aggregate commercial window prediction.
+    assert "steel_casement_windows" not in {prediction.tag for prediction in predictions}
