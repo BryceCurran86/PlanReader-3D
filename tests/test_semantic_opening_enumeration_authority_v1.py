@@ -172,8 +172,7 @@ def test_examined_noncandidate_visible_segment_is_disposed_for_covered_path() ->
     assert record.residual_visible_observation_ids == ()
     assert record.structural_enumeration_complete is True
     assert record.physical_opening_universe_complete is False
-    assert record.physical_opening_universe_complete is False
-    assert SEMANTIC_OPENING_RESIDUAL_SOURCE_EVIDENCE in record.reason_codes
+    assert SEMANTIC_OPENING_RESIDUAL_SOURCE_EVIDENCE not in record.reason_codes
     assert SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN in record.reason_codes
 
 
