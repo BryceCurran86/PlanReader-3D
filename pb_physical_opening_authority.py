@@ -694,9 +694,6 @@ class PhysicalOpeningAuthority:
         doors = detect_door_candidates(
             segments, walls, (), page_no=int(seed.page_id)
         )
-        windows = detect_window_candidates(
-            segments, walls, (), page_no=int(seed.page_id)
-        )
         gaps = detect_gap_candidates(
             segments, walls, (), page_no=int(seed.page_id)
         )
@@ -790,44 +787,92 @@ class PhysicalOpeningAuthority:
                 )
             )
 
-            # Resolve the stronger two-jamb representation first. A single
-            # perpendicular jamb can satisfy the generic door detector too,
-            # but once two corroborated parallel jambs bound this same gap,
-            # treating each jamb as a separate door identity would create a
-            # false ambiguity. Keep the stronger pair and suppress only the
-            # weaker door interpretations that reuse either paired jamb.
+            # Resolve the stronger two-jamb representation directly from
+            # the wall discontinuity endpoints. The legacy window detector
+            # assumes both jambs are near one continuous wall segment, which
+            # is incompatible with a real gap where each jamb belongs to the
+            # opposite side of the interruption.
             paired_window_jamb_ids: set[str] = set()
-            for window in windows:
-                if window.wall_segment not in gap.wall_segments:
-                    continue
-                if len(window.parallel_segments) != 2:
-                    continue
-                first, second = window.parallel_segments
-                window_center = (
-                    (first.cx + second.cx) / 2.0,
-                    (first.cy + second.cy) / 2.0,
-                )
-                jamb_span = math.hypot(first.cx - second.cx, first.cy - second.cy)
-                if math.hypot(
-                    window_center[0] - center[0], window_center[1] - center[1]
-                ) > max(jamb_span, gap_width):
-                    continue
-                first_record = record_for(first)
-                second_record = record_for(second)
-                if first_record is None or second_record is None:
-                    continue
-                candidate = support_candidate(
-                    support_records=(
-                        gap_wall_records[0], gap_wall_records[1],
-                        first_record, second_record,
-                    ),  # type: ignore[arg-type]
-                    structural_pattern=GAP_CORROBORATED_WINDOW_JAMB_PAIR,
-                )
-                if candidate is not None:
-                    found[candidate.candidate_id] = candidate
-                    paired_window_jamb_ids.update(
-                        (first_record.observation_id, second_record.observation_id)
+
+            endpoints_a = (
+                (float(gap_wall_a.x1), float(gap_wall_a.y1)),
+                (float(gap_wall_a.x2), float(gap_wall_a.y2)),
+            )
+            endpoints_b = (
+                (float(gap_wall_b.x1), float(gap_wall_b.y1)),
+                (float(gap_wall_b.x2), float(gap_wall_b.y2)),
+            )
+            gap_endpoint_a, gap_endpoint_b = min(
+                (
+                    (point_a, point_b)
+                    for point_a in endpoints_a
+                    for point_b in endpoints_b
+                ),
+                key=lambda pair: math.hypot(
+                    pair[0][0] - pair[1][0],
+                    pair[0][1] - pair[1][1],
+                ),
+            )
+
+            def _touches(
+                segment: LegacyPlanSegment,
+                point: tuple[float, float],
+            ) -> bool:
+                return min(
+                    math.hypot(segment.x1 - point[0], segment.y1 - point[1]),
+                    math.hypot(segment.x2 - point[0], segment.y2 - point[1]),
+                ) <= _COORD_EQ_ABS_TOL
+
+            def _parallel_segments(
+                first: LegacyPlanSegment,
+                second: LegacyPlanSegment,
+            ) -> bool:
+                delta = abs(first.angle_deg - second.angle_deg) % 180.0
+                return min(delta, 180.0 - delta) <= 5.0
+
+            def _perpendicular_to_wall(segment: LegacyPlanSegment) -> bool:
+                delta = abs(segment.angle_deg - gap_wall_a.angle_deg) % 180.0
+                return abs(delta - 90.0) <= 15.0
+
+            left_jambs = tuple(
+                segment
+                for segment in segments
+                if segment is not gap_wall_a
+                and segment is not gap_wall_b
+                and _perpendicular_to_wall(segment)
+                and _touches(segment, gap_endpoint_a)
+            )
+            right_jambs = tuple(
+                segment
+                for segment in segments
+                if segment is not gap_wall_a
+                and segment is not gap_wall_b
+                and _perpendicular_to_wall(segment)
+                and _touches(segment, gap_endpoint_b)
+            )
+            for first in left_jambs:
+                for second in right_jambs:
+                    if first is second or not _parallel_segments(first, second):
+                        continue
+                    first_record = record_for(first)
+                    second_record = record_for(second)
+                    if first_record is None or second_record is None:
+                        continue
+                    candidate = support_candidate(
+                        support_records=(
+                            gap_wall_records[0], gap_wall_records[1],
+                            first_record, second_record,
+                        ),  # type: ignore[arg-type]
+                        structural_pattern=GAP_CORROBORATED_WINDOW_JAMB_PAIR,
                     )
+                    if candidate is not None:
+                        found[candidate.candidate_id] = candidate
+                        paired_window_jamb_ids.update(
+                            (
+                                first_record.observation_id,
+                                second_record.observation_id,
+                            )
+                        )
 
             for door in doors:
                 if door.wall_segment not in gap.wall_segments or door.jamb_segment is None:
