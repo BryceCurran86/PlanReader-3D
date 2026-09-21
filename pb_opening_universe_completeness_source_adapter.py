@@ -167,6 +167,7 @@ def build_semantic_opening_inventory_completeness(
     revision_id: str,
     decision_scope_id: str,
     page_ids: Sequence[str] | None = None,
+    semantic_producer: SemanticOpeningEnumerationProducer | None = None,
     optional_content_known_visible: bool = False,
     xobject_traversal_truncated: bool = False,
 ) -> OpeningUniverseCompletenessAuthority:
@@ -185,21 +186,17 @@ def build_semantic_opening_inventory_completeness(
     if type(source_visibility_producer) is not SourceVisibilityProducer:
         raise TypeError("source_visibility_producer must be producer-owned")
 
-    semantic_producer = (
-        SemanticOpeningEnumerationProducer.from_source_visibility_producer(
-            source_visibility_producer
+    if semantic_producer is None:
+        semantic_producer = (
+            SemanticOpeningEnumerationProducer.from_source_visibility_producer(
+                source_visibility_producer
+            )
         )
-    )
-    if page_ids is None:
-        semantic_result = semantic_producer.publish_document_scope(
-            revision_id=revision_id,
-            decision_scope_id=decision_scope_id,
-        )
-    else:
-        semantic_result = semantic_producer.publish_page_scope(
-            revision_id=revision_id,
-            decision_scope_id=decision_scope_id,
-            page_ids=tuple(str(page_id) for page_id in page_ids),
+    elif type(semantic_producer) is not SemanticOpeningEnumerationProducer:
+        raise TypeError("semantic_producer must be producer-owned")
+    elif semantic_producer._source_visibility_producer is not source_visibility_producer:
+        raise ValueError(
+            "semantic_producer must be backed by source_visibility_producer"
         )
 
     producer = OpeningUniverseCompletenessProducer(
@@ -207,14 +204,50 @@ def build_semantic_opening_inventory_completeness(
         producer_version="2.0.0",
     )
     published = source_visibility_producer.published_snapshot_for_revision(revision_id)
+    if published is None:
+        return producer.authority()
+
+    semantic_result = semantic_producer.authority().resolve(
+        SemanticOpeningEnumerationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            decision_scope_id=decision_scope_id,
+        )
+    )
+    if semantic_result.record is None:
+        if page_ids is None:
+            semantic_result = semantic_producer.publish_document_scope(
+                revision_id=revision_id,
+                decision_scope_id=decision_scope_id,
+            )
+        else:
+            semantic_result = semantic_producer.publish_page_scope(
+                revision_id=revision_id,
+                decision_scope_id=decision_scope_id,
+                page_ids=tuple(str(page_id) for page_id in page_ids),
+            )
+
     if (
-        published is None
-        or semantic_result.record is None
+        semantic_result.record is None
         or semantic_result.status is EvidenceResolutionStatus.CONFLICT
     ):
         return producer.authority()
 
     record = semantic_result.record
+    requested_page_ids = (
+        None if page_ids is None else tuple(str(page_id) for page_id in page_ids)
+    )
+    if page_ids is None:
+        if record.decision_scope_kind != "document":
+            return producer.authority()
+    elif (
+        record.decision_scope_kind != "pages"
+        or record.page_ids != requested_page_ids
+    ):
+        return producer.authority()
+
     semantic_authority = semantic_producer.authority()
     resolved = semantic_authority.resolve(
         SemanticOpeningEnumerationSelector(

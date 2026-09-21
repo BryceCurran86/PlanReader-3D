@@ -7,6 +7,9 @@ from pb_item35_production_authority_shadow import (
     collect_item35_authority_shadow,
 )
 from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+from pb_semantic_opening_enumeration_authority import (
+    SemanticOpeningEnumerationProducer,
+)
 
 
 def _draw_opening(page: fitz.Page) -> None:
@@ -101,3 +104,39 @@ def test_scoped_live_extraction_runs_item35_only_on_requested_pages(tmp_path) ->
     assert shadow["generic_count_status"] == "corroborated"
     assert shadow["generic_count"] == 1
     assert extractor.extraction_status["item35_authority_shadow"] == "evidence_present"
+
+
+def test_item35_shadow_reuses_semantic_inventory_for_completeness(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf_path = tmp_path / "item35-shadow-single-enumeration.pdf"
+    _write_minimal_drawing(pdf_path)
+
+    calls = 0
+    original = SemanticOpeningEnumerationProducer.publish_document_scope
+
+    def counted_publish_document_scope(self, *, revision_id, decision_scope_id):
+        nonlocal calls
+        calls += 1
+        return original(
+            self,
+            revision_id=revision_id,
+            decision_scope_id=decision_scope_id,
+        )
+
+    monkeypatch.setattr(
+        SemanticOpeningEnumerationProducer,
+        "publish_document_scope",
+        counted_publish_document_scope,
+    )
+
+    shadow = collect_item35_authority_shadow(
+        pdf_path,
+        document_id="item35-shadow-single-enumeration",
+    )
+
+    assert calls == 1
+    assert shadow["physical_opening_universe_complete"] is True
+    assert shadow["commercial_count_unlocked"] is True
+    assert shadow["generic_count"] == 1

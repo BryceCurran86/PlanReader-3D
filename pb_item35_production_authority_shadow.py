@@ -186,6 +186,7 @@ def collect_item35_authority_shadow(
         revision_id=published.revision.revision_id,
         decision_scope_id=decision_scope_id,
         page_ids=scoped_page_ids,
+        semantic_producer=semantic_producer,
         optional_content_known_visible=False,
     )
     view_authority = build_source_page_view_class_authority(
