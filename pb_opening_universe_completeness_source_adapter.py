@@ -177,9 +177,9 @@ def build_semantic_opening_inventory_completeness(
     openings.  Its representative observation ids therefore have the exact
     shape GenericOpeningCountAuthority will eventually consume.
 
-    V1 intentionally remains commercially unsealed because
-    physical_opening_universe_complete is not yet provable.  This function is
-    an integration seam, not a shortcut around that missing proposition.
+    Commercial sealing remains fail-closed until the semantic producer proves
+    physical_opening_universe_complete. Optional-content visibility is derived
+    from the immutable stored PDF; caller flags cannot create that proof.
     """
 
     if type(source_visibility_producer) is not SourceVisibilityProducer:
@@ -269,10 +269,14 @@ def build_semantic_opening_inventory_completeness(
         # are supplied on both sides only to fingerprint the inventory itself.
         source_primitives=semantic_members,
         enumerated_primitives=semantic_members,
-        optional_content_state=(
-            "known_visible" if optional_content_known_visible else "unresolved"
+        optional_content_state=source_visibility_producer.optional_content_state_for_scope(
+            revision_id,
+            page_ids=record.page_ids,
         ),
-        xobject_traversal_truncated=xobject_traversal_truncated,
+        # SourceVisibilityProducer owns the semantic source snapshot. It either
+        # completes page decode or records failed coverage; callers cannot
+        # assert or clear an independent XObject-truncation flag here.
+        xobject_traversal_truncated=False,
         semantic_enumeration_proven=bool(
             resolved.record.physical_opening_universe_complete
         ),
