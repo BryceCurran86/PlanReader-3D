@@ -192,6 +192,9 @@ def _publish_schedule_bindings(
                 "status": str(result.status.value),
                 "reason_codes": list(result.reason_codes),
                 "opening_record_id": opening_record_id or None,
+                "opening_page_id": (
+                    str(record.page_id) if record is not None else None
+                ),
                 "tag_mark": (str(record.tag_mark) if record is not None else None),
                 "schedule_page_id": (
                     str(record.schedule_page_id) if record is not None else None
@@ -464,12 +467,22 @@ def collect_item35_authority_shadow(
             trade_type = "doors"
         else:
             continue
+        source_pages = sorted(
+            {
+                int(item["opening_page_id"])
+                for item in material
+                if str(item.get("opening_page_id") or "").isdigit()
+            }
+        )
+        if not source_pages:
+            continue
         mark_predictions[mark] = {
             "quantity": int(count),
             "unit": "NO",
             "trade_type": trade_type,
             "width_mm": width_mm,
             "height_mm": height_mm,
+            "source_pages": source_pages,
             "authority": "item35_generic_opening_count",
         }
     shadow["opening_mark_predictions"] = mark_predictions
