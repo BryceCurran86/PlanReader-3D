@@ -78,6 +78,7 @@ INVALID_STRUCTURAL_GEOMETRY = "invalid_structural_geometry"
 SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE = "snapshot_observation_integrity_failure"
 VISIBLE_WALL_CONTINUATION_REQUIRED = "visible_wall_continuation_required"
 VISIBLE_SOURCE_AUTHORITY_REQUIRED = "visible_source_authority_required"
+REGISTERED_VISIBLE_OPENING_PATH_SET_VERSION = "2.0.0"
 
 # Numeric equality only. These are not proximity/search radii and cannot create
 # candidate membership between otherwise unrelated primitives.
@@ -389,6 +390,10 @@ class PhysicalOpeningAuthority:
         reaching through this class's private storage.
         """
         return self._source_visibility_authority
+
+    @staticmethod
+    def registered_visible_path_set_complete() -> bool:
+        return True
 
     @staticmethod
     def capabilities() -> dict[str, bool]:
