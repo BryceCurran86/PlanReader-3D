@@ -241,6 +241,7 @@ def _resolve_wall_ref(wl_a: WallLine, wl_b: WallLine) -> str:
 @dataclass
 class DoorCandidate:
     wall_ref: str = ""
+    wall_segment: Optional[Segment] = None
     position_along_wall_m: Optional[float] = None
     width_m: Optional[float] = None
     jamb_segment: Optional[Segment] = None
@@ -335,6 +336,7 @@ def detect_door_candidates(
 
             candidates.append(DoorCandidate(
                 wall_ref=wl.wall_ref or "",
+                wall_segment=wall,
                 position_along_wall_m=pos_m,
                 width_m=width_m,
                 jamb_segment=seg,
@@ -352,6 +354,7 @@ def detect_door_candidates(
 @dataclass
 class WindowCandidate:
     wall_ref: str = ""
+    wall_segment: Optional[Segment] = None
     position_along_wall_m: Optional[float] = None
     width_m: Optional[float] = None
     parallel_segments: List[Segment] = field(default_factory=list)
@@ -533,6 +536,7 @@ def detect_window_candidates(
             ev.append(f"tag: {assigned_tag} (window-compatible)")
         candidates.append(WindowCandidate(
             wall_ref=wl.wall_ref or "",
+            wall_segment=wall,
             position_along_wall_m=pos_m,
             width_m=width_m,
             parallel_segments=[a, b],
@@ -549,6 +553,7 @@ def detect_window_candidates(
 @dataclass
 class GapCandidate:
     wall_ref: str = ""
+    wall_segments: Tuple[Segment, Segment] | None = None
     position_along_wall_m: Optional[float] = None
     width_m: Optional[float] = None
     tag: str = ""
@@ -670,6 +675,7 @@ def detect_gap_candidates(
                 ev.append(f"tag: {tag} (semantic evidence)")
             candidates.append(GapCandidate(
                 wall_ref=gap_wall_ref,
+                wall_segments=(a, b),
                 position_along_wall_m=pos_m,
                 width_m=width_m,
                 tag=tag,
