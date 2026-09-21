@@ -24,6 +24,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_generic_opening_count_authority import (
+    _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL,
+)
 from pb_opening_universe_completeness_authority import (
     OpeningUniverseCompletenessAuthority,
     OpeningUniverseCompletenessProducer,
@@ -251,7 +254,7 @@ def build_semantic_opening_inventory_completeness(
             )
         )
 
-    producer.publish_enumeration(
+    completeness_record = producer.publish_enumeration(
         decision_scope_id=record.decision_scope_id,
         decision_scope_kind=record.decision_scope_kind,
         document_id=record.document_id,
@@ -262,10 +265,8 @@ def build_semantic_opening_inventory_completeness(
         viewport_id=None,
         coverage=published.coverage,
         # At this seam the source universe is the producer-owned semantic
-        # inventory, not the raw segment universe.  The same semantic members
-        # are supplied on both sides only to fingerprint the inventory itself;
-        # semantic_enumeration_proven remains False until a stronger authority
-        # proves physical-opening universe exhaustiveness.
+        # inventory, not the raw segment universe. The same semantic members
+        # are supplied on both sides only to fingerprint the inventory itself.
         source_primitives=semantic_members,
         enumerated_primitives=semantic_members,
         optional_content_state=(
@@ -276,7 +277,16 @@ def build_semantic_opening_inventory_completeness(
             resolved.record.physical_opening_universe_complete
         ),
     )
-    return producer.authority()
+    authority = producer.authority()
+    if (
+        bool(resolved.record.physical_opening_universe_complete)
+        and bool(completeness_record.semantic_enumeration_complete)
+        and bool(completeness_record.decision_scope_complete)
+    ):
+        # Private in-process authentication consumed by GenericOpeningCountAuthority.
+        # Ordinary callers cannot provide this seal or a completeness claim.
+        authority._source_authentication_seal = _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL
+    return authority
 
 
 __all__ = [
