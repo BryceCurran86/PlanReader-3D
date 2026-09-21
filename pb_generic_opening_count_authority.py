@@ -85,6 +85,7 @@ from pb_schedule_row_quantity_authority import (
     ScheduleRowQuantitySelector,
 )
 from pb_source_observation_authority import ObservationSelector
+from pb_source_page_view_class_adapter import page_viewport_id
 from pb_viewport_view_class_authority import (
     VIEW_KIND_FLOOR_PLAN,
     ViewportViewClassAuthority,
@@ -524,23 +525,21 @@ class GenericOpeningCountProducer:
                     ),
                 )
 
-            if p_rec.viewport_id is None:
-                return self._store(
-                    selector,
-                    _blocked(
-                        EvidenceResolutionStatus.ABSTAINED,
-                        GENERIC_OPENING_COUNT_VIEWPORT_CLASS_UNAVAILABLE,
-                        *diagnostic_reasons,
-                    ),
-                )
+            effective_viewport_id = (
+                p_rec.viewport_id
+                if p_rec.viewport_id is not None
+                else page_viewport_id(p_rec.page_id)
+            )
 
             # Producer-owned view class only — never caller ID lists or name guessing.
+            # Source openings without an explicit PDF viewport are classified against
+            # their producer-owned page viewport identity.
             vp_sel = ViewportViewClassSelector(
                 document_id=selector.document_id,
                 revision_id=selector.revision_id,
                 source_sha256=selector.source_sha256,
                 snapshot_id=selector.snapshot_id,
-                viewport_id=p_rec.viewport_id,
+                viewport_id=effective_viewport_id,
             )
             vp_res = self._view_class.resolve(vp_sel)
             if (
