@@ -85,3 +85,65 @@ def test_gap_plus_window_jamb_pair_is_independent_physical_existence_path() -> N
         )
     )
     assert _resolved_patterns(payload) == {GAP_CORROBORATED_WINDOW_JAMB_PAIR}
+
+
+def _resolved_record_ids(payload: bytes) -> set[str]:
+    source = SourceVisibilityProducer(
+        producer_method="generic-path-negative-test",
+        producer_version="1.0",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="generic-path-negative",
+        source_bytes=payload,
+        source_locator="memory://generic-path-negative.pdf",
+    )
+    physical = PhysicalOpeningAuthority(source.authority())
+    record_ids: set[str] = set()
+    for observation_id in published.visible_observation_ids:
+        result = physical.prove_existence(
+            ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        if (
+            result.status is EvidenceResolutionStatus.CORROBORATED
+            and result.proposition == PHYSICAL_OPENING_EXISTS
+            and result.existence_record is not None
+        ):
+            record_ids.add(result.existence_record.record_id)
+    return record_ids
+
+
+def test_wall_gap_alone_does_not_mint_physical_opening() -> None:
+    payload = _pdf(
+        (
+            ((20.0, 100.0), (250.0, 100.0)),
+            ((310.0, 100.0), (650.0, 100.0)),
+        )
+    )
+    assert _resolved_record_ids(payload) == set()
+
+
+def test_perpendicular_doorish_segment_without_wall_gap_does_not_mint_opening() -> None:
+    payload = _pdf(
+        (
+            ((20.0, 100.0), (650.0, 100.0)),
+            ((250.0, 100.0), (250.0, 140.0)),
+        )
+    )
+    assert _resolved_record_ids(payload) == set()
+
+
+def test_window_jamb_pair_without_wall_gap_does_not_mint_opening() -> None:
+    payload = _pdf(
+        (
+            ((20.0, 100.0), (650.0, 100.0)),
+            ((250.0, 100.0), (250.0, 140.0)),
+            ((280.0, 100.0), (280.0, 140.0)),
+        )
+    )
+    assert _resolved_record_ids(payload) == set()
