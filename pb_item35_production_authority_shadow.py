@@ -22,6 +22,7 @@ from typing import Any, Sequence
 
 import fitz
 
+from pb_migration_contracts import EvidenceResolutionStatus
 from pb_generic_opening_count_authority import (
     GenericOpeningCountProducer,
     GenericOpeningCountSelector,
