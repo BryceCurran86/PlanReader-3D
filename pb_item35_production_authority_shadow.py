@@ -29,6 +29,7 @@ from pb_generic_opening_count_authority import (
 from pb_opening_universe_completeness_source_adapter import (
     build_semantic_opening_inventory_completeness,
 )
+from pb_opening_tag_normalization import normalize_opening_tag
 from pb_page_view_class_source_adapter import (
     build_source_page_view_class_authority,
     page_viewport_id,
@@ -85,6 +86,44 @@ def empty_item35_authority_shadow(*, reason: str) -> dict[str, Any]:
 
 
 
+def _page_has_native_opening_tag(
+    *,
+    source: SourceVisibilityProducer,
+    revision_id: str,
+    page_id: str,
+) -> bool:
+    """Return whether trusted native text already supplies a W/D identity.
+
+    OCR is a recovery source, not a competing rewrite of stronger native text.
+    If a page already contains any producer-authenticated explicit opening tag,
+    the page-wide OCR pass is skipped. Raster-only/scanned pages continue to OCR.
+    """
+    published = source.published_snapshot_for_revision(revision_id)
+    if published is None:
+        return False
+    text_authority = source.text_integrity_authority()
+    for observation_id in published.text_observation_ids:
+        result = text_authority.resolve_text(
+            ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        if (
+            result.status is not EvidenceResolutionStatus.CORROBORATED
+            or result.receipt is None
+            or str(result.receipt.page_id) != str(page_id)
+            or not result.trusted_text
+        ):
+            continue
+        if normalize_opening_tag(str(result.trusted_text)) is not None:
+            return True
+    return False
+
+
 def _augment_floor_plan_ocr_tags(
     *,
     source: SourceVisibilityProducer,
@@ -102,6 +141,12 @@ def _augment_floor_plan_ocr_tags(
             published = source.published_snapshot_for_revision(revision_id)
             if published is None:
                 break
+            if _page_has_native_opening_tag(
+                source=source,
+                revision_id=revision_id,
+                page_id=page_id,
+            ):
+                continue
 
             view_authority = build_source_page_view_class_authority(
                 source_visibility_producer=source,
