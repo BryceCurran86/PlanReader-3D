@@ -79,9 +79,9 @@ def test_gap_plus_window_jamb_pair_is_independent_physical_existence_path() -> N
     payload = _pdf(
         (
             ((20.0, 100.0), (250.0, 100.0)),
-            ((280.0, 100.0), (650.0, 100.0)),
+            ((290.0, 100.0), (650.0, 100.0)),
             ((250.0, 100.0), (250.0, 140.0)),
-            ((280.0, 100.0), (280.0, 140.0)),
+            ((290.0, 100.0), (290.0, 140.0)),
         )
     )
     assert _resolved_patterns(payload) == {GAP_CORROBORATED_WINDOW_JAMB_PAIR}
