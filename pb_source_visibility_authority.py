@@ -527,11 +527,14 @@ class SourceVisibilityProducer:
     def augment_with_raster_visible_segments(
         self,
         revision_id: str,
+        *,
+        page_ids: Sequence[str] | None = None,
     ) -> PublishedVisibleSourceSnapshot:
         """Add source-bound raster visible segments where native visibility is absent.
 
-        The caller supplies only the revision address. Page inventory, render
-        resolution, detector, segment coordinates, and lineage remain
+        Callers may optionally address source pages, but cannot supply pixels,
+        line segments, DPI, detector thresholds, marks, counts, or expected
+        quantities. Rendering, detection, geometry, and lineage remain
         producer-owned.
         """
 
@@ -559,8 +562,24 @@ class SourceVisibilityProducer:
         visible_ids = list(published.visible_observation_ids)
         new_receipts: dict[str, RasterSegmentVisibilityReceipt] = {}
 
+        decoded_page_ids = {
+            str(int(value)) for value in published.coverage.decoded_pages
+        }
+        if page_ids is None:
+            selected_page_ids = decoded_page_ids
+        else:
+            selected_page_ids = {
+                str(page_id).strip()
+                for page_id in page_ids
+                if str(page_id).strip()
+            }
+            if not selected_page_ids:
+                raise ValueError("page_ids must contain at least one source page")
+            if not selected_page_ids <= decoded_page_ids:
+                raise ValueError(OBSERVATION_UNAVAILABLE)
+
         for page_number in sorted(
-            {int(value) for value in published.coverage.decoded_pages}
+            {int(value) for value in selected_page_ids}
         ):
             page_id = str(page_number)
             if page_id in pages_with_visible:
