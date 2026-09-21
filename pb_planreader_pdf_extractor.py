@@ -2455,43 +2455,31 @@ class GenericPlanReaderExtractor:
         # source-visibility -> semantic-opening -> commercial-count gate on the
         # same PDF bytes, but never mutates pred_dict or the F.9 deduction path.
         #
-        # SemanticOpeningEnumerationProducer v1 is document-scoped. When this
-        # extractor is explicitly asked to process only selected pages, silently
-        # re-reading the entire 45-238 page source would violate that extraction
-        # scope and can turn a diagnostic shadow into the dominant runtime cost.
-        # Until semantic enumeration has a producer-owned page-scope contract,
-        # scoped extraction therefore fails closed instead of expanding scope.
-        if pages is not None:
+        # Scoped extraction passes only page addresses. The Item 35 producer
+        # still owns source observations, physical-opening discovery, and
+        # semantic inventory; callers cannot inject a candidate universe.
+        try:
+            from pb_item35_production_authority_shadow import (
+                collect_item35_authority_shadow,
+            )
+
+            self.item35_authority_shadow = collect_item35_authority_shadow(
+                p_path,
+                document_id=f"extractor:{p_path.name}",
+                pages=(target_pages if pages is not None else None),
+            )
+            self.extraction_status["item35_authority_shadow"] = str(
+                self.item35_authority_shadow.get("status") or "abstained"
+            )
+        except Exception as exc:
             from pb_item35_production_authority_shadow import (
                 empty_item35_authority_shadow,
             )
 
             self.item35_authority_shadow = empty_item35_authority_shadow(
-                reason="scoped_extraction_semantic_shadow_unavailable"
+                reason=f"shadow_exception:{type(exc).__name__}"
             )
-            self.extraction_status["item35_authority_shadow"] = "abstained"
-        else:
-            try:
-                from pb_item35_production_authority_shadow import (
-                    collect_item35_authority_shadow,
-                )
-
-                self.item35_authority_shadow = collect_item35_authority_shadow(
-                    p_path,
-                    document_id=f"extractor:{p_path.name}",
-                )
-                self.extraction_status["item35_authority_shadow"] = str(
-                    self.item35_authority_shadow.get("status") or "abstained"
-                )
-            except Exception as exc:
-                from pb_item35_production_authority_shadow import (
-                    empty_item35_authority_shadow,
-                )
-
-                self.item35_authority_shadow = empty_item35_authority_shadow(
-                    reason=f"shadow_exception:{type(exc).__name__}"
-                )
-                self.extraction_status["item35_authority_shadow"] = "extraction_failed"
+            self.extraction_status["item35_authority_shadow"] = "extraction_failed"
 
         doc.close()
         return list(pred_dict.values())
