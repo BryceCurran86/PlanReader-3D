@@ -38,6 +38,11 @@ PHYSICAL_OPENING_IDENTITIES_DISTINCT = "physical_opening_identities_distinct"
 PHYSICAL_OPENING_IDENTITY_SCOPE_MISMATCH = "physical_opening_identity_scope_mismatch"
 PHYSICAL_OPENING_IDENTITY_EXISTENCE_REQUIRED = "physical_opening_identity_existence_required"
 PHYSICAL_OPENING_IDENTITY_RESOLVED = "physical_opening_identity_resolved"
+PHYSICAL_OPENING_DISPOSITION_OPENING_SUPPORT = "opening_support"
+PHYSICAL_OPENING_DISPOSITION_CANDIDATE = "candidate_unresolved"
+PHYSICAL_OPENING_DISPOSITION_NO_CANDIDATE = "no_candidate_in_covered_path"
+PHYSICAL_OPENING_DISPOSITION_CONFLICT = "conflict"
+PHYSICAL_OPENING_DISPOSITION_UNRESOLVED = "unresolved"
 
 AUTHORITATIVE_PHYSICAL_OPENING_SEMANTICS_UNAVAILABLE = (
     "authoritative_physical_opening_semantics_unavailable"
@@ -126,6 +131,23 @@ class PhysicalOpeningExistenceResult:
     candidate: Optional[CandidateSemanticOpening] = None
     existence_record: Optional[PhysicalOpeningExistenceRecord] = None
     missing_upstream_capability: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class PhysicalOpeningDispositionResult:
+    """Disposition of one visible observation under covered opening paths.
+
+    no_candidate_in_covered_path is deliberately not a proof that the
+    observation can never participate in any opening representation. It means
+    only that the producer examined the observation against the currently
+    registered structural paths and found no candidate membership.
+    """
+
+    status: EvidenceResolutionStatus
+    disposition: str
+    reason_codes: tuple[str, ...]
+    candidate_ids: tuple[str, ...] = ()
+    existence_record: Optional[PhysicalOpeningExistenceRecord] = None
 
 
 @dataclass(frozen=True)
@@ -651,7 +673,7 @@ class PhysicalOpeningAuthority:
             reason_codes=reasons,
         )
 
-    def prove_existence(self, selector: ObservationSelector) -> PhysicalOpeningExistenceResult:
+    def classify_disposition(\n        self,\n        selector: ObservationSelector,\n    ) -> PhysicalOpeningDispositionResult:\n        """Classify one source-visible observation under covered structural paths."""\n\n        if not isinstance(selector, ObservationSelector):\n            raise TypeError("selector must be ObservationSelector")\n        if self._source_visibility_authority is None:\n            return PhysicalOpeningDispositionResult(\n                status=EvidenceResolutionStatus.ABSTAINED,\n                disposition=PHYSICAL_OPENING_DISPOSITION_UNRESOLVED,\n                reason_codes=(VISIBLE_SOURCE_AUTHORITY_REQUIRED,),\n            )\n\n        visibility = self._source_visibility_authority\n        source_result = visibility.resolve_visible(selector)\n        if (\n            source_result.status is not EvidenceResolutionStatus.CORROBORATED\n            or source_result.observation is None\n        ):\n            return PhysicalOpeningDispositionResult(\n                status=_source_failure_status(source_result),\n                disposition=(\n                    PHYSICAL_OPENING_DISPOSITION_CONFLICT\n                    if source_result.status is EvidenceResolutionStatus.CONFLICT\n                    else PHYSICAL_OPENING_DISPOSITION_UNRESOLVED\n                ),\n                reason_codes=_dedupe_reason_codes(source_result.reason_codes),\n            )\n\n        records, failures = self._visible_snapshot_records(source_result)\n        if failures:\n            status = _source_failure_status(*failures)\n            return PhysicalOpeningDispositionResult(\n                status=status,\n                disposition=(\n                    PHYSICAL_OPENING_DISPOSITION_CONFLICT\n                    if status is EvidenceResolutionStatus.CONFLICT\n                    else PHYSICAL_OPENING_DISPOSITION_UNRESOLVED\n                ),\n                reason_codes=_dedupe_reason_codes(\n                    (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),\n                    *tuple(result.reason_codes for result in failures),\n                ),\n            )\n\n        observation = source_result.observation\n        candidates = self._visible_structural_candidates(observation, records)\n        containing = tuple(\n            candidate\n            for candidate in candidates\n            if observation.observation_id in candidate.source_observation_ids\n        )\n        if len(containing) > 1:\n            return PhysicalOpeningDispositionResult(\n                status=EvidenceResolutionStatus.CONFLICT,\n                disposition=PHYSICAL_OPENING_DISPOSITION_CONFLICT,\n                reason_codes=(AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES,),\n                candidate_ids=tuple(sorted(candidate.candidate_id for candidate in containing)),\n            )\n        if len(containing) == 1:\n            existence = self.prove_existence(selector)\n            if (\n                existence.status is EvidenceResolutionStatus.CORROBORATED\n                and existence.existence_record is not None\n            ):\n                return PhysicalOpeningDispositionResult(\n                    status=EvidenceResolutionStatus.CORROBORATED,\n                    disposition=PHYSICAL_OPENING_DISPOSITION_OPENING_SUPPORT,\n                    reason_codes=existence.reason_codes,\n                    candidate_ids=(containing[0].candidate_id,),\n                    existence_record=existence.existence_record,\n                )\n            return PhysicalOpeningDispositionResult(\n                status=EvidenceResolutionStatus.CANDIDATE,\n                disposition=PHYSICAL_OPENING_DISPOSITION_CANDIDATE,\n                reason_codes=containing[0].reason_codes,\n                candidate_ids=(containing[0].candidate_id,),\n            )\n\n        return PhysicalOpeningDispositionResult(\n            status=EvidenceResolutionStatus.CORROBORATED,\n            disposition=PHYSICAL_OPENING_DISPOSITION_NO_CANDIDATE,\n            reason_codes=(VISIBLE_WALL_CONTINUATION_REQUIRED,),\n        )\n\n    def prove_existence(self, selector: ObservationSelector) -> PhysicalOpeningExistenceResult:
         if not isinstance(selector, ObservationSelector):
             raise TypeError("selector must be ObservationSelector")
 
