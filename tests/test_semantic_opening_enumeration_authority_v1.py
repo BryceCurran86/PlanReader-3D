@@ -23,6 +23,7 @@ from pb_opening_universe_completeness_source_adapter import (
     build_semantic_opening_inventory_completeness,
 )
 from pb_semantic_opening_enumeration_authority import (
+    SEMANTIC_OPENING_CANDIDATE_UNIVERSE_COMPLETE,
     SEMANTIC_OPENING_RESIDUAL_SOURCE_EVIDENCE,
     SEMANTIC_OPENING_STRUCTURAL_ENUMERATION_COMPLETE,
     SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN,
@@ -140,9 +141,10 @@ def test_real_g17_support_is_grouped_into_one_semantic_opening() -> None:
     assert len(record.opening_support_observation_ids) == 6
     assert record.residual_visible_observation_ids == ()
     assert record.structural_enumeration_complete is True
-    assert record.physical_opening_universe_complete is False
+    assert record.physical_opening_universe_complete is True
     assert SEMANTIC_OPENING_STRUCTURAL_ENUMERATION_COMPLETE in record.reason_codes
-    assert SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN in record.reason_codes
+    assert SEMANTIC_OPENING_CANDIDATE_UNIVERSE_COMPLETE in record.reason_codes
+    assert SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN not in record.reason_codes
 
     resolved = producer.authority().resolve(
         SemanticOpeningEnumerationSelector(
@@ -171,9 +173,10 @@ def test_examined_noncandidate_visible_segment_is_disposed_for_covered_path() ->
     assert len(record.opening_support_observation_ids) == 6
     assert record.residual_visible_observation_ids == ()
     assert record.structural_enumeration_complete is True
-    assert record.physical_opening_universe_complete is False
+    assert record.physical_opening_universe_complete is True
     assert SEMANTIC_OPENING_RESIDUAL_SOURCE_EVIDENCE not in record.reason_codes
-    assert SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN in record.reason_codes
+    assert SEMANTIC_OPENING_CANDIDATE_UNIVERSE_COMPLETE in record.reason_codes
+    assert SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN not in record.reason_codes
 
 
 def test_unknown_revision_abstains_without_inventing_inventory() -> None:
@@ -190,7 +193,7 @@ def test_unknown_revision_abstains_without_inventing_inventory() -> None:
     assert result.record is None
 
 
-def test_semantic_inventory_projects_representative_member_into_completeness_but_never_seals() -> None:
+def test_semantic_inventory_seals_after_candidate_universe_closure() -> None:
     src = SourceVisibilityProducer(
         producer_method="semantic-enum-test",
         producer_version="1.0",
@@ -206,9 +209,7 @@ def test_semantic_inventory_projects_representative_member_into_completeness_but
         optional_content_known_visible=True,
     )
 
-    # The new semantic inventory is real producer-owned evidence, but V1 still
-    # does not prove universal physical-opening exhaustiveness.
-    assert getattr(authority, "_source_authentication_seal", None) is not (
+    assert getattr(authority, "_source_authentication_seal", None) is (
         _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL
     )
 
@@ -222,9 +223,9 @@ def test_semantic_inventory_projects_representative_member_into_completeness_but
         )
     )
     assert result.record is not None
-    assert result.record.semantic_enumeration_complete is False
-    assert result.record.decision_scope_complete is False
-    assert SEMANTIC_ENUMERATION_INCOMPLETE in result.record.reason_codes
+    assert result.record.semantic_enumeration_complete is True
+    assert result.record.decision_scope_complete is True
+    assert SEMANTIC_ENUMERATION_INCOMPLETE not in result.record.reason_codes
     # Six raw support segments have become exactly one semantic representative.
     assert len(result.record.accounted_member_ids) == 1
 
@@ -289,7 +290,7 @@ def test_page_scope_selects_only_requested_source_pages() -> None:
     assert len(record.opening_support_observation_ids) == 6
     assert record.residual_visible_observation_ids == ()
     assert record.structural_enumeration_complete is True
-    assert record.physical_opening_universe_complete is False
+    assert record.physical_opening_universe_complete is True
 
 
 def test_page_scope_rejects_unavailable_page_without_expanding_scope() -> None:
@@ -327,3 +328,37 @@ def test_page_scope_surface_accepts_addresses_not_candidate_universe() -> None:
         "complete",
     }
     assert not (params & forbidden)
+
+
+def test_unmatched_wall_gap_remains_residual_and_blocks_v2_universe_complete() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=700, height=300)
+    page.draw_line(
+        fitz.Point(20.0, 100.0),
+        fitz.Point(250.0, 100.0),
+        color=(0, 0, 0),
+        width=1,
+    )
+    page.draw_line(
+        fitz.Point(310.0, 100.0),
+        fitz.Point(650.0, 100.0),
+        color=(0, 0, 0),
+        width=1,
+    )
+    payload = doc.tobytes()
+    doc.close()
+
+    src = SourceVisibilityProducer(
+        producer_method="semantic-enum-v2-gap-test",
+        producer_version="2.0",
+    )
+    ingested = _ingest(src, payload, "semantic-unmatched-gap")
+    _producer, result = _enumerate(src, ingested.revision.revision_id)
+
+    assert result.record is not None
+    assert result.record.physical_opening_record_ids == ()
+    assert result.record.residual_visible_observation_ids
+    assert result.record.structural_enumeration_complete is False
+    assert result.record.physical_opening_universe_complete is False
+    assert SEMANTIC_OPENING_RESIDUAL_SOURCE_EVIDENCE in result.record.reason_codes
+    assert SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN in result.record.reason_codes
