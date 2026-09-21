@@ -177,9 +177,9 @@ def build_semantic_opening_inventory_completeness(
     openings.  Its representative observation ids therefore have the exact
     shape GenericOpeningCountAuthority will eventually consume.
 
-    V1 intentionally remains commercially unsealed because
-    physical_opening_universe_complete is not yet provable.  This function is
-    an integration seam, not a shortcut around that missing proposition.
+    V2 may attach the commercial source-authentication seal only after semantic
+    candidate closure and source-owned visibility-scope checks both succeed.
+    Caller compatibility flags are never used as authority.
     """
 
     if type(source_visibility_producer) is not SourceVisibilityProducer:
@@ -204,7 +204,7 @@ def build_semantic_opening_inventory_completeness(
 
     producer = OpeningUniverseCompletenessProducer(
         producer_method="source_authenticated_semantic_opening_inventory_adapter",
-        producer_version="1.0.0",
+        producer_version="2.0.0",
     )
     published = source_visibility_producer.published_snapshot_for_revision(revision_id)
     if (
@@ -254,6 +254,19 @@ def build_semantic_opening_inventory_completeness(
             )
         )
 
+    producer_optional_content_state = (
+        source_visibility_producer.optional_content_state_for_scope(
+            revision_id,
+            page_ids=record.page_ids,
+        )
+    )
+    producer_xobject_truncated = (
+        source_visibility_producer.xobject_traversal_truncated_for_scope(
+            revision_id,
+            page_ids=record.page_ids,
+        )
+    )
+
     completeness_record = producer.publish_enumeration(
         decision_scope_id=record.decision_scope_id,
         decision_scope_kind=record.decision_scope_kind,
@@ -269,10 +282,8 @@ def build_semantic_opening_inventory_completeness(
         # are supplied on both sides only to fingerprint the inventory itself.
         source_primitives=semantic_members,
         enumerated_primitives=semantic_members,
-        optional_content_state=(
-            "known_visible" if optional_content_known_visible else "unresolved"
-        ),
-        xobject_traversal_truncated=xobject_traversal_truncated,
+        optional_content_state=producer_optional_content_state,
+        xobject_traversal_truncated=producer_xobject_truncated,
         semantic_enumeration_proven=bool(
             resolved.record.physical_opening_universe_complete
         ),
