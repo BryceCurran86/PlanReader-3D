@@ -20,6 +20,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Sequence
 
+import fitz
+
 from pb_generic_opening_count_authority import (
     GenericOpeningCountProducer,
     GenericOpeningCountSelector,
@@ -29,8 +31,19 @@ from pb_opening_universe_completeness_source_adapter import (
 )
 from pb_page_view_class_source_adapter import (
     build_source_page_view_class_authority,
+    page_viewport_id,
 )
 from pb_physical_opening_authority import PhysicalOpeningAuthority
+from pb_schedule_opening_instance_binding_authority import (
+    ScheduleOpeningInstanceBindingProducer,
+)
+from pb_source_observation_authority import ObservationSelector
+from pb_source_opening_candidate_authority import authenticate_viewport_decision
+from pb_viewport_segmentation import SegmentedViewport
+from pb_viewport_view_class_authority import (
+    VIEW_KIND_FLOOR_PLAN,
+    ViewportViewClassSelector,
+)
 from pb_semantic_opening_enumeration_authority import (
     SemanticOpeningEnumerationProducer,
 )
@@ -63,7 +76,128 @@ def empty_item35_authority_shadow(*, reason: str) -> dict[str, Any]:
         "generic_count_reason_codes": [],
         "generic_count": None,
         "commercial_count_unlocked": False,
+        "ocr_tag_observation_count": 0,
+        "schedule_binding_statuses": [],
+        "classified_opening_count": 0,
+        "opening_family_counts": {},
+        "opening_mark_counts": {},
     }
+
+
+
+def _augment_floor_plan_ocr_tags(
+    *,
+    source: SourceVisibilityProducer,
+    revision_id: str,
+    payload: bytes,
+    page_ids: Sequence[str],
+) -> int:
+    """Run producer-owned OCR only on source-authenticated floor-plan pages."""
+
+    tag_count = 0
+    pdf = fitz.open(stream=payload, filetype="pdf")
+    try:
+        for raw_page_id in page_ids:
+            page_id = str(raw_page_id)
+            published = source.published_snapshot_for_revision(revision_id)
+            if published is None:
+                break
+
+            view_authority = build_source_page_view_class_authority(
+                source_visibility_producer=source,
+                revision_id=revision_id,
+                page_ids=(page_id,),
+            )
+            viewport_id = page_viewport_id(page_id)
+            selector = ViewportViewClassSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                viewport_id=viewport_id,
+            )
+            try:
+                page_index = int(page_id) - 1
+            except (TypeError, ValueError):
+                continue
+            if page_index < 0 or page_index >= int(pdf.page_count):
+                continue
+            page = pdf.load_page(page_index)
+            rect = page.rect
+            viewport = SegmentedViewport(
+                view_id=viewport_id,
+                page_number=page_index + 1,
+                view_type=VIEW_KIND_FLOOR_PLAN,
+                label="SOURCE FLOOR PLAN PAGE",
+                title_bbox=(0.0, 0.0, 0.0, 0.0),
+                bounding_box=(0.0, 0.0, float(rect.width), float(rect.height)),
+                status="resolved",
+                boundary_source="producer_page_scope",
+                confidence=1.0,
+            )
+            decision = authenticate_viewport_decision(
+                viewport=viewport,
+                view_class_authority=view_authority,
+                selector=selector,
+            )
+            tags, _updated = source.augment_with_raster_ocr_tags(
+                revision_id,
+                viewport_decision=decision,
+            )
+            tag_count += len(tags)
+    finally:
+        pdf.close()
+    return tag_count
+
+
+def _publish_schedule_bindings(
+    *,
+    source: SourceVisibilityProducer,
+    semantic_record,
+    decision_scope_id: str,
+) -> tuple[object, tuple[dict[str, Any], ...]]:
+    """Resolve source-owned opening->tag->schedule bindings for semantic members."""
+
+    binder = ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(source)
+    published = source.published_snapshot_for_revision(semantic_record.revision_id)
+    if published is None:
+        return binder.authority(), ()
+
+    statuses: list[dict[str, Any]] = []
+    seen_opening_records: set[str] = set()
+    for observation_id in semantic_record.representative_observation_ids:
+        result = binder.publish_scope(
+            opening_selector=ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            ),
+            decision_scope_id=decision_scope_id,
+        )
+        record = result.record
+        opening_record_id = (
+            str(record.opening_record_id)
+            if record is not None
+            else ""
+        )
+        if opening_record_id and opening_record_id in seen_opening_records:
+            continue
+        if opening_record_id:
+            seen_opening_records.add(opening_record_id)
+        statuses.append(
+            {
+                "status": str(result.status.value),
+                "reason_codes": list(result.reason_codes),
+                "opening_record_id": opening_record_id or None,
+                "tag_mark": (str(record.tag_mark) if record is not None else None),
+                "schedule_page_id": (
+                    str(record.schedule_page_id) if record is not None else None
+                ),
+            }
+        )
+    return binder.authority(), tuple(statuses)
 
 
 def collect_item35_authority_shadow(
@@ -96,16 +230,10 @@ def collect_item35_authority_shadow(
         source_locator=str(path),
     )
 
-    semantic_producer = (
-        SemanticOpeningEnumerationProducer.from_source_visibility_producer(source)
-    )
     if pages is None:
         scoped_page_ids = None
         decision_scope_id = f"item35:document:{published.revision.revision_id}"
-        semantic = semantic_producer.publish_document_scope(
-            revision_id=published.revision.revision_id,
-            decision_scope_id=decision_scope_id,
-        )
+        scoped_page_ids = tuple(str(page) for page in published.coverage.decoded_pages)
     else:
         scoped_page_ids = tuple(
             str(int(page_index) + 1)
@@ -121,6 +249,27 @@ def collect_item35_authority_shadow(
             published.revision.revision_id,
             page_ids=scoped_page_ids,
         )
+    # OCR tags must enter the same immutable source snapshot before semantic
+    # opening and commercial-binding authorities are composed.
+    ocr_tag_count = _augment_floor_plan_ocr_tags(
+        source=source,
+        revision_id=published.revision.revision_id,
+        payload=payload,
+        page_ids=scoped_page_ids,
+    )
+    published = source.published_snapshot_for_revision(
+        published.revision.revision_id
+    ) or published
+
+    semantic_producer = (
+        SemanticOpeningEnumerationProducer.from_source_visibility_producer(source)
+    )
+    if pages is None:
+        semantic = semantic_producer.publish_document_scope(
+            revision_id=published.revision.revision_id,
+            decision_scope_id=decision_scope_id,
+        )
+    else:
         semantic = semantic_producer.publish_page_scope(
             revision_id=published.revision.revision_id,
             decision_scope_id=decision_scope_id,
@@ -139,6 +288,7 @@ def collect_item35_authority_shadow(
                 if semantic.record is not None
                 else 0
             ),
+            "ocr_tag_observation_count": int(ocr_tag_count),
         }
     )
 
@@ -197,10 +347,24 @@ def collect_item35_authority_shadow(
             else tuple(str(page) for page in published.coverage.decoded_pages)
         ),
     )
+    binding_authority = None
+    binding_statuses: tuple[dict[str, Any], ...] = ()
+    if semantic.record is not None:
+        binding_authority, binding_statuses = _publish_schedule_bindings(
+            source=source,
+            semantic_record=semantic.record,
+            decision_scope_id=decision_scope_id,
+        )
+    shadow["schedule_binding_statuses"] = list(binding_statuses)
+    shadow["classified_opening_count"] = sum(
+        1 for item in binding_statuses if item.get("status") == "corroborated"
+    )
+
     generic = GenericOpeningCountProducer.from_authorities(
         opening_universe_authority=completeness,
         physical_opening_authority=PhysicalOpeningAuthority(source.authority()),
         viewport_view_class_authority=view_authority,
+        schedule_binding_authority=binding_authority,
     )
     generic_result = generic.publish(
         GenericOpeningCountSelector(
@@ -219,6 +383,46 @@ def collect_item35_authority_shadow(
         else None
     )
     shadow["commercial_count_unlocked"] = bool(generic_result.record is not None)
+
+    family_counts: dict[str, int] = {}
+    for family in ("window", "door"):
+        result = generic.publish(
+            GenericOpeningCountSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                decision_scope_id=decision_scope_id,
+                opening_family=family,
+            )
+        )
+        if result.record is not None:
+            family_counts[family] = int(result.record.count)
+    shadow["opening_family_counts"] = family_counts
+
+    mark_counts: dict[str, int] = {}
+    marks = sorted(
+        {
+            str(item.get("tag_mark") or "").strip().upper()
+            for item in binding_statuses
+            if item.get("status") == "corroborated"
+            and str(item.get("tag_mark") or "").strip()
+        }
+    )
+    for mark in marks:
+        result = generic.publish(
+            GenericOpeningCountSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                decision_scope_id=decision_scope_id,
+                opening_mark=mark,
+            )
+        )
+        if result.record is not None:
+            mark_counts[mark] = int(result.record.count)
+    shadow["opening_mark_counts"] = mark_counts
     return shadow
 
 
