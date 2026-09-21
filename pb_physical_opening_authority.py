@@ -25,6 +25,7 @@ from pb_source_observation_authority import (
 )
 from pb_source_visibility_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
+    RASTER_PDF_VISIBLE_SEGMENT,
     VISIBILITY_RECEIPT_UNAVAILABLE,
     SourceVisibilityAuthority,
 )
@@ -524,7 +525,10 @@ class PhysicalOpeningAuthority:
         scoped = tuple(
             record
             for record in records
-            if record.observation_kind == NATIVE_PDF_VISIBLE_SEGMENT
+            if record.observation_kind in {
+                NATIVE_PDF_VISIBLE_SEGMENT,
+                RASTER_PDF_VISIBLE_SEGMENT,
+            }
             and record.document_id == seed.document_id
             and record.revision_id == seed.revision_id
             and record.source_sha256 == seed.source_sha256
