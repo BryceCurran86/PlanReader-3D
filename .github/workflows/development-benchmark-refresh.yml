@@ -1,0 +1,176 @@
+name: Development Benchmark Refresh
+# post-candidate-closure benchmark trigger
+
+on:
+  push:
+    branches: [gpt/post-candidate-closure-cached-benchmark-v1]
+  pull_request:
+    branches: [main]
+
+jobs:
+  five-project-development-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install benchmark dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download registered benchmark source PDFs
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf" \
+            -o "benchmarks/sources/1727358888238-bq-nd-drawing.pdf"
+
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf" \
+            -o "benchmarks/sources/1785347143869-bqs-drawings.pdf"
+
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf" \
+            -o "benchmarks/sources/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf"
+
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf" \
+            -o "benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf"
+
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://umma.ac.ke/wp-content/uploads/2026/06/Builders-work.pdf" \
+            -o "benchmarks/sources/umma-university-hostels-builders-work.pdf"
+
+      - name: Verify registered source hashes
+        run: |
+          set -euo pipefail
+          cat > /tmp/benchmark-sha256.txt <<'EOF'
+          6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+          84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  benchmarks/sources/1785347143869-bqs-drawings.pdf
+          c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f  benchmarks/sources/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf
+          fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+          f30711f69944e66ef993341180e35b49ccfcb36d6f402743284823ab588183af  benchmarks/sources/umma-university-hostels-builders-work.pdf
+          EOF
+          sha256sum -c /tmp/benchmark-sha256.txt
+
+      - name: Run canonical public-tender suite
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          rm -rf benchmark_results_runtime
+          python pb_benchmark_accuracy_engine.py \
+            --all \
+            --require-local-sources \
+            --output-dir benchmark_results_runtime
+
+      - name: Print five-project development summary
+        if: always()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          p = Path("benchmark_results_runtime/headline_accuracy_dashboard.json")
+          if not p.exists():
+              raise SystemExit("dashboard not produced")
+          d = json.loads(p.read_text(encoding="utf-8"))
+          h = d["headline_metrics"]
+          accepted = int(h["exact_matches"]) + int(h["within_5_percent"])
+          print("=" * 72)
+          print("FIVE-PROJECT DEVELOPMENT BENCHMARK")
+          print(f"evaluated_commit_sha={d.get('evaluated_commit_sha')}")
+          print(f"accepted={accepted}")
+          print(f"denominator={h['total_items_compared']}")
+          print(f"accuracy={h['overall_accuracy_percentage']}")
+          print(f"exact={h['exact_matches']}")
+          print(f"within_5={h['within_5_percent']}")
+          print(f"gross={h['gross_mismatches']}")
+          print(f"missed={h['missed_items']}")
+          print(f"hallucinated={h['hallucinated_items']}")
+          print(f"coverage_complete={d.get('summary_counts', {}).get('headline_coverage_complete')}")
+          print("=" * 72)
+          for r in d.get("headline_reports", []):
+              s = r["summary"]
+              a = int(s["exact_matches"]) + int(s["within_5_percent"])
+              print(
+                  f"{r['benchmark_id']}: "
+                  f"{a}/{s['total_items_compared']} accepted; "
+                  f"exact={s['exact_matches']}; within5={s['within_5_percent']}; "
+                  f"gross={s['gross_mismatches']}; missed={s['missed_items']}; "
+                  f"hallucinated={s['hallucinated_items']}; "
+                  f"accuracy={s['overall_accuracy_percentage']}"
+              )
+          PY
+
+      - name: Print row movements versus committed dashboard
+        if: success()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          runtime = Path("benchmark_results_runtime")
+          committed = Path("benchmark_results")
+          project_ids = [
+              "tenders_ke_kstvet_cbc_classroom",
+              "tenders_ke_murera_science_lab",
+              "tenders_ke_ghazi_science_lab",
+              "tenders_ke_umma_hostels",
+              "tenders_ke_lamu_ishakani_ecd_classrooms",
+          ]
+
+          print("=" * 72)
+          print("ROW MOVEMENTS VS COMMITTED REPORTS")
+          for project_id in project_ids:
+              new_path = runtime / f"{project_id}_accuracy_report.json"
+              old_path = committed / f"{project_id}_accuracy_report.json"
+              if not new_path.exists() or not old_path.exists():
+                  print(f"{project_id}: comparison file unavailable")
+                  continue
+              new = json.loads(new_path.read_text(encoding="utf-8"))
+              old = json.loads(old_path.read_text(encoding="utf-8"))
+              old_rows = {row["item_id"]: row for row in old.get("item_results", [])}
+              new_rows = {row["item_id"]: row for row in new.get("item_results", [])}
+              moved = []
+              for item_id in sorted(set(old_rows) | set(new_rows)):
+                  before = old_rows.get(item_id, {})
+                  after = new_rows.get(item_id, {})
+                  before_status = before.get("status")
+                  after_status = after.get("status")
+                  before_qty = before.get("extracted_quantity")
+                  after_qty = after.get("extracted_quantity")
+                  if before_status != after_status or before_qty != after_qty:
+                      moved.append(
+                          (
+                              item_id,
+                              before_status,
+                              after_status,
+                              before_qty,
+                              after_qty,
+                          )
+                      )
+              print(f"{project_id}: {len(moved)} row(s) moved")
+              for item_id, before_status, after_status, before_qty, after_qty in moved:
+                  print(
+                      f"  {item_id}: {before_status} -> {after_status}; "
+                      f"qty {before_qty} -> {after_qty}"
+                  )
+          print("=" * 72)
+          PY
+
+      - name: Upload benchmark reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: five-project-development-benchmark
+          path: benchmark_results_runtime/
+          if-no-files-found: warn
