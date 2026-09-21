@@ -396,6 +396,17 @@ class PhysicalOpeningAuthority:
                 "source_observation_authority must be the concrete producer-owned "
                 "SourceObservationAuthority or SourceVisibilityAuthority reader"
             )
+        self._visible_candidate_cache: dict[
+            tuple[str, str, str, str, str],
+            tuple[CandidateSemanticOpening, ...],
+        ] = {}
+        self._visible_snapshot_cache: dict[
+            tuple[str, str, str, str],
+            tuple[
+                tuple[SourceObservationRecord, ...],
+                tuple[SourceObservationAuthorityResult, ...],
+            ],
+        ] = {}
 
     def source_visibility_authority(self) -> Optional[SourceVisibilityAuthority]:
         """Return the producer-owned visibility reader when this authority is visibility-backed.
@@ -451,6 +462,15 @@ class PhysicalOpeningAuthority:
         visibility = self._source_visibility_authority
         if visibility is None or seed.snapshot is None or seed.source_revision is None:
             return (), ()
+        cache_key = (
+            seed.snapshot.document_id,
+            seed.snapshot.revision_id,
+            seed.snapshot.source_sha256,
+            seed.snapshot.snapshot_id,
+        )
+        cached = self._visible_snapshot_cache.get(cache_key)
+        if cached is not None:
+            return cached
         records: list[SourceObservationRecord] = []
         failures: list[SourceObservationAuthorityResult] = []
         for observation_id in seed.snapshot.observation_ids:
@@ -469,7 +489,9 @@ class PhysicalOpeningAuthority:
                 failures.append(result)
             elif VISIBILITY_RECEIPT_UNAVAILABLE not in result.reason_codes:
                 failures.append(result)
-        return tuple(records), tuple(failures)
+        resolved = (tuple(records), tuple(failures))
+        self._visible_snapshot_cache[cache_key] = resolved
+        return resolved
 
     @staticmethod
     def _raw_structural_candidates(
@@ -931,6 +953,27 @@ class PhysicalOpeningAuthority:
         by_id = {item.candidate_id: item for item in (*strong, *retained)}
         return tuple(by_id[key] for key in sorted(by_id))
 
+    def _visible_candidates_for(
+        self,
+        seed: SourceObservationRecord,
+        records: tuple[SourceObservationRecord, ...],
+    ) -> tuple[CandidateSemanticOpening, ...]:
+        """Memoize deterministic multi-path candidate discovery per source page."""
+
+        key = (
+            seed.document_id,
+            seed.revision_id,
+            seed.source_sha256,
+            seed.snapshot_id,
+            seed.page_id,
+        )
+        cached = self._visible_candidate_cache.get(key)
+        if cached is not None:
+            return cached
+        candidates = self._visible_all_structural_candidates(seed, records)
+        self._visible_candidate_cache[key] = candidates
+        return candidates
+
     def assess_visible_candidate_closure(
         self,
         selector: ObservationSelector,
@@ -1085,7 +1128,7 @@ class PhysicalOpeningAuthority:
                     ),
                 )
 
-        proven = self._visible_all_structural_candidates(seed, records)
+        proven = self._visible_candidates_for(seed, records)
         proven_supports = tuple(
             frozenset(candidate.source_observation_ids)
             for candidate in proven
@@ -1200,7 +1243,7 @@ class PhysicalOpeningAuthority:
             )
 
         observation = source_result.observation
-        candidates = self._visible_all_structural_candidates(observation, records)
+        candidates = self._visible_candidates_for(observation, records)
         containing = tuple(
             candidate
             for candidate in candidates
@@ -1321,7 +1364,7 @@ class PhysicalOpeningAuthority:
                 ), source_observation=source_result,
             )
         observation = source_result.observation
-        candidates = self._visible_all_structural_candidates(observation, records)
+        candidates = self._visible_candidates_for(observation, records)
         containing = tuple(
             candidate for candidate in candidates
             if observation.observation_id in candidate.source_observation_ids
