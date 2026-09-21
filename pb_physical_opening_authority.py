@@ -371,6 +371,10 @@ class PhysicalOpeningAuthority:
                 "source_observation_authority must be the concrete producer-owned "
                 "SourceObservationAuthority or SourceVisibilityAuthority reader"
             )
+        self._visible_candidate_cache: dict[
+            tuple[str, str, str, str, str],
+            tuple[CandidateSemanticOpening, ...],
+        ] = {}
 
     def source_visibility_authority(self) -> Optional[SourceVisibilityAuthority]:
         """Return the producer-owned visibility reader when this authority is visibility-backed.
@@ -638,6 +642,32 @@ class PhysicalOpeningAuthority:
             ))
         return tuple(candidates)
 
+    def _visible_candidates_for(
+        self,
+        seed: SourceObservationRecord,
+        records: tuple[SourceObservationRecord, ...],
+    ) -> tuple[CandidateSemanticOpening, ...]:
+        """Memoize deterministic page candidate discovery within this authority.
+
+        Candidate discovery depends only on immutable source/snapshot/page
+        identity and the producer-owned visible snapshot records. Reusing the
+        result avoids re-running the same page topology search once per source
+        segment on dense drawings.
+        """
+        key = (
+            seed.document_id,
+            seed.revision_id,
+            seed.source_sha256,
+            seed.snapshot_id,
+            seed.page_id,
+        )
+        cached = self._visible_candidate_cache.get(key)
+        if cached is not None:
+            return cached
+        candidates = self._visible_structural_candidates(seed, records)
+        self._visible_candidate_cache[key] = candidates
+        return candidates
+
     @staticmethod
     def _single_raw_candidate(
         observation: SourceObservationRecord,
@@ -721,7 +751,7 @@ class PhysicalOpeningAuthority:
             )
 
         observation = source_result.observation
-        candidates = self._visible_structural_candidates(observation, records)
+        candidates = self._visible_candidates_for(observation, records)
         containing = tuple(
             candidate
             for candidate in candidates
@@ -842,7 +872,7 @@ class PhysicalOpeningAuthority:
                 ), source_observation=source_result,
             )
         observation = source_result.observation
-        candidates = self._visible_structural_candidates(observation, records)
+        candidates = self._visible_candidates_for(observation, records)
         containing = tuple(
             candidate for candidate in candidates
             if observation.observation_id in candidate.source_observation_ids
