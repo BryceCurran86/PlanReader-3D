@@ -169,7 +169,8 @@ def _geometry_points(geometry: Sequence[float]) -> tuple[Point, ...]:
     return tuple((coords[index], coords[index + 1]) for index in range(0, len(coords), 2))
 
 
-def _bbox_iou(left: BBox, right: BBox) -> float:
+def _bbox_overlap_fraction_of_smaller(left: BBox, right: BBox) -> float:
+    """Return intersection area as a fraction of the smaller source box."""
     lx0, ly0, lx1, ly1 = left
     rx0, ry0, rx1, ry1 = right
     ix0, iy0 = max(lx0, rx0), max(ly0, ry0)
@@ -179,8 +180,8 @@ def _bbox_iou(left: BBox, right: BBox) -> float:
         return 0.0
     left_area = max(0.0, lx1 - lx0) * max(0.0, ly1 - ly0)
     right_area = max(0.0, rx1 - rx0) * max(0.0, ry1 - ry0)
-    union = left_area + right_area - intersection
-    return intersection / union if union > 0.0 else 0.0
+    smaller = min(left_area, right_area)
+    return intersection / smaller if smaller > 0.0 else 0.0
 
 
 def _bbox_overlap_fraction_of_smaller(left: BBox, right: BBox) -> float:
