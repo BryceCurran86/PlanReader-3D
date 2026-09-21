@@ -81,6 +81,7 @@ def empty_item35_authority_shadow(*, reason: str) -> dict[str, Any]:
         "classified_opening_count": 0,
         "opening_family_counts": {},
         "opening_mark_counts": {},
+        "opening_mark_predictions": {},
     }
 
 
@@ -194,6 +195,16 @@ def _publish_schedule_bindings(
                 "tag_mark": (str(record.tag_mark) if record is not None else None),
                 "schedule_page_id": (
                     str(record.schedule_page_id) if record is not None else None
+                ),
+                "schedule_row_width_mm": (
+                    int(record.schedule_row_width_mm)
+                    if record is not None and record.schedule_row_width_mm is not None
+                    else None
+                ),
+                "schedule_row_height_mm": (
+                    int(record.schedule_row_height_mm)
+                    if record is not None and record.schedule_row_height_mm is not None
+                    else None
                 ),
             }
         )
@@ -423,6 +434,45 @@ def collect_item35_authority_shadow(
         if result.record is not None:
             mark_counts[mark] = int(result.record.count)
     shadow["opening_mark_counts"] = mark_counts
+
+    mark_predictions: dict[str, dict[str, Any]] = {}
+    for mark, count in mark_counts.items():
+        material = [
+            item
+            for item in binding_statuses
+            if item.get("status") == "corroborated"
+            and str(item.get("tag_mark") or "").strip().upper() == mark
+        ]
+        dimensions = {
+            (
+                int(item["schedule_row_width_mm"]),
+                int(item["schedule_row_height_mm"]),
+            )
+            for item in material
+            if item.get("schedule_row_width_mm") is not None
+            and item.get("schedule_row_height_mm") is not None
+        }
+        # A classified mark with missing or competing schedule dimensions is
+        # not a fully measurable opening type; keep the count diagnostic only.
+        if len(dimensions) != 1:
+            continue
+        width_mm, height_mm = next(iter(dimensions))
+        normalized = mark.upper()
+        if normalized.startswith("W"):
+            trade_type = "windows"
+        elif normalized.startswith("D") and not normalized.startswith("DW"):
+            trade_type = "doors"
+        else:
+            continue
+        mark_predictions[mark] = {
+            "quantity": int(count),
+            "unit": "NO",
+            "trade_type": trade_type,
+            "width_mm": width_mm,
+            "height_mm": height_mm,
+            "authority": "item35_generic_opening_count",
+        }
+    shadow["opening_mark_predictions"] = mark_predictions
     return shadow
 
 
