@@ -885,6 +885,9 @@ class ScheduleOpeningInstanceBindingProducer:
                     for index, existing in enumerate(deduped_tags)
                     if (
                         existing[1] == mark
+                        # Require most of the smaller source box to overlap:
+                        # tolerant of native/OCR envelope height differences,
+                        # but never a generic proximity-based dedupe.
                         and _bbox_overlap_fraction_of_smaller(existing[2], bbox) >= 0.75
                     )
                 ),
