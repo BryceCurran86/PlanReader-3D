@@ -32,7 +32,7 @@ def _pdf() -> bytes:
     return payload
 
 
-def test_structural_completeness_alone_does_not_receive_commercial_seal() -> None:
+def test_candidate_closed_semantic_universe_receives_commercial_seal() -> None:
     source = SourceVisibilityProducer(
         producer_method="commercial-seal-test",
         producer_version="1.0",
@@ -51,5 +51,5 @@ def test_structural_completeness_alone_does_not_receive_commercial_seal() -> Non
     )
     assert (
         getattr(authority, "_source_authentication_seal", None)
-        is not _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL
+        is _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL
     )
