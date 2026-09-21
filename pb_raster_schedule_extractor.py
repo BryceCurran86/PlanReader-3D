@@ -673,7 +673,7 @@ class GenericScheduleTableExtractor:
             def _identity_tokens(text: str) -> List[Tuple[str, str]]:
                 found: List[Tuple[str, str]] = []
                 for match in re.finditer(
-                    r"(?<![A-Za-z0-9])(?:WINDOW|WIN|W|DOOR|DR|D)\s*[-_]?\s*\d{1,3}(?![A-Za-z0-9])",
+                    r"(?<![A-Za-z0-9])(?:WINDOW|WIN|W|DOOR|DR|D)\s*[-_]?\s*\d{1,3}(?![A-Za-z0-9])(?!\s*[-_]\s*\d)",
                     text,
                     re.I,
                 ):
@@ -684,7 +684,7 @@ class GenericScheduleTableExtractor:
                             found.append(pair)
                 return found
 
-            emitted: set[Tuple[str, float, float, int]] = set()
+            emitted: set[Tuple[str, float, Tuple[float, ...], int]] = set()
 
             def _emit_from_text(
                 combined_text: str,
@@ -713,7 +713,7 @@ class GenericScheduleTableExtractor:
                 key = (
                     normalized_opening.tag,
                     qty,
-                    float(dims[0]) if dims else 0.0,
+                    tuple(float(value) for value in (dims or [])),
                     page_num,
                 )
                 if key in emitted:
