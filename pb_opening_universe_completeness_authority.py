@@ -115,6 +115,7 @@ class OpeningUniverseCompletenessRecord:
     accounted_member_ids: tuple[str, ...]
     universe_fingerprint: str
     reason_codes: tuple[str, ...]
+    accounted_source_observation_ids: tuple[str, ...] = ()
     schema_version: str = OPENING_UNIVERSE_COMPLETENESS_SCHEMA_VERSION
 
 
@@ -565,6 +566,9 @@ class OpeningUniverseCompletenessProducer:
         accounted_ids = tuple(
             sorted({member.member_id for member in enumerated_members})
         )
+        accounted_source_observation_ids = tuple(
+            sorted({member.primitive_id for member in enumerated_members})
+        )
         record_payload = {
             "schema_version": OPENING_UNIVERSE_COMPLETENESS_SCHEMA_VERSION,
             "producer_method": self._producer_method,
@@ -575,6 +579,7 @@ class OpeningUniverseCompletenessProducer:
             "semantic_enumeration_complete": semantic_complete,
             "decision_scope_complete": decision_complete,
             "accounted_member_ids": accounted_ids,
+            "accounted_source_observation_ids": accounted_source_observation_ids,
             "universe_fingerprint": source_fingerprint,
             "reason_codes": unique_reasons,
         }
@@ -597,6 +602,7 @@ class OpeningUniverseCompletenessProducer:
             accounted_member_ids=accounted_ids,
             universe_fingerprint=source_fingerprint,
             reason_codes=unique_reasons,
+            accounted_source_observation_ids=accounted_source_observation_ids,
         )
         key = _record_key(
             document_id=scope.document_id,
