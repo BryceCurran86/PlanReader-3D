@@ -778,9 +778,16 @@ class PhysicalOpeningAuthority:
             if center is None:
                 continue
 
-            gap_width = math.hypot(
-                gap_wall_a.cx - gap_wall_b.cx,
-                gap_wall_a.cy - gap_wall_b.cy,
+            gap_width = min(
+                math.hypot(ax - bx, ay - by)
+                for ax, ay in (
+                    (gap_wall_a.x1, gap_wall_a.y1),
+                    (gap_wall_a.x2, gap_wall_a.y2),
+                )
+                for bx, by in (
+                    (gap_wall_b.x1, gap_wall_b.y1),
+                    (gap_wall_b.x2, gap_wall_b.y2),
+                )
             )
             for door in doors:
                 if door.wall_segment not in gap.wall_segments or door.jamb_segment is None:
