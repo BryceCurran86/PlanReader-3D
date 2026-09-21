@@ -1,5 +1,5 @@
 name: Development Benchmark Refresh
-# post-candidate-closure benchmark trigger
+# Split-project execution: each canonical project runs independently, then results are aggregated.
 
 on:
   push:
@@ -8,9 +8,40 @@ on:
     branches: [main]
 
 jobs:
-  five-project-development-benchmark:
+  project-benchmark:
+    name: benchmark-${{ matrix.slug }}
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slug: kstvet
+            benchmark_id: tenders_ke_kstvet_cbc_classroom
+            source_url: https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf
+            source_path: benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+            source_sha256: 6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc
+          - slug: murera
+            benchmark_id: tenders_ke_murera_science_lab
+            source_url: https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf
+            source_path: benchmarks/sources/1785347143869-bqs-drawings.pdf
+            source_sha256: 84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b
+          - slug: ghazi
+            benchmark_id: tenders_ke_ghazi_science_lab
+            source_url: https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf
+            source_path: benchmarks/sources/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf
+            source_sha256: c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f
+          - slug: lamu
+            benchmark_id: tenders_ke_lamu_ishakani_ecd_classrooms
+            source_url: https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf
+            source_path: benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+            source_sha256: fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2
+          - slug: umma
+            benchmark_id: tenders_ke_umma_hostels
+            source_url: https://umma.ac.ke/wp-content/uploads/2026/06/Builders-work.pdf
+            source_path: benchmarks/sources/umma-university-hostels-builders-work.pdf
+            source_sha256: f30711f69944e66ef993341180e35b49ccfcb36d6f402743284823ab588183af
+
     steps:
       - uses: actions/checkout@v4
 
@@ -24,101 +55,198 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-ci-v1228.txt
 
-      - name: Download registered benchmark source PDFs
+      - name: Download registered benchmark source PDF
+        env:
+          SOURCE_URL: ${{ matrix.source_url }}
+          SOURCE_PATH: ${{ matrix.source_path }}
+          SOURCE_SHA256: ${{ matrix.source_sha256 }}
         run: |
           set -euo pipefail
-          mkdir -p benchmarks/sources
+          mkdir -p "$(dirname "$SOURCE_PATH")"
+          curl --fail --location --retry 4 --retry-delay 3 "$SOURCE_URL" -o "$SOURCE_PATH"
+          echo "$SOURCE_SHA256  $SOURCE_PATH" | sha256sum -c -
 
-          curl --fail --location --retry 4 --retry-delay 3 \
-            "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf" \
-            -o "benchmarks/sources/1727358888238-bq-nd-drawing.pdf"
-
-          curl --fail --location --retry 4 --retry-delay 3 \
-            "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf" \
-            -o "benchmarks/sources/1785347143869-bqs-drawings.pdf"
-
-          curl --fail --location --retry 4 --retry-delay 3 \
-            "https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf" \
-            -o "benchmarks/sources/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf"
-
-          curl --fail --location --retry 4 --retry-delay 3 \
-            "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf" \
-            -o "benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf"
-
-          curl --fail --location --retry 4 --retry-delay 3 \
-            "https://umma.ac.ke/wp-content/uploads/2026/06/Builders-work.pdf" \
-            -o "benchmarks/sources/umma-university-hostels-builders-work.pdf"
-
-      - name: Verify registered source hashes
-        run: |
-          set -euo pipefail
-          cat > /tmp/benchmark-sha256.txt <<'EOF'
-          6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/1727358888238-bq-nd-drawing.pdf
-          84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  benchmarks/sources/1785347143869-bqs-drawings.pdf
-          c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f  benchmarks/sources/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf
-          fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
-          f30711f69944e66ef993341180e35b49ccfcb36d6f402743284823ab588183af  benchmarks/sources/umma-university-hostels-builders-work.pdf
-          EOF
-          sha256sum -c /tmp/benchmark-sha256.txt
-
-      - name: Run canonical public-tender suite
+      - name: Run canonical project benchmark
         env:
           PYTHONPATH: .
+          BENCHMARK_ID: ${{ matrix.benchmark_id }}
+          SLUG: ${{ matrix.slug }}
         run: |
           set -euo pipefail
-          rm -rf benchmark_results_runtime
-          python pb_benchmark_accuracy_engine.py \
-            --all \
-            --require-local-sources \
-            --output-dir benchmark_results_runtime
+          out="benchmark_results_runtime/$SLUG"
+          rm -rf "$out"
+          python pb_benchmark_accuracy_engine.py             --benchmark "$BENCHMARK_ID"             --auto-extract             --output-dir "$out"
 
-      - name: Print five-project development summary
+      - name: Print project result
+        if: always()
+        env:
+          BENCHMARK_ID: ${{ matrix.benchmark_id }}
+          SLUG: ${{ matrix.slug }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          benchmark_id = os.environ["BENCHMARK_ID"]
+          slug = os.environ["SLUG"]
+          p = Path("benchmark_results_runtime") / slug / f"{benchmark_id}_accuracy_report.json"
+          if not p.exists():
+              raise SystemExit(f"{benchmark_id}: report not produced")
+          d = json.loads(p.read_text(encoding="utf-8"))
+          s = d["summary"]
+          accepted = int(s["exact_matches"]) + int(s["within_5_percent"])
+          print("=" * 72)
+          print(f"{benchmark_id}: {accepted}/{s['total_items_compared']} accepted")
+          print(f"accuracy={s['overall_accuracy_percentage']}")
+          print(f"exact={s['exact_matches']}")
+          print(f"within_5={s['within_5_percent']}")
+          print(f"gross={s['gross_mismatches']}")
+          print(f"missed={s['missed_items']}")
+          print(f"hallucinated={s['hallucinated_items']}")
+          print("=" * 72)
+          PY
+
+      - name: Upload project report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ matrix.slug }}
+          path: benchmark_results_runtime/${{ matrix.slug }}/
+          if-no-files-found: warn
+
+  aggregate-benchmark:
+    name: aggregate-five-project-benchmark
+    if: always()
+    needs: project-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download project reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: benchmark-*
+          path: split_benchmark_reports
+          merge-multiple: true
+
+      - name: Aggregate canonical five-project score
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark_results_runtime
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          expected_ids = [
+              "tenders_ke_kstvet_cbc_classroom",
+              "tenders_ke_murera_science_lab",
+              "tenders_ke_ghazi_science_lab",
+              "tenders_ke_umma_hostels",
+              "tenders_ke_lamu_ishakani_ecd_classrooms",
+          ]
+
+          report_dir = Path("split_benchmark_reports")
+          reports = {}
+          for path in report_dir.glob("*_accuracy_report.json"):
+              d = json.loads(path.read_text(encoding="utf-8"))
+              reports[d["benchmark_id"]] = d
+
+          missing = [bid for bid in expected_ids if bid not in reports]
+          ordered = [reports[bid] for bid in expected_ids if bid in reports]
+
+          totals = {
+              "total_measurable_expected": 0,
+              "total_items_compared": 0,
+              "exact_matches": 0,
+              "within_5_percent": 0,
+              "within_10_percent": 0,
+              "within_20_percent": 0,
+              "gross_mismatches": 0,
+              "missed_items": 0,
+              "hallucinated_items": 0,
+          }
+          projects = []
+          for r in ordered:
+              s = r["summary"]
+              for key in totals:
+                  totals[key] += int(s[key])
+              accepted = int(s["exact_matches"]) + int(s["within_5_percent"])
+              projects.append(
+                  {
+                      "benchmark_id": r["benchmark_id"],
+                      "project_name": r.get("project_name"),
+                      "accepted": accepted,
+                      "denominator": int(s["total_items_compared"]),
+                      "accuracy": s["overall_accuracy_percentage"],
+                      "exact": int(s["exact_matches"]),
+                      "within_5": int(s["within_5_percent"]),
+                      "gross": int(s["gross_mismatches"]),
+                      "missed": int(s["missed_items"]),
+                      "hallucinated": int(s["hallucinated_items"]),
+                  }
+              )
+
+          denominator = totals["total_items_compared"]
+          accepted = totals["exact_matches"] + totals["within_5_percent"]
+          accuracy = round(accepted / denominator * 100.0, 2) if denominator else None
+          strict_exact = round(totals["exact_matches"] / denominator * 100.0, 2) if denominator else None
+          coverage_complete = not missing and len(reports) == len(expected_ids)
+
+          aggregate = {
+              "execution_mode": "split_project_ci",
+              "coverage_complete": coverage_complete,
+              "missing_benchmark_ids": missing,
+              "expected_benchmark_ids": expected_ids,
+              "projects": projects,
+              "headline_metrics": {
+                  **totals,
+                  "accepted_within_5_percent": accepted,
+                  "overall_accuracy_percentage": accuracy if coverage_complete else None,
+                  "strict_exact_accuracy_percentage": strict_exact if coverage_complete else None,
+              },
+          }
+
+          out = Path("benchmark_results_runtime/split_five_project_summary.json")
+          out.write_text(json.dumps(aggregate, indent=2), encoding="utf-8")
+
+          print("=" * 72)
+          print("SPLIT FIVE-PROJECT DEVELOPMENT BENCHMARK")
+          print(f"coverage_complete={coverage_complete}")
+          print(f"missing={missing}")
+          print(f"accepted={accepted}")
+          print(f"denominator={denominator}")
+          print(f"accuracy={aggregate['headline_metrics']['overall_accuracy_percentage']}")
+          print(f"strict_exact={aggregate['headline_metrics']['strict_exact_accuracy_percentage']}")
+          print(f"exact={totals['exact_matches']}")
+          print(f"within_5={totals['within_5_percent']}")
+          print(f"gross={totals['gross_mismatches']}")
+          print(f"missed={totals['missed_items']}")
+          print(f"hallucinated={totals['hallucinated_items']}")
+          print("=" * 72)
+          for p in projects:
+              print(
+                  f"{p['benchmark_id']}: "
+                  f"{p['accepted']}/{p['denominator']} accepted; "
+                  f"exact={p['exact']}; within5={p['within_5']}; "
+                  f"gross={p['gross']}; missed={p['missed']}; "
+                  f"hallucinated={p['hallucinated']}; accuracy={p['accuracy']}"
+              )
+
+          if not coverage_complete:
+              raise SystemExit(f"incomplete split benchmark; missing={missing}")
+          PY
+
+      - name: Print row movements versus committed reports
         if: always()
         run: |
           python - <<'PY'
-          from pathlib import Path
           import json
-
-          p = Path("benchmark_results_runtime/headline_accuracy_dashboard.json")
-          if not p.exists():
-              raise SystemExit("dashboard not produced")
-          d = json.loads(p.read_text(encoding="utf-8"))
-          h = d["headline_metrics"]
-          accepted = int(h["exact_matches"]) + int(h["within_5_percent"])
-          print("=" * 72)
-          print("FIVE-PROJECT DEVELOPMENT BENCHMARK")
-          print(f"evaluated_commit_sha={d.get('evaluated_commit_sha')}")
-          print(f"accepted={accepted}")
-          print(f"denominator={h['total_items_compared']}")
-          print(f"accuracy={h['overall_accuracy_percentage']}")
-          print(f"exact={h['exact_matches']}")
-          print(f"within_5={h['within_5_percent']}")
-          print(f"gross={h['gross_mismatches']}")
-          print(f"missed={h['missed_items']}")
-          print(f"hallucinated={h['hallucinated_items']}")
-          print(f"coverage_complete={d.get('summary_counts', {}).get('headline_coverage_complete')}")
-          print("=" * 72)
-          for r in d.get("headline_reports", []):
-              s = r["summary"]
-              a = int(s["exact_matches"]) + int(s["within_5_percent"])
-              print(
-                  f"{r['benchmark_id']}: "
-                  f"{a}/{s['total_items_compared']} accepted; "
-                  f"exact={s['exact_matches']}; within5={s['within_5_percent']}; "
-                  f"gross={s['gross_mismatches']}; missed={s['missed_items']}; "
-                  f"hallucinated={s['hallucinated_items']}; "
-                  f"accuracy={s['overall_accuracy_percentage']}"
-              )
-          PY
-
-      - name: Print row movements versus committed dashboard
-        if: success()
-        run: |
-          python - <<'PY'
           from pathlib import Path
-          import json
 
-          runtime = Path("benchmark_results_runtime")
+          runtime = Path("split_benchmark_reports")
           committed = Path("benchmark_results")
           project_ids = [
               "tenders_ke_kstvet_cbc_classroom",
@@ -167,10 +295,12 @@ jobs:
           print("=" * 72)
           PY
 
-      - name: Upload benchmark reports
+      - name: Upload aggregate report set
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: five-project-development-benchmark
-          path: benchmark_results_runtime/
+          name: five-project-split-benchmark
+          path: |
+            split_benchmark_reports/
+            benchmark_results_runtime/
           if-no-files-found: warn
