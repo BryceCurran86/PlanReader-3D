@@ -98,7 +98,18 @@ def test_raster_augmentation_accepts_no_caller_segment_or_dpi_inputs() -> None:
             SourceVisibilityProducer.augment_with_raster_visible_segments
         ).parameters
     )
-    assert params == {"self", "revision_id"}
+    assert params == {"self", "revision_id", "page_ids"}
+    forbidden = {
+        "png_bytes",
+        "pixels",
+        "segments",
+        "dpi",
+        "detector_threshold",
+        "expected_count",
+        "marks",
+        "tags",
+    }
+    assert not (params & forbidden)
 
 
 def test_image_only_pdf_gets_producer_owned_raster_visible_segments() -> None:
