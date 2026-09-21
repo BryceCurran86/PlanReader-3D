@@ -30,6 +30,7 @@ def _pdf() -> bytes:
 
 
 def test_visible_candidate_discovery_is_memoized_per_source_page(monkeypatch) -> None:
+    """Repeated selectors must reuse one immutable page-candidate discovery."""
     source = SourceVisibilityProducer(
         producer_method="candidate-cache-test",
         producer_version="1",
