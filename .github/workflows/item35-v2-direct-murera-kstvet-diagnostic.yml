@@ -1,0 +1,80 @@
+name: Item35 V2 Direct Murera KSTVET Diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  direct-item35-v2:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - benchmark_id: tenders_ke_kstvet_cbc_classroom
+            url: https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf
+            filename: 1727358888238-bq-nd-drawing.pdf
+            sha256: 6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc
+          - benchmark_id: tenders_ke_murera_science_lab
+            url: https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf
+            filename: 1785347143869-bqs-drawings.pdf
+            sha256: 84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download and verify source
+        env:
+          SOURCE_URL: ${{ matrix.url }}
+          SOURCE_FILE: ${{ matrix.filename }}
+          SOURCE_SHA: ${{ matrix.sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          curl --fail --location --retry 4 --retry-delay 3 "$SOURCE_URL" -o "benchmarks/sources/$SOURCE_FILE"
+          echo "$SOURCE_SHA  benchmarks/sources/$SOURCE_FILE" | sha256sum -c -
+      - name: Run direct Item35 authority shadow
+        env:
+          PYTHONPATH: .
+          BENCHMARK_ID: ${{ matrix.benchmark_id }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from pb_item35_production_authority_shadow import collect_item35_authority_shadow
+          from pb_public_tender_benchmark import PublicTenderBenchmark
+          from pb_benchmark_runner import resolve_file_path
+
+          bid = os.environ["BENCHMARK_ID"]
+          bench = PublicTenderBenchmark.load(bid)
+          pdf = None
+          pages = None
+          for doc in bench.download_manifest.get("documents", []):
+              if doc.get("role") in ("architectural_drawings", "drawings", "tender_drawings"):
+                  fn = doc.get("filename")
+                  if fn:
+                      resolved = resolve_file_path(fn)
+                      if resolved:
+                          pdf = Path(resolved)
+                  dp = doc.get("drawing_pages")
+                  if dp and len(dp) == 2:
+                      pages = list(range(int(dp[0]) - 1, int(dp[1])))
+                  break
+          if pdf is None:
+              raise SystemExit("source unavailable after hydration")
+          shadow = collect_item35_authority_shadow(
+              pdf,
+              document_id=f"direct-v2-diag:{bid}",
+              pages=pages,
+          )
+          print("DIRECT_ITEM35_V2_DIAG", bid)
+          print("pages_zero_based", pages)
+          print(json.dumps(shadow, sort_keys=True))
+          PY
