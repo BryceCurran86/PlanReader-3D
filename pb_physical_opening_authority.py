@@ -38,6 +38,11 @@ PHYSICAL_OPENING_IDENTITIES_DISTINCT = "physical_opening_identities_distinct"
 PHYSICAL_OPENING_IDENTITY_SCOPE_MISMATCH = "physical_opening_identity_scope_mismatch"
 PHYSICAL_OPENING_IDENTITY_EXISTENCE_REQUIRED = "physical_opening_identity_existence_required"
 PHYSICAL_OPENING_IDENTITY_RESOLVED = "physical_opening_identity_resolved"
+PHYSICAL_OPENING_DISPOSITION_OPENING_SUPPORT = "opening_support"
+PHYSICAL_OPENING_DISPOSITION_CANDIDATE = "candidate_unresolved"
+PHYSICAL_OPENING_DISPOSITION_NO_CANDIDATE = "no_candidate_in_covered_path"
+PHYSICAL_OPENING_DISPOSITION_CONFLICT = "conflict"
+PHYSICAL_OPENING_DISPOSITION_UNRESOLVED = "unresolved"
 
 AUTHORITATIVE_PHYSICAL_OPENING_SEMANTICS_UNAVAILABLE = (
     "authoritative_physical_opening_semantics_unavailable"
@@ -126,6 +131,23 @@ class PhysicalOpeningExistenceResult:
     candidate: Optional[CandidateSemanticOpening] = None
     existence_record: Optional[PhysicalOpeningExistenceRecord] = None
     missing_upstream_capability: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class PhysicalOpeningDispositionResult:
+    """Disposition of one visible observation under covered opening paths.
+
+    no_candidate_in_covered_path is deliberately not a proof that the
+    observation can never participate in any opening representation. It means
+    only that the producer examined the observation against the currently
+    registered structural paths and found no candidate membership.
+    """
+
+    status: EvidenceResolutionStatus
+    disposition: str
+    reason_codes: tuple[str, ...]
+    candidate_ids: tuple[str, ...] = ()
+    existence_record: Optional[PhysicalOpeningExistenceRecord] = None
 
 
 @dataclass(frozen=True)
@@ -649,6 +671,95 @@ class PhysicalOpeningAuthority:
             structural_pattern=STRUCTURAL_OPENING_CANDIDATE,
             status=EvidenceResolutionStatus.CANDIDATE,
             reason_codes=reasons,
+        )
+
+    def classify_disposition(
+        self,
+        selector: ObservationSelector,
+    ) -> PhysicalOpeningDispositionResult:
+        """Classify one source-visible observation under covered structural paths."""
+
+        if not isinstance(selector, ObservationSelector):
+            raise TypeError("selector must be ObservationSelector")
+        if self._source_visibility_authority is None:
+            return PhysicalOpeningDispositionResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                disposition=PHYSICAL_OPENING_DISPOSITION_UNRESOLVED,
+                reason_codes=(VISIBLE_SOURCE_AUTHORITY_REQUIRED,),
+            )
+
+        visibility = self._source_visibility_authority
+        source_result = visibility.resolve_visible(selector)
+        if (
+            source_result.status is not EvidenceResolutionStatus.CORROBORATED
+            or source_result.observation is None
+        ):
+            return PhysicalOpeningDispositionResult(
+                status=_source_failure_status(source_result),
+                disposition=(
+                    PHYSICAL_OPENING_DISPOSITION_CONFLICT
+                    if source_result.status is EvidenceResolutionStatus.CONFLICT
+                    else PHYSICAL_OPENING_DISPOSITION_UNRESOLVED
+                ),
+                reason_codes=_dedupe_reason_codes(source_result.reason_codes),
+            )
+
+        records, failures = self._visible_snapshot_records(source_result)
+        if failures:
+            status = _source_failure_status(*failures)
+            return PhysicalOpeningDispositionResult(
+                status=status,
+                disposition=(
+                    PHYSICAL_OPENING_DISPOSITION_CONFLICT
+                    if status is EvidenceResolutionStatus.CONFLICT
+                    else PHYSICAL_OPENING_DISPOSITION_UNRESOLVED
+                ),
+                reason_codes=_dedupe_reason_codes(
+                    (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),
+                    *tuple(result.reason_codes for result in failures),
+                ),
+            )
+
+        observation = source_result.observation
+        candidates = self._visible_structural_candidates(observation, records)
+        containing = tuple(
+            candidate
+            for candidate in candidates
+            if observation.observation_id in candidate.source_observation_ids
+        )
+        if len(containing) > 1:
+            return PhysicalOpeningDispositionResult(
+                status=EvidenceResolutionStatus.CONFLICT,
+                disposition=PHYSICAL_OPENING_DISPOSITION_CONFLICT,
+                reason_codes=(AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES,),
+                candidate_ids=tuple(
+                    sorted(candidate.candidate_id for candidate in containing)
+                ),
+            )
+        if len(containing) == 1:
+            existence = self.prove_existence(selector)
+            if (
+                existence.status is EvidenceResolutionStatus.CORROBORATED
+                and existence.existence_record is not None
+            ):
+                return PhysicalOpeningDispositionResult(
+                    status=EvidenceResolutionStatus.CORROBORATED,
+                    disposition=PHYSICAL_OPENING_DISPOSITION_OPENING_SUPPORT,
+                    reason_codes=existence.reason_codes,
+                    candidate_ids=(containing[0].candidate_id,),
+                    existence_record=existence.existence_record,
+                )
+            return PhysicalOpeningDispositionResult(
+                status=EvidenceResolutionStatus.CANDIDATE,
+                disposition=PHYSICAL_OPENING_DISPOSITION_CANDIDATE,
+                reason_codes=containing[0].reason_codes,
+                candidate_ids=(containing[0].candidate_id,),
+            )
+
+        return PhysicalOpeningDispositionResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            disposition=PHYSICAL_OPENING_DISPOSITION_NO_CANDIDATE,
+            reason_codes=(VISIBLE_WALL_CONTINUATION_REQUIRED,),
         )
 
     def prove_existence(self, selector: ObservationSelector) -> PhysicalOpeningExistenceResult:
