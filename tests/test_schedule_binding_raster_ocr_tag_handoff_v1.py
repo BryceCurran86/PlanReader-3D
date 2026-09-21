@@ -223,6 +223,22 @@ def test_distinct_ocr_marks_in_same_aperture_remain_ambiguous() -> None:
     assert BINDING_AMBIGUOUS_TAGS in result.reason_codes
 
 
+
+def test_distinct_same_mark_ocr_boxes_are_not_collapsed() -> None:
+    source, published = _ingest("ocr-same-mark-distinct")
+    _tags, _updated, selector = _augment(
+        source,
+        published,
+        (
+            _ocr_line("W1", (102.0, 102.0, 113.0, 108.0)),
+            _ocr_line("W1", (126.0, 102.0, 137.0, 108.0)),
+        ),
+    )
+
+    result = _bind(source, selector)
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert BINDING_AMBIGUOUS_TAGS in result.reason_codes
+
 def test_production_ocr_handoff_accepts_no_backend_or_caller_text() -> None:
     params = set(inspect.signature(SourceVisibilityProducer.augment_with_raster_ocr_tags).parameters)
     assert params == {"self", "revision_id", "viewport_decision"}
