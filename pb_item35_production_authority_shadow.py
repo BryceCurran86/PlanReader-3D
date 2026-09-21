@@ -61,6 +61,7 @@ def empty_item35_authority_shadow(*, reason: str) -> dict[str, Any]:
         "representative_observation_ids": [],
         "generic_count_status": "abstained",
         "generic_count_reason_codes": [],
+        "generic_count": None,
         "commercial_count_unlocked": False,
     }
 
@@ -212,6 +213,11 @@ def collect_item35_authority_shadow(
     )
     shadow["generic_count_status"] = str(generic_result.status.value)
     shadow["generic_count_reason_codes"] = list(generic_result.reason_codes)
+    shadow["generic_count"] = (
+        int(generic_result.record.count)
+        if generic_result.record is not None
+        else None
+    )
     shadow["commercial_count_unlocked"] = bool(generic_result.record is not None)
     return shadow
 
