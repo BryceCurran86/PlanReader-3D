@@ -30,6 +30,9 @@ from typing import Mapping, Optional
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_opening_authority import (
+    PHYSICAL_OPENING_DISPOSITION_CONFLICT,
+    PHYSICAL_OPENING_DISPOSITION_NO_CANDIDATE,
+    PHYSICAL_OPENING_DISPOSITION_OPENING_SUPPORT,
     PHYSICAL_OPENING_EXISTS,
     PhysicalOpeningAuthority,
     PhysicalOpeningExistenceRecord,
@@ -340,13 +343,25 @@ class SemanticOpeningEnumerationProducer:
 
         coverage = published.coverage
         decoded_pages = tuple(sorted({int(page) for page in coverage.decoded_pages}))
-        source_complete = (
-            str(coverage.state) == "complete"
-            and int(coverage.total_pages) > 0
-            and not tuple(coverage.failed_pages)
-            and len(decoded_pages) == int(coverage.total_pages)
-            and decoded_pages == tuple(range(1, int(coverage.total_pages) + 1))
-        )
+        decoded_page_ids = {str(page) for page in decoded_pages}
+        failed_page_ids = {str(page) for page in coverage.failed_pages}
+        if decision_scope_kind == "document":
+            source_complete = (
+                str(coverage.state) == "complete"
+                and int(coverage.total_pages) > 0
+                and not failed_page_ids
+                and len(decoded_pages) == int(coverage.total_pages)
+                and decoded_pages == tuple(range(1, int(coverage.total_pages) + 1))
+            )
+            scoped_page_ids = tuple(str(page) for page in decoded_pages)
+        else:
+            assert page_ids is not None
+            scoped_page_ids = tuple(page_ids)
+            source_complete = bool(scoped_page_ids) and all(
+                page_id in decoded_page_ids and page_id not in failed_page_ids
+                for page_id in scoped_page_ids
+            )
+
         if not source_complete:
             return self._store(
                 selector,
@@ -356,22 +371,6 @@ class SemanticOpeningEnumerationProducer:
                     record=None,
                 ),
             )
-
-        if decision_scope_kind == "document":
-            scoped_page_ids = tuple(str(page) for page in decoded_pages)
-        else:
-            assert page_ids is not None
-            decoded_page_ids = {str(page) for page in decoded_pages}
-            if any(page_id not in decoded_page_ids for page_id in page_ids):
-                return self._store(
-                    selector,
-                    SemanticOpeningEnumerationResult(
-                        status=EvidenceResolutionStatus.ABSTAINED,
-                        reason_codes=(SEMANTIC_OPENING_SOURCE_COVERAGE_INCOMPLETE,),
-                        record=None,
-                    ),
-                )
-            scoped_page_ids = tuple(page_ids)
 
         visibility = self._source_visibility_producer.authority()
         physical = PhysicalOpeningAuthority(visibility)
@@ -424,13 +423,13 @@ class SemanticOpeningEnumerationProducer:
                 conflict_ids.add(observation_id)
                 continue
 
-            existence = physical.prove_existence(obs_selector)
+            disposition = physical.classify_disposition(obs_selector)
             if (
-                existence.status is EvidenceResolutionStatus.CORROBORATED
-                and existence.proposition == PHYSICAL_OPENING_EXISTS
-                and existence.existence_record is not None
+                disposition.status is EvidenceResolutionStatus.CORROBORATED
+                and disposition.disposition == PHYSICAL_OPENING_DISPOSITION_OPENING_SUPPORT
+                and disposition.existence_record is not None
             ):
-                record = existence.existence_record
+                record = disposition.existence_record
                 if (
                     record.document_id != selector.document_id
                     or record.revision_id != selector.revision_id
@@ -451,14 +450,26 @@ class SemanticOpeningEnumerationProducer:
                 representatives[record.record_id] = min(
                     record.source_observation_ids
                 )
-            elif existence.status is EvidenceResolutionStatus.CONFLICT:
+            elif (
+                disposition.status is EvidenceResolutionStatus.CORROBORATED
+                and disposition.disposition == PHYSICAL_OPENING_DISPOSITION_NO_CANDIDATE
+            ):
+                # Examined and disposed under the currently covered structural
+                # path. This is not a universal negative opening proposition.
+                continue
+            elif (
+                disposition.status is EvidenceResolutionStatus.CONFLICT
+                or disposition.disposition == PHYSICAL_OPENING_DISPOSITION_CONFLICT
+            ):
                 conflict_ids.add(observation_id)
             else:
                 unresolved_visible_ids.add(observation_id)
 
         visible_ids = tuple(sorted(set(scoped_visible_ids)))
-        residual_ids = set(visible_ids) - support_ids
-        residual_ids.update(unresolved_visible_ids - support_ids)
+        # Residual evidence means unresolved opening-candidate evidence only.
+        # Source-visible geometry examined as no_candidate_in_covered_path is
+        # semantically disposed for this covered path and is not residual.
+        residual_ids = set(unresolved_visible_ids) - support_ids
 
         reasons: list[str] = []
         if not visible_ids:
