@@ -134,8 +134,10 @@ class SemanticOpeningEnumerationRecord:
     def __post_init__(self) -> None:
         if not self.record_id:
             raise ValueError("record_id must be non-empty")
-        if self.decision_scope_kind != "document":
-            raise ValueError("v1 semantic enumeration supports document scope only")
+        if self.decision_scope_kind not in {"document", "pages"}:
+            raise ValueError(
+                "v1 semantic enumeration supports document or explicit page scope only"
+            )
         if len(set(self.physical_opening_record_ids)) != len(
             self.physical_opening_record_ids
         ):
@@ -264,12 +266,59 @@ class SemanticOpeningEnumerationProducer:
     ) -> SemanticOpeningEnumerationResult:
         """Enumerate the exact complete document snapshot for revision_id."""
 
+        return self._publish_scope(
+            revision_id=revision_id,
+            decision_scope_id=decision_scope_id,
+            decision_scope_kind="document",
+            page_ids=None,
+        )
+
+    def publish_page_scope(
+        self,
+        *,
+        revision_id: str,
+        decision_scope_id: str,
+        page_ids: tuple[str, ...],
+    ) -> SemanticOpeningEnumerationResult:
+        """Enumerate only an explicit set of source page addresses.
+
+        Page IDs select scope only. They cannot inject observations,
+        candidates, marks, counts, or expected quantities. The producer still
+        obtains every visible observation from its own source snapshot and
+        independently re-proves physical opening existence.
+        """
+
+        cleaned_pages = tuple(
+            sorted(
+                {_clean(page_id) for page_id in page_ids if _clean(page_id)},
+                key=lambda value: (0, int(value)) if value.isdigit() else (1, value),
+            )
+        )
+        if not cleaned_pages:
+            raise ValueError("page_ids must contain at least one page")
+        return self._publish_scope(
+            revision_id=revision_id,
+            decision_scope_id=decision_scope_id,
+            decision_scope_kind="pages",
+            page_ids=cleaned_pages,
+        )
+
+    def _publish_scope(
+        self,
+        *,
+        revision_id: str,
+        decision_scope_id: str,
+        decision_scope_kind: str,
+        page_ids: Optional[tuple[str, ...]],
+    ) -> SemanticOpeningEnumerationResult:
         revision_id = _clean(revision_id)
         decision_scope_id = _clean(decision_scope_id)
         if not revision_id:
             raise ValueError("revision_id must be a non-empty string")
         if not decision_scope_id:
             raise ValueError("decision_scope_id must be a non-empty string")
+        if decision_scope_kind not in {"document", "pages"}:
+            raise ValueError("unsupported semantic opening decision scope")
 
         published = self._source_visibility_producer.published_snapshot_for_revision(
             revision_id
@@ -308,8 +357,25 @@ class SemanticOpeningEnumerationProducer:
                 ),
             )
 
+        if decision_scope_kind == "document":
+            scoped_page_ids = tuple(str(page) for page in decoded_pages)
+        else:
+            assert page_ids is not None
+            decoded_page_ids = {str(page) for page in decoded_pages}
+            if any(page_id not in decoded_page_ids for page_id in page_ids):
+                return self._store(
+                    selector,
+                    SemanticOpeningEnumerationResult(
+                        status=EvidenceResolutionStatus.ABSTAINED,
+                        reason_codes=(SEMANTIC_OPENING_SOURCE_COVERAGE_INCOMPLETE,),
+                        record=None,
+                    ),
+                )
+            scoped_page_ids = tuple(page_ids)
+
         visibility = self._source_visibility_producer.authority()
         physical = PhysicalOpeningAuthority(visibility)
+        allowed_pages = set(scoped_page_ids)
 
         opening_records: dict[str, PhysicalOpeningExistenceRecord] = {}
         representatives: dict[str, str] = {}
@@ -317,9 +383,10 @@ class SemanticOpeningEnumerationProducer:
         unresolved_visible_ids: set[str] = set()
         conflict_ids: set[str] = set()
         lineage_mismatch = False
+        scoped_visible_ids: list[str] = []
+        unknown_scope_resolution = False
 
-        visible_ids = tuple(sorted(set(published.visible_observation_ids)))
-        for observation_id in visible_ids:
+        for observation_id in tuple(sorted(set(published.visible_observation_ids))):
             obs_selector = ObservationSelector(
                 document_id=selector.document_id,
                 revision_id=selector.revision_id,
@@ -332,13 +399,21 @@ class SemanticOpeningEnumerationProducer:
                 visible_result.status is not EvidenceResolutionStatus.CORROBORATED
                 or visible_result.observation is None
             ):
-                if visible_result.status is EvidenceResolutionStatus.CONFLICT:
-                    conflict_ids.add(observation_id)
+                if decision_scope_kind == "document":
+                    scoped_visible_ids.append(observation_id)
+                    if visible_result.status is EvidenceResolutionStatus.CONFLICT:
+                        conflict_ids.add(observation_id)
+                    else:
+                        unresolved_visible_ids.add(observation_id)
                 else:
-                    unresolved_visible_ids.add(observation_id)
+                    unknown_scope_resolution = True
                 continue
 
             observation = visible_result.observation
+            if str(observation.page_id) not in allowed_pages:
+                continue
+            scoped_visible_ids.append(observation_id)
+
             if (
                 observation.document_id != selector.document_id
                 or observation.revision_id != selector.revision_id
@@ -361,6 +436,7 @@ class SemanticOpeningEnumerationProducer:
                     or record.revision_id != selector.revision_id
                     or record.source_sha256 != selector.source_sha256
                     or record.snapshot_id != selector.snapshot_id
+                    or str(record.page_id) not in allowed_pages
                 ):
                     lineage_mismatch = True
                     conflict_ids.add(observation_id)
@@ -380,14 +456,15 @@ class SemanticOpeningEnumerationProducer:
             else:
                 unresolved_visible_ids.add(observation_id)
 
-        # Final residuals are computed after the exhaustive scan from the
-        # complete support union, not from iteration order.
+        visible_ids = tuple(sorted(set(scoped_visible_ids)))
         residual_ids = set(visible_ids) - support_ids
         residual_ids.update(unresolved_visible_ids - support_ids)
 
         reasons: list[str] = []
         if not visible_ids:
             reasons.append(SEMANTIC_OPENING_NO_VISIBLE_SEGMENTS)
+        if unknown_scope_resolution:
+            reasons.append(SEMANTIC_OPENING_VISIBLE_OBSERVATION_UNRESOLVED)
         if lineage_mismatch:
             reasons.append(SEMANTIC_OPENING_LINEAGE_MISMATCH)
         if conflict_ids:
@@ -396,21 +473,20 @@ class SemanticOpeningEnumerationProducer:
             reasons.append(SEMANTIC_OPENING_RESIDUAL_SOURCE_EVIDENCE)
 
         structural_complete = bool(visible_ids) and not (
-            lineage_mismatch or conflict_ids or residual_ids
+            unknown_scope_resolution
+            or lineage_mismatch
+            or conflict_ids
+            or residual_ids
         )
         if structural_complete:
             reasons.append(SEMANTIC_OPENING_STRUCTURAL_ENUMERATION_COMPLETE)
 
-        # Critical safety boundary: V1 only proves exhaustive enumeration of the
-        # G17 structural pattern among authority-visible segments. It cannot
-        # prove that every possible physical-opening representation is covered.
         reasons.append(SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN)
 
         opening_ids = tuple(sorted(opening_records))
         representative_ids = tuple(
             representatives[record_id] for record_id in opening_ids
         )
-        page_ids = tuple(str(page) for page in decoded_pages)
 
         payload = {
             "schema_version": SEMANTIC_OPENING_ENUMERATION_SCHEMA_VERSION,
@@ -419,8 +495,8 @@ class SemanticOpeningEnumerationProducer:
             "source_sha256": selector.source_sha256,
             "snapshot_id": selector.snapshot_id,
             "decision_scope_id": selector.decision_scope_id,
-            "decision_scope_kind": "document",
-            "page_ids": page_ids,
+            "decision_scope_kind": decision_scope_kind,
+            "page_ids": scoped_page_ids,
             "visible_observation_ids": visible_ids,
             "physical_opening_record_ids": opening_ids,
             "representative_observation_ids": representative_ids,
@@ -442,8 +518,8 @@ class SemanticOpeningEnumerationProducer:
             source_sha256=selector.source_sha256,
             snapshot_id=selector.snapshot_id,
             decision_scope_id=selector.decision_scope_id,
-            decision_scope_kind="document",
-            page_ids=page_ids,
+            decision_scope_kind=decision_scope_kind,
+            page_ids=scoped_page_ids,
             visible_observation_ids=visible_ids,
             physical_opening_record_ids=opening_ids,
             representative_observation_ids=representative_ids,
@@ -459,6 +535,8 @@ class SemanticOpeningEnumerationProducer:
             if conflict_ids or lineage_mismatch
             else EvidenceResolutionStatus.CORROBORATED
         )
+        if unknown_scope_resolution and not (conflict_ids or lineage_mismatch):
+            status = EvidenceResolutionStatus.ABSTAINED
         return self._store(
             selector,
             SemanticOpeningEnumerationResult(

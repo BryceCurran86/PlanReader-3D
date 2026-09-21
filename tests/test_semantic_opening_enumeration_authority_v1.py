@@ -252,3 +252,78 @@ def test_geometry_mutation_changes_semantic_inventory_identity() -> None:
         first_result.record.physical_opening_record_ids
         != second_result.record.physical_opening_record_ids
     )
+
+
+
+def _two_page_pdf() -> bytes:
+    doc = fitz.open()
+    first = doc.new_page(width=700, height=650)
+    _draw_opening(first, x0=20.0, gap0=100.0, gap1=140.0, x1=220.0)
+    second = doc.new_page(width=700, height=650)
+    _draw_opening(second, x0=300.0, gap0=380.0, gap1=420.0, x1=500.0)
+    payload = doc.tobytes()
+    doc.close()
+    return payload
+
+
+def test_page_scope_selects_only_requested_source_pages() -> None:
+    src = SourceVisibilityProducer(
+        producer_method="semantic-enum-test",
+        producer_version="1.0",
+    )
+    ingested = _ingest(src, _two_page_pdf(), "semantic-page-scope")
+    producer = SemanticOpeningEnumerationProducer.from_source_visibility_producer(src)
+    result = producer.publish_page_scope(
+        revision_id=ingested.revision.revision_id,
+        decision_scope_id="semantic-opening-enumeration:page-2",
+        page_ids=("2",),
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.record is not None
+    record = result.record
+    assert record.decision_scope_kind == "pages"
+    assert record.page_ids == ("2",)
+    assert len(record.visible_observation_ids) == 6
+    assert len(record.physical_opening_record_ids) == 1
+    assert len(record.opening_support_observation_ids) == 6
+    assert record.residual_visible_observation_ids == ()
+    assert record.structural_enumeration_complete is True
+    assert record.physical_opening_universe_complete is False
+
+
+def test_page_scope_rejects_unavailable_page_without_expanding_scope() -> None:
+    src = SourceVisibilityProducer(
+        producer_method="semantic-enum-test",
+        producer_version="1.0",
+    )
+    ingested = _ingest(src, _pdf(), "semantic-invalid-page-scope")
+    producer = SemanticOpeningEnumerationProducer.from_source_visibility_producer(src)
+    result = producer.publish_page_scope(
+        revision_id=ingested.revision.revision_id,
+        decision_scope_id="semantic-opening-enumeration:invalid-page",
+        page_ids=("2",),
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+
+
+def test_page_scope_surface_accepts_addresses_not_candidate_universe() -> None:
+    params = set(
+        inspect.signature(
+            SemanticOpeningEnumerationProducer.publish_page_scope
+        ).parameters
+    )
+    assert params == {"self", "revision_id", "decision_scope_id", "page_ids"}
+    forbidden = {
+        "candidate_ids",
+        "opening_ids",
+        "observation_ids",
+        "expected_count",
+        "schedule_count",
+        "tags",
+        "radius",
+        "complete",
+    }
+    assert not (params & forbidden)

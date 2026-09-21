@@ -18,7 +18,7 @@ predictions, benchmark gold, or expected quantities.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from pb_generic_opening_count_authority import (
     GenericOpeningCountProducer,
@@ -67,6 +67,7 @@ def collect_item35_authority_shadow(
     pdf_path: Path | str,
     *,
     document_id: str | None = None,
+    pages: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     """Execute Item 35 authority infrastructure without publishing quantities."""
 
@@ -95,11 +96,29 @@ def collect_item35_authority_shadow(
     semantic_producer = (
         SemanticOpeningEnumerationProducer.from_source_visibility_producer(source)
     )
-    decision_scope_id = f"item35:document:{published.revision.revision_id}"
-    semantic = semantic_producer.publish_document_scope(
-        revision_id=published.revision.revision_id,
-        decision_scope_id=decision_scope_id,
-    )
+    if pages is None:
+        scoped_page_ids = None
+        decision_scope_id = f"item35:document:{published.revision.revision_id}"
+        semantic = semantic_producer.publish_document_scope(
+            revision_id=published.revision.revision_id,
+            decision_scope_id=decision_scope_id,
+        )
+    else:
+        scoped_page_ids = tuple(
+            str(int(page_index) + 1)
+            for page_index in sorted({int(value) for value in pages})
+        )
+        if not scoped_page_ids:
+            return empty_item35_authority_shadow(reason="page_scope_unavailable")
+        decision_scope_id = (
+            f"item35:pages:{published.revision.revision_id}:"
+            + ",".join(scoped_page_ids)
+        )
+        semantic = semantic_producer.publish_page_scope(
+            revision_id=published.revision.revision_id,
+            decision_scope_id=decision_scope_id,
+            page_ids=scoped_page_ids,
+        )
 
     shadow = empty_item35_authority_shadow(reason="semantic_inventory_unavailable")
     shadow.update(
@@ -108,7 +127,11 @@ def collect_item35_authority_shadow(
             "revision_id": published.revision.revision_id,
             "source_sha256": published.revision.source_sha256,
             "snapshot_id": published.snapshot.snapshot_id,
-            "visible_observation_count": len(published.visible_observation_ids),
+            "visible_observation_count": (
+                len(semantic.record.visible_observation_ids)
+                if semantic.record is not None
+                else 0
+            ),
         }
     )
 
@@ -155,6 +178,7 @@ def collect_item35_authority_shadow(
         source_visibility_producer=source,
         revision_id=published.revision.revision_id,
         decision_scope_id=decision_scope_id,
+        page_ids=scoped_page_ids,
         optional_content_known_visible=False,
     )
     generic = GenericOpeningCountProducer.from_authorities(
