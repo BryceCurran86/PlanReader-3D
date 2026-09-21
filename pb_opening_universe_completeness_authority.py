@@ -394,14 +394,33 @@ def _coverage_complete(
         reasons.append(SOURCE_DECODE_INCOMPLETE)
         return False, _ordered_unique(reasons)
 
-    if (
-        _clean(getattr(coverage, "state", "")) != "complete"
-        or total_pages != len(scope.page_ids)
-        or total_pages <= 0
-        or failed_pages
-        or len(set(decoded_pages)) != total_pages
-    ):
-        reasons.append(SOURCE_DECODE_INCOMPLETE)
+    decoded_set = set(decoded_pages)
+    failed_set = set(failed_pages)
+    if scope.decision_scope_kind == "document":
+        expected_pages = set(range(1, total_pages + 1))
+        if (
+            _clean(getattr(coverage, "state", "")) != "complete"
+            or total_pages <= 0
+            or failed_pages
+            or decoded_set != expected_pages
+            or len(scope.page_ids) != total_pages
+        ):
+            reasons.append(SOURCE_DECODE_INCOMPLETE)
+    elif scope.decision_scope_kind == "pages":
+        try:
+            requested_pages = {int(page_id) for page_id in scope.page_ids}
+        except (TypeError, ValueError):
+            reasons.append(SOURCE_DECODE_INCOMPLETE)
+            return False, _ordered_unique(reasons)
+        if (
+            not requested_pages
+            or any(page <= 0 or page > total_pages for page in requested_pages)
+            or not requested_pages <= decoded_set
+            or bool(requested_pages & failed_set)
+        ):
+            reasons.append(SOURCE_DECODE_INCOMPLETE)
+    else:
+        reasons.append(SOURCE_DECODE_SCOPE_MISMATCH)
     return not reasons, _ordered_unique(reasons)
 
 
