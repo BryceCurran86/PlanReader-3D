@@ -420,7 +420,17 @@ def _coverage_complete(
         ):
             reasons.append(SOURCE_DECODE_INCOMPLETE)
     else:
-        reasons.append(SOURCE_DECODE_SCOPE_MISMATCH)
+        # Legacy scope kinds predate the explicit Item 35 "pages" contract.
+        # Preserve their historical whole-coverage semantics so this additive
+        # page-scope fix does not change downstream opening/deduction behavior.
+        if (
+            _clean(getattr(coverage, "state", "")) != "complete"
+            or total_pages != len(scope.page_ids)
+            or total_pages <= 0
+            or failed_pages
+            or len(decoded_set) != total_pages
+        ):
+            reasons.append(SOURCE_DECODE_INCOMPLETE)
     return not reasons, _ordered_unique(reasons)
 
 
