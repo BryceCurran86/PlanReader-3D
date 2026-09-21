@@ -169,6 +169,20 @@ def _geometry_points(geometry: Sequence[float]) -> tuple[Point, ...]:
     return tuple((coords[index], coords[index + 1]) for index in range(0, len(coords), 2))
 
 
+def _bbox_iou(left: BBox, right: BBox) -> float:
+    lx0, ly0, lx1, ly1 = left
+    rx0, ry0, rx1, ry1 = right
+    ix0, iy0 = max(lx0, rx0), max(ly0, ry0)
+    ix1, iy1 = min(lx1, rx1), min(ly1, ry1)
+    intersection = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
+    if intersection <= 0.0:
+        return 0.0
+    left_area = max(0.0, lx1 - lx0) * max(0.0, ly1 - ly0)
+    right_area = max(0.0, rx1 - rx0) * max(0.0, ry1 - ry0)
+    union = left_area + right_area - intersection
+    return intersection / union if union > 0.0 else 0.0
+
+
 def _line(record: SourceObservationRecord) -> Line | None:
     if len(record.geometry) != 4:
         return None
@@ -802,16 +816,35 @@ class ScheduleOpeningInstanceBindingProducer:
                 )
             )
 
-        contained_tags: list[tuple[str, str]] = []
+        contained_tag_candidates: list[tuple[str, str, BBox, str]] = []
         for observation_id, text, geometry in trusted_by_page.get(opening.page_id, []):
             bbox = _bbox_of_points(_geometry_points(geometry))
             if bbox is None or not _aperture_contains_bbox(aperture, bbox):
                 continue
             normalized = normalize_opening_tag(text)
             if normalized is not None:
-                contained_tags.append((observation_id, normalized.tag))
+                contained_tag_candidates.append(
+                    (observation_id, normalized.tag, bbox, "native")
+                )
 
-        if not contained_tags:
+        # OCR tags are admitted only through SourceVisibilityProducer's
+        # producer-owned, immutable-page lineage handoff.  They may classify
+        # a plan aperture, but they are never used as schedule-row text.
+        for observation in self._source_visibility_producer.authenticated_ocr_tag_observations(
+            opening.revision_id
+        ):
+            if str(observation.page_id) != str(opening.page_id):
+                continue
+            bbox = _bbox_of_points(_geometry_points(observation.geometry))
+            if bbox is None or not _aperture_contains_bbox(aperture, bbox):
+                continue
+            normalized = normalize_opening_tag(observation.raw_text)
+            if normalized is not None:
+                contained_tag_candidates.append(
+                    (observation.observation_id, normalized.tag, bbox, "ocr")
+                )
+
+        if not contained_tag_candidates:
             return self._store(
                 key,
                 _blocked(
@@ -819,7 +852,30 @@ class ScheduleOpeningInstanceBindingProducer:
                     BINDING_NO_CONTAINED_TAG,
                 ),
             )
-        if len(contained_tags) != 1:
+
+        # Native text and OCR can legitimately observe the same printed mark.
+        # Collapse only same-mark, substantially-overlapping duplicates; two
+        # spatially distinct marks or two different marks remain ambiguous.
+        deduped_tags: list[tuple[str, str, BBox, str]] = []
+        for candidate in contained_tag_candidates:
+            observation_id, mark, bbox, source_kind = candidate
+            duplicate_index = next(
+                (
+                    index
+                    for index, existing in enumerate(deduped_tags)
+                    if existing[1] == mark and _bbox_iou(existing[2], bbox) >= 0.5
+                ),
+                None,
+            )
+            if duplicate_index is None:
+                deduped_tags.append(candidate)
+                continue
+            # Prefer the independently text-integrity-receipted native word
+            # when both native and OCR describe the same physical mark.
+            if deduped_tags[duplicate_index][3] == "ocr" and source_kind == "native":
+                deduped_tags[duplicate_index] = candidate
+
+        if len(deduped_tags) != 1:
             return self._store(
                 key,
                 _blocked(
@@ -827,7 +883,7 @@ class ScheduleOpeningInstanceBindingProducer:
                     BINDING_AMBIGUOUS_TAGS,
                 ),
             )
-        tag_observation_id, tag_mark = contained_tags[0]
+        tag_observation_id, tag_mark, _tag_bbox, _tag_source = deduped_tags[0]
 
         discovered: dict[
             tuple[str, tuple[str, ...]],
