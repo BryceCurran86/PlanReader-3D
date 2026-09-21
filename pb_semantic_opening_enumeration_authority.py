@@ -6,16 +6,15 @@ reuses PhysicalOpeningAuthority.prove_existence() as the only positive
 physical-existence proposition; OCR text, schedule rows, caller candidate lists,
 proximity ranking, and expected quantities never create an opening here.
 
-V1 has two deliberately separate completeness concepts:
+V2 keeps two separate completeness concepts:
 
 1. structural_enumeration_complete means every authority-visible segment in
-   the exact document snapshot participated in at least one independently proven
-   G17 physical-opening record and no source/physical conflict occurred.
-2. physical_opening_universe_complete remains False in V1. Exhaustively
-   enumerating one known structural representation is not proof that every
-   possible physical-opening representation has been covered. Commercial count
-   therefore remains fail-closed until a later authority proves that stronger
-   proposition.
+   the exact decision scope has been either assigned to a proven physical
+   opening or explicitly disposed by the registered physical-opening paths,
+   with no unresolved/conflicting source evidence.
+2. physical_opening_universe_complete is true only when structural enumeration
+   is complete and PhysicalOpeningAuthority confirms that its registered
+   source-visible path set is closed for this producer version.
 
 The useful output of this authority is the producer-owned semantic inventory:
 unique physical-opening record ids, one representative source observation per
