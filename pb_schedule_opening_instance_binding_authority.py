@@ -890,10 +890,9 @@ class ScheduleOpeningInstanceBindingProducer:
                 (
                     index
                     for index, existing in enumerate(deduped_tags)
-                    if existing[1] == mark
-                    and (
-                        _bbox_iou(existing[2], bbox) >= 0.5
-                        or _bbox_overlap_fraction_of_smaller(existing[2], bbox) >= 0.7
+                    if (
+                        existing[1] == mark
+                        and _bbox_overlap_fraction_of_smaller(existing[2], bbox) >= 0.75
                     )
                 ),
                 None,
