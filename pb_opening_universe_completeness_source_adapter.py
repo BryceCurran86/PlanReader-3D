@@ -163,6 +163,7 @@ def build_semantic_opening_inventory_completeness(
     source_visibility_producer: SourceVisibilityProducer,
     revision_id: str,
     decision_scope_id: str,
+    page_ids: Sequence[str] | None = None,
     optional_content_known_visible: bool = False,
     xobject_traversal_truncated: bool = False,
 ) -> OpeningUniverseCompletenessAuthority:
@@ -186,10 +187,17 @@ def build_semantic_opening_inventory_completeness(
             source_visibility_producer
         )
     )
-    semantic_result = semantic_producer.publish_document_scope(
-        revision_id=revision_id,
-        decision_scope_id=decision_scope_id,
-    )
+    if page_ids is None:
+        semantic_result = semantic_producer.publish_document_scope(
+            revision_id=revision_id,
+            decision_scope_id=decision_scope_id,
+        )
+    else:
+        semantic_result = semantic_producer.publish_page_scope(
+            revision_id=revision_id,
+            decision_scope_id=decision_scope_id,
+            page_ids=tuple(str(page_id) for page_id in page_ids),
+        )
 
     producer = OpeningUniverseCompletenessProducer(
         producer_method="source_authenticated_semantic_opening_inventory_adapter",
