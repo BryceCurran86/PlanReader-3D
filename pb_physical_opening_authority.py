@@ -17,6 +17,13 @@ import math
 from typing import Optional
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_plan_opening_detection_v171 import (
+    Segment as LegacyPlanSegment,
+    detect_door_candidates,
+    detect_gap_candidates,
+    detect_wall_lines,
+    detect_window_candidates,
+)
 from pb_source_observation_authority import (
     ObservationSelector,
     SourceObservationAuthority,
@@ -55,6 +62,8 @@ MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY = (
 )
 
 JAMB_BOUNDED_TWO_FACE_INTERRUPTION = "jamb_bounded_two_face_interruption"
+GAP_CORROBORATED_DOOR_JAMB_LEAF = "gap_corroborated_door_jamb_leaf"
+GAP_CORROBORATED_WINDOW_JAMB_PAIR = "gap_corroborated_window_jamb_pair"
 WALL_FACE_INTERRUPTION_KIND = "wall_face_interruption"
 OPENING_JAMB_BOUNDARY_KIND = "opening_jamb_boundary"
 WEAK_PHYSICAL_OPENING_CANDIDATE_KINDS = frozenset(
@@ -639,6 +648,216 @@ class PhysicalOpeningAuthority:
         return tuple(candidates)
 
     @staticmethod
+    def _visible_generic_correlated_candidates(
+        seed: SourceObservationRecord,
+        records: tuple[SourceObservationRecord, ...],
+    ) -> tuple[CandidateSemanticOpening, ...]:
+        """Discover additional source-visible opening paths via existing generic detectors.
+
+        Door/window candidates are promoted only when independently corroborated
+        by a wall discontinuity on the same producer-owned wall segment.
+        """
+        scoped_records = tuple(
+            record
+            for record in records
+            if record.observation_kind in {
+                NATIVE_PDF_VISIBLE_SEGMENT,
+                RASTER_PDF_VISIBLE_SEGMENT,
+            }
+            and record.document_id == seed.document_id
+            and record.revision_id == seed.revision_id
+            and record.source_sha256 == seed.source_sha256
+            and record.snapshot_id == seed.snapshot_id
+            and record.page_id == seed.page_id
+            and record.viewport_id is None
+            and _line_geometry(record) is not None
+        )
+        if not scoped_records:
+            return ()
+
+        segments: list[LegacyPlanSegment] = []
+        record_by_index: dict[int, SourceObservationRecord] = {}
+        for index, record in enumerate(scoped_records):
+            line = _line_geometry(record)
+            assert line is not None
+            segments.append(
+                LegacyPlanSegment(
+                    x1=line[0], y1=line[1], x2=line[2], y2=line[3],
+                    drawing_index=index,
+                )
+            )
+            record_by_index[index] = record
+
+        walls = detect_wall_lines(segments)
+        if not walls:
+            return ()
+        doors = detect_door_candidates(
+            segments, walls, (), page_no=int(seed.page_id)
+        )
+        windows = detect_window_candidates(
+            segments, walls, (), page_no=int(seed.page_id)
+        )
+        gaps = detect_gap_candidates(
+            segments, walls, (), page_no=int(seed.page_id)
+        )
+
+        def record_for(segment: LegacyPlanSegment | None) -> Optional[SourceObservationRecord]:
+            if segment is None:
+                return None
+            return record_by_index.get(int(segment.drawing_index))
+
+        def midpoint(segment: LegacyPlanSegment) -> tuple[float, float]:
+            return ((segment.x1 + segment.x2) / 2.0, (segment.y1 + segment.y2) / 2.0)
+
+        def gap_center(gap) -> Optional[tuple[float, float]]:
+            if gap.centroid_x is None or gap.centroid_y is None:
+                return None
+            return (float(gap.centroid_x), float(gap.centroid_y))
+
+        def support_candidate(
+            *,
+            support_records: tuple[SourceObservationRecord, ...],
+            structural_pattern: str,
+        ) -> Optional[CandidateSemanticOpening]:
+            unique = {record.observation_id: record for record in support_records}
+            if len(unique) < 3:
+                return None
+            support = tuple(unique[key] for key in sorted(unique))
+            parent_ids: list[str] = []
+            for item in support:
+                if len(item.derivation_parent_ids) != 1:
+                    return None
+                parent_ids.append(item.derivation_parent_ids[0])
+            if len(set(parent_ids)) != len(parent_ids):
+                return None
+            observation_ids = tuple(item.observation_id for item in support)
+            root_ids = tuple(sorted(parent_ids))
+            payload = {
+                "document_id": seed.document_id,
+                "revision_id": seed.revision_id,
+                "source_sha256": seed.source_sha256,
+                "snapshot_id": seed.snapshot_id,
+                "page_id": seed.page_id,
+                "viewport_id": None,
+                "structural_pattern": structural_pattern,
+                "source_observation_ids": observation_ids,
+                "source_lineage_root_ids": root_ids,
+            }
+            return CandidateSemanticOpening(
+                candidate_id=stable_contract_id(
+                    "physical_opening_candidate", payload, digest_chars=32
+                ),
+                source_observation_ids=observation_ids,
+                source_lineage_root_ids=root_ids,
+                document_id=seed.document_id,
+                revision_id=seed.revision_id,
+                source_sha256=seed.source_sha256,
+                snapshot_id=seed.snapshot_id,
+                page_id=seed.page_id,
+                viewport_id=None,
+                structural_pattern=structural_pattern,
+                status=EvidenceResolutionStatus.CANDIDATE,
+                reason_codes=(
+                    structural_pattern,
+                    VISIBLE_WALL_CONTINUATION_REQUIRED,
+                ),
+            )
+
+        found: dict[str, CandidateSemanticOpening] = {}
+        for gap in gaps:
+            if not gap.wall_segments:
+                continue
+            gap_wall_a, gap_wall_b = gap.wall_segments
+            gap_wall_records = (
+                record_for(gap_wall_a),
+                record_for(gap_wall_b),
+            )
+            if any(record is None for record in gap_wall_records):
+                continue
+            center = gap_center(gap)
+            if center is None:
+                continue
+
+            gap_width = min(
+                math.hypot(ax - bx, ay - by)
+                for ax, ay in (
+                    (gap_wall_a.x1, gap_wall_a.y1),
+                    (gap_wall_a.x2, gap_wall_a.y2),
+                )
+                for bx, by in (
+                    (gap_wall_b.x1, gap_wall_b.y1),
+                    (gap_wall_b.x2, gap_wall_b.y2),
+                )
+            )
+            for door in doors:
+                if door.wall_segment not in gap.wall_segments or door.jamb_segment is None:
+                    continue
+                door_center = midpoint(door.jamb_segment)
+                if math.hypot(
+                    door_center[0] - center[0], door_center[1] - center[1]
+                ) > max(float(door.jamb_segment.length), gap_width):
+                    continue
+                jamb_record = record_for(door.jamb_segment)
+                if jamb_record is None:
+                    continue
+                candidate = support_candidate(
+                    support_records=(
+                        gap_wall_records[0], gap_wall_records[1], jamb_record
+                    ),  # type: ignore[arg-type]
+                    structural_pattern=GAP_CORROBORATED_DOOR_JAMB_LEAF,
+                )
+                if candidate is not None:
+                    found[candidate.candidate_id] = candidate
+
+            for window in windows:
+                if window.wall_segment not in gap.wall_segments:
+                    continue
+                if len(window.parallel_segments) != 2:
+                    continue
+                first, second = window.parallel_segments
+                window_center = (
+                    (first.cx + second.cx) / 2.0,
+                    (first.cy + second.cy) / 2.0,
+                )
+                jamb_span = math.hypot(first.cx - second.cx, first.cy - second.cy)
+                if math.hypot(
+                    window_center[0] - center[0], window_center[1] - center[1]
+                ) > max(jamb_span, gap_width):
+                    continue
+                first_record = record_for(first)
+                second_record = record_for(second)
+                if first_record is None or second_record is None:
+                    continue
+                candidate = support_candidate(
+                    support_records=(
+                        gap_wall_records[0], gap_wall_records[1],
+                        first_record, second_record,
+                    ),  # type: ignore[arg-type]
+                    structural_pattern=GAP_CORROBORATED_WINDOW_JAMB_PAIR,
+                )
+                if candidate is not None:
+                    found[candidate.candidate_id] = candidate
+
+        return tuple(found[key] for key in sorted(found))
+
+    @classmethod
+    def _visible_all_structural_candidates(
+        cls,
+        seed: SourceObservationRecord,
+        records: tuple[SourceObservationRecord, ...],
+    ) -> tuple[CandidateSemanticOpening, ...]:
+        strong = cls._visible_structural_candidates(seed, records)
+        generic = cls._visible_generic_correlated_candidates(seed, records)
+        strong_sets = [set(item.source_observation_ids) for item in strong]
+        retained = [
+            item
+            for item in generic
+            if not any(set(item.source_observation_ids) <= support for support in strong_sets)
+        ]
+        by_id = {item.candidate_id: item for item in (*strong, *retained)}
+        return tuple(by_id[key] for key in sorted(by_id))
+
+    @staticmethod
     def _single_raw_candidate(
         observation: SourceObservationRecord,
     ) -> CandidateSemanticOpening:
@@ -721,7 +940,7 @@ class PhysicalOpeningAuthority:
             )
 
         observation = source_result.observation
-        candidates = self._visible_structural_candidates(observation, records)
+        candidates = self._visible_all_structural_candidates(observation, records)
         containing = tuple(
             candidate
             for candidate in candidates
@@ -842,7 +1061,7 @@ class PhysicalOpeningAuthority:
                 ), source_observation=source_result,
             )
         observation = source_result.observation
-        candidates = self._visible_structural_candidates(observation, records)
+        candidates = self._visible_all_structural_candidates(observation, records)
         containing = tuple(
             candidate for candidate in candidates
             if observation.observation_id in candidate.source_observation_ids
