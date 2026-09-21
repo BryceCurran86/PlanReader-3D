@@ -114,6 +114,10 @@ def collect_item35_authority_shadow(
             f"item35:pages:{published.revision.revision_id}:"
             + ",".join(scoped_page_ids)
         )
+        published = source.augment_with_raster_visible_segments(
+            published.revision.revision_id,
+            page_ids=scoped_page_ids,
+        )
         semantic = semantic_producer.publish_page_scope(
             revision_id=published.revision.revision_id,
             decision_scope_id=decision_scope_id,
