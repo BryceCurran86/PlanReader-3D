@@ -1,4 +1,5 @@
 name: Item35 Murera Runtime Probe
+# test-only runtime measurement
 on:
   push:
     branches: [review/item35-murera-runtime-after-index-v1]
