@@ -10,10 +10,10 @@ source PDF bytes
 -> semantic inventory completeness adapter
 -> GenericOpeningCountAuthority diagnostic resolve
 
-The semantic completeness adapter is intentionally unsealed until a stronger
-authority proves exhaustive physical-opening-universe coverage, so commercial
-count publication remains blocked.  This module must never modify extractor
-predictions, benchmark gold, or expected quantities.
+The shadow composes only producer-owned source, physical-opening, schedule
+binding and generic-count authorities.  It must never modify extractor
+predictions, benchmark gold, or expected quantities; classified counts remain
+diagnostic until a separate live-publication change is independently reviewed.
 """
 from __future__ import annotations
 
@@ -231,9 +231,10 @@ def collect_item35_authority_shadow(
     )
 
     if pages is None:
-        scoped_page_ids = None
         decision_scope_id = f"item35:document:{published.revision.revision_id}"
-        scoped_page_ids = tuple(str(page) for page in published.coverage.decoded_pages)
+        scoped_page_ids = tuple(
+            str(page) for page in published.coverage.decoded_pages
+        )
     else:
         scoped_page_ids = tuple(
             str(int(page_index) + 1)
@@ -245,10 +246,14 @@ def collect_item35_authority_shadow(
             f"item35:pages:{published.revision.revision_id}:"
             + ",".join(scoped_page_ids)
         )
-        published = source.augment_with_raster_visible_segments(
-            published.revision.revision_id,
-            page_ids=scoped_page_ids,
-        )
+
+    # Raster-visible structural primitives are producer-owned source evidence.
+    # Always augment the addressed source pages before semantic enumeration;
+    # vector-only pages remain unchanged by the augmentation method.
+    published = source.augment_with_raster_visible_segments(
+        published.revision.revision_id,
+        page_ids=scoped_page_ids,
+    )
     # OCR tags must enter the same immutable source snapshot before semantic
     # opening and commercial-binding authorities are composed.
     ocr_tag_count = _augment_floor_plan_ocr_tags(
