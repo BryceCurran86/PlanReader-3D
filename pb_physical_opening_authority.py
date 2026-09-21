@@ -591,6 +591,12 @@ class PhysicalOpeningAuthority:
         seed: SourceObservationRecord,
         records: tuple[SourceObservationRecord, ...],
     ) -> tuple[CandidateSemanticOpening, ...]:
+        """Discover exact structural openings without quadratic rescans of breaks.
+
+        This is an equivalence-preserving index only. Candidate membership is
+        still decided by the original exact predicates for same-gap, distinct
+        parallel axes, segment matching, lineage and final geometry dedupe.
+        """
         scoped = tuple(
             record
             for record in records
@@ -613,27 +619,111 @@ class PhysicalOpeningAuthority:
                 if found is not None:
                     breaks.append(found)
 
-        discovered: dict[tuple[object, ...], tuple[SourceObservationRecord, ...]] = {}
-        for index, first_break in enumerate(breaks):
-            for second_break in breaks[index + 1:]:
+        if not breaks:
+            return ()
+
+        coord_tol = _COORD_EQ_ABS_TOL
+        max_same_angle = math.acos(max(-1.0, 1.0 - _PARALLEL_REL_TOL))
+        angle_width = max(max_same_angle * 2.0, 1e-12)
+        angle_bucket_count = max(1, int(math.ceil(math.pi / angle_width)))
+
+        def coord_bin(value: float) -> int:
+            return math.floor(float(value) / coord_tol)
+
+        def point_bin(point: tuple[float, float]) -> tuple[int, int]:
+            return (coord_bin(point[0]), coord_bin(point[1]))
+
+        def angle_bin(direction: tuple[float, float]) -> int:
+            angle = math.atan2(direction[1], direction[0]) % math.pi
+            return int(math.floor(angle / angle_width)) % angle_bucket_count
+
+        endpoint_index: dict[
+            tuple[tuple[int, int], tuple[int, int]],
+            list[SourceObservationRecord],
+        ] = {}
+        for record in scoped:
+            line = _line_geometry(record)
+            assert line is not None
+            a = point_bin((line[0], line[1]))
+            b = point_bin((line[2], line[3]))
+            endpoint_index.setdefault((a, b), []).append(record)
+            endpoint_index.setdefault((b, a), []).append(record)
+
+        segment_match_cache: dict[
+            tuple[tuple[float, float], tuple[float, float]],
+            tuple[SourceObservationRecord, ...],
+        ] = {}
+
+        def indexed_segment_matches(
+            first: tuple[float, float],
+            second: tuple[float, float],
+        ) -> tuple[SourceObservationRecord, ...]:
+            key = (first, second)
+            cached = segment_match_cache.get(key)
+            if cached is not None:
+                return cached
+            first_bin = point_bin(first)
+            second_bin = point_bin(second)
+            candidates: dict[str, SourceObservationRecord] = {}
+            for fdx in (-1, 0, 1):
+                for fdy in (-1, 0, 1):
+                    fb = (first_bin[0] + fdx, first_bin[1] + fdy)
+                    for sdx in (-1, 0, 1):
+                        for sdy in (-1, 0, 1):
+                            sb = (second_bin[0] + sdx, second_bin[1] + sdy)
+                            for record in endpoint_index.get((fb, sb), ()):
+                                candidates[record.observation_id] = record
+            result = tuple(
+                record
+                for record in candidates.values()
+                if _segment_matches(record, first, second)
+            )
+            segment_match_cache[key] = result
+            return result
+
+        break_index: dict[tuple[int, int, int], list[int]] = {}
+        discovered: dict[
+            tuple[object, ...], tuple[SourceObservationRecord, ...]
+        ] = {}
+
+        for second_index, second_break in enumerate(breaks):
+            gs = coord_bin(second_break.gap_start)
+            ge = coord_bin(second_break.gap_end)
+            ga = angle_bin(second_break.direction)
+
+            prior_indexes: set[int] = set()
+            for ds in (-1, 0, 1):
+                for de in (-1, 0, 1):
+                    for da in (-1, 0, 1):
+                        ak = (ga + da) % angle_bucket_count
+                        prior_indexes.update(
+                            break_index.get((gs + ds, ge + de, ak), ())
+                        )
+
+            for first_index in sorted(prior_indexes):
+                first_break = breaks[first_index]
                 if not _same_gap(first_break, second_break):
                     continue
                 if not _distinct_parallel_axes(first_break, second_break):
                     continue
-                left_jambs = tuple(
-                    record for record in scoped
-                    if _segment_matches(record, first_break.start_point, second_break.start_point)
+
+                left_jambs = indexed_segment_matches(
+                    first_break.start_point,
+                    second_break.start_point,
                 )
-                right_jambs = tuple(
-                    record for record in scoped
-                    if _segment_matches(record, first_break.end_point, second_break.end_point)
+                right_jambs = indexed_segment_matches(
+                    first_break.end_point,
+                    second_break.end_point,
                 )
                 for left_jamb in left_jambs:
                     for right_jamb in right_jambs:
                         support = (
-                            first_break.first, first_break.second,
-                            second_break.first, second_break.second,
-                            left_jamb, right_jamb,
+                            first_break.first,
+                            first_break.second,
+                            second_break.first,
+                            second_break.second,
+                            left_jamb,
+                            right_jamb,
                         )
                         if len({item.observation_id for item in support}) != 6:
                             continue
@@ -646,18 +736,30 @@ class PhysicalOpeningAuthority:
                             parent_ids.append(item.derivation_parent_ids[0])
                         if not lineage_ok or len(set(parent_ids)) != 6:
                             continue
-                        geometry_key = tuple(sorted(_canonical_line(item) for item in support))
+                        geometry_key = tuple(
+                            sorted(_canonical_line(item) for item in support)
+                        )
                         key = (
-                            seed.document_id, seed.revision_id, seed.source_sha256,
-                            seed.snapshot_id, seed.page_id, geometry_key,
+                            seed.document_id,
+                            seed.revision_id,
+                            seed.source_sha256,
+                            seed.snapshot_id,
+                            seed.page_id,
+                            geometry_key,
                         )
                         discovered[key] = support
+
+            break_index.setdefault((gs, ge, ga), []).append(second_index)
 
         candidates: list[CandidateSemanticOpening] = []
         for key in sorted(discovered, key=repr):
             support = discovered[key]
-            observation_ids = tuple(sorted(item.observation_id for item in support))
-            root_ids = tuple(sorted(item.derivation_parent_ids[0] for item in support))
+            observation_ids = tuple(
+                sorted(item.observation_id for item in support)
+            )
+            root_ids = tuple(
+                sorted(item.derivation_parent_ids[0] for item in support)
+            )
             payload = {
                 "document_id": seed.document_id,
                 "revision_id": seed.revision_id,
@@ -669,20 +771,29 @@ class PhysicalOpeningAuthority:
                 "source_observation_ids": observation_ids,
                 "source_lineage_root_ids": root_ids,
             }
-            candidates.append(CandidateSemanticOpening(
-                candidate_id=stable_contract_id("physical_opening_candidate", payload, digest_chars=32),
-                source_observation_ids=observation_ids,
-                source_lineage_root_ids=root_ids,
-                document_id=seed.document_id,
-                revision_id=seed.revision_id,
-                source_sha256=seed.source_sha256,
-                snapshot_id=seed.snapshot_id,
-                page_id=seed.page_id,
-                viewport_id=None,
-                structural_pattern=JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
-                status=EvidenceResolutionStatus.CANDIDATE,
-                reason_codes=(JAMB_BOUNDED_TWO_FACE_INTERRUPTION, VISIBLE_WALL_CONTINUATION_REQUIRED),
-            ))
+            candidates.append(
+                CandidateSemanticOpening(
+                    candidate_id=stable_contract_id(
+                        "physical_opening_candidate",
+                        payload,
+                        digest_chars=32,
+                    ),
+                    source_observation_ids=observation_ids,
+                    source_lineage_root_ids=root_ids,
+                    document_id=seed.document_id,
+                    revision_id=seed.revision_id,
+                    source_sha256=seed.source_sha256,
+                    snapshot_id=seed.snapshot_id,
+                    page_id=seed.page_id,
+                    viewport_id=None,
+                    structural_pattern=JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
+                    status=EvidenceResolutionStatus.CANDIDATE,
+                    reason_codes=(
+                        JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
+                        VISIBLE_WALL_CONTINUATION_REQUIRED,
+                    ),
+                )
+            )
         return tuple(candidates)
 
     @staticmethod
