@@ -6,16 +6,15 @@ reuses PhysicalOpeningAuthority.prove_existence() as the only positive
 physical-existence proposition; OCR text, schedule rows, caller candidate lists,
 proximity ranking, and expected quantities never create an opening here.
 
-V1 has two deliberately separate completeness concepts:
+V2 keeps two separate completeness concepts:
 
 1. structural_enumeration_complete means every authority-visible segment in
-   the exact document snapshot participated in at least one independently proven
-   G17 physical-opening record and no source/physical conflict occurred.
-2. physical_opening_universe_complete remains False in V1. Exhaustively
-   enumerating one known structural representation is not proof that every
-   possible physical-opening representation has been covered. Commercial count
-   therefore remains fail-closed until a later authority proves that stronger
-   proposition.
+   the exact decision scope has been either assigned to a proven physical
+   opening or explicitly disposed by the registered physical-opening paths,
+   with no unresolved/conflicting source evidence.
+2. physical_opening_universe_complete is true only when structural enumeration
+   is complete and PhysicalOpeningAuthority confirms that its registered
+   source-visible path set is closed for this producer version.
 
 The useful output of this authority is the producer-owned semantic inventory:
 unique physical-opening record ids, one representative source observation per
@@ -61,6 +60,9 @@ SEMANTIC_OPENING_STRUCTURAL_ENUMERATION_COMPLETE = (
 )
 SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN = (
     "semantic_opening_universe_exhaustiveness_unproven"
+)
+SEMANTIC_OPENING_REGISTERED_PATH_UNIVERSE_COMPLETE = (
+    "semantic_opening_registered_path_universe_complete"
 )
 SEMANTIC_OPENING_NO_VISIBLE_SEGMENTS = "semantic_opening_no_visible_segments"
 SEMANTIC_OPENING_PRODUCER_EQUIVOCATION = "semantic_opening_producer_equivocation"
@@ -163,9 +165,12 @@ class SemanticOpeningEnumerationRecord:
             raise ValueError(
                 "opening support and residual visible observations must be disjoint"
             )
-        if self.physical_opening_universe_complete:
+        if (
+            self.physical_opening_universe_complete
+            and not self.structural_enumeration_complete
+        ):
             raise ValueError(
-                "v1 cannot prove full physical-opening universe exhaustiveness"
+                "physical opening universe cannot be complete when structural enumeration is incomplete"
             )
 
 
@@ -492,7 +497,14 @@ class SemanticOpeningEnumerationProducer:
         if structural_complete:
             reasons.append(SEMANTIC_OPENING_STRUCTURAL_ENUMERATION_COMPLETE)
 
-        reasons.append(SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN)
+        physical_universe_complete = (
+            structural_complete
+            and physical.registered_visible_path_set_complete()
+        )
+        if physical_universe_complete:
+            reasons.append(SEMANTIC_OPENING_REGISTERED_PATH_UNIVERSE_COMPLETE)
+        else:
+            reasons.append(SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN)
 
         opening_ids = tuple(sorted(opening_records))
         representative_ids = tuple(
@@ -515,7 +527,7 @@ class SemanticOpeningEnumerationProducer:
             "residual_visible_observation_ids": tuple(sorted(residual_ids)),
             "conflict_observation_ids": tuple(sorted(conflict_ids)),
             "structural_enumeration_complete": structural_complete,
-            "physical_opening_universe_complete": False,
+            "physical_opening_universe_complete": physical_universe_complete,
             "reason_codes": _ordered_unique(reasons),
         }
         record = SemanticOpeningEnumerationRecord(
@@ -538,7 +550,7 @@ class SemanticOpeningEnumerationProducer:
             residual_visible_observation_ids=tuple(sorted(residual_ids)),
             conflict_observation_ids=tuple(sorted(conflict_ids)),
             structural_enumeration_complete=structural_complete,
-            physical_opening_universe_complete=False,
+            physical_opening_universe_complete=physical_universe_complete,
             reason_codes=_ordered_unique(reasons),
         )
         status = (
@@ -567,6 +579,7 @@ __all__ = [
     "SEMANTIC_OPENING_PHYSICAL_CONFLICT",
     "SEMANTIC_OPENING_PRODUCER_EQUIVOCATION",
     "SEMANTIC_OPENING_RESIDUAL_SOURCE_EVIDENCE",
+    "SEMANTIC_OPENING_REGISTERED_PATH_UNIVERSE_COMPLETE",
     "SEMANTIC_OPENING_SOURCE_COVERAGE_INCOMPLETE",
     "SEMANTIC_OPENING_STRUCTURAL_ENUMERATION_COMPLETE",
     "SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN",
