@@ -343,6 +343,54 @@ class SourceVisibilityProducer:
         """
         return self._published_by_revision.get(str(revision_id))
 
+    def optional_content_state_for_scope(
+        self,
+        revision_id: str,
+        *,
+        page_ids: Sequence[str] | None = None,
+    ) -> str:
+        """Return producer-derived optional-content visibility state.
+
+        The state is "known_visible" only when the exact stored PDF has no
+        Optional Content Groups at all. Any OCG presence or decode uncertainty
+        remains unresolved. Callers may address pages but cannot provide the
+        visibility result.
+        """
+        published = self._published_by_revision.get(str(revision_id))
+        if published is None:
+            return "unresolved"
+
+        decoded = {str(int(value)) for value in published.coverage.decoded_pages}
+        if page_ids is not None:
+            requested = {
+                str(page_id).strip()
+                for page_id in page_ids
+                if str(page_id).strip()
+            }
+            if not requested or not requested <= decoded:
+                return "unresolved"
+
+        source_bytes = self._producer._store.source_bytes_by_revision.get(
+            str(revision_id)
+        )
+        if not source_bytes:
+            return "unresolved"
+        if hashlib.sha256(source_bytes).hexdigest() != published.revision.source_sha256:
+            return "unresolved"
+
+        try:
+            pdf = fitz.open(stream=source_bytes, filetype="pdf")
+        except Exception:
+            return "unresolved"
+        try:
+            try:
+                ocgs = pdf.get_ocgs() or {}
+            except Exception:
+                return "unresolved"
+            return "known_visible" if not ocgs else "unresolved"
+        finally:
+            pdf.close()
+
     def opening_dimension_authority(self):
         """Return the read-only dimension resolver bound to this producer."""
         from pb_opening_dimension_authority import (
