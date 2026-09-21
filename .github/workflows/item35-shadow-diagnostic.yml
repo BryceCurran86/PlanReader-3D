@@ -1,0 +1,90 @@
+name: Item35 Five-Project Shadow Diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  item35-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download registered benchmark source PDFs
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          curl --fail --location --retry 4 --retry-delay 3 "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf" -o "benchmarks/sources/1727358888238-bq-nd-drawing.pdf"
+          curl --fail --location --retry 4 --retry-delay 3 "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf" -o "benchmarks/sources/1785347143869-bqs-drawings.pdf"
+          curl --fail --location --retry 4 --retry-delay 3 "https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf" -o "benchmarks/sources/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf"
+          curl --fail --location --retry 4 --retry-delay 3 "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf" -o "benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf"
+          curl --fail --location --retry 4 --retry-delay 3 "https://umma.ac.ke/wp-content/uploads/2026/06/Builders-work.pdf" -o "benchmarks/sources/umma-university-hostels-builders-work.pdf"
+
+      - name: Verify registered source hashes
+        run: |
+          set -euo pipefail
+          cat > /tmp/benchmark-sha256.txt <<'EOF'
+          6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+          84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  benchmarks/sources/1785347143869-bqs-drawings.pdf
+          c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f  benchmarks/sources/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf
+          fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+          f30711f69944e66ef993341180e35b49ccfcb36d6f402743284823ab588183af  benchmarks/sources/umma-university-hostels-builders-work.pdf
+          EOF
+          sha256sum -c /tmp/benchmark-sha256.txt
+
+      - name: Print exact-scope Item35 shadows
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          from pb_public_tender_benchmark import PublicTenderBenchmark
+          from pb_benchmark_runner import resolve_file_path
+
+          ids = [
+              "tenders_ke_kstvet_cbc_classroom",
+              "tenders_ke_murera_science_lab",
+              "tenders_ke_ghazi_science_lab",
+              "tenders_ke_umma_hostels",
+              "tenders_ke_lamu_ishakani_ecd_classrooms",
+          ]
+
+          for bid in ids:
+              bench = PublicTenderBenchmark.load(bid)
+              pdf = None
+              target_pages = None
+              for doc in bench.download_manifest.get("documents", []):
+                  fn = doc.get("filename")
+                  if fn and pdf is None:
+                      resolved = resolve_file_path(fn)
+                      if resolved:
+                          pdf = Path(resolved)
+                  if doc.get("role") in ("architectural_drawings", "drawings", "tender_drawings"):
+                      dp = doc.get("drawing_pages")
+                      if dp and len(dp) == 2:
+                          target_pages = list(range(int(dp[0]) - 1, int(dp[1])))
+              if pdf is None:
+                  print("ITEM35_DIAG", bid, "SOURCE_UNAVAILABLE")
+                  continue
+              extractor = GenericPlanReaderExtractor()
+              preds = extractor.extract_from_pdf(pdf, pages=target_pages)
+              print("=" * 96)
+              print("ITEM35_DIAG", bid)
+              print("source", pdf)
+              print("target_pages_zero_based", target_pages)
+              print("prediction_count", len(preds))
+              print(json.dumps(extractor.item35_authority_shadow, sort_keys=True))
+          PY
