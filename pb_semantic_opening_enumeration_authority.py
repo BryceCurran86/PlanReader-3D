@@ -535,7 +535,7 @@ class SemanticOpeningEnumerationProducer:
             if conflict_ids or lineage_mismatch
             else EvidenceResolutionStatus.CORROBORATED
         )
-        if unknown_scope_resolution:
+        if unknown_scope_resolution and not (conflict_ids or lineage_mismatch):
             status = EvidenceResolutionStatus.ABSTAINED
         return self._store(
             selector,
