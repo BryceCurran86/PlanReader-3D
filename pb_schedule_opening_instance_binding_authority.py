@@ -183,6 +183,25 @@ def _bbox_iou(left: BBox, right: BBox) -> float:
     return intersection / union if union > 0.0 else 0.0
 
 
+def _bbox_overlap_fraction_of_smaller(left: BBox, right: BBox) -> float:
+    """Fraction of the smaller observation box covered by the intersection.
+
+    Native PDF word boxes and OCR boxes often have different ascender/descender
+    extents for the same printed mark, so IoU alone can understate duplicate
+    overlap. Distinct nearby marks still score zero when their boxes do not
+    physically overlap.
+    """
+    lx0, ly0, lx1, ly1 = left
+    rx0, ry0, rx1, ry1 = right
+    ix0, iy0 = max(lx0, rx0), max(ly0, ry0)
+    ix1, iy1 = min(lx1, rx1), min(ly1, ry1)
+    intersection = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
+    left_area = max(0.0, lx1 - lx0) * max(0.0, ly1 - ly0)
+    right_area = max(0.0, rx1 - rx0) * max(0.0, ry1 - ry0)
+    smaller = min(left_area, right_area)
+    return intersection / smaller if smaller > 0.0 else 0.0
+
+
 def _line(record: SourceObservationRecord) -> Line | None:
     if len(record.geometry) != 4:
         return None
@@ -863,7 +882,11 @@ class ScheduleOpeningInstanceBindingProducer:
                 (
                     index
                     for index, existing in enumerate(deduped_tags)
-                    if existing[1] == mark and _bbox_iou(existing[2], bbox) >= 0.5
+                    if existing[1] == mark
+                    and (
+                        _bbox_iou(existing[2], bbox) >= 0.5
+                        or _bbox_overlap_fraction_of_smaller(existing[2], bbox) >= 0.7
+                    )
                 ),
                 None,
             )
