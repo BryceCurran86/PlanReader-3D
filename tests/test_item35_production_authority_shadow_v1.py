@@ -4,7 +4,7 @@ from __future__ import annotations
 import fitz
 
 from pb_generic_opening_count_authority import (
-    GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED,
+    GENERIC_OPENING_COUNT_VIEWPORT_CLASS_UNAVAILABLE,
 )
 from pb_item35_production_authority_shadow import (
     collect_item35_authority_shadow,
@@ -53,11 +53,11 @@ def test_item35_shadow_executes_real_source_chain_but_keeps_commerce_locked(tmp_
     assert shadow["support_observation_count"] == 6
     assert shadow["residual_visible_observation_count"] == 0
     assert shadow["structural_enumeration_complete"] is True
-    assert shadow["physical_opening_universe_complete"] is False
+    assert shadow["physical_opening_universe_complete"] is True
     assert shadow["commercial_count_unlocked"] is False
     assert shadow["generic_count_status"] == "abstained"
     assert (
-        GENERIC_OPENING_COUNT_COMPLETENESS_NOT_SOURCE_AUTHENTICATED
+        GENERIC_OPENING_COUNT_VIEWPORT_CLASS_UNAVAILABLE
         in shadow["generic_count_reason_codes"]
     )
 
@@ -81,6 +81,7 @@ def test_live_extractor_populates_item35_shadow_without_publishing_opening_count
     assert shadow["status"] == "evidence_present"
     assert shadow["semantic_opening_count"] == 1
     assert shadow["commercial_count_unlocked"] is False
+    assert shadow["generic_count"] is None
     assert extractor.extraction_status["item35_authority_shadow"] == "evidence_present"
 
 
@@ -100,5 +101,8 @@ def test_scoped_live_extraction_runs_item35_only_on_requested_pages(tmp_path) ->
     assert shadow["status"] == "evidence_present"
     assert shadow["semantic_opening_count"] == 1
     assert shadow["visible_observation_count"] == 6
-    assert shadow["commercial_count_unlocked"] is False
+    assert shadow["physical_opening_universe_complete"] is True
+    assert shadow["commercial_count_unlocked"] is True
+    assert shadow["generic_count_status"] == "corroborated"
+    assert shadow["generic_count"] == 1
     assert extractor.extraction_status["item35_authority_shadow"] == "evidence_present"
