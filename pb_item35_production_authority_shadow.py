@@ -27,12 +27,14 @@ from pb_generic_opening_count_authority import (
 from pb_opening_universe_completeness_source_adapter import (
     build_semantic_opening_inventory_completeness,
 )
+from pb_page_view_class_source_adapter import (
+    build_source_page_view_class_authority,
+)
 from pb_physical_opening_authority import PhysicalOpeningAuthority
 from pb_semantic_opening_enumeration_authority import (
     SemanticOpeningEnumerationProducer,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
-from pb_viewport_view_class_authority import ViewportViewClassProducer
 
 
 ITEM35_PRODUCTION_SHADOW_SCHEMA_VERSION = "1.0.0"
@@ -185,10 +187,19 @@ def collect_item35_authority_shadow(
         page_ids=scoped_page_ids,
         optional_content_known_visible=False,
     )
+    view_authority = build_source_page_view_class_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=(
+            scoped_page_ids
+            if scoped_page_ids is not None
+            else tuple(str(page) for page in published.coverage.decoded_pages)
+        ),
+    )
     generic = GenericOpeningCountProducer.from_authorities(
         opening_universe_authority=completeness,
         physical_opening_authority=PhysicalOpeningAuthority(source.authority()),
-        viewport_view_class_authority=ViewportViewClassProducer.create().authority(),
+        viewport_view_class_authority=view_authority,
     )
     generic_result = generic.publish(
         GenericOpeningCountSelector(
