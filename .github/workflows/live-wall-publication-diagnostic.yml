@@ -13,12 +13,12 @@ jobs:
       matrix:
         include:
           - slug: kstvet
-            page_index: 53
+            page_indexes: "53,54"
             source_url: https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf
             source_path: benchmarks/sources/1727358888238-bq-nd-drawing.pdf
             source_sha256: 6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc
           - slug: lamu
-            page_index: 40
+            page_indexes: "40,41,42,43,44"
             source_url: https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf
             source_path: benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
             source_sha256: fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2
@@ -56,7 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p live_trace_results
-          python tools/trace_live_wall_publication.py "$SOURCE_PATH"             --page-index "$PAGE_INDEX" | tee "live_trace_results/$SLUG.json"
+          python tools/trace_live_wall_publication.py "$SOURCE_PATH"             --page-indexes "$PAGE_INDEXES" | tee "live_trace_results/$SLUG.json"
 
       - name: Upload diagnostic
         if: always()
