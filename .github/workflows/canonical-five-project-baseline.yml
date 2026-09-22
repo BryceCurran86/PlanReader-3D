@@ -1,8 +1,6 @@
 name: Canonical Five-Project Baseline — DO NOT MERGE
 
 on:
-  push:
-    branches: [review/canonical-five-project-baseline-main-0b8bff3]
   pull_request:
     branches: [main]
 
@@ -243,7 +241,7 @@ jobs:
           aggregate = {
               "execution_mode": "independent_sequential_matrix",
               "coverage_complete": True,
-              "main_commit": "0b8bff3cd900e4cf6a9e23c936d2b42e9ca65baa",
+              "main_commit": "${{ github.event.pull_request.base.sha }}",
               "benchmark_commit": "${{ github.sha }}",
               "projects": projects,
               "headline_metrics": {
