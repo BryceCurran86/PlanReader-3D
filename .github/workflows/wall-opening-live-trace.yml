@@ -1,8 +1,7 @@
 name: Wall Opening Live Trace
 
 on:
-  push:
-    branches: [gpt2/wall-opening-live-trace-v1]
+  workflow_dispatch:
 
 jobs:
   trace:
