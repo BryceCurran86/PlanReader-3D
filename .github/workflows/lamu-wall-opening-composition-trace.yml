@@ -1,0 +1,45 @@
+name: Lamu Wall Opening Composition Trace
+
+on:
+  push:
+    branches: [gpt2/wall-net-lamu-real-trace-v1]
+    paths:
+      - tools/trace_live_wall_opening_composition.py
+      - .github/workflows/lamu-wall-opening-composition-trace.yml
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download and verify Lamu source
+        run: |
+          mkdir -p benchmarks/sources
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf" \
+            -o benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+          echo "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf" | sha256sum -c -
+      - name: Trace page 41 host composition
+        env:
+          PYTHONPATH: .
+        run: |
+          mkdir -p live_trace
+          python tools/trace_live_wall_opening_composition.py \
+            benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf \
+            --page-id 41 | tee live_trace/lamu-page41.json
+      - name: Upload trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lamu-wall-opening-composition-page41
+          path: live_trace/lamu-page41.json
+          if-no-files-found: warn
