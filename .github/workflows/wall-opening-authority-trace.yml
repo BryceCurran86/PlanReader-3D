@@ -6,6 +6,82 @@ on:
   workflow_dispatch:
 
 jobs:
+  observe-kstvet-live-extractor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and verify KSTVET source
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf" \
+            -o benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+          echo "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/1727358888238-bq-nd-drawing.pdf" | sha256sum -c -
+
+      - name: Observe live commercial wall/opening predictions
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+
+          pdf = Path("benchmarks/sources/1727358888238-bq-nd-drawing.pdf")
+          extractor = GenericPlanReaderExtractor()
+          preds = extractor.extract_from_pdf(
+              pdf,
+              pages=[53, 54],
+              collect_item35_shadow=False,
+          )
+          keep = {}
+          for pred in preds:
+              if (
+                  pred.tag in {
+                      "perimeter_walling",
+                      "internal_plaster",
+                      "internal_paint",
+                      "external_key_pointing",
+                      "external_render",
+                      "W1",
+                      "W2",
+                      "D1",
+                      "D2",
+                  }
+                  or pred.trade_type in {"windows", "doors"}
+              ):
+                  keep[pred.tag] = pred.to_dict()
+          payload = {
+              "predictions": keep,
+              "extraction_status": extractor.extraction_status,
+          }
+          Path("kstvet_live_wall_opening_observation.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(json.dumps(payload, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload live extractor observation
+        uses: actions/upload-artifact@v4
+        with:
+          name: kstvet-live-wall-opening-observation
+          path: kstvet_live_wall_opening_observation.json
+          if-no-files-found: error
+
   trace-kstvet-wall-opening:
     runs-on: ubuntu-latest
     timeout-minutes: 45
