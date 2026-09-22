@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 VERSION = "1.3.0"
 SETTING_PREFIX = "vector_geometry_v130_"
