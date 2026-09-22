@@ -961,6 +961,50 @@ class PhysicalWallCandidateProducer:
 
     @classmethod
     def from_source_visibility_producer(cls, source_visibility_producer):
+        return cls._from_source_visibility_producer(
+            source_visibility_producer,
+            page_ids=None,
+        )
+
+    @classmethod
+    def from_source_visibility_producer_for_pages(
+        cls,
+        source_visibility_producer,
+        *,
+        page_ids: Sequence[str],
+    ):
+        """Build only addressed page scopes from the immutable source.
+
+        Page ids are addressing only. They cannot provide wall geometry,
+        completeness, identity, or any other truth; every selected page is
+        still rebuilt from the producer-owned source bytes and receipts.
+        """
+        cleaned = tuple(
+            dict.fromkeys(
+                str(page_id).strip()
+                for page_id in page_ids
+                if str(page_id).strip()
+            )
+        )
+        if not cleaned:
+            raise ValueError("page_ids must contain at least one source page")
+        if any(
+            (not page_id.isdigit()) or int(page_id) < 1
+            for page_id in cleaned
+        ):
+            raise ValueError("page_ids must be positive source page numbers")
+        return cls._from_source_visibility_producer(
+            source_visibility_producer,
+            page_ids=cleaned,
+        )
+
+    @classmethod
+    def _from_source_visibility_producer(
+        cls,
+        source_visibility_producer,
+        *,
+        page_ids: Optional[Sequence[str]],
+    ):
         if type(source_visibility_producer) is not SourceVisibilityProducer:
             raise TypeError(
                 "source_visibility_producer must be an actual SourceVisibilityProducer"
@@ -982,8 +1026,23 @@ class PhysicalWallCandidateProducer:
             if digest != published.revision.source_sha256:
                 raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
 
-            for page_number in published.coverage.decoded_pages:
-                page_id = str(page_number)
+            decoded_page_ids = {
+                str(int(page_number))
+                for page_number in published.coverage.decoded_pages
+            }
+            selected_page_ids = (
+                tuple(sorted(decoded_page_ids, key=int))
+                if page_ids is None
+                else tuple(
+                    page_id
+                    for page_id in page_ids
+                    if page_id in decoded_page_ids
+                )
+            )
+            if page_ids is not None and len(selected_page_ids) != len(page_ids):
+                raise ValueError(PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
+
+            for page_id in selected_page_ids:
                 result = _build_scope_result(
                     source_producer=source_visibility_producer,
                     published=published,
