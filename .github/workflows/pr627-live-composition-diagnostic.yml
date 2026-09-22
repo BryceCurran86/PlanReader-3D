@@ -1,0 +1,69 @@
+name: PR627 Live Composition Diagnostic
+
+on:
+  push:
+    branches: [gpt2/wall-net-pr627-real-source-diag]
+    paths:
+      - tools/trace_pr627_live_composition.py
+      - .github/workflows/pr627-live-composition-diagnostic.yml
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slug: kstvet
+            document_id: kstvet-pr627
+            page_ids: "54"
+            url: https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf
+            path: benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+            sha: 6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc
+          - slug: lamu
+            document_id: lamu-pr627
+            page_ids: "41"
+            url: https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf
+            path: benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+            sha: fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download and verify source
+        env:
+          URL: ${{ matrix.url }}
+          PATH_OUT: ${{ matrix.path }}
+          SHA: ${{ matrix.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$PATH_OUT")"
+          curl --fail --location --retry 4 --retry-delay 3 "$URL" -o "$PATH_OUT"
+          echo "$SHA  $PATH_OUT" | sha256sum -c -
+      - name: Compose live authorities
+        env:
+          PYTHONPATH: .
+          PATH_OUT: ${{ matrix.path }}
+          DOCUMENT_ID: ${{ matrix.document_id }}
+          PAGE_IDS: ${{ matrix.page_ids }}
+          SLUG: ${{ matrix.slug }}
+        run: |
+          set -euo pipefail
+          mkdir -p pr627_trace
+          python tools/trace_pr627_live_composition.py "$PATH_OUT" \
+            --document-id "$DOCUMENT_ID" --page-ids "$PAGE_IDS" \
+            | tee "pr627_trace/$SLUG.json"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr627-live-composition-${{ matrix.slug }}
+          path: pr627_trace/${{ matrix.slug }}.json
+          if-no-files-found: warn
