@@ -1,0 +1,49 @@
+name: Validate Murera Item35 Batch PR616
+
+on:
+  push:
+    branches: [validation/murera-item35-batch-pr616]
+
+jobs:
+  murera-item35:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download and SHA-verify Murera source
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf" \
+            -o benchmarks/sources/1785347143869-bqs-drawings.pdf
+          echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  benchmarks/sources/1785347143869-bqs-drawings.pdf" | sha256sum -c -
+      - name: Run full Item35 extraction with resource accounting
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          /usr/bin/time -v python - <<'PY'
+          from pathlib import Path
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+
+          p = Path("benchmarks/sources/1785347143869-bqs-drawings.pdf")
+          ex = GenericPlanReaderExtractor()
+          preds = ex.extract_from_pdf(p, collect_item35_shadow=True)
+          print("PREDICTION_COUNT", len(preds))
+          print("ITEM35_STATUS", ex.item35_authority_shadow.get("status"))
+          print("ITEM35_REASON", ex.item35_authority_shadow.get("reason"))
+          print("ITEM35_VISIBLE", ex.item35_authority_shadow.get("visible_observation_count"))
+          print("ITEM35_SEMANTIC_OPENINGS", ex.item35_authority_shadow.get("semantic_opening_count"))
+          print("ITEM35_CLASSIFIED", ex.item35_authority_shadow.get("classified_opening_count"))
+          print("ITEM35_FAMILY_COUNTS", ex.item35_authority_shadow.get("opening_family_counts"))
+          print("ITEM35_MARK_COUNTS", ex.item35_authority_shadow.get("opening_mark_counts"))
+          PY
