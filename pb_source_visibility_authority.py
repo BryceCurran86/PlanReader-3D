@@ -5,12 +5,16 @@ only that a native PDF segment is eligible as an authority-visible source
 observation. It does not prove opening existence, identity, dimensions, host
 binding, physical voids, deductions, or commercial quantities.
 
-Phase 1 is deliberately conservative:
+Visibility is deliberately conservative:
 - clip association unknown -> not authority-visible
-- active clip present -> not authority-visible until clip shape/coverage is
-  independently proven by a later source-visibility enhancement
-- only finite, non-degenerate segments with a proven *no active clip* state
-  become ``native_pdf_visible_segment`` observations
+- active clips require exact axis-aligned rectangular shape proof from the
+  extended PDF drawing path; PyMuPDF scissor alone is never authority
+- clipped segments are published only when their full native geometry is
+  contained by the proven rectangular clip intersection
+- non-rectangular, partially intersecting, or otherwise unresolved clips
+  remain fail-closed
+- finite, non-degenerate segments with proven no-clip or proven-contained
+  rectangular-clip state become native_pdf_visible_segment observations
 
 Raw native observations remain preserved by ``SourceObservationProducer``.
 """
@@ -51,11 +55,14 @@ from pb_source_observation_authority import (
 from pb_vector_geometry_v130 import extract_native_page
 
 
-SOURCE_VISIBILITY_SCHEMA_VERSION = "1.1.0"
+SOURCE_VISIBILITY_SCHEMA_VERSION = "1.2.0"
 NATIVE_PDF_VISIBLE_SEGMENT = "native_pdf_visible_segment"
 RASTER_PDF_SEGMENT = "raster_pdf_segment"
 RASTER_PDF_VISIBLE_SEGMENT = "raster_pdf_visible_segment"
 VISIBLE_SEGMENT_ORIGIN_KIND = "producer_visibility_no_active_clip"
+RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND = (
+    "producer_visibility_exact_rectangular_clip"
+)
 RASTER_SEGMENT_ORIGIN_KIND = "producer_raster_page_render_segment"
 RASTER_VISIBLE_SEGMENT_ORIGIN_KIND = "producer_raster_visibility"
 VISIBLE_SOURCE_OBSERVATION_EXISTS = "visible_source_observation_exists"
@@ -66,6 +73,12 @@ VISIBILITY_ACTIVE_CLIP_UNRESOLVED = "visibility_active_clip_unresolved"
 VISIBILITY_GEOMETRY_INVALID = "visibility_geometry_invalid"
 VISIBILITY_CLIP_STATE_INCONSISTENT = "visibility_clip_state_inconsistent"
 VISIBILITY_PROVEN_NO_ACTIVE_CLIP = "visibility_proven_no_active_clip"
+VISIBILITY_PROVEN_RECTANGULAR_CLIP = (
+    "visibility_proven_rectangular_clip_contains_segment"
+)
+VISIBILITY_RECTANGULAR_CLIP_EXCLUDES_SEGMENT = (
+    "visibility_rectangular_clip_excludes_or_intersects_segment"
+)
 VISIBILITY_RECEIPT_UNAVAILABLE = "visibility_receipt_unavailable"
 VISIBILITY_PARENT_MISMATCH = "visibility_parent_mismatch"
 
@@ -126,15 +139,50 @@ def _segment_geometry(segment: Mapping[str, object]) -> tuple[float, float, floa
     return geometry
 
 
+def _exact_clip_rect(
+    segment: Mapping[str, object],
+) -> Optional[tuple[float, float, float, float]]:
+    value = segment.get("clip_exact_rect")
+    if value is None:
+        return None
+    try:
+        x0, y0, x1, y1 = (float(item) for item in value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(item) for item in (x0, y0, x1, y1)):
+        return None
+    if x1 < x0 or y1 < y0:
+        return None
+    return (x0, y0, x1, y1)
+
+
+def _geometry_fully_inside_rect(
+    geometry: tuple[float, float, float, float],
+    rect: tuple[float, float, float, float],
+    *,
+    tolerance: float = 1e-6,
+) -> bool:
+    x0, y0, x1, y1 = rect
+    for x, y in ((geometry[0], geometry[1]), (geometry[2], geometry[3])):
+        if (
+            x < x0 - tolerance
+            or x > x1 + tolerance
+            or y < y0 - tolerance
+            or y > y1 + tolerance
+        ):
+            return False
+    return True
+
+
 def classify_native_segment_visibility(
     segment: Mapping[str, object],
 ) -> NativeSegmentVisibilityDecision:
-    """Return the phase-1 authority-visibility decision for one native segment.
+    """Return the authority-visibility decision for one native segment.
 
-    ``clip_known=True, clip_present=False`` is the only positive state in this
-    phase. An active clip is *not* treated as rectangular merely because
-    PyMuPDF supplies a ``scissor`` rectangle: scissor is insufficient proof of
-    the actual clipping path shape.
+    An active clip becomes positive only when the vector extractor has
+    independently proven the actual clip path is an axis-aligned rectangle and
+    the full segment lies inside the exact rectangular intersection. scissor
+    remains diagnostic and is never accepted as clip-shape proof.
     """
 
     try:
@@ -157,10 +205,29 @@ def classify_native_segment_visibility(
             reason_codes=(VISIBILITY_CLIP_ASSOCIATION_UNKNOWN,),
         )
     if clip_present:
+        if segment.get("clip_shape_known") is not True:
+            return NativeSegmentVisibilityDecision(
+                visible=False,
+                geometry=geometry,
+                reason_codes=(VISIBILITY_ACTIVE_CLIP_UNRESOLVED,),
+            )
+        exact_rect = _exact_clip_rect(segment)
+        if exact_rect is None:
+            return NativeSegmentVisibilityDecision(
+                visible=False,
+                geometry=geometry,
+                reason_codes=(VISIBILITY_RECTANGULAR_CLIP_EXCLUDES_SEGMENT,),
+            )
+        if not _geometry_fully_inside_rect(geometry, exact_rect):
+            return NativeSegmentVisibilityDecision(
+                visible=False,
+                geometry=geometry,
+                reason_codes=(VISIBILITY_RECTANGULAR_CLIP_EXCLUDES_SEGMENT,),
+            )
         return NativeSegmentVisibilityDecision(
-            visible=False,
+            visible=True,
             geometry=geometry,
-            reason_codes=(VISIBILITY_ACTIVE_CLIP_UNRESOLVED,),
+            reason_codes=(VISIBILITY_PROVEN_RECTANGULAR_CLIP,),
         )
     if clip is not None:
         return NativeSegmentVisibilityDecision(
@@ -229,6 +296,7 @@ def _visible_observation_id(
     primitive_ref: str,
     parent_observation_id: str,
     geometry: Sequence[float],
+    origin_kind: str = VISIBLE_SEGMENT_ORIGIN_KIND,
 ) -> str:
     payload = {
         "document_id": document_id,
@@ -237,7 +305,7 @@ def _visible_observation_id(
         "partition_id": partition_id,
         "kind": NATIVE_PDF_VISIBLE_SEGMENT,
         "primitive_ref": primitive_ref,
-        "origin_kind": VISIBLE_SEGMENT_ORIGIN_KIND,
+        "origin_kind": origin_kind,
         "parents": (parent_observation_id,),
         "raw_text": "",
         "geometry": tuple(float(value) for value in geometry),
@@ -537,6 +605,11 @@ class SourceVisibilityProducer:
                         geometry=decision.geometry,
                     )
                     visible_ref = f"visible:{parent_ref}"
+                    origin_kind = (
+                        RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND
+                        if VISIBILITY_PROVEN_RECTANGULAR_CLIP in decision.reason_codes
+                        else VISIBLE_SEGMENT_ORIGIN_KIND
+                    )
                     visible_id = _visible_observation_id(
                         document_id=base.revision.document_id,
                         revision_id=base.revision.revision_id,
@@ -545,6 +618,7 @@ class SourceVisibilityProducer:
                         primitive_ref=visible_ref,
                         parent_observation_id=parent_id,
                         geometry=decision.geometry,
+                        origin_kind=origin_kind,
                     )
                     snapshot = self._producer.publish_derived_observation(
                         document_id=base.revision.document_id,
@@ -554,7 +628,7 @@ class SourceVisibilityProducer:
                         source_partition_id=partition_id,
                         observation_kind=NATIVE_PDF_VISIBLE_SEGMENT,
                         source_primitive_ref=visible_ref,
-                        origin_kind=VISIBLE_SEGMENT_ORIGIN_KIND,
+                        origin_kind=origin_kind,
                         parent_observation_ids=(parent_id,),
                         raw_text="",
                         geometry=decision.geometry,
@@ -934,7 +1008,10 @@ class SourceVisibilityAuthority:
         if expected_parent is not None:
             if (
                 observation.observation_kind != NATIVE_PDF_VISIBLE_SEGMENT
-                or observation.origin_kind != VISIBLE_SEGMENT_ORIGIN_KIND
+                or observation.origin_kind not in (
+                    VISIBLE_SEGMENT_ORIGIN_KIND,
+                    RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND,
+                )
                 or observation.viewport_id is not None
                 or observation.derivation_parent_ids != (expected_parent,)
             ):
@@ -1049,6 +1126,7 @@ __all__ = [
     "RASTER_RENDER_DPI",
     "RASTER_SEGMENT_ORIGIN_KIND",
     "RASTER_VISIBLE_SEGMENT_ORIGIN_KIND",
+    "RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND",
     "SOURCE_VISIBILITY_SCHEMA_VERSION",
     "VISIBLE_SEGMENT_ORIGIN_KIND",
     "VISIBLE_SOURCE_OBSERVATION_EXISTS",
@@ -1058,6 +1136,8 @@ __all__ = [
     "VISIBILITY_GEOMETRY_INVALID",
     "VISIBILITY_PARENT_MISMATCH",
     "VISIBILITY_PROVEN_NO_ACTIVE_CLIP",
+    "VISIBILITY_PROVEN_RECTANGULAR_CLIP",
+    "VISIBILITY_RECTANGULAR_CLIP_EXCLUDES_SEGMENT",
     "VISIBILITY_RECEIPT_UNAVAILABLE",
     "NativeSegmentVisibilityDecision",
     "RasterSegmentVisibilityReceipt",
