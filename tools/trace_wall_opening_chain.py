@@ -19,9 +19,6 @@ from pb_physical_wall_candidate_authority import (
     _build_scope_result,
     _decision_scope_id,
 )
-from pb_semantic_opening_enumeration_authority import (
-    SemanticOpeningEnumerationProducer,
-)
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -142,21 +139,55 @@ def trace(pdf_path: Path, *, document_id: str, page_id: str) -> int:
         ],
     )
 
-    semantic = SemanticOpeningEnumerationProducer.from_source_visibility_producer(source)
-    semantic_result = semantic.publish_page_scope(
-        revision_id=published.revision.revision_id,
-        decision_scope_id=scope_id,
-        page_ids=(page_id,),
-    )
-    sem_record = semantic_result.record
+    physical = PhysicalOpeningAuthority(source.authority())
+    visibility = source.authority()
+
+    page_observation_ids = []
+    for observation_id in tuple(sorted(set(published.visible_observation_ids))):
+        obs_selector = ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=observation_id,
+        )
+        visible = visibility.resolve_visible(obs_selector)
+        obs = getattr(visible, "observation", None)
+        if (
+            visible.status is EvidenceResolutionStatus.CORROBORATED
+            and obs is not None
+            and str(getattr(obs, "page_id", "")) == page_id
+        ):
+            page_observation_ids.append(observation_id)
+
+    opening_pairs = []
+    seen_openings = set()
+    for observation_id in page_observation_ids:
+        obs_selector = ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=observation_id,
+        )
+        existence = physical.prove_existence(obs_selector)
+        record = existence.existence_record
+        if (
+            existence.status is EvidenceResolutionStatus.CORROBORATED
+            and record is not None
+            and record.record_id not in seen_openings
+        ):
+            seen_openings.add(record.record_id)
+            opening_pairs.append((record.record_id, observation_id, existence))
+
     _emit(
         "physical_opening",
-        file="pb_semantic_opening_enumeration_authority.py + pb_physical_opening_authority.py",
-        class_function="SemanticOpeningEnumerationProducer.publish_page_scope",
-        status=_status(semantic_result.status),
-        reason_codes=list(semantic_result.reason_codes or ()),
-        record_present=sem_record is not None,
-        record_id=getattr(sem_record, "record_id", None),
+        file="pb_physical_opening_authority.py",
+        class_function="PhysicalOpeningAuthority.prove_existence page-local scan",
+        status="corroborated" if opening_pairs else "abstained",
+        reason_codes=[] if opening_pairs else ["no_authenticated_physical_opening_found_on_page"],
+        record_present=bool(opening_pairs),
+        record_id=[item[0] for item in opening_pairs],
         input_lineage={
             "document_id": published.revision.document_id,
             "revision_id": published.revision.revision_id,
@@ -165,16 +196,11 @@ def trace(pdf_path: Path, *, document_id: str, page_id: str) -> int:
             "page_id": page_id,
             "decision_scope_id": scope_id,
         },
-        output_lineage=_lineage(sem_record),
-        structural_enumeration_complete=getattr(sem_record, "structural_enumeration_complete", None),
-        physical_opening_universe_complete=getattr(sem_record, "physical_opening_universe_complete", None),
-        physical_opening_record_ids=list(getattr(sem_record, "physical_opening_record_ids", ()) or ()),
-        representative_observation_ids=list(getattr(sem_record, "representative_observation_ids", ()) or ()),
-        residual_visible_observation_count=len(getattr(sem_record, "residual_visible_observation_ids", ()) or ()),
-        conflict_observation_count=len(getattr(sem_record, "conflict_observation_ids", ()) or ()),
+        output_lineage=[_lineage(item[2].existence_record) for item in opening_pairs],
+        page_visible_observation_count=len(page_observation_ids),
+        authenticated_opening_count=len(opening_pairs),
     )
 
-    physical = PhysicalOpeningAuthority(source.authority())
     host_universe = OpeningHostWallUniverseProducer.from_physical_wall_candidate_authority(
         wall_authority
     ).authority()
@@ -201,13 +227,13 @@ def trace(pdf_path: Path, *, document_id: str, page_id: str) -> int:
         wall_count=len(tuple(host_universe_result.records or ())),
     )
 
-    if sem_record is None:
+    if not opening_pairs:
         _emit(
             "opening_host_binding",
             file="pb_opening_host_binding_authority.py",
             class_function="OpeningHostBindingProducer.publish",
             status="abstained",
-            reason_codes=["semantic_opening_inventory_unavailable"],
+            reason_codes=["no_authenticated_physical_opening_found_on_page"],
             record_present=False,
             record_id=None,
             input_lineage=_lineage(host_universe_selector),
@@ -219,28 +245,7 @@ def trace(pdf_path: Path, *, document_id: str, page_id: str) -> int:
         physical_opening_authority=physical,
         host_wall_universe_authority=host_universe,
     )
-    pairs = list(
-        zip(
-            sem_record.physical_opening_record_ids,
-            sem_record.representative_observation_ids,
-            strict=True,
-        )
-    )
-    if not pairs:
-        _emit(
-            "opening_host_binding",
-            file="pb_opening_host_binding_authority.py",
-            class_function="OpeningHostBindingProducer.publish",
-            status="abstained",
-            reason_codes=["no_physical_openings_in_semantic_inventory"],
-            record_present=False,
-            record_id=None,
-            input_lineage=_lineage(host_universe_selector),
-            output_lineage=None,
-        )
-        return 0
-
-    for opening_record_id, observation_id in pairs:
+    for opening_record_id, observation_id, existence in opening_pairs:
         obs_selector = ObservationSelector(
             document_id=published.revision.document_id,
             revision_id=published.revision.revision_id,
@@ -248,7 +253,6 @@ def trace(pdf_path: Path, *, document_id: str, page_id: str) -> int:
             snapshot_id=published.snapshot.snapshot_id,
             observation_id=observation_id,
         )
-        existence = physical.prove_existence(obs_selector)
         _emit(
             "physical_opening_identity",
             file="pb_physical_opening_authority.py",
@@ -267,7 +271,6 @@ def trace(pdf_path: Path, *, document_id: str, page_id: str) -> int:
                 "observation_id": observation_id,
             },
             output_lineage=_lineage(existence.existence_record),
-            semantic_inventory_record_id=opening_record_id,
         )
         binding = host_producer.publish(
             opening_left_selector=obs_selector,
