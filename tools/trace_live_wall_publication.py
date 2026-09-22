@@ -22,8 +22,21 @@ def main() -> int:
     parser.add_argument("--page-index", type=int, required=True)
     args = parser.parse_args()
 
-    extractor = GenericPlanReaderExtractor()
-    predictions = extractor.extract_from_pdf(args.pdf, pages=[args.page_index])
+    # Item35 is a shadow-only diagnostic and is owned by PR #612. Disable it
+    # in this trace harness only; it never mutates pred_dict/F.9 wall output.
+    import pb_item35_production_authority_shadow as item35_shadow
+
+    original_collect = item35_shadow.collect_item35_authority_shadow
+    item35_shadow.collect_item35_authority_shadow = lambda *a, **k: {
+        "status": "abstained",
+        "reason": "disabled_in_wall_lane_diagnostic",
+        "commercial_count_unlocked": False,
+    }
+    try:
+        extractor = GenericPlanReaderExtractor()
+        predictions = extractor.extract_from_pdf(args.pdf, pages=[args.page_index])
+    finally:
+        item35_shadow.collect_item35_authority_shadow = original_collect
 
     rows = []
     for pred in predictions:
