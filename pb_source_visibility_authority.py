@@ -482,6 +482,7 @@ class SourceVisibilityProducer:
 
         snapshot = base.snapshot
         visible_ids: list[str] = []
+        visible_specs: list[dict[str, object]] = []
         text_receipts: list[tuple[str, PdfTextIntegrityReceipt]] = []
         pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
         try:
@@ -546,24 +547,35 @@ class SourceVisibilityProducer:
                         parent_observation_id=parent_id,
                         geometry=decision.geometry,
                     )
-                    snapshot = self._producer.publish_derived_observation(
-                        document_id=base.revision.document_id,
-                        revision_id=base.revision.revision_id,
-                        base_snapshot_id=snapshot.snapshot_id,
-                        page_id=page_id,
-                        source_partition_id=partition_id,
-                        observation_kind=NATIVE_PDF_VISIBLE_SEGMENT,
-                        source_primitive_ref=visible_ref,
-                        origin_kind=VISIBLE_SEGMENT_ORIGIN_KIND,
-                        parent_observation_ids=(parent_id,),
-                        raw_text="",
-                        geometry=decision.geometry,
-                        viewport_id=None,
-                        observation_id=visible_id,
+                    visible_specs.append(
+                        {
+                            "page_id": page_id,
+                            "source_partition_id": partition_id,
+                            "observation_kind": NATIVE_PDF_VISIBLE_SEGMENT,
+                            "source_primitive_ref": visible_ref,
+                            "origin_kind": VISIBLE_SEGMENT_ORIGIN_KIND,
+                            "parent_observation_ids": (parent_id,),
+                            "raw_text": "",
+                            "geometry": decision.geometry,
+                            "viewport_id": None,
+                            "observation_id": visible_id,
+                        }
                     )
                     visible_ids.append(visible_id)
         finally:
             pdf.close()
+
+        # All native visible segments are siblings rooted in observations from
+        # the immutable base source snapshot. Publish them in one producer-owned
+        # batch so source ingestion clones the base snapshot once rather than
+        # once per visible segment.
+        if visible_specs:
+            snapshot = self._producer.publish_derived_observations(
+                document_id=base.revision.document_id,
+                revision_id=base.revision.revision_id,
+                base_snapshot_id=base.snapshot.snapshot_id,
+                observations=visible_specs,
+            )
 
         published = PublishedVisibleSourceSnapshot(
             revision=replace(base.revision),
