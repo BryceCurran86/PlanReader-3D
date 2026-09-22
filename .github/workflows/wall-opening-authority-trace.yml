@@ -1,0 +1,73 @@
+name: Wall Opening Authority Trace
+
+on:
+  push:
+    branches: [gpt/wall-opening-net-finish-v1]
+  workflow_dispatch:
+
+jobs:
+  trace-kstvet-wall-opening:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and verify KSTVET source
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf" \
+            -o benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+          echo "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/1727358888238-bq-nd-drawing.pdf" | sha256sum -c -
+
+      - name: Trace KSTVET page 54 authority seam
+        env:
+          PYTHONPATH: .
+        run: |
+          python scripts/trace_wall_opening_authority_chain.py \
+            benchmarks/sources/1727358888238-bq-nd-drawing.pdf \
+            --document-id tenders_ke_kstvet_cbc_classroom \
+            --page-id 54 \
+            --output wall_opening_trace_kstvet_p54.json
+
+      - name: Print causal summary
+        if: always()
+        run: |
+          if [ -f wall_opening_trace_kstvet_p54.json ]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          d = json.loads(Path("wall_opening_trace_kstvet_p54.json").read_text())
+          print("FIRST_CAUSAL_FAILURE =", json.dumps(d.get("FIRST_CAUSAL_FAILURE"), indent=2))
+          print("wall_candidate_count =", d.get("wall_candidate_count"))
+          print("physical_opening_count =", d.get("physical_opening_count"))
+          print("host_binding_resolved_count =", d.get("host_binding_resolved_count"))
+          for row in d.get("trace", []):
+              print(
+                  row.get("FILE"),
+                  row.get("CLASS_FUNCTION"),
+                  "STATUS=", row.get("STATUS"),
+                  "REASONS=", row.get("REASON_CODES"),
+                  "RECORD=", row.get("RECORD_ID"),
+              )
+          PY
+          fi
+
+      - name: Upload trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wall-opening-trace-kstvet-p54
+          path: wall_opening_trace_kstvet_p54.json
+          if-no-files-found: warn
