@@ -1040,16 +1040,6 @@ class PhysicalWallCandidateProducer:
                 "source_visibility_producer must be an actual SourceVisibilityProducer"
             )
 
-        # Preserve the current mainline raster-wall path. Raster augmentation is
-        # producer-owned and happens before the page-addressing filter freezes
-        # the scope map; callers still cannot supply raster primitives or labels.
-        for revision_id in tuple(
-            sorted(source_visibility_producer._published_by_revision)
-        ):
-            source_visibility_producer.augment_with_raster_visible_segments(
-                revision_id
-            )
-
         selected_page_ids: Optional[set[str]] = None
         if page_ids is not None:
             selected_page_ids = {
@@ -1059,6 +1049,40 @@ class PhysicalWallCandidateProducer:
             }
             if not selected_page_ids:
                 raise ValueError("page_ids must contain at least one source page")
+
+        # Preserve the current mainline raster-wall path while keeping page
+        # addressing operationally narrow. Validate the requested source pages
+        # against producer-owned decode coverage first, then render raster
+        # fallback only for those pages. No caller pixels, segments, DPI,
+        # thresholds, labels, or quantities enter this path.
+        for revision_id in tuple(
+            sorted(source_visibility_producer._published_by_revision)
+        ):
+            pre_augmented = source_visibility_producer._published_by_revision[
+                revision_id
+            ]
+            decoded_page_ids = {
+                str(int(page_number))
+                for page_number in pre_augmented.coverage.decoded_pages
+            }
+            if (
+                selected_page_ids is not None
+                and not selected_page_ids <= decoded_page_ids
+            ):
+                raise ValueError(PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
+            source_visibility_producer.augment_with_raster_visible_segments(
+                revision_id,
+                page_ids=(
+                    tuple(
+                        sorted(
+                            selected_page_ids,
+                            key=lambda value: int(value),
+                        )
+                    )
+                    if selected_page_ids is not None
+                    else None
+                ),
+            )
 
         published_by_revision = dict(source_visibility_producer._published_by_revision)
         store = source_visibility_producer._producer._store
