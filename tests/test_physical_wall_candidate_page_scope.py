@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fitz
 import pytest
+from unittest.mock import patch
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import (
@@ -63,6 +64,24 @@ def test_page_scope_materializes_only_requested_decoded_page() -> None:
     page_one = authority.resolve_scope(_selector(published, "1"))
     assert page_one.status is EvidenceResolutionStatus.ABSTAINED
     assert PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE in page_one.reason_codes
+
+
+def test_page_scope_limits_raster_augmentation_to_requested_pages() -> None:
+    source, _ = _source()
+    with patch.object(
+        source,
+        "augment_with_raster_visible_segments",
+        wraps=source.augment_with_raster_visible_segments,
+    ) as augment:
+        PhysicalWallCandidateProducer.from_source_visibility_producer(
+            source,
+            page_ids=("2",),
+        )
+    augment.assert_called_once()
+    assert augment.call_args.args == (
+        next(iter(source._published_by_revision)),
+    )
+    assert augment.call_args.kwargs["page_ids"] == ("2",)
 
 
 def test_page_scope_rejects_undecoded_source_page_address() -> None:
