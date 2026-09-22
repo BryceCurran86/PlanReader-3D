@@ -24,6 +24,11 @@ from pb_opening_host_binding_authority import (
     OpeningHostWallUniverseProducer,
     OpeningHostWallUniverseSelector,
 )
+from pb_opening_host_frame_authority import (
+    OpeningHostFrameAuthority,
+    OpeningHostFrameProducer,
+    OpeningHostFrameSelector,
+)
 from pb_physical_opening_authority import PhysicalOpeningAuthority
 from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateAuthority,
@@ -58,6 +63,16 @@ class LiveOpeningHostTrace:
 
 
 @dataclass(frozen=True)
+class LiveOpeningHostFrameTrace:
+    opening_identity_id: str
+    status: EvidenceResolutionStatus
+    reason_codes: tuple[str, ...]
+    record_id: Optional[str]
+    host_wall_id: Optional[str]
+    whole_wall_candidate_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class LiveWallScopeTrace:
     page_id: str
     status: EvidenceResolutionStatus
@@ -75,11 +90,14 @@ class LiveWallOpeningAuthorityComposition:
     semantic_enumeration_result: SemanticOpeningEnumerationResult
     wall_scopes: tuple[LiveWallScopeTrace, ...]
     opening_bindings: tuple[LiveOpeningHostTrace, ...]
+    host_frames: tuple[LiveOpeningHostFrameTrace, ...]
     physical_wall_candidate_authority: PhysicalWallCandidateAuthority
     physical_opening_authority: PhysicalOpeningAuthority
     semantic_opening_enumeration_authority: SemanticOpeningEnumerationAuthority
     opening_host_binding_authority: OpeningHostBindingAuthority
+    opening_host_frame_authority: OpeningHostFrameAuthority
     binding_selectors: Mapping[str, OpeningHostBindingSelector]
+    host_frame_selectors: Mapping[str, OpeningHostFrameSelector]
     schema_version: str = LIVE_WALL_OPENING_COMPOSITION_SCHEMA_VERSION
 
 
@@ -185,6 +203,7 @@ def compose_live_wall_opening_authority(
 
     opening_traces: list[LiveOpeningHostTrace] = []
     binding_selectors: dict[str, OpeningHostBindingSelector] = {}
+    opening_observation_selectors: dict[str, ObservationSelector] = {}
     record = semantic_result.record
     representative_ids = (
         tuple(record.representative_observation_ids)
@@ -262,6 +281,7 @@ def compose_live_wall_opening_authority(
                 ),
             )
         )
+        opening_observation_selectors[opening_record.record_id] = obs_selector
         binding_selectors[opening_record.record_id] = OpeningHostBindingSelector(
             document_id=opening_record.document_id,
             revision_id=opening_record.revision_id,
@@ -273,6 +293,45 @@ def compose_live_wall_opening_authority(
         )
 
     binding_authority = binding_producer.authority()
+    frame_producer = OpeningHostFrameProducer.from_authorities(
+        physical_opening_authority=physical_opening_authority,
+        host_binding_authority=binding_authority,
+        physical_wall_candidate_authority=wall_authority,
+    )
+    host_frame_traces: list[LiveOpeningHostFrameTrace] = []
+    host_frame_selectors: dict[str, OpeningHostFrameSelector] = {}
+    for opening_identity_id, binding_selector in binding_selectors.items():
+        observation_selector = opening_observation_selectors[opening_identity_id]
+        frame_result = frame_producer.publish(
+            opening_selector=observation_selector,
+            host_binding_selector=binding_selector,
+        )
+        evidence = frame_result.evidence
+        frame_selector = OpeningHostFrameSelector(
+            document_id=binding_selector.document_id,
+            revision_id=binding_selector.revision_id,
+            source_sha256=binding_selector.source_sha256,
+            snapshot_id=binding_selector.snapshot_id,
+            page_id=binding_selector.page_id,
+            decision_scope_id=binding_selector.decision_scope_id,
+            opening_identity_id=binding_selector.opening_identity_id,
+        )
+        host_frame_selectors[opening_identity_id] = frame_selector
+        host_frame_traces.append(
+            LiveOpeningHostFrameTrace(
+                opening_identity_id=opening_identity_id,
+                status=frame_result.status,
+                reason_codes=tuple(frame_result.reason_codes),
+                record_id=evidence.record_id if evidence is not None else None,
+                host_wall_id=evidence.host_wall_id if evidence is not None else None,
+                whole_wall_candidate_ids=(
+                    tuple(evidence.whole_wall_candidate_ids)
+                    if evidence is not None
+                    else ()
+                ),
+            )
+        )
+    host_frame_authority = frame_producer.authority()
     has_wall_failure = any(
         trace.status is not EvidenceResolutionStatus.CORROBORATED
         or not trace.scope_complete
@@ -284,6 +343,11 @@ def compose_live_wall_opening_authority(
         or trace.record_id is None
         for trace in opening_traces
     )
+    has_frame_failure = any(
+        trace.status is not EvidenceResolutionStatus.CORROBORATED
+        or trace.record_id is None
+        for trace in host_frame_traces
+    )
     semantic_unavailable = semantic_result.record is None
     if semantic_unavailable:
         status = EvidenceResolutionStatus.ABSTAINED
@@ -291,7 +355,7 @@ def compose_live_wall_opening_authority(
             LIVE_WALL_OPENING_COMPOSITION_UNAVAILABLE,
             *tuple(semantic_result.reason_codes),
         )
-    elif has_wall_failure or has_binding_failure:
+    elif has_wall_failure or has_binding_failure or has_frame_failure:
         status = (
             EvidenceResolutionStatus.CONFLICT
             if (
@@ -306,6 +370,7 @@ def compose_live_wall_opening_authority(
             *tuple(semantic_result.reason_codes),
             *(reason for trace in wall_traces for reason in trace.reason_codes),
             *(reason for trace in opening_traces for reason in trace.reason_codes),
+            *(reason for trace in host_frame_traces for reason in trace.reason_codes),
         )
     else:
         status = EvidenceResolutionStatus.CORROBORATED
@@ -322,11 +387,14 @@ def compose_live_wall_opening_authority(
         semantic_enumeration_result=semantic_result,
         wall_scopes=tuple(wall_traces),
         opening_bindings=tuple(opening_traces),
+        host_frames=tuple(host_frame_traces),
         physical_wall_candidate_authority=wall_authority,
         physical_opening_authority=physical_opening_authority,
         semantic_opening_enumeration_authority=semantic_producer.authority(),
         opening_host_binding_authority=binding_authority,
+        opening_host_frame_authority=host_frame_authority,
         binding_selectors=MappingProxyType(dict(binding_selectors)),
+        host_frame_selectors=MappingProxyType(dict(host_frame_selectors)),
     )
 
 
@@ -335,6 +403,7 @@ __all__ = [
     "LIVE_WALL_OPENING_COMPOSITION_RESOLVED",
     "LIVE_WALL_OPENING_COMPOSITION_SCHEMA_VERSION",
     "LIVE_WALL_OPENING_COMPOSITION_UNAVAILABLE",
+    "LiveOpeningHostFrameTrace",
     "LiveOpeningHostTrace",
     "LiveWallOpeningAuthorityComposition",
     "LiveWallScopeTrace",
