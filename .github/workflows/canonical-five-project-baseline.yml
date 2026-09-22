@@ -3,6 +3,8 @@ name: Canonical Five-Project Baseline — DO NOT MERGE
 on:
   push:
     branches: [review/canonical-five-project-baseline-main-0b8bff3]
+  pull_request:
+    branches: [main]
 
 jobs:
   project-benchmark:
