@@ -14,6 +14,9 @@ from pb_physical_opening_authority import PhysicalOpeningAuthority
 from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateProducer,
     PhysicalWallCandidateSelector,
+    _PRODUCER_SEAL as WALL_PRODUCER_SEAL,
+    _ScopeKey,
+    _build_scope_result,
     _decision_scope_id,
 )
 from pb_semantic_opening_enumeration_authority import (
@@ -83,7 +86,27 @@ def trace(pdf_path: Path, *, document_id: str, page_id: str) -> int:
     )
 
     scope_id = _decision_scope_id(page_id)
-    wall_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(source)
+    # Diagnostic-only exact-page construction: preserve the registered source
+    # bytes/SHA and use the production page builder, but do not build wall
+    # candidates for unrelated pages in this trace job.
+    wall_scope = _build_scope_result(
+        source_producer=source,
+        published=published,
+        source_bytes=raw,
+        page_id=page_id,
+    )
+    wall_key = _ScopeKey(
+        document_id=wall_scope.document_id,
+        revision_id=wall_scope.revision_id,
+        source_sha256=wall_scope.source_sha256,
+        snapshot_id=wall_scope.snapshot_id,
+        page_id=wall_scope.page_id,
+        decision_scope_id=wall_scope.decision_scope_id,
+    )
+    wall_producer = PhysicalWallCandidateProducer(
+        {wall_key: wall_scope},
+        _seal=WALL_PRODUCER_SEAL,
+    )
     wall_authority = wall_producer.authority()
     wall_selector = PhysicalWallCandidateSelector(
         document_id=published.revision.document_id,
