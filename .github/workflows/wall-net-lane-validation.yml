@@ -57,6 +57,20 @@ jobs:
           mkdir -p "$(dirname "$PATH_OUT")"
           curl --fail --location --retry 4 --retry-delay 2 "$URL" -o "$PATH_OUT"
           echo "$SHA256  $PATH_OUT" | sha256sum -c -
+      - name: Build local diagnostic bundle
+        env:
+          SLUG: ${{ matrix.slug }}
+          PATH_OUT: ${{ matrix.path }}
+        run: |
+          mkdir -p "wall-net-debug/$SLUG"
+          git archive --format=zip HEAD -o "wall-net-debug/$SLUG/planreader-source.zip"
+          cp "$PATH_OUT" "wall-net-debug/$SLUG/source.pdf"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wall-net-debug-${{ matrix.slug }}
+          path: wall-net-debug/${{ matrix.slug }}
+          retention-days: 1
+
       - name: Producer-owned wall/opening trace
         env:
           PATH_OUT: ${{ matrix.path }}
