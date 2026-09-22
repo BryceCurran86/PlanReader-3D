@@ -1,0 +1,67 @@
+name: Live Wall Publication Diagnostic
+
+on:
+  push:
+    branches: [gpt2/wall-opening-live-trace-v1]
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slug: kstvet
+            page_index: 53
+            source_url: https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf
+            source_path: benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+            source_sha256: 6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc
+          - slug: lamu
+            page_index: 40
+            source_url: https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf
+            source_path: benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+            source_sha256: fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and verify source
+        env:
+          SOURCE_URL: ${{ matrix.source_url }}
+          SOURCE_PATH: ${{ matrix.source_path }}
+          SOURCE_SHA256: ${{ matrix.source_sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$SOURCE_PATH")"
+          curl --fail --location --retry 4 --retry-delay 3 "$SOURCE_URL" -o "$SOURCE_PATH"
+          echo "$SOURCE_SHA256  $SOURCE_PATH" | sha256sum -c -
+
+      - name: Run live extractor diagnostic
+        env:
+          PYTHONPATH: .
+          SOURCE_PATH: ${{ matrix.source_path }}
+          PAGE_INDEX: ${{ matrix.page_index }}
+          SLUG: ${{ matrix.slug }}
+        run: |
+          set -euo pipefail
+          mkdir -p live_trace_results
+          python tools/trace_live_wall_publication.py "$SOURCE_PATH"             --page-index "$PAGE_INDEX" | tee "live_trace_results/$SLUG.json"
+
+      - name: Upload diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-wall-publication-${{ matrix.slug }}
+          path: live_trace_results/${{ matrix.slug }}.json
+          if-no-files-found: warn
