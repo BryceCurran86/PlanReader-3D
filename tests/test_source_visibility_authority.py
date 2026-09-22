@@ -67,6 +67,7 @@ def test_unclipped_native_segments_publish_producer_owned_visible_receipts() -> 
     producer, published, authority = _visible_ingest(_rectangle_pdf_bytes())
     assert len(published.visible_observation_ids) == 4
     assert published.snapshot.snapshot_id != published.base_source_snapshot_id
+    assert published.snapshot.parent_snapshot_id == published.base_source_snapshot_id
 
     for observation_id in published.visible_observation_ids:
         result = authority.resolve_visible(_selector(published, observation_id))
