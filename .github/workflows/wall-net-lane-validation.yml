@@ -73,3 +73,24 @@ jobs:
           for row in d["item_results"]:
               print("ROW", row["item_id"], row["status"], row.get("extracted_quantity"), "expected", row.get("expected_quantity"))
           PY
+      - name: Print live target prediction metadata
+        env:
+          PATH_OUT: ${{ matrix.path }}
+          SLUG: ${{ matrix.slug }}
+        run: |
+          PYTHONPATH=. python - "$PATH_OUT" "$SLUG" <<'PY'
+          import json, sys
+          from pathlib import Path
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          path, slug = Path(sys.argv[1]), sys.argv[2]
+          wanted = {
+              "kstvet": {"perimeter_walling", "internal_plaster", "internal_paint"},
+              "lamu": {"perimeter_walling"},
+          }[slug]
+          extractor = GenericPlanReaderExtractor()
+          predictions = extractor.extract_from_pdf(path, collect_item35_shadow=False)
+          for pred in predictions:
+              if pred.tag in wanted:
+                  print("PRED", pred.tag, "quantity", pred.quantity, "confidence", pred.confidence)
+                  print("META", pred.tag, json.dumps(pred.metadata, sort_keys=True, default=str))
+          PY
