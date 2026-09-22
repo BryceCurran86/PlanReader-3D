@@ -76,6 +76,50 @@ jobs:
           doc.close()
           PY
 
+      - name: Locate Murera plan and envelope evidence across source
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import fitz
+          from pb_viewport_segmentation import segment_page_viewports
+
+          path = Path("benchmarks/sources/1785347143869-bqs-drawings.pdf")
+          doc = fitz.open(path)
+          needles = (
+              "ground floor plan", "floor plan", "veranda", "verandah",
+              "18200", "18,200", "18.200", "8201", "8,201", "8.201",
+          )
+          for idx in range(doc.page_count):
+              page = doc.load_page(idx)
+              text = page.get_text("text") or ""
+              compact = re.sub(r"\s+", " ", text.lower())
+              hits = [needle for needle in needles if needle in compact]
+              if not hits:
+                  continue
+              print(f"=== PAGE {idx+1} HITS {hits} ===")
+              print("VIEWPORTS", [
+                  {
+                      "id": v.view_id,
+                      "status": v.status,
+                      "type": v.view_type,
+                      "bbox": v.bounding_box,
+                  }
+                  for v in segment_page_viewports(page, page_number=idx+1)
+              ])
+              lines=[line.strip() for line in text.splitlines() if line.strip()]
+              for line in lines:
+                  low=line.lower()
+                  if any(
+                      token in low
+                      for token in ("floor plan","veranda","verandah","18200","18,200","8201","8,201")
+                  ):
+                      print(line)
+          doc.close()
+          PY
+
       - name: Trace Murera secondary-footprint evidence
         env:
           PYTHONPATH: .
