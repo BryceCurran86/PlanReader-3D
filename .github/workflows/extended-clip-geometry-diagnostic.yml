@@ -1,0 +1,33 @@
+name: Extended Clip Geometry Diagnostic
+on:
+  push:
+    branches: [gpt2/wall-opening-live-trace-v1]
+    paths:
+      - tools/trace_extended_clips.py
+      - .github/workflows/extended-clip-geometry-diagnostic.yml
+jobs:
+  kstvet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - run: |
+          mkdir -p benchmarks/sources
+          curl --fail --location --retry 4 --retry-delay 3 https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf -o benchmarks/sources/kstvet.pdf
+          echo "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/kstvet.pdf" | sha256sum -c -
+      - env:
+          PYTHONPATH: .
+        run: |
+          mkdir -p clip_trace
+          python tools/trace_extended_clips.py benchmarks/sources/kstvet.pdf --pages "54,55" | tee clip_trace/kstvet.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extended-clips-kstvet
+          path: clip_trace/kstvet.json
