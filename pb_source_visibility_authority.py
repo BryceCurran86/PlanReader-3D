@@ -711,6 +711,7 @@ class SourceVisibilityProducer:
                             ),
                         )
                     )
+                page_visible_specs: list[dict[str, object]] = []
                 for segment in native.get("segments") or ():
                     decision = classify_native_segment_visibility(segment)
                     if not decision.visible:
@@ -737,22 +738,35 @@ class SourceVisibilityProducer:
                         parent_observation_id=parent_id,
                         geometry=decision.geometry,
                     )
-                    snapshot = self._producer.publish_derived_observation(
+                    page_visible_specs.append(
+                        {
+                            "page_id": page_id,
+                            "source_partition_id": partition_id,
+                            "observation_kind": NATIVE_PDF_VISIBLE_SEGMENT,
+                            "source_primitive_ref": visible_ref,
+                            "origin_kind": VISIBLE_SEGMENT_ORIGIN_KIND,
+                            "parent_observation_ids": (parent_id,),
+                            "raw_text": "",
+                            "geometry": decision.geometry,
+                            "viewport_id": None,
+                            "observation_id": visible_id,
+                        }
+                    )
+                    visible_ids.append(visible_id)
+
+                # Publish the page's complete visible-segment set in one
+                # producer transaction. Publishing one observation at a time
+                # cloned the growing snapshot for every segment (quadratic
+                # memory/time on dense CAD sheets such as Murera). The batch
+                # path preserves identical observation ids, lineage, and
+                # final membership while cloning the snapshot once per page.
+                if page_visible_specs:
+                    snapshot = self._producer.publish_derived_observations(
                         document_id=base.revision.document_id,
                         revision_id=base.revision.revision_id,
                         base_snapshot_id=snapshot.snapshot_id,
-                        page_id=page_id,
-                        source_partition_id=partition_id,
-                        observation_kind=NATIVE_PDF_VISIBLE_SEGMENT,
-                        source_primitive_ref=visible_ref,
-                        origin_kind=VISIBLE_SEGMENT_ORIGIN_KIND,
-                        parent_observation_ids=(parent_id,),
-                        raw_text="",
-                        geometry=decision.geometry,
-                        viewport_id=None,
-                        observation_id=visible_id,
+                        observations=page_visible_specs,
                     )
-                    visible_ids.append(visible_id)
         finally:
             pdf.close()
 
