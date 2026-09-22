@@ -75,3 +75,34 @@ jobs:
                           print(line)
           doc.close()
           PY
+
+      - name: Render Murera E-01 and adjacent drawing sheets
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import fitz
+
+          src = Path("benchmarks/sources/1785347143869-bqs-drawings.pdf")
+          out = Path("murera_diag_pages")
+          out.mkdir(exist_ok=True)
+          doc = fitz.open(src)
+          for page_no in (219, 220, 221, 225, 227):
+              if not (1 <= page_no <= doc.page_count):
+                  continue
+              page = doc.load_page(page_no - 1)
+              pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0), alpha=False)
+              pix.save(out / f"page-{page_no}.png")
+              (out / f"page-{page_no}.txt").write_text(
+                  page.get_text("text") or "", encoding="utf-8"
+              )
+          doc.close()
+          PY
+
+      - name: Upload Murera diagnostic pages
+        uses: actions/upload-artifact@v4
+        with:
+          name: murera-diagnostic-pages
+          path: murera_diag_pages/
+          if-no-files-found: error
