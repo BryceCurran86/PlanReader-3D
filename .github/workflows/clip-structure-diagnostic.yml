@@ -1,0 +1,54 @@
+name: Clip Structure Diagnostic
+
+on:
+  push:
+    branches: [gpt2/wall-net-current-source-diag-v1]
+    paths:
+      - tools/trace_clip_structures.py
+      - .github/workflows/clip-structure-diagnostic.yml
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slug: kstvet
+            pages: "54,55"
+            url: https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf
+            path: benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+            sha: 6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc
+          - slug: lamu
+            pages: "41,42,45"
+            url: https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf
+            path: benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+            sha: fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install PyMuPDF
+      - name: Download and verify source
+        env:
+          URL: ${{ matrix.url }}
+          PATH_OUT: ${{ matrix.path }}
+          SHA: ${{ matrix.sha }}
+        run: |
+          mkdir -p "$(dirname "$PATH_OUT")"
+          curl --fail --location --retry 4 --retry-delay 3 "$URL" -o "$PATH_OUT"
+          echo "$SHA  $PATH_OUT" | sha256sum -c -
+      - name: Trace clip structures
+        env:
+          PATH_OUT: ${{ matrix.path }}
+          PAGES: ${{ matrix.pages }}
+          SLUG: ${{ matrix.slug }}
+        run: |
+          mkdir -p clip_trace
+          python tools/trace_clip_structures.py "$PATH_OUT" --pages "$PAGES" | tee "clip_trace/$SLUG.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clip-structure-${{ matrix.slug }}
+          path: clip_trace/${{ matrix.slug }}.json
