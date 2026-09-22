@@ -76,6 +76,76 @@ jobs:
           doc.close()
           PY
 
+      - name: Trace Murera secondary-footprint evidence
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import fitz
+
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_figured_dimension_evidence import extract_dimension_evidence_bundle
+          from pb_secondary_footprint_evidence import resolve_secondary_footprint_width_m
+          from pb_viewport_segmentation import segment_page_viewports
+
+          path = Path("benchmarks/sources/1785347143869-bqs-drawings.pdf")
+          doc = fitz.open(path)
+          page_no = 219
+          page = doc.load_page(page_no - 1)
+
+          print("=== SECONDARY FOOTPRINT RESOLUTION ===")
+          print(resolve_secondary_footprint_width_m(page, page_num=page_no))
+
+          print("=== VIEWPORTS ===")
+          viewports = segment_page_viewports(page, page_number=page_no)
+          for viewport in viewports:
+              print({
+                  "view_id": viewport.view_id,
+                  "status": viewport.status,
+                  "view_type": viewport.view_type,
+                  "bbox": viewport.bounding_box,
+              })
+
+          print("=== VERANDAH / NEARBY WORDS ===")
+          words = page.get_text("words") or []
+          verandah_words = [w for w in words if "verand" in str(w[4]).lower()]
+          for vw in verandah_words:
+              print("LABEL", tuple(vw[:5]))
+              cx=(float(vw[0])+float(vw[2]))/2
+              cy=(float(vw[1])+float(vw[3]))/2
+              nearby=[]
+              for w in words:
+                  wcx=(float(w[0])+float(w[2]))/2
+                  wcy=(float(w[1])+float(w[3]))/2
+                  if abs(wcx-cx) <= 180 and abs(wcy-cy) <= 180:
+                      nearby.append(tuple(w[:5]))
+              print("NEARBY", nearby)
+
+          print("=== DIMENSION EVIDENCE ===")
+          for viewport in viewports:
+              if viewport.view_type != DrawingViewType.FLOOR_PLAN.value:
+                  continue
+              bundle = extract_dimension_evidence_bundle(
+                  page,
+                  page_num=page_no,
+                  view_id=viewport.view_id,
+                  view_type=viewport.view_type,
+              )
+              binding_by_id = {b.observation_id: b.status for b in bundle.bindings}
+              for observation in bundle.observations:
+                  print(json.dumps({
+                      "dimension_id": observation.dimension_id,
+                      "value_m": observation.value_m,
+                      "orientation": observation.orientation,
+                      "bbox": observation.bbox,
+                      "endpoints": observation.endpoints,
+                      "binding": binding_by_id.get(observation.dimension_id),
+                  }, default=str, sort_keys=True))
+          doc.close()
+          PY
+
       - name: Render Murera E-01 and adjacent drawing sheets
         env:
           PYTHONPATH: .
