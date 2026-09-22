@@ -39,6 +39,8 @@ from pb_physical_wall_identity import (
 )
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import (
+    NATIVE_PDF_VISIBLE_SEGMENT,
+    RASTER_PDF_VISIBLE_SEGMENT,
     SourceVisibilityProducer,
     classify_native_segment_visibility,
 )
@@ -184,7 +186,8 @@ def _source_page_segments(
     """
 
     visibility = source_producer.authority()
-    visible_by_raw_id: dict[str, tuple[str, tuple[float, ...]]] = {}
+    native_visible_by_raw_id: dict[str, tuple[str, tuple[float, ...]]] = {}
+    raster_visible: list[tuple[str, str, tuple[float, ...]]] = []
     page_visible_ids: list[str] = []
 
     for observation_id in published.visible_observation_ids:
@@ -205,16 +208,30 @@ def _source_page_segments(
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
         if observation.page_id != page_id:
             continue
-        prefix = "visible:segment:"
-        if not observation.source_primitive_ref.startswith(prefix):
+
+        geometry = tuple(float(value) for value in observation.geometry)
+        if len(geometry) != 4:
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        raw_id = observation.source_primitive_ref[len(prefix) :]
-        if not raw_id or raw_id in visible_by_raw_id:
+
+        if observation.observation_kind == NATIVE_PDF_VISIBLE_SEGMENT:
+            prefix = "visible:segment:"
+            if not observation.source_primitive_ref.startswith(prefix):
+                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+            raw_id = observation.source_primitive_ref[len(prefix) :]
+            if not raw_id or raw_id in native_visible_by_raw_id:
+                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+            native_visible_by_raw_id[raw_id] = (observation_id, geometry)
+        elif observation.observation_kind == RASTER_PDF_VISIBLE_SEGMENT:
+            prefix = "visible:raster_segment:"
+            if not observation.source_primitive_ref.startswith(prefix):
+                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+            raster_ref = observation.source_primitive_ref[len("visible:") :]
+            if not raster_ref:
+                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+            raster_visible.append((observation_id, raster_ref, geometry))
+        else:
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        visible_by_raw_id[raw_id] = (
-            observation_id,
-            tuple(float(value) for value in observation.geometry),
-        )
+
         page_visible_ids.append(observation_id)
 
     try:
@@ -241,7 +258,7 @@ def _source_page_segments(
         raw_id = str(source_segment.get("id") or "").strip()
         if not raw_id:
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        expected = visible_by_raw_id.get(raw_id)
+        expected = native_visible_by_raw_id.get(raw_id)
         if expected is None:
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
         observation_id, observation_geometry = expected
@@ -258,9 +275,54 @@ def _source_page_segments(
         segment["document_id"] = published.revision.document_id
         segment["page_id"] = page_id
         segment["viewport_id"] = decision_scope_id
+        segment["source_observation_id"] = observation_id
         segments.append(segment)
 
-    if native_visible_ids != set(page_visible_ids):
+    if native_visible_ids != {
+        observation_id
+        for observation_id, _geometry in native_visible_by_raw_id.values()
+    }:
+        raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+
+    # Raster-visible observations have already passed the producer-owned
+    # visibility authority, including page-render provenance, image hash, DPI,
+    # pixel geometry and parent-lineage checks.  Feed their exact page-point
+    # geometry into the same W2-W5 topology pipeline as native segments while
+    # leaving graphic attributes explicitly unknown.  No caller-supplied
+    # pixels, segments, transforms or wall classifications enter this path.
+    for observation_id, raster_ref, geometry in sorted(raster_visible):
+        x1, y1, x2, y2 = geometry
+        segments.append(
+            {
+                "id": raster_ref,
+                "x1": x1,
+                "y1": y1,
+                "x2": x2,
+                "y2": y2,
+                "kind": "line",
+                "kind_present": True,
+                "width": 0.0,
+                "width_present": False,
+                "stroke": None,
+                "stroke_present": False,
+                "fill": None,
+                "fill_present": False,
+                "layer": "",
+                "layer_present": False,
+                "dashes": "",
+                "dashes_present": False,
+                "clip": None,
+                "clip_present": False,
+                "clip_known": True,
+                "document_id": published.revision.document_id,
+                "page_id": page_id,
+                "viewport_id": decision_scope_id,
+                "source_observation_id": observation_id,
+                "source_kind": RASTER_PDF_VISIBLE_SEGMENT,
+            }
+        )
+
+    if native_visible_ids | {item[0] for item in raster_visible} != set(page_visible_ids):
         raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
 
     return (
@@ -976,6 +1038,16 @@ class PhysicalWallCandidateProducer:
         if type(source_visibility_producer) is not SourceVisibilityProducer:
             raise TypeError(
                 "source_visibility_producer must be an actual SourceVisibilityProducer"
+            )
+
+        # Preserve the current mainline raster-wall path. Raster augmentation is
+        # producer-owned and happens before the page-addressing filter freezes
+        # the scope map; callers still cannot supply raster primitives or labels.
+        for revision_id in tuple(
+            sorted(source_visibility_producer._published_by_revision)
+        ):
+            source_visibility_producer.augment_with_raster_visible_segments(
+                revision_id
             )
 
         selected_page_ids: Optional[set[str]] = None
