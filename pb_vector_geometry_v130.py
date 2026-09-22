@@ -271,7 +271,7 @@ def _clip_scissor_by_seqno(pdf_page: Any) -> _ClipAssociationTable:
     return _ClipAssociationTable(available=True, by_seqno=by_seqno)
 
 
-def _resolve_clip_fields(
+def _resolve_clip_proof_fields(
     *,
     clip_table: _ClipAssociationTable,
     seq_key: Optional[int],
@@ -282,17 +282,53 @@ def _resolve_clip_fields(
     bool,
     Optional[Tuple[float, float, float, float]],
 ]:
-    """Return clip state without conflating scissor with exact clip geometry."""
+    """Return clip state plus exact-shape proof, failing closed on legacy data.
+
+    _ClipAssociationTable used to store None / scissor tuples directly.
+    Preserve read compatibility for callers that still construct that legacy
+    table shape, but never promote a legacy scissor tuple to exact clip-shape
+    authority. Only producer-owned _ClipAssociation records can carry the
+    independent rectangular-path proof.
+    """
     if not clip_table.available or seq_key is None or seq_key not in clip_table.by_seqno:
         return False, False, None, False, None
+
     association = clip_table.by_seqno[seq_key]
-    return (
-        True,
-        association.clip_present,
-        association.scissor,
-        association.exact_shape_known,
-        association.exact_rect,
+    if isinstance(association, _ClipAssociation):
+        return (
+            True,
+            association.clip_present,
+            association.scissor,
+            association.exact_shape_known,
+            association.exact_rect,
+        )
+
+    # Legacy table compatibility. None means association succeeded and no
+    # active clip was present. A tuple is only the effective scissor and
+    # remains diagnostic: it is not proof that the actual clip path is a
+    # rectangle.
+    if association is None:
+        return True, False, None, True, None
+    try:
+        clip = tuple(float(value) for value in association)
+    except (TypeError, ValueError):
+        return False, False, None, False, None
+    if len(clip) != 4 or not all(math.isfinite(value) for value in clip):
+        return False, False, None, False, None
+    return True, True, clip, False, None
+
+
+def _resolve_clip_fields(
+    *,
+    clip_table: _ClipAssociationTable,
+    seq_key: Optional[int],
+) -> Tuple[bool, bool, Optional[Tuple[float, float, float, float]]]:
+    """Backward-compatible clip ternary used by existing provenance callers."""
+    clip_known, clip_present, clip, _, _ = _resolve_clip_proof_fields(
+        clip_table=clip_table,
+        seq_key=seq_key,
     )
+    return clip_known, clip_present, clip
 
 
 def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
@@ -352,7 +388,7 @@ def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
             clip,
             clip_shape_known,
             clip_exact_rect,
-        ) = _resolve_clip_fields(
+        ) = _resolve_clip_proof_fields(
             clip_table=clip_table, seq_key=seq_key
         )
 
