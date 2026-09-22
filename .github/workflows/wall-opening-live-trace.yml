@@ -2,6 +2,12 @@ name: Wall Opening Live Trace
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - gpt2/wall-opening-live-trace-v1
+    paths:
+      - .github/workflows/wall-opening-live-trace.yml
+      - tools/trace_wall_opening_chain.py
 
 jobs:
   trace:
@@ -11,18 +17,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: kstvet
+          - slug: kstvet-p55
             document_id: kstvet-wall-opening-trace
-            page_id: "54"
+            page_id: "55"
             source_url: https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf
             source_path: benchmarks/sources/1727358888238-bq-nd-drawing.pdf
             source_sha256: 6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc
-          - slug: lamu
-            document_id: lamu-wall-opening-trace
-            page_id: "41"
-            source_url: https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf
-            source_path: benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
-            source_sha256: fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2
 
     steps:
       - uses: actions/checkout@v4
@@ -58,7 +58,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p trace_results
-          python tools/trace_wall_opening_chain.py "$SOURCE_PATH"             --document-id "$DOCUMENT_ID"             --page-id "$PAGE_ID" | tee "trace_results/$SLUG.jsonl"
+          python tools/trace_wall_opening_chain.py "$SOURCE_PATH" --document-id "$DOCUMENT_ID" --page-id "$PAGE_ID" | tee "trace_results/$SLUG.jsonl"
 
       - name: Upload trace
         if: always()
