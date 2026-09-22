@@ -242,3 +242,21 @@ def test_distinct_same_mark_ocr_boxes_are_not_collapsed() -> None:
 def test_production_ocr_handoff_accepts_no_backend_or_caller_text() -> None:
     params = set(inspect.signature(SourceVisibilityProducer.augment_with_raster_ocr_tags).parameters)
     assert params == {"self", "revision_id", "viewport_decision"}
+
+
+def test_ocr_bridge_publishes_only_explicit_opening_identity_lines() -> None:
+    source, published = _ingest("ocr-filter-non-tags")
+    tags, updated, _selector = _augment(
+        source,
+        published,
+        (
+            _ocr_line("GROUND FLOOR PLAN", (30.0, 30.0, 130.0, 40.0)),
+            _ocr_line("MARK WIDTH HEIGHT", (50.0, 500.0, 300.0, 512.0)),
+            _ocr_line("900", (150.0, 530.0, 175.0, 540.0)),
+            _ocr_line("W1 900 2100", (50.0, 530.0, 290.0, 542.0)),
+            _ocr_line("W1", (112.0, 102.0, 126.0, 108.0)),
+        ),
+    )
+
+    assert [tag.raw_tag_text for tag in tags] == ["W1"]
+    assert len(updated.ocr_tag_observation_ids) == 1
