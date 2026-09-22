@@ -623,6 +623,13 @@ def _producer_opening_relation_overrides(
             snapshot_id=published.snapshot.snapshot_id,
             observation_id=observation_id,
         )
+        visible = visibility.resolve_visible(selector)
+        if (
+            visible.status is not EvidenceResolutionStatus.CORROBORATED
+            or visible.observation is None
+            or str(visible.observation.page_id) != str(page_id)
+        ):
+            continue
         result = opening_authority.prove_existence(selector)
         existence = result.existence_record
         if (
