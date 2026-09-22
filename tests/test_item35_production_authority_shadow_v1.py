@@ -163,6 +163,29 @@ def test_live_extractor_publishes_only_fully_corroborated_item35_mark(tmp_path) 
     assert (window.metadata or {}).get("all_members_classified") is True
 
 
+def test_benchmark_mode_retains_authoritative_item35_mark_publication(tmp_path) -> None:
+    pdf_path = tmp_path / "benchmark-mode-item35-window.pdf"
+    _write_classified_window_drawing(pdf_path)
+
+    extractor = GenericPlanReaderExtractor()
+    predictions = {
+        prediction.tag: prediction
+        for prediction in extractor.extract_from_pdf(
+            pdf_path,
+            collect_item35_shadow=False,
+        )
+    }
+
+    assert "W1" in predictions
+    window = predictions["W1"]
+    assert window.quantity == 1.0
+    assert window.dimensions == [900.0, 2100.0]
+    assert (window.metadata or {}).get("derivation") == (
+        "item35_source_authenticated_opening_mark"
+    )
+    assert extractor.item35_authority_shadow["reason"] == "not_collected"
+
+
 def test_item35_conflicting_schedule_dimensions_never_publish_mark_prediction(tmp_path) -> None:
     pdf_path = tmp_path / "item35-conflicting-window-size.pdf"
     doc = fitz.open()
