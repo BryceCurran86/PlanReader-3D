@@ -41,14 +41,16 @@ jobs:
           curl --fail --location --retry 4 --retry-delay 3 "$URL" -o "$PATH_OUT"
           echo "$SHA  $PATH_OUT" | sha256sum -c -
       - name: Trace association
+        shell: bash
         env:
           PYTHONPATH: .
           PATH_OUT: ${{ matrix.path }}
           PAGES: ${{ matrix.pages }}
           SLUG: ${{ matrix.slug }}
         run: |
+          set -euo pipefail
           mkdir -p clip_assoc
-          python tools/trace_clip_association.py "$PATH_OUT" --pages "$PAGES" | tee "clip_assoc/$SLUG.json"
+          python -u tools/trace_clip_association.py "$PATH_OUT" --pages "$PAGES" 2>&1 | tee "clip_assoc/$SLUG.json"
       - uses: actions/upload-artifact@v4
         with:
           name: clip-association-${{ matrix.slug }}
