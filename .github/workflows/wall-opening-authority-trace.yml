@@ -82,6 +82,48 @@ jobs:
           path: kstvet_live_wall_opening_observation.json
           if-no-files-found: error
 
+  inspect-kstvet-finish-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install PyMuPDF
+        run: pip install PyMuPDF==1.28.0
+
+      - name: Download and verify KSTVET source
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf" \
+            -o benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+          echo "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/1727358888238-bq-nd-drawing.pdf" | sha256sum -c -
+
+      - name: Print finish-bearing source lines on drawing pages
+        run: |
+          python - <<'PY'
+          import fitz
+          from pathlib import Path
+          p=Path("benchmarks/sources/1727358888238-bq-nd-drawing.pdf")
+          doc=fitz.open(p)
+          for idx in (53,54):
+              page=doc[idx]
+              print(f"=== PAGE {idx+1} ===")
+              blocks=page.get_text("blocks") or []
+              for block in blocks:
+                  txt=str(block[4] if len(block)>4 else "")
+                  norm=" ".join(txt.split())
+                  if any(k in norm.lower() for k in ("plaster","paint","masonry","internal","finish")):
+                      print("BBOX", tuple(round(float(v),2) for v in block[:4]))
+                      print(norm)
+          doc.close()
+          PY
+
   observe-lamu-live-extractor:
     runs-on: ubuntu-latest
     timeout-minutes: 20
