@@ -39,6 +39,8 @@ from pb_physical_wall_identity import (
 )
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import (
+    NATIVE_PDF_VISIBLE_SEGMENT,
+    RASTER_PDF_VISIBLE_SEGMENT,
     SourceVisibilityProducer,
     classify_native_segment_visibility,
 )
@@ -175,17 +177,23 @@ def _source_page_segments(
     page_id: str,
     decision_scope_id: str,
 ) -> tuple[list[dict], tuple[str, ...], float, float]:
-    """Rebuild W2 inputs from exact bytes and exact receipted visible membership.
+    """Rebuild W2 inputs from exact producer-receipted visible membership.
 
-    Also returns the page's own (width, height) in points, so callers can
-    determine whether a wall's dangling end actually terminates inside the
-    drawing (a real wall end) or merely at the page edge (the wall's true
-    continuation is unknown -- it may simply be cropped by this sheet).
+    Native vector observations are replayed against the immutable PDF bytes as
+    before. Raster observations are accepted only after SourceVisibilityAuthority
+    independently re-validates their producer-owned render lineage. Callers
+    cannot supply raster pixels, segments, transforms, or wall labels here.
+
+    Both origins then enter the same W2/W3/W4 topology pipeline. Raster geometry
+    is candidate linework only; this adapter does not mint wall role, thickness,
+    height, area, or commercial quantity authority.
     """
 
     visibility = source_producer.authority()
-    visible_by_raw_id: dict[str, tuple[str, tuple[float, ...]]] = {}
+    native_visible_by_raw_id: dict[str, tuple[str, tuple[float, ...]]] = {}
+    raster_segments: list[dict] = []
     page_visible_ids: list[str] = []
+    native_page_visible_ids: set[str] = set()
 
     for observation_id in published.visible_observation_ids:
         result = visibility.resolve_visible(
@@ -205,17 +213,44 @@ def _source_page_segments(
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
         if observation.page_id != page_id:
             continue
-        prefix = "visible:segment:"
-        if not observation.source_primitive_ref.startswith(prefix):
-            raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        raw_id = observation.source_primitive_ref[len(prefix) :]
-        if not raw_id or raw_id in visible_by_raw_id:
-            raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        visible_by_raw_id[raw_id] = (
-            observation_id,
-            tuple(float(value) for value in observation.geometry),
-        )
+
         page_visible_ids.append(observation_id)
+        if observation.observation_kind == NATIVE_PDF_VISIBLE_SEGMENT:
+            prefix = "visible:segment:"
+            if not observation.source_primitive_ref.startswith(prefix):
+                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+            raw_id = observation.source_primitive_ref[len(prefix) :]
+            if not raw_id or raw_id in native_visible_by_raw_id:
+                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+            native_visible_by_raw_id[raw_id] = (
+                observation_id,
+                tuple(float(value) for value in observation.geometry),
+            )
+            native_page_visible_ids.add(observation_id)
+            continue
+
+        if observation.observation_kind == RASTER_PDF_VISIBLE_SEGMENT:
+            geometry = _line(observation.geometry)
+            if geometry is None:
+                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+            raster_segments.append(
+                {
+                    "id": observation_id,
+                    "kind": "line",
+                    "x1": geometry[0],
+                    "y1": geometry[1],
+                    "x2": geometry[2],
+                    "y2": geometry[3],
+                    "document_id": published.revision.document_id,
+                    "page_id": page_id,
+                    "viewport_id": decision_scope_id,
+                    "source_observation_id": observation_id,
+                    "source_origin": "producer_raster_visibility",
+                }
+            )
+            continue
+
+        raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
 
     try:
         page_number = int(page_id)
@@ -233,7 +268,7 @@ def _source_page_segments(
         pdf.close()
 
     segments: list[dict] = []
-    native_visible_ids: set[str] = set()
+    replayed_native_visible_ids: set[str] = set()
     for source_segment in native.get("segments") or ():
         decision = classify_native_segment_visibility(source_segment)
         if not decision.visible:
@@ -241,7 +276,7 @@ def _source_page_segments(
         raw_id = str(source_segment.get("id") or "").strip()
         if not raw_id:
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        expected = visible_by_raw_id.get(raw_id)
+        expected = native_visible_by_raw_id.get(raw_id)
         if expected is None:
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
         observation_id, observation_geometry = expected
@@ -253,15 +288,17 @@ def _source_page_segments(
         )
         if tuple(geometry) != tuple(observation_geometry):
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        native_visible_ids.add(observation_id)
+        replayed_native_visible_ids.add(observation_id)
         segment = dict(source_segment)
         segment["document_id"] = published.revision.document_id
         segment["page_id"] = page_id
         segment["viewport_id"] = decision_scope_id
         segments.append(segment)
 
-    if native_visible_ids != set(page_visible_ids):
+    if replayed_native_visible_ids != native_page_visible_ids:
         raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+
+    segments.extend(raster_segments)
 
     return (
         segments,
@@ -269,7 +306,6 @@ def _source_page_segments(
         float(native["width"]),
         float(native["height"]),
     )
-
 
 def _dangling_ends(wall: WallCandidate) -> list[Point]:
     """Return the coordinates of this wall's ends that are genuinely
