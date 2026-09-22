@@ -51,12 +51,13 @@ jobs:
         env:
           PYTHONPATH: .
           SOURCE_PATH: ${{ matrix.source_path }}
-          PAGE_INDEX: ${{ matrix.page_index }}
+          PAGE_INDEXES: ${{ matrix.page_indexes }}
           SLUG: ${{ matrix.slug }}
         run: |
           set -euo pipefail
           mkdir -p live_trace_results
-          python tools/trace_live_wall_publication.py "$SOURCE_PATH"             --page-indexes "$PAGE_INDEXES" | tee "live_trace_results/$SLUG.json"
+          python tools/trace_live_wall_publication.py "$SOURCE_PATH" \
+            --page-indexes "$PAGE_INDEXES" | tee "live_trace_results/$SLUG.json"
 
       - name: Upload diagnostic
         if: always()
