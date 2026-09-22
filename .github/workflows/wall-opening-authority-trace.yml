@@ -1,0 +1,71 @@
+name: Wall Opening Authority Trace
+
+on:
+  push:
+    branches: [gpt/wall-net-authority-trace-v1]
+  workflow_dispatch:
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slug: kstvet
+            document_id: trace-kstvet
+            page_id: "54"
+            source_url: https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf
+            source_path: benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+            source_sha256: 6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc
+          - slug: lamu
+            document_id: trace-lamu
+            page_id: "41"
+            source_url: https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf
+            source_path: benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+            source_sha256: fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and verify source
+        env:
+          SOURCE_URL: ${{ matrix.source_url }}
+          SOURCE_PATH: ${{ matrix.source_path }}
+          SOURCE_SHA256: ${{ matrix.source_sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$SOURCE_PATH")"
+          curl --fail --location --retry 5 --retry-delay 3 "$SOURCE_URL" -o "$SOURCE_PATH"
+          echo "$SOURCE_SHA256  $SOURCE_PATH" | sha256sum -c -
+
+      - name: Trace authority chain
+        env:
+          PYTHONPATH: .
+          SLUG: ${{ matrix.slug }}
+          DOCUMENT_ID: ${{ matrix.document_id }}
+          PAGE_ID: ${{ matrix.page_id }}
+          SOURCE_PATH: ${{ matrix.source_path }}
+        run: |
+          set -euo pipefail
+          mkdir -p trace_results
+          python scripts/trace_wall_opening_chain.py             --pdf "$SOURCE_PATH"             --document-id "$DOCUMENT_ID"             --page-id "$PAGE_ID"             --output "trace_results/${SLUG}.json"
+
+      - name: Upload trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wall-opening-trace-${{ matrix.slug }}
+          path: trace_results/
+          if-no-files-found: warn
