@@ -960,11 +960,33 @@ class PhysicalWallCandidateProducer:
         self._scopes = MappingProxyType(dict(scopes))
 
     @classmethod
-    def from_source_visibility_producer(cls, source_visibility_producer):
+    def from_source_visibility_producer(
+        cls,
+        source_visibility_producer,
+        *,
+        page_ids: Optional[Sequence[str]] = None,
+    ):
+        """Build wall scopes, optionally narrowed by source page address.
+
+        page_ids is addressing only: it can select which already-decoded source
+        pages are materialized, but it cannot inject geometry, candidates,
+        completeness, roles, quantities, or any other evidence-shaped input.
+        The legacy no-argument behavior remains the complete decoded-page build.
+        """
         if type(source_visibility_producer) is not SourceVisibilityProducer:
             raise TypeError(
                 "source_visibility_producer must be an actual SourceVisibilityProducer"
             )
+
+        selected_page_ids: Optional[set[str]] = None
+        if page_ids is not None:
+            selected_page_ids = {
+                str(page_id).strip()
+                for page_id in page_ids
+                if str(page_id).strip()
+            }
+            if not selected_page_ids:
+                raise ValueError("page_ids must contain at least one source page")
 
         published_by_revision = dict(source_visibility_producer._published_by_revision)
         store = source_visibility_producer._producer._store
@@ -982,8 +1004,19 @@ class PhysicalWallCandidateProducer:
             if digest != published.revision.source_sha256:
                 raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
 
-            for page_number in published.coverage.decoded_pages:
-                page_id = str(page_number)
+            decoded_page_ids = {
+                str(int(page_number))
+                for page_number in published.coverage.decoded_pages
+            }
+            if selected_page_ids is not None and not selected_page_ids <= decoded_page_ids:
+                raise ValueError(PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
+            materialized_page_ids = (
+                sorted(selected_page_ids, key=lambda value: int(value))
+                if selected_page_ids is not None
+                else sorted(decoded_page_ids, key=lambda value: int(value))
+            )
+
+            for page_id in materialized_page_ids:
                 result = _build_scope_result(
                     source_producer=source_visibility_producer,
                     published=published,
