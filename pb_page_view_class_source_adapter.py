@@ -63,8 +63,15 @@ def build_source_page_view_class_authority(
         return producer.authority()
 
     text_authority = source_visibility_producer.text_integrity_authority()
-    words_by_page: dict[str, list[str]] = {page_id: [] for page_id in requested}
-    evidence_by_page: dict[str, list[str]] = {page_id: [] for page_id in requested}
+    # Preserve authenticated page reading order. Observation ids are stable
+    # content hashes, not a textual sequence; iterating them in hash order can
+    # scramble source phrases such as "GROUND FLOOR PLAN" and incorrectly
+    # downgrade a producer-authenticated title to the low-confidence "plan"
+    # fallback. Geometry and the producer-owned text receipt provide the
+    # deterministic source order without caller-authored classification hints.
+    words_by_page: dict[str, list[tuple[float, float, int, str, str]]] = {
+        page_id: [] for page_id in requested
+    }
 
     for observation_id in published.text_observation_ids:
         selector = ObservationSelector(
@@ -84,15 +91,24 @@ def build_source_page_view_class_authority(
         page_id = str(result.receipt.page_id)
         if page_id not in words_by_page:
             continue
-        words_by_page[page_id].append(str(result.trusted_text))
-        evidence_by_page[page_id].append(observation_id)
+        geometry = tuple(float(value) for value in result.receipt.geometry)
+        x0 = geometry[0] if len(geometry) >= 4 else 0.0
+        y0 = geometry[1] if len(geometry) >= 4 else 0.0
+        sequence_number = (
+            int(result.receipt.sequence_number)
+            if result.receipt.sequence_number is not None
+            else 2**31 - 1
+        )
+        words_by_page[page_id].append(
+            (y0, x0, sequence_number, observation_id, str(result.trusted_text))
+        )
 
     for page_id in requested:
-        words = words_by_page[page_id]
-        evidence = tuple(sorted(set(evidence_by_page[page_id])))
-        if not words or not evidence:
+        ordered_words = sorted(words_by_page[page_id])
+        evidence = tuple(item[3] for item in ordered_words)
+        if not ordered_words or not evidence:
             continue
-        text = " ".join(words)
+        text = " ".join(item[4] for item in ordered_words)
         role, confidence, _discipline, _target = classify_sheet_role(text, text)
         if float(confidence) < _MIN_AUTHORITATIVE_CONFIDENCE:
             continue
