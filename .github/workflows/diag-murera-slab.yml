@@ -1,0 +1,77 @@
+name: DIAG Murera slab source — DO NOT MERGE
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-slab-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and verify Murera source
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf" \
+            -o benchmarks/sources/1785347143869-bqs-drawings.pdf
+          echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  benchmarks/sources/1785347143869-bqs-drawings.pdf" | sha256sum -c -
+
+      - name: Print Murera slab/DPM/mesh evidence
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import fitz
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+
+          path = Path("benchmarks/sources/1785347143869-bqs-drawings.pdf")
+          extractor = GenericPlanReaderExtractor()
+          predictions = extractor.extract_from_pdf(path, collect_item35_shadow=False)
+
+          target_terms = (
+              "floor", "slab", "bed", "dpm", "damp", "mesh",
+              "hardcore", "murram", "screed", "surface",
+          )
+          print("=== TARGET PREDICTIONS ===")
+          for pred in sorted(predictions, key=lambda item: item.tag):
+              tag = str(pred.tag or "")
+              desc = str(pred.description or "")
+              if any(term in (tag + " " + desc).lower() for term in target_terms):
+                  print(json.dumps(pred.to_dict(), sort_keys=True, default=str))
+
+          print("=== ALL TAGS ===")
+          print(json.dumps(sorted(str(pred.tag) for pred in predictions), indent=2))
+
+          print("=== EXTRACTION STATUS ===")
+          print(json.dumps(extractor.extraction_status, indent=2, sort_keys=True, default=str))
+
+          print("=== DRAWING PAGE TEXT HINTS ===")
+          doc = fitz.open(path)
+          for index in range(doc.page_count):
+              page = doc.load_page(index)
+              text = page.get_text("text") or ""
+              lower = text.lower()
+              if any(term in lower for term in ("surface bed", "polythene", "a142", "mesh", "floor plan", "slab", "hardcore")):
+                  print(f"--- page {index + 1} ---")
+                  lines = [line.strip() for line in text.splitlines() if line.strip()]
+                  for line in lines[:120]:
+                      if any(term in line.lower() for term in ("surface", "polythene", "a142", "mesh", "floor", "slab", "hardcore", "dimension", "plan")):
+                          print(line)
+          doc.close()
+          PY
