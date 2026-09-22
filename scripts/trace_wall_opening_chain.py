@@ -154,7 +154,10 @@ def trace(pdf_path: Path, *, document_id: str, page_id: str) -> dict[str, Any]:
     )
 
     # Producer-owned physical wall scope and identities.
-    wall_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(source)
+    wall_producer = PhysicalWallCandidateProducer.from_source_visibility_producer_for_pages(
+        source,
+        page_ids=(page_id,),
+    )
     wall_authority = wall_producer.authority()
     wall_selector = PhysicalWallCandidateSelector(**base_lineage)
     wall_result = wall_authority.resolve_scope(wall_selector)
