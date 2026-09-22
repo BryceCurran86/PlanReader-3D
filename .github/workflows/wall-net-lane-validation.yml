@@ -28,11 +28,13 @@ jobs:
       matrix:
         include:
           - slug: kstvet
+            page: "54"
             benchmark_id: tenders_ke_kstvet_cbc_classroom
             url: https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf
             path: benchmarks/sources/1727358888238-bq-nd-drawing.pdf
             sha256: 6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc
           - slug: lamu
+            page: "41"
             benchmark_id: tenders_ke_lamu_ishakani_ecd_classrooms
             url: https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf
             path: benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
@@ -55,6 +57,12 @@ jobs:
           mkdir -p "$(dirname "$PATH_OUT")"
           curl --fail --location --retry 4 --retry-delay 2 "$URL" -o "$PATH_OUT"
           echo "$SHA256  $PATH_OUT" | sha256sum -c -
+      - name: Producer-owned wall/opening trace
+        env:
+          PATH_OUT: ${{ matrix.path }}
+          PAGE_ID: ${{ matrix.page }}
+        run: PYTHONPATH=. python scripts/trace_wall_opening_live_chain.py --pdf "$PATH_OUT" --page "$PAGE_ID"
+
       - name: Canonical project benchmark
         env:
           BID: ${{ matrix.benchmark_id }}
