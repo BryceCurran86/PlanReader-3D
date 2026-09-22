@@ -56,6 +56,42 @@ def test_item35_shadow_executes_real_source_chain_but_keeps_commerce_locked(tmp_
     assert shadow["generic_count"] == 1
 
 
+
+def _write_classified_window_drawing(path) -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=700, height=650)
+    page.insert_text(fitz.Point(40, 40), "GROUND FLOOR PLAN", color=(0, 0, 0))
+    _draw_opening(page)
+    page.insert_text(fitz.Point(112, 106), "W1", color=(0, 0, 0))
+    y = 500.0
+    for row in (("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "2100")):
+        for text, x in zip(row, (50.0, 150.0, 250.0)):
+            page.insert_text(fitz.Point(x, y), text, color=(0, 0, 0))
+        y += 30.0
+    doc.save(path)
+    doc.close()
+
+
+def test_item35_shadow_composes_schedule_binding_and_family_mark_counts(tmp_path) -> None:
+    pdf_path = tmp_path / "item35-classified-window.pdf"
+    _write_classified_window_drawing(pdf_path)
+
+    shadow = collect_item35_authority_shadow(
+        pdf_path,
+        document_id="item35-classified-window",
+        pages=(0,),
+    )
+
+    assert shadow["status"] == "evidence_present"
+    assert shadow["semantic_opening_count"] == 1
+    assert shadow["classified_opening_count"] == 1
+    assert shadow["opening_family_counts"] == {"window": 1}
+    assert shadow["opening_mark_counts"] == {"W1": 1}
+    assert any(
+        item["status"] == "corroborated" and item["tag_mark"] == "W1"
+        for item in shadow["schedule_binding_statuses"]
+    )
+
 def test_live_extractor_populates_item35_shadow_without_publishing_opening_count(tmp_path) -> None:
     pdf_path = tmp_path / "live-item35-shadow.pdf"
     _write_minimal_drawing(pdf_path)
@@ -101,3 +137,86 @@ def test_scoped_live_extraction_runs_item35_only_on_requested_pages(tmp_path) ->
     assert shadow["generic_count_status"] == "corroborated"
     assert shadow["generic_count"] == 1
     assert extractor.extraction_status["item35_authority_shadow"] == "evidence_present"
+
+
+def test_live_extractor_publishes_only_fully_corroborated_item35_mark(tmp_path) -> None:
+    pdf_path = tmp_path / "live-item35-authoritative-window.pdf"
+    _write_classified_window_drawing(pdf_path)
+
+    extractor = GenericPlanReaderExtractor()
+    predictions = {prediction.tag: prediction for prediction in extractor.extract_from_pdf(pdf_path)}
+
+    assert "W1" in predictions, {
+        "generic_count_reason_codes": extractor.item35_authority_shadow.get("generic_count_reason_codes"),
+        "opening_family_counts": extractor.item35_authority_shadow.get("opening_family_counts"),
+        "opening_mark_counts": extractor.item35_authority_shadow.get("opening_mark_counts"),
+        "schedule_binding_statuses": extractor.item35_authority_shadow.get("schedule_binding_statuses"),
+        "physical_opening_universe_complete": extractor.item35_authority_shadow.get("physical_opening_universe_complete"),
+    }
+    window = predictions["W1"]
+    assert window.trade_type == "windows"
+    assert window.quantity == 1.0
+    assert window.dimensions == [900.0, 2100.0]
+    assert (window.metadata or {}).get("derivation") == "item35_source_authenticated_opening_mark"
+    assert (window.metadata or {}).get("authority") == "item35_generic_opening_count"
+    assert (window.metadata or {}).get("physical_opening_universe_complete") is True
+    assert (window.metadata or {}).get("all_members_classified") is True
+
+
+def test_benchmark_mode_retains_authoritative_item35_mark_publication(tmp_path) -> None:
+    pdf_path = tmp_path / "benchmark-mode-item35-window.pdf"
+    _write_classified_window_drawing(pdf_path)
+
+    extractor = GenericPlanReaderExtractor()
+    predictions = {
+        prediction.tag: prediction
+        for prediction in extractor.extract_from_pdf(
+            pdf_path,
+            collect_item35_shadow=False,
+        )
+    }
+
+    assert "W1" in predictions
+    window = predictions["W1"]
+    assert window.quantity == 1.0
+    assert window.dimensions == [900.0, 2100.0]
+    assert (window.metadata or {}).get("derivation") == (
+        "item35_source_authenticated_opening_mark"
+    )
+    assert extractor.item35_authority_shadow["reason"] == "not_collected"
+
+
+def test_item35_conflicting_schedule_dimensions_never_publish_mark_prediction(tmp_path) -> None:
+    pdf_path = tmp_path / "item35-conflicting-window-size.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=700, height=650)
+    page.insert_text(fitz.Point(40, 40), "GROUND FLOOR PLAN", color=(0, 0, 0))
+    _draw_opening(page)
+    page.insert_text(fitz.Point(112, 106), "W1", color=(0, 0, 0))
+
+    y = 470.0
+    for row in (
+        ("MARK", "WIDTH", "HEIGHT"),
+        ("W1", "900", "2100"),
+        ("W1", "1200", "2100"),
+    ):
+        for text, x in zip(row, (50.0, 150.0, 250.0)):
+            page.insert_text(fitz.Point(x, y), text, color=(0, 0, 0))
+        y += 30.0
+    doc.save(pdf_path)
+    doc.close()
+
+    shadow = collect_item35_authority_shadow(
+        pdf_path,
+        document_id="item35-conflicting-window-size",
+        pages=(0,),
+    )
+    assert "W1" not in shadow["opening_mark_predictions"]
+
+    extractor = GenericPlanReaderExtractor()
+    predictions = {prediction.tag: prediction for prediction in extractor.extract_from_pdf(pdf_path)}
+    assert not (
+        "W1" in predictions
+        and (predictions["W1"].metadata or {}).get("derivation")
+        == "item35_source_authenticated_opening_mark"
+    )
