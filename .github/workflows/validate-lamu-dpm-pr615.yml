@@ -26,6 +26,23 @@ jobs:
             "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf" \
             -o benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
           echo "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf" | sha256sum -c -
+      - name: Print DPM-related source evidence
+        run: |
+          python - <<'PY'
+          import fitz, re
+          p = "benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf"
+          doc = fitz.open(p)
+          rx = re.compile(r"d\s*\.?\s*p\s*\.?\s*m\s*\.?|polythene|membrane|damp[- ]?proof|foundation|slab", re.I)
+          for i, page in enumerate(doc):
+              text = page.get_text("text") or ""
+              hits = [line.strip() for line in text.splitlines() if rx.search(line)]
+              if hits:
+                  print(f"PAGE {i+1} HITS:")
+                  for line in hits[:40]:
+                      print("  ", line)
+                  print("PAGE_HEAD:", " | ".join(x.strip() for x in text.splitlines()[:20] if x.strip()))
+          doc.close()
+          PY
       - name: Run canonical LAMU benchmark
         env:
           PYTHONPATH: .
