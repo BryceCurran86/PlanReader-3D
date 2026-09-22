@@ -78,6 +78,20 @@ def test_composer_resolves_source_owned_opening_host_without_caller_geometry() -
         and trace.member_wall_candidate_ids
         for trace in composition.opening_bindings
     )
+    assert composition.host_frames
+    assert all(
+        trace.status is EvidenceResolutionStatus.CORROBORATED
+        and trace.record_id is not None
+        and trace.host_wall_id is not None
+        and trace.whole_wall_candidate_ids
+        for trace in composition.host_frames
+    )
+    for trace in composition.host_frames:
+        selector = composition.host_frame_selectors[trace.opening_identity_id]
+        resolved = composition.opening_host_frame_authority.resolve(selector)
+        assert resolved.status is EvidenceResolutionStatus.CORROBORATED
+        assert resolved.evidence is not None
+        assert resolved.evidence.record_id == trace.record_id
 
     for trace in composition.opening_bindings:
         selector = composition.binding_selectors[trace.opening_identity_id]
