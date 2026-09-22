@@ -146,7 +146,13 @@ def test_live_extractor_publishes_only_fully_corroborated_item35_mark(tmp_path) 
     extractor = GenericPlanReaderExtractor()
     predictions = {prediction.tag: prediction for prediction in extractor.extract_from_pdf(pdf_path)}
 
-    assert "W1" in predictions, extractor.item35_authority_shadow
+    assert "W1" in predictions, {
+        "generic_count_reason_codes": extractor.item35_authority_shadow.get("generic_count_reason_codes"),
+        "opening_family_counts": extractor.item35_authority_shadow.get("opening_family_counts"),
+        "opening_mark_counts": extractor.item35_authority_shadow.get("opening_mark_counts"),
+        "schedule_binding_statuses": extractor.item35_authority_shadow.get("schedule_binding_statuses"),
+        "physical_opening_universe_complete": extractor.item35_authority_shadow.get("physical_opening_universe_complete"),
+    }
     window = predictions["W1"]
     assert window.trade_type == "windows"
     assert window.quantity == 1.0
