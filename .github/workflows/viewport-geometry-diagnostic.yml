@@ -1,0 +1,43 @@
+name: Viewport Geometry Diagnostic
+
+on:
+  push:
+    branches: [gpt2/wall-opening-live-trace-v1]
+    paths:
+      - tools/trace_viewport_geometry.py
+      - .github/workflows/viewport-geometry-diagnostic.yml
+
+jobs:
+  kstvet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download and verify source
+        run: |
+          mkdir -p benchmarks/sources
+          curl --fail --location --retry 4 --retry-delay 3 \
+            https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf \
+            -o benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+          echo "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/1727358888238-bq-nd-drawing.pdf" | sha256sum -c -
+      - name: Trace viewport geometry
+        env:
+          PYTHONPATH: .
+        run: |
+          mkdir -p viewport_trace
+          python tools/trace_viewport_geometry.py \
+            benchmarks/sources/1727358888238-bq-nd-drawing.pdf \
+            --page-number 54 | tee viewport_trace/kstvet-page54.json
+      - name: Upload viewport trace
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewport-geometry-kstvet-page54
+          path: viewport_trace/kstvet-page54.json
