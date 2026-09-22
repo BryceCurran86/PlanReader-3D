@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install PyMuPDF
+      - run: pip install PyMuPDF==1.28.0
       - name: Download and verify
         env:
           URL: ${{ matrix.url }}
