@@ -19,7 +19,7 @@ TARGET_TAGS = {
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("pdf", type=Path)
-    parser.add_argument("--page-index", type=int, required=True)
+    parser.add_argument("--page-indexes", required=True)
     args = parser.parse_args()
 
     # Item35 is a shadow-only diagnostic and is owned by PR #612. Disable it
@@ -34,7 +34,8 @@ def main() -> int:
     }
     try:
         extractor = GenericPlanReaderExtractor()
-        predictions = extractor.extract_from_pdf(args.pdf, pages=[args.page_index])
+        pages = [int(x.strip()) for x in args.page_indexes.split(",") if x.strip()]
+        predictions = extractor.extract_from_pdf(args.pdf, pages=pages)
     finally:
         item35_shadow.collect_item35_authority_shadow = original_collect
 
