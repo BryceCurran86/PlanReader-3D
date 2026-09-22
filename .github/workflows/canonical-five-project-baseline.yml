@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 180
     strategy:
       fail-fast: false
-      max-parallel: 5
+      max-parallel: 1
       matrix:
         include:
           - slug: kstvet
@@ -77,8 +77,29 @@ jobs:
           rm -rf "$out"
           mkdir -p "$out"
           start=$(date +%s)
+          (
+            while true; do
+              echo "=== RESOURCE_SNAPSHOT $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+              if [ -r /sys/fs/cgroup/memory.current ]; then
+                echo "cgroup_memory_current=$(cat /sys/fs/cgroup/memory.current)"
+              fi
+              if [ -r /sys/fs/cgroup/memory.max ]; then
+                echo "cgroup_memory_max=$(cat /sys/fs/cgroup/memory.max)"
+              fi
+              free -m || true
+              ps -eo pid,ppid,%cpu,%mem,rss,vsz,etime,comm --sort=-rss | head -n 15 || true
+              sleep 60
+            done
+          ) &
+          monitor_pid=$!
+          trap 'kill "$monitor_pid" 2>/dev/null || true' EXIT
+          set +e
           python pb_benchmark_accuracy_engine.py --benchmark "$BENCHMARK_ID" --auto-extract --output-dir "$out"
           rc=$?
+          set -e
+          kill "$monitor_pid" 2>/dev/null || true
+          wait "$monitor_pid" 2>/dev/null || true
+          trap - EXIT
           end=$(date +%s)
           elapsed=$((end-start))
           python - "$SLUG" "$BENCHMARK_ID" "$elapsed" "$rc" <<'PY'
