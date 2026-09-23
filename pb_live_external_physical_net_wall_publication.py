@@ -1,0 +1,563 @@
+"""Physical external net-wall publication from source-owned geometry.
+
+This path is intentionally separate from trade/finish opening-deduction policy.
+For structural/perimeter wall quantity, every authenticated physical opening void
+in a complete source opening universe is geometric absence from its authenticated
+host whole wall. No ODTARGET/ODRULE declaration is required or accepted here.
+
+The function accepts only producer-owned compositions. It replays gross wall and
+whole-wall role authorities, replays every physical opening void, proves complete
+opening coverage, maps voids to canonical whole-wall frame identities, and then
+subtracts the exact union of wall-local void rectangles from each authenticated
+EXTERNAL gross wall.
+
+No caller-supplied wall list, role, area, opening count, deduction decision,
+benchmark expectation, or fallback enters the numeric path.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import math
+from typing import Optional
+
+from shapely.geometry import box
+
+from pb_live_gross_wall_geometry_composition import LiveGrossWallGeometryComposition
+from pb_live_physical_opening_void_composition import LivePhysicalOpeningVoidComposition
+from pb_live_wall_opening_authority_composition import LiveWallOpeningAuthorityComposition
+from pb_live_whole_wall_role_composition import LiveWholeWallRoleComposition
+from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence, stable_contract_id
+from pb_net_wall_boolean_union_authority import subtract_void_union_from_wall_polygon
+from pb_wall_role_authority import WallRoleClassification
+
+
+LIVE_EXTERNAL_PHYSICAL_NET_WALL_SCHEMA_VERSION = "1.0.0"
+
+LIVE_EXTERNAL_PHYSICAL_NET_WALL_RESOLVED = (
+    "live_external_physical_net_wall_publication_resolved"
+)
+LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE = (
+    "live_external_physical_net_wall_publication_upstream_incomplete"
+)
+LIVE_EXTERNAL_PHYSICAL_NET_WALL_LINEAGE_MISMATCH = (
+    "live_external_physical_net_wall_publication_lineage_mismatch"
+)
+LIVE_EXTERNAL_PHYSICAL_NET_WALL_VOID_UNRESOLVED = (
+    "live_external_physical_net_wall_publication_void_unresolved"
+)
+LIVE_EXTERNAL_PHYSICAL_NET_WALL_ROLE_UNRESOLVED = (
+    "live_external_physical_net_wall_publication_role_unresolved"
+)
+LIVE_EXTERNAL_PHYSICAL_NET_WALL_DUPLICATE_WALL = (
+    "live_external_physical_net_wall_publication_duplicate_wall"
+)
+LIVE_EXTERNAL_PHYSICAL_NET_WALL_NO_EXTERNAL_WALLS = (
+    "live_external_physical_net_wall_publication_no_external_walls"
+)
+LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID = (
+    "live_external_physical_net_wall_publication_geometry_invalid"
+)
+
+PERIMETER_WALLING_SEMANTIC_KEY = "perimeter_walling"
+
+
+@dataclass(frozen=True)
+class LiveExternalPhysicalNetWallPublication:
+    revision_id: str
+    status: EvidenceResolutionStatus
+    reason_codes: tuple[str, ...]
+    quantity_evidence: Optional[QuantityEvidence]
+    external_wall_ids: tuple[str, ...]
+    gross_geometry_record_ids: tuple[str, ...]
+    whole_wall_role_record_ids: tuple[str, ...]
+    physical_void_record_ids: tuple[str, ...]
+    opening_universe_record_ids: tuple[str, ...]
+    schema_version: str = LIVE_EXTERNAL_PHYSICAL_NET_WALL_SCHEMA_VERSION
+
+
+def _clean(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _reasons(*values: object) -> tuple[str, ...]:
+    out: list[str] = []
+    for value in values:
+        if isinstance(value, (tuple, list)):
+            out.extend(_clean(item) for item in value if _clean(item))
+        elif _clean(value):
+            out.append(_clean(value))
+    return tuple(dict.fromkeys(out))
+
+
+def _blocked(
+    *,
+    revision_id: str,
+    status: EvidenceResolutionStatus,
+    reason: str,
+    extra_reasons: tuple[str, ...] = (),
+) -> LiveExternalPhysicalNetWallPublication:
+    if status is EvidenceResolutionStatus.CORROBORATED:
+        status = EvidenceResolutionStatus.ABSTAINED
+    return LiveExternalPhysicalNetWallPublication(
+        revision_id=revision_id,
+        status=status,
+        reason_codes=_reasons(reason, extra_reasons),
+        quantity_evidence=None,
+        external_wall_ids=(),
+        gross_geometry_record_ids=(),
+        whole_wall_role_record_ids=(),
+        physical_void_record_ids=(),
+        opening_universe_record_ids=(),
+    )
+
+
+def _lineage_tuple(value) -> tuple[str, str, str, str, str, str]:
+    return (
+        _clean(value.document_id),
+        _clean(value.revision_id),
+        _clean(value.source_sha256),
+        _clean(value.snapshot_id),
+        _clean(value.page_id),
+        _clean(value.decision_scope_id),
+    )
+
+
+def compose_live_external_physical_net_wall_publication(
+    *,
+    wall_opening_composition: LiveWallOpeningAuthorityComposition,
+    physical_void_composition: LivePhysicalOpeningVoidComposition,
+    gross_wall_composition: LiveGrossWallGeometryComposition,
+    whole_wall_role_composition: LiveWholeWallRoleComposition,
+) -> LiveExternalPhysicalNetWallPublication:
+    """Publish source-authenticated external whole-wall physical net area."""
+
+    if type(wall_opening_composition) is not LiveWallOpeningAuthorityComposition:
+        raise TypeError(
+            "wall_opening_composition must be LiveWallOpeningAuthorityComposition"
+        )
+    if type(physical_void_composition) is not LivePhysicalOpeningVoidComposition:
+        raise TypeError(
+            "physical_void_composition must be LivePhysicalOpeningVoidComposition"
+        )
+    if type(gross_wall_composition) is not LiveGrossWallGeometryComposition:
+        raise TypeError(
+            "gross_wall_composition must be LiveGrossWallGeometryComposition"
+        )
+    if type(whole_wall_role_composition) is not LiveWholeWallRoleComposition:
+        raise TypeError(
+            "whole_wall_role_composition must be LiveWholeWallRoleComposition"
+        )
+
+    revision_id = _clean(wall_opening_composition.revision_id)
+    if (
+        _clean(physical_void_composition.revision_id) != revision_id
+        or _clean(gross_wall_composition.revision_id) != revision_id
+        or _clean(whole_wall_role_composition.revision_id) != revision_id
+    ):
+        return _blocked(
+            revision_id=revision_id,
+            status=EvidenceResolutionStatus.CONFLICT,
+            reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_LINEAGE_MISMATCH,
+        )
+
+    if (
+        wall_opening_composition.status is not EvidenceResolutionStatus.CORROBORATED
+        or gross_wall_composition.status is not EvidenceResolutionStatus.CORROBORATED
+        or whole_wall_role_composition.status
+        is not EvidenceResolutionStatus.CORROBORATED
+        or gross_wall_composition.gross_wall_geometry_authority is None
+        or whole_wall_role_composition.whole_wall_role_authority is None
+        or not gross_wall_composition.traces
+    ):
+        return _blocked(
+            revision_id=revision_id,
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE,
+            extra_reasons=_reasons(
+                wall_opening_composition.reason_codes,
+                gross_wall_composition.reason_codes,
+                whole_wall_role_composition.reason_codes,
+            ),
+        )
+
+    wall_ids = tuple(
+        _clean(trace.physical_wall_id) for trace in gross_wall_composition.traces
+    )
+    if (
+        any(not wall_id for wall_id in wall_ids)
+        or len(set(wall_ids)) != len(wall_ids)
+    ):
+        return _blocked(
+            revision_id=revision_id,
+            status=EvidenceResolutionStatus.CONFLICT,
+            reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_DUPLICATE_WALL,
+        )
+
+    expected_opening_ids = tuple(
+        _clean(trace.opening_identity_id)
+        for trace in wall_opening_composition.opening_bindings
+        if _clean(trace.opening_identity_id)
+    )
+    if len(set(expected_opening_ids)) != len(expected_opening_ids):
+        return _blocked(
+            revision_id=revision_id,
+            status=EvidenceResolutionStatus.CONFLICT,
+            reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE,
+        )
+
+    if expected_opening_ids:
+        trace_opening_ids = {
+            _clean(trace.opening_identity_id)
+            for trace in physical_void_composition.traces
+            if _clean(trace.opening_identity_id)
+        }
+        if (
+            physical_void_composition.status
+            is not EvidenceResolutionStatus.CORROBORATED
+            or trace_opening_ids != set(expected_opening_ids)
+            or set(physical_void_composition.void_selectors)
+            != set(expected_opening_ids)
+        ):
+            return _blocked(
+                revision_id=revision_id,
+                status=(
+                    EvidenceResolutionStatus.CONFLICT
+                    if physical_void_composition.status
+                    is EvidenceResolutionStatus.CONFLICT
+                    else EvidenceResolutionStatus.ABSTAINED
+                ),
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_VOID_UNRESOLVED,
+                extra_reasons=tuple(physical_void_composition.reason_codes),
+            )
+    elif physical_void_composition.traces or physical_void_composition.void_selectors:
+        return _blocked(
+            revision_id=revision_id,
+            status=EvidenceResolutionStatus.CONFLICT,
+            reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_VOID_UNRESOLVED,
+        )
+
+    gross_authority = gross_wall_composition.gross_wall_geometry_authority
+    role_authority = whole_wall_role_composition.whole_wall_role_authority
+
+    gross_records = {}
+    role_records = {}
+    universe_record_ids: list[str] = []
+
+    for trace in gross_wall_composition.traces:
+        wall_id = _clean(trace.physical_wall_id)
+        gross_selector = gross_wall_composition.gross_selectors.get(wall_id)
+        role_selector = whole_wall_role_composition.role_selectors.get(wall_id)
+        universe = wall_opening_composition.opening_universe_results.get(
+            _clean(trace.page_id)
+        )
+        if (
+            gross_selector is None
+            or role_selector is None
+            or universe is None
+            or universe.status is not EvidenceResolutionStatus.CORROBORATED
+            or universe.record is None
+            or not universe.record.decision_scope_complete
+        ):
+            return _blocked(
+                revision_id=revision_id,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE,
+            )
+
+        gross_result = gross_authority.resolve(gross_selector)
+        role_result = role_authority.resolve(role_selector)
+        gross_record = gross_result.record
+        role_record = role_result.record
+        if (
+            gross_result.status is not EvidenceResolutionStatus.CORROBORATED
+            or gross_record is None
+        ):
+            return _blocked(
+                revision_id=revision_id,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE,
+                extra_reasons=tuple(gross_result.reason_codes),
+            )
+        if (
+            role_result.status is not EvidenceResolutionStatus.CORROBORATED
+            or role_record is None
+            or role_record.role is WallRoleClassification.UNRESOLVED
+        ):
+            return _blocked(
+                revision_id=revision_id,
+                status=(
+                    EvidenceResolutionStatus.CONFLICT
+                    if role_result.status is EvidenceResolutionStatus.CONFLICT
+                    else EvidenceResolutionStatus.ABSTAINED
+                ),
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_ROLE_UNRESOLVED,
+                extra_reasons=tuple(role_result.reason_codes),
+            )
+
+        if (
+            _lineage_tuple(gross_selector) != _lineage_tuple(gross_record)
+            or _lineage_tuple(role_selector) != _lineage_tuple(role_record)
+            or _lineage_tuple(gross_record) != _lineage_tuple(role_record)
+            or _clean(gross_record.physical_wall_id) != wall_id
+            or _clean(role_record.physical_wall_id) != wall_id
+            or _clean(role_record.gross_geometry_record_id)
+            != _clean(gross_record.record_id)
+        ):
+            return _blocked(
+                revision_id=revision_id,
+                status=EvidenceResolutionStatus.CONFLICT,
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_LINEAGE_MISMATCH,
+            )
+
+        if (
+            not math.isfinite(float(gross_record.length_m))
+            or not math.isfinite(float(gross_record.height_m))
+            or not math.isfinite(float(gross_record.gross_area_m2))
+            or float(gross_record.length_m) <= 0.0
+            or float(gross_record.height_m) <= 0.0
+            or float(gross_record.gross_area_m2) <= 0.0
+        ):
+            return _blocked(
+                revision_id=revision_id,
+                status=EvidenceResolutionStatus.CONFLICT,
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID,
+            )
+
+        expected_gross_area = float(gross_record.length_m) * float(
+            gross_record.height_m
+        )
+        if not math.isclose(
+            expected_gross_area,
+            float(gross_record.gross_area_m2),
+            rel_tol=1e-9,
+            abs_tol=1e-9,
+        ):
+            return _blocked(
+                revision_id=revision_id,
+                status=EvidenceResolutionStatus.CONFLICT,
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID,
+            )
+
+        gross_records[wall_id] = gross_record
+        role_records[wall_id] = role_record
+        universe_record_ids.append(_clean(universe.record.record_id))
+
+    voids_by_wall: dict[str, list[object]] = {wall_id: [] for wall_id in wall_ids}
+    all_void_record_ids: list[str] = []
+
+    for opening_id in expected_opening_ids:
+        selector = physical_void_composition.void_selectors.get(opening_id)
+        if selector is None:
+            return _blocked(
+                revision_id=revision_id,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_VOID_UNRESOLVED,
+            )
+        authority = physical_void_composition.physical_opening_void_authorities.get(
+            _clean(selector.page_id)
+        )
+        if authority is None:
+            return _blocked(
+                revision_id=revision_id,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_VOID_UNRESOLVED,
+            )
+        result = authority.resolve(selector)
+        record = result.record
+        if (
+            result.status is not EvidenceResolutionStatus.CORROBORATED
+            or record is None
+            or _clean(record.opening_identity_id) != opening_id
+            or _lineage_tuple(selector) != _lineage_tuple(record)
+        ):
+            return _blocked(
+                revision_id=revision_id,
+                status=(
+                    EvidenceResolutionStatus.CONFLICT
+                    if result.status is EvidenceResolutionStatus.CONFLICT
+                    else EvidenceResolutionStatus.ABSTAINED
+                ),
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_VOID_UNRESOLVED,
+                extra_reasons=tuple(result.reason_codes),
+            )
+
+        wall_id = _clean(record.wall_local_frame_id)
+        gross_record = gross_records.get(wall_id)
+        if gross_record is None:
+            return _blocked(
+                revision_id=revision_id,
+                status=EvidenceResolutionStatus.CONFLICT,
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_LINEAGE_MISMATCH,
+            )
+        if (
+            _clean(record.page_id) != _clean(gross_record.page_id)
+            or _clean(record.decision_scope_id)
+            != _clean(gross_record.decision_scope_id)
+            or _clean(record.revision_id) != revision_id
+        ):
+            return _blocked(
+                revision_id=revision_id,
+                status=EvidenceResolutionStatus.CONFLICT,
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_LINEAGE_MISMATCH,
+            )
+
+        u0 = float(record.u0)
+        u1 = float(record.u1)
+        z0 = float(record.z0)
+        z1 = float(record.z1)
+        if (
+            not all(math.isfinite(v) for v in (u0, u1, z0, z1))
+            or u0 < 0.0
+            or z0 < 0.0
+            or u1 <= u0
+            or z1 <= z0
+            or u1 > float(gross_record.length_m) + 1e-9
+            or z1 > float(gross_record.height_m) + 1e-9
+        ):
+            return _blocked(
+                revision_id=revision_id,
+                status=EvidenceResolutionStatus.CONFLICT,
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID,
+            )
+
+        voids_by_wall[wall_id].append(record)
+        all_void_record_ids.append(_clean(record.record_id))
+
+    external_wall_ids: list[str] = []
+    external_gross_ids: list[str] = []
+    external_role_ids: list[str] = []
+    net_values: list[float] = []
+    external_void_ids: list[str] = []
+
+    for wall_id in wall_ids:
+        role_record = role_records[wall_id]
+        if role_record.role is not WallRoleClassification.EXTERNAL:
+            continue
+
+        gross_record = gross_records[wall_id]
+        gross_polygon = box(
+            0.0,
+            0.0,
+            float(gross_record.length_m),
+            float(gross_record.height_m),
+        )
+        void_records = voids_by_wall.get(wall_id, [])
+        void_polygons = [
+            box(float(v.u0), float(v.z0), float(v.u1), float(v.z1))
+            for v in void_records
+        ]
+        try:
+            net_polygon = subtract_void_union_from_wall_polygon(
+                gross_polygon,
+                void_polygons,
+            )
+        except ValueError:
+            return _blocked(
+                revision_id=revision_id,
+                status=EvidenceResolutionStatus.CONFLICT,
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID,
+            )
+
+        net_area = float(net_polygon.area)
+        if not math.isfinite(net_area) or net_area < 0.0:
+            return _blocked(
+                revision_id=revision_id,
+                status=EvidenceResolutionStatus.CONFLICT,
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID,
+            )
+
+        external_wall_ids.append(wall_id)
+        external_gross_ids.append(_clean(gross_record.record_id))
+        external_role_ids.append(_clean(role_record.record_id))
+        external_void_ids.extend(_clean(v.record_id) for v in void_records)
+        net_values.append(net_area)
+
+    if not external_wall_ids:
+        return _blocked(
+            revision_id=revision_id,
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_NO_EXTERNAL_WALLS,
+        )
+
+    value = round(math.fsum(net_values), 6)
+    evidence = QuantityEvidence(
+        quantity_id=stable_contract_id(
+            "external_physical_net_wall_area",
+            {
+                "revision_id": revision_id,
+                "physical_wall_ids": tuple(external_wall_ids),
+                "gross_geometry_record_ids": tuple(external_gross_ids),
+                "whole_wall_role_record_ids": tuple(external_role_ids),
+                "physical_void_record_ids": tuple(external_void_ids),
+                "opening_universe_record_ids": tuple(dict.fromkeys(universe_record_ids)),
+                "value_m2": value,
+            },
+        ),
+        family="wall_net_area",
+        semantic_key=PERIMETER_WALLING_SEMANTIC_KEY,
+        value=value,
+        unit="m2",
+        input_entity_ids=tuple(external_wall_ids),
+        formula=(
+            "sum(gross_wall_polygon - union(all authenticated physical opening "
+            "voids in each source-authenticated external whole wall))"
+        ),
+        formula_version="1.0.0",
+        evidence_ids=tuple(
+            dict.fromkeys(
+                (
+                    *external_gross_ids,
+                    *external_role_ids,
+                    *external_void_ids,
+                    *universe_record_ids,
+                )
+            )
+        ),
+        authority=(
+            "pb_live_external_physical_net_wall_publication."
+            "compose_live_external_physical_net_wall_publication"
+        ),
+        status="corroborated",
+        confidence=1.0,
+        abstained=False,
+        blocking_reasons=(),
+        reason_codes=(LIVE_EXTERNAL_PHYSICAL_NET_WALL_RESOLVED,),
+        metadata={
+            "revision_id": revision_id,
+            "external_wall_ids": tuple(external_wall_ids),
+            "gross_geometry_record_ids": tuple(external_gross_ids),
+            "whole_wall_role_record_ids": tuple(external_role_ids),
+            "physical_void_record_ids": tuple(external_void_ids),
+            "opening_universe_record_ids": tuple(
+                dict.fromkeys(universe_record_ids)
+            ),
+            "deduction_policy": "physical_geometry_not_trade_finish_policy",
+        },
+    )
+    return LiveExternalPhysicalNetWallPublication(
+        revision_id=revision_id,
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=(LIVE_EXTERNAL_PHYSICAL_NET_WALL_RESOLVED,),
+        quantity_evidence=evidence,
+        external_wall_ids=tuple(external_wall_ids),
+        gross_geometry_record_ids=tuple(external_gross_ids),
+        whole_wall_role_record_ids=tuple(external_role_ids),
+        physical_void_record_ids=tuple(external_void_ids),
+        opening_universe_record_ids=tuple(dict.fromkeys(universe_record_ids)),
+    )
+
+
+__all__ = [
+    "LIVE_EXTERNAL_PHYSICAL_NET_WALL_DUPLICATE_WALL",
+    "LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID",
+    "LIVE_EXTERNAL_PHYSICAL_NET_WALL_LINEAGE_MISMATCH",
+    "LIVE_EXTERNAL_PHYSICAL_NET_WALL_NO_EXTERNAL_WALLS",
+    "LIVE_EXTERNAL_PHYSICAL_NET_WALL_RESOLVED",
+    "LIVE_EXTERNAL_PHYSICAL_NET_WALL_ROLE_UNRESOLVED",
+    "LIVE_EXTERNAL_PHYSICAL_NET_WALL_SCHEMA_VERSION",
+    "LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE",
+    "LIVE_EXTERNAL_PHYSICAL_NET_WALL_VOID_UNRESOLVED",
+    "PERIMETER_WALLING_SEMANTIC_KEY",
+    "LiveExternalPhysicalNetWallPublication",
+    "compose_live_external_physical_net_wall_publication",
+]
