@@ -85,33 +85,26 @@ def compose_live_whole_wall_roles(
     results = {}
     duplicate_wall_ids: set[str] = set()
 
+    selector_mismatches: set[str] = set()
     for gross_trace in gross_wall_composition.traces:
         wall_id = str(gross_trace.physical_wall_id)
+        gross_selector = gross_wall_composition.gross_selectors.get(wall_id)
+        if (
+            gross_selector is None
+            or gross_selector.revision_id != gross_wall_composition.revision_id
+            or gross_selector.page_id != gross_trace.page_id
+            or gross_selector.decision_scope_id != gross_trace.decision_scope_id
+            or gross_selector.physical_wall_id != wall_id
+        ):
+            selector_mismatches.add(wall_id)
+            continue
         selector = WholeWallRoleSelector(
-            document_id=next(
-                selector.document_id
-                for selector in gross_wall_composition.gross_selectors.values()
-                if selector.physical_wall_id == wall_id
-                and selector.page_id == gross_trace.page_id
-                and selector.decision_scope_id == gross_trace.decision_scope_id
-            ),
-            revision_id=gross_wall_composition.revision_id,
-            source_sha256=next(
-                selector.source_sha256
-                for selector in gross_wall_composition.gross_selectors.values()
-                if selector.physical_wall_id == wall_id
-                and selector.page_id == gross_trace.page_id
-                and selector.decision_scope_id == gross_trace.decision_scope_id
-            ),
-            snapshot_id=next(
-                selector.snapshot_id
-                for selector in gross_wall_composition.gross_selectors.values()
-                if selector.physical_wall_id == wall_id
-                and selector.page_id == gross_trace.page_id
-                and selector.decision_scope_id == gross_trace.decision_scope_id
-            ),
-            page_id=gross_trace.page_id,
-            decision_scope_id=gross_trace.decision_scope_id,
+            document_id=gross_selector.document_id,
+            revision_id=gross_selector.revision_id,
+            source_sha256=gross_selector.source_sha256,
+            snapshot_id=gross_selector.snapshot_id,
+            page_id=gross_selector.page_id,
+            decision_scope_id=gross_selector.decision_scope_id,
             physical_wall_id=wall_id,
         )
         existing = selectors.get(wall_id)
@@ -121,21 +114,25 @@ def compose_live_whole_wall_roles(
         selectors[wall_id] = selector
         results[wall_id] = producer.publish(selector)
 
-    if duplicate_wall_ids or not selectors:
+    if duplicate_wall_ids or selector_mismatches or not selectors:
         return LiveWholeWallRoleComposition(
             revision_id=gross_wall_composition.revision_id,
             status=(
                 EvidenceResolutionStatus.CONFLICT
-                if duplicate_wall_ids
+                if duplicate_wall_ids or selector_mismatches
                 else EvidenceResolutionStatus.ABSTAINED
             ),
             reason_codes=(
                 LIVE_WHOLE_WALL_ROLE_PARTIAL
-                if duplicate_wall_ids
+                if duplicate_wall_ids or selector_mismatches
                 else LIVE_WHOLE_WALL_ROLE_UNAVAILABLE,
                 *(
                     f"duplicate_physical_wall_id:{wall_id}"
                     for wall_id in sorted(duplicate_wall_ids)
+                ),
+                *(
+                    f"gross_role_selector_mismatch:{wall_id}"
+                    for wall_id in sorted(selector_mismatches)
                 ),
             ),
             traces=(),
