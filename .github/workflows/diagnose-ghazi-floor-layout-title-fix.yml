@@ -1,4 +1,5 @@
 name: DIAGNOSTIC Ghazi Floor Layout Title Fix — DO NOT MERGE
+# diagnostic revision: viewport clipping audit
 
 on:
   pull_request:
