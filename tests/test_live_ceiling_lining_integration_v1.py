@@ -6,6 +6,7 @@ from pathlib import Path
 import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
 from pb_page_scale_calibration_authority import POINTS_PER_METRE_AT_1_1
 from pb_live_ceiling_lining_integration import (
     LIVE_CEILING_LINING_FINISH_INCOMPLETE,
@@ -185,3 +186,71 @@ def test_multiple_floor_plans_are_not_summed_without_identity_authority(
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.reason_codes == (LIVE_CEILING_LINING_SCOPE_NOT_UNIQUE,)
     assert result.quantity_m2 is None
+
+
+
+def test_generic_extractor_publishes_authorized_ceiling_lining(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "extractor-live-ceiling.pdf"
+    _write_single_plan(path)
+
+    extractor = GenericPlanReaderExtractor()
+    predictions = extractor.extract_from_pdf(
+        path,
+        collect_item35_shadow=False,
+    )
+
+    ceiling = [prediction for prediction in predictions if prediction.tag == "ceiling_lining"]
+    assert len(ceiling) == 1
+    prediction = ceiling[0]
+    assert prediction.quantity is not None
+    assert prediction.quantity > 0.0
+    assert prediction.unit == "SM"
+    assert prediction.trade_type == "finishes"
+    assert prediction.metadata["authority_status"] == "review_required"
+    assert prediction.metadata["measurement_authority"] == "pdf_scaled"
+    assert prediction.metadata["source_owned_ceiling_lining"] is True
+    assert prediction.metadata["commercial_review_required"] is True
+    assert prediction.metadata["physical_scale_record_id"]
+    assert prediction.metadata["room_entity_ids"]
+    assert extractor.extraction_status["ceiling_lining"] == "resolved"
+    assert extractor.ceiling_lining_live["status"] == "corroborated"
+
+
+def test_generic_extractor_keeps_ratio_only_ceiling_out_of_live_predictions(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "extractor-ratio-only-ceiling.pdf"
+    _write_single_plan(path, include_scale_bar=False)
+
+    extractor = GenericPlanReaderExtractor()
+    predictions = extractor.extract_from_pdf(
+        path,
+        collect_item35_shadow=False,
+    )
+
+    assert not any(prediction.tag == "ceiling_lining" for prediction in predictions)
+    assert extractor.extraction_status["ceiling_lining"] == "abstained"
+    assert extractor.ceiling_lining_live["reason_codes"] == [
+        LIVE_CEILING_LINING_SCALE_UNAVAILABLE
+    ]
+
+
+def test_generic_extractor_keeps_partial_finish_coverage_out_of_live_predictions(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "extractor-partial-ceiling.pdf"
+    _write_single_plan(path, include_right_finish=False)
+
+    extractor = GenericPlanReaderExtractor()
+    predictions = extractor.extract_from_pdf(
+        path,
+        collect_item35_shadow=False,
+    )
+
+    assert not any(prediction.tag == "ceiling_lining" for prediction in predictions)
+    assert extractor.extraction_status["ceiling_lining"] == "abstained"
+    assert extractor.ceiling_lining_live["reason_codes"] == [
+        LIVE_CEILING_LINING_FINISH_INCOMPLETE
+    ]
