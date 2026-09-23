@@ -562,9 +562,15 @@ class NetWallBooleanUnionProducer:
                 continue
 
             void_record = void_result.record
-            # Check host wall identity
-            if void_record.host_wall_id != selector.physical_wall_id:
-                # Opening belongs to another physical wall; ignore for this wall
+            # Check whole-wall identity. Live composition addresses a physical
+            # whole wall by the sealed wall_local_frame_id shared by all openings
+            # on that wall. host_wall_id is opening-scoped legacy identity and
+            # remains accepted only for backward-compatible producer fixtures.
+            if (
+                void_record.wall_local_frame_id != selector.physical_wall_id
+                and void_record.host_wall_id != selector.physical_wall_id
+            ):
+                # Opening belongs to another physical wall/frame; ignore it.
                 continue
 
             # Verify lineage
