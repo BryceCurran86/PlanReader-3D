@@ -54,7 +54,7 @@ from pb_zero_opening_wall_frame_authority import (
 )
 
 
-GROSS_WALL_GEOMETRY_SCHEMA_VERSION = "1.0.0"
+GROSS_WALL_GEOMETRY_SCHEMA_VERSION = "1.1.0"
 
 GROSS_WALL_GEOMETRY_RESOLVED = "gross_wall_geometry_resolved"
 GROSS_WALL_GEOMETRY_WALL_UNRESOLVED = "gross_wall_geometry_wall_unresolved"
@@ -154,6 +154,7 @@ class GrossWallGeometryRecord:
     height_m: float
     gross_area_m2: float
     polygon_wkb_hex: str
+    member_wall_candidate_ids: tuple[str, ...] = ()
     coordinate_unit: str = METRE
     schema_version: str = GROSS_WALL_GEOMETRY_SCHEMA_VERSION
 
@@ -858,6 +859,7 @@ class GrossWallGeometryProducer:
             "height_m": height_m,
             "gross_area_m2": gross_area_m2,
             "polygon_wkb_hex": polygon.wkb_hex,
+            "member_wall_candidate_ids": frame_member_ids,
             "coordinate_unit": METRE,
             "schema_version": GROSS_WALL_GEOMETRY_SCHEMA_VERSION,
         }
