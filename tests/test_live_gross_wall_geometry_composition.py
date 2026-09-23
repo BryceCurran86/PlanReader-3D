@@ -72,6 +72,37 @@ def test_live_gross_wall_never_defaults_height_without_cross_sheet_identity() ->
     assert replay.record is None
 
 
+def test_live_gross_wall_uses_shared_whole_wall_frame_identity() -> None:
+    source, wall_opening, physical_void = _one_page_chain()
+
+    void_trace = physical_void.traces[0]
+    void_selector = physical_void.void_selectors[void_trace.opening_identity_id]
+    void_authority = physical_void.physical_opening_void_authorities[
+        void_trace.page_id
+    ]
+    void_result = void_authority.resolve(void_selector)
+    assert void_result.status is EvidenceResolutionStatus.CORROBORATED
+    assert void_result.record is not None
+    void_record = void_result.record
+
+    # The binding id is intentionally opening-scoped. Downstream gross/net wall
+    # truth must instead use the producer-owned shared whole-wall frame.
+    assert void_record.host_wall_id != void_record.wall_local_frame_id
+
+    composition = compose_live_gross_wall_geometry(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+        physical_void_composition=physical_void,
+    )
+
+    assert len(composition.traces) == 1
+    trace = composition.traces[0]
+    assert trace.physical_wall_id == void_record.wall_local_frame_id
+    assert trace.physical_wall_id != void_record.host_wall_id
+    assert void_record.wall_local_frame_id in composition.gross_selectors
+    assert void_record.host_wall_id not in composition.gross_selectors
+
+
 def test_live_gross_wall_public_interface_has_no_height_or_area_truth_inputs() -> None:
     import inspect
 
