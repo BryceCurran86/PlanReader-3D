@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import fitz
+
 from pb_gross_wall_geometry_authority import GROSS_WALL_GEOMETRY_HEIGHT_UNRESOLVED
 from pb_live_gross_wall_geometry_composition import (
+    LIVE_GROSS_WALL_COVERAGE_INCOMPLETE,
     LIVE_GROSS_WALL_PARTIAL,
     compose_live_gross_wall_geometry,
 )
@@ -70,6 +73,95 @@ def test_live_gross_wall_never_defaults_height_without_cross_sheet_identity() ->
     replay = composition.gross_wall_geometry_authority.resolve(selector)
     assert replay.status is EvidenceResolutionStatus.ABSTAINED
     assert replay.record is None
+
+
+def test_live_gross_wall_uses_shared_whole_wall_frame_identity() -> None:
+    source, wall_opening, physical_void = _one_page_chain()
+
+    void_trace = physical_void.traces[0]
+    void_selector = physical_void.void_selectors[void_trace.opening_identity_id]
+    void_authority = physical_void.physical_opening_void_authorities[
+        void_trace.page_id
+    ]
+    void_result = void_authority.resolve(void_selector)
+    assert void_result.status is EvidenceResolutionStatus.CORROBORATED
+    assert void_result.record is not None
+    void_record = void_result.record
+
+    # The binding id is intentionally opening-scoped. Downstream gross/net wall
+    # truth must instead use the producer-owned shared whole-wall frame.
+    assert void_record.host_wall_id != void_record.wall_local_frame_id
+
+    composition = compose_live_gross_wall_geometry(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+        physical_void_composition=physical_void,
+    )
+
+    assert len(composition.traces) == 1
+    trace = composition.traces[0]
+    assert trace.physical_wall_id == void_record.wall_local_frame_id
+    assert trace.physical_wall_id != void_record.host_wall_id
+    assert void_record.wall_local_frame_id in composition.gross_selectors
+    assert void_record.host_wall_id not in composition.gross_selectors
+
+
+def test_live_gross_wall_blocks_when_selected_page_has_zero_opening_wall_coverage() -> None:
+    doc = fitz.open(stream=_complete_void_pdf(), filetype="pdf")
+    try:
+        page = doc.new_page(width=760.0, height=650.0)
+        # A separate source-owned wall on the second selected plan page. It has
+        # no aperture, so it cannot appear in the opening-host frame inventory.
+        page.draw_line(
+            fitz.Point(80.0, 250.0),
+            fitz.Point(300.0, 250.0),
+            width=1.0,
+        )
+        page.draw_line(
+            fitz.Point(80.0, 270.0),
+            fitz.Point(300.0, 270.0),
+            width=1.0,
+        )
+        payload = bytes(doc.tobytes(garbage=4, deflate=True))
+    finally:
+        doc.close()
+
+    source = SourceVisibilityProducer(
+        producer_method="live-gross-wall-zero-opening-coverage-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="live-gross-wall-zero-opening-coverage",
+        source_bytes=payload,
+        source_locator="memory://live-gross-wall-zero-opening-coverage.pdf",
+    )
+    wall_opening = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1", "2"),
+    )
+    assert wall_opening.status is EvidenceResolutionStatus.CORROBORATED
+    page_two = next(trace for trace in wall_opening.wall_scopes if trace.page_id == "2")
+    assert page_two.scope_complete
+    assert page_two.wall_candidate_ids
+
+    physical_void = compose_live_physical_opening_voids(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+    assert physical_void.status is EvidenceResolutionStatus.CORROBORATED
+
+    composition = compose_live_gross_wall_geometry(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+        physical_void_composition=physical_void,
+    )
+
+    # Resolving every opening-host wall is not enough to claim complete wall
+    # coverage. The unopened wall on page 2 must keep this layer fail-closed
+    # until a producer-owned no-opening frame/gross path exists.
+    assert composition.status is EvidenceResolutionStatus.ABSTAINED
+    assert LIVE_GROSS_WALL_COVERAGE_INCOMPLETE in composition.reason_codes
 
 
 def test_live_gross_wall_public_interface_has_no_height_or_area_truth_inputs() -> None:
