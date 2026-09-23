@@ -14,6 +14,7 @@ from pb_source_visibility_authority import (
     VISIBLE_SOURCE_OBSERVATION_EXISTS,
     VISIBILITY_ACTIVE_CLIP_UNRESOLVED,
     VISIBILITY_CLIP_ASSOCIATION_UNKNOWN,
+    VISIBILITY_CLIP_STATE_INCONSISTENT,
     VISIBILITY_PROVEN_NO_ACTIVE_CLIP,
     VISIBILITY_PROVEN_RECTANGULAR_CLIP,
     VISIBILITY_RECTANGULAR_CLIP_EXCLUDES_SEGMENT,
@@ -184,6 +185,73 @@ def test_proven_rectangular_clip_requires_full_segment_containment() -> None:
         VISIBILITY_RECTANGULAR_CLIP_EXCLUDES_SEGMENT,
     )
 
+    outside = classify_native_segment_visibility(
+        {
+            "x1": 110.0,
+            "y1": 10.0,
+            "x2": 120.0,
+            "y2": 10.0,
+            "clip_known": True,
+            "clip_present": True,
+            "clip": [0.0, 0.0, 100.0, 100.0],
+            "clip_shape_known": True,
+            "clip_exact_rect": [0.0, 0.0, 100.0, 100.0],
+        }
+    )
+    assert outside.visible is False
+    assert outside.reason_codes == (
+        VISIBILITY_RECTANGULAR_CLIP_EXCLUDES_SEGMENT,
+    )
+
+
+@pytest.mark.parametrize(
+    "exact_rect",
+    [
+        None,
+        [0.0, 0.0, float("nan"), 100.0],
+        [0.0, 0.0, float("inf"), 100.0],
+        [100.0, 0.0, 0.0, 100.0],
+        [0.0, 0.0, 0.0, 100.0],
+        [0.0, 0.0, 100.0],
+    ],
+)
+def test_claimed_rectangular_clip_with_invalid_exact_rect_fails_closed(
+    exact_rect,
+) -> None:
+    decision = classify_native_segment_visibility(
+        {
+            "x1": 10.0,
+            "y1": 10.0,
+            "x2": 20.0,
+            "y2": 10.0,
+            "clip_known": True,
+            "clip_present": True,
+            "clip": [0.0, 0.0, 100.0, 100.0],
+            "clip_shape_known": True,
+            "clip_exact_rect": exact_rect,
+        }
+    )
+    assert decision.visible is False
+    assert decision.reason_codes == (VISIBILITY_CLIP_STATE_INCONSISTENT,)
+
+
+def test_exact_clip_proof_rejects_conflicting_diagnostic_scissor() -> None:
+    decision = classify_native_segment_visibility(
+        {
+            "x1": 10.0,
+            "y1": 10.0,
+            "x2": 20.0,
+            "y2": 10.0,
+            "clip_known": True,
+            "clip_present": True,
+            "clip": [50.0, 50.0, 60.0, 60.0],
+            "clip_shape_known": True,
+            "clip_exact_rect": [0.0, 0.0, 100.0, 100.0],
+        }
+    )
+    assert decision.visible is False
+    assert decision.reason_codes == (VISIBILITY_CLIP_STATE_INCONSISTENT,)
+
 
 def test_axis_aligned_quad_is_exact_rectangular_clip_proof() -> None:
     class _Point:
@@ -225,7 +293,9 @@ def test_unknown_clip_association_is_never_authority_visible() -> None:
     assert decision.reason_codes == (VISIBILITY_CLIP_ASSOCIATION_UNKNOWN,)
 
 
-def test_any_active_clip_is_fail_closed_until_clip_shape_is_independently_proven() -> None:
+def test_scissor_alone_cannot_unlock_active_clip_visibility() -> None:
+    # Adversarial mutation: even a caller-supplied scissor and exact-rect-like
+    # payload cannot unlock visibility without producer-owned shape proof.
     decision = classify_native_segment_visibility(
         {
             "x1": 1.0,
@@ -235,6 +305,8 @@ def test_any_active_clip_is_fail_closed_until_clip_shape_is_independently_proven
             "clip_known": True,
             "clip_present": True,
             "clip": [0.0, 0.0, 100.0, 100.0],
+            "clip_shape_known": False,
+            "clip_exact_rect": [0.0, 0.0, 100.0, 100.0],
         }
     )
     assert decision.visible is False

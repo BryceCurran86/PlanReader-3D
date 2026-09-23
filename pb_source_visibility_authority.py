@@ -139,10 +139,9 @@ def _segment_geometry(segment: Mapping[str, object]) -> tuple[float, float, floa
     return geometry
 
 
-def _exact_clip_rect(
-    segment: Mapping[str, object],
+def _finite_rect(
+    value: object,
 ) -> Optional[tuple[float, float, float, float]]:
-    value = segment.get("clip_exact_rect")
     if value is None:
         return None
     try:
@@ -151,9 +150,15 @@ def _exact_clip_rect(
         return None
     if not all(math.isfinite(item) for item in (x0, y0, x1, y1)):
         return None
-    if x1 < x0 or y1 < y0:
+    if x1 <= x0 or y1 <= y0:
         return None
     return (x0, y0, x1, y1)
+
+
+def _exact_clip_rect(
+    segment: Mapping[str, object],
+) -> Optional[tuple[float, float, float, float]]:
+    return _finite_rect(segment.get("clip_exact_rect"))
 
 
 def _geometry_fully_inside_rect(
@@ -172,6 +177,20 @@ def _geometry_fully_inside_rect(
         ):
             return False
     return True
+
+
+def _rect_fully_inside_rect(
+    inner: tuple[float, float, float, float],
+    outer: tuple[float, float, float, float],
+    *,
+    tolerance: float = 1e-6,
+) -> bool:
+    return (
+        inner[0] >= outer[0] - tolerance
+        and inner[1] >= outer[1] - tolerance
+        and inner[2] <= outer[2] + tolerance
+        and inner[3] <= outer[3] + tolerance
+    )
 
 
 def classify_native_segment_visibility(
@@ -216,8 +235,27 @@ def classify_native_segment_visibility(
             return NativeSegmentVisibilityDecision(
                 visible=False,
                 geometry=geometry,
-                reason_codes=(VISIBILITY_RECTANGULAR_CLIP_EXCLUDES_SEGMENT,),
+                reason_codes=(VISIBILITY_CLIP_STATE_INCONSISTENT,),
             )
+
+        # PyMuPDF's diagnostic scissor is never clip-shape authority. When
+        # present, it may only veto the independently proven exact rectangle:
+        # malformed scissor data, or a scissor that cannot contain the exact
+        # clip intersection, is contradictory producer evidence and fails
+        # closed. A missing scissor does not weaken the source-owned exact-path
+        # proof and therefore is not itself a contradiction.
+        if clip is not None:
+            diagnostic_clip = _finite_rect(clip)
+            if diagnostic_clip is None or not _rect_fully_inside_rect(
+                exact_rect,
+                diagnostic_clip,
+            ):
+                return NativeSegmentVisibilityDecision(
+                    visible=False,
+                    geometry=geometry,
+                    reason_codes=(VISIBILITY_CLIP_STATE_INCONSISTENT,),
+                )
+
         if not _geometry_fully_inside_rect(geometry, exact_rect):
             return NativeSegmentVisibilityDecision(
                 visible=False,
