@@ -555,11 +555,10 @@ class BenchmarkAccuracyEngine:
         Maintains complete architectural decoupling from ground truth BOQs.
         """
         extractor = GenericPlanReaderExtractor()
-        # Item35 is diagnostic shadow evidence and does not publish scored
-        # quantities. Avoid its full-document observation replay in benchmarks.
-        preds = extractor.extract_from_pdf(
-            pdf_path, pages=pages, collect_item35_shadow=False
-        )
+        # Execute the same production extractor path used outside benchmarks.
+        # Native source visibility is batch-published, so Item35 authority
+        # execution no longer requires a benchmark-only bypass.
+        preds = extractor.extract_from_pdf(pdf_path, pages=pages)
         return [p.to_dict() for p in preds]
 
     def evaluate_benchmark(
