@@ -165,3 +165,4 @@ jobs:
             /tmp/benchmark-manifest-diff.txt
             /tmp/before-out
             /tmp/after
+# diagnostic synchronize trigger
