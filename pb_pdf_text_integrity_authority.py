@@ -27,7 +27,7 @@ from pb_source_observation_authority import (
 )
 
 
-PDF_TEXT_INTEGRITY_SCHEMA_VERSION = "1.0.0"
+PDF_TEXT_INTEGRITY_SCHEMA_VERSION = "1.1.0"
 TRUSTED_PDF_TEXT = "trusted_pdf_text"
 TEXT_INTEGRITY_RECEIPT_UNAVAILABLE = "text_integrity_receipt_unavailable"
 TEXT_INTEGRITY_RECEIPT_MISMATCH = "text_integrity_receipt_mismatch"
@@ -127,6 +127,9 @@ class PdfTextIntegrityReceipt:
     font_subtype: str = ""
     font_name: str = ""
     sequence_number: Optional[int] = None
+    block_no: Optional[int] = None
+    line_no: Optional[int] = None
+    word_no: Optional[int] = None
     schema_version: str = PDF_TEXT_INTEGRITY_SCHEMA_VERSION
 
 
@@ -613,6 +616,9 @@ def build_pdf_text_integrity_receipt(
     source_partition_id: str,
     geometry: Sequence[object],
     decision: NativeTextIntegrityDecision,
+    block_no: Optional[int] = None,
+    line_no: Optional[int] = None,
+    word_no: Optional[int] = None,
 ) -> PdfTextIntegrityReceipt:
     bbox = _rect_tuple(geometry)
     payload = {
@@ -632,6 +638,9 @@ def build_pdf_text_integrity_receipt(
         "font_subtype": decision.font_subtype,
         "font_name": decision.font_name,
         "sequence_number": decision.sequence_number,
+        "block_no": None if block_no is None else int(block_no),
+        "line_no": None if line_no is None else int(line_no),
+        "word_no": None if word_no is None else int(word_no),
     }
     receipt_id = stable_contract_id("pdf_text_integrity", payload, digest_chars=32)
     return PdfTextIntegrityReceipt(receipt_id=receipt_id, **payload)
