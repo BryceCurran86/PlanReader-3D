@@ -2540,9 +2540,17 @@ class GenericPlanReaderExtractor:
                 collect_live_physical_net_wall_claim,
             )
 
+            physical_net_pages = [
+                p
+                for p in target_pages
+                if (
+                    0 <= p < len(doc)
+                    and self.is_drawing_page(doc[p].get_text("text"), doc[p])
+                )
+            ]
             physical_wall_result = collect_live_physical_net_wall_claim(
                 p_path,
-                pages=target_pages,
+                pages=physical_net_pages,
             )
             self.physical_net_wall_live = {
                 "status": physical_wall_result.status.value,
