@@ -234,3 +234,5 @@ def test_canonical_five_physical_net_wall_diagnostic(tmp_path: Path) -> None:
     }
 
     pytest.fail("CANONICAL_FIVE_RESULT=" + json.dumps(payload, sort_keys=True))
+
+# Synchronize trigger after retargeting diagnostic PR to main.
