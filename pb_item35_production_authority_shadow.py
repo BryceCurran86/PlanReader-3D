@@ -234,6 +234,16 @@ def collect_item35_authority_shadow(
     if not doc_id:
         return empty_item35_authority_shadow(reason="document_id_unavailable")
 
+    if pages is None:
+        requested_source_page_ids: tuple[str, ...] | None = None
+    else:
+        requested_source_page_ids = tuple(
+            str(int(page_index) + 1)
+            for page_index in sorted({int(value) for value in pages})
+        )
+        if not requested_source_page_ids:
+            return empty_item35_authority_shadow(reason="page_scope_unavailable")
+
     source = SourceVisibilityProducer(
         producer_method="planreader_live_item35_shadow",
         producer_version=ITEM35_PRODUCTION_SHADOW_SCHEMA_VERSION,
@@ -242,19 +252,16 @@ def collect_item35_authority_shadow(
         document_id=doc_id,
         source_bytes=payload,
         source_locator=str(path),
+        page_ids=requested_source_page_ids,
     )
 
     if pages is None:
-        scoped_page_ids = None
-        decision_scope_id = f"item35:document:{published.revision.revision_id}"
-        scoped_page_ids = tuple(str(page) for page in published.coverage.decoded_pages)
-    else:
         scoped_page_ids = tuple(
-            str(int(page_index) + 1)
-            for page_index in sorted({int(value) for value in pages})
+            str(page) for page in published.coverage.decoded_pages
         )
-        if not scoped_page_ids:
-            return empty_item35_authority_shadow(reason="page_scope_unavailable")
+        decision_scope_id = f"item35:document:{published.revision.revision_id}"
+    else:
+        scoped_page_ids = requested_source_page_ids
         decision_scope_id = (
             f"item35:pages:{published.revision.revision_id}:"
             + ",".join(scoped_page_ids)
