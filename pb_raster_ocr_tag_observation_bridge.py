@@ -26,6 +26,7 @@ from typing import List, Optional, Sequence, Tuple
 from PIL import Image
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_opening_tag_normalization import normalize_opening_tag
 from pb_portable_raster_ocr_authority import (
     MockOCRBackend,
     NullOCRBackend,
@@ -306,6 +307,18 @@ class RasterOCRTagObservationProducer:
         for line in raw_lines:
             text = str(line.text or "").strip()
             if not text:
+                continue
+            # This producer exists only to publish explicit opening identity
+            # callouts. Do not clone arbitrary OCR titles, dimensions, notes,
+            # or schedule-row text into the source snapshot under a tag kind.
+            # Reuse the repository's generic W/D identity grammar and require
+            # the OCR line itself to be the tag, rather than merely containing
+            # one inside a longer schedule/note line.
+            normalized_tag = normalize_opening_tag(text)
+            if (
+                normalized_tag is None
+                or normalized_tag.raw_text.strip().upper() != text.upper()
+            ):
                 continue
             try:
                 lx0, ly0, lx1, ly1 = (float(v) for v in line.bbox_px)
