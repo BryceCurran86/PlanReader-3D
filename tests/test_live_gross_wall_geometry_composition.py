@@ -112,14 +112,12 @@ def test_live_gross_wall_targets_proven_zero_opening_wall_without_coverage_gap()
         page = doc.new_page(width=760.0, height=650.0)
         # A separate source-owned wall on the second selected plan page. It has
         # no aperture, so it cannot appear in the opening-host frame inventory.
+        # Use one centreline candidate: two unsupported parallel faces are
+        # intentionally ambiguous until an independent relation proves they are
+        # the same physical wall.
         page.draw_line(
             fitz.Point(80.0, 250.0),
             fitz.Point(300.0, 250.0),
-            width=1.0,
-        )
-        page.draw_line(
-            fitz.Point(80.0, 270.0),
-            fitz.Point(300.0, 270.0),
             width=1.0,
         )
         payload = bytes(doc.tobytes(garbage=4, deflate=True))
