@@ -16,6 +16,12 @@ from pb_migration_contracts import ViewportEvidence, ViewportResolutionStatus
 from pb_migration_provider_envelope import ProviderContext
 from pb_source_owned_ceiling_lining_pipeline import run_source_owned_ceiling_lining_shadow
 from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_viewport_segmentation import (
+    calibrate_viewport_layout,
+    extract_vector_frames,
+    extract_view_title_anchors,
+    segment_page_viewports,
+)
 import fitz
 
 
@@ -81,6 +87,29 @@ def test_ghazi_ceiling_current_main_diagnostic(tmp_path: Path) -> None:
     pdf = fitz.open(stream=raw, filetype="pdf")
     try:
         page = pdf[166]
+        page_text = page.get_text("text") or ""
+        relevant_text_lines = [
+            line.strip()
+            for line in page_text.splitlines()
+            if line.strip()
+            and any(
+                token in line.upper()
+                for token in (
+                    "PLAN",
+                    "LAYOUT",
+                    "DESIGN",
+                    "SCHEME",
+                    "SCALE",
+                    "CEILING",
+                    "CHIP",
+                    "BOARD",
+                )
+            )
+        ]
+        calibration = calibrate_viewport_layout(page)
+        title_anchors = extract_view_title_anchors(page)
+        vector_frames = extract_vector_frames(page, calibration)
+        all_segmented = segment_page_viewports(page, page_number=167)
         segmented_viewports = tuple(
             authoritative_floor_plan_viewports(page, page_number=167)
         )
@@ -204,6 +233,41 @@ def test_ghazi_ceiling_current_main_diagnostic(tmp_path: Path) -> None:
             "coverage_state": published.coverage.state,
             "visible_observation_count": len(published.visible_observation_ids),
             "text_observation_count": len(published.text_observation_ids),
+        },
+        "viewport_diagnostic": {
+            "page_size": [
+                float(page.rect.width) if 'page' in locals() else None,
+                float(page.rect.height) if 'page' in locals() else None,
+            ],
+            "relevant_text_lines": relevant_text_lines,
+            "title_anchors": [
+                {
+                    "text": anchor.text,
+                    "bbox": list(anchor.bbox),
+                    "view_type": anchor.view_type,
+                }
+                for anchor in title_anchors
+            ],
+            "vector_frames": [list(frame) for frame in vector_frames],
+            "segmented": [
+                {
+                    "view_id": vp.view_id,
+                    "view_type": vp.view_type,
+                    "label": vp.label,
+                    "title_bbox": list(vp.title_bbox),
+                    "bounding_box": (
+                        list(vp.bounding_box)
+                        if vp.bounding_box is not None
+                        else None
+                    ),
+                    "status": vp.status,
+                    "boundary_source": vp.boundary_source,
+                    "confidence": vp.confidence,
+                    "notes": list(vp.notes),
+                    "provenance": vp.provenance,
+                }
+                for vp in all_segmented
+            ],
         },
         "stages": stages,
         "ceiling_lining_live": extractor.ceiling_lining_live,
