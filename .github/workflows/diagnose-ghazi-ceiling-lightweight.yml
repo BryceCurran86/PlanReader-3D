@@ -43,6 +43,20 @@ jobs:
           from pb_wall_topology_diagnostics import collect_topology_from_page
 
           doc = fitz.open("/tmp/ghazi.pdf")
+          source_keyword_hits = []
+          source_terms = ("ceiling", "chipboard", "chip board", "ceiling lining", "softboard", "gypsum")
+          for source_page_index in range(doc.page_count):
+              source_text = doc[source_page_index].get_text("text")
+              hit_lines = [
+                  line.strip()
+                  for line in source_text.splitlines()
+                  if any(term in line.casefold() for term in source_terms)
+              ]
+              if hit_lines:
+                  source_keyword_hits.append({
+                      "page_no": source_page_index + 1,
+                      "lines": hit_lines[:80],
+                  })
           page = doc[166]
           text = page.get_text("text")
           native = extract_native_page(page)
@@ -116,6 +130,7 @@ jobs:
           pix.save("/tmp/ghazi-page-167.png")
 
           report = {
+              "source_ceiling_keyword_hits": source_keyword_hits,
               "page_rect": [float(page.rect.x0), float(page.rect.y0), float(page.rect.x1), float(page.rect.y1)],
               "plan_floor_layout_bboxes": plan_title_rects,
               "native_segments": segment_rows,
@@ -177,4 +192,11 @@ jobs:
         with:
           name: ghazi-page-167-render
           path: /tmp/ghazi-page-167.png
+          if-no-files-found: error
+
+      - name: Upload verified source for local diagnostic replay
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghazi-verified-source
+          path: /tmp/ghazi.pdf
           if-no-files-found: error
