@@ -1,0 +1,74 @@
+name: DIAGNOSTIC KSTVET C47-D Source Evidence — DO NOT MERGE
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  inspect-kstvet-c47d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download and SHA-verify registered KSTVET source
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf" \
+            -o benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+          echo "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/1727358888238-bq-nd-drawing.pdf" | sha256sum -c -
+      - name: Inspect page 54 support evidence
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import fitz
+          from pb_dimension_chain_evidence_extractor import extract_dimension_chains_from_page
+          from pb_secondary_area_support_evidence import extract_secondary_area_support_evidence_from_page
+
+          path = "benchmarks/sources/1727358888238-bq-nd-drawing.pdf"
+          doc = fitz.open(path)
+          page = doc[53]
+          print("PAGE_COUNT", doc.page_count)
+          print("PAGE_54_TEXT_BEGIN")
+          print(page.get_text("text"))
+          print("PAGE_54_TEXT_END")
+
+          print("RELEVANT_BLOCKS_BEGIN")
+          for block in page.get_text("blocks") or []:
+              text = " ".join(str(block[4]).split()).strip()
+              upper = text.upper()
+              if any(k in upper for k in ("VERANDA", "PILLAR", "COLUMN", "POST", "PIER", "CHS", "RHS", "SHS")):
+                  print(tuple(round(float(v), 2) for v in block[:4]), repr(text))
+          print("RELEVANT_BLOCKS_END")
+
+          chains = extract_dimension_chains_from_page(page, page_num=54, view_id="page_54")
+          print("DIMENSION_CHAINS_BEGIN")
+          for chain in chains:
+              values = [round(float(obs.value_m), 4) for obs in chain.observations]
+              boxes = [getattr(obs, "bbox", None) for obs in chain.observations]
+              print({
+                  "chain_id": str(chain.chain_id),
+                  "orientation": str(chain.orientation),
+                  "values_m": values,
+                  "bboxes": boxes,
+              })
+          print("DIMENSION_CHAINS_END")
+
+          evidence = extract_secondary_area_support_evidence_from_page(
+              page, source_page=54, dimension_chains=chains
+          )
+          print("SECONDARY_SUPPORT_EVIDENCE", evidence)
+
+          print("DRAWING_PRIMITIVES", len(page.get_drawings() or []))
+          doc.close()
+          PY
