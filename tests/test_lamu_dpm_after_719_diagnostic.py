@@ -65,8 +65,42 @@ def test_lamu_dpm_after_structural_sheet_scan(tmp_path: Path) -> None:
         if item.item_id == "LMU-E3-C"
     )
 
+    import fitz
+    page_audit = []
+    doc = fitz.open(str(source))
+    try:
+        for page_index in range(40, 45):
+            page = doc[page_index]
+            text_value = page.get_text("text") or ""
+            lines = [
+                line.strip()
+                for line in text_value.splitlines()
+                if any(
+                    token in line.lower()
+                    for token in (
+                        "poly", "dpm", "d.p.m", "membrane", "a142", "mesh",
+                        "foundation", "slab", "blinding", "hardcore",
+                    )
+                )
+            ]
+            page_audit.append(
+                {
+                    "page": page_index + 1,
+                    "is_drawing_page": extractor.is_drawing_page(text_value, page),
+                    "has_dpm": extractor._has_dpm_specification(text_value),
+                    "has_large_raster": extractor._page_has_large_raster(page),
+                    "text_length": len(text_value.strip()),
+                    "matching_lines": lines[:80],
+                    "drawing_count": len(page.get_drawings() or []),
+                    "image_count": len(page.get_images() or []),
+                }
+            )
+    finally:
+        doc.close()
+
     payload = {
         "production_sha": "095353d2a39e8b09c1e321f03d98abdaa8cb8f6d",
+        "page_audit": page_audit,
         "dpm_prediction": dpm,
         "target_LMU_E3_C": target,
         "project": {
