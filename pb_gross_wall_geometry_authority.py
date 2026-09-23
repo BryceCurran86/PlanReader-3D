@@ -326,6 +326,18 @@ class GrossWallGeometryProducer:
                 ),
             )
 
+        candidate_records = tuple(getattr(candidates_result, "records", ()))
+        selector_matches_candidate = any(
+            getattr(record, "wall_candidate_id", None) == selector.physical_wall_id
+            or getattr(
+                getattr(record, "physical_identity", None),
+                "physical_wall_id",
+                None,
+            )
+            == selector.physical_wall_id
+            for record in candidate_records
+        )
+
         # Resolve the whole-wall frame before deciding which identity class the
         # selector addresses. The live path uses whole_wall_frame_id as the
         # canonical wall identity. Legacy candidate-addressed selectors remain
@@ -370,7 +382,11 @@ class GrossWallGeometryProducer:
                 selector,
                 _blocked(
                     EvidenceResolutionStatus.ABSTAINED,
-                    GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED,
+                    (
+                        GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED
+                        if selector_matches_candidate
+                        else GROSS_WALL_GEOMETRY_WALL_UNRESOLVED
+                    ),
                 ),
             )
 
@@ -419,7 +435,6 @@ class GrossWallGeometryProducer:
                 ),
             )
 
-        candidate_records = tuple(getattr(candidates_result, "records", ()))
         frame_addressed = (
             selector.physical_wall_id == frame_evidence.whole_wall_frame_id
         )
