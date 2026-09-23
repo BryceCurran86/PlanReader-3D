@@ -1,0 +1,100 @@
+name: DIAGNOSTIC Murera Masonry Piers — DO NOT MERGE
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  inspect-murera-piers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download and SHA-verify registered Murera source
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf" \
+            -o benchmarks/sources/1785347143869-bqs-drawings.pdf
+          echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  benchmarks/sources/1785347143869-bqs-drawings.pdf" | sha256sum -c -
+      - name: Inspect page 225 source evidence
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import collections
+          import fitz
+          from pb_dimension_chain_evidence_extractor import extract_dimension_chains_from_page
+
+          path="benchmarks/sources/1785347143869-bqs-drawings.pdf"
+          doc=fitz.open(path)
+          print("PAGE_COUNT",doc.page_count)
+          page=doc[224]
+          print("PAGE_225_TEXT_BEGIN")
+          print(page.get_text("text"))
+          print("PAGE_225_TEXT_END")
+
+          print("RELEVANT_BLOCKS_BEGIN")
+          for block in page.get_text("blocks") or []:
+              text=" ".join(str(block[4]).split()).strip()
+              upper=text.upper()
+              if any(k in upper for k in ("PIER","FOUNDATION","300","MASONRY","COLUMN","POST","GRID")):
+                  print(tuple(round(float(v),2) for v in block[:4]),repr(text))
+          print("RELEVANT_BLOCKS_END")
+
+          chains=extract_dimension_chains_from_page(page,page_num=225,view_id="page_225")
+          print("DIMENSION_CHAINS_BEGIN")
+          for chain in chains:
+              vals=[round(float(obs.value_m),4) for obs in chain.observations]
+              boxes=[getattr(obs,"bbox",None) for obs in chain.observations]
+              if len(vals)>=2:
+                  print({"chain_id":str(chain.chain_id),"orientation":str(chain.orientation),"values_m":vals,"bboxes":boxes})
+          print("DIMENSION_CHAINS_END")
+
+          drawings=page.get_drawings() or []
+          candidates=[]
+          scale_ref=max(1.0,min(float(page.rect.width),float(page.rect.height)))
+          for idx,d in enumerate(drawings):
+              rect=d.get("rect")
+              if rect is None:
+                  continue
+              w=float(rect.width); h=float(rect.height)
+              if w<=0 or h<=0 or w>scale_ref*0.04 or h>scale_ref*0.04:
+                  continue
+              ratio=max(w,h)/min(w,h)
+              if ratio>1.25:
+                  continue
+              kinds=tuple(str(item[0]) for item in (d.get("items") or []))
+              cx=(float(rect.x0)+float(rect.x1))/2
+              cy=(float(rect.y0)+float(rect.y1))/2
+              candidates.append((idx,round(cx,2),round(cy,2),round(w,2),round(h,2),d.get("fill"),kinds))
+          print("SMALL_NEAR_SQUARE_COUNT",len(candidates))
+          clusters=collections.defaultdict(list)
+          for row in candidates:
+              _,cx,cy,w,h,fill,kinds=row
+              clusters[(round(w,1),round(h,1),bool(fill),kinds)].append(row)
+          print("REPEATED_SHAPES_BEGIN")
+          for key,rows in sorted(clusters.items(),key=lambda kv:-len(kv[1]))[:50]:
+              if len(rows)>=3:
+                  print("CLUSTER",key,"COUNT",len(rows),"CENTERS",[(r[1],r[2]) for r in rows[:40]])
+          print("REPEATED_SHAPES_END")
+
+          pix=page.get_pixmap(matrix=fitz.Matrix(1.2,1.2),alpha=False)
+          pix.save("/tmp/murera-page225.png")
+          doc.close()
+          PY
+      - name: Upload diagnostic page
+        uses: actions/upload-artifact@v4
+        with:
+          name: murera-page225
+          path: /tmp/murera-page225.png
+          if-no-files-found: error
