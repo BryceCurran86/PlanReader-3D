@@ -383,6 +383,9 @@ class SourceVisibilityProducer:
             tuple[str, str], PdfTextIntegrityReceipt
         ] = {}
         self._published_by_revision: dict[str, PublishedVisibleSourceSnapshot] = {}
+        self._published_by_source_snapshot: dict[
+            str, PublishedVisibleSourceSnapshot
+        ] = {}
 
     def authority(self) -> "SourceVisibilityAuthority":
         return SourceVisibilityAuthority(
@@ -535,6 +538,9 @@ class SourceVisibilityProducer:
             ocr_tag_observation_ids=tag_ids,
         )
         self._published_by_revision[updated.revision.revision_id] = updated
+        self._published_by_source_snapshot[
+            updated.base_source_snapshot_id
+        ] = updated
         return tuple(tags), updated
 
     def authenticated_ocr_tag_observations(
@@ -728,15 +734,18 @@ class SourceVisibilityProducer:
         document_id: str,
         source_bytes: bytes | bytearray | memoryview,
         source_locator: str,
+        page_ids: Sequence[object] | None = None,
     ) -> PublishedVisibleSourceSnapshot:
         immutable_bytes = bytes(source_bytes)
         base: PublishedSourceSnapshot = self._producer.ingest_native_pdf_bytes(
             document_id=document_id,
             source_bytes=immutable_bytes,
             source_locator=source_locator,
+            page_ids=page_ids,
         )
-        cached = self._published_by_revision.get(base.revision.revision_id)
+        cached = self._published_by_source_snapshot.get(base.snapshot.snapshot_id)
         if cached is not None:
+            self._published_by_revision[base.revision.revision_id] = cached
             return cached
 
         snapshot = base.snapshot
@@ -745,8 +754,8 @@ class SourceVisibilityProducer:
         text_receipts: list[tuple[str, PdfTextIntegrityReceipt]] = []
         pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
         try:
-            for page_index in range(int(pdf.page_count)):
-                page_number = page_index + 1
+            for page_number in base.coverage.decoded_pages:
+                page_index = int(page_number) - 1
                 page_id = str(page_number)
                 partition_id = f"page:{page_number}"
                 page = pdf.load_page(page_index)
@@ -900,6 +909,9 @@ class SourceVisibilityProducer:
             self._text_integrity_receipts[key] = receipt
 
         self._published_by_revision[published.revision.revision_id] = published
+        self._published_by_source_snapshot[
+            published.base_source_snapshot_id
+        ] = published
         return published
 
 
@@ -1145,6 +1157,9 @@ class SourceVisibilityProducer:
             ocr_tag_observation_ids=tuple(published.ocr_tag_observation_ids),
         )
         self._published_by_revision[updated.revision.revision_id] = updated
+        self._published_by_source_snapshot[
+            updated.base_source_snapshot_id
+        ] = updated
         return updated
 
 
