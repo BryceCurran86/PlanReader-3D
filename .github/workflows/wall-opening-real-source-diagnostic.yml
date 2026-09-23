@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: wall-opening-real-source-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   visibility-only:
     runs-on: ubuntu-latest
@@ -126,7 +130,7 @@ jobs:
       - name: Trace KSTVET and Lamu authority chain
         run: |
           set -euo pipefail
-          PYTHONPATH=. python scripts/diagnose_wall_opening_real_sources.py | tee /tmp/authority-trace.log
+          timeout 600s env PYTHONPATH=. python -u scripts/diagnose_wall_opening_real_sources.py | tee /tmp/authority-trace.log
 
       - name: Run current canonical five-project benchmark
         run: |
