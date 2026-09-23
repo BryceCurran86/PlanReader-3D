@@ -32,6 +32,7 @@ import pytest
 
 from pb_drawing_evidence_binding import (
     DrawingEvidenceBindingEngine,
+    DrawingViewClassifier,
     DrawingViewType,
     EvidenceGraph,
     EvidenceObservation,
@@ -472,3 +473,8 @@ def test_redteam_incomplete_dimensions_zero_deduction():
     instances = build_opening_instances_from_physical_openings(openings)
     # Both should be excluded from firm deduction instances
     assert len(instances) == 0
+
+
+def test_floor_layout_title_grammar_classifies_as_floor_plan():
+    assert DrawingViewClassifier.classify_text("PLAN : FLOOR LAYOUT") == DrawingViewType.FLOOR_PLAN
+    assert DrawingViewClassifier.classify_text("FLOOR LAYOUT") == DrawingViewType.FLOOR_PLAN

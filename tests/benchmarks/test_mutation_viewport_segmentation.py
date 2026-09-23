@@ -222,3 +222,27 @@ def test_schedule_and_detail_are_separate_from_plan_when_framed():
         DrawingViewType.DETAIL.value,
     }
     doc.close()
+
+
+def test_plan_floor_layout_title_is_supported_without_relaxing_prose_guard():
+    doc = fitz.open()
+    page = doc.new_page(width=640, height=420)
+    page.draw_rect(fitz.Rect(30, 30, 295, 350))
+    page.draw_rect(fitz.Rect(330, 30, 595, 350))
+    page.insert_text((80, 320), "PLAN : FLOOR LAYOUT", fontsize=11)
+    page.insert_text((400, 320), "LEGEND", fontsize=11)
+    doc = _reopen(doc)
+
+    viewports = segment_page_viewports(doc[0], page_number=1)
+    by_type = {v.view_type: v for v in viewports}
+    assert DrawingViewType.FLOOR_PLAN.value in by_type
+    assert by_type[DrawingViewType.FLOOR_PLAN.value].status == ViewportSegmentationStatus.RESOLVED.value
+    assert by_type[DrawingViewType.FLOOR_PLAN.value].bounding_box == pytest.approx((30, 30, 295, 350))
+    doc.close()
+
+    prose = fitz.open()
+    page = prose.new_page(width=400, height=300)
+    page.insert_text((40, 80), "NOTE: PLAN : FLOOR LAYOUT REVISED - REFER TO ARCHITECT", fontsize=10)
+    prose = _reopen(prose)
+    assert segment_page_viewports(prose[0], page_number=1) == []
+    prose.close()
