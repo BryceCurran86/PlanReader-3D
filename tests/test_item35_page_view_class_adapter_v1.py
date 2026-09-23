@@ -8,6 +8,9 @@ from pb_generic_opening_count_authority import (
     _SOURCE_AUTHENTICATED_COMPLETENESS_SEAL,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_portable_raster_ocr_authority import MockOCRBackend, OCRLine
+from pb_source_opening_candidate_authority import authenticate_viewport_decision
+from pb_viewport_segmentation import SegmentedViewport
 from pb_opening_universe_completeness_authority import (
     OpeningUniverseCompletenessAuthority,
     OpeningUniverseCompletenessRecord,
@@ -185,3 +188,84 @@ def test_page_scoped_generic_count_uses_authenticated_page_viewport() -> None:
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.record is not None
     assert result.record.count == 1
+
+
+def test_authenticated_page_view_class_survives_ocr_snapshot_augmentation() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="page-view-ocr-snapshot-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="view-ocr-doc",
+        source_bytes=_floor_plan_pdf(),
+        source_locator="memory://view-ocr.pdf",
+    )
+    selector = ViewportViewClassSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        viewport_id=page_viewport_id("1"),
+    )
+    initial = build_source_page_view_class_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    initial_result = initial.resolve(selector)
+    assert initial_result.status is EvidenceResolutionStatus.CORROBORATED
+    assert initial_result.record is not None
+    assert initial_result.record.view_kind == VIEW_KIND_FLOOR_PLAN
+
+    viewport = SegmentedViewport(
+        view_id=page_viewport_id("1"),
+        page_number=1,
+        view_type=VIEW_KIND_FLOOR_PLAN,
+        label="SOURCE FLOOR PLAN PAGE",
+        title_bbox=(0.0, 0.0, 0.0, 0.0),
+        bounding_box=(0.0, 0.0, 400.0, 250.0),
+        status="resolved",
+        boundary_source="producer_page_scope",
+        confidence=1.0,
+    )
+    decision = authenticate_viewport_decision(
+        viewport=viewport,
+        view_class_authority=initial,
+        selector=selector,
+    )
+    assert decision.status is EvidenceResolutionStatus.CORROBORATED
+
+    scale = 300.0 / 72.0
+    _tags, updated = source.augment_with_raster_ocr_tags_for_tests(
+        published.revision.revision_id,
+        viewport_decision=decision,
+        backend=MockOCRBackend(
+            (
+                OCRLine(
+                    text="W1",
+                    confidence=0.99,
+                    bbox_px=(100.0 * scale, 100.0 * scale, 120.0 * scale, 110.0 * scale),
+                    bbox_pt=(999.0, 999.0, 1000.0, 1000.0),
+                ),
+            )
+        ),
+    )
+    assert updated.snapshot.snapshot_id != published.snapshot.snapshot_id
+
+    current = build_source_page_view_class_authority(
+        source_visibility_producer=source,
+        revision_id=updated.revision.revision_id,
+        page_ids=("1",),
+    )
+    current_result = current.resolve(
+        ViewportViewClassSelector(
+            document_id=updated.revision.document_id,
+            revision_id=updated.revision.revision_id,
+            source_sha256=updated.revision.source_sha256,
+            snapshot_id=updated.snapshot.snapshot_id,
+            viewport_id=page_viewport_id("1"),
+        )
+    )
+    assert current_result.status is EvidenceResolutionStatus.CORROBORATED, current_result.reason_codes
+    assert current_result.record is not None
+    assert current_result.record.view_kind == VIEW_KIND_FLOOR_PLAN
