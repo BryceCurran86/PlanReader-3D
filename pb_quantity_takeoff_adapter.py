@@ -210,6 +210,15 @@ def _validate_quantity_trace(
     trace: CommercialTakeoffSourceTrace,
     authority: CommercialMeasurementAuthority,
 ) -> None:
+    metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+    if metadata.get("shadow_only") is True:
+        raise MissingCommercialAuthorityError(
+            "shadow-only QuantityEvidence cannot enter commercial projection"
+        )
+    if metadata.get("commercial_projection_allowed") is False:
+        raise MissingCommercialAuthorityError(
+            "QuantityEvidence explicitly blocks commercial projection"
+        )
     if quantity.blocking_reasons:
         raise MissingCommercialAuthorityError(
             "QuantityEvidence carries publication blockers: " + ", ".join(quantity.blocking_reasons)
