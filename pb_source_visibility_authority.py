@@ -416,6 +416,11 @@ class SourceVisibilityProducer:
         self._raster_visibility_receipts: dict[
             tuple[str, str], RasterSegmentVisibilityReceipt
         ] = {}
+        # Raster extraction is deterministic for immutable source bytes, the
+        # fixed render DPI, and the detector version. Cache successful render
+        # attempts per revision/page so repeated downstream compositions do not
+        # rerender and republish the same page into ever-growing snapshots.
+        self._raster_visibility_attempted_pages: set[tuple[str, str]] = set()
         self._text_integrity_receipts: dict[
             tuple[str, str], PdfTextIntegrityReceipt
         ] = {}
@@ -814,6 +819,10 @@ class SourceVisibilityProducer:
             {int(value) for value in selected_page_ids}
         ):
             page_id = str(page_number)
+            raster_attempt_key = (published.revision.revision_id, page_id)
+            if raster_attempt_key in self._raster_visibility_attempted_pages:
+                continue
+
             image_regions = self._producer.native_page_image_regions(
                 document_id=published.revision.document_id,
                 revision_id=published.revision.revision_id,
@@ -837,6 +846,10 @@ class SourceVisibilityProducer:
                 png_bytes,
                 dpi=RASTER_RENDER_DPI,
             )
+            # Once render + detection complete successfully, repeating the same
+            # immutable revision/page cannot produce new source evidence.
+            self._raster_visibility_attempted_pages.add(raster_attempt_key)
+
             if page_id in pages_with_visible and image_regions:
                 def _inside_image_region(segment) -> bool:
                     x0, y0, x1, y1 = segment.geometry_pt
