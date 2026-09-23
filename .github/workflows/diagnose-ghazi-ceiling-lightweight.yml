@@ -80,6 +80,38 @@ jobs:
               }
               for seg in (native.get("segments") or ())
           ]
+          image_rows = []
+          for image in page.get_images(full=True) or []:
+              xref = int(image[0])
+              rects = []
+              try:
+                  rects = [
+                      [float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)]
+                      for rect in page.get_image_rects(xref)
+                  ]
+              except Exception:
+                  rects = []
+              image_rows.append({
+                  "xref": xref,
+                  "pixel_width": int(image[2] or 0),
+                  "pixel_height": int(image[3] or 0),
+                  "bpc": int(image[4] or 0),
+                  "colorspace": str(image[5] or ""),
+                  "rects": rects,
+              })
+
+          drawing_rows = []
+          for idx, drawing in enumerate(page.get_drawings() or []):
+              rect = drawing.get("rect")
+              drawing_rows.append({
+                  "index": idx,
+                  "rect": (
+                      None if rect is None else
+                      [float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)]
+                  ),
+                  "item_kinds": [str(item[0]) for item in (drawing.get("items") or [])],
+              })
+
           pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
           pix.save("/tmp/ghazi-page-167.png")
 
@@ -87,6 +119,8 @@ jobs:
               "page_rect": [float(page.rect.x0), float(page.rect.y0), float(page.rect.x1), float(page.rect.y1)],
               "plan_floor_layout_bboxes": plan_title_rects,
               "native_segments": segment_rows,
+              "embedded_images": image_rows,
+              "drawing_paths": drawing_rows,
               "native_segment_count": len(native.get("segments") or ()),
               "native_word_count": len(native.get("words") or ()),
               "ceiling_text_lines": [ln for ln in lines if "ceiling" in ln.casefold()],
