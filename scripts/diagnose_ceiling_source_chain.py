@@ -146,6 +146,12 @@ def run(pdf_path: Path, *, page_no: int, expected_sha256: str | None, document_i
         source,
         page_ids=(str(page_no),),
     ).authority()
+    refreshed = source.published_snapshot_for_revision(
+        published.revision.revision_id
+    )
+    if refreshed is not None:
+        published = refreshed
+
     wall_selector = PhysicalWallCandidateSelector(
         document_id=published.revision.document_id,
         revision_id=published.revision.revision_id,
@@ -277,7 +283,7 @@ def run(pdf_path: Path, *, page_no: int, expected_sha256: str | None, document_i
             document = DocumentEvidence(
                 document_id=published.revision.document_id,
                 source_sha256=published.revision.source_sha256,
-                page_count=int(published.revision.page_count),
+                page_count=int(published.coverage.total_pages),
                 page_ids=(),
                 evidence_ids=(candidate.evidence_id,),
                 producer="diagnose-ceiling-source-chain",
@@ -389,7 +395,7 @@ def run(pdf_path: Path, *, page_no: int, expected_sha256: str | None, document_i
         "source": {
             "document_id": published.revision.document_id,
             "sha256": actual_sha,
-            "page_count": int(published.revision.page_count),
+            "page_count": int(published.coverage.total_pages),
             "diagnostic_page": page_no,
             "decoded_pages": list(published.coverage.decoded_pages),
         },
