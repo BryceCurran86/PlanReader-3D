@@ -88,6 +88,7 @@ class ZeroOpeningWallFrameSelector:
     source_sha256: str
     snapshot_id: str
     page_id: str
+    viewport_id: str
     decision_scope_id: str
     physical_wall_id: str
 
@@ -477,6 +478,22 @@ class ZeroOpeningWallFrameProducer:
         member_records_typed = tuple(
             record for record in member_records if record is not None
         )
+        viewport_ids = {
+            str(record.wall_candidate.viewport_id)
+            for record in member_records_typed
+            if str(record.wall_candidate.viewport_id)
+        }
+        if len(viewport_ids) != 1:
+            return self._store(
+                selector,
+                _blocked(
+                    EvidenceResolutionStatus.ABSTAINED,
+                    ZERO_OPENING_WALL_FRAME_GEOMETRY_UNRESOLVED,
+                    "zero_opening_wall_viewport_unresolved",
+                ),
+            )
+        viewport_id = next(iter(viewport_ids))
+
         paths = tuple(
             tuple(
                 (float(point[0]), float(point[1]))
@@ -512,6 +529,7 @@ class ZeroOpeningWallFrameProducer:
             "source_sha256": selector.source_sha256,
             "snapshot_id": selector.snapshot_id,
             "page_id": selector.page_id,
+            "viewport_id": viewport_id,
             "decision_scope_id": selector.decision_scope_id,
             "physical_wall_id": selector.physical_wall_id,
             "member_wall_candidate_ids": member_ids,
