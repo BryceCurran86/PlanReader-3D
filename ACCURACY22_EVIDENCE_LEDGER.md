@@ -38,16 +38,16 @@ STATUS: ROOT CAUSE FOUND
 
 ITEM: LMU-E3-C  
 EXPECTED: 132 SM 1000-gauge polythene DPM.  
-CURRENT OUTPUT: Older committed report: absent; canonical revalidation pending.  
-SOURCE EVIDENCE: Lamu structural/foundation sheet explicitly carries the DPM/polythene material note while the architectural plan supplies the independently derived floor-bed footprint.  
-FIRST PIPELINE FAILURE: `is_drawing_page()` rejected structural sheet titles such as FOUNDATION PLAN / FOUNDATION LAYOUT / SLAB DETAIL before the existing cross-page DPM evidence scan could inspect them.  
-ROOT CAUSE: Drawing-page classification excluded a legitimate structural evidence sheet; the DPM detector and slab-bound area path already existed.  
-FIX: PR #604 generically admits common foundation/slab structural drawing titles while preserving the existing BOQ/rate/amount exclusion. No quantity is inferred from the note itself.  
-TESTS ADDED: Foundation/slab-title classification; cross-sheet polythene note + independent plan footprint; membrane-absent abstention; BOQ-like false-positive rejection.  
-TEST RESULT: Full CI and Performance Fastpath green at `125340d1b4a9165c567199f185757a8e4b09d669`.  
-EXPECTED BENCHMARK IMPACT: Probable LMU-E3-C recovery once the repaired canonical benchmark validates the real source.  
-COMMIT/BRANCH: PR #604 — `gpt/accuracy22-lamu-dpm-structural-sheet-v1`.  
-STATUS: FIX IMPLEMENTED — AWAITING CANONICAL VALIDATION
+CURRENT OUTPUT: Absent in the trustworthy canonical five-project run. PR #604 was canonically validated through test-only PR #624 and did not move this row; aggregate remained 30/60 = 50.00%.  
+SOURCE EVIDENCE: Registered drawing scope is PDF pages 41-45. Direct source review shows page 41 General Notes explicitly specify DPC only ("DPC denotes damp proof course ... under all walls on ground floor"). Searches of the full public PDF for "polythene", "1000 gauge", and membrane wording locate the DPM specification only in BOQ pages, not in the registered drawing pages.  
+FIRST PIPELINE FAILURE: No source-authenticated drawing proposition establishes that a polythene DPM applies to the measured floor-bed footprint. The prior structural-sheet-title hypothesis was false for this registered source.  
+ROOT CAUSE: Required DPM applicability evidence is absent from the drawing-only benchmark scope. The floor/slab area can be measured from drawings, but applying the BOQ-only 1000-gauge polythene specification would leak ground-truth/BOQ knowledge into production extraction.  
+FIX: None permitted in drawing-only production code without new source evidence. Do not infer DPM from DPC, generic slab construction, floor area, or benchmark expectation. If the benchmark is intended to remain drawing-only, this row is a genuine source-evidence blocker and benchmark-data review is required outside production extraction.  
+TESTS ADDED: PR #604 title-classification and false-positive regressions remain valid generic tests but are not a recovery for this row.  
+TEST RESULT: #624 canonical validation completed successfully with 30/60 accepted, 50.00% accuracy, 40.00% strict exact; LMU-E3-C did not move.  
+EXPECTED BENCHMARK IMPACT: None from production code unless additional authenticated drawing evidence is supplied.  
+COMMIT/BRANCH: #604 / #624 closed without merge for accuracy gain.  
+STATUS: BLOCKED — REQUIRED DRAWING EVIDENCE ABSENT
 
 ## 3. LMU-E4-A
 
