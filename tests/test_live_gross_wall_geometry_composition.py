@@ -106,7 +106,7 @@ def test_live_gross_wall_uses_shared_whole_wall_frame_identity() -> None:
     assert void_record.host_wall_id not in composition.gross_selectors
 
 
-def test_live_gross_wall_targets_proven_zero_opening_wall_without_coverage_gap() -> None:
+def test_live_gross_wall_targets_proven_zero_opening_wall_without_weakening_global_coverage_firewall() -> None:
     doc = fitz.open(stream=_complete_void_pdf(), filetype="pdf")
     try:
         page = doc.new_page(width=760.0, height=650.0)
@@ -155,16 +155,16 @@ def test_live_gross_wall_targets_proven_zero_opening_wall_without_coverage_gap()
         physical_void_composition=physical_void,
     )
 
-    # The unopened wall is now positively framed from complete source truth and
-    # enters the same gross-wall target set. This fixture still lacks the
-    # independent cross-sheet height / physical scale evidence needed to mint a
-    # gross area, so ABSTAINED remains valid -- but wall coverage itself is no
-    # longer the blocker.
+    # The unopened page-two wall is now positively framed from complete source
+    # truth and enters the same gross-wall target set. The page-one opening
+    # fixture intentionally leaves some face-level wall identities ambiguous,
+    # so the composition must keep the global coverage firewall rather than
+    # pretending that every physical wall on every selected page is resolved.
     page_two_traces = tuple(
         trace for trace in composition.traces if trace.page_id == "2"
     )
     assert page_two_traces
-    assert LIVE_GROSS_WALL_COVERAGE_INCOMPLETE not in composition.reason_codes
+    assert LIVE_GROSS_WALL_COVERAGE_INCOMPLETE in composition.reason_codes
     assert any(
         trace.physical_wall_id in composition.gross_selectors
         for trace in page_two_traces
