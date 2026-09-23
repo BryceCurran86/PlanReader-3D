@@ -47,6 +47,7 @@ LIVE_CEILING_LINING_UNAVAILABLE = "live_ceiling_lining_unavailable"
 LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED = (
     "live_ceiling_lining_multi_viewport_identity_unresolved"
 )
+LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT = "live_ceiling_lining_tag_family_conflict"
 
 
 @dataclass(frozen=True)
@@ -385,10 +386,26 @@ def collect_live_ceiling_lining_claims(
                 )
             )
 
+        # A family tag is a publication identity. If distinct explicit
+        # descriptors collapse to the same family tag, do not let confidence
+        # or iteration order pick one. Cross-descriptor identity is unresolved.
+        tag_to_descriptors: dict[str, set[str]] = {}
+        for claim in claims:
+            tag_to_descriptors.setdefault(claim.tag, set()).add(claim.finish_descriptor)
+        conflicted_tags = {
+            tag for tag, descriptors in tag_to_descriptors.items()
+            if len(descriptors) > 1
+        }
+        tag_conflict_blocked = bool(conflicted_tags)
+        if conflicted_tags:
+            claims = [claim for claim in claims if claim.tag not in conflicted_tags]
+
         if claims:
             reasons = [LIVE_CEILING_LINING_RESOLVED]
             if multi_viewport_blocked:
                 reasons.append(LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED)
+            if tag_conflict_blocked:
+                reasons.append(LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT)
             return LiveCeilingLiningResult(
                 status=EvidenceResolutionStatus.CORROBORATED,
                 reason_codes=tuple(reasons),
@@ -398,6 +415,8 @@ def collect_live_ceiling_lining_claims(
         reasons = [LIVE_CEILING_LINING_UNAVAILABLE]
         if multi_viewport_blocked:
             reasons.append(LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED)
+        if tag_conflict_blocked:
+            reasons.append(LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT)
         return LiveCeilingLiningResult(
             status=EvidenceResolutionStatus.ABSTAINED,
             reason_codes=tuple(reasons),
@@ -411,6 +430,7 @@ __all__ = [
     "LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED",
     "LIVE_CEILING_LINING_RESOLVED",
     "LIVE_CEILING_LINING_SCHEMA_VERSION",
+    "LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT",
     "LIVE_CEILING_LINING_UNAVAILABLE",
     "LiveCeilingLiningClaim",
     "LiveCeilingLiningResult",
