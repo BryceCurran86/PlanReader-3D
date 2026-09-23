@@ -189,6 +189,27 @@ class ZeroOpeningWallFrameAuthority:
         )
 
 
+def combine_zero_opening_wall_frame_authorities(
+    authorities: tuple[ZeroOpeningWallFrameAuthority, ...],
+) -> ZeroOpeningWallFrameAuthority:
+    """Combine only already-sealed zero-opening frame results.
+
+    This helper cannot mint records. It exists so multi-page live composition
+    can route exact page-local producer results into one downstream selector
+    authority without accepting any caller-authored wall/frame truth.
+    """
+    merged: dict[_Key, ZeroOpeningWallFrameResult] = {}
+    for authority in authorities:
+        if type(authority) is not ZeroOpeningWallFrameAuthority:
+            raise TypeError("all authorities must be producer-owned")
+        for key, result in authority._results.items():
+            prior = merged.get(key)
+            if prior is not None and prior != result:
+                raise RuntimeError("zero_opening_wall_frame_authority_conflict")
+            merged[key] = result
+    return ZeroOpeningWallFrameAuthority(merged, _seal=_AUTHORITY_SEAL)
+
+
 class ZeroOpeningWallFrameProducer:
     """Trusted writer for source-derived wall frames with proven zero openings."""
 
@@ -583,6 +604,7 @@ __all__ = [
     "ZERO_OPENING_WALL_FRAME_SCHEMA_VERSION",
     "ZERO_OPENING_WALL_FRAME_SCOPE_INCOMPLETE",
     "ZERO_OPENING_WALL_FRAME_WALL_UNRESOLVED",
+    "combine_zero_opening_wall_frame_authorities",
     "ZeroOpeningWallFrameAuthority",
     "ZeroOpeningWallFrameProducer",
     "ZeroOpeningWallFrameRecord",
