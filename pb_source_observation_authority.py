@@ -21,7 +21,7 @@ from pb_migration_contracts import (
     canonical_contract_json,
     stable_contract_id,
 )
-from pb_vector_geometry_v130 import extract_native_page
+from pb_vector_geometry_v130 import extract_native_page, native_word_primitive_ref
 
 
 SOURCE_OBSERVATION_AUTHORITY_SCHEMA_VERSION = "1.0.0"
@@ -495,7 +495,7 @@ class SourceObservationProducer:
                                 "page_id": str(page_number),
                                 "partition_id": partition_id,
                                 "kind": "native_pdf_word",
-                                "primitive_ref": f"word:{word.get('id')}",
+                                "primitive_ref": native_word_primitive_ref(word),
                                 "raw_text": str(word.get("text") or ""),
                                 "geometry": _finite_tuple(word.get("bbox") or ()),
                             }
