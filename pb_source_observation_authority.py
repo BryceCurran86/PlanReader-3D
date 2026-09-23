@@ -1070,6 +1070,20 @@ class SourceObservationProducer:
             mark_source_snapshot
             or revision.revision_id not in self._store.coverage_by_revision
         ):
+            prior_revision_coverage = self._store.coverage_by_revision.get(
+            revision.revision_id
+        )
+        if (
+            prior_revision_coverage is None
+            or prior_revision_coverage.state != "complete"
+            and coverage.state == "complete"
+            or (
+                prior_revision_coverage.state != "complete"
+                and coverage.state != "complete"
+                and len(coverage.decoded_pages)
+                > len(prior_revision_coverage.decoded_pages)
+            )
+        ):
             self._store.coverage_by_revision[revision.revision_id] = coverage
         self._store.coverage_by_snapshot[snapshot.snapshot_id] = coverage
         self._store.snapshots[snapshot.snapshot_id] = snapshot
