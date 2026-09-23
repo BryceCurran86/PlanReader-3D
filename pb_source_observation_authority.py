@@ -167,6 +167,12 @@ class _SourceObservationStore:
         ] = {}
         self.coverage_by_revision: dict[str, SourceDecodeCoverageRecord] = {}
         self.snapshots: dict[str, ProducerSnapshotRecord] = {}
+        # Identity-bound O(1) membership index for immutable snapshot records.
+        # Replacement of a snapshot object causes the index to be rebuilt from
+        # that replacement, preserving the previous resolution semantics.
+        self.snapshot_observation_id_sets: dict[
+            str, tuple[ProducerSnapshotRecord, frozenset[str]]
+        ] = {}
         self.source_snapshot_by_revision: dict[str, str] = {}
         self.observations: dict[tuple[str, str], SourceObservationRecord] = {}
         self.record_fingerprints: dict[tuple[str, str], str] = {}
@@ -195,6 +201,17 @@ class _SourceObservationStore:
             actual,
         )
         return True
+
+    def snapshot_contains_observation(
+        self,
+        snapshot: ProducerSnapshotRecord,
+        observation_id: str,
+    ) -> bool:
+        cached = self.snapshot_observation_id_sets.get(snapshot.snapshot_id)
+        if cached is None or cached[0] is not snapshot:
+            cached = (snapshot, frozenset(snapshot.observation_ids))
+            self.snapshot_observation_id_sets[snapshot.snapshot_id] = cached
+        return str(observation_id) in cached[1]
 
     def next_generation(self) -> int:
         self.generation += 1
@@ -1087,6 +1104,10 @@ class SourceObservationProducer:
         self._store.source_bytes_by_revision[revision.revision_id] = stored_source_bytes
         self._store.coverage_by_revision[revision.revision_id] = coverage
         self._store.snapshots[snapshot.snapshot_id] = snapshot
+        self._store.snapshot_observation_id_sets[snapshot.snapshot_id] = (
+            snapshot,
+            frozenset(snapshot.observation_ids),
+        )
         for key, record in staged.items():
             self._store.observations[key] = record
             self._store.record_fingerprints[key] = record.observation_payload_sha256
@@ -1147,7 +1168,10 @@ class SourceObservationAuthority:
         record = self._store.observations.get((selector.snapshot_id, selector.observation_id))
         if record is None:
             return self._blocked(OBSERVATION_UNAVAILABLE)
-        if selector.observation_id not in snapshot.observation_ids:
+        if not self._store.snapshot_contains_observation(
+            snapshot,
+            selector.observation_id,
+        ):
             return self._integrity_failure()
         expected = self._store.record_fingerprints.get((selector.snapshot_id, selector.observation_id))
         actual = _content_sha256(_record_payload(record))
