@@ -1056,7 +1056,7 @@ class SourceObservationAuthority:
         if revision is None or source_bytes is None:
             return self._integrity_failure()
         if not self._store.source_bytes_match_revision(
-            revision_id,
+            selector.revision_id,
             source_bytes,
             revision.source_sha256,
         ):
