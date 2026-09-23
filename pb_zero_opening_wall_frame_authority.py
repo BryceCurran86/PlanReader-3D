@@ -88,7 +88,8 @@ class ZeroOpeningWallFrameSelector:
     source_sha256: str
     snapshot_id: str
     page_id: str
-    viewport_id: str
+    wall_candidate_viewport_id: str
+    scale_viewport_id: str | None
     decision_scope_id: str
     physical_wall_id: str
 
@@ -529,7 +530,8 @@ class ZeroOpeningWallFrameProducer:
             "source_sha256": selector.source_sha256,
             "snapshot_id": selector.snapshot_id,
             "page_id": selector.page_id,
-            "viewport_id": viewport_id,
+            "wall_candidate_viewport_id": viewport_id,
+            "scale_viewport_id": None,
             "decision_scope_id": selector.decision_scope_id,
             "physical_wall_id": selector.physical_wall_id,
             "member_wall_candidate_ids": member_ids,
