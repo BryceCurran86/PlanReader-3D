@@ -464,23 +464,30 @@ class WallRoleProducer:
         if structural_cross_sheet_authority is not None and type(structural_cross_sheet_authority) is not StructuralCrossSheetAuthority:
             raise TypeError("structural_cross_sheet_authority must be a producer-owned StructuralCrossSheetAuthority")
 
-        # These three authority classes currently wrap publicly constructible
-        # evidence records. A sealed wrapper does not establish provenance.
-        # Reject every positive injection path until source-derived producers
-        # (room/envelope topology, annotation extraction, registered structural
-        # evidence) exist and can be consumed directly.
+        # Wall topology may cross this boundary only when it came from the
+        # dedicated source-derived physical-wall topology adapter. Publicly
+        # constructible evidence containers remain diagnostic and rejected.
+        if wall_topology_authority is not None:
+            from pb_source_wall_topology_authority import (
+                is_source_wall_topology_authority,
+            )
+
+            if not is_source_wall_topology_authority(wall_topology_authority):
+                raise TypeError(
+                    "wall_topology_authority is not source-derived from the "
+                    "producer-owned physical wall authority"
+                )
         if (
-            wall_topology_authority is not None
-            or wall_annotation_authority is not None
+            wall_annotation_authority is not None
             or structural_cross_sheet_authority is not None
         ):
             raise TypeError(
-                "caller-constructible role evidence authorities are not accepted; "
-                "source-derived role evidence producer unavailable"
+                "annotation / cross-sheet role evidence has no source-derived "
+                "positive producer yet"
             )
 
         self._wall_candidates = physical_wall_candidate_authority
-        self._wall_topology = None
+        self._wall_topology = wall_topology_authority
         self._wall_annotations = None
         self._structural_evidence = None
         self._results: Dict[_Key, WallRoleResult] = {}
@@ -499,6 +506,27 @@ class WallRoleProducer:
             wall_topology_authority=wall_topology_authority,
             wall_annotation_authority=wall_annotation_authority,
             structural_cross_sheet_authority=structural_cross_sheet_authority,
+            _seal=_PRODUCER_SEAL,
+        )
+
+    @classmethod
+    def from_source_topology(
+        cls,
+        *,
+        physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
+    ) -> "WallRoleProducer":
+        """Build Item26 role authority from producer-owned multi-room topology."""
+
+        from pb_source_wall_topology_authority import (
+            build_source_wall_topology_authority,
+        )
+
+        topology_authority = build_source_wall_topology_authority(
+            physical_wall_candidate_authority
+        )
+        return cls(
+            physical_wall_candidate_authority,
+            wall_topology_authority=topology_authority,
             _seal=_PRODUCER_SEAL,
         )
 
@@ -573,16 +601,20 @@ class WallRoleProducer:
         ):
             diagnostic_reasons.append(WALL_ROLE_PERIMETER_ONLY_REJECTED)
 
-        # No positive role evidence source is currently authentic enough to
-        # cross this boundary. Candidate metadata remains diagnostic only.
-        return self._store(
-            selector,
-            _abstained(WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE, *diagnostic_reasons),
-        )
+        if (
+            self._wall_topology is None
+            and self._wall_annotations is None
+            and self._structural_evidence is None
+        ):
+            return self._store(
+                selector,
+                _abstained(
+                    WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE,
+                    *diagnostic_reasons,
+                ),
+            )
 
-        # 3. Query independent producer-owned evidence sources (intentionally
-        # unreachable until a future source-derived role-evidence producer is
-        # wired and independently reviewed).
+        # 3. Query independent producer-owned source evidence.
         propositions: list[tuple[WallRoleClassification, str]] = []
         corroborating_ids: list[str] = []
         stale_reasons: list[str] = []
