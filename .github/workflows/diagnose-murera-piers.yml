@@ -90,11 +90,36 @@ jobs:
 
           pix=page.get_pixmap(matrix=fitz.Matrix(1.2,1.2),alpha=False)
           pix.save("/tmp/murera-page225.png")
+
+          print("DOCUMENT_TERM_SCAN_BEGIN")
+          ranked=[]
+          terms=("FOUNDATION LAYOUT","FOUNDATION PLAN","MASONRY PIER","PIERS","PIER","300 X 300","300X300")
+          for idx in range(doc.page_count):
+              txt=doc[idx].get_text("text") or ""
+              upper=txt.upper()
+              hits=[term for term in terms if term in upper]
+              if hits:
+                  title_lines=[line.strip() for line in txt.splitlines() if line.strip()]
+                  print("PAGE",idx+1,"HITS",hits,"TEXT",title_lines[:30])
+                  ranked.append((len(hits),idx,hits))
+          print("DOCUMENT_TERM_SCAN_END")
+
+          # Render likely drawing neighborhood plus any text-hit pages so the
+          # diagnosis is not hostage to stale benchmark page notes.
+          render_pages=set(range(218,min(228,doc.page_count)))
+          render_pages.update(idx for _score,idx,_hits in ranked)
+          import os
+          os.makedirs("/tmp/murera-candidate-pages",exist_ok=True)
+          for idx in sorted(render_pages):
+              pix=doc[idx].get_pixmap(matrix=fitz.Matrix(0.9,0.9),alpha=False)
+              pix.save(f"/tmp/murera-candidate-pages/page-{idx+1}.png")
           doc.close()
           PY
-      - name: Upload diagnostic page
+      - name: Upload diagnostic pages
         uses: actions/upload-artifact@v4
         with:
-          name: murera-page225
-          path: /tmp/murera-page225.png
+          name: murera-pier-candidate-pages
+          path: |
+            /tmp/murera-page225.png
+            /tmp/murera-candidate-pages/*.png
           if-no-files-found: error
