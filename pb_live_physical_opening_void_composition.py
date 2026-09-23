@@ -49,6 +49,7 @@ LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION = "1.0.0"
 LIVE_PHYSICAL_OPENING_VOID_RESOLVED = "live_physical_opening_void_composition_resolved"
 LIVE_PHYSICAL_OPENING_VOID_PARTIAL = "live_physical_opening_void_composition_partial"
 LIVE_PHYSICAL_OPENING_VOID_UNAVAILABLE = "live_physical_opening_void_composition_unavailable"
+LIVE_PHYSICAL_OPENING_VOID_UPSTREAM_INCOMPLETE = "live_physical_opening_void_upstream_incomplete"
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,7 @@ def compose_live_physical_opening_voids(
         )
 
     physical = wall_opening_composition.physical_opening_authority
+    expected_opening_ids = tuple(semantic_record.physical_opening_record_ids)
     opening_selectors: dict[str, ObservationSelector] = {}
     opening_pages: dict[str, str] = {}
     representative_by_opening: dict[str, str] = {}
@@ -420,10 +422,17 @@ def compose_live_physical_opening_voids(
     for page_id, producer in void_producers.items():
         void_authorities[page_id] = producer.authority()
 
+    traced_opening_ids = {trace.opening_identity_id for trace in traces}
+    expected_opening_id_set = set(expected_opening_ids)
+    upstream_complete = (
+        bool(expected_opening_id_set)
+        and set(opening_selectors) == expected_opening_id_set
+        and traced_opening_ids == expected_opening_id_set
+    )
     has_conflict = any(
         trace.void_status is EvidenceResolutionStatus.CONFLICT for trace in traces
     )
-    all_resolved = bool(traces) and all(
+    all_resolved = upstream_complete and all(
         trace.void_status is EvidenceResolutionStatus.CORROBORATED
         and trace.void_record_id is not None
         for trace in traces
@@ -441,6 +450,11 @@ def compose_live_physical_opening_voids(
         status = EvidenceResolutionStatus.ABSTAINED
         reasons = (
             LIVE_PHYSICAL_OPENING_VOID_PARTIAL,
+            *(
+                (LIVE_PHYSICAL_OPENING_VOID_UPSTREAM_INCOMPLETE,)
+                if not upstream_complete
+                else ()
+            ),
             *(reason for trace in traces for reason in trace.void_reason_codes),
         )
 
@@ -459,6 +473,7 @@ __all__ = [
     "LIVE_PHYSICAL_OPENING_VOID_RESOLVED",
     "LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION",
     "LIVE_PHYSICAL_OPENING_VOID_UNAVAILABLE",
+    "LIVE_PHYSICAL_OPENING_VOID_UPSTREAM_INCOMPLETE",
     "LivePhysicalOpeningVoidComposition",
     "LivePhysicalOpeningVoidTrace",
     "compose_live_physical_opening_voids",
