@@ -46,6 +46,7 @@ from pb_physical_scale_authority import (
 from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateAuthority,
     PhysicalWallCandidateProducer,
+    PhysicalWallCandidateSelector,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_wall_height_authority import (
@@ -64,6 +65,9 @@ LIVE_GROSS_WALL_SOURCE_SNAPSHOT_ADVANCED = (
 )
 LIVE_GROSS_WALL_UPSTREAM_INCOMPLETE = (
     "live_gross_wall_geometry_upstream_incomplete"
+)
+LIVE_GROSS_WALL_COVERAGE_INCOMPLETE = (
+    "live_gross_wall_geometry_wall_coverage_incomplete"
 )
 
 
@@ -194,6 +198,68 @@ def compose_live_gross_wall_geometry(
 
     wall_candidate_authority = wall_candidate_producer.authority()
 
+    # Build the complete wall-equivalence universe for the exact source pages
+    # selected by the upstream live wall/opening composition. A downstream
+    # gross/net composition may not call itself complete merely because every
+    # opening-host wall resolved; zero-opening walls must remain visible as an
+    # explicit coverage blocker until they have their own authenticated frame.
+    required_wall_classes: list[tuple[str, frozenset[str]]] = []
+    coverage_identity_ambiguous = False
+    for page_id in wall_opening_composition.page_ids:
+        scope_selector = PhysicalWallCandidateSelector(
+            document_id=published_after.revision.document_id,
+            revision_id=published_after.revision.revision_id,
+            source_sha256=published_after.revision.source_sha256,
+            snapshot_id=published_after.snapshot.snapshot_id,
+            page_id=page_id,
+            decision_scope_id=f"wall-source:page-{page_id}",
+        )
+        scope_result = wall_candidate_authority.resolve_scope(scope_selector)
+        if (
+            scope_result.status is not EvidenceResolutionStatus.CORROBORATED
+            or not scope_result.scope_complete
+            or scope_result.document_id != published_after.revision.document_id
+            or scope_result.revision_id != published_after.revision.revision_id
+            or scope_result.source_sha256 != published_after.revision.source_sha256
+            or scope_result.snapshot_id != published_after.snapshot.snapshot_id
+            or scope_result.page_id != page_id
+        ):
+            return _blocked(
+                revision_id=revision_id,
+                reason_codes=(
+                    LIVE_GROSS_WALL_UPSTREAM_INCOMPLETE,
+                    LIVE_GROSS_WALL_COVERAGE_INCOMPLETE,
+                ),
+            )
+
+        equivalence = scope_result.equivalence
+        if equivalence is None:
+            coverage_identity_ambiguous = True
+            for record in scope_result.records:
+                required_wall_classes.append(
+                    (page_id, frozenset((record.wall_candidate_id,)))
+                )
+            continue
+
+        if (
+            tuple(equivalence.ambiguous_wall_ids)
+            or tuple(equivalence.abstained_wall_ids)
+        ):
+            coverage_identity_ambiguous = True
+
+        groups = tuple(
+            frozenset(str(member_id) for member_id in group if str(member_id))
+            for group in equivalence.equivalence_groups
+            if group
+        )
+        for representative_id in equivalence.representative_wall_ids:
+            representative_id = str(representative_id)
+            wall_class = next(
+                (group for group in groups if representative_id in group),
+                frozenset((representative_id,)),
+            )
+            required_wall_classes.append((page_id, wall_class))
+
     # Whole walls are discovered only by replaying producer-owned physical void
     # records and their sealed whole-wall host frames. OpeningHostBindingRecord
     # host_wall_id is deliberately opening-scoped; it must never become the
@@ -273,6 +339,22 @@ def compose_live_gross_wall_geometry(
             )
         host_walls[key] = member_ids
 
+    covered_member_ids_by_page: dict[str, set[str]] = {}
+    for (page_id, _decision_scope_id, _frame_id), member_ids in host_walls.items():
+        covered_member_ids_by_page.setdefault(page_id, set()).update(member_ids)
+
+    uncovered_wall_classes = tuple(
+        (page_id, wall_class)
+        for page_id, wall_class in required_wall_classes
+        if not (
+            wall_class
+            & covered_member_ids_by_page.get(page_id, set())
+        )
+    )
+    coverage_incomplete = bool(
+        coverage_identity_ambiguous or uncovered_wall_classes
+    )
+
     if not host_walls:
         return LiveGrossWallGeometryComposition(
             revision_id=revision_id,
@@ -280,6 +362,7 @@ def compose_live_gross_wall_geometry(
             reason_codes=(
                 LIVE_GROSS_WALL_UNAVAILABLE,
                 LIVE_GROSS_WALL_UPSTREAM_INCOMPLETE,
+                LIVE_GROSS_WALL_COVERAGE_INCOMPLETE,
             ),
             traces=(),
             physical_wall_candidate_authority=wall_candidate_authority,
@@ -487,15 +570,27 @@ def compose_live_gross_wall_geometry(
         or trace.scale_status is EvidenceResolutionStatus.CONFLICT
         for trace in traces
     )
-    if all_resolved:
-        status = EvidenceResolutionStatus.CORROBORATED
-        reasons = (LIVE_GROSS_WALL_RESOLVED,)
-    elif any_conflict:
+    if any_conflict:
         status = EvidenceResolutionStatus.CONFLICT
         reasons = (
             LIVE_GROSS_WALL_PARTIAL,
+            *(
+                (LIVE_GROSS_WALL_COVERAGE_INCOMPLETE,)
+                if coverage_incomplete
+                else ()
+            ),
             *(reason for trace in traces for reason in trace.gross_reason_codes),
         )
+    elif coverage_incomplete:
+        status = EvidenceResolutionStatus.ABSTAINED
+        reasons = (
+            LIVE_GROSS_WALL_PARTIAL,
+            LIVE_GROSS_WALL_COVERAGE_INCOMPLETE,
+            *(reason for trace in traces for reason in trace.gross_reason_codes),
+        )
+    elif all_resolved:
+        status = EvidenceResolutionStatus.CORROBORATED
+        reasons = (LIVE_GROSS_WALL_RESOLVED,)
     else:
         status = EvidenceResolutionStatus.ABSTAINED
         reasons = (
@@ -518,6 +613,7 @@ def compose_live_gross_wall_geometry(
 
 
 __all__ = [
+    "LIVE_GROSS_WALL_COVERAGE_INCOMPLETE",
     "LIVE_GROSS_WALL_PARTIAL",
     "LIVE_GROSS_WALL_RESOLVED",
     "LIVE_GROSS_WALL_SCHEMA_VERSION",
