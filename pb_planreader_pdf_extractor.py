@@ -370,6 +370,11 @@ class GenericPlanReaderExtractor:
             "reason": "not_collected",
             "commercial_count_unlocked": False,
         }
+        self.ceiling_lining_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "claims": [],
+        }
         # Live extraction visibility: distinguish absence from failure/conflict.
         self.extraction_status: Dict[str, str] = {}
 
@@ -799,6 +804,11 @@ class GenericPlanReaderExtractor:
             "status": "abstained",
             "reason": "not_collected",
             "commercial_count_unlocked": False,
+        }
+        self.ceiling_lining_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "claims": [],
         }
 
         # ------------------------------------------------------------------
@@ -2500,6 +2510,85 @@ class GenericPlanReaderExtractor:
                     reason=f"shadow_exception:{type(exc).__name__}"
                 )
                 self.extraction_status["item35_authority_shadow"] = "extraction_failed"
+
+        # Source-owned ceiling-lining LIVE provisional output.
+        #
+        # This is deliberately late and additive: it cannot feed any floor,
+        # wall, opening-deduction, or legacy finish derivation above.  The
+        # producer re-ingests the same PDF bytes through SourceVisibility,
+        # accepts only F.07 RESOLVED floor-plan vector-frame viewports, and
+        # revalidates room/finish/scale authority before returning a live
+        # provisional claim.  Commercial review remains a separate authority
+        # path in pb_ceiling_lining_review_promotion.
+        try:
+            from pb_live_ceiling_lining_integration import (
+                collect_live_ceiling_lining_claims,
+            )
+
+            ceiling_result = collect_live_ceiling_lining_claims(
+                p_path,
+                pages=target_pages,
+            )
+            self.ceiling_lining_live = {
+                "status": ceiling_result.status.value,
+                "reason_codes": list(ceiling_result.reason_codes),
+                "claims": [
+                    {
+                        "claim_id": claim.claim_id,
+                        "tag": claim.tag,
+                        "finish_descriptor": claim.finish_descriptor,
+                        "quantity_m2": claim.quantity_m2,
+                        "source_page": claim.source_page,
+                        "viewport_id": claim.viewport_id,
+                        "room_quantity_ids": list(claim.room_quantity_ids),
+                        "room_entity_ids": list(claim.room_entity_ids),
+                        "physical_scale_record_id": claim.physical_scale_record_id,
+                    }
+                    for claim in ceiling_result.claims
+                ],
+            }
+            self.extraction_status["ceiling_lining_live"] = ceiling_result.status.value
+
+            for claim in ceiling_result.claims:
+                merge_extracted_prediction(
+                    pred_dict,
+                    ExtractedPrediction(
+                        tag=claim.tag,
+                        trade_type="finishes",
+                        description=(
+                            "Ceiling lining / finish — "
+                            f"{claim.finish_descriptor}"
+                        ),
+                        quantity=round(float(claim.quantity_m2), 4),
+                        unit="SM",
+                        confidence=float(claim.confidence),
+                        source_page=int(claim.source_page),
+                        dimensions=None,
+                        bounding_box=None,
+                        metadata={
+                            "derivation": "source_owned_ceiling_lining",
+                            "live_authority_status": claim.status,
+                            "commercial_projection_allowed": False,
+                            "source_sha256": claim.source_sha256,
+                            "revision_id": claim.revision_id,
+                            "viewport_id": claim.viewport_id,
+                            "finish_descriptor": claim.finish_descriptor,
+                            "room_quantity_ids": list(claim.room_quantity_ids),
+                            "room_entity_ids": list(claim.room_entity_ids),
+                            "evidence_ids": list(claim.evidence_ids),
+                            "physical_scale_record_id": claim.physical_scale_record_id,
+                            "raw_evidence_ref": claim.claim_id,
+                        },
+                    ),
+                    merge_source="source_owned_ceiling_lining",
+                )
+        except Exception as exc:
+            self.ceiling_lining_live = {
+                "status": "abstained",
+                "reason_codes": [f"live_ceiling_exception:{type(exc).__name__}"],
+                "claims": [],
+            }
+            self.extraction_status["ceiling_lining_live"] = "extraction_failed"
 
         doc.close()
         return list(pred_dict.values())
