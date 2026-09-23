@@ -16,6 +16,7 @@ from pb_source_observation_authority import (
     SNAPSHOT_MISMATCH,
     SOURCE_HASH_MISMATCH,
     SOURCE_OBSERVATION_EXISTS,
+    SOURCE_UNAVAILABLE,
     STALE_REVISION,
     ObservationSelector,
     ProducerIntegrityError,
@@ -392,3 +393,112 @@ def test_consumer_authority_has_no_writer_capability() -> None:
     assert hasattr(producer, "publish_derived_observation")
     assert not hasattr(authority, "ingest_native_pdf_bytes")
     assert not hasattr(authority, "publish_derived_observation")
+
+
+def _multi_page_pdf_bytes() -> bytes:
+    doc = fitz.open()
+    for index in range(3):
+        page = doc.new_page(width=300, height=200)
+        page.insert_text((40, 40), f"PAGE-{index + 1}")
+        page.draw_line((30, 90), (220, 90))
+    payload = doc.tobytes()
+    doc.close()
+    return payload
+
+
+def test_scoped_native_ingestion_preserves_full_source_identity_but_decodes_only_scope() -> None:
+    source = _multi_page_pdf_bytes()
+    producer = _producer()
+    scoped = producer.ingest_native_pdf_bytes(
+        document_id="doc-scoped",
+        source_bytes=source,
+        source_locator="memory://doc-scoped.pdf",
+        page_ids=("2",),
+    )
+
+    assert scoped.revision.source_sha256 == hashlib.sha256(source).hexdigest()
+    assert scoped.revision.partition_ids == ("page:1", "page:2", "page:3")
+    assert scoped.coverage.total_pages == 3
+    assert scoped.coverage.decoded_pages == (2,)
+    assert scoped.coverage.failed_pages == ()
+    assert scoped.coverage.state == "partial"
+
+    authority = producer.authority()
+    resolved_pages = set()
+    for observation_id in scoped.snapshot.observation_ids:
+        result = authority.resolve(
+            ObservationSelector(
+                document_id=scoped.revision.document_id,
+                revision_id=scoped.revision.revision_id,
+                source_sha256=scoped.revision.source_sha256,
+                snapshot_id=scoped.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        assert result.status is EvidenceResolutionStatus.CORROBORATED
+        assert result.observation is not None
+        resolved_pages.add(result.observation.page_id)
+    assert resolved_pages == {"2"}
+
+    png, page_parent = producer.render_native_page_png(
+        document_id=scoped.revision.document_id,
+        revision_id=scoped.revision.revision_id,
+        source_sha256=scoped.revision.source_sha256,
+        snapshot_id=scoped.snapshot.snapshot_id,
+        page_id="2",
+        dpi=72,
+    )
+    assert png
+    assert page_parent.page_id == "2"
+
+    with pytest.raises(ValueError, match=SOURCE_UNAVAILABLE):
+        producer.render_native_page_png(
+            document_id=scoped.revision.document_id,
+            revision_id=scoped.revision.revision_id,
+            source_sha256=scoped.revision.source_sha256,
+            snapshot_id=scoped.snapshot.snapshot_id,
+            page_id="1",
+            dpi=72,
+        )
+
+
+def test_scoped_snapshot_keeps_its_coverage_after_full_replay_of_same_revision() -> None:
+    source = _multi_page_pdf_bytes()
+    producer = _producer()
+    scoped = producer.ingest_native_pdf_bytes(
+        document_id="doc-scope-then-full",
+        source_bytes=source,
+        source_locator="memory://doc-scope-then-full.pdf",
+        page_ids=(2,),
+    )
+    full = producer.ingest_native_pdf_bytes(
+        document_id="doc-scope-then-full",
+        source_bytes=source,
+        source_locator="memory://doc-scope-then-full.pdf",
+    )
+
+    assert full.revision.revision_id == scoped.revision.revision_id
+    assert full.snapshot.snapshot_id != scoped.snapshot.snapshot_id
+    assert full.coverage.decoded_pages == (1, 2, 3)
+    assert full.coverage.state == "complete"
+    assert producer._store.coverage_by_snapshot[
+        scoped.snapshot.snapshot_id
+    ].decoded_pages == (2,)
+
+    with pytest.raises(ValueError, match=SOURCE_UNAVAILABLE):
+        producer.native_page_image_regions(
+            document_id=scoped.revision.document_id,
+            revision_id=scoped.revision.revision_id,
+            source_sha256=scoped.revision.source_sha256,
+            snapshot_id=scoped.snapshot.snapshot_id,
+            page_id="1",
+        )
+
+    regions = producer.native_page_image_regions(
+        document_id=full.revision.document_id,
+        revision_id=full.revision.revision_id,
+        source_sha256=full.revision.source_sha256,
+        snapshot_id=full.snapshot.snapshot_id,
+        page_id="1",
+    )
+    assert regions == ()
