@@ -188,3 +188,30 @@ def test_live_gross_wall_public_interface_has_no_height_or_area_truth_inputs() -
         "scale",
     }
     assert not (forbidden & set(signature.parameters))
+
+
+def test_live_gross_wall_reuses_upstream_wall_authority_for_exact_decode_scope(
+    monkeypatch,
+) -> None:
+    source, wall_opening, physical_void = _one_page_chain()
+
+    def _unexpected_rebuild(*args, **kwargs):
+        raise AssertionError("exact upstream wall authority should be reused")
+
+    monkeypatch.setattr(
+        "pb_live_gross_wall_geometry_composition."
+        "PhysicalWallCandidateProducer.from_source_visibility_producer",
+        _unexpected_rebuild,
+    )
+
+    composition = compose_live_gross_wall_geometry(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+        physical_void_composition=physical_void,
+    )
+
+    assert (
+        composition.physical_wall_candidate_authority
+        is wall_opening.physical_wall_candidate_authority
+    )
+    assert composition.traces
