@@ -28,9 +28,14 @@ from pb_migration_contracts import (
     EvidenceAtom,
     EvidenceResolutionStatus,
     ViewportEvidence,
+    ViewportResolutionStatus,
     stable_contract_id,
 )
 from pb_migration_provider_envelope import ProviderContext
+from pb_source_room_face_authority import (
+    SourceRoomFaceAuthority,
+    SourceRoomFaceSelector,
+)
 from pb_wall_room_topology_contracts import RoomCandidate
 from pb_wall_topology_diagnostics import (
     GEOMETRY_SOURCE_CALLER_SUPPLIED_SEGMENTS,
@@ -41,6 +46,7 @@ Point = Tuple[float, float]
 BBox = Tuple[float, float, float, float]
 
 PROOF_TEXT_BBOX_IN_UNIQUE_ROOM_CANDIDATE = "text_bbox_in_unique_room_candidate"
+GEOMETRY_SOURCE_AUTHENTICATED_ROOM_FACES = "source_authenticated_room_faces"
 
 _PROOF_SEAL = object()
 _INDEX_SEAL = object()
@@ -226,6 +232,157 @@ def build_owned_topology_room_index(
         viewport_id=_clean(snapshot.viewport_id),
         topology_snapshot_fingerprint=snapshot_fp,
         geometry_source=_clean(snapshot.geometry_source),
+        _rooms_by_ref=dict(rooms_by_ref),
+        _seal=_INDEX_SEAL,
+    )
+
+
+
+def build_owned_source_room_face_index(
+    *,
+    room_face_authority: SourceRoomFaceAuthority,
+    selector: SourceRoomFaceSelector,
+    context: ProviderContext,
+    viewport: ViewportEvidence,
+) -> Optional[OwnedTopologyRoomIndex]:
+    """Seal a room index from producer-owned source room-face authority.
+
+    This is the authenticated replacement for the intentionally disabled
+    diagnostic TopologySnapshot path.  Callers provide only selector/context
+    addresses; room polygons come from the sealed source authority.
+    """
+
+    if type(room_face_authority) is not SourceRoomFaceAuthority:
+        raise TypeError("room_face_authority must be SourceRoomFaceAuthority")
+    if type(selector) is not SourceRoomFaceSelector:
+        raise TypeError("selector must be SourceRoomFaceSelector")
+
+    result = room_face_authority.resolve_scope(selector)
+    if (
+        result.status is not EvidenceResolutionStatus.CORROBORATED
+        or not result.scope_complete
+        or not result.records
+    ):
+        return None
+
+    if not context.revision_id or not context.current_revision_id:
+        return None
+    if context.revision_id != context.current_revision_id:
+        return None
+    if result.document_id != context.document_id:
+        return None
+    if result.source_sha256.lower() != context.source_sha256.lower():
+        return None
+    if result.revision_id != context.current_revision_id:
+        return None
+
+    try:
+        source_page_no = int(result.page_id)
+    except (TypeError, ValueError):
+        return None
+    if source_page_no not in context.trusted_page_numbers():
+        return None
+    if viewport.document_id != context.document_id:
+        return None
+    if viewport.viewport_id not in context.trusted_viewport_ids():
+        return None
+    if viewport.status not in (
+        ViewportResolutionStatus.RESOLVED,
+        ViewportResolutionStatus.DERIVED,
+    ):
+        return None
+    mapped_page = context.page_for_viewport(viewport.viewport_id)
+    if mapped_page is not None and int(mapped_page) != source_page_no:
+        return None
+
+    rooms_by_ref: dict[str, RoomCandidate] = {}
+    fingerprints: list[dict[str, object]] = []
+    for record in result.records:
+        if (
+            record.document_id != result.document_id
+            or record.revision_id != result.revision_id
+            or record.source_sha256.lower() != result.source_sha256.lower()
+            or record.snapshot_id != result.snapshot_id
+            or record.page_id != result.page_id
+            or record.decision_scope_id != result.decision_scope_id
+            or len(record.polygon_pdf_pts) < 3
+            or record.area_page_pts2 <= 0.0
+        ):
+            return None
+        room_ref = _clean(record.face_id)
+        if not room_ref or room_ref in rooms_by_ref:
+            return None
+        room = RoomCandidate(
+            room_ref=room_ref,
+            label=room_ref,
+            polygon_pdf_pts=record.polygon_pdf_pts,
+            polygon_m=None,
+            floor_area_m2=None,
+            area_page_pts2=float(record.area_page_pts2),
+            perimeter_m=None,
+            geometry_confidence=1.0,
+            evidence=(
+                record.record_id,
+                *(f"physical_wall:{wall_id}" for wall_id in record.bounding_wall_ids),
+            ),
+            source_page=source_page_no,
+            drawing_number="",
+            scale_source=GEOMETRY_SOURCE_AUTHENTICATED_ROOM_FACES,
+            calibration_confidence=0.0,
+            has_voids=False,
+            document_id=result.document_id,
+            viewport_id=viewport.viewport_id,
+            status=EvidenceResolutionStatus.CORROBORATED,
+        )
+        rooms_by_ref[room_ref] = room
+        fingerprints.append(
+            {
+                "room_ref": room_ref,
+                "record_id": record.record_id,
+                "polygon_pdf_pts": [list(point) for point in record.polygon_pdf_pts],
+                "bounding_wall_ids": list(record.bounding_wall_ids),
+                "area_page_pts2": float(record.area_page_pts2),
+            }
+        )
+
+    if not rooms_by_ref:
+        return None
+
+    source_fingerprint = stable_contract_id(
+        "source_room_face_index",
+        {
+            "document_id": result.document_id,
+            "revision_id": result.revision_id,
+            "source_sha256": result.source_sha256,
+            "snapshot_id": result.snapshot_id,
+            "page_id": result.page_id,
+            "decision_scope_id": result.decision_scope_id,
+            "rooms": fingerprints,
+        },
+    )
+    index_id = stable_contract_id(
+        "topidx",
+        {
+            "source_room_face_index": source_fingerprint,
+            "document_id": context.document_id,
+            "source_sha256": context.source_sha256,
+            "revision_id": context.current_revision_id,
+            "page_id": result.page_id,
+            "page_no": source_page_no,
+            "viewport_id": viewport.viewport_id,
+            "geometry_source": GEOMETRY_SOURCE_AUTHENTICATED_ROOM_FACES,
+        },
+    )
+    return OwnedTopologyRoomIndex(
+        index_id=index_id,
+        document_id=_clean(context.document_id),
+        source_sha256=_clean(context.source_sha256).lower(),
+        revision_id=_clean(context.current_revision_id),
+        page_id=_clean(result.page_id),
+        page_no=source_page_no,
+        viewport_id=_clean(viewport.viewport_id),
+        topology_snapshot_fingerprint=source_fingerprint,
+        geometry_source=GEOMETRY_SOURCE_AUTHENTICATED_ROOM_FACES,
         _rooms_by_ref=dict(rooms_by_ref),
         _seal=_INDEX_SEAL,
     )
