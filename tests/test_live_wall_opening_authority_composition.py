@@ -7,6 +7,7 @@ from pb_live_wall_opening_authority_composition import (
     compose_live_wall_opening_authority,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_opening_universe_completeness_authority import OpeningUniverseSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -67,6 +68,23 @@ def test_composer_resolves_source_owned_opening_host_without_caller_geometry() -
 
     assert composition.status is EvidenceResolutionStatus.CORROBORATED
     assert LIVE_WALL_OPENING_COMPOSITION_RESOLVED in composition.reason_codes
+    assert (
+        composition.opening_universe_result.status
+        is EvidenceResolutionStatus.CORROBORATED
+    )
+    assert composition.opening_universe_result.decision_scope_complete is True
+    assert composition.opening_universe_result.record is not None
+    universe_record = composition.opening_universe_result.record
+    resolved_universe = composition.opening_universe_completeness_authority.resolve(
+        OpeningUniverseSelector(
+            document_id=universe_record.document_id,
+            revision_id=universe_record.revision_id,
+            source_sha256=universe_record.source_sha256,
+            snapshot_id=universe_record.snapshot_id,
+            decision_scope_id=universe_record.decision_scope_id,
+        )
+    )
+    assert resolved_universe == composition.opening_universe_result
     assert len(composition.wall_scopes) == 1
     assert composition.wall_scopes[0].scope_complete is True
     assert composition.wall_scopes[0].wall_candidate_ids
@@ -112,3 +130,5 @@ def test_composer_does_not_materialize_unselected_wall_page() -> None:
 
     assert composition.page_ids == ("2",)
     assert [trace.page_id for trace in composition.wall_scopes] == ["2"]
+    if composition.opening_universe_result.record is not None:
+        assert composition.opening_universe_result.record.page_ids == ("2",)
