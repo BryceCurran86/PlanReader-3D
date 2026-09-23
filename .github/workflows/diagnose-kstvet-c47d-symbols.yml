@@ -1,0 +1,103 @@
+name: DIAGNOSTIC KSTVET C47-D Physical Symbols — DO NOT MERGE
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  inspect-symbols:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download and SHA-verify KSTVET
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf" \
+            -o benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+          echo "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/1727358888238-bq-nd-drawing.pdf" | sha256sum -c -
+      - name: Inspect repeated physical support symbols
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import collections
+          import math
+          import fitz
+
+          path = "benchmarks/sources/1727358888238-bq-nd-drawing.pdf"
+          doc = fitz.open(path)
+          page = doc[53]
+          blocks = []
+          for block in page.get_text("blocks") or []:
+              text = " ".join(str(block[4]).split()).strip()
+              if "VERANDAH" in text.upper():
+                  blocks.append((tuple(float(v) for v in block[:4]), text))
+          print("VERANDAH_BLOCKS", blocks)
+          print("PAGE_RECT", tuple(float(v) for v in page.rect))
+
+          drawings = page.get_drawings() or []
+          candidates = []
+          for idx, d in enumerate(drawings):
+              rect = d.get("rect")
+              if rect is None:
+                  continue
+              w = float(rect.width)
+              h = float(rect.height)
+              if w <= 0 or h <= 0 or w > 40 or h > 40:
+                  continue
+              ratio = max(w, h) / min(w, h)
+              if ratio > 1.35:
+                  continue
+              center = ((float(rect.x0)+float(rect.x1))/2.0, (float(rect.y0)+float(rect.y1))/2.0)
+              item_kinds = tuple(str(item[0]) for item in (d.get("items") or []))
+              candidates.append({
+                  "idx": idx,
+                  "center": tuple(round(v,2) for v in center),
+                  "w": round(w,2),
+                  "h": round(h,2),
+                  "close": bool(d.get("closePath")),
+                  "fill": d.get("fill"),
+                  "color": d.get("color"),
+                  "items": item_kinds,
+              })
+
+          print("SMALL_NEAR_SQUARE_COUNT", len(candidates))
+          clusters = collections.defaultdict(list)
+          for c in candidates:
+              key=(round(c["w"],1), round(c["h"],1), c["close"], c["items"])
+              clusters[key].append(c)
+          ranked=sorted(clusters.items(), key=lambda kv:(-len(kv[1]), kv[0]))
+          print("TOP_REPEATED_SHAPE_CLUSTERS_BEGIN")
+          for key, rows in ranked[:40]:
+              if len(rows) < 2:
+                  continue
+              print("CLUSTER", key, "COUNT", len(rows), "CENTERS", [r["center"] for r in rows[:30]])
+          print("TOP_REPEATED_SHAPE_CLUSTERS_END")
+
+          # Show small shapes near any source-authenticated verandah label,
+          # using a generous diagnostic neighborhood only.
+          print("NEAR_VERANDAH_BEGIN")
+          for bbox, text in blocks:
+              x0,y0,x1,y1=bbox
+              cx=(x0+x1)/2.0
+              cy=(y0+y1)/2.0
+              near=[]
+              for row in candidates:
+                  x,y=row["center"]
+                  if abs(x-cx) <= 450 and abs(y-cy) <= 220:
+                      near.append(row)
+              print("LABEL", repr(text), "CENTER", (round(cx,2),round(cy,2)), "CANDIDATES", near)
+          print("NEAR_VERANDAH_END")
+          doc.close()
+          PY
