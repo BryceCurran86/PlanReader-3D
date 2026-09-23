@@ -191,3 +191,38 @@ def test_item35_conflicting_schedule_dimensions_never_publish_mark_prediction(tm
         and (predictions["W1"].metadata or {}).get("derivation")
         == "item35_source_authenticated_opening_mark"
     )
+
+
+def test_live_extractor_scopes_item35_to_source_classified_drawing_pages(tmp_path, monkeypatch) -> None:
+    pdf_path = tmp_path / "item35-drawing-scope.pdf"
+    doc = fitz.open()
+    boq = doc.new_page(width=700, height=650)
+    boq.insert_text(fitz.Point(40, 40), "BILL OF QUANTITIES\nRATE AMOUNT KSH")
+    plan = doc.new_page(width=700, height=650)
+    plan.insert_text(fitz.Point(40, 40), "GROUND FLOOR PLAN\nSCALE 1:100")
+    schedule = doc.new_page(width=700, height=650)
+    schedule.insert_text(fitz.Point(40, 40), "WINDOW SCHEDULE\nW1 900 2100")
+    doc.save(pdf_path)
+    doc.close()
+
+    captured = {}
+
+    def fake_collect(path, *, document_id=None, pages=None):
+        captured["pages"] = tuple(pages or ())
+        return {
+            "status": "abstained",
+            "reason": "test_scope_capture",
+            "opening_mark_predictions": {},
+        }
+
+    monkeypatch.setattr(
+        "pb_item35_production_authority_shadow.collect_item35_authority_shadow",
+        fake_collect,
+    )
+
+    extractor = GenericPlanReaderExtractor()
+    extractor.extract_from_pdf(pdf_path)
+
+    # Zero-based source pages 1 and 2 are independently classified as drawing
+    # evidence; the BOQ page is never admitted to Item35.
+    assert captured["pages"] == (1, 2)
