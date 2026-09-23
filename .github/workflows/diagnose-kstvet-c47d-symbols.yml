@@ -131,6 +131,27 @@ jobs:
               })
           print("PLAN_BAND_REPEATED_ROWS_END")
 
+          print("FRONT_EDGE_VECTOR_PATHS_BEGIN")
+          for idx,d in enumerate(drawings):
+              rect=d.get("rect")
+              if rect is None:
+                  continue
+              cx=(float(rect.x0)+float(rect.x1))/2.0
+              cy=(float(rect.y0)+float(rect.y1))/2.0
+              if 230 <= cx <= 690 and 760 <= cy <= 790:
+                  print({
+                      "idx":idx,
+                      "rect":tuple(round(float(v),3) for v in (rect.x0,rect.y0,rect.x1,rect.y1)),
+                      "w":round(float(rect.width),3),
+                      "h":round(float(rect.height),3),
+                      "close":bool(d.get("closePath")),
+                      "fill":d.get("fill"),
+                      "color":d.get("color"),
+                      "width":d.get("width"),
+                      "items":[str(item[0]) for item in (d.get("items") or [])],
+                  })
+          print("FRONT_EDGE_VECTOR_PATHS_END")
+
           # Diagnostic-only visual crop of the source-authenticated floor-plan
           # verandah band. Coordinates are used only for this temporary audit.
           clip = fitz.Rect(120, 630, 850, 870)
