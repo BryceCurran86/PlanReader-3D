@@ -13,7 +13,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-def _complete_void_pdf() -> bytes:
+def _complete_void_pdf(*, include_height: bool = True) -> bytes:
     doc = fitz.open()
     try:
         page = doc.new_page(width=760.0, height=650.0)
@@ -39,7 +39,7 @@ def _complete_void_pdf() -> bytes:
             "ROUGH-OPENING-SILL-MM",
             "ROUGH-OPENING-HEAD-MM",
         )
-        values = ("W1", "900", "2100", "900", "3000")
+        values = ("W1", "900", "2100" if include_height else "", "900", "3000")
         xs = (50.0, 150.0, 250.0, 350.0, 550.0)
         for text, x in zip(headings, xs):
             page.insert_text(fitz.Point(x, 500.0), text)
@@ -115,3 +115,34 @@ def test_live_composition_resolves_sealed_physical_opening_void() -> None:
     assert replay.record is not None
     assert replay.record.record_id == trace.void_record_id
     assert replay.record.coordinate_unit == "metre"
+
+
+def test_live_void_composition_never_uses_default_height_when_source_height_is_missing() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="live-physical-opening-void-no-default-height-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="live-physical-opening-void-no-height",
+        source_bytes=_complete_void_pdf(include_height=False),
+        source_locator="memory://live-physical-opening-void-no-height.pdf",
+    )
+    wall_opening = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    assert wall_opening.status is EvidenceResolutionStatus.CORROBORATED
+
+    composition = compose_live_physical_opening_voids(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    assert composition.status is not EvidenceResolutionStatus.CORROBORATED
+    assert len(composition.traces) == 1
+    trace = composition.traces[0]
+    assert trace.height_status is not EvidenceResolutionStatus.CORROBORATED
+    assert trace.height_record_id is None
+    assert trace.void_status is not EvidenceResolutionStatus.CORROBORATED
+    assert trace.void_record_id is None
