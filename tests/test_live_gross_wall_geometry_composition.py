@@ -106,7 +106,7 @@ def test_live_gross_wall_uses_shared_whole_wall_frame_identity() -> None:
     assert void_record.host_wall_id not in composition.gross_selectors
 
 
-def test_live_gross_wall_blocks_when_selected_page_has_zero_opening_wall_coverage() -> None:
+def test_live_gross_wall_targets_proven_zero_opening_wall_without_coverage_gap() -> None:
     doc = fitz.open(stream=_complete_void_pdf(), filetype="pdf")
     try:
         page = doc.new_page(width=760.0, height=650.0)
@@ -157,11 +157,20 @@ def test_live_gross_wall_blocks_when_selected_page_has_zero_opening_wall_coverag
         physical_void_composition=physical_void,
     )
 
-    # Resolving every opening-host wall is not enough to claim complete wall
-    # coverage. The unopened wall on page 2 must keep this layer fail-closed
-    # until a producer-owned no-opening frame/gross path exists.
-    assert composition.status is EvidenceResolutionStatus.ABSTAINED
-    assert LIVE_GROSS_WALL_COVERAGE_INCOMPLETE in composition.reason_codes
+    # The unopened wall is now positively framed from complete source truth and
+    # enters the same gross-wall target set. This fixture still lacks the
+    # independent cross-sheet height / physical scale evidence needed to mint a
+    # gross area, so ABSTAINED remains valid -- but wall coverage itself is no
+    # longer the blocker.
+    page_two_traces = tuple(
+        trace for trace in composition.traces if trace.page_id == "2"
+    )
+    assert page_two_traces
+    assert LIVE_GROSS_WALL_COVERAGE_INCOMPLETE not in composition.reason_codes
+    assert any(
+        trace.physical_wall_id in composition.gross_selectors
+        for trace in page_two_traces
+    )
 
 
 def test_live_gross_wall_public_interface_has_no_height_or_area_truth_inputs() -> None:
