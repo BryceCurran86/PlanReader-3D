@@ -817,6 +817,10 @@ class GenericPlanReaderExtractor:
         global_dimension_chains: List[Any] = []  # List[DimensionChain], imported lazily below
         global_explicit_floor_area_evidence: List[Any] = []  # source-only figured FLOOR AREA evidence
         global_secondary_area_support_evidence: List[Any] = []  # corroborated repeated-bay support evidence
+        # Source-derived page scope for Item35. This is populated only by the
+        # extractor's own drawing-page classifier; caller page lists cannot
+        # promote BOQ/non-drawing pages into opening authority.
+        item35_source_pages: List[int] = []
 
         for p_idx in target_pages:
             if p_idx < 0 or p_idx >= len(doc):
@@ -825,6 +829,7 @@ class GenericPlanReaderExtractor:
             pg_txt = page_obj.get_text("text")
             if not self.is_drawing_page(pg_txt, page_obj):
                 continue
+            item35_source_pages.append(p_idx)
             native_sparse = len((pg_txt or "").strip()) < 150
             if native_sparse or self._page_has_large_raster(page_obj):
                 ocr_txt = self._ocr_text_for_page(page_obj, p_idx)
@@ -2487,7 +2492,7 @@ class GenericPlanReaderExtractor:
                 self.item35_authority_shadow = collect_item35_authority_shadow(
                     p_path,
                     document_id=f"extractor:{p_path.name}",
-                    pages=(target_pages if pages is not None else None),
+                    pages=tuple(item35_source_pages),
                 )
                 self.extraction_status["item35_authority_shadow"] = str(
                     self.item35_authority_shadow.get("status") or "abstained"
