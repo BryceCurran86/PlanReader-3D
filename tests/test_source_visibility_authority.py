@@ -81,6 +81,27 @@ def test_unclipped_native_segments_publish_producer_owned_visible_receipts() -> 
     assert not hasattr(producer, "publish_derived_observation")
 
 
+def test_native_visible_segments_publish_in_one_derived_snapshot() -> None:
+    producer, published, authority = _visible_ingest(
+        _rectangle_pdf_bytes(),
+        document_id="batched-visible",
+    )
+
+    # The source snapshot plus exactly one derived visibility snapshot proves
+    # that sibling visible segments are committed as one producer-owned batch
+    # instead of repeatedly cloning a growing snapshot.
+    assert len(producer._producer._store.snapshots) == 2
+    assert published.snapshot.parent_snapshot_id == published.base_source_snapshot_id
+    assert len(published.visible_observation_ids) == 4
+
+    for observation_id in published.visible_observation_ids:
+        result = authority.resolve_visible(_selector(published, observation_id))
+        assert result.status == EvidenceResolutionStatus.CORROBORATED
+        assert result.observation is not None
+        assert result.observation.snapshot_id == published.snapshot.snapshot_id
+        assert len(result.observation.derivation_parent_ids) == 1
+
+
 def test_real_rectangular_clip_does_not_publish_visible_segments_in_phase1() -> None:
     payload = _rectangle_pdf_bytes(clip_prefix=b"0 0 20 20 re W n")
     producer, published, authority = _visible_ingest(payload, document_id="fully-clipped")
