@@ -6,6 +6,7 @@ import fitz
 from pb_page_scale_calibration_authority import POINTS_PER_METRE_AT_1_1
 from pb_live_ceiling_lining_integration import (
     LIVE_CEILING_LINING_RESOLVED,
+    LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT,
     collect_live_ceiling_lining_claims,
 )
 from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
@@ -132,3 +133,66 @@ def test_unframed_plan_does_not_fall_back_to_page_wide_ceiling_authority(tmp_pat
 
     assert not any(item.tag.startswith("ceiling_") for item in predictions)
     assert extractor.ceiling_lining_live["claims"] == []
+
+
+def _pdf_with_two_board_descriptors() -> bytes:
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=460.0, height=320.0)
+        page.draw_rect(
+            fitz.Rect(30.0, 25.0, 370.0, 230.0),
+            color=(0, 0, 0),
+            width=1.0,
+        )
+        page.insert_text(
+            fitz.Point(120.0, 48.0),
+            "GROUND FLOOR PLAN",
+            fontsize=8.0,
+            color=(0, 0, 0),
+        )
+        for first, second in (
+            ((70.0, 70.0), (330.0, 70.0)),
+            ((330.0, 70.0), (330.0, 175.0)),
+            ((330.0, 175.0), (70.0, 175.0)),
+            ((70.0, 175.0), (70.0, 70.0)),
+            ((200.0, 70.0), (200.0, 175.0)),
+        ):
+            page.draw_line(
+                fitz.Point(*first),
+                fitz.Point(*second),
+                color=(0, 0, 0),
+                width=1.0,
+            )
+        page.insert_text(
+            fitz.Point(86.0, 115.0),
+            "CEILING FINISH: BOARD TYPE A",
+            fontsize=6.5,
+        )
+        page.insert_text(
+            fitz.Point(218.0, 115.0),
+            "CEILING FINISH: BOARD TYPE B",
+            fontsize=6.5,
+        )
+        span = POINTS_PER_METRE_AT_1_1 / 100.0
+        x0, x1, y = 95.0, 95.0 + span, 205.0
+        shape = page.new_shape()
+        shape.draw_line(fitz.Point(x0, y), fitz.Point(x1, y))
+        shape.draw_line(fitz.Point(x0, y - 6.0), fitz.Point(x0, y + 6.0))
+        shape.draw_line(fitz.Point(x1, y - 6.0), fitz.Point(x1, y + 6.0))
+        shape.finish(width=1.0)
+        shape.commit()
+        page.insert_text(fitz.Point(x0 - 2.0, y + 18.0), "0", fontsize=7.0)
+        page.insert_text(fitz.Point(x1 - 4.0, y + 18.0), "1m", fontsize=7.0)
+        return bytes(doc.tobytes(garbage=4, deflate=True))
+    finally:
+        doc.close()
+
+
+def test_distinct_finish_descriptors_that_share_one_family_tag_abstain(tmp_path) -> None:
+    path = tmp_path / "tag-conflict.pdf"
+    path.write_bytes(_pdf_with_two_board_descriptors())
+
+    result = collect_live_ceiling_lining_claims(path, pages=(0,))
+
+    assert result.claims == ()
+    assert LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT in result.reason_codes
