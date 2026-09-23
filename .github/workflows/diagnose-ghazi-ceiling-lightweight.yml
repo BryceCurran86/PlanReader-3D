@@ -65,12 +65,18 @@ jobs:
               method="native_pdf_text",
           )
 
+          title_terms = ("plan", "layout", "design", "scheme", "floor", "laboratory", "drawing", "scale", "legend")
+          finish_terms = ("ceiling", "chip", "board", "finish", "gypsum", "soffit", "particle", "fibre", "fiber", "pvc", "softboard", "soft board", "plaster", "paint")
+          lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
           report = {
               "page_rect": [float(page.rect.x0), float(page.rect.y0), float(page.rect.x1), float(page.rect.y1)],
               "native_segment_count": len(native.get("segments") or ()),
               "native_word_count": len(native.get("words") or ()),
-              "ceiling_text_lines": [ln.strip() for ln in text.splitlines() if "ceiling" in ln.casefold()],
-              "chipboard_text_lines": [ln.strip() for ln in text.splitlines() if "chip" in ln.casefold()],
+              "ceiling_text_lines": [ln for ln in lines if "ceiling" in ln.casefold()],
+              "chipboard_text_lines": [ln for ln in lines if "chip" in ln.casefold()],
+              "title_like_lines": [ln for ln in lines if any(term in ln.casefold() for term in title_terms)],
+              "finish_like_lines": [ln for ln in lines if any(term in ln.casefold() for term in finish_terms)],
+              "scale_like_lines": [ln for ln in lines if "scale" in ln.casefold() or ":" in ln],
               "finish_candidate_count": len(finishes),
               "finish_candidates": [
                   {"raw_text": item.raw_text, "kind": item.kind, "method": item.method}
