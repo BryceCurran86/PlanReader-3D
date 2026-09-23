@@ -18,14 +18,39 @@ from pb_live_ceiling_lining_integration import (
 )
 
 
-def _draw_room_frame(page, *, x0=40.0, y0=40.0, x1=320.0, y1=160.0) -> None:
+def _draw_viewport_frame(
+    page,
+    *,
+    x0=20.0,
+    y0=20.0,
+    x1=360.0,
+    y1=200.0,
+) -> None:
+    """Draw one native closed path for F.07 ownership only."""
     shape = page.new_shape()
     shape.draw_line(fitz.Point(x0, y0), fitz.Point(x1, y0))
     shape.draw_line(fitz.Point(x1, y0), fitz.Point(x1, y1))
     shape.draw_line(fitz.Point(x1, y1), fitz.Point(x0, y1))
     shape.draw_line(fitz.Point(x0, y1), fitz.Point(x0, y0))
-    shape.finish(width=1.0)
+    shape.finish(width=0.5)
     shape.commit()
+
+
+def _draw_two_room_walls(page) -> None:
+    """Match the proven SourceRoomFaceAuthority two-room wall fixture."""
+    for first, second in (
+        ((50.0, 50.0), (320.0, 50.0)),
+        ((320.0, 50.0), (320.0, 160.0)),
+        ((320.0, 160.0), (50.0, 160.0)),
+        ((50.0, 160.0), (50.0, 50.0)),
+        ((180.0, 50.0), (180.0, 160.0)),
+    ):
+        page.draw_line(
+            fitz.Point(*first),
+            fitz.Point(*second),
+            color=(0, 0, 0),
+            width=1.0,
+        )
 
 
 def _write_single_plan(
@@ -38,17 +63,12 @@ def _write_single_plan(
     doc = fitz.open()
     page = doc.new_page(width=420.0, height=240.0)
 
-    _draw_room_frame(page)
-    page.draw_line(
-        fitz.Point(180.0, 40.0),
-        fitz.Point(180.0, 160.0),
-        color=(0, 0, 0),
-        width=1.0,
-    )
+    _draw_viewport_frame(page)
+    _draw_two_room_walls(page)
 
     if include_title:
         page.insert_text(
-            fitz.Point(120.0, 58.0),
+            fitz.Point(120.0, 36.0),
             "GROUND FLOOR PLAN",
             fontsize=8.0,
             color=(0, 0, 0),
@@ -69,7 +89,7 @@ def _write_single_plan(
         )
 
     page.insert_text(
-        fitz.Point(205.0, 72.0),
+        fitz.Point(245.0, 188.0),
         "SCALE 1:100",
         fontsize=6.0,
         color=(0, 0, 0),
@@ -77,15 +97,15 @@ def _write_single_plan(
 
     if include_scale_bar:
         span = POINTS_PER_METRE_AT_1_1 / 100.0
-        x0, x1, y = 70.0, 70.0 + span, 132.0
+        x0, x1, y = 70.0, 70.0 + span, 176.0
         shape = page.new_shape()
         shape.draw_line(fitz.Point(x0, y), fitz.Point(x1, y))
         shape.draw_line(fitz.Point(x0, y - 6.0), fitz.Point(x0, y + 6.0))
         shape.draw_line(fitz.Point(x1, y - 6.0), fitz.Point(x1, y + 6.0))
         shape.finish(width=0.8)
         shape.commit()
-        page.insert_text(fitz.Point(x0 - 1.0, y + 15.0), "0", fontsize=6.0)
-        page.insert_text(fitz.Point(x1 - 3.0, y + 15.0), "1m", fontsize=6.0)
+        page.insert_text(fitz.Point(x0 - 1.0, y + 14.0), "0", fontsize=6.0)
+        page.insert_text(fitz.Point(x1 - 3.0, y + 14.0), "1m", fontsize=6.0)
 
     doc.save(path)
     doc.close()
