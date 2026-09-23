@@ -345,6 +345,12 @@ class GenericPlanReaderExtractor:
             "reason": "not_collected",
             "walls": [],
         }
+        self.wall_opening_authority_shadow: Dict[str, Any] = {
+            "status": "abstained",
+            "reason": "not_collected",
+            "first_causal_failure": None,
+            "stages": [],
+        }
         self._ocr_text_by_page: Dict[int, str] = {}
         self.hosted_opening_shadow: Dict[str, Any] = {
             "status": "abstained",
@@ -763,6 +769,7 @@ class GenericPlanReaderExtractor:
         pages: Optional[Sequence[int]] = None,
         *,
         collect_item35_shadow: bool = True,
+        collect_wall_opening_authority_shadow: bool = True,
     ) -> List[ExtractedPrediction]:
         """Extract all identifiable architectural quantities from a PDF document.
 
@@ -776,6 +783,13 @@ class GenericPlanReaderExtractor:
         doc = fitz.open(str(p_path))
         target_pages = list(pages) if pages else list(range(len(doc)))
         self.extraction_status = {}
+        self.wall_opening_authority_shadow = {
+            "status": "abstained",
+            "reason": "not_collected",
+            "first_causal_failure": None,
+            "stages": [],
+        }
+        authority_page_indexes = list(target_pages) if pages is not None else []
         self.hosted_opening_shadow = {
             "status": "abstained",
             "reason": "not_collected",
@@ -825,6 +839,8 @@ class GenericPlanReaderExtractor:
             pg_txt = page_obj.get_text("text")
             if not self.is_drawing_page(pg_txt, page_obj):
                 continue
+            if pages is None:
+                authority_page_indexes.append(p_idx)
             native_sparse = len((pg_txt or "").strip()) < 150
             if native_sparse or self._page_has_large_raster(page_obj):
                 ocr_txt = self._ocr_text_for_page(page_obj, p_idx)
@@ -2469,6 +2485,41 @@ class GenericPlanReaderExtractor:
                 "reason": "shadow_exception",
                 "openings": [],
             }
+
+        # Source-owned WALL -> OPENING authority diagnostic shadow. This
+        # executes the production source visibility / physical wall / physical
+        # opening / host binding / host-frame / opening-universe chain against
+        # the same immutable PDF bytes. It records lineage and the first causal
+        # failure only; it never mutates pred_dict or commercial publication.
+        if collect_wall_opening_authority_shadow:
+            try:
+                from pb_live_wall_opening_authority_shadow import (
+                    collect_live_wall_opening_authority_shadow,
+                )
+
+                self.wall_opening_authority_shadow = (
+                    collect_live_wall_opening_authority_shadow(
+                        p_path,
+                        document_id=f"extractor-wall-opening:{p_path.name}",
+                        page_indexes=tuple(authority_page_indexes),
+                    )
+                )
+                self.extraction_status["wall_opening_authority_shadow"] = str(
+                    self.wall_opening_authority_shadow.get("status") or "abstained"
+                )
+            except Exception as exc:
+                from pb_live_wall_opening_authority_shadow import (
+                    empty_wall_opening_authority_shadow,
+                )
+
+                self.wall_opening_authority_shadow = (
+                    empty_wall_opening_authority_shadow(
+                        reason=f"shadow_exception:{type(exc).__name__}"
+                    )
+                )
+                self.extraction_status["wall_opening_authority_shadow"] = (
+                    "extraction_failed"
+                )
 
         # Item 35 production-authority SHADOW only. This executes the real
         # source-visibility -> semantic-opening -> commercial-count gate on the
