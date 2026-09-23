@@ -182,7 +182,7 @@ class DrawingViewClassifier:
     """Classifies text and spatial regions into architectural drawing view types."""
 
     _PLAN_PATTERNS = (
-        r"\b(?:ground\s*floor\s*plan|floor\s*plan|layout\s*plan|first\s*floor\s*plan|level\s*\d+\s*plan)\b",
+        r"\b(?:ground\s*floor\s*plan|floor\s*plan|layout\s*plan|floor\s*layout|plan\s*:\s*floor\s*layout|first\s*floor\s*plan|level\s*\d+\s*plan)\b",
     )
     _ROOF_PATTERNS = (
         r"\b(?:roof\s*plan|roof\s*layout|roofing\s*plan)\b",
