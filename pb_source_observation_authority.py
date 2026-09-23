@@ -197,6 +197,10 @@ class SourceObservationProducer:
         self._producer_method = _nonempty(producer_method, "producer_method")
         self._producer_version = _nonempty(producer_version, "producer_version")
         self._store = _SourceObservationStore()
+        # One immutable native-decode scope per revision on this producer.
+        # None means the complete source document; a tuple means an explicit
+        # page subset. Replaying a revision at a different scope fails closed.
+        self._ingest_scope_by_revision: dict[str, tuple[int, ...] | None] = {}
 
     def authority(self) -> "SourceObservationAuthority":
         return SourceObservationAuthority(self._store)
@@ -418,11 +422,20 @@ class SourceObservationProducer:
         document_id: str,
         source_bytes: bytes | bytearray | memoryview,
         source_locator: str,
+        page_ids: Optional[Sequence[str]] = None,
     ) -> PublishedSourceSnapshot:
-        """Hash and decode the exact same immutable PDF byte buffer.
+        """Hash the full immutable PDF and decode a fixed producer-owned page scope.
 
-        Page partitions and native observations are producer-derived from the PDF;
-        a caller cannot supply authoritative page inventories or observation bodies.
+        page_ids is addressing only. The document revision, source SHA-256,
+        total page inventory, and partition inventory always describe the exact
+        original PDF bytes. When a strict page subset is requested, only those
+        source pages produce native observations and decode coverage is marked
+        partial. Full-document ingestion preserves the historical snapshot
+        identity.
+
+        A producer instance may ingest a given revision at exactly one decode
+        scope. Replaying the same scope is idempotent; attempting to re-ingest
+        the same revision at a different scope fails closed.
         """
 
         document_id = _nonempty(document_id, "document_id")
@@ -439,13 +452,6 @@ class SourceObservationProducer:
             {"document_id": document_id, "source_sha256": digest},
             digest_chars=32,
         )
-        existing_snapshot_id = self._store.source_snapshot_by_revision.get(revision_id)
-        if existing_snapshot_id is not None:
-            return PublishedSourceSnapshot(
-                revision=replace(self._store.revisions[revision_id]),
-                coverage=replace(self._store.coverage_by_revision[revision_id]),
-                snapshot=replace(self._store.snapshots[existing_snapshot_id]),
-            )
 
         try:
             pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
@@ -457,9 +463,56 @@ class SourceObservationProducer:
         failed_pages: list[int] = []
         try:
             total_pages = int(pdf.page_count)
+            all_pages = tuple(range(1, total_pages + 1))
+            if page_ids is None:
+                requested_pages = all_pages
+            else:
+                normalized_pages: set[int] = set()
+                for raw_page_id in page_ids:
+                    raw = str(raw_page_id).strip()
+                    try:
+                        page_number = int(raw)
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(
+                            f"{SOURCE_UNAVAILABLE}: invalid page id {raw_page_id!r}"
+                        ) from exc
+                    if (
+                        str(page_number) != raw
+                        or page_number < 1
+                        or page_number > total_pages
+                    ):
+                        raise ValueError(
+                            f"{SOURCE_UNAVAILABLE}: invalid page id {raw_page_id!r}"
+                        )
+                    normalized_pages.add(page_number)
+                if not normalized_pages:
+                    raise ValueError(
+                        f"{SOURCE_UNAVAILABLE}: page_ids must select at least one page"
+                    )
+                requested_pages = tuple(sorted(normalized_pages))
+
+            scope_marker: tuple[int, ...] | None = (
+                None if requested_pages == all_pages else requested_pages
+            )
+
+            existing_snapshot_id = self._store.source_snapshot_by_revision.get(
+                revision_id
+            )
+            if existing_snapshot_id is not None:
+                prior_scope = self._ingest_scope_by_revision.get(revision_id)
+                if prior_scope != scope_marker:
+                    raise ValueError(
+                        f"{SNAPSHOT_MISMATCH}: native decode scope changed for revision"
+                    )
+                return PublishedSourceSnapshot(
+                    revision=replace(self._store.revisions[revision_id]),
+                    coverage=replace(self._store.coverage_by_revision[revision_id]),
+                    snapshot=replace(self._store.snapshots[existing_snapshot_id]),
+                )
+
             partition_ids = tuple(f"page:{i + 1}" for i in range(total_pages))
-            for page_index in range(total_pages):
-                page_number = page_index + 1
+            for page_number in requested_pages:
+                page_index = page_number - 1
                 partition_id = f"page:{page_number}"
                 try:
                     page = pdf.load_page(page_index)
@@ -472,7 +525,10 @@ class SourceObservationProducer:
                             "kind": "native_pdf_page",
                             "primitive_ref": f"page:{page_number}",
                             "raw_text": "",
-                            "geometry": (float(native["width"]), float(native["height"])),
+                            "geometry": (
+                                float(native["width"]),
+                                float(native["height"]),
+                            ),
                         }
                     )
                     for segment in native.get("segments") or []:
@@ -484,8 +540,10 @@ class SourceObservationProducer:
                                 "primitive_ref": f"segment:{segment.get('id')}",
                                 "raw_text": "",
                                 "geometry": (
-                                    float(segment["x1"]), float(segment["y1"]),
-                                    float(segment["x2"]), float(segment["y2"]),
+                                    float(segment["x1"]),
+                                    float(segment["y1"]),
+                                    float(segment["x2"]),
+                                    float(segment["y2"]),
                                 ),
                             }
                         )
@@ -535,18 +593,30 @@ class SourceObservationProducer:
             total_pages=total_pages,
             decoded_pages=tuple(decoded_pages),
             failed_pages=tuple(failed_pages),
-            state="complete" if not failed_pages else "partial",
+            state=(
+                "complete"
+                if scope_marker is None and not failed_pages
+                else "partial"
+            ),
         )
+        snapshot_payload: dict[str, object] = {
+            "document_id": document_id,
+            "revision_id": revision_id,
+            "source_sha256": digest,
+            "producer_method": self._producer_method,
+            "producer_version": self._producer_version,
+            "kind": "native_pdf_ingestion",
+        }
+        if scope_marker is not None:
+            snapshot_payload.update(
+                {
+                    "kind": "native_pdf_ingestion_scoped",
+                    "requested_pages": requested_pages,
+                }
+            )
         snapshot_id = stable_contract_id(
             "source_snapshot",
-            {
-                "document_id": document_id,
-                "revision_id": revision_id,
-                "source_sha256": digest,
-                "producer_method": self._producer_method,
-                "producer_version": self._producer_version,
-                "kind": "native_pdf_ingestion",
-            },
+            snapshot_payload,
             digest_chars=32,
         )
 
@@ -608,8 +678,11 @@ class SourceObservationProducer:
             source_bytes=immutable_bytes,
             mark_source_snapshot=True,
         )
+        self._ingest_scope_by_revision[revision_id] = scope_marker
         return PublishedSourceSnapshot(
-            revision=replace(revision), coverage=replace(coverage), snapshot=replace(snapshot)
+            revision=replace(revision),
+            coverage=replace(coverage),
+            snapshot=replace(snapshot),
         )
 
     def publish_derived_observation(
