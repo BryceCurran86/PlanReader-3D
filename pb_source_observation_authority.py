@@ -1066,7 +1066,11 @@ class SourceObservationProducer:
         self._store.revisions[revision.revision_id] = revision
         self._store.current_revision_by_document[revision.document_id] = revision.revision_id
         self._store.source_bytes_by_revision[revision.revision_id] = bytes(source_bytes)
-        self._store.coverage_by_revision[revision.revision_id] = coverage
+        if (
+            mark_source_snapshot
+            or revision.revision_id not in self._store.coverage_by_revision
+        ):
+            self._store.coverage_by_revision[revision.revision_id] = coverage
         self._store.coverage_by_snapshot[snapshot.snapshot_id] = coverage
         self._store.snapshots[snapshot.snapshot_id] = snapshot
         for key, record in staged.items():
