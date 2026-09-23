@@ -531,3 +531,35 @@ def test_full_revision_coverage_is_not_downgraded_by_later_scoped_snapshot() -> 
     assert producer._store.coverage_by_snapshot[
         scoped.snapshot.snapshot_id
     ].decoded_pages == (2,)
+
+
+def test_scoped_replay_after_full_ingest_does_not_downgrade_revision_coverage() -> None:
+    source = _multi_page_pdf_bytes()
+    producer = _producer()
+    full = producer.ingest_native_pdf_bytes(
+        document_id="doc-full-then-scope",
+        source_bytes=source,
+        source_locator="memory://doc-full-then-scope.pdf",
+    )
+    scoped = producer.ingest_native_pdf_bytes(
+        document_id="doc-full-then-scope",
+        source_bytes=source,
+        source_locator="memory://doc-full-then-scope.pdf",
+        page_ids=(2,),
+    )
+
+    assert full.revision.revision_id == scoped.revision.revision_id
+    assert full.coverage.state == "complete"
+    assert scoped.coverage.state == "partial"
+    assert scoped.coverage.decoded_pages == (2,)
+
+    legacy = producer.authority().coverage(
+        document_id=full.revision.document_id,
+        revision_id=full.revision.revision_id,
+    )
+    assert legacy is not None
+    assert legacy.state == "complete"
+    assert legacy.decoded_pages == (1, 2, 3)
+    assert producer._store.coverage_by_snapshot[
+        scoped.snapshot.snapshot_id
+    ].decoded_pages == (2,)
