@@ -1149,10 +1149,7 @@ class SourceObservationAuthority:
     def coverage(
         self, *, document_id: str, revision_id: str
     ) -> Optional[SourceDecodeCoverageRecord]:
-        coverage = (
-            self._store.coverage_by_snapshot.get(snapshot_id)
-            or self._store.coverage_by_revision.get(revision_id)
-        )
+        coverage = self._store.coverage_by_revision.get(revision_id)
         if coverage is None or coverage.document_id != document_id:
             return None
         return replace(coverage)
