@@ -197,6 +197,10 @@ class SourceObservationProducer:
         self._producer_method = _nonempty(producer_method, "producer_method")
         self._producer_version = _nonempty(producer_version, "producer_version")
         self._store = _SourceObservationStore()
+        # One immutable native-decode scope per revision on this producer.
+        # None means the complete source document; a tuple means an explicit
+        # page subset. Replaying a revision at a different scope fails closed.
+        self._ingest_scope_by_revision: dict[str, tuple[int, ...] | None] = {}
 
     def authority(self) -> "SourceObservationAuthority":
         return SourceObservationAuthority(self._store)
