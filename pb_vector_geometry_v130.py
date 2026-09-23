@@ -64,6 +64,25 @@ def _dimension_m(token: Any) -> Optional[float]:
     return value if 0.25 <= value <= 150.0 else None
 
 
+def native_word_primitive_ref(word: Mapping[str, Any]) -> str:
+    """Return a deterministic primitive ref preserving native PDF line structure.
+
+    PyMuPDF native words carry block_no / line_no / word_no.  Preserve those
+    producer-derived coordinates when available; legacy/unstructured inputs
+    retain the historical word:<id> identity rather than inventing structure.
+    """
+    raw_id = word.get("id")
+    try:
+        block_no = int(word.get("block_no"))
+        line_no = int(word.get("line_no"))
+        word_no = int(word.get("word_no"))
+    except (TypeError, ValueError):
+        return f"word:{raw_id}"
+    if min(block_no, line_no, word_no) < 0:
+        return f"word:{raw_id}"
+    return f"word:b{block_no}:l{line_no}:w{word_no}:i{raw_id}"
+
+
 def _normalize_scissor(scissor: Any) -> Optional[Tuple[float, float, float, float]]:
     """Return a stable page-space clip rectangle, or None when unknown."""
     if scissor is None:
@@ -483,8 +502,28 @@ def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
         if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
             continue
         text = str(word[4]).strip()
-        if text:
-            words.append({"id": idx, "text": text, "bbox": [x0, y0, x1, y1]})
+        if not text:
+            continue
+
+        block_no = line_no = word_no = None
+        if len(word) >= 8:
+            try:
+                candidate = (int(word[5]), int(word[6]), int(word[7]))
+                if min(candidate) >= 0:
+                    block_no, line_no, word_no = candidate
+            except (TypeError, ValueError):
+                pass
+
+        words.append(
+            {
+                "id": idx,
+                "text": text,
+                "bbox": [x0, y0, x1, y1],
+                "block_no": block_no,
+                "line_no": line_no,
+                "word_no": word_no,
+            }
+        )
 
     return {
         "width": float(pdf_page.rect.width), "height": float(pdf_page.rect.height),
