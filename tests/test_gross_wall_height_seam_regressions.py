@@ -235,6 +235,7 @@ def test_legitimate_wall_height_producer_positive_path() -> None:
     assert result.record.height_m == 3.0
     assert result.record.length_m == 1.0
     assert result.record.gross_area_m2 == 3.0
+    assert result.record.member_wall_candidate_ids == (WALL,)
 
 
 def test_firm_height_without_exact_cross_sheet_binding_is_rejected() -> None:
