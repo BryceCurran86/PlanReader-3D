@@ -52,7 +52,7 @@ from pb_source_observation_authority import (
     SourceObservationProducer,
     SourceRevisionRecord,
 )
-from pb_vector_geometry_v130 import extract_native_page
+from pb_vector_geometry_v130 import extract_native_page, native_word_primitive_ref
 
 
 SOURCE_VISIBILITY_SCHEMA_VERSION = "1.2.0"
@@ -601,7 +601,7 @@ class SourceVisibilityProducer:
                 for word in native.get("words") or ():
                     raw_text = str(word.get("text") or "")
                     geometry = tuple(float(value) for value in (word.get("bbox") or ()))
-                    primitive_ref = f"word:{word.get('id')}"
+                    primitive_ref = native_word_primitive_ref(word)
                     parent_id = _native_word_observation_id(
                         document_id=base.revision.document_id,
                         revision_id=base.revision.revision_id,
@@ -624,6 +624,9 @@ class SourceVisibilityProducer:
                                 source_partition_id=partition_id,
                                 geometry=geometry,
                                 decision=decision,
+                                block_no=word.get("block_no"),
+                                line_no=word.get("line_no"),
+                                word_no=word.get("word_no"),
                             ),
                         )
                     )
