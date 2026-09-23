@@ -209,7 +209,8 @@ def compose_live_gross_wall_geometry(
     # opening-host wall resolved; zero-opening walls must remain visible as an
     # explicit coverage blocker until they have their own authenticated frame.
     required_wall_classes: list[tuple[str, str, frozenset[str]]] = []
-    coverage_identity_ambiguous = False
+    ambiguous_wall_ids_by_page: dict[str, set[str]] = {}
+    coverage_equivalence_unavailable = False
     for page_id in wall_opening_composition.page_ids:
         scope_selector = PhysicalWallCandidateSelector(
             document_id=published_after.revision.document_id,
@@ -239,7 +240,7 @@ def compose_live_gross_wall_geometry(
 
         equivalence = scope_result.equivalence
         if equivalence is None:
-            coverage_identity_ambiguous = True
+            coverage_equivalence_unavailable = True
             for record in scope_result.records:
                 required_wall_classes.append(
                     (
@@ -250,11 +251,16 @@ def compose_live_gross_wall_geometry(
                 )
             continue
 
-        if (
-            tuple(equivalence.ambiguous_wall_ids)
-            or tuple(equivalence.abstained_wall_ids)
-        ):
-            coverage_identity_ambiguous = True
+        # abstained_wall_ids also contains ordinary non-representatives of
+        # proven SAME groups, so it cannot by itself mean coverage is unknown.
+        # Track only genuinely ambiguous candidate identities. A later sealed
+        # whole-wall host frame may independently account for those members.
+        if tuple(equivalence.ambiguous_wall_ids):
+            ambiguous_wall_ids_by_page.setdefault(page_id, set()).update(
+                str(wall_id)
+                for wall_id in equivalence.ambiguous_wall_ids
+                if str(wall_id)
+            )
 
         groups = tuple(
             frozenset(str(member_id) for member_id in group if str(member_id))
@@ -448,8 +454,16 @@ def compose_live_gross_wall_geometry(
             & covered_member_ids_by_page.get(page_id, set())
         )
     )
+    remaining_uncovered_ambiguous_ids = tuple(
+        (page_id, wall_id)
+        for page_id, wall_ids in sorted(ambiguous_wall_ids_by_page.items())
+        for wall_id in sorted(wall_ids)
+        if wall_id not in covered_member_ids_by_page.get(page_id, set())
+    )
     coverage_incomplete = bool(
-        coverage_identity_ambiguous or remaining_uncovered_wall_classes
+        coverage_equivalence_unavailable
+        or remaining_uncovered_wall_classes
+        or remaining_uncovered_ambiguous_ids
     )
 
     if not wall_targets:
