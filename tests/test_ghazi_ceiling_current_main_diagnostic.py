@@ -87,6 +87,7 @@ def test_ghazi_ceiling_current_main_diagnostic(tmp_path: Path) -> None:
     pdf = fitz.open(stream=raw, filetype="pdf")
     try:
         page = pdf[166]
+        page_size = [float(page.rect.width), float(page.rect.height)]
         page_text = page.get_text("text") or ""
         relevant_text_lines = [
             line.strip()
@@ -235,10 +236,7 @@ def test_ghazi_ceiling_current_main_diagnostic(tmp_path: Path) -> None:
             "text_observation_count": len(published.text_observation_ids),
         },
         "viewport_diagnostic": {
-            "page_size": [
-                float(page.rect.width) if 'page' in locals() else None,
-                float(page.rect.height) if 'page' in locals() else None,
-            ],
+            "page_size": page_size,
             "relevant_text_lines": relevant_text_lines,
             "title_anchors": [
                 {
