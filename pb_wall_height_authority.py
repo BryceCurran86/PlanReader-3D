@@ -1175,6 +1175,191 @@ class WallHeightProducer:
         self._quantities[selector.key] = qty
         return qty
 
+    def publish_whole_wall_frame(
+        self,
+        selector: WallHeightSelector,
+        *,
+        host_frame_authority: object,
+    ) -> QuantityEvidence:
+        """Promote exact member registrations to one sealed whole-wall frame.
+
+        The selector's physical_wall_id must be a producer-owned
+        OpeningHostFrameEvidence.whole_wall_frame_id. Candidate members are
+        discovered only from that sealed frame. A caller cannot supply or
+        narrow the member list. Missing member registrations are tolerated,
+        but every FIRM registered member height that exists must agree.
+        """
+        from pb_opening_host_frame_authority import OpeningHostFrameAuthority
+
+        if type(selector) is not WallHeightSelector:
+            raise TypeError("selector must be WallHeightSelector")
+        if type(host_frame_authority) is not OpeningHostFrameAuthority:
+            raise TypeError(
+                "host_frame_authority must be producer-owned OpeningHostFrameAuthority"
+            )
+
+        matching_frames = []
+        for result in getattr(host_frame_authority, "_results", {}).values():
+            evidence = getattr(result, "evidence", None)
+            if (
+                result.status is EvidenceResolutionStatus.CORROBORATED
+                and evidence is not None
+                and evidence.whole_wall_frame_id == selector.physical_wall_id
+                and evidence.selector.document_id == selector.document_id
+                and evidence.selector.revision_id == selector.revision_id
+                and evidence.selector.source_sha256 == selector.source_sha256
+                and evidence.selector.snapshot_id == selector.snapshot_id
+                and evidence.selector.page_id == selector.page_id
+                and evidence.selector.decision_scope_id == selector.decision_scope_id
+            ):
+                matching_frames.append(evidence)
+
+        if not matching_frames:
+            return self._blocked(
+                selector, "whole_wall_frame_identity_unavailable"
+            )
+
+        member_sets = {
+            tuple(sorted(str(value) for value in frame.whole_wall_candidate_ids))
+            for frame in matching_frames
+        }
+        if len(member_sets) != 1:
+            return self._blocked(
+                selector, "conflicting_whole_wall_frame_membership"
+            )
+        member_ids = next(iter(member_sets))
+        if not member_ids:
+            return self._blocked(
+                selector, "whole_wall_frame_membership_unavailable"
+            )
+
+        firm_members: list[QuantityEvidence] = []
+        for member_id in member_ids:
+            member_selector = WallHeightSelector(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                page_id=selector.page_id,
+                decision_scope_id=selector.decision_scope_id,
+                physical_wall_id=member_id,
+            )
+            quantity = self.publish_scope(member_selector)
+            if (
+                isinstance(quantity, QuantityEvidence)
+                and not quantity.abstained
+                and quantity.value is not None
+                and quantity.family == WALL_HEIGHT_FAMILY
+                and quantity.status == AuthorityStatus.FIRM.value
+            ):
+                firm_members.append(quantity)
+
+        if not firm_members:
+            return self._blocked(
+                selector, "no_cross_sheet_bound_wall_height_evidence"
+            )
+
+        distinct_values = {
+            round(float(quantity.value), 6)
+            for quantity in firm_members
+            if quantity.value is not None
+        }
+        if len(distinct_values) != 1:
+            return self._blocked(
+                selector,
+                "conflicting_cross_sheet_wall_height_evidence",
+                evidence_ids=tuple(
+                    dict.fromkeys(
+                        evidence_id
+                        for quantity in firm_members
+                        for evidence_id in quantity.evidence_ids
+                    )
+                ),
+            )
+
+        value_m = round(float(next(iter(distinct_values))), 6)
+        firm_members.sort(
+            key=lambda quantity: (
+                str((quantity.metadata or {}).get("height_evidence_page_id") or ""),
+                str((quantity.metadata or {}).get("cross_sheet_registration_record_id") or ""),
+                quantity.quantity_id,
+            )
+        )
+        first = firm_members[0]
+        all_evidence_ids = tuple(
+            dict.fromkeys(
+                evidence_id
+                for quantity in firm_members
+                for evidence_id in quantity.evidence_ids
+            )
+        )
+        registration_ids = tuple(
+            dict.fromkeys(
+                str((quantity.metadata or {}).get("cross_sheet_registration_record_id") or "")
+                for quantity in firm_members
+                if str((quantity.metadata or {}).get("cross_sheet_registration_record_id") or "")
+            )
+        )
+        target_ids = tuple(
+            dict.fromkeys(
+                str((quantity.metadata or {}).get("target_physical_element_id") or "")
+                for quantity in firm_members
+                if str((quantity.metadata or {}).get("target_physical_element_id") or "")
+            )
+        )
+        first_meta = first.metadata if isinstance(first.metadata, Mapping) else {}
+        payload = {
+            "wall_id": selector.physical_wall_id,
+            "value_m": value_m,
+            "source_sha256": selector.source_sha256,
+            "revision_id": selector.revision_id,
+            "snapshot_id": selector.snapshot_id,
+            "source_page_id": selector.page_id,
+            "whole_wall_frame_id": selector.physical_wall_id,
+            "member_physical_element_ids": member_ids,
+            "cross_sheet_registration_record_ids": registration_ids,
+            "target_physical_element_ids": target_ids,
+            "evidence_ids": list(all_evidence_ids),
+        }
+        quantity = QuantityEvidence(
+            quantity_id=stable_contract_id("qty", payload),
+            family=WALL_HEIGHT_FAMILY,
+            semantic_key=f"wall_height:{selector.physical_wall_id}",
+            value=value_m,
+            unit="m",
+            input_entity_ids=(selector.physical_wall_id,),
+            formula="cross_sheet_registered_whole_wall_frame_height",
+            formula_version=WALL_HEIGHT_FORMULA_VERSION,
+            evidence_ids=all_evidence_ids,
+            authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+            status=AuthorityStatus.FIRM.value,
+            confidence=1.0,
+            abstained=False,
+            metadata={
+                "source_sha256": selector.source_sha256,
+                "revision_id": selector.revision_id,
+                "evidence_snapshot_id": selector.snapshot_id,
+                "source_page_id": selector.page_id,
+                "height_evidence_page_id": first_meta.get("height_evidence_page_id"),
+                "height_evidence_view_id": first_meta.get("height_evidence_view_id"),
+                "target_entity_id": selector.physical_wall_id,
+                "whole_wall_frame_id": selector.physical_wall_id,
+                "source_physical_element_ids": member_ids,
+                "target_physical_element_id": (
+                    target_ids[0] if target_ids else ""
+                ),
+                "target_physical_element_ids": target_ids,
+                "cross_sheet_registration_record_id": (
+                    registration_ids[0] if registration_ids else ""
+                ),
+                "cross_sheet_registration_record_ids": registration_ids,
+                "identity_binding_kind": "cross_sheet_registered_whole_wall_frame",
+                "evidence_kind": "wall_height_dimension",
+            },
+        )
+        self._quantities[selector.key] = quantity
+        return quantity
+
     def publish(
         self, selector: WallHeightSelector
     ) -> QuantityEvidence:
