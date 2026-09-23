@@ -209,19 +209,20 @@ def collect_live_ceiling_lining_claims(
     source_sha = hashlib.sha256(payload).hexdigest()
     document_id = f"live-source:{source_sha[:32]}"
 
-    source = SourceVisibilityProducer(
-        producer_method="live-ceiling-lining",
-        producer_version=LIVE_CEILING_LINING_SCHEMA_VERSION,
-    )
-    published = source.ingest_native_pdf_bytes(
-        document_id=document_id,
-        source_bytes=payload,
-        source_locator="memory://live-source.pdf",
-    )
-
     doc = fitz.open(stream=payload, filetype="pdf")
     try:
         selected = _selected_page_indices(len(doc), pages)
+        page_ids = tuple(str(index + 1) for index in selected)
+        source = SourceVisibilityProducer(
+            producer_method="live-ceiling-lining",
+            producer_version=LIVE_CEILING_LINING_SCHEMA_VERSION,
+        )
+        published = source.ingest_native_pdf_bytes(
+            document_id=document_id,
+            source_bytes=payload,
+            source_locator="memory://live-source.pdf",
+            page_ids=page_ids,
+        )
         by_descriptor: dict[
             str,
             list[
