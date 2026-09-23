@@ -5,6 +5,41 @@ on:
     branches: [main]
 
 jobs:
+  visibility-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download target source PDFs
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          curl -fL --retry 3 --retry-delay 2 "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf" -o benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+          curl -fL --retry 3 --retry-delay 2 "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf" -o benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+      - name: Verify target source hashes
+        run: |
+          set -euo pipefail
+          echo "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/1727358888238-bq-nd-drawing.pdf" | sha256sum -c -
+          echo "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf" | sha256sum -c -
+      - name: Classify target native segment visibility
+        env:
+          VISIBILITY_ONLY: "1"
+        run: |
+          PYTHONPATH=. python -u scripts/diagnose_wall_opening_real_sources.py | tee /tmp/visibility-only.log
+      - name: Upload visibility trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wall-opening-visibility-only
+          path: /tmp/visibility-only.log
+
   real-source-diagnostic:
     runs-on: ubuntu-latest
     steps:
