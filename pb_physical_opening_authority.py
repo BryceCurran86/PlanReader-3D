@@ -308,6 +308,79 @@ def _endpoint_at_projection(
     return None
 
 
+def _candidate_collinear_record_pairs(
+    records: tuple[SourceObservationRecord, ...],
+) -> tuple[tuple[int, int], ...]:
+    """Return a conservative broad-phase superset of collinear record pairs.
+
+    Exact membership is still decided by _face_break. This index only removes
+    pairs that cannot satisfy the existing parallel + collinearity tolerances.
+    Pair indexes are returned in the same lexicographic order as the historical
+    nested all-pairs loop so downstream break ordering stays deterministic.
+    """
+
+    if len(records) < 2:
+        return ()
+
+    indexed: list[tuple[int, float, float, float]] = []
+    max_radius = 0.0
+    for index, record in enumerate(records):
+        line = _line_geometry(record)
+        if line is None:
+            continue
+        direction = _canonical_direction(line)
+        angle = math.atan2(direction[1], direction[0]) % math.pi
+        offset = _cross(direction, (line[0], line[1]))
+        radius = max(
+            math.hypot(line[0], line[1]),
+            math.hypot(line[2], line[3]),
+        )
+        max_radius = max(max_radius, radius)
+        indexed.append((index, angle, offset, radius))
+
+    if len(indexed) < 2:
+        return ()
+
+    max_angle_delta = math.asin(min(1.0, _PARALLEL_REL_TOL))
+    angle_width = max(max_angle_delta * 4.0, 1e-12)
+    angle_bucket_count = max(1, int(math.ceil(math.pi / angle_width)))
+    offset_width = max(
+        _COORD_EQ_ABS_TOL * 4.0,
+        (_COORD_EQ_ABS_TOL + max_radius * max_angle_delta) * 4.0,
+    )
+
+    def angle_bin(angle: float) -> int:
+        return int(math.floor(angle / angle_width)) % angle_bucket_count
+
+    def offset_bin(offset: float) -> int:
+        return math.floor(offset / offset_width)
+
+    buckets: dict[tuple[int, int], list[int]] = {}
+    pairs: set[tuple[int, int]] = set()
+
+    for index, angle, offset, _radius in indexed:
+        a_bin = angle_bin(angle)
+        o_bin = offset_bin(offset)
+        candidate_indexes: set[int] = set()
+        for da in (-1, 0, 1):
+            neighbor_angle = (a_bin + da) % angle_bucket_count
+            for do in (-1, 0, 1):
+                candidate_indexes.update(
+                    buckets.get((neighbor_angle, o_bin + do), ())
+                )
+
+        line = _line_geometry(records[index])
+        assert line is not None
+        for prior in candidate_indexes:
+            prior_line = _line_geometry(records[prior])
+            assert prior_line is not None
+            if _parallel(prior_line, line) and _collinear(prior_line, line):
+                pairs.add((prior, index) if prior < index else (index, prior))
+
+        buckets.setdefault((a_bin, o_bin), []).append(index)
+
+    return tuple(sorted(pairs))
+
 def _face_break(
     first: SourceObservationRecord,
     second: SourceObservationRecord,
@@ -613,11 +686,10 @@ class PhysicalOpeningAuthority:
             and _line_geometry(record) is not None
         )
         breaks: list[_FaceBreak] = []
-        for index, first in enumerate(scoped):
-            for second in scoped[index + 1:]:
-                found = _face_break(first, second)
-                if found is not None:
-                    breaks.append(found)
+        for first_index, second_index in _candidate_collinear_record_pairs(scoped):
+            found = _face_break(scoped[first_index], scoped[second_index])
+            if found is not None:
+                breaks.append(found)
 
         if not breaks:
             return ()
