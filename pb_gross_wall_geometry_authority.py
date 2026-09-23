@@ -325,7 +325,11 @@ class GrossWallGeometryProducer:
                 ),
             )
 
-        # Ensure selector.physical_wall_id is present in candidate records
+        # Candidate ids are valid direct wall addresses. Live opening-host walls
+        # may instead be addressed by a sealed whole_wall_frame_id because one
+        # physical wall can be represented by multiple left/right fragments
+        # around openings. The frame authority, never the caller, supplies that
+        # complete member set.
         matching_candidates = [
             r
             for r in getattr(candidates_result, "records", ())
@@ -333,14 +337,45 @@ class GrossWallGeometryProducer:
             or getattr(getattr(r, "physical_identity", None), "physical_wall_id", None)
             == selector.physical_wall_id
         ]
-        if not matching_candidates:
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    GROSS_WALL_GEOMETRY_WALL_UNRESOLVED,
-                ),
-            )
+        frame_identity_evidence: list[OpeningHostFrameEvidence] = []
+        if not matching_candidates and hasattr(self._frame, "_results"):
+            for res in self._frame._results.values():
+                ev = getattr(res, "evidence", None)
+                if (
+                    ev is not None
+                    and res.status is EvidenceResolutionStatus.CORROBORATED
+                    and ev.whole_wall_frame_id == selector.physical_wall_id
+                    and ev.selector.document_id == selector.document_id
+                    and ev.selector.revision_id == selector.revision_id
+                    and ev.selector.source_sha256 == selector.source_sha256
+                    and ev.selector.snapshot_id == selector.snapshot_id
+                    and ev.selector.page_id == selector.page_id
+                    and ev.selector.decision_scope_id == selector.decision_scope_id
+                ):
+                    frame_identity_evidence.append(ev)
+
+            member_sets = {
+                tuple(sorted(str(value) for value in ev.whole_wall_candidate_ids))
+                for ev in frame_identity_evidence
+            }
+            candidate_ids = {
+                str(getattr(record, "wall_candidate_id", ""))
+                for record in getattr(candidates_result, "records", ())
+            }
+            if (
+                not frame_identity_evidence
+                or len(member_sets) != 1
+                or not next(iter(member_sets), ())
+                or not set(next(iter(member_sets), ())).issubset(candidate_ids)
+            ):
+                return self._store(
+                    selector,
+                    _blocked(
+                        EvidenceResolutionStatus.ABSTAINED,
+                        GROSS_WALL_GEOMETRY_WALL_UNRESOLVED,
+                        "whole_wall_frame_identity_unresolved",
+                    ),
+                )
 
         # Check for ambiguous equivalence
         equivalence = getattr(candidates_result, "equivalence", None)
@@ -365,7 +400,8 @@ class GrossWallGeometryProducer:
                     and res.status is EvidenceResolutionStatus.CORROBORATED
                 ):
                     is_match = (
-                        ev.host_wall_id == selector.physical_wall_id
+                        ev.whole_wall_frame_id == selector.physical_wall_id
+                        or ev.host_wall_id == selector.physical_wall_id
                         or selector.physical_wall_id
                         in getattr(ev, "whole_wall_candidate_ids", ())
                     )
@@ -542,13 +578,29 @@ class GrossWallGeometryProducer:
                     "wall_height_target_mismatch",
                 ),
             )
-        if h_meta.get("identity_binding_kind") != "cross_sheet_registration":
+        binding_kind = h_meta.get("identity_binding_kind")
+        if binding_kind not in {
+            "cross_sheet_registration",
+            "cross_sheet_registered_whole_wall_frame",
+        }:
             return self._store(
                 selector,
                 _blocked(
                     EvidenceResolutionStatus.ABSTAINED,
                     GROSS_WALL_GEOMETRY_HEIGHT_UNRESOLVED,
                     "wall_height_exact_identity_binding_unavailable",
+                ),
+            )
+        if (
+            binding_kind == "cross_sheet_registered_whole_wall_frame"
+            and h_meta.get("whole_wall_frame_id") != selector.physical_wall_id
+        ):
+            return self._store(
+                selector,
+                _blocked(
+                    EvidenceResolutionStatus.CONFLICT,
+                    GROSS_WALL_GEOMETRY_HEIGHT_UNRESOLVED,
+                    "wall_height_whole_wall_frame_mismatch",
                 ),
             )
         registration_record_id = str(
