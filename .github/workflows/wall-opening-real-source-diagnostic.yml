@@ -40,6 +40,50 @@ jobs:
           name: wall-opening-visibility-only
           path: /tmp/visibility-only.log
 
+  producer-ingest-only:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: KSTVET
+            filename: 1727358888238-bq-nd-drawing.pdf
+            url: https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf
+            sha256: 6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc
+          - project: LAMU
+            filename: lamu-ishakani-ecd-classrooms-boq.pdf
+            url: https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf
+            sha256: fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download source
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          curl -fL --retry 3 --retry-delay 2 "${{ matrix.url }}" -o "benchmarks/sources/${{ matrix.filename }}"
+          echo "${{ matrix.sha256 }}  benchmarks/sources/${{ matrix.filename }}" | sha256sum -c -
+      - name: Time authenticated source visibility ingestion
+        env:
+          PROJECT_FILTER: "${{ matrix.project }}"
+          INGEST_ONLY: "1"
+        run: |
+          set -euo pipefail
+          timeout 300s env PYTHONPATH=. python -u scripts/diagnose_wall_opening_real_sources.py | tee "/tmp/ingest-${{ matrix.project }}.log"
+      - name: Upload ingestion trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "wall-opening-ingest-${{ matrix.project }}"
+          path: "/tmp/ingest-${{ matrix.project }}.log"
+
   real-source-diagnostic:
     runs-on: ubuntu-latest
     steps:
