@@ -51,7 +51,7 @@ from pb_source_observation_authority import (
 from pb_vector_geometry_v130 import extract_native_page
 
 
-SOURCE_VISIBILITY_SCHEMA_VERSION = "1.1.0"
+SOURCE_VISIBILITY_SCHEMA_VERSION = "1.2.0"
 NATIVE_PDF_VISIBLE_SEGMENT = "native_pdf_visible_segment"
 RASTER_PDF_SEGMENT = "raster_pdf_segment"
 RASTER_PDF_VISIBLE_SEGMENT = "raster_pdf_visible_segment"
@@ -106,6 +106,7 @@ class PublishedVisibleSourceSnapshot:
     base_source_snapshot_id: str
     visible_observation_ids: tuple[str, ...]
     text_observation_ids: tuple[str, ...] = ()
+    ocr_tag_observation_ids: tuple[str, ...] = ()
     schema_version: str = SOURCE_VISIBILITY_SCHEMA_VERSION
 
 
@@ -343,6 +344,196 @@ class SourceVisibilityProducer:
         """
         return self._published_by_revision.get(str(revision_id))
 
+    def augment_with_raster_ocr_tags(
+        self,
+        revision_id: str,
+        *,
+        viewport_decision,
+    ) -> tuple[tuple[object, ...], PublishedVisibleSourceSnapshot]:
+        """Publish producer-owned OCR opening tags into this exact source snapshot.
+
+        Callers provide only an already-authenticated viewport decision. OCR
+        pixels, backend choice, parent observation ids, partition ids, tag text,
+        geometry and expected quantities remain producer-owned. The returned
+        tags are evidence only; this method does not bind them to openings or
+        publish commercial counts.
+        """
+        return self._augment_with_raster_ocr_tags(
+            revision_id,
+            viewport_decision=viewport_decision,
+            test_backend=None,
+        )
+
+    def augment_with_raster_ocr_tags_for_tests(
+        self,
+        revision_id: str,
+        *,
+        viewport_decision,
+        backend,
+    ) -> tuple[tuple[object, ...], PublishedVisibleSourceSnapshot]:
+        """Deterministic test-only OCR handoff accepting exact MockOCRBackend."""
+        from pb_portable_raster_ocr_authority import MockOCRBackend
+
+        if type(backend) is not MockOCRBackend:
+            raise TypeError("test OCR augmentation requires exact MockOCRBackend")
+        return self._augment_with_raster_ocr_tags(
+            revision_id,
+            viewport_decision=viewport_decision,
+            test_backend=backend,
+        )
+
+    def _augment_with_raster_ocr_tags(
+        self,
+        revision_id: str,
+        *,
+        viewport_decision,
+        test_backend,
+    ) -> tuple[tuple[object, ...], PublishedVisibleSourceSnapshot]:
+        from pb_portable_raster_ocr_authority import PortableRasterOCRSelector
+        from pb_raster_ocr_tag_observation_bridge import RasterOCRTagObservationProducer
+
+        published = self._published_by_revision.get(str(revision_id))
+        if published is None:
+            raise ValueError(OBSERVATION_UNAVAILABLE)
+
+        page_id = str(getattr(getattr(viewport_decision, "viewport", None), "page_number", "") or "")
+        viewport_id = str(getattr(getattr(viewport_decision, "viewport", None), "view_id", "") or "")
+        if not page_id or not viewport_id:
+            return (), published
+
+        selector = PortableRasterOCRSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            page_id=page_id,
+            viewport_id=viewport_id,
+        )
+        bridge = (
+            RasterOCRTagObservationProducer.create_for_tests(
+                source_producer=self._producer,
+                backend=test_backend,
+                dpi=300,
+            )
+            if test_backend is not None
+            else RasterOCRTagObservationProducer.create(
+                source_producer=self._producer,
+                dpi=300,
+            )
+        )
+        tags, final_snapshot_id = bridge.publish(
+            selector=selector,
+            viewport_decision=viewport_decision,
+        )
+        if not tags or final_snapshot_id == published.snapshot.snapshot_id:
+            return tuple(tags), published
+
+        snapshot = self._producer._store.snapshots.get(final_snapshot_id)
+        if snapshot is None:
+            raise RuntimeError(f"{PRODUCER_INTEGRITY_FAILURE}: OCR snapshot unavailable")
+
+        old_snapshot_id = published.snapshot.snapshot_id
+        for observation_id in published.visible_observation_ids:
+            native_parent = self._visibility_receipts.get((old_snapshot_id, observation_id))
+            if native_parent is not None:
+                self._visibility_receipts[(final_snapshot_id, observation_id)] = native_parent
+            raster_receipt = self._raster_visibility_receipts.get((old_snapshot_id, observation_id))
+            if raster_receipt is not None:
+                self._raster_visibility_receipts[(final_snapshot_id, observation_id)] = raster_receipt
+
+        for observation_id in published.text_observation_ids:
+            receipt = self._text_integrity_receipts.get((old_snapshot_id, observation_id))
+            if receipt is not None:
+                self._text_integrity_receipts[(final_snapshot_id, observation_id)] = receipt
+
+        tag_ids = tuple(
+            dict.fromkeys(
+                [
+                    *published.ocr_tag_observation_ids,
+                    *(str(getattr(tag, "observation_id", "")) for tag in tags),
+                ]
+            )
+        )
+        if any(not observation_id for observation_id in tag_ids):
+            raise RuntimeError(f"{PRODUCER_INTEGRITY_FAILURE}: OCR tag id unavailable")
+
+        updated = PublishedVisibleSourceSnapshot(
+            revision=replace(published.revision),
+            coverage=replace(published.coverage),
+            snapshot=replace(snapshot),
+            base_source_snapshot_id=published.base_source_snapshot_id,
+            visible_observation_ids=tuple(published.visible_observation_ids),
+            text_observation_ids=tuple(published.text_observation_ids),
+            ocr_tag_observation_ids=tag_ids,
+        )
+        self._published_by_revision[updated.revision.revision_id] = updated
+        return tuple(tags), updated
+
+    def authenticated_ocr_tag_observations(
+        self,
+        revision_id: str,
+    ) -> tuple[object, ...]:
+        """Return the producer-owned OCR tag universe for the current snapshot.
+
+        Every returned observation is independently re-resolved and must be an
+        OCR text observation derived directly from the immutable native page.
+        """
+        published = self._published_by_revision.get(str(revision_id))
+        if published is None or not published.ocr_tag_observation_ids:
+            return ()
+
+        from pb_raster_ocr_tag_observation_bridge import (
+            OCR_TAG_OBSERVATION_KIND,
+            OCR_TAG_OBSERVATION_ORIGIN_KIND,
+        )
+
+        authority = self._producer.authority()
+        records: list[object] = []
+        for observation_id in published.ocr_tag_observation_ids:
+            result = authority.resolve(
+                ObservationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    observation_id=observation_id,
+                )
+            )
+            observation = result.observation
+            if (
+                result.status is not EvidenceResolutionStatus.CORROBORATED
+                or observation is None
+                or observation.observation_kind != OCR_TAG_OBSERVATION_KIND
+                or observation.origin_kind != OCR_TAG_OBSERVATION_ORIGIN_KIND
+                or len(observation.derivation_parent_ids) != 1
+            ):
+                raise RuntimeError(f"{PRODUCER_INTEGRITY_FAILURE}: invalid OCR tag observation")
+
+            parent_result = authority.resolve(
+                ObservationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    observation_id=observation.derivation_parent_ids[0],
+                )
+            )
+            parent = parent_result.observation
+            if (
+                parent_result.status is not EvidenceResolutionStatus.CORROBORATED
+                or parent is None
+                or parent.observation_kind != "native_pdf_page"
+                or parent.origin_kind != "native"
+                or parent.document_id != observation.document_id
+                or parent.revision_id != observation.revision_id
+                or parent.source_sha256 != observation.source_sha256
+                or parent.page_id != observation.page_id
+                or parent.source_partition_id != observation.source_partition_id
+            ):
+                raise RuntimeError(f"{PRODUCER_INTEGRITY_FAILURE}: OCR tag parent mismatch")
+            records.append(observation)
+        return tuple(records)
+
     def optional_content_state_for_scope(
         self,
         revision_id: str,
@@ -482,7 +673,6 @@ class SourceVisibilityProducer:
 
         snapshot = base.snapshot
         visible_ids: list[str] = []
-        visible_specs: list[dict[str, object]] = []
         text_receipts: list[tuple[str, PdfTextIntegrityReceipt]] = []
         pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
         try:
@@ -547,31 +737,24 @@ class SourceVisibilityProducer:
                         parent_observation_id=parent_id,
                         geometry=decision.geometry,
                     )
-                    visible_specs.append(
-                        {
-                            "page_id": page_id,
-                            "source_partition_id": partition_id,
-                            "observation_kind": NATIVE_PDF_VISIBLE_SEGMENT,
-                            "source_primitive_ref": visible_ref,
-                            "origin_kind": VISIBLE_SEGMENT_ORIGIN_KIND,
-                            "parent_observation_ids": (parent_id,),
-                            "raw_text": "",
-                            "geometry": decision.geometry,
-                            "viewport_id": None,
-                            "observation_id": visible_id,
-                        }
+                    snapshot = self._producer.publish_derived_observation(
+                        document_id=base.revision.document_id,
+                        revision_id=base.revision.revision_id,
+                        base_snapshot_id=snapshot.snapshot_id,
+                        page_id=page_id,
+                        source_partition_id=partition_id,
+                        observation_kind=NATIVE_PDF_VISIBLE_SEGMENT,
+                        source_primitive_ref=visible_ref,
+                        origin_kind=VISIBLE_SEGMENT_ORIGIN_KIND,
+                        parent_observation_ids=(parent_id,),
+                        raw_text="",
+                        geometry=decision.geometry,
+                        viewport_id=None,
+                        observation_id=visible_id,
                     )
                     visible_ids.append(visible_id)
         finally:
             pdf.close()
-
-        if visible_specs:
-            snapshot = self._producer.publish_derived_observations(
-                document_id=base.revision.document_id,
-                revision_id=base.revision.revision_id,
-                base_snapshot_id=base.snapshot.snapshot_id,
-                observations=visible_specs,
-            )
 
         published = PublishedVisibleSourceSnapshot(
             revision=replace(base.revision),
@@ -877,6 +1060,7 @@ class SourceVisibilityProducer:
             base_source_snapshot_id=published.base_source_snapshot_id,
             visible_observation_ids=tuple(sorted(set(visible_ids))),
             text_observation_ids=tuple(published.text_observation_ids),
+            ocr_tag_observation_ids=tuple(published.ocr_tag_observation_ids),
         )
         self._published_by_revision[updated.revision.revision_id] = updated
         return updated
