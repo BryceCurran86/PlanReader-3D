@@ -54,6 +54,11 @@ from pb_wall_height_authority import (
     WallHeightProducer,
     WallHeightSelector,
 )
+from pb_zero_opening_wall_frame_authority import (
+    ZeroOpeningWallFrameProducer,
+    ZeroOpeningWallFrameSelector,
+    combine_zero_opening_wall_frame_authorities,
+)
 
 
 LIVE_GROSS_WALL_SCHEMA_VERSION = "1.0.0"
@@ -203,7 +208,7 @@ def compose_live_gross_wall_geometry(
     # gross/net composition may not call itself complete merely because every
     # opening-host wall resolved; zero-opening walls must remain visible as an
     # explicit coverage blocker until they have their own authenticated frame.
-    required_wall_classes: list[tuple[str, frozenset[str]]] = []
+    required_wall_classes: list[tuple[str, str, frozenset[str]]] = []
     coverage_identity_ambiguous = False
     for page_id in wall_opening_composition.page_ids:
         scope_selector = PhysicalWallCandidateSelector(
@@ -237,7 +242,11 @@ def compose_live_gross_wall_geometry(
             coverage_identity_ambiguous = True
             for record in scope_result.records:
                 required_wall_classes.append(
-                    (page_id, frozenset((record.wall_candidate_id,)))
+                    (
+                        page_id,
+                        record.wall_candidate_id,
+                        frozenset((record.wall_candidate_id,)),
+                    )
                 )
             continue
 
@@ -258,7 +267,9 @@ def compose_live_gross_wall_geometry(
                 (group for group in groups if representative_id in group),
                 frozenset((representative_id,)),
             )
-            required_wall_classes.append((page_id, wall_class))
+            required_wall_classes.append(
+                (page_id, representative_id, wall_class)
+            )
 
     # Whole walls are discovered only by replaying producer-owned physical void
     # records and their sealed whole-wall host frames. OpeningHostBindingRecord
@@ -344,18 +355,104 @@ def compose_live_gross_wall_geometry(
         covered_member_ids_by_page.setdefault(page_id, set()).update(member_ids)
 
     uncovered_wall_classes = tuple(
-        (page_id, wall_class)
-        for page_id, wall_class in required_wall_classes
+        (page_id, representative_id, wall_class)
+        for page_id, representative_id, wall_class in required_wall_classes
+        if not (
+            wall_class
+            & covered_member_ids_by_page.get(page_id, set())
+        )
+    )
+
+    # A wall class absent from the opening-host inventory is not assumed to
+    # have zero openings. Re-prove that proposition through exact page opening
+    # completeness + every sealed opening host frame, then mint a producer-owned
+    # source-space frame only for a genuinely unopened wall.
+    zero_walls: dict[tuple[str, str, str], tuple[str, ...]] = {}
+    zero_frame_authorities = []
+    physical_opening_authority = (
+        wall_opening_composition.physical_opening_authority
+    )
+    for page_id, representative_id, wall_class in uncovered_wall_classes:
+        opening_completeness_authority = (
+            wall_opening_composition.opening_universe_completeness_authorities.get(
+                page_id
+            )
+        )
+        if (
+            physical_opening_authority is None
+            or opening_completeness_authority is None
+        ):
+            continue
+
+        zero_producer = ZeroOpeningWallFrameProducer.from_authorities(
+            physical_wall_candidate_authority=wall_candidate_authority,
+            physical_opening_authority=physical_opening_authority,
+            opening_universe_completeness_authority=(
+                opening_completeness_authority
+            ),
+            opening_host_frame_authority=frame_authority,
+        )
+        zero_selector = ZeroOpeningWallFrameSelector(
+            document_id=published_after.revision.document_id,
+            revision_id=published_after.revision.revision_id,
+            source_sha256=published_after.revision.source_sha256,
+            snapshot_id=published_after.snapshot.snapshot_id,
+            page_id=page_id,
+            decision_scope_id=f"wall-source:page-{page_id}",
+            physical_wall_id=representative_id,
+        )
+        zero_result = zero_producer.publish(zero_selector)
+        zero_frame_authorities.append(zero_producer.authority())
+        zero_record = zero_result.record
+        if (
+            zero_result.status is EvidenceResolutionStatus.CORROBORATED
+            and zero_record is not None
+            and zero_record.physical_wall_id == representative_id
+            and frozenset(zero_record.member_wall_candidate_ids) == wall_class
+        ):
+            zero_walls[
+                (
+                    page_id,
+                    f"wall-source:page-{page_id}",
+                    representative_id,
+                )
+            ] = tuple(zero_record.member_wall_candidate_ids)
+
+    zero_frame_authority = (
+        combine_zero_opening_wall_frame_authorities(
+            tuple(zero_frame_authorities)
+        )
+        if zero_frame_authorities
+        else None
+    )
+
+    wall_targets = dict(host_walls)
+    for key, member_ids in zero_walls.items():
+        existing = wall_targets.get(key)
+        if existing is not None and existing != member_ids:
+            return _blocked(
+                revision_id=revision_id,
+                reason_codes=(LIVE_GROSS_WALL_UPSTREAM_INCOMPLETE,),
+            )
+        wall_targets[key] = member_ids
+
+    covered_member_ids_by_page = {}
+    for (page_id, _decision_scope_id, _wall_id), member_ids in wall_targets.items():
+        covered_member_ids_by_page.setdefault(page_id, set()).update(member_ids)
+
+    remaining_uncovered_wall_classes = tuple(
+        (page_id, representative_id, wall_class)
+        for page_id, representative_id, wall_class in required_wall_classes
         if not (
             wall_class
             & covered_member_ids_by_page.get(page_id, set())
         )
     )
     coverage_incomplete = bool(
-        coverage_identity_ambiguous or uncovered_wall_classes
+        coverage_identity_ambiguous or remaining_uncovered_wall_classes
     )
 
-    if not host_walls:
+    if not wall_targets:
         return LiveGrossWallGeometryComposition(
             revision_id=revision_id,
             status=EvidenceResolutionStatus.ABSTAINED,
@@ -389,11 +486,11 @@ def compose_live_gross_wall_geometry(
     )
     registration_results: dict[
         tuple[str, str, str], list[tuple[str, str, object]]
-    ] = {key: [] for key in host_walls}
+    ] = {key: [] for key in wall_targets}
 
-    for key in sorted(host_walls):
+    for key in sorted(wall_targets):
         page_id, decision_scope_id, whole_wall_frame_id = key
-        for member_id in host_walls[key]:
+        for member_id in wall_targets[key]:
             for target_page_id in decoded_pages:
                 if target_page_id == page_id:
                     continue
@@ -419,10 +516,10 @@ def compose_live_gross_wall_geometry(
         physical_wall_candidate_authority=wall_candidate_authority,
     )
     height_results = {}
-    for key in sorted(host_walls):
+    for key in sorted(wall_targets):
         page_id, decision_scope_id, _whole_wall_frame_id = key
         member_heights = []
-        for member_id in host_walls[key]:
+        for member_id in wall_targets[key]:
             selector = WallHeightSelector(
                 document_id=published_after.revision.document_id,
                 revision_id=published_after.revision.revision_id,
@@ -459,7 +556,7 @@ def compose_live_gross_wall_geometry(
         source_visibility_producer
     )
     scale_results = {}
-    for page_id in sorted({key[0] for key in host_walls}, key=int):
+    for page_id in sorted({key[0] for key in wall_targets}, key=int):
         selector = PhysicalScaleSelector(
             document_id=published_after.revision.document_id,
             revision_id=published_after.revision.revision_id,
@@ -476,10 +573,11 @@ def compose_live_gross_wall_geometry(
         host_frame_authority=wall_opening_composition.opening_host_frame_authority,
         physical_scale_authority=scale_authority,
         wall_height_authority=height_authority,
+        zero_opening_wall_frame_authority=zero_frame_authority,
     )
     gross_results = {}
     gross_selectors: dict[str, GrossWallGeometrySelector] = {}
-    for page_id, decision_scope_id, physical_wall_id in sorted(host_walls):
+    for page_id, decision_scope_id, physical_wall_id in sorted(wall_targets):
         selector = GrossWallGeometrySelector(
             document_id=published_after.revision.document_id,
             revision_id=published_after.revision.revision_id,
@@ -496,7 +594,7 @@ def compose_live_gross_wall_geometry(
     gross_authority = gross_producer.authority()
 
     traces: list[LiveGrossWallTrace] = []
-    for key in sorted(host_walls):
+    for key in sorted(wall_targets):
         page_id, decision_scope_id, physical_wall_id = key
         registrations = registration_results.get(key, [])
         resolved_registrations = [
