@@ -106,20 +106,18 @@ def test_live_gross_wall_uses_shared_whole_wall_frame_identity() -> None:
     assert void_record.host_wall_id not in composition.gross_selectors
 
 
-def test_live_gross_wall_blocks_when_selected_page_has_zero_opening_wall_coverage() -> None:
+def test_live_gross_wall_targets_proven_zero_opening_wall_without_weakening_global_coverage_firewall() -> None:
     doc = fitz.open(stream=_complete_void_pdf(), filetype="pdf")
     try:
         page = doc.new_page(width=760.0, height=650.0)
         # A separate source-owned wall on the second selected plan page. It has
         # no aperture, so it cannot appear in the opening-host frame inventory.
+        # Use one centreline candidate: two unsupported parallel faces are
+        # intentionally ambiguous until an independent relation proves they are
+        # the same physical wall.
         page.draw_line(
             fitz.Point(80.0, 250.0),
             fitz.Point(300.0, 250.0),
-            width=1.0,
-        )
-        page.draw_line(
-            fitz.Point(80.0, 270.0),
-            fitz.Point(300.0, 270.0),
             width=1.0,
         )
         payload = bytes(doc.tobytes(garbage=4, deflate=True))
@@ -157,11 +155,20 @@ def test_live_gross_wall_blocks_when_selected_page_has_zero_opening_wall_coverag
         physical_void_composition=physical_void,
     )
 
-    # Resolving every opening-host wall is not enough to claim complete wall
-    # coverage. The unopened wall on page 2 must keep this layer fail-closed
-    # until a producer-owned no-opening frame/gross path exists.
-    assert composition.status is EvidenceResolutionStatus.ABSTAINED
+    # The unopened page-two wall is now positively framed from complete source
+    # truth and enters the same gross-wall target set. The page-one opening
+    # fixture intentionally leaves some face-level wall identities ambiguous,
+    # so the composition must keep the global coverage firewall rather than
+    # pretending that every physical wall on every selected page is resolved.
+    page_two_traces = tuple(
+        trace for trace in composition.traces if trace.page_id == "2"
+    )
+    assert page_two_traces
     assert LIVE_GROSS_WALL_COVERAGE_INCOMPLETE in composition.reason_codes
+    assert any(
+        trace.physical_wall_id in composition.gross_selectors
+        for trace in page_two_traces
+    )
 
 
 def test_live_gross_wall_public_interface_has_no_height_or_area_truth_inputs() -> None:
