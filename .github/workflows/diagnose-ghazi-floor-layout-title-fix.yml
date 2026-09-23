@@ -2,7 +2,7 @@ name: DIAGNOSTIC Ghazi Floor Layout Title Fix — DO NOT MERGE
 
 on:
   pull_request:
-    branches: [gpt/floor-layout-viewport-title]
+    branches: [main]
 
 jobs:
   inspect:
@@ -32,11 +32,28 @@ jobs:
           python - <<'PY'
           import json
           import fitz
-          from pb_viewport_segmentation import segment_page_viewports
+          from pb_vector_geometry_v130 import extract_native_page
+          from pb_viewport_segmentation import (
+              extract_view_title_anchors,
+              segment_page_viewports,
+          )
           from pb_wall_topology_diagnostics import collect_topology_from_page
+
+          def inside(point, bbox):
+              x, y = point
+              return bbox[0] <= x <= bbox[2] and bbox[1] <= y <= bbox[3]
+
+          def intersects(seg, bbox):
+              x0, y0, x1, y1 = seg["x1"], seg["y1"], seg["x2"], seg["y2"]
+              sx0, sx1 = sorted((x0, x1))
+              sy0, sy1 = sorted((y0, y1))
+              return not (sx1 < bbox[0] or sx0 > bbox[2] or sy1 < bbox[1] or sy0 > bbox[3])
 
           doc = fitz.open("/tmp/ghazi.pdf")
           page = doc[166]
+          native = extract_native_page(page)
+          segments = native.get("segments") or ()
+          anchors = extract_view_title_anchors(page)
           viewports = segment_page_viewports(page, page_number=167)
           topology = collect_topology_from_page(
               page,
@@ -44,21 +61,53 @@ jobs:
               document_id="diagnostic-floor-layout-title-fix",
               allow_derived=True,
           )
-          report = {
-              "viewports": [
-                  {
-                      "view_id": v.view_id,
-                      "view_type": v.view_type,
-                      "label": v.label,
-                      "status": v.status,
-                      "boundary_source": v.boundary_source,
-                      "bbox": v.bounding_box,
-                      "scale_raw": v.scale_raw,
-                      "scale_denominator": v.scale_denominator,
-                      "scale_conflict": v.scale_conflict,
+
+          rows = []
+          for v in viewports:
+              row = {
+                  "view_id": v.view_id,
+                  "view_type": v.view_type,
+                  "label": v.label,
+                  "title_bbox": v.title_bbox,
+                  "status": v.status,
+                  "boundary_source": v.boundary_source,
+                  "bbox": v.bounding_box,
+                  "scale_raw": v.scale_raw,
+                  "scale_denominator": v.scale_denominator,
+                  "scale_conflict": v.scale_conflict,
+              }
+              if v.bounding_box is not None:
+                  bbox = v.bounding_box
+                  both = 0
+                  either = 0
+                  midpoint = 0
+                  hit = 0
+                  for seg in segments:
+                      a = (float(seg["x1"]), float(seg["y1"]))
+                      b = (float(seg["x2"]), float(seg["y2"]))
+                      ia, ib = inside(a, bbox), inside(b, bbox)
+                      both += int(ia and ib)
+                      either += int(ia or ib)
+                      midpoint += int(inside(((a[0]+b[0])/2.0, (a[1]+b[1])/2.0), bbox))
+                      hit += int(intersects(seg, bbox))
+                  row["segment_membership"] = {
+                      "both_endpoints": both,
+                      "either_endpoint": either,
+                      "midpoint": midpoint,
+                      "bbox_intersects": hit,
                   }
-                  for v in viewports
+              rows.append(row)
+
+          pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+          pix.save("/tmp/ghazi-page-167.png")
+
+          report = {
+              "native_segment_count": len(segments),
+              "title_anchors": [
+                  {"text": a.text, "bbox": a.bbox, "view_type": a.view_type}
+                  for a in anchors
               ],
+              "viewports": rows,
               "topology": {
                   "fail_closed_reason": topology.fail_closed_reason,
                   "viewport_id": topology.viewport_id,
@@ -74,3 +123,9 @@ jobs:
           print("TITLE_FIX_REPORT_END")
           doc.close()
           PY
+      - name: Upload rendered sheet
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghazi-page-167-render
+          path: /tmp/ghazi-page-167.png
+          if-no-files-found: error
