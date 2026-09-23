@@ -159,11 +159,59 @@ class _SourceObservationStore:
         self.revisions: dict[str, SourceRevisionRecord] = {}
         self.current_revision_by_document: dict[str, str] = {}
         self.source_bytes_by_revision: dict[str, bytes] = {}
+        # Cache the exact immutable bytes object together with the digest that
+        # was verified for a revision. Replacing the bytes object or expected
+        # digest always forces a fresh SHA-256 integrity check.
+        self.verified_source_integrity_by_revision: dict[
+            str, tuple[bytes, str]
+        ] = {}
         self.coverage_by_revision: dict[str, SourceDecodeCoverageRecord] = {}
         self.snapshots: dict[str, ProducerSnapshotRecord] = {}
+        # Identity-bound O(1) membership index for immutable snapshot records.
+        # Replacement of a snapshot object causes the index to be rebuilt from
+        # that replacement, preserving the previous resolution semantics.
+        self.snapshot_observation_id_sets: dict[
+            str, tuple[ProducerSnapshotRecord, frozenset[str]]
+        ] = {}
         self.source_snapshot_by_revision: dict[str, str] = {}
         self.observations: dict[tuple[str, str], SourceObservationRecord] = {}
         self.record_fingerprints: dict[tuple[str, str], str] = {}
+
+    def source_bytes_match_revision(
+        self,
+        revision_id: str,
+        source_bytes: bytes,
+        expected_sha256: str,
+    ) -> bool:
+        cached = self.verified_source_integrity_by_revision.get(str(revision_id))
+        if (
+            cached is not None
+            and cached[0] is source_bytes
+            and cached[1] == str(expected_sha256)
+        ):
+            return True
+
+        actual = hashlib.sha256(source_bytes).hexdigest()
+        if actual != str(expected_sha256):
+            self.verified_source_integrity_by_revision.pop(str(revision_id), None)
+            return False
+
+        self.verified_source_integrity_by_revision[str(revision_id)] = (
+            source_bytes,
+            actual,
+        )
+        return True
+
+    def snapshot_contains_observation(
+        self,
+        snapshot: ProducerSnapshotRecord,
+        observation_id: str,
+    ) -> bool:
+        cached = self.snapshot_observation_id_sets.get(snapshot.snapshot_id)
+        if cached is None or cached[0] is not snapshot:
+            cached = (snapshot, frozenset(snapshot.observation_ids))
+            self.snapshot_observation_id_sets[snapshot.snapshot_id] = cached
+        return str(observation_id) in cached[1]
 
     def next_generation(self) -> int:
         self.generation += 1
@@ -251,7 +299,11 @@ class SourceObservationProducer:
             raise ProducerIntegrityError(
                 f"{PRODUCER_INTEGRITY_FAILURE}: source lineage unavailable"
             )
-        if hashlib.sha256(source_bytes).hexdigest() != revision.source_sha256:
+        if not self._store.source_bytes_match_revision(
+            revision_id,
+            source_bytes,
+            revision.source_sha256,
+        ):
             raise ProducerIntegrityError(
                 f"{PRODUCER_INTEGRITY_FAILURE}: immutable source hash changed"
             )
@@ -351,7 +403,11 @@ class SourceObservationProducer:
             raise ProducerIntegrityError(
                 f"{PRODUCER_INTEGRITY_FAILURE}: source lineage unavailable"
             )
-        if hashlib.sha256(source_bytes).hexdigest() != revision.source_sha256:
+        if not self._store.source_bytes_match_revision(
+            revision_id,
+            source_bytes,
+            revision.source_sha256,
+        ):
             raise ProducerIntegrityError(
                 f"{PRODUCER_INTEGRITY_FAILURE}: immutable source hash changed"
             )
@@ -1036,9 +1092,22 @@ class SourceObservationProducer:
             staged[key] = record
         self._store.revisions[revision.revision_id] = revision
         self._store.current_revision_by_document[revision.document_id] = revision.revision_id
-        self._store.source_bytes_by_revision[revision.revision_id] = bytes(source_bytes)
+        stored_source_bytes = bytes(source_bytes)
+        if not self._store.source_bytes_match_revision(
+            revision.revision_id,
+            stored_source_bytes,
+            revision.source_sha256,
+        ):
+            raise ProducerIntegrityError(
+                f"{PRODUCER_INTEGRITY_FAILURE}: immutable source hash changed"
+            )
+        self._store.source_bytes_by_revision[revision.revision_id] = stored_source_bytes
         self._store.coverage_by_revision[revision.revision_id] = coverage
         self._store.snapshots[snapshot.snapshot_id] = snapshot
+        self._store.snapshot_observation_id_sets[snapshot.snapshot_id] = (
+            snapshot,
+            frozenset(snapshot.observation_ids),
+        )
         for key, record in staged.items():
             self._store.observations[key] = record
             self._store.record_fingerprints[key] = record.observation_payload_sha256
@@ -1080,7 +1149,11 @@ class SourceObservationAuthority:
         source_bytes = self._store.source_bytes_by_revision.get(selector.revision_id)
         if revision is None or source_bytes is None:
             return self._integrity_failure()
-        if hashlib.sha256(source_bytes).hexdigest() != revision.source_sha256:
+        if not self._store.source_bytes_match_revision(
+            selector.revision_id,
+            source_bytes,
+            revision.source_sha256,
+        ):
             return self._integrity_failure()
         if selector.source_sha256 != revision.source_sha256:
             return self._blocked(SOURCE_HASH_MISMATCH)
@@ -1095,7 +1168,10 @@ class SourceObservationAuthority:
         record = self._store.observations.get((selector.snapshot_id, selector.observation_id))
         if record is None:
             return self._blocked(OBSERVATION_UNAVAILABLE)
-        if selector.observation_id not in snapshot.observation_ids:
+        if not self._store.snapshot_contains_observation(
+            snapshot,
+            selector.observation_id,
+        ):
             return self._integrity_failure()
         expected = self._store.record_fingerprints.get((selector.snapshot_id, selector.observation_id))
         actual = _content_sha256(_record_payload(record))
