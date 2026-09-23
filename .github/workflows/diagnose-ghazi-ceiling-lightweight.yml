@@ -68,8 +68,25 @@ jobs:
           title_terms = ("plan", "layout", "design", "scheme", "floor", "laboratory", "drawing", "scale", "legend")
           finish_terms = ("ceiling", "chip", "board", "finish", "gypsum", "soffit", "particle", "fibre", "fiber", "pvc", "softboard", "soft board", "plaster", "paint")
           lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+          plan_title_rects = [
+              [float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)]
+              for rect in page.search_for("PLAN : FLOOR LAYOUT")
+          ]
+          segment_rows = [
+              {
+                  "id": str(seg.get("id") or ""),
+                  "x1": float(seg["x1"]), "y1": float(seg["y1"]),
+                  "x2": float(seg["x2"]), "y2": float(seg["y2"]),
+              }
+              for seg in (native.get("segments") or ())
+          ]
+          pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+          pix.save("/tmp/ghazi-page-167.png")
+
           report = {
               "page_rect": [float(page.rect.x0), float(page.rect.y0), float(page.rect.x1), float(page.rect.y1)],
+              "plan_floor_layout_bboxes": plan_title_rects,
+              "native_segments": segment_rows,
               "native_segment_count": len(native.get("segments") or ()),
               "native_word_count": len(native.get("words") or ()),
               "ceiling_text_lines": [ln for ln in lines if "ceiling" in ln.casefold()],
@@ -120,3 +137,10 @@ jobs:
           print("LIGHTWEIGHT_REPORT_END")
           doc.close()
           PY
+
+      - name: Upload rendered source page
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghazi-page-167-render
+          path: /tmp/ghazi-page-167.png
+          if-no-files-found: error
