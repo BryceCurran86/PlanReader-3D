@@ -20,7 +20,7 @@ identity, benchmark value, or caller role hint participates in the proof.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Iterable, Mapping
+from typing import Iterable
 
 from pb_accuracy_v13_engines_v145 import extract_planar_faces
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
