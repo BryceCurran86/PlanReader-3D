@@ -48,6 +48,10 @@ from pb_wall_height_authority import (
     WallHeightAuthority,
     WallHeightSelector,
 )
+from pb_zero_opening_wall_frame_authority import (
+    ZeroOpeningWallFrameAuthority,
+    ZeroOpeningWallFrameSelector,
+)
 
 
 GROSS_WALL_GEOMETRY_SCHEMA_VERSION = "1.0.0"
@@ -212,6 +216,7 @@ class GrossWallGeometryProducer:
         host_frame_authority: OpeningHostFrameAuthority,
         physical_scale_authority: PhysicalScaleAuthority,
         wall_height_authority: WallHeightAuthority,
+        zero_opening_wall_frame_authority: ZeroOpeningWallFrameAuthority | None = None,
         *,
         _seal: object = None,
     ) -> None:
@@ -229,10 +234,19 @@ class GrossWallGeometryProducer:
                 "WallHeightProducer.from_authorities().authority(); duck-typed resolvers and plain "
                 "Mappings are not accepted."
             )
+        if (
+            zero_opening_wall_frame_authority is not None
+            and type(zero_opening_wall_frame_authority)
+            is not ZeroOpeningWallFrameAuthority
+        ):
+            raise TypeError(
+                "zero_opening_wall_frame_authority must be producer-owned"
+            )
         self._wall_candidates = physical_wall_candidate_authority
         self._frame = host_frame_authority
         self._scale = physical_scale_authority
         self._height = wall_height_authority
+        self._zero_opening_frame = zero_opening_wall_frame_authority
         self._results: dict[_Key, GrossWallGeometryResult] = {}
 
     @classmethod
@@ -243,12 +257,14 @@ class GrossWallGeometryProducer:
         host_frame_authority: OpeningHostFrameAuthority,
         physical_scale_authority: PhysicalScaleAuthority,
         wall_height_authority: WallHeightAuthority,
+        zero_opening_wall_frame_authority: ZeroOpeningWallFrameAuthority | None = None,
     ) -> "GrossWallGeometryProducer":
         return cls(
             physical_wall_candidate_authority,
             host_frame_authority,
             physical_scale_authority,
             wall_height_authority,
+            zero_opening_wall_frame_authority,
             _seal=_PRODUCER_SEAL,
         )
 
