@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 
 import fitz
 
@@ -75,3 +76,46 @@ def test_resolve_reuses_verified_immutable_source_hash_but_detects_replacement(
     assert source_hash_calls == 1
     assert after_replacement.status is EvidenceResolutionStatus.CONFLICT
     assert after_replacement.reason_codes == (PRODUCER_INTEGRITY_FAILURE,)
+
+
+def test_snapshot_membership_index_rebuilds_if_store_snapshot_is_replaced() -> None:
+    payload = _single_page_pdf()
+    producer = SourceObservationProducer(
+        producer_method="test-snapshot-membership-index",
+        producer_version="1.0.0",
+    )
+    published = producer.ingest_native_pdf_bytes(
+        document_id="doc-snapshot-membership-index",
+        source_bytes=payload,
+        source_locator="memory://snapshot-membership-index.pdf",
+        page_ids=("1",),
+    )
+    observation_id = published.snapshot.observation_ids[0]
+    selector = ObservationSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        observation_id=observation_id,
+    )
+
+    assert producer.authority().resolve(selector).status is EvidenceResolutionStatus.CORROBORATED
+
+    stored = producer._store.snapshots[published.snapshot.snapshot_id]
+    cached = producer._store.snapshot_observation_id_sets[stored.snapshot_id]
+    assert cached[0] is stored
+    assert observation_id in cached[1]
+
+    replacement = replace(
+        stored,
+        observation_ids=tuple(
+            item for item in stored.observation_ids if item != observation_id
+        ),
+    )
+    producer._store.snapshots[stored.snapshot_id] = replacement
+
+    result = producer.authority().resolve(selector)
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    refreshed = producer._store.snapshot_observation_id_sets[stored.snapshot_id]
+    assert refreshed[0] is replacement
+    assert observation_id not in refreshed[1]
