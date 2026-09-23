@@ -267,6 +267,19 @@ class SourceObservationProducer:
         ):
             raise ValueError(SNAPSHOT_MISMATCH)
 
+        coverage = (
+            self._store.coverage_by_snapshot.get(snapshot_id)
+            or self._store.coverage_by_revision.get(revision_id)
+        )
+        try:
+            page_number = int(page_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{SOURCE_UNAVAILABLE}: invalid page id {page_id!r}") from exc
+        if str(page_number) != page_id or page_number < 1:
+            raise ValueError(f"{SOURCE_UNAVAILABLE}: invalid page id {page_id!r}")
+        if coverage is None or page_number not in coverage.decoded_pages:
+            raise ValueError(f"{SOURCE_UNAVAILABLE}: page {page_id} was not decoded")
+
         page_parents: list[SourceObservationRecord] = []
         for observation_id in snapshot.observation_ids:
             record = self._store.observations.get((snapshot_id, observation_id))
@@ -289,19 +302,6 @@ class SourceObservationProducer:
             raise ProducerIntegrityError(
                 f"{PRODUCER_INTEGRITY_FAILURE}: native page partition not in revision"
             )
-
-        coverage = (
-            self._store.coverage_by_snapshot.get(snapshot_id)
-            or self._store.coverage_by_revision.get(revision_id)
-        )
-        try:
-            page_number = int(page_id)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"{SOURCE_UNAVAILABLE}: invalid page id {page_id!r}") from exc
-        if str(page_number) != page_id or page_number < 1:
-            raise ValueError(f"{SOURCE_UNAVAILABLE}: invalid page id {page_id!r}")
-        if coverage is None or page_number not in coverage.decoded_pages:
-            raise ValueError(f"{SOURCE_UNAVAILABLE}: page {page_id} was not decoded")
 
         try:
             pdf = fitz.open(stream=source_bytes, filetype="pdf")
@@ -1066,17 +1066,15 @@ class SourceObservationProducer:
         self._store.revisions[revision.revision_id] = revision
         self._store.current_revision_by_document[revision.document_id] = revision.revision_id
         self._store.source_bytes_by_revision[revision.revision_id] = bytes(source_bytes)
-        if (
-            mark_source_snapshot
-            or revision.revision_id not in self._store.coverage_by_revision
-        ):
-            prior_revision_coverage = self._store.coverage_by_revision.get(
+        prior_revision_coverage = self._store.coverage_by_revision.get(
             revision.revision_id
         )
         if (
             prior_revision_coverage is None
-            or prior_revision_coverage.state != "complete"
-            and coverage.state == "complete"
+            or (
+                prior_revision_coverage.state != "complete"
+                and coverage.state == "complete"
+            )
             or (
                 prior_revision_coverage.state != "complete"
                 and coverage.state != "complete"
