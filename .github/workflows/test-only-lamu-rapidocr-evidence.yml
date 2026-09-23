@@ -1,0 +1,106 @@
+name: TEST-ONLY Lamu RapidOCR Evidence
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lamu-rapidocr:
+    if: startsWith(github.head_ref, 'diag/lamu-rapidocr-evidence')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install repository and diagnostic OCR dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+          pip install rapidocr onnxruntime
+
+      - name: Run SHA-pinned Lamu structural-page OCR diagnostic
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          from __future__ import annotations
+          import hashlib
+          import json
+          import urllib.request
+
+          import fitz
+          from PIL import Image
+
+          from pb_portable_raster_ocr_authority import RapidOCRBackend
+
+          url = "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          expected_sha = "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          request = urllib.request.Request(
+              url,
+              headers={"User-Agent": "PlanReader-Lamu-RapidOCR-diagnostic/1.0"},
+          )
+          with urllib.request.urlopen(request, timeout=120) as response:
+              payload = response.read()
+          actual_sha = hashlib.sha256(payload).hexdigest()
+          if actual_sha != expected_sha:
+              raise SystemExit(f"source hash mismatch: {actual_sha}")
+
+          backend = RapidOCRBackend()
+          if not backend.is_available():
+              raise SystemExit("RapidOCR backend failed capability detection after diagnostic install")
+
+          doc = fitz.open(stream=payload, filetype="pdf")
+          rows = []
+          try:
+              for page_no in range(41, 46):
+                  page = doc[page_no - 1]
+                  pix = page.get_pixmap(dpi=220, alpha=False)
+                  image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                  lines = backend.extract_lines(image, dpi=220)
+                  matches = [
+                      {
+                          "text": line.text,
+                          "confidence": line.confidence,
+                          "bbox_pt": line.bbox_pt,
+                      }
+                      for line in lines
+                      if any(
+                          token in line.text.lower()
+                          for token in (
+                              "poly", "dpm", "membrane", "gauge", "a142",
+                              "mesh", "slab", "blinding", "hardcore",
+                              "foundation",
+                          )
+                      )
+                  ]
+                  rows.append(
+                      {
+                          "page": page_no,
+                          "line_count": len(lines),
+                          "matches": matches,
+                      }
+                  )
+          finally:
+              doc.close()
+
+          result = {
+              "diagnostic": "lamu_rapidocr_evidence",
+              "source_sha256": actual_sha,
+              "backend": backend.name,
+              "backend_version": backend.version,
+              "pages": rows,
+              "has_dpm_like_text": any(
+                  any(
+                      token in item["text"].lower()
+                      for token in ("poly", "dpm", "membrane")
+                  )
+                  for row in rows
+                  for item in row["matches"]
+              ),
+          }
+          print("LAMU_RAPIDOCR_RESULT=" + json.dumps(result, sort_keys=True))
+          PY
