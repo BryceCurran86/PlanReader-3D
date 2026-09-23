@@ -23,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import hashlib
 import math
+import re
 from typing import Mapping, Optional, Sequence
 
 import fitz
@@ -109,6 +110,33 @@ class RasterSegmentVisibilityReceipt:
     pixel_geometry: tuple[float, float, float, float]
     geometry: tuple[float, float, float, float]
     detector_version: str = RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION
+
+
+
+@dataclass(frozen=True)
+class ScheduleBindingScopeAudit:
+    base_source_snapshot_id: str
+    revision_id: str
+    source_sha256: str
+    total_pages: int
+    decoded_pages: tuple[int, ...]
+    omitted_pages: tuple[int, ...]
+    complete: bool
+    reason_codes: tuple[str, ...]
+
+
+_BOQ_PAGE_RE = re.compile(
+    r"bills?\s*of\s*quantit|\brate\b.{0,80}\bamount\b|"
+    r"\bamount\s*\(?kshs?\)?|\bbrought\s+forward\b|\bcarried\s+forward\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_OPENING_OR_DRAWING_PAGE_RE = re.compile(
+    r"window\s+schedule|door\s+schedule|schedule\s+of\s+windows|"
+    r"schedule\s+of\s+doors|ground\s+floor\s+plan|\bfloor\s+plan\b|"
+    r"\belevation\b|\bsection\b|roof\s+plan|layout\s+plan|"
+    r"working\s+drawing|drawing\s+no\.?|drawing\s+title|sheet\s+no\.?",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -423,6 +451,9 @@ class SourceVisibilityProducer:
         self._published_by_revision: dict[str, PublishedVisibleSourceSnapshot] = {}
         self._published_by_source_snapshot: dict[
             str, PublishedVisibleSourceSnapshot
+        ] = {}
+        self._schedule_binding_scope_audits: dict[
+            str, ScheduleBindingScopeAudit
         ] = {}
 
     def authority(self) -> "SourceVisibilityAuthority":
@@ -753,6 +784,167 @@ class SourceVisibilityProducer:
             return False
         finally:
             pdf.close()
+
+    def _audit_schedule_binding_scope(
+        self,
+        *,
+        immutable_bytes: bytes,
+        base: PublishedSourceSnapshot,
+    ) -> ScheduleBindingScopeAudit:
+        """Prove a scoped snapshot omitted only explicit non-opening BOQ pages.
+
+        The audit is producer-owned and re-reads the immutable full PDF bytes.
+        It never accepts caller-authored page classifications. A scoped snapshot
+        is positive only when every omitted page is clearly a BOQ/rate-amount
+        page, carries no opening/drawing/schedule indicators, and contains no
+        large raster that could conceal drawing evidence.
+        """
+
+        decoded = tuple(sorted({int(value) for value in base.coverage.decoded_pages}))
+        total_pages = int(base.coverage.total_pages)
+        omitted = tuple(
+            page for page in range(1, total_pages + 1) if page not in set(decoded)
+        )
+        reasons: list[str] = []
+
+        if base.coverage.failed_pages:
+            reasons.append("schedule_binding_selected_page_decode_failed")
+        if not decoded:
+            reasons.append("schedule_binding_decoded_scope_empty")
+
+        if not omitted and not reasons:
+            return ScheduleBindingScopeAudit(
+                base_source_snapshot_id=base.snapshot.snapshot_id,
+                revision_id=base.revision.revision_id,
+                source_sha256=base.revision.source_sha256,
+                total_pages=total_pages,
+                decoded_pages=decoded,
+                omitted_pages=(),
+                complete=True,
+                reason_codes=(),
+            )
+
+        try:
+            pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
+        except Exception:
+            reasons.append("schedule_binding_full_source_decode_failed")
+            return ScheduleBindingScopeAudit(
+                base_source_snapshot_id=base.snapshot.snapshot_id,
+                revision_id=base.revision.revision_id,
+                source_sha256=base.revision.source_sha256,
+                total_pages=total_pages,
+                decoded_pages=decoded,
+                omitted_pages=omitted,
+                complete=False,
+                reason_codes=tuple(dict.fromkeys(reasons)),
+            )
+
+        try:
+            if int(pdf.page_count) != total_pages:
+                reasons.append("schedule_binding_page_count_mismatch")
+            for page_number in omitted:
+                try:
+                    page = pdf.load_page(page_number - 1)
+                    text = re.sub(r"\s+", " ", page.get_text("text") or "").strip()
+                except Exception:
+                    reasons.append(
+                        f"schedule_binding_omitted_page_{page_number}_unreadable"
+                    )
+                    continue
+
+                if not text or _BOQ_PAGE_RE.search(text) is None:
+                    reasons.append(
+                        f"schedule_binding_omitted_page_{page_number}_not_proven_boq"
+                    )
+                    continue
+                if _OPENING_OR_DRAWING_PAGE_RE.search(text) is not None:
+                    reasons.append(
+                        f"schedule_binding_omitted_page_{page_number}_drawing_indicator"
+                    )
+                    continue
+
+                try:
+                    page_area = max(1.0, float(page.rect.width) * float(page.rect.height))
+                    large_raster = False
+                    for image in page.get_images(full=True) or ():
+                        if not image:
+                            continue
+                        try:
+                            xref = int(image[0])
+                            rects = page.get_image_rects(xref) or ()
+                        except Exception:
+                            reasons.append(
+                                f"schedule_binding_omitted_page_{page_number}_image_state_unresolved"
+                            )
+                            large_raster = True
+                            break
+                        if any(
+                            max(0.0, float(rect.width))
+                            * max(0.0, float(rect.height))
+                            >= 0.25 * page_area
+                            for rect in rects
+                        ):
+                            large_raster = True
+                            break
+                    if large_raster:
+                        reasons.append(
+                            f"schedule_binding_omitted_page_{page_number}_large_raster"
+                        )
+                except Exception:
+                    reasons.append(
+                        f"schedule_binding_omitted_page_{page_number}_image_state_unresolved"
+                    )
+        finally:
+            pdf.close()
+
+        unique = tuple(dict.fromkeys(reasons))
+        return ScheduleBindingScopeAudit(
+            base_source_snapshot_id=base.snapshot.snapshot_id,
+            revision_id=base.revision.revision_id,
+            source_sha256=base.revision.source_sha256,
+            total_pages=total_pages,
+            decoded_pages=decoded,
+            omitted_pages=omitted,
+            complete=not unique,
+            reason_codes=unique,
+        )
+
+    def schedule_binding_scope_complete(self, revision_id: str) -> bool:
+        """Return producer-proven completeness for schedule-row binding.
+
+        Whole-document coverage remains the strongest path. Scoped coverage is
+        accepted only when this producer's immutable-source audit proved every
+        omitted page is explicitly irrelevant BOQ material.
+        """
+
+        published = self._published_by_revision.get(str(revision_id))
+        if published is None or published.coverage.failed_pages:
+            return False
+        if published.coverage.state == "complete":
+            return True
+
+        audit = self._schedule_binding_scope_audits.get(
+            published.base_source_snapshot_id
+        )
+        if audit is None or not audit.complete:
+            return False
+        if (
+            audit.revision_id != published.revision.revision_id
+            or audit.source_sha256 != published.revision.source_sha256
+            or audit.total_pages != published.coverage.total_pages
+            or audit.decoded_pages
+            != tuple(sorted({int(value) for value in published.coverage.decoded_pages}))
+        ):
+            return False
+        source_bytes = self._producer._store.source_bytes_by_revision.get(
+            published.revision.revision_id
+        )
+        return bool(
+            source_bytes
+            and hashlib.sha256(source_bytes).hexdigest()
+            == published.revision.source_sha256
+        )
+
     def opening_dimension_authority(self):
         """Return the read-only dimension resolver bound to this producer."""
         from pb_opening_dimension_authority import (
@@ -781,6 +973,13 @@ class SourceVisibilityProducer:
             source_locator=source_locator,
             page_ids=page_ids,
         )
+        if base.snapshot.snapshot_id not in self._schedule_binding_scope_audits:
+            self._schedule_binding_scope_audits[
+                base.snapshot.snapshot_id
+            ] = self._audit_schedule_binding_scope(
+                immutable_bytes=immutable_bytes,
+                base=base,
+            )
         cached = self._published_by_source_snapshot.get(base.snapshot.snapshot_id)
         if cached is not None:
             self._published_by_revision[base.revision.revision_id] = cached
