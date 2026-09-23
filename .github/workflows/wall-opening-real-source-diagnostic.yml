@@ -1,0 +1,167 @@
+name: Wall Opening Real Source Diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  real-source-diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download canonical source PDFs
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          curl -fL --retry 3 --retry-delay 2 "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf" -o benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+          curl -fL --retry 3 --retry-delay 2 "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf" -o benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+          curl -fL --retry 3 --retry-delay 2 "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf" -o benchmarks/sources/1785347143869-bqs-drawings.pdf
+          curl -fL --retry 3 --retry-delay 2 "https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf" -o benchmarks/sources/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf
+          curl -fL --retry 3 --retry-delay 2 "https://umma.ac.ke/wp-content/uploads/2026/06/Builders-work.pdf" -o benchmarks/sources/umma-university-hostels-builders-work.pdf
+
+      - name: Verify canonical source hashes
+        run: |
+          set -euo pipefail
+          cat >/tmp/SHA256SUMS <<'EOF'
+          6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+          fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+          84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  benchmarks/sources/1785347143869-bqs-drawings.pdf
+          c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f  benchmarks/sources/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf
+          f30711f69944e66ef993341180e35b49ccfcb36d6f402743284823ab588183af  benchmarks/sources/umma-university-hostels-builders-work.pdf
+          EOF
+          sha256sum -c /tmp/SHA256SUMS
+
+      - name: Trace KSTVET and Lamu authority chain
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python scripts/diagnose_wall_opening_real_sources.py | tee /tmp/authority-trace.log
+
+      - name: Run current canonical five-project benchmark
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/after
+          PYTHONPATH=. python pb_benchmark_accuracy_engine.py --all --auto-extract --require-local-sources --output-dir /tmp/after | tee /tmp/after.log
+
+      - name: Run verified-baseline SHA benchmark in same environment
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/before /tmp/before-out
+          git worktree add --detach /tmp/before 8793400a5d4905bf23d7b8ff5cb2753d1e4351de
+          mkdir -p /tmp/before/benchmarks/sources
+          cp benchmarks/sources/*.pdf /tmp/before/benchmarks/sources/
+          (
+            cd /tmp/before
+            PYTHONPATH=. python pb_benchmark_accuracy_engine.py --all --auto-extract --require-local-sources --output-dir /tmp/before-out
+          ) | tee /tmp/before.log
+
+      - name: Compare benchmark manifests between baseline and current
+        run: |
+          set -euo pipefail
+          git diff --name-status 8793400a5d4905bf23d7b8ff5cb2753d1e4351de HEAD -- benchmarks/public_tenders | tee /tmp/benchmark-manifest-diff.txt
+
+      - name: Report canonical before and after delta
+        run: |
+          set -euo pipefail
+          python - <<'PY' | tee /tmp/benchmark-delta.json
+          import json
+          from pathlib import Path
+
+          before = json.loads(Path("/tmp/before-out/headline_accuracy_dashboard.json").read_text())
+          after = json.loads(Path("/tmp/after/headline_accuracy_dashboard.json").read_text())
+
+          def metrics(payload):
+              h = payload.get("headline_metrics", {})
+              exact = int(h.get("exact_matches", 0) or 0)
+              within5 = int(h.get("within_5_percent", 0) or 0)
+              return {
+                  "accepted": exact + within5,
+                  "denominator": int(h.get("total_items_compared", 0) or 0),
+                  "accuracy": h.get("overall_accuracy_percentage"),
+                  "strict_exact": h.get("strict_exact_accuracy_percentage"),
+                  "exact_matches": exact,
+                  "within_5_percent": within5,
+              }
+
+          def rows(payload):
+              out = {}
+              for report in payload.get("headline_reports", []):
+                  bid = report.get("benchmark_id")
+                  for row in report.get("item_results", []):
+                      out[(bid, row.get("item_id"))] = {
+                          "status": row.get("status"),
+                          "expected": row.get("expected_quantity"),
+                          "extracted": row.get("extracted_quantity"),
+                          "pct_error": row.get("pct_error"),
+                      }
+              return out
+
+          accepted_statuses = {"exact_match", "within_5_percent"}
+          b_rows = rows(before)
+          a_rows = rows(after)
+          improved = []
+          regressed = []
+          changed = []
+          for key in sorted(set(b_rows) | set(a_rows)):
+              b = b_rows.get(key)
+              a = a_rows.get(key)
+              b_ok = bool(b and b.get("status") in accepted_statuses)
+              a_ok = bool(a and a.get("status") in accepted_statuses)
+              entry = {
+                  "benchmark_id": key[0],
+                  "item_id": key[1],
+                  "before": b,
+                  "after": a,
+              }
+              if b_ok != a_ok:
+                  (improved if a_ok else regressed).append(entry)
+              elif b != a:
+                  changed.append(entry)
+
+          result = {
+              "declared_verified_baseline": {
+                  "accepted": 30,
+                  "denominator": 60,
+                  "accuracy": 50.0,
+                  "strict_exact": 40.0,
+              },
+              "before_same_environment": metrics(before),
+              "before_matches_declared": (
+                  metrics(before)["accepted"] == 30
+                  and metrics(before)["denominator"] == 60
+                  and abs(float(metrics(before)["accuracy"]) - 50.0) < 1e-9
+                  and abs(float(metrics(before)["strict_exact"]) - 40.0) < 1e-9
+              ),
+              "after": metrics(after),
+              "rows_improved": improved,
+              "rows_regressed": regressed,
+              "other_rows_changed": changed,
+          }
+          print(json.dumps(result, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wall-opening-real-source-diagnostic
+          path: |
+            /tmp/authority-trace.log
+            /tmp/before.log
+            /tmp/after.log
+            /tmp/benchmark-delta.json
+            /tmp/benchmark-manifest-diff.txt
+            /tmp/before-out
+            /tmp/after
