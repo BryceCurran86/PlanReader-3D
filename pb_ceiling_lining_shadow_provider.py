@@ -3,12 +3,13 @@
 Rebuild of the parked #316 wiring with mandatory authority corrections:
 
 1. Finish collection is unscoped (``collect_unscoped_ceiling_finish_candidates``).
-2. Room ownership resolves only from authenticated/source-owned topology via
-   ``build_owned_topology_room_index`` — never from caller ``RoomCandidate``
-   bodies, free proofs, or diagnostic caller-segment collector snapshots.
-3. Until that authenticated geometry seam is wired into
-   ``C15_ROOM_INDEX_GEOMETRY_SOURCES``, scope binding stays fail-closed
-   (quantities BLOCKED for missing finish ownership).
+2. Room ownership resolves only from authenticated/source-owned topology:
+   sealed ``SourceRoomFaceAuthority`` is the positive production-source seam;
+   legacy ``TopologySnapshot`` support remains fail-closed unless its geometry
+   source is explicitly allowlisted. Caller ``RoomCandidate`` bodies and free
+   proofs are never accepted.
+3. Source room-face authority and selector must be supplied as an exact pair;
+   mixed legacy + source-authority inputs fail closed instead of choosing one.
 4. Final contract is ``ProviderResult`` via the standard migration envelope.
 
 Shadow-only: no live ExtractedPrediction, no commercial/JobHub publication,
@@ -29,6 +30,7 @@ from pb_ceiling_lining_quantity import (
 )
 from pb_ceiling_lining_scope_binder import (
     bind_unscoped_finish_candidates_to_room,
+    build_owned_source_room_face_index,
     build_owned_topology_room_index,
     resolve_ceiling_finish_scope_proofs,
 )
@@ -48,10 +50,14 @@ from pb_migration_provider_envelope import (
     fingerprint_source_files,
 )
 from pb_provider_gold_isolation import assert_provider_gold_free
+from pb_source_room_face_authority import (
+    SourceRoomFaceAuthority,
+    SourceRoomFaceSelector,
+)
 from pb_wall_topology_diagnostics import TopologySnapshot
 
 PROVIDER_ENGINE_ID = "shadow_ceiling_lining"
-PROVIDER_ENGINE_VERSION = "2.3.0"
+PROVIDER_ENGINE_VERSION = "2.4.0"
 PROVIDER_OUTPUT_SCHEMA_VERSION = "1.3.0"
 PROVIDER_FAMILY = CEILING_LINING_FAMILY
 
@@ -60,6 +66,7 @@ _CODE_MODULES = (
     "pb_ceiling_lining_finish_evidence",
     "pb_ceiling_lining_scope_binder",
     "pb_ceiling_lining_quantity",
+    "pb_source_room_face_authority",
 )
 
 _ACCEPTED_AREA_FAMILIES = frozenset(
@@ -95,9 +102,10 @@ class CeilingLiningShadowInputs:
     """Injected shadow inputs for the provider (tests / shadow harness).
 
     Scope proofs and ``RoomCandidate`` bodies are never accepted from the
-    caller. Binding resolves rooms only from an authenticated/source-owned
-    ``TopologySnapshot`` via ``build_owned_topology_room_index``. Diagnostic
-    caller-segment collector output is not eligible and yields BLOCKED.
+    caller. The preferred positive seam is sealed ``SourceRoomFaceAuthority``
+    plus its exact ``SourceRoomFaceSelector``. Legacy ``TopologySnapshot``
+    input remains supported only through the existing authenticated geometry
+    allowlist; diagnostic caller-segment snapshots still yield BLOCKED.
     """
 
     document: DocumentEvidence
@@ -106,6 +114,8 @@ class CeilingLiningShadowInputs:
     authoritative_area_quantities: tuple[QuantityEvidence, ...]
     unscoped_finish_candidates: tuple[EvidenceAtom, ...]
     topology_snapshot: Optional[TopologySnapshot] = None
+    source_room_face_authority: Optional[SourceRoomFaceAuthority] = None
+    source_room_face_selector: Optional[SourceRoomFaceSelector] = None
 
 
 def _scope_of_area(area: QuantityEvidence) -> str:
@@ -223,11 +233,31 @@ class CeilingLiningShadowProvider:
 
         inputs = self._inputs
         room_index = None
-        if inputs.topology_snapshot is not None:
+        has_source_authority = inputs.source_room_face_authority is not None
+        has_source_selector = inputs.source_room_face_selector is not None
+        source_pair_complete = has_source_authority and has_source_selector
+        source_pair_partial = has_source_authority != has_source_selector
+
+        # Never choose between two competing geometry inputs. The sealed
+        # source-room seam is positive only when authority + selector are both
+        # present and no legacy topology snapshot is competing with them.
+        if source_pair_complete and inputs.topology_snapshot is None:
+            room_index = build_owned_source_room_face_index(
+                room_face_authority=inputs.source_room_face_authority,
+                selector=inputs.source_room_face_selector,
+                context=context,
+                viewport=inputs.viewport,
+            )
+        elif (
+            not source_pair_partial
+            and not source_pair_complete
+            and inputs.topology_snapshot is not None
+        ):
             room_index = build_owned_topology_room_index(
                 snapshot=inputs.topology_snapshot,
                 context=context,
             )
+
         # Resolve sealed proofs from producer-owned room index only.
         # Callers cannot inject RoomCandidate bodies or free-form proofs.
         resolved_proofs = resolve_ceiling_finish_scope_proofs(
