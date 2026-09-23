@@ -370,6 +370,10 @@ class GenericPlanReaderExtractor:
             "reason": "not_collected",
             "commercial_count_unlocked": False,
         }
+        self.ceiling_lining_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason": "not_collected",
+        }
         # Live extraction visibility: distinguish absence from failure/conflict.
         self.extraction_status: Dict[str, str] = {}
 
@@ -799,6 +803,10 @@ class GenericPlanReaderExtractor:
             "status": "abstained",
             "reason": "not_collected",
             "commercial_count_unlocked": False,
+        }
+        self.ceiling_lining_live = {
+            "status": "abstained",
+            "reason": "not_collected",
         }
 
         # ------------------------------------------------------------------
@@ -2500,6 +2508,94 @@ class GenericPlanReaderExtractor:
                     reason=f"shadow_exception:{type(exc).__name__}"
                 )
                 self.extraction_status["item35_authority_shadow"] = "extraction_failed"
+
+        # Source-owned ceiling lining LIVE extraction.  This is deliberately
+        # isolated from the legacy floor/wall/opening paths above.  The resolver
+        # publishes only when one F.07 RESOLVED floor-plan viewport owns the
+        # complete room/finish/scale chain; otherwise it abstains without
+        # mutating pred_dict.
+        try:
+            from pb_live_ceiling_lining_integration import (
+                LIVE_CEILING_LINING_RESOLVED,
+                resolve_live_ceiling_lining,
+            )
+            from pb_migration_contracts import EvidenceResolutionStatus
+
+            ceiling = resolve_live_ceiling_lining(
+                p_path,
+                pages=(target_pages if pages is not None else None),
+            )
+            self.ceiling_lining_live = {
+                "status": ceiling.status.value,
+                "reason_codes": list(ceiling.reason_codes),
+                "quantity_m2": ceiling.quantity_m2,
+                "finish_descriptor": ceiling.finish_descriptor,
+                "source_page": ceiling.source_page,
+                "viewport_id": ceiling.viewport_id,
+                "room_entity_ids": list(ceiling.room_entity_ids),
+                "physical_scale_record_id": ceiling.physical_scale_record_id,
+            }
+            if (
+                ceiling.status is EvidenceResolutionStatus.CORROBORATED
+                and ceiling.reason_codes == (LIVE_CEILING_LINING_RESOLVED,)
+                and ceiling.quantity_m2 is not None
+                and ceiling.quantity_m2 > 0.0
+                and ceiling.source_page is not None
+                and ceiling.viewport_bbox is not None
+            ):
+                incoming = ExtractedPrediction(
+                    tag="ceiling_lining",
+                    trade_type="finishes",
+                    description=(
+                        "Ceiling lining"
+                        + (
+                            f" - {ceiling.finish_descriptor}"
+                            if ceiling.finish_descriptor
+                            else ""
+                        )
+                    ),
+                    quantity=float(ceiling.quantity_m2),
+                    unit="SM",
+                    confidence=float(ceiling.confidence),
+                    source_page=int(ceiling.source_page),
+                    bounding_box=list(ceiling.viewport_bbox),
+                    metadata={
+                        "authority_status": "review_required",
+                        "measurement_authority": "pdf_scaled",
+                        "source_owned_ceiling_lining": True,
+                        "commercial_review_required": True,
+                        "source_sha256": ceiling.source_sha256,
+                        "revision_id": ceiling.revision_id,
+                        "viewport_id": ceiling.viewport_id,
+                        "room_entity_ids": list(ceiling.room_entity_ids),
+                        "room_area_quantity_ids": list(
+                            ceiling.room_area_quantity_ids
+                        ),
+                        "ceiling_quantity_ids": list(
+                            ceiling.ceiling_quantity_ids
+                        ),
+                        "physical_scale_record_id": (
+                            ceiling.physical_scale_record_id
+                        ),
+                        "raw_evidence_ref": (
+                            f"ceiling-authority:{ceiling.physical_scale_record_id}"
+                        ),
+                    },
+                )
+                merge_extracted_prediction(
+                    pred_dict,
+                    incoming,
+                    merge_source="source_owned_ceiling_lining",
+                )
+                self.extraction_status["ceiling_lining"] = "resolved"
+            else:
+                self.extraction_status["ceiling_lining"] = "abstained"
+        except Exception as exc:
+            self.ceiling_lining_live = {
+                "status": "abstained",
+                "reason": f"live_exception:{type(exc).__name__}",
+            }
+            self.extraction_status["ceiling_lining"] = "extraction_failed"
 
         doc.close()
         return list(pred_dict.values())
