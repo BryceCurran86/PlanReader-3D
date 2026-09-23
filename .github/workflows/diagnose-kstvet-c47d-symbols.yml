@@ -99,5 +99,36 @@ jobs:
                       near.append(row)
               print("LABEL", repr(text), "CENTER", (round(cx,2),round(cy,2)), "CANDIDATES", near)
           print("NEAR_VERANDAH_END")
+
+          # Refine within the ground-floor-plan/verandah band. Group
+          # near-square curve symbols by size and horizontal row; ignore
+          # large grid bubbles (>15 pt) and microscopic CAD debris (<0.8 pt).
+          band=[r for r in candidates if 150 <= r["center"][0] <= 850 and 650 <= r["center"][1] <= 850 and 0.8 <= r["w"] <= 15 and 0.8 <= r["h"] <= 15 and "c" in r["items"]]
+          rows=[]
+          used=set()
+          for i,a in enumerate(band):
+              if i in used:
+                  continue
+              group=[a]
+              used.add(i)
+              for j,b in enumerate(band):
+                  if j in used:
+                      continue
+                  if abs(a["w"]-b["w"]) <= 0.35 and abs(a["h"]-b["h"]) <= 0.35 and abs(a["center"][1]-b["center"][1]) <= 2.5:
+                      group.append(b)
+                      used.add(j)
+              if len(group) >= 3:
+                  rows.append(group)
+          print("PLAN_BAND_REPEATED_ROWS_BEGIN")
+          for group in sorted(rows, key=lambda g:(g[0]["center"][1],g[0]["w"])):
+              print({
+                  "count":len(group),
+                  "w":round(sum(r["w"] for r in group)/len(group),2),
+                  "h":round(sum(r["h"] for r in group)/len(group),2),
+                  "y":round(sum(r["center"][1] for r in group)/len(group),2),
+                  "centers":[r["center"] for r in sorted(group,key=lambda r:r["center"][0])],
+                  "items":group[0]["items"],
+              })
+          print("PLAN_BAND_REPEATED_ROWS_END")
           doc.close()
           PY
