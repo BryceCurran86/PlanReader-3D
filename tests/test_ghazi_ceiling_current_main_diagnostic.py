@@ -111,6 +111,100 @@ def test_ghazi_ceiling_current_main_diagnostic(tmp_path: Path) -> None:
         title_anchors = extract_view_title_anchors(page)
         vector_frames = extract_vector_frames(page, calibration)
         all_segmented = segment_page_viewports(page, page_number=167)
+        derived_trials = []
+        for candidate in all_segmented:
+            if (
+                candidate.view_type != "floor_plan"
+                or candidate.bounding_box is None
+            ):
+                continue
+            current = visibility.published_snapshot_for_revision(
+                published.revision.revision_id
+            )
+            assert current is not None
+            candidate_viewport = ViewportEvidence(
+                viewport_id=str(candidate.view_id),
+                document_id=current.revision.document_id,
+                page_id="167",
+                bbox=tuple(float(value) for value in candidate.bounding_box),
+                view_type="floor_plan",
+                status=ViewportResolutionStatus.RESOLVED,
+                evidence_ids=(),
+                confidence=float(candidate.confidence),
+            )
+            candidate_context = ProviderContext(
+                run_id=f"derived-trial:{current.snapshot.snapshot_id}:{candidate.view_id}",
+                workspace_id="diagnostic",
+                project_id="diagnostic",
+                document_id=current.revision.document_id,
+                source_sha256=current.revision.source_sha256,
+                revision_id=current.revision.revision_id,
+                current_revision_id=current.revision.revision_id,
+                selected_pages=(166,),
+                owned_viewport_ids=(str(candidate.view_id),),
+                evidence_snapshot_id=current.snapshot.snapshot_id,
+                owned_page_numbers=(167,),
+                viewport_page_ownership=((str(candidate.view_id), 167),),
+            )
+            try:
+                trial = run_source_owned_ceiling_lining_shadow(
+                    source_visibility_producer=visibility,
+                    context=candidate_context,
+                    viewport=candidate_viewport,
+                    page_no=167,
+                )
+                derived_trials.append({
+                    "view_id": candidate.view_id,
+                    "f07_status": candidate.status,
+                    "boundary_source": candidate.boundary_source,
+                    "scale_raw": candidate.scale_raw,
+                    "scale_denominator": candidate.scale_denominator,
+                    "scale_conflict": candidate.scale_conflict,
+                    "pipeline_status": trial.status.value,
+                    "pipeline_reasons": list(trial.reason_codes),
+                    "finish_candidates": [
+                        {
+                            "raw_text": item.raw_text,
+                            "geometry": list(item.geometry),
+                            "status": item.status.value,
+                        }
+                        for item in trial.finish_candidates
+                    ],
+                    "scale_bridge_status": trial.scale_bridge.status.value,
+                    "scale_bridge_reasons": list(trial.scale_bridge.reason_codes),
+                    "room_areas": [
+                        {
+                            "value": q.value,
+                            "status": q.status,
+                            "authority": q.authority,
+                            "abstained": q.abstained,
+                            "blocking_reasons": list(q.blocking_reasons),
+                        }
+                        for q in trial.room_area_quantities
+                    ],
+                    "ceilings": [
+                        {
+                            "value": q.value,
+                            "status": q.status,
+                            "authority": q.authority,
+                            "abstained": q.abstained,
+                            "blocking_reasons": list(q.blocking_reasons),
+                            "finish_descriptor": (
+                                q.metadata.get("finish_descriptor")
+                                if isinstance(q.metadata, dict)
+                                else None
+                            ),
+                        }
+                        for q in trial.ceiling_quantities
+                    ],
+                })
+            except Exception as exc:
+                derived_trials.append({
+                    "view_id": candidate.view_id,
+                    "f07_status": candidate.status,
+                    "boundary_source": candidate.boundary_source,
+                    "exception": f"{type(exc).__name__}:{exc}",
+                })
         segmented_viewports = tuple(
             authoritative_floor_plan_viewports(page, page_number=167)
         )
@@ -248,6 +342,7 @@ def test_ghazi_ceiling_current_main_diagnostic(tmp_path: Path) -> None:
                 for anchor in title_anchors
             ],
             "vector_frames": [list(frame) for frame in vector_frames],
+            "derived_floor_plan_trials": derived_trials,
             "segmented": [
                 {
                     "view_id": vp.view_id,
