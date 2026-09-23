@@ -1,44 +1,18 @@
-"""Benchmark extraction excludes diagnostic Item35 work without changing truth."""
+"""Canonical benchmark must execute production Item35 authority."""
 
 from __future__ import annotations
 
 import fitz
 
 from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
-from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
 
 
-def test_benchmark_skips_only_item35_shadow(tmp_path, monkeypatch) -> None:
+def test_benchmark_executes_item35_production_authority(tmp_path, monkeypatch) -> None:
     pdf_path = tmp_path / "drawing.pdf"
     doc = fitz.open()
-    page = doc.new_page(width=700, height=650)
-    page.insert_text(
-        fitz.Point(40, 40),
-        "GROUND FLOOR PLAN\n"
-        "SCALE 1:100\n"
-        "DRAWING NO: AD-01\n"
-        "12,000\n"
-        "6,000\n"
-        "FLOOR AREA - 72.00M2\n"
-        "D.P.M. under floor bed\n",
-    )
+    doc.new_page(width=700, height=650)
     doc.save(pdf_path)
     doc.close()
-
-    normal = GenericPlanReaderExtractor()
-    normal_predictions = [
-        item.to_dict() for item in normal.extract_from_pdf(pdf_path)
-    ]
-    assert normal_predictions
-    assert normal.item35_authority_shadow["reason"] != "not_collected"
-
-    skipped = GenericPlanReaderExtractor()
-    skipped_predictions = [
-        item.to_dict()
-        for item in skipped.extract_from_pdf(pdf_path, collect_item35_shadow=False)
-    ]
-    assert skipped_predictions == normal_predictions
-    assert skipped.item35_authority_shadow["reason"] == "not_collected"
 
     calls = []
 
@@ -53,4 +27,4 @@ def test_benchmark_skips_only_item35_shadow(tmp_path, monkeypatch) -> None:
     )
     engine = BenchmarkAccuracyEngine(output_dir=tmp_path / "reports")
     assert engine.extract_quantities_from_pdf(pdf_path, pages=[0]) == []
-    assert calls == [(pdf_path, [0], False)]
+    assert calls == [(pdf_path, [0], True)]
