@@ -5,6 +5,7 @@ from dataclasses import asdict, is_dataclass
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -219,15 +220,49 @@ def diagnose(case: dict[str, Any]) -> None:
         producer_method="wall-opening-real-source-diagnostic",
         producer_version="1.0",
     )
+    ingest_started = time.perf_counter()
     published = producer.ingest_native_pdf_bytes(
         document_id=f"diagnostic:{name.lower()}",
         source_bytes=source_bytes,
         source_locator=str(path),
     )
+    ingest_seconds = time.perf_counter() - ingest_started
+    print(
+        "SOURCE_VISIBILITY_INGEST_COMPLETE "
+        + json.dumps(
+            {
+                "PROJECT": name,
+                "SECONDS": round(ingest_seconds, 3),
+                "VISIBLE_OBSERVATIONS": len(published.visible_observation_ids),
+                "TEXT_OBSERVATIONS": len(published.text_observation_ids),
+                "SNAPSHOT_ID": published.snapshot.snapshot_id,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    if os.environ.get("INGEST_ONLY") == "1":
+        return
+
+    composition_started = time.perf_counter()
     composition = compose_live_wall_opening_authority(
         source_visibility_producer=producer,
         revision_id=published.revision.revision_id,
         page_ids=(str(page_number),),
+    )
+    composition_seconds = time.perf_counter() - composition_started
+    print(
+        "WALL_OPENING_COMPOSITION_COMPLETE "
+        + json.dumps(
+            {
+                "PROJECT": name,
+                "SECONDS": round(composition_seconds, 3),
+                "STATUS": _status(composition.status),
+                "REASON_CODES": list(composition.reason_codes),
+            },
+            sort_keys=True,
+        ),
+        flush=True,
     )
 
     wall_selector = PhysicalWallCandidateSelector(
@@ -501,7 +536,15 @@ def diagnose(case: dict[str, Any]) -> None:
 
 
 def main() -> int:
-    for case in CASES:
+    project_filter = str(os.environ.get("PROJECT_FILTER") or "").strip().upper()
+    selected = tuple(
+        case
+        for case in CASES
+        if not project_filter or str(case["name"]).upper() == project_filter
+    )
+    if not selected:
+        raise SystemExit(f"unknown PROJECT_FILTER={project_filter!r}")
+    for case in selected:
         diagnose(case)
     return 0
 
