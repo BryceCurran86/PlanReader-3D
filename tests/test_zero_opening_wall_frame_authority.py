@@ -111,7 +111,8 @@ def test_zero_opening_wall_frame_publishes_from_complete_source_scope() -> None:
     assert result.record.physical_wall_id == representative
     assert result.record.member_wall_candidate_ids
     assert result.record.wall_local_frame_id
-    assert result.record.viewport_id
+    assert result.record.wall_candidate_viewport_id == "wall-source:page-2"
+    assert result.record.scale_viewport_id is None
     assert result.record.length_pt > 0.0
     assert result.record.u0_pt == 0.0
     assert result.record.u1_pt == result.record.length_pt
