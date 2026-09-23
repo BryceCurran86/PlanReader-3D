@@ -130,5 +130,17 @@ jobs:
                   "items":group[0]["items"],
               })
           print("PLAN_BAND_REPEATED_ROWS_END")
+
+          # Diagnostic-only visual crop of the source-authenticated floor-plan
+          # verandah band. Coordinates are used only for this temporary audit.
+          clip = fitz.Rect(120, 630, 850, 870)
+          pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0), clip=clip, alpha=False)
+          pix.save("/tmp/kstvet-c47d-plan-crop.png")
           doc.close()
           PY
+      - name: Upload diagnostic plan crop
+        uses: actions/upload-artifact@v4
+        with:
+          name: kstvet-c47d-plan-crop
+          path: /tmp/kstvet-c47d-plan-crop.png
+          if-no-files-found: error
