@@ -160,8 +160,12 @@ class _SourceObservationStore:
         self.current_revision_by_document: dict[str, str] = {}
         self.source_bytes_by_revision: dict[str, bytes] = {}
         self.coverage_by_revision: dict[str, SourceDecodeCoverageRecord] = {}
+        self.coverage_by_snapshot: dict[str, SourceDecodeCoverageRecord] = {}
         self.snapshots: dict[str, ProducerSnapshotRecord] = {}
         self.source_snapshot_by_revision: dict[str, str] = {}
+        self.source_snapshot_by_revision_scope: dict[
+            tuple[str, tuple[int, ...]], str
+        ] = {}
         self.observations: dict[tuple[str, str], SourceObservationRecord] = {}
         self.record_fingerprints: dict[tuple[str, str], str] = {}
 
@@ -286,7 +290,10 @@ class SourceObservationProducer:
                 f"{PRODUCER_INTEGRITY_FAILURE}: native page partition not in revision"
             )
 
-        coverage = self._store.coverage_by_revision.get(revision_id)
+        coverage = (
+            self._store.coverage_by_snapshot.get(snapshot_id)
+            or self._store.coverage_by_revision.get(revision_id)
+        )
         try:
             page_number = int(page_id)
         except (TypeError, ValueError) as exc:
@@ -370,7 +377,10 @@ class SourceObservationProducer:
         if str(page_number) != page_id or page_number < 1:
             raise ValueError(f"{SOURCE_UNAVAILABLE}: invalid page id {page_id!r}")
 
-        coverage = self._store.coverage_by_revision.get(revision_id)
+        coverage = (
+            self._store.coverage_by_snapshot.get(snapshot_id)
+            or self._store.coverage_by_revision.get(revision_id)
+        )
         if coverage is None or page_number not in coverage.decoded_pages:
             raise ValueError(f"{SOURCE_UNAVAILABLE}: page {page_id} was not decoded")
 
@@ -412,17 +422,23 @@ class SourceObservationProducer:
         finally:
             pdf.close()
 
+
     def ingest_native_pdf_bytes(
         self,
         *,
         document_id: str,
         source_bytes: bytes | bytearray | memoryview,
         source_locator: str,
+        page_ids: Optional[Sequence[object]] = None,
     ) -> PublishedSourceSnapshot:
-        """Hash and decode the exact same immutable PDF byte buffer.
+        """Hash immutable PDF bytes and decode the document or an exact page scope.
 
-        Page partitions and native observations are producer-derived from the PDF;
-        a caller cannot supply authoritative page inventories or observation bodies.
+        page_ids=None preserves historical whole-document ingestion. When
+        page_ids is supplied, the full immutable PDF is still hashed and retained
+        as the source revision, but native primitives are decoded only for the
+        requested 1-based source pages. Coverage records only pages actually
+        decoded, so document-scope completeness remains fail-closed while the
+        explicit pages completeness contract can prove the requested scope.
         """
 
         document_id = _nonempty(document_id, "document_id")
@@ -439,13 +455,6 @@ class SourceObservationProducer:
             {"document_id": document_id, "source_sha256": digest},
             digest_chars=32,
         )
-        existing_snapshot_id = self._store.source_snapshot_by_revision.get(revision_id)
-        if existing_snapshot_id is not None:
-            return PublishedSourceSnapshot(
-                revision=replace(self._store.revisions[revision_id]),
-                coverage=replace(self._store.coverage_by_revision[revision_id]),
-                snapshot=replace(self._store.snapshots[existing_snapshot_id]),
-            )
 
         try:
             pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
@@ -458,8 +467,58 @@ class SourceObservationProducer:
         try:
             total_pages = int(pdf.page_count)
             partition_ids = tuple(f"page:{i + 1}" for i in range(total_pages))
-            for page_index in range(total_pages):
-                page_number = page_index + 1
+            if page_ids is None:
+                selected_pages = tuple(range(1, total_pages + 1))
+                scoped = False
+            else:
+                try:
+                    selected_pages = tuple(
+                        sorted(
+                            {
+                                int(str(value).strip())
+                                for value in page_ids
+                                if str(value).strip()
+                            }
+                        )
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"{SOURCE_UNAVAILABLE}: invalid source page scope"
+                    ) from exc
+                if (
+                    not selected_pages
+                    or any(page < 1 or page > total_pages for page in selected_pages)
+                ):
+                    raise ValueError(
+                        f"{SOURCE_UNAVAILABLE}: invalid source page scope"
+                    )
+                scoped = True
+
+            if not scoped:
+                existing_snapshot_id = self._store.source_snapshot_by_revision.get(
+                    revision_id
+                )
+            else:
+                existing_snapshot_id = self._store.source_snapshot_by_revision_scope.get(
+                    (revision_id, selected_pages)
+                )
+            if existing_snapshot_id is not None:
+                coverage = (
+                    self._store.coverage_by_snapshot.get(existing_snapshot_id)
+                    or self._store.coverage_by_revision.get(revision_id)
+                )
+                if coverage is None:
+                    raise ProducerIntegrityError(
+                        f"{PRODUCER_INTEGRITY_FAILURE}: cached coverage unavailable"
+                    )
+                return PublishedSourceSnapshot(
+                    revision=replace(self._store.revisions[revision_id]),
+                    coverage=replace(coverage),
+                    snapshot=replace(self._store.snapshots[existing_snapshot_id]),
+                )
+
+            for page_number in selected_pages:
+                page_index = page_number - 1
                 partition_id = f"page:{page_number}"
                 try:
                     page = pdf.load_page(page_index)
@@ -472,7 +531,10 @@ class SourceObservationProducer:
                             "kind": "native_pdf_page",
                             "primitive_ref": f"page:{page_number}",
                             "raw_text": "",
-                            "geometry": (float(native["width"]), float(native["height"])),
+                            "geometry": (
+                                float(native["width"]),
+                                float(native["height"]),
+                            ),
                         }
                     )
                     for segment in native.get("segments") or []:
@@ -484,8 +546,10 @@ class SourceObservationProducer:
                                 "primitive_ref": f"segment:{segment.get('id')}",
                                 "raw_text": "",
                                 "geometry": (
-                                    float(segment["x1"]), float(segment["y1"]),
-                                    float(segment["x2"]), float(segment["y2"]),
+                                    float(segment["x1"]),
+                                    float(segment["y1"]),
+                                    float(segment["x2"]),
+                                    float(segment["y2"]),
                                 ),
                             }
                         )
@@ -516,40 +580,60 @@ class SourceObservationProducer:
         finally:
             pdf.close()
 
-        previous_revision = self._store.current_revision_by_document.get(document_id)
-        generation = self._store.next_generation()
-        revision = SourceRevisionRecord(
-            document_id=document_id,
-            revision_id=revision_id,
-            source_sha256=digest,
-            source_locator=source_locator,
-            partition_ids=partition_ids,
-            producer_method=self._producer_method,
-            producer_version=self._producer_version,
-            producer_generation=generation,
-            supersedes_revision_id=previous_revision,
-        )
+        existing_revision = self._store.revisions.get(revision_id)
+        if existing_revision is not None:
+            if existing_revision.source_sha256 != digest:
+                raise ProducerIntegrityError(
+                    f"{PRODUCER_INTEGRITY_FAILURE}: revision hash changed"
+                )
+            revision = existing_revision
+        else:
+            previous_revision = self._store.current_revision_by_document.get(
+                document_id
+            )
+            revision_generation = self._store.next_generation()
+            revision = SourceRevisionRecord(
+                document_id=document_id,
+                revision_id=revision_id,
+                source_sha256=digest,
+                source_locator=source_locator,
+                partition_ids=partition_ids,
+                producer_method=self._producer_method,
+                producer_version=self._producer_version,
+                producer_generation=revision_generation,
+                supersedes_revision_id=previous_revision,
+            )
+
         coverage = SourceDecodeCoverageRecord(
             document_id=document_id,
             revision_id=revision_id,
             total_pages=total_pages,
             decoded_pages=tuple(decoded_pages),
             failed_pages=tuple(failed_pages),
-            state="complete" if not failed_pages else "partial",
+            state=(
+                "complete"
+                if not failed_pages and len(decoded_pages) == total_pages
+                else "partial"
+            ),
         )
+        snapshot_payload: dict[str, object] = {
+            "document_id": document_id,
+            "revision_id": revision_id,
+            "source_sha256": digest,
+            "producer_method": self._producer_method,
+            "producer_version": self._producer_version,
+            "kind": "native_pdf_ingestion",
+        }
+        if scoped:
+            snapshot_payload["kind"] = "native_pdf_ingestion_scoped"
+            snapshot_payload["page_ids"] = selected_pages
         snapshot_id = stable_contract_id(
             "source_snapshot",
-            {
-                "document_id": document_id,
-                "revision_id": revision_id,
-                "source_sha256": digest,
-                "producer_method": self._producer_method,
-                "producer_version": self._producer_version,
-                "kind": "native_pdf_ingestion",
-            },
+            snapshot_payload,
             digest_chars=32,
         )
 
+        generation = self._store.next_generation()
         records: list[SourceObservationRecord] = []
         for item in pending:
             identity = {
@@ -589,13 +673,12 @@ class SourceObservationProducer:
             record = replace(record, observation_payload_sha256=fingerprint)
             records.append(record)
 
-        observation_ids = tuple(sorted(r.observation_id for r in records))
         snapshot = ProducerSnapshotRecord(
             snapshot_id=snapshot_id,
             document_id=document_id,
             revision_id=revision_id,
             source_sha256=digest,
-            observation_ids=observation_ids,
+            observation_ids=tuple(sorted(r.observation_id for r in records)),
             producer_method=self._producer_method,
             producer_version=self._producer_version,
             producer_generation=generation,
@@ -606,10 +689,16 @@ class SourceObservationProducer:
             snapshot=snapshot,
             records=records,
             source_bytes=immutable_bytes,
-            mark_source_snapshot=True,
+            mark_source_snapshot=not scoped,
         )
+        if scoped:
+            self._store.source_snapshot_by_revision_scope[
+                (revision_id, selected_pages)
+            ] = snapshot.snapshot_id
         return PublishedSourceSnapshot(
-            revision=replace(revision), coverage=replace(coverage), snapshot=replace(snapshot)
+            revision=replace(revision),
+            coverage=replace(coverage),
+            snapshot=replace(snapshot),
         )
 
     def publish_derived_observation(
@@ -645,7 +734,14 @@ class SourceObservationProducer:
                 raise ValueError(f"{LINEAGE_UNAVAILABLE}: parent not in base snapshot")
 
         revision = self._store.revisions[revision_id]
-        coverage = self._store.coverage_by_revision[revision_id]
+        coverage = (
+            self._store.coverage_by_snapshot.get(base_snapshot_id)
+            or self._store.coverage_by_revision.get(revision_id)
+        )
+        if coverage is None:
+            raise ProducerIntegrityError(
+                f"{PRODUCER_INTEGRITY_FAILURE}: base snapshot coverage unavailable"
+            )
         generation = self._store.next_generation()
         payload = {
             "document_id": document_id,
@@ -766,7 +862,14 @@ class SourceObservationProducer:
             raise ValueError("observations must be non-empty")
 
         revision = self._store.revisions[revision_id]
-        coverage = self._store.coverage_by_revision[revision_id]
+        coverage = (
+            self._store.coverage_by_snapshot.get(base_snapshot_id)
+            or self._store.coverage_by_revision.get(revision_id)
+        )
+        if coverage is None:
+            raise ProducerIntegrityError(
+                f"{PRODUCER_INTEGRITY_FAILURE}: base snapshot coverage unavailable"
+            )
         generation = self._store.next_generation()
 
         prepared: list[dict[str, Any]] = []
@@ -965,6 +1068,7 @@ class SourceObservationProducer:
         self._store.current_revision_by_document[revision.document_id] = revision.revision_id
         self._store.source_bytes_by_revision[revision.revision_id] = bytes(source_bytes)
         self._store.coverage_by_revision[revision.revision_id] = coverage
+        self._store.coverage_by_snapshot[snapshot.snapshot_id] = coverage
         self._store.snapshots[snapshot.snapshot_id] = snapshot
         for key, record in staged.items():
             self._store.observations[key] = record
@@ -1046,7 +1150,10 @@ class SourceObservationAuthority:
     def coverage(
         self, *, document_id: str, revision_id: str
     ) -> Optional[SourceDecodeCoverageRecord]:
-        coverage = self._store.coverage_by_revision.get(revision_id)
+        coverage = (
+            self._store.coverage_by_snapshot.get(snapshot_id)
+            or self._store.coverage_by_revision.get(revision_id)
+        )
         if coverage is None or coverage.document_id != document_id:
             return None
         return replace(coverage)
