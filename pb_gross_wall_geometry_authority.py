@@ -493,9 +493,22 @@ class GrossWallGeometryProducer:
             )
             member_addressed = frame_addressed
             wall_local_frame_id = frame_evidence.whole_wall_frame_id
-            length_pt = abs(
-                float(frame_evidence.u1_pt) - float(frame_evidence.u0_pt)
+            # u0/u1 are the opening interval inside this shared wall frame.
+            # Gross wall extent must come from the independently sealed whole
+            # wall length, never from the opening width.
+            whole_wall_length_pt = getattr(
+                frame_evidence, "whole_wall_length_pt", None
             )
+            if whole_wall_length_pt is None:
+                return self._store(
+                    selector,
+                    _blocked(
+                        EvidenceResolutionStatus.ABSTAINED,
+                        GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED,
+                        "whole_wall_length_unavailable",
+                    ),
+                )
+            length_pt = float(whole_wall_length_pt)
             viewport_id = getattr(frame_evidence, "viewport_id", None)
         else:
             assert zero_frame_record is not None
