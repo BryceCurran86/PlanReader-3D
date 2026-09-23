@@ -45,13 +45,42 @@ def _segment_intersection(a: Segment, b: Segment, tol: float = 1e-9) -> Point | 
 
 
 def split_segments_at_intersections(segments: Sequence[Segment]) -> List[Segment]:
-    """Split vector linework at every true crossing before graph traversal."""
+    """Split vector linework at every true crossing before graph traversal.
+
+    The exact intersection predicate and split ordering are unchanged. A
+    deterministic x-axis sweep only removes segment pairs whose axis-aligned
+    bounding boxes cannot intersect, avoiding the historical all-pairs scan on
+    dense CAD pages.
+    """
     pts: List[List[Point]] = [[tuple(map(float,s[0])), tuple(map(float,s[1]))] for s in segments]
-    for i in range(len(segments)):
-        for j in range(i+1,len(segments)):
+
+    # Broad phase only: candidate pairs still pass through the existing exact
+    # _segment_intersection() predicate. The original segment indexes are kept
+    # so output order and per-segment split ordering remain unchanged.
+    tol = 1e-9
+    bounds = [
+        (
+            min(float(seg[0][0]), float(seg[1][0])),
+            min(float(seg[0][1]), float(seg[1][1])),
+            max(float(seg[0][0]), float(seg[1][0])),
+            max(float(seg[0][1]), float(seg[1][1])),
+            index,
+        )
+        for index, seg in enumerate(segments)
+    ]
+    ordered = sorted(bounds, key=lambda item: (item[0], item[2], item[1], item[3], item[4]))
+    for pos, left in enumerate(ordered):
+        left_x0, left_y0, left_x1, left_y1, i = left
+        for right in ordered[pos + 1:]:
+            right_x0, right_y0, right_x1, right_y1, j = right
+            if right_x0 > left_x1 + tol:
+                break
+            if right_y0 > left_y1 + tol or right_y1 < left_y0 - tol:
+                continue
             p=_segment_intersection(segments[i],segments[j])
             if p is not None:
                 pts[i].append(p); pts[j].append(p)
+
     out: List[Segment]=[]
     for original, candidates in zip(segments,pts):
         a,b=original; dx=b[0]-a[0]; dy=b[1]-a[1]
