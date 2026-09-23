@@ -1,0 +1,116 @@
+name: DIAGNOSTIC Ghazi Ceiling Lightweight — DO NOT MERGE
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  inspect-ghazi-ceiling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and SHA-verify registered source
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf" \
+            -o /tmp/ghazi.pdf
+          echo "c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f  /tmp/ghazi.pdf" | sha256sum -c -
+
+      - name: Inspect page 167 observations
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          import fitz
+          from pb_ceiling_lining_finish_evidence import collect_unscoped_ceiling_finish_candidates
+          from pb_vector_geometry_v130 import extract_native_page
+          from pb_viewport_segmentation import segment_page_viewports
+          from pb_wall_topology_diagnostics import collect_topology_from_page
+
+          doc = fitz.open("/tmp/ghazi.pdf")
+          page = doc[166]
+          text = page.get_text("text")
+          native = extract_native_page(page)
+          viewports = segment_page_viewports(page, page_number=167)
+          topology = collect_topology_from_page(
+              page,
+              page_number=167,
+              document_id="ghazi-lightweight-diagnostic",
+              allow_derived=True,
+          )
+          finishes = collect_unscoped_ceiling_finish_candidates(
+              page_text=text,
+              document_id="ghazi-lightweight-diagnostic",
+              source_sha256="c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f",
+              revision_id="diagnostic",
+              page_id="167",
+              page_no=167,
+              viewport_id=None,
+              text_geometry=None,
+              method="native_pdf_text",
+          )
+
+          report = {
+              "page_rect": [float(page.rect.x0), float(page.rect.y0), float(page.rect.x1), float(page.rect.y1)],
+              "native_segment_count": len(native.get("segments") or ()),
+              "native_word_count": len(native.get("words") or ()),
+              "ceiling_text_lines": [ln.strip() for ln in text.splitlines() if "ceiling" in ln.casefold()],
+              "chipboard_text_lines": [ln.strip() for ln in text.splitlines() if "chip" in ln.casefold()],
+              "finish_candidate_count": len(finishes),
+              "finish_candidates": [
+                  {"raw_text": item.raw_text, "kind": item.kind, "method": item.method}
+                  for item in finishes
+              ],
+              "viewports": [
+                  {
+                      "view_id": v.view_id,
+                      "view_type": v.view_type,
+                      "label": v.label,
+                      "status": v.status,
+                      "bbox": v.bounding_box,
+                      "scale_raw": v.scale_raw,
+                      "scale_denominator": v.scale_denominator,
+                      "scale_conflict": v.scale_conflict,
+                  }
+                  for v in viewports
+              ],
+              "diagnostic_topology": {
+                  "fail_closed_reason": topology.fail_closed_reason,
+                  "viewport_id": topology.viewport_id,
+                  "viewport_authority": topology.viewport_authority,
+                  "view_type": topology.view_type,
+                  "scoped_primitive_count": topology.scoped_primitive_count,
+                  "wall_count": len(topology.walls),
+                  "room_count": len(topology.rooms),
+                  "room_rows": [
+                      {
+                          "room_ref": r.room_ref,
+                          "label": r.label,
+                          "status": str(getattr(r.status, "value", r.status)),
+                          "area_page_pts2": r.area_page_pts2,
+                          "wall_count": len(r.bounding_wall_candidate_ids),
+                      }
+                      for r in topology.rooms
+                  ],
+              },
+          }
+          print("LIGHTWEIGHT_REPORT_BEGIN")
+          print(json.dumps(report, indent=2, sort_keys=True))
+          print("LIGHTWEIGHT_REPORT_END")
+          doc.close()
+          PY
