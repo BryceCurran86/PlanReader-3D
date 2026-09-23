@@ -4,6 +4,7 @@ from collections import Counter
 from dataclasses import asdict, is_dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -121,7 +122,7 @@ def _emit(
         "INPUT LINEAGE": input_lineage,
         "OUTPUT LINEAGE": output_lineage,
     }
-    print("AUTHORITY_TRACE " + json.dumps(payload, sort_keys=True, default=str))
+    print("AUTHORITY_TRACE " + json.dumps(payload, sort_keys=True, default=str), flush=True)
 
 
 def _is_corrob(status: Any) -> bool:
@@ -196,6 +197,23 @@ def diagnose(case: dict[str, Any]) -> None:
             ],
         },
     )
+
+    if os.environ.get("VISIBILITY_ONLY") == "1":
+        print(
+            "VISIBILITY_ONLY_COMPLETE "
+            + json.dumps(
+                {
+                    "PROJECT": name,
+                    "PAGE": page_number,
+                    "NATIVE_SEGMENTS": len(segments),
+                    "VISIBLE_SEGMENTS": len(visible_segments),
+                    "REASON_COUNTS": dict(sorted(reason_counts.items())),
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        return
 
     producer = SourceVisibilityProducer(
         producer_method="wall-opening-real-source-diagnostic",
