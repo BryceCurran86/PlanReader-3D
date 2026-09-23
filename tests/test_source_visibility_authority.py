@@ -420,3 +420,52 @@ def test_same_bytes_replay_returns_same_visibility_snapshot_and_ids() -> None:
     assert second.revision.revision_id == first.revision.revision_id
     assert second.snapshot.snapshot_id == first.snapshot.snapshot_id
     assert second.visible_observation_ids == first.visible_observation_ids
+
+def _two_page_rectangle_pdf_bytes() -> bytes:
+    doc = fitz.open()
+    for index in range(2):
+        page = doc.new_page(width=240, height=240)
+        page.insert_text((20, 30), f"PAGE-{index + 1}")
+        page.draw_line((100, 100), (140, 100), color=(0, 0, 0), width=1)
+        page.draw_line((100, 110), (140, 110), color=(0, 0, 0), width=1)
+        page.draw_line((100, 100), (100, 110), color=(0, 0, 0), width=1)
+        page.draw_line((140, 100), (140, 110), color=(0, 0, 0), width=1)
+    payload = doc.tobytes()
+    doc.close()
+    return payload
+
+
+def test_visibility_scoped_ingestion_never_decodes_or_publishes_other_pages() -> None:
+    payload = _two_page_rectangle_pdf_bytes()
+    producer = SourceVisibilityProducer(
+        producer_method="source-visibility-scoped-test",
+        producer_version="1.0",
+    )
+    published = producer.ingest_native_pdf_bytes(
+        document_id="visible-scoped",
+        source_bytes=payload,
+        source_locator="memory://visible-scoped.pdf",
+        page_ids=("2",),
+    )
+
+    assert published.coverage.total_pages == 2
+    assert published.coverage.decoded_pages == (2,)
+    assert published.coverage.state == "partial"
+    assert len(published.visible_observation_ids) == 4
+
+    source = producer._producer.authority()
+    observed_pages = set()
+    for observation_id in published.snapshot.observation_ids:
+        result = source.resolve(_selector(published, observation_id))
+        if result.observation is not None:
+            observed_pages.add(result.observation.page_id)
+    assert observed_pages == {"2"}
+
+    assert producer.optional_content_state_for_scope(
+        published.revision.revision_id,
+        page_ids=("2",),
+    ) == "known_visible"
+    assert producer.optional_content_state_for_scope(
+        published.revision.revision_id,
+        page_ids=("1",),
+    ) == "unresolved"
