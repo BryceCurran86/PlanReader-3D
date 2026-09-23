@@ -558,7 +558,10 @@ class BenchmarkAccuracyEngine:
         # Item35 is diagnostic shadow evidence and does not publish scored
         # quantities. Avoid its full-document observation replay in benchmarks.
         preds = extractor.extract_from_pdf(
-            pdf_path, pages=pages, collect_item35_shadow=False
+            pdf_path,
+            pages=pages,
+            collect_item35_shadow=False,
+            collect_wall_opening_authority_shadow=False,
         )
         return [p.to_dict() for p in preds]
 
