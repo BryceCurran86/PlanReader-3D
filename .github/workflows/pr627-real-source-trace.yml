@@ -1,0 +1,65 @@
+name: PR627 Real Source Trace
+
+on:
+  push:
+    branches: [diag/wall-net-pr627-real-source]
+    paths:
+      - tools/trace_pr627_real_source.py
+      - .github/workflows/pr627-real-source-trace.yml
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slug: kstvet
+            document_id: kstvet-pr627
+            pages: "54"
+            url: https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf
+            path: benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+            sha: 6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc
+          - slug: lamu
+            document_id: lamu-pr627
+            pages: "41"
+            url: https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf
+            path: benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+            sha: fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download and verify
+        env:
+          URL: ${{ matrix.url }}
+          PATH_OUT: ${{ matrix.path }}
+          SHA: ${{ matrix.sha }}
+        run: |
+          mkdir -p "$(dirname "$PATH_OUT")"
+          curl --fail --location --retry 4 --retry-delay 3 "$URL" -o "$PATH_OUT"
+          echo "$SHA  $PATH_OUT" | sha256sum -c -
+      - name: Trace composer
+        env:
+          PYTHONPATH: .
+          PATH_OUT: ${{ matrix.path }}
+          DOCUMENT_ID: ${{ matrix.document_id }}
+          PAGES: ${{ matrix.pages }}
+          SLUG: ${{ matrix.slug }}
+        run: |
+          mkdir -p trace
+          python tools/trace_pr627_real_source.py "$PATH_OUT" --document-id "$DOCUMENT_ID" --pages "$PAGES" | tee "trace/$SLUG.json"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr627-real-source-${{ matrix.slug }}
+          path: trace/${{ matrix.slug }}.json
+          if-no-files-found: warn
