@@ -3,7 +3,6 @@ from __future__ import annotations
 import fitz
 
 from pb_live_wall_opening_authority_shadow import (
-    PHYSICAL_OPENING_VOID_NOT_COMPOSED,
     collect_live_wall_opening_authority_shadow,
 )
 from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
@@ -30,7 +29,7 @@ def _host_fixture_pdf() -> bytes:
         doc.close()
 
 
-def test_authority_shadow_reports_first_uncomposed_causal_gate(tmp_path) -> None:
+def test_authority_shadow_reports_first_real_causal_gate(tmp_path) -> None:
     path = tmp_path / "wall-opening-shadow.pdf"
     path.write_bytes(_host_fixture_pdf())
 
@@ -57,10 +56,9 @@ def test_authority_shadow_reports_first_uncomposed_causal_gate(tmp_path) -> None
 
     failure = shadow["first_causal_failure"]
     assert failure is not None
-    assert failure["FILE"] == "pb_physical_opening_void_authority.py"
-    assert failure["CLASS/FUNCTION"] == "PhysicalOpeningVoidProducer.publish"
-    assert failure["STATUS"] == "not_composed"
-    assert failure["REASON_CODES"] == (PHYSICAL_OPENING_VOID_NOT_COMPOSED,)
+    assert failure["FILE"] == "pb_opening_dimension_authority.py"
+    assert failure["CLASS/FUNCTION"] == "OpeningDimensionAuthority.resolve_width"
+    assert failure["STATUS"] == "abstained"
     assert failure["RECORD PRESENT"] is False
 
 
@@ -90,7 +88,7 @@ def test_extractor_shadow_never_mutates_live_predictions(tmp_path) -> None:
     assert with_shadow.wall_opening_authority_shadow["status"] == "corroborated"
     assert (
         with_shadow.wall_opening_authority_shadow["first_causal_failure"]["FILE"]
-        == "pb_physical_opening_void_authority.py"
+        == "pb_opening_dimension_authority.py"
     )
     assert (
         with_shadow.extraction_status["wall_opening_authority_shadow"]
