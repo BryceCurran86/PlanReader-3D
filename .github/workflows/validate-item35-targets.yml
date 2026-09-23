@@ -1,0 +1,70 @@
+name: TEST-ONLY Item35 KSTVET Murera Validation — DO NOT MERGE
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - slug: kstvet
+            benchmark_id: tenders_ke_kstvet_cbc_classroom
+            source_url: https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf
+            source_path: benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+            source_sha256: 6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc
+          - slug: murera
+            benchmark_id: tenders_ke_murera_science_lab
+            source_url: https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf
+            source_path: benchmarks/sources/1785347143869-bqs-drawings.pdf
+            source_sha256: 84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download and SHA-verify source
+        env:
+          SOURCE_URL: ${{ matrix.source_url }}
+          SOURCE_PATH: ${{ matrix.source_path }}
+          SOURCE_SHA256: ${{ matrix.source_sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$SOURCE_PATH")"
+          curl --fail --location --retry 4 --retry-delay 3 "$SOURCE_URL" -o "$SOURCE_PATH"
+          echo "$SOURCE_SHA256  $SOURCE_PATH" | sha256sum -c -
+      - name: Run production benchmark
+        env:
+          PYTHONPATH: .
+          BENCHMARK_ID: ${{ matrix.benchmark_id }}
+          SLUG: ${{ matrix.slug }}
+        run: |
+          mkdir -p benchmark_results_runtime
+          python pb_benchmark_accuracy_engine.py --benchmark "$BENCHMARK_ID" --auto-extract --output-dir benchmark_results_runtime
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          bid=os.environ["BENCHMARK_ID"]
+          p=Path("benchmark_results_runtime") / f"{bid}_accuracy_report.json"
+          d=json.loads(p.read_text(encoding="utf-8"))
+          s=d["summary"]
+          accepted=int(s["exact_matches"])+int(s["within_5_percent"])
+          print("RESULT", bid, accepted, "/", s["total_items_compared"], "accuracy", s["overall_accuracy_percentage"])
+          targets={
+            "tenders_ke_kstvet_cbc_classroom":{"BOQ-C41-B","BOQ-C41-C","BOQ-C44-A"},
+            "tenders_ke_murera_science_lab":{"steel_casement_windows","doors_complete"},
+          }[bid]
+          for row in d.get("item_results",[]):
+              if row.get("item_id") in targets:
+                  print("TARGET_ROW", row.get("item_id"), row.get("status"), row.get("extracted_quantity"), row.get("expected_quantity"))
+          PY
