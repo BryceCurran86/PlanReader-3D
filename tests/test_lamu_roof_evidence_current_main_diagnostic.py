@@ -117,6 +117,18 @@ def test_lamu_roof_evidence_current_main(tmp_path: Path) -> None:
             frames = extract_vector_frames(page, calibration)
             viewports = segment_page_viewports(page, page_number=page_index + 1)
             segs = _segments(page)
+            # Source-only silhouette diagnostics: long horizontals and tall verticals
+            # near elevation regions can reveal eave endpoints vs wall/post supports.
+            horizontals = [
+                row for row in segs
+                if abs(float(row["angle_deg"])) <= 1.0
+                and float(row["length"]) >= 40.0
+            ]
+            verticals = [
+                row for row in segs
+                if abs(abs(float(row["angle_deg"])) - 90.0) <= 1.0
+                and float(row["length"]) >= 20.0
+            ]
             diagonal = [
                 row for row in segs
                 if 8.0 <= abs(float(row["angle_deg"])) <= 70.0
@@ -151,6 +163,8 @@ def test_lamu_roof_evidence_current_main(tmp_path: Path) -> None:
                 ],
                 "segment_count_ge6pt": len(segs),
                 "roof_like_diagonals": diagonal[:80],
+                "long_horizontals": horizontals[:120],
+                "tall_verticals": verticals[:120],
             })
     finally:
         doc.close()
