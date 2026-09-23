@@ -45,7 +45,7 @@ def test_wall_candidate_producer_exposes_no_caller_raster_inputs() -> None:
             PhysicalWallCandidateProducer.from_source_visibility_producer
         ).parameters
     )
-    assert params == {"source_visibility_producer"}
+    assert params == {"source_visibility_producer", "page_ids"}
     assert not params & {
         "png_bytes",
         "pixels",
@@ -55,6 +55,7 @@ def test_wall_candidate_producer_exposes_no_caller_raster_inputs() -> None:
         "wall_candidates",
         "expected_count",
     }
+    assert "page_ids" in params  # source addressing only; not raster evidence
 
 
 def test_image_only_raster_wall_scope_is_built_from_producer_visibility() -> None:

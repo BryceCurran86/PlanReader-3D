@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 VERSION = "1.3.0"
 SETTING_PREFIX = "vector_geometry_v130_"
@@ -81,34 +81,127 @@ def _normalize_scissor(scissor: Any) -> Optional[Tuple[float, float, float, floa
 
 
 @dataclass(frozen=True)
+class _ClipShapeProof:
+    """Exact active clip-shape proof from the extended drawing stream."""
+
+    scissor: Optional[Tuple[float, float, float, float]]
+    exact_rect: Optional[Tuple[float, float, float, float]]
+
+
+@dataclass(frozen=True)
+class _ClipAssociation:
+    clip_present: bool
+    scissor: Optional[Tuple[float, float, float, float]]
+    exact_shape_known: bool
+    exact_rect: Optional[Tuple[float, float, float, float]]
+
+
+@dataclass(frozen=True)
 class _ClipAssociationTable:
     """Extended-drawing clip association result.
 
-    ``available`` is False when the extended API failed. ``by_seqno`` maps a
-    *matched* drawing ``seqno`` to the active scissor, or to ``None`` when
-    association succeeded and no clip is active. Absence from ``by_seqno`` is
-    unknown (unmatched / missing seqno), distinct from matched ``None``.
+    available is False when the extended API failed. by_seqno maps a matched
+    drawing seqno to both the legacy effective scissor and an independent
+    exact-shape proof. scissor remains diagnostic only: an active clip is
+    authority-safe only when every active clip path is proven to be an
+    axis-aligned rectangle from the actual extended drawing items.
     """
 
     available: bool
-    by_seqno: Dict[int, Optional[Tuple[float, float, float, float]]]
+    by_seqno: Dict[int, _ClipAssociation]
+
+
+def _normalize_axis_aligned_quad(
+    quad: Any,
+    *,
+    tolerance: float = 1e-4,
+) -> Optional[Tuple[float, float, float, float]]:
+    """Return the exact bbox only when quad proves an axis-aligned rectangle."""
+    try:
+        points = [
+            (float(quad.ul.x), float(quad.ul.y)),
+            (float(quad.ur.x), float(quad.ur.y)),
+            (float(quad.ll.x), float(quad.ll.y)),
+            (float(quad.lr.x), float(quad.lr.y)),
+        ]
+    except Exception:
+        return None
+    if not all(math.isfinite(v) for point in points for v in point):
+        return None
+
+    def _clusters(values: Sequence[float]) -> List[float]:
+        ordered = sorted(float(value) for value in values)
+        groups: List[List[float]] = []
+        for value in ordered:
+            if not groups or abs(value - groups[-1][-1]) > tolerance:
+                groups.append([value])
+            else:
+                groups[-1].append(value)
+        return [sum(group) / len(group) for group in groups]
+
+    xs = _clusters([point[0] for point in points])
+    ys = _clusters([point[1] for point in points])
+    if len(xs) != 2 or len(ys) != 2:
+        return None
+    xmin, xmax = min(xs), max(xs)
+    ymin, ymax = min(ys), max(ys)
+    if xmax - xmin <= tolerance or ymax - ymin <= tolerance:
+        return None
+    corners = ((xmin, ymin), (xmin, ymax), (xmax, ymin), (xmax, ymax))
+    for corner in corners:
+        if not any(
+            abs(point[0] - corner[0]) <= tolerance
+            and abs(point[1] - corner[1]) <= tolerance
+            for point in points
+        ):
+            return None
+    return (xmin, ymin, xmax, ymax)
+
+
+def _exact_rect_from_clip_drawing(
+    drawing: Mapping[str, Any],
+) -> Optional[Tuple[float, float, float, float]]:
+    items = drawing.get("items") or ()
+    if len(items) != 1 or not items[0]:
+        return None
+    item = items[0]
+    kind = str(item[0])
+    if kind == "re" and len(item) >= 2:
+        return _normalize_scissor(item[1])
+    if kind == "qu" and len(item) >= 2:
+        return _normalize_axis_aligned_quad(item[1])
+    return None
+
+
+def _intersect_exact_rects(
+    rects: Sequence[Tuple[float, float, float, float]],
+) -> Optional[Tuple[float, float, float, float]]:
+    if not rects:
+        return None
+    x0 = max(rect[0] for rect in rects)
+    y0 = max(rect[1] for rect in rects)
+    x1 = min(rect[2] for rect in rects)
+    y1 = min(rect[3] for rect in rects)
+    if x1 < x0 or y1 < y0:
+        return None
+    return (x0, y0, x1, y1)
 
 
 def _clip_scissor_by_seqno(pdf_page: Any) -> _ClipAssociationTable:
-    """Map non-extended drawing ``seqno`` values to active clip scissors.
+    """Map drawing seqno values to active clip state and exact shape proof.
 
-    Uses a separate ``get_drawings(extended=True)`` pass so the primary
-    non-extended enumeration (and therefore historical ``d{{path}}i{{item}}``
-    ids) stays bit-identical.
+    The primary non-extended drawing enumeration remains untouched, preserving
+    historical primitive IDs. The separate extended pass is used only to prove
+    clip provenance. PyMuPDF scissor is never itself accepted as shape
+    authority.
     """
     try:
         extended = pdf_page.get_drawings(extended=True) or []
     except Exception:
         return _ClipAssociationTable(available=False, by_seqno={})
 
-    # Nesting stack: index == clip nesting level from PyMuPDF.
-    stack: List[Optional[Tuple[float, float, float, float]]] = []
-    by_seqno: Dict[int, Optional[Tuple[float, float, float, float]]] = {}
+    stack: List[Optional[_ClipShapeProof]] = []
+    by_seqno: Dict[int, _ClipAssociation] = {}
     for drawing in extended:
         if not isinstance(drawing, dict):
             continue
@@ -125,11 +218,14 @@ def _clip_scissor_by_seqno(pdf_page: Any) -> _ClipAssociationTable:
                 stack.pop()
             while len(stack) < level:
                 stack.append(None)
-            scissor = _normalize_scissor(drawing.get("scissor"))
+            proof = _ClipShapeProof(
+                scissor=_normalize_scissor(drawing.get("scissor")),
+                exact_rect=_exact_rect_from_clip_drawing(drawing),
+            )
             if len(stack) == level:
-                stack.append(scissor)
+                stack.append(proof)
             else:
-                stack[level] = scissor
+                stack[level] = proof
             continue
 
         seqno = drawing.get("seqno")
@@ -139,14 +235,87 @@ def _clip_scissor_by_seqno(pdf_page: Any) -> _ClipAssociationTable:
             seq_key = int(seqno)
         except (TypeError, ValueError):
             continue
-        active: Optional[Tuple[float, float, float, float]] = None
-        # Innermost declared clip below the stroke's nesting level.
+
         limit = min(len(stack), max(level, 0))
-        for idx in range(limit):
-            if stack[idx] is not None:
-                active = stack[idx]
-        by_seqno[seq_key] = active
+        active = [stack[idx] for idx in range(limit) if stack[idx] is not None]
+        if not active:
+            by_seqno[seq_key] = _ClipAssociation(
+                clip_present=False,
+                scissor=None,
+                exact_shape_known=True,
+                exact_rect=None,
+            )
+            continue
+
+        effective_scissor = None
+        for proof in active:
+            if proof is not None and proof.scissor is not None:
+                effective_scissor = proof.scissor
+
+        exact_shape_known = all(
+            proof is not None and proof.exact_rect is not None for proof in active
+        )
+        exact_rect = (
+            _intersect_exact_rects(
+                [proof.exact_rect for proof in active if proof and proof.exact_rect]
+            )
+            if exact_shape_known
+            else None
+        )
+        by_seqno[seq_key] = _ClipAssociation(
+            clip_present=True,
+            scissor=effective_scissor,
+            exact_shape_known=exact_shape_known,
+            exact_rect=exact_rect,
+        )
     return _ClipAssociationTable(available=True, by_seqno=by_seqno)
+
+
+def _resolve_clip_proof_fields(
+    *,
+    clip_table: _ClipAssociationTable,
+    seq_key: Optional[int],
+) -> Tuple[
+    bool,
+    bool,
+    Optional[Tuple[float, float, float, float]],
+    bool,
+    Optional[Tuple[float, float, float, float]],
+]:
+    """Return clip state plus exact-shape proof, failing closed on legacy data.
+
+    _ClipAssociationTable used to store None / scissor tuples directly.
+    Preserve read compatibility for callers that still construct that legacy
+    table shape, but never promote a legacy scissor tuple to exact clip-shape
+    authority. Only producer-owned _ClipAssociation records can carry the
+    independent rectangular-path proof.
+    """
+    if not clip_table.available or seq_key is None or seq_key not in clip_table.by_seqno:
+        return False, False, None, False, None
+
+    association = clip_table.by_seqno[seq_key]
+    if isinstance(association, _ClipAssociation):
+        return (
+            True,
+            association.clip_present,
+            association.scissor,
+            association.exact_shape_known,
+            association.exact_rect,
+        )
+
+    # Legacy table compatibility. None means association succeeded and no
+    # active clip was present. A tuple is only the effective scissor and
+    # remains diagnostic: it is not proof that the actual clip path is a
+    # rectangle.
+    if association is None:
+        return True, False, None, True, None
+    try:
+        clip = tuple(float(value) for value in association)
+    except (TypeError, ValueError):
+        return False, False, None, False, None
+    if len(clip) != 4 or not all(math.isfinite(value) for value in clip):
+        return False, False, None, False, None
+    return True, True, clip, False, None
 
 
 def _resolve_clip_fields(
@@ -154,13 +323,12 @@ def _resolve_clip_fields(
     clip_table: _ClipAssociationTable,
     seq_key: Optional[int],
 ) -> Tuple[bool, bool, Optional[Tuple[float, float, float, float]]]:
-    """Return ``(clip_known, clip_present, clip)`` without conflating states."""
-    if not clip_table.available or seq_key is None or seq_key not in clip_table.by_seqno:
-        return False, False, None
-    clip = clip_table.by_seqno[seq_key]
-    if clip is None:
-        return True, False, None
-    return True, True, clip
+    """Backward-compatible clip ternary used by existing provenance callers."""
+    clip_known, clip_present, clip, _, _ = _resolve_clip_proof_fields(
+        clip_table=clip_table,
+        seq_key=seq_key,
+    )
+    return clip_known, clip_present, clip
 
 
 def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
@@ -214,7 +382,13 @@ def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
             seq_key = int(seqno) if seqno is not None else None
         except (TypeError, ValueError):
             seq_key = None
-        clip_known, clip_present, clip = _resolve_clip_fields(
+        (
+            clip_known,
+            clip_present,
+            clip,
+            clip_shape_known,
+            clip_exact_rect,
+        ) = _resolve_clip_proof_fields(
             clip_table=clip_table, seq_key=seq_key
         )
 
@@ -233,6 +407,10 @@ def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
                 "clip": list(clip) if clip is not None else None,
                 "clip_present": clip_present,
                 "clip_known": clip_known,
+                "clip_shape_known": clip_shape_known,
+                "clip_exact_rect": (
+                    list(clip_exact_rect) if clip_exact_rect is not None else None
+                ),
                 "path_index": int(draw_index),
             }
 

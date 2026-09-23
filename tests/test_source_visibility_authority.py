@@ -8,12 +8,15 @@ from pb_source_observation_authority import (
     ObservationSelector,
     SourceObservationProducer,
 )
+from pb_vector_geometry_v130 import _normalize_axis_aligned_quad
 from pb_source_visibility_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
     VISIBLE_SOURCE_OBSERVATION_EXISTS,
     VISIBILITY_ACTIVE_CLIP_UNRESOLVED,
     VISIBILITY_CLIP_ASSOCIATION_UNKNOWN,
     VISIBILITY_PROVEN_NO_ACTIVE_CLIP,
+    VISIBILITY_PROVEN_RECTANGULAR_CLIP,
+    VISIBILITY_RECTANGULAR_CLIP_EXCLUDES_SEGMENT,
     VISIBILITY_RECEIPT_UNAVAILABLE,
     SourceVisibilityAuthority,
     SourceVisibilityProducer,
@@ -115,6 +118,77 @@ def test_nonrectangular_clip_does_not_publish_visible_segments() -> None:
     )
     _, published, _ = _visible_ingest(payload, document_id="triangle-clip")
     assert published.visible_observation_ids == ()
+
+
+def test_rectangular_clip_containing_segments_publishes_visible_segments() -> None:
+    payload = _rectangle_pdf_bytes(clip_prefix=b"0 0 240 240 re W n")
+    _, published, authority = _visible_ingest(payload, document_id="contained-rect-clip")
+
+    assert len(published.visible_observation_ids) == 4
+    for observation_id in published.visible_observation_ids:
+        result = authority.resolve_visible(_selector(published, observation_id))
+        assert result.status == EvidenceResolutionStatus.CORROBORATED
+        assert result.proposition == VISIBLE_SOURCE_OBSERVATION_EXISTS
+
+
+def test_proven_rectangular_clip_requires_full_segment_containment() -> None:
+    inside = classify_native_segment_visibility(
+        {
+            "x1": 10.0,
+            "y1": 10.0,
+            "x2": 20.0,
+            "y2": 10.0,
+            "clip_known": True,
+            "clip_present": True,
+            "clip": [0.0, 0.0, 100.0, 100.0],
+            "clip_shape_known": True,
+            "clip_exact_rect": [0.0, 0.0, 100.0, 100.0],
+        }
+    )
+    assert inside.visible is True
+    assert inside.reason_codes == (VISIBILITY_PROVEN_RECTANGULAR_CLIP,)
+
+    crossing = classify_native_segment_visibility(
+        {
+            "x1": 90.0,
+            "y1": 10.0,
+            "x2": 110.0,
+            "y2": 10.0,
+            "clip_known": True,
+            "clip_present": True,
+            "clip": [0.0, 0.0, 100.0, 100.0],
+            "clip_shape_known": True,
+            "clip_exact_rect": [0.0, 0.0, 100.0, 100.0],
+        }
+    )
+    assert crossing.visible is False
+    assert crossing.reason_codes == (
+        VISIBILITY_RECTANGULAR_CLIP_EXCLUDES_SEGMENT,
+    )
+
+
+def test_axis_aligned_quad_is_exact_rectangular_clip_proof() -> None:
+    class _Point:
+        def __init__(self, x: float, y: float) -> None:
+            self.x = x
+            self.y = y
+
+    class _Quad:
+        ul = _Point(0.0, 0.0)
+        ur = _Point(100.0, 0.0)
+        ll = _Point(0.0, 50.0)
+        lr = _Point(100.0, 50.0)
+
+    class _Skewed:
+        ul = _Point(0.0, 0.0)
+        ur = _Point(100.0, 1.0)
+        ll = _Point(0.0, 50.0)
+        lr = _Point(100.0, 50.0)
+
+    assert _normalize_axis_aligned_quad(_Quad()) == pytest.approx(
+        (0.0, 0.0, 100.0, 50.0)
+    )
+    assert _normalize_axis_aligned_quad(_Skewed()) is None
 
 
 def test_unknown_clip_association_is_never_authority_visible() -> None:
