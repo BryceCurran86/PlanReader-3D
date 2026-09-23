@@ -166,42 +166,85 @@ def compose_live_gross_wall_geometry(
             reason_codes=(LIVE_GROSS_WALL_UNAVAILABLE,),
         )
 
-    # Build the complete decoded-page candidate universe. This may add
-    # producer-owned raster evidence on pages that had no usable native vectors.
-    # Never mix a newly advanced snapshot with already-sealed opening records.
-    wall_candidate_producer = (
-        PhysicalWallCandidateProducer.from_source_visibility_producer(
-            source_visibility_producer
-        )
+    # Reuse the exact upstream physical-wall authority when it already seals
+    # the complete decoded page universe for this snapshot. The wall/opening
+    # composition built these same source-owned scopes moments earlier; rebuilding
+    # them repeats raster/topology/identity work without adding evidence.
+    #
+    # This optimization is intentionally narrow. If decoded coverage contains
+    # any page outside the upstream selected scope, or an exact current-snapshot
+    # selector is not present upstream, preserve the historical complete-universe
+    # rebuild so cross-sheet registration semantics cannot be weakened.
+    decoded_page_ids_before = {
+        str(int(page_number))
+        for page_number in published_before.coverage.decoded_pages
+    }
+    selected_page_ids = set(wall_opening_composition.page_ids)
+    upstream_wall_authority = (
+        wall_opening_composition.physical_wall_candidate_authority
     )
-    published_after = source_visibility_producer.published_snapshot_for_revision(
-        revision_id
+    reuse_upstream_wall_authority = (
+        upstream_wall_authority is not None
+        and decoded_page_ids_before == selected_page_ids
     )
-    if published_after is None:
-        return _blocked(
-            revision_id=revision_id,
-            reason_codes=(LIVE_GROSS_WALL_UNAVAILABLE,),
-        )
-    if (
-        published_after.snapshot.snapshot_id
-        != published_before.snapshot.snapshot_id
-    ):
-        return _blocked(
-            revision_id=revision_id,
-            reason_codes=(LIVE_GROSS_WALL_SOURCE_SNAPSHOT_ADVANCED,),
-        )
-    if (
-        published_after.revision.document_id
-        != published_before.revision.document_id
-        or published_after.revision.source_sha256
-        != published_before.revision.source_sha256
-    ):
-        return _blocked(
-            revision_id=revision_id,
-            reason_codes=(LIVE_GROSS_WALL_UPSTREAM_INCOMPLETE,),
-        )
+    if reuse_upstream_wall_authority:
+        for page_id in wall_opening_composition.page_ids:
+            scope = upstream_wall_authority.resolve_scope(
+                PhysicalWallCandidateSelector(
+                    document_id=published_before.revision.document_id,
+                    revision_id=published_before.revision.revision_id,
+                    source_sha256=published_before.revision.source_sha256,
+                    snapshot_id=published_before.snapshot.snapshot_id,
+                    page_id=page_id,
+                    decision_scope_id=f"wall-source:page-{page_id}",
+                )
+            )
+            if scope.proposition is None:
+                reuse_upstream_wall_authority = False
+                break
 
-    wall_candidate_authority = wall_candidate_producer.authority()
+    if reuse_upstream_wall_authority:
+        wall_candidate_authority = upstream_wall_authority
+        published_after = published_before
+    else:
+        # Build the complete decoded-page candidate universe. This may add
+        # producer-owned raster evidence on pages that had no usable native
+        # vectors. Never mix a newly advanced snapshot with already-sealed
+        # opening records.
+        wall_candidate_producer = (
+            PhysicalWallCandidateProducer.from_source_visibility_producer(
+                source_visibility_producer
+            )
+        )
+        published_after = (
+            source_visibility_producer.published_snapshot_for_revision(
+                revision_id
+            )
+        )
+        if published_after is None:
+            return _blocked(
+                revision_id=revision_id,
+                reason_codes=(LIVE_GROSS_WALL_UNAVAILABLE,),
+            )
+        if (
+            published_after.snapshot.snapshot_id
+            != published_before.snapshot.snapshot_id
+        ):
+            return _blocked(
+                revision_id=revision_id,
+                reason_codes=(LIVE_GROSS_WALL_SOURCE_SNAPSHOT_ADVANCED,),
+            )
+        if (
+            published_after.revision.document_id
+            != published_before.revision.document_id
+            or published_after.revision.source_sha256
+            != published_before.revision.source_sha256
+        ):
+            return _blocked(
+                revision_id=revision_id,
+                reason_codes=(LIVE_GROSS_WALL_UPSTREAM_INCOMPLETE,),
+            )
+        wall_candidate_authority = wall_candidate_producer.authority()
 
     # Build the complete wall-equivalence universe for the exact source pages
     # selected by the upstream live wall/opening composition. A downstream
