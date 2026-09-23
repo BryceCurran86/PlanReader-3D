@@ -85,6 +85,24 @@ def test_composer_resolves_source_owned_opening_host_without_caller_geometry() -
         )
     )
     assert resolved_universe == composition.opening_universe_result
+
+    page_universe = composition.opening_universe_results["1"]
+    assert page_universe.status is EvidenceResolutionStatus.CORROBORATED
+    assert page_universe.decision_scope_complete is True
+    assert page_universe.record is not None
+    assert page_universe.record.decision_scope_id == "wall-source:page-1"
+    resolved_page_universe = (
+        composition.opening_universe_completeness_authorities["1"].resolve(
+            OpeningUniverseSelector(
+                document_id=page_universe.record.document_id,
+                revision_id=page_universe.record.revision_id,
+                source_sha256=page_universe.record.source_sha256,
+                snapshot_id=page_universe.record.snapshot_id,
+                decision_scope_id="wall-source:page-1",
+            )
+        )
+    )
+    assert resolved_page_universe == page_universe
     assert len(composition.wall_scopes) == 1
     assert composition.wall_scopes[0].scope_complete is True
     assert composition.wall_scopes[0].wall_candidate_ids
@@ -113,6 +131,12 @@ def test_composer_resolves_source_owned_opening_host_without_caller_geometry() -
 
     for trace in composition.opening_bindings:
         selector = composition.binding_selectors[trace.opening_identity_id]
+        assert selector.decision_scope_id == "wall-source:page-1"
+        assert (
+            composition.opening_universe_results[selector.page_id]
+            .record.decision_scope_id
+            == selector.decision_scope_id
+        )
         resolved = composition.opening_host_binding_authority.resolve(selector)
         assert resolved.status is EvidenceResolutionStatus.CORROBORATED
         assert resolved.record is not None
@@ -132,3 +156,9 @@ def test_composer_does_not_materialize_unselected_wall_page() -> None:
     assert [trace.page_id for trace in composition.wall_scopes] == ["2"]
     if composition.opening_universe_result.record is not None:
         assert composition.opening_universe_result.record.page_ids == ("2",)
+    assert set(composition.opening_universe_results) == {"2"}
+    assert composition.opening_universe_results["2"].record is not None
+    assert (
+        composition.opening_universe_results["2"].record.decision_scope_id
+        == "wall-source:page-2"
+    )
