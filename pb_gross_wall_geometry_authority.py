@@ -529,7 +529,7 @@ class GrossWallGeometryProducer:
             frame_addressed = False
             wall_local_frame_id = zero_frame_record.wall_local_frame_id
             length_pt = float(zero_frame_record.length_pt)
-            viewport_id = zero_frame_record.viewport_id
+            viewport_id = zero_frame_record.scale_viewport_id
 
         records_by_candidate_id = {
             str(getattr(record, "wall_candidate_id", "")): record
