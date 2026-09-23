@@ -238,6 +238,48 @@ def build_owned_topology_room_index(
 
 
 
+def _source_room_polygon_owned_by_viewport(
+    polygon: Sequence[tuple[float, float]],
+    viewport: ViewportEvidence,
+    *,
+    tolerance: float = 1e-6,
+) -> bool:
+    """Return whether every source-room vertex belongs to the owned viewport.
+
+    SourceRoomFaceAuthority is page-scoped.  A page may contain multiple
+    independently scaled drawing viewports, so page membership alone cannot
+    authorize applying one viewport's scale to every room face on the page.
+    Filtering here does not delete source authority; it creates the exact
+    viewport-owned index consumed by downstream quantity binding.
+    """
+    if len(polygon) < 3:
+        return False
+    try:
+        x0, y0, x1, y1 = (float(value) for value in viewport.bbox)
+    except (TypeError, ValueError):
+        return False
+    if not all(math.isfinite(value) for value in (x0, y0, x1, y1)):
+        return False
+    if x1 < x0 or y1 < y0:
+        return False
+
+    for point in polygon:
+        try:
+            x, y = float(point[0]), float(point[1])
+        except (TypeError, ValueError, IndexError):
+            return False
+        if not math.isfinite(x) or not math.isfinite(y):
+            return False
+        if (
+            x < x0 - tolerance
+            or x > x1 + tolerance
+            or y < y0 - tolerance
+            or y > y1 + tolerance
+        ):
+            return False
+    return True
+
+
 def build_owned_source_room_face_index(
     *,
     room_face_authority: SourceRoomFaceAuthority,
@@ -309,6 +351,15 @@ def build_owned_source_room_face_index(
             or record.area_page_pts2 <= 0.0
         ):
             return None
+        # Source room-face authority is page-scoped, while metric authority
+        # is viewport-scoped.  Never let a room outside this exact viewport
+        # inherit the viewport's scale or finish scope.
+        if not _source_room_polygon_owned_by_viewport(
+            record.polygon_pdf_pts,
+            viewport,
+        ):
+            continue
+
         room_ref = _clean(record.face_id)
         if not room_ref or room_ref in rooms_by_ref:
             return None
