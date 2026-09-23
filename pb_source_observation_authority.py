@@ -581,6 +581,7 @@ class SourceObservationProducer:
             pdf.close()
 
         existing_revision = self._store.revisions.get(revision_id)
+        generation = self._store.next_generation()
         if existing_revision is not None:
             if existing_revision.source_sha256 != digest:
                 raise ProducerIntegrityError(
@@ -591,7 +592,6 @@ class SourceObservationProducer:
             previous_revision = self._store.current_revision_by_document.get(
                 document_id
             )
-            revision_generation = self._store.next_generation()
             revision = SourceRevisionRecord(
                 document_id=document_id,
                 revision_id=revision_id,
@@ -600,7 +600,7 @@ class SourceObservationProducer:
                 partition_ids=partition_ids,
                 producer_method=self._producer_method,
                 producer_version=self._producer_version,
-                producer_generation=revision_generation,
+                producer_generation=generation,
                 supersedes_revision_id=previous_revision,
             )
 
@@ -633,7 +633,6 @@ class SourceObservationProducer:
             digest_chars=32,
         )
 
-        generation = self._store.next_generation()
         records: list[SourceObservationRecord] = []
         for item in pending:
             identity = {
