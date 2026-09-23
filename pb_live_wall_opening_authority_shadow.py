@@ -10,6 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Sequence
 
+from pb_live_physical_opening_void_composition import (
+    LivePhysicalOpeningVoidComposition,
+    compose_live_physical_opening_voids,
+)
 from pb_live_wall_opening_authority_composition import (
     LiveWallOpeningAuthorityComposition,
     compose_live_wall_opening_authority,
@@ -19,7 +23,9 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 
 
 SHADOW_SCHEMA_VERSION = "1.0.0"
-PHYSICAL_OPENING_VOID_NOT_COMPOSED = "live_physical_opening_void_not_composed"
+OPENING_DEDUCTION_APPLICABILITY_NOT_COMPOSED = (
+    "live_opening_deduction_applicability_not_composed"
+)
 
 
 def empty_wall_opening_authority_shadow(*, reason: str = "not_collected") -> dict[str, Any]:
@@ -73,6 +79,7 @@ def _stage(
 
 def _serialize_composition(
     composition: LiveWallOpeningAuthorityComposition,
+    void_composition: LivePhysicalOpeningVoidComposition,
     *,
     document_id: str,
     source_sha256: str,
@@ -201,18 +208,92 @@ def _serialize_composition(
             )
         )
 
-    stages.append(
-        _stage(
-            file="pb_physical_opening_void_authority.py",
-            function="PhysicalOpeningVoidProducer.publish",
-            status="not_composed",
-            reason_codes=(PHYSICAL_OPENING_VOID_NOT_COMPOSED,),
-            record_id=None,
-            input_lineage=root_lineage,
-            output_lineage=root_lineage,
-            record_present=False,
+    for trace in void_composition.traces:
+        opening_lineage = {
+            **root_lineage,
+            "page_id": trace.page_id,
+            "decision_scope_id": trace.decision_scope_id,
+            "opening_identity_id": trace.opening_identity_id,
+        }
+        stages.extend(
+            (
+                _stage(
+                    file="pb_opening_dimension_authority.py",
+                    function="OpeningDimensionAuthority.resolve_width",
+                    status=_status(trace.width_status),
+                    reason_codes=trace.width_reason_codes,
+                    record_id=trace.width_record_id,
+                    input_lineage=opening_lineage,
+                    output_lineage=opening_lineage,
+                ),
+                _stage(
+                    file="pb_schedule_opening_instance_binding_authority.py",
+                    function="ScheduleOpeningInstanceBindingProducer.publish_scope",
+                    status=_status(trace.schedule_binding_status),
+                    reason_codes=trace.schedule_binding_reason_codes,
+                    record_id=trace.schedule_binding_record_id,
+                    input_lineage=opening_lineage,
+                    output_lineage=opening_lineage,
+                ),
+                _stage(
+                    file="pb_opening_height_authority.py",
+                    function="OpeningHeightProducer.publish_scope",
+                    status=_status(trace.height_status),
+                    reason_codes=trace.height_reason_codes,
+                    record_id=trace.height_record_id,
+                    input_lineage=opening_lineage,
+                    output_lineage=opening_lineage,
+                ),
+                _stage(
+                    file="pb_opening_vertical_placement_authority.py",
+                    function="OpeningVerticalPlacementProducer.publish_scope",
+                    status=_status(trace.vertical_status),
+                    reason_codes=trace.vertical_reason_codes,
+                    record_id=trace.vertical_record_id,
+                    input_lineage=opening_lineage,
+                    output_lineage=opening_lineage,
+                ),
+                _stage(
+                    file="pb_physical_scale_authority.py",
+                    function="PhysicalScaleProducer.publish_scope",
+                    status=_status(trace.scale_status),
+                    reason_codes=trace.scale_reason_codes,
+                    record_id=trace.scale_record_id,
+                    input_lineage=opening_lineage,
+                    output_lineage=opening_lineage,
+                ),
+                _stage(
+                    file="pb_physical_opening_void_authority.py",
+                    function="PhysicalOpeningVoidProducer.publish",
+                    status=_status(trace.void_status),
+                    reason_codes=trace.void_reason_codes,
+                    record_id=trace.void_record_id,
+                    input_lineage=opening_lineage,
+                    output_lineage=opening_lineage,
+                ),
+            )
         )
-    )
+
+    if (
+        void_composition.traces
+        and all(
+            trace.void_status is EvidenceResolutionStatus.CORROBORATED
+            and trace.void_record_id is not None
+            for trace in void_composition.traces
+        )
+    ):
+        stages.append(
+            _stage(
+                file="pb_opening_deduction_applicability_authority.py",
+                function="OpeningDeductionApplicabilityProducer.publish",
+                status="not_composed",
+                reason_codes=(OPENING_DEDUCTION_APPLICABILITY_NOT_COMPOSED,),
+                record_id=None,
+                input_lineage=root_lineage,
+                output_lineage=root_lineage,
+                record_present=False,
+            )
+        )
 
     first_failure = next(
         (
@@ -269,8 +350,13 @@ def collect_live_wall_opening_authority_shadow(
         revision_id=published.revision.revision_id,
         page_ids=tuple(str(index + 1) for index in valid_indexes),
     )
+    void_composition = compose_live_physical_opening_voids(
+        source_visibility_producer=source,
+        wall_opening_composition=composition,
+    )
     return _serialize_composition(
         composition,
+        void_composition,
         document_id=published.revision.document_id,
         source_sha256=published.revision.source_sha256,
         snapshot_id=published.snapshot.snapshot_id,
@@ -278,7 +364,7 @@ def collect_live_wall_opening_authority_shadow(
 
 
 __all__ = [
-    "PHYSICAL_OPENING_VOID_NOT_COMPOSED",
+    "OPENING_DEDUCTION_APPLICABILITY_NOT_COMPOSED",
     "SHADOW_SCHEMA_VERSION",
     "collect_live_wall_opening_authority_shadow",
     "empty_wall_opening_authority_shadow",
