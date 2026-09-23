@@ -205,6 +205,12 @@ class CrossSheetRegistrationProducer:
         self._wall_candidates = physical_wall_candidate_authority
         self._source = source_visibility_producer
         self._results: dict[_Key, CrossSheetRegistrationResult] = {}
+        # Source bytes are immutable once ingested. Cache a verified object by
+        # revision identity so wall×target registration attempts do not hash
+        # the entire PDF repeatedly. Object identity is part of the guard:
+        # replacing the store entry forces a fresh digest check, preserving
+        # tamper detection.
+        self._verified_source_bytes_by_revision: dict[str, bytes] = {}
 
     @classmethod
     def from_authorities(
@@ -264,9 +270,17 @@ class CrossSheetRegistrationProducer:
         ):
             return None
         source_bytes = self._source._producer._store.source_bytes_by_revision.get(selector.revision_id)
-        if source_bytes is None or hashlib.sha256(source_bytes).hexdigest() != selector.source_sha256:
+        if source_bytes is None:
             raise RuntimeError(CROSS_SHEET_SOURCE_INTEGRITY_FAILURE)
-        return bytes(source_bytes)
+
+        cached = self._verified_source_bytes_by_revision.get(selector.revision_id)
+        if cached is source_bytes:
+            return cached
+
+        if hashlib.sha256(source_bytes).hexdigest() != selector.source_sha256:
+            raise RuntimeError(CROSS_SHEET_SOURCE_INTEGRITY_FAILURE)
+        self._verified_source_bytes_by_revision[selector.revision_id] = source_bytes
+        return source_bytes
 
     def publish(
         self,
