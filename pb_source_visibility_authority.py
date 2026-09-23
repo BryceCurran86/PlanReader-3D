@@ -575,12 +575,14 @@ class SourceVisibilityProducer:
         document_id: str,
         source_bytes: bytes | bytearray | memoryview,
         source_locator: str,
+        page_ids: Sequence[str] | None = None,
     ) -> PublishedVisibleSourceSnapshot:
         immutable_bytes = bytes(source_bytes)
         base: PublishedSourceSnapshot = self._producer.ingest_native_pdf_bytes(
             document_id=document_id,
             source_bytes=immutable_bytes,
             source_locator=source_locator,
+            page_ids=page_ids,
         )
         cached = self._published_by_revision.get(base.revision.revision_id)
         if cached is not None:
@@ -592,8 +594,8 @@ class SourceVisibilityProducer:
         text_receipts: list[tuple[str, PdfTextIntegrityReceipt]] = []
         pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
         try:
-            for page_index in range(int(pdf.page_count)):
-                page_number = page_index + 1
+            for page_number in base.coverage.decoded_pages:
+                page_index = int(page_number) - 1
                 page_id = str(page_number)
                 partition_id = f"page:{page_number}"
                 page = pdf.load_page(page_index)
