@@ -37,6 +37,7 @@ from pb_live_wall_opening_authority_composition import (
     LiveWallOpeningAuthorityComposition,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_opening_host_frame_authority import OpeningHostFrameSelector
 from pb_physical_scale_authority import (
     PhysicalScaleAuthority,
     PhysicalScaleProducer,
@@ -193,9 +194,20 @@ def compose_live_gross_wall_geometry(
 
     wall_candidate_authority = wall_candidate_producer.authority()
 
-    # Host walls are discovered only by replaying producer-owned physical void
-    # records. Callers never provide wall ids or wall lists.
-    host_walls: dict[tuple[str, str, str], None] = {}
+    # Whole walls are discovered only by replaying producer-owned physical void
+    # records and their sealed whole-wall host frames. OpeningHostBindingRecord
+    # host_wall_id is deliberately opening-scoped; it must never become the
+    # downstream physical-wall identity. The shared whole_wall_frame_id is the
+    # canonical address, while its authenticated candidate members are retained
+    # only for lower-level cross-sheet registration and wall-height proof.
+    host_walls: dict[tuple[str, str, str], tuple[str, ...]] = {}
+    frame_authority = wall_opening_composition.opening_host_frame_authority
+    if frame_authority is None:
+        return _blocked(
+            revision_id=revision_id,
+            reason_codes=(LIVE_GROSS_WALL_UPSTREAM_INCOMPLETE,),
+        )
+
     for opening_id, selector in physical_void_composition.void_selectors.items():
         authority = physical_void_composition.physical_opening_void_authorities.get(
             selector.page_id
@@ -204,7 +216,7 @@ def compose_live_gross_wall_geometry(
             continue
         result = authority.resolve(selector)
         record = result.record
-        if (
+        if not (
             result.status is EvidenceResolutionStatus.CORROBORATED
             and record is not None
             and record.opening_identity_id == opening_id
@@ -213,7 +225,53 @@ def compose_live_gross_wall_geometry(
             and record.source_sha256 == published_after.revision.source_sha256
             and record.snapshot_id == published_after.snapshot.snapshot_id
         ):
-            host_walls[(record.page_id, record.decision_scope_id, record.host_wall_id)] = None
+            continue
+
+        frame_result = frame_authority.resolve(
+            OpeningHostFrameSelector(
+                document_id=record.document_id,
+                revision_id=record.revision_id,
+                source_sha256=record.source_sha256,
+                snapshot_id=record.snapshot_id,
+                page_id=record.page_id,
+                decision_scope_id=record.decision_scope_id,
+                opening_identity_id=record.opening_identity_id,
+            )
+        )
+        frame = frame_result.evidence
+        if not (
+            frame_result.status is EvidenceResolutionStatus.CORROBORATED
+            and frame is not None
+            and frame.whole_wall_frame_id == record.wall_local_frame_id
+            and frame.host_wall_id == record.host_wall_id
+            and frame.opening_identity_id == record.opening_identity_id
+        ):
+            continue
+
+        member_ids = tuple(
+            sorted(
+                dict.fromkeys(
+                    str(member_id)
+                    for member_id in frame.whole_wall_candidate_ids
+                    if str(member_id)
+                )
+            )
+        )
+        if not member_ids:
+            continue
+
+        key = (
+            record.page_id,
+            record.decision_scope_id,
+            frame.whole_wall_frame_id,
+        )
+        existing = host_walls.get(key)
+        if existing is not None and existing != member_ids:
+            return _blocked(
+                revision_id=revision_id,
+                reason_codes=(LIVE_GROSS_WALL_UPSTREAM_INCOMPLETE,),
+            )
+        host_walls[key] = member_ids
 
     if not host_walls:
         return LiveGrossWallGeometryComposition(
@@ -247,26 +305,28 @@ def compose_live_gross_wall_geometry(
         source_visibility_producer=source_visibility_producer,
     )
     registration_results: dict[
-        tuple[str, str, str], list[tuple[str, object]]
+        tuple[str, str, str], list[tuple[str, str, object]]
     ] = {key: [] for key in host_walls}
 
-    for page_id, decision_scope_id, physical_wall_id in sorted(host_walls):
-        for target_page_id in decoded_pages:
-            if target_page_id == page_id:
-                continue
-            selector = CrossSheetRegistrationSelector(
-                document_id=published_after.revision.document_id,
-                revision_id=published_after.revision.revision_id,
-                source_sha256=published_after.revision.source_sha256,
-                snapshot_id=published_after.snapshot.snapshot_id,
-                source_page_id=page_id,
-                target_page_id=target_page_id,
-                physical_element_id=physical_wall_id,
-            )
-            result = registration_producer.publish(selector)
-            registration_results[
-                (page_id, decision_scope_id, physical_wall_id)
-            ].append((target_page_id, result))
+    for key in sorted(host_walls):
+        page_id, decision_scope_id, whole_wall_frame_id = key
+        for member_id in host_walls[key]:
+            for target_page_id in decoded_pages:
+                if target_page_id == page_id:
+                    continue
+                selector = CrossSheetRegistrationSelector(
+                    document_id=published_after.revision.document_id,
+                    revision_id=published_after.revision.revision_id,
+                    source_sha256=published_after.revision.source_sha256,
+                    snapshot_id=published_after.snapshot.snapshot_id,
+                    source_page_id=page_id,
+                    target_page_id=target_page_id,
+                    physical_element_id=member_id,
+                )
+                result = registration_producer.publish(selector)
+                registration_results[key].append(
+                    (member_id, target_page_id, result)
+                )
 
     registration_authority = registration_producer.authority()
 
@@ -276,19 +336,40 @@ def compose_live_gross_wall_geometry(
         physical_wall_candidate_authority=wall_candidate_authority,
     )
     height_results = {}
-    for page_id, decision_scope_id, physical_wall_id in sorted(host_walls):
-        selector = WallHeightSelector(
-            document_id=published_after.revision.document_id,
-            revision_id=published_after.revision.revision_id,
-            source_sha256=published_after.revision.source_sha256,
-            snapshot_id=published_after.snapshot.snapshot_id,
-            page_id=page_id,
-            decision_scope_id=decision_scope_id,
-            physical_wall_id=physical_wall_id,
-        )
-        height_results[(page_id, decision_scope_id, physical_wall_id)] = (
-            height_producer.publish_scope(selector)
-        )
+    for key in sorted(host_walls):
+        page_id, decision_scope_id, _whole_wall_frame_id = key
+        member_heights = []
+        for member_id in host_walls[key]:
+            selector = WallHeightSelector(
+                document_id=published_after.revision.document_id,
+                revision_id=published_after.revision.revision_id,
+                source_sha256=published_after.revision.source_sha256,
+                snapshot_id=published_after.snapshot.snapshot_id,
+                page_id=page_id,
+                decision_scope_id=decision_scope_id,
+                physical_wall_id=member_id,
+            )
+            member_heights.append(
+                (member_id, height_producer.publish_scope(selector))
+            )
+
+        resolved_heights = [
+            (member_id, quantity)
+            for member_id, quantity in member_heights
+            if (
+                not getattr(quantity, "abstained", True)
+                and getattr(quantity, "value", None) is not None
+                and getattr(quantity, "status", None) == AuthorityStatus.FIRM.value
+            )
+        ]
+        if resolved_heights:
+            height_results[key] = sorted(
+                resolved_heights, key=lambda item: item[0]
+            )[0][1]
+        elif member_heights:
+            height_results[key] = sorted(
+                member_heights, key=lambda item: item[0]
+            )[0][1]
     height_authority = height_producer.authority()
 
     scale_producer = PhysicalScaleProducer.from_source_visibility_producer(
@@ -337,13 +418,13 @@ def compose_live_gross_wall_geometry(
         registrations = registration_results.get(key, [])
         resolved_registrations = [
             (target_page_id, result.record.record_id)
-            for target_page_id, result in registrations
+            for _member_id, target_page_id, result in registrations
             if (
                 result.status is EvidenceResolutionStatus.CORROBORATED
                 and result.record is not None
             )
         ]
-        height = height_results[key]
+        height = height_results.get(key)
         scale = scale_results.get(page_id)
         gross = gross_results[key]
         scale_evidence = getattr(scale, "evidence", None)
@@ -359,15 +440,23 @@ def compose_live_gross_wall_geometry(
                 registration_record_ids=tuple(
                     record_id for _, record_id in resolved_registrations
                 ),
-                height_status=str(height.status),
+                height_status=(
+                    str(height.status)
+                    if height is not None
+                    else str(AuthorityStatus.BLOCKED.value)
+                ),
                 height_m=(
                     float(height.value)
-                    if height.value is not None
+                    if height is not None and height.value is not None
                     else None
                 ),
                 height_reason_codes=_reasons(
-                    getattr(height, "reason_codes", ())
-                    or getattr(height, "blocking_reasons", ())
+                    (
+                        getattr(height, "reason_codes", ())
+                        or getattr(height, "blocking_reasons", ())
+                    )
+                    if height is not None
+                    else ("wall_height_unavailable",)
                 ),
                 scale_status=(
                     scale.status
