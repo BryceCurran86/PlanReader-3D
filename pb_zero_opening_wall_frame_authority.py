@@ -124,6 +124,8 @@ class ZeroOpeningWallFrameRecord:
     source_sha256: str
     snapshot_id: str
     page_id: str
+    wall_candidate_viewport_id: str
+    scale_viewport_id: str | None
     decision_scope_id: str
     physical_wall_id: str
     wall_local_frame_id: str
