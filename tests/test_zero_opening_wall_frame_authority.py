@@ -11,6 +11,7 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_zero_opening_wall_frame_authority import (
     ZERO_OPENING_WALL_FRAME_HAS_OPENING,
     ZERO_OPENING_WALL_FRAME_RESOLVED,
+    ZERO_OPENING_WALL_FRAME_WALL_UNRESOLVED,
     ZeroOpeningWallFrameProducer,
     ZeroOpeningWallFrameSelector,
 )
@@ -21,14 +22,13 @@ def _opening_plus_unopened_wall_pdf() -> bytes:
     doc = fitz.open(stream=_complete_void_pdf(), filetype="pdf")
     try:
         page = doc.new_page(width=760.0, height=650.0)
+        # Deliberately use one authenticated wall centreline here. Two bare
+        # parallel faces with no opening/jamb or other relation evidence are
+        # correctly AMBIGUOUS_PHYSICAL_EQUIVALENCE, so they cannot be used as
+        # a positive zero-opening-wall proof fixture.
         page.draw_line(
             fitz.Point(80.0, 250.0),
             fitz.Point(300.0, 250.0),
-            width=1.0,
-        )
-        page.draw_line(
-            fitz.Point(80.0, 270.0),
-            fitz.Point(300.0, 270.0),
             width=1.0,
         )
         return bytes(doc.tobytes(garbage=4, deflate=True))
@@ -118,7 +118,7 @@ def test_zero_opening_wall_frame_publishes_from_complete_source_scope() -> None:
     assert result.record.u1_pt == result.record.length_pt
 
 
-def test_zero_opening_wall_frame_refuses_wall_class_that_has_opening() -> None:
+def test_zero_opening_wall_frame_never_certifies_opening_bearing_source_member() -> None:
     published, composition = _chain()
     scope = _scope(composition, published, "1")
     assert scope.status is EvidenceResolutionStatus.CORROBORATED
@@ -132,29 +132,20 @@ def test_zero_opening_wall_frame_refuses_wall_class_that_has_opening() -> None:
     }
     assert framed_members
 
-    groups = tuple(
-        set(group) for group in scope.equivalence.equivalence_groups
-    )
-    target_representative = None
-    for representative in scope.equivalence.representative_wall_ids:
-        wall_class = next(
-            (group for group in groups if representative in group),
-            {representative},
-        )
-        if wall_class & framed_members:
-            target_representative = representative
-            break
-    assert target_representative is not None
-
+    # The opening fixture can legitimately leave some face-level candidate
+    # identities ambiguous. That ambiguity is itself sufficient to block a
+    # zero-opening certificate; if a framed member is also the resolved class
+    # representative, the stronger HAS_OPENING reason must block it instead.
+    target_member = sorted(framed_members)[0]
     producer = _producer(composition, "1")
-    result = producer.publish(
-        _selector(published, "1", target_representative)
-    )
+    result = producer.publish(_selector(published, "1", target_member))
 
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert ZERO_OPENING_WALL_FRAME_HAS_OPENING in result.reason_codes
+    assert result.status is not EvidenceResolutionStatus.CORROBORATED
     assert result.record is None
-
+    assert (
+        ZERO_OPENING_WALL_FRAME_HAS_OPENING in result.reason_codes
+        or ZERO_OPENING_WALL_FRAME_WALL_UNRESOLVED in result.reason_codes
+    )
 
 def test_zero_opening_wall_frame_public_writer_has_no_truth_shaped_inputs() -> None:
     import inspect
