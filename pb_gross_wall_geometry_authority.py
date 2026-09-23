@@ -104,6 +104,62 @@ def _is_forbidden_default_height(quantity: QuantityEvidence) -> bool:
     return False
 
 
+def _authenticated_member_extent_pt(
+    frame_evidence: OpeningHostFrameEvidence,
+    member_ids: Sequence[str],
+    records_by_candidate_id: Mapping[str, object],
+) -> float | None:
+    """Re-derive whole-wall extent from authenticated member geometry only.
+
+    This supports sealed host-frame records minted before the explicit
+    whole-wall-length field existed. It deliberately never uses the opening
+    interval u0_pt/u1_pt: those coordinates describe opening width, not wall
+    extent.
+    """
+    try:
+        axis = (
+            float(frame_evidence.axis_unit[0]),
+            float(frame_evidence.axis_unit[1]),
+        )
+    except (TypeError, ValueError, IndexError):
+        return None
+    if (
+        not all(math.isfinite(value) for value in axis)
+        or not math.isclose(math.hypot(*axis), 1.0, rel_tol=1e-9, abs_tol=1e-9)
+    ):
+        return None
+
+    projected: list[float] = []
+    for member_id in member_ids:
+        record = records_by_candidate_id.get(str(member_id))
+        if record is None:
+            return None
+        wall_candidate = getattr(record, "wall_candidate", None)
+        points = tuple(getattr(wall_candidate, "centerline_pts", ()) or ())
+        if len(points) < 2:
+            identity = getattr(record, "physical_identity", None)
+            points = tuple(getattr(identity, "path_fingerprint", ()) or ())
+        if len(points) < 2:
+            return None
+        try:
+            member_values = [
+                float(point[0]) * axis[0] + float(point[1]) * axis[1]
+                for point in points
+            ]
+        except (TypeError, ValueError, IndexError):
+            return None
+        if not member_values or not all(math.isfinite(value) for value in member_values):
+            return None
+        projected.extend(member_values)
+
+    if len(projected) < 2:
+        return None
+    extent = max(projected) - min(projected)
+    if not math.isfinite(extent) or extent <= 0.0:
+        return None
+    return float(extent)
+
+
 @dataclass(frozen=True)
 class GrossWallGeometrySelector:
     document_id: str
@@ -343,6 +399,11 @@ class GrossWallGeometryProducer:
             )
 
         candidate_records = tuple(getattr(candidates_result, "records", ()))
+        records_by_candidate_id = {
+            str(getattr(record, "wall_candidate_id", "")): record
+            for record in candidate_records
+            if str(getattr(record, "wall_candidate_id", ""))
+        }
         selector_matches_candidate = any(
             getattr(record, "wall_candidate_id", None) == selector.physical_wall_id
             or getattr(
@@ -493,9 +554,49 @@ class GrossWallGeometryProducer:
             )
             member_addressed = frame_addressed
             wall_local_frame_id = frame_evidence.whole_wall_frame_id
-            length_pt = abs(
-                float(frame_evidence.u1_pt) - float(frame_evidence.u0_pt)
+            # u0/u1 are the opening interval inside this shared wall frame.
+            # Gross wall extent must come from the independently sealed whole
+            # wall length, never from the opening width.
+            whole_wall_length_pt = getattr(
+                frame_evidence, "whole_wall_length_pt", None
             )
+            derived_member_extent_pt = _authenticated_member_extent_pt(
+                frame_evidence,
+                frame_member_ids,
+                records_by_candidate_id,
+            )
+            if whole_wall_length_pt is None:
+                # Backward-compatible replay of older sealed frame records:
+                # re-derive from authenticated wall members, never u0/u1.
+                if derived_member_extent_pt is None:
+                    return self._store(
+                        selector,
+                        _blocked(
+                            EvidenceResolutionStatus.ABSTAINED,
+                            GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED,
+                            "whole_wall_length_unavailable",
+                        ),
+                    )
+                length_pt = float(derived_member_extent_pt)
+            else:
+                length_pt = float(whole_wall_length_pt)
+                if (
+                    derived_member_extent_pt is not None
+                    and not math.isclose(
+                        length_pt,
+                        derived_member_extent_pt,
+                        rel_tol=1e-9,
+                        abs_tol=1e-6,
+                    )
+                ):
+                    return self._store(
+                        selector,
+                        _blocked(
+                            EvidenceResolutionStatus.CONFLICT,
+                            GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED,
+                            "whole_wall_length_conflict",
+                        ),
+                    )
             viewport_id = getattr(frame_evidence, "viewport_id", None)
         else:
             assert zero_frame_record is not None
@@ -531,11 +632,6 @@ class GrossWallGeometryProducer:
             length_pt = float(zero_frame_record.length_pt)
             viewport_id = zero_frame_record.scale_viewport_id
 
-        records_by_candidate_id = {
-            str(getattr(record, "wall_candidate_id", "")): record
-            for record in candidate_records
-            if str(getattr(record, "wall_candidate_id", ""))
-        }
         if member_addressed:
             if any(
                 member_id not in records_by_candidate_id

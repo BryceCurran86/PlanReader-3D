@@ -43,7 +43,7 @@ from pb_physical_wall_identity import PhysicalEquivalenceClass
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityAuthority
 
-OPENING_HOST_FRAME_SCHEMA_VERSION = "1.2.0"
+OPENING_HOST_FRAME_SCHEMA_VERSION = "1.3.0"
 OPENING_HOST_FRAME_RESOLVED = "opening_host_frame_resolved"
 OPENING_HOST_FRAME_OPENING_UNAVAILABLE = "opening_host_frame_opening_unavailable"
 OPENING_HOST_FRAME_HOST_UNAVAILABLE = "opening_host_frame_host_unavailable"
@@ -179,6 +179,7 @@ class OpeningHostFrameEvidence:
     u0_pt: float
     u1_pt: float
     wall_thickness_pt: float
+    whole_wall_length_pt: float | None = None
     coordinate_unit: str = "pdf_point"
     schema_version: str = OPENING_HOST_FRAME_SCHEMA_VERSION
 
@@ -208,6 +209,7 @@ class _WholeWallFrame:
     u0: float
     u1: float
     wall_thickness: float
+    whole_wall_length: float
     frame_id: str
     candidate_ids: tuple[str, ...]
     source_observation_ids: tuple[str, ...]
@@ -628,6 +630,7 @@ class OpeningHostFrameProducer:
             u0=float(u0),
             u1=float(u1),
             wall_thickness=float(wall_thickness),
+            whole_wall_length=float(host_length),
             frame_id=frame_id,
             candidate_ids=component_ids,
             source_observation_ids=source_observation_ids,
@@ -765,6 +768,7 @@ class OpeningHostFrameProducer:
             "u0_pt": round(float(frame.u0), 9),
             "u1_pt": round(float(frame.u1), 9),
             "wall_thickness_pt": round(float(frame.wall_thickness), 9),
+            "whole_wall_length_pt": round(float(frame.whole_wall_length), 9),
             "coordinate_unit": "pdf_point",
         }
         evidence = OpeningHostFrameEvidence(
@@ -782,6 +786,7 @@ class OpeningHostFrameProducer:
             u0_pt=float(frame.u0),
             u1_pt=float(frame.u1),
             wall_thickness_pt=float(frame.wall_thickness),
+            whole_wall_length_pt=float(frame.whole_wall_length),
         )
         result = OpeningHostFrameResult(
             status=EvidenceResolutionStatus.CORROBORATED,
