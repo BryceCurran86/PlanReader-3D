@@ -46,10 +46,15 @@ from pb_physical_wall_candidate_authority import (
 from pb_wall_height_authority import (
     WALL_HEIGHT_FAMILY,
     WallHeightAuthority,
+    WallHeightSelector,
+)
+from pb_zero_opening_wall_frame_authority import (
+    ZeroOpeningWallFrameAuthority,
+    ZeroOpeningWallFrameSelector,
 )
 
 
-GROSS_WALL_GEOMETRY_SCHEMA_VERSION = "1.0.0"
+GROSS_WALL_GEOMETRY_SCHEMA_VERSION = "1.1.0"
 
 GROSS_WALL_GEOMETRY_RESOLVED = "gross_wall_geometry_resolved"
 GROSS_WALL_GEOMETRY_WALL_UNRESOLVED = "gross_wall_geometry_wall_unresolved"
@@ -97,6 +102,62 @@ def _is_forbidden_default_height(quantity: QuantityEvidence) -> bool:
     if any(tok in method for tok in _FORBIDDEN_DEFAULT_TOKENS):
         return True
     return False
+
+
+def _authenticated_member_extent_pt(
+    frame_evidence: OpeningHostFrameEvidence,
+    member_ids: Sequence[str],
+    records_by_candidate_id: Mapping[str, object],
+) -> float | None:
+    """Re-derive whole-wall extent from authenticated member geometry only.
+
+    This supports sealed host-frame records minted before the explicit
+    whole-wall-length field existed. It deliberately never uses the opening
+    interval u0_pt/u1_pt: those coordinates describe opening width, not wall
+    extent.
+    """
+    try:
+        axis = (
+            float(frame_evidence.axis_unit[0]),
+            float(frame_evidence.axis_unit[1]),
+        )
+    except (TypeError, ValueError, IndexError):
+        return None
+    if (
+        not all(math.isfinite(value) for value in axis)
+        or not math.isclose(math.hypot(*axis), 1.0, rel_tol=1e-9, abs_tol=1e-9)
+    ):
+        return None
+
+    projected: list[float] = []
+    for member_id in member_ids:
+        record = records_by_candidate_id.get(str(member_id))
+        if record is None:
+            return None
+        wall_candidate = getattr(record, "wall_candidate", None)
+        points = tuple(getattr(wall_candidate, "centerline_pts", ()) or ())
+        if len(points) < 2:
+            identity = getattr(record, "physical_identity", None)
+            points = tuple(getattr(identity, "path_fingerprint", ()) or ())
+        if len(points) < 2:
+            return None
+        try:
+            member_values = [
+                float(point[0]) * axis[0] + float(point[1]) * axis[1]
+                for point in points
+            ]
+        except (TypeError, ValueError, IndexError):
+            return None
+        if not member_values or not all(math.isfinite(value) for value in member_values):
+            return None
+        projected.extend(member_values)
+
+    if len(projected) < 2:
+        return None
+    extent = max(projected) - min(projected)
+    if not math.isfinite(extent) or extent <= 0.0:
+        return None
+    return float(extent)
 
 
 @dataclass(frozen=True)
@@ -149,6 +210,7 @@ class GrossWallGeometryRecord:
     height_m: float
     gross_area_m2: float
     polygon_wkb_hex: str
+    member_wall_candidate_ids: tuple[str, ...] = ()
     coordinate_unit: str = METRE
     schema_version: str = GROSS_WALL_GEOMETRY_SCHEMA_VERSION
 
@@ -211,6 +273,7 @@ class GrossWallGeometryProducer:
         host_frame_authority: OpeningHostFrameAuthority,
         physical_scale_authority: PhysicalScaleAuthority,
         wall_height_authority: WallHeightAuthority,
+        zero_opening_wall_frame_authority: ZeroOpeningWallFrameAuthority | None = None,
         *,
         _seal: object = None,
     ) -> None:
@@ -228,10 +291,19 @@ class GrossWallGeometryProducer:
                 "WallHeightProducer.from_authorities().authority(); duck-typed resolvers and plain "
                 "Mappings are not accepted."
             )
+        if (
+            zero_opening_wall_frame_authority is not None
+            and type(zero_opening_wall_frame_authority)
+            is not ZeroOpeningWallFrameAuthority
+        ):
+            raise TypeError(
+                "zero_opening_wall_frame_authority must be producer-owned"
+            )
         self._wall_candidates = physical_wall_candidate_authority
         self._frame = host_frame_authority
         self._scale = physical_scale_authority
         self._height = wall_height_authority
+        self._zero_opening_frame = zero_opening_wall_frame_authority
         self._results: dict[_Key, GrossWallGeometryResult] = {}
 
     @classmethod
@@ -242,12 +314,14 @@ class GrossWallGeometryProducer:
         host_frame_authority: OpeningHostFrameAuthority,
         physical_scale_authority: PhysicalScaleAuthority,
         wall_height_authority: WallHeightAuthority,
+        zero_opening_wall_frame_authority: ZeroOpeningWallFrameAuthority | None = None,
     ) -> "GrossWallGeometryProducer":
         return cls(
             physical_wall_candidate_authority,
             host_frame_authority,
             physical_scale_authority,
             wall_height_authority,
+            zero_opening_wall_frame_authority,
             _seal=_PRODUCER_SEAL,
         )
 
@@ -325,27 +399,289 @@ class GrossWallGeometryProducer:
                 ),
             )
 
-        # Ensure selector.physical_wall_id is present in candidate records
-        matching_candidates = [
-            r
-            for r in getattr(candidates_result, "records", ())
-            if getattr(r, "wall_candidate_id", None) == selector.physical_wall_id
-            or getattr(getattr(r, "physical_identity", None), "physical_wall_id", None)
+        candidate_records = tuple(getattr(candidates_result, "records", ()))
+        records_by_candidate_id = {
+            str(getattr(record, "wall_candidate_id", "")): record
+            for record in candidate_records
+            if str(getattr(record, "wall_candidate_id", ""))
+        }
+        selector_matches_candidate = any(
+            getattr(record, "wall_candidate_id", None) == selector.physical_wall_id
+            or getattr(
+                getattr(record, "physical_identity", None),
+                "physical_wall_id",
+                None,
+            )
             == selector.physical_wall_id
-        ]
-        if not matching_candidates:
+            for record in candidate_records
+        )
+
+        # Resolve either an opening-derived whole-wall frame or a producer-owned
+        # zero-opening wall frame. The two authorities prove disjoint positive
+        # propositions: the zero-opening authority itself refuses any wall class
+        # intersecting a sealed opening host frame.
+        matching_frames: list[OpeningHostFrameEvidence] = []
+        if hasattr(self._frame, "_results"):
+            for _key, res in self._frame._results.items():
+                ev = getattr(res, "evidence", None)
+                if (
+                    ev is None
+                    or res.status is not EvidenceResolutionStatus.CORROBORATED
+                ):
+                    continue
+                is_match = (
+                    ev.whole_wall_frame_id == selector.physical_wall_id
+                    or selector.physical_wall_id
+                    in getattr(ev, "whole_wall_candidate_ids", ())
+                    or ev.host_wall_id == selector.physical_wall_id
+                )
+                if not is_match:
+                    continue
+                frame_sel = ev.selector
+                if (
+                    frame_sel.document_id != selector.document_id
+                    or frame_sel.revision_id != selector.revision_id
+                    or frame_sel.source_sha256 != selector.source_sha256
+                    or frame_sel.snapshot_id != selector.snapshot_id
+                    or frame_sel.page_id != selector.page_id
+                ):
+                    return self._store(
+                        selector,
+                        _blocked(
+                            EvidenceResolutionStatus.CONFLICT,
+                            GROSS_WALL_GEOMETRY_LINEAGE_MISMATCH,
+                        ),
+                    )
+                matching_frames.append(ev)
+
+        zero_frame_result = None
+        zero_frame_record = None
+        if (
+            not matching_frames
+            and selector_matches_candidate
+            and self._zero_opening_frame is not None
+        ):
+            zero_frame_result = self._zero_opening_frame.resolve(
+                ZeroOpeningWallFrameSelector(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    page_id=selector.page_id,
+                    decision_scope_id=selector.decision_scope_id,
+                    physical_wall_id=selector.physical_wall_id,
+                )
+            )
+            if (
+                zero_frame_result.status is EvidenceResolutionStatus.CORROBORATED
+                and zero_frame_result.record is not None
+            ):
+                zero_frame_record = zero_frame_result.record
+
+        if not matching_frames and zero_frame_record is None:
             return self._store(
                 selector,
                 _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    GROSS_WALL_GEOMETRY_WALL_UNRESOLVED,
+                    (
+                        zero_frame_result.status
+                        if zero_frame_result is not None
+                        else EvidenceResolutionStatus.ABSTAINED
+                    ),
+                    (
+                        GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED
+                        if selector_matches_candidate
+                        else GROSS_WALL_GEOMETRY_WALL_UNRESOLVED
+                    ),
+                    *(
+                        tuple(zero_frame_result.reason_codes)
+                        if zero_frame_result is not None
+                        else ()
+                    ),
                 ),
             )
 
-        # Check for ambiguous equivalence
+        member_addressed = False
+        if matching_frames:
+            distinct_frame_ids = {
+                ev.whole_wall_frame_id for ev in matching_frames
+            }
+            if len(distinct_frame_ids) > 1:
+                return self._store(
+                    selector,
+                    _blocked(
+                        EvidenceResolutionStatus.CONFLICT,
+                        GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED,
+                        "ambiguous_whole_wall_frame",
+                    ),
+                )
+
+            distinct_memberships = {
+                tuple(sorted(str(item) for item in ev.whole_wall_candidate_ids))
+                for ev in matching_frames
+            }
+            if len(distinct_memberships) != 1:
+                return self._store(
+                    selector,
+                    _blocked(
+                        EvidenceResolutionStatus.CONFLICT,
+                        GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED,
+                        "inconsistent_whole_wall_membership",
+                    ),
+                )
+
+            frame_evidence = matching_frames[0]
+            frame_member_ids = tuple(
+                sorted(
+                    dict.fromkeys(
+                        str(item)
+                        for item in frame_evidence.whole_wall_candidate_ids
+                        if str(item)
+                    )
+                )
+            )
+            if not frame_member_ids:
+                return self._store(
+                    selector,
+                    _blocked(
+                        EvidenceResolutionStatus.ABSTAINED,
+                        GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED,
+                        "whole_wall_membership_unavailable",
+                    ),
+                )
+
+            frame_addressed = (
+                selector.physical_wall_id
+                == frame_evidence.whole_wall_frame_id
+            )
+            member_addressed = frame_addressed
+            wall_local_frame_id = frame_evidence.whole_wall_frame_id
+            # u0/u1 are the opening interval inside this shared wall frame.
+            # Gross wall extent must come from the independently sealed whole
+            # wall length, never from the opening width.
+            whole_wall_length_pt = getattr(
+                frame_evidence, "whole_wall_length_pt", None
+            )
+            derived_member_extent_pt = _authenticated_member_extent_pt(
+                frame_evidence,
+                frame_member_ids,
+                records_by_candidate_id,
+            )
+            if whole_wall_length_pt is None:
+                # Backward-compatible replay of older sealed frame records:
+                # re-derive from authenticated wall members, never u0/u1.
+                if derived_member_extent_pt is None:
+                    return self._store(
+                        selector,
+                        _blocked(
+                            EvidenceResolutionStatus.ABSTAINED,
+                            GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED,
+                            "whole_wall_length_unavailable",
+                        ),
+                    )
+                length_pt = float(derived_member_extent_pt)
+            else:
+                length_pt = float(whole_wall_length_pt)
+                if (
+                    derived_member_extent_pt is not None
+                    and not math.isclose(
+                        length_pt,
+                        derived_member_extent_pt,
+                        rel_tol=1e-9,
+                        abs_tol=1e-6,
+                    )
+                ):
+                    return self._store(
+                        selector,
+                        _blocked(
+                            EvidenceResolutionStatus.CONFLICT,
+                            GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED,
+                            "whole_wall_length_conflict",
+                        ),
+                    )
+            viewport_id = getattr(frame_evidence, "viewport_id", None)
+        else:
+            assert zero_frame_record is not None
+            if zero_frame_record.physical_wall_id != selector.physical_wall_id:
+                return self._store(
+                    selector,
+                    _blocked(
+                        EvidenceResolutionStatus.CONFLICT,
+                        GROSS_WALL_GEOMETRY_LINEAGE_MISMATCH,
+                    ),
+                )
+            frame_member_ids = tuple(
+                sorted(
+                    dict.fromkeys(
+                        str(item)
+                        for item in zero_frame_record.member_wall_candidate_ids
+                        if str(item)
+                    )
+                )
+            )
+            if not frame_member_ids:
+                return self._store(
+                    selector,
+                    _blocked(
+                        EvidenceResolutionStatus.ABSTAINED,
+                        GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED,
+                        "zero_opening_wall_membership_unavailable",
+                    ),
+                )
+            member_addressed = True
+            frame_addressed = False
+            wall_local_frame_id = zero_frame_record.wall_local_frame_id
+            length_pt = float(zero_frame_record.length_pt)
+            viewport_id = zero_frame_record.scale_viewport_id
+
+        if member_addressed:
+            if any(
+                member_id not in records_by_candidate_id
+                for member_id in frame_member_ids
+            ):
+                return self._store(
+                    selector,
+                    _blocked(
+                        EvidenceResolutionStatus.ABSTAINED,
+                        GROSS_WALL_GEOMETRY_WALL_UNRESOLVED,
+                        "whole_wall_member_unresolved",
+                    ),
+                )
+        else:
+            matching_candidates = [
+                record
+                for record in candidate_records
+                if getattr(record, "wall_candidate_id", None)
+                == selector.physical_wall_id
+                or getattr(
+                    getattr(record, "physical_identity", None),
+                    "physical_wall_id",
+                    None,
+                )
+                == selector.physical_wall_id
+            ]
+            if not matching_candidates:
+                return self._store(
+                    selector,
+                    _blocked(
+                        EvidenceResolutionStatus.ABSTAINED,
+                        GROSS_WALL_GEOMETRY_WALL_UNRESOLVED,
+                    ),
+                )
+
+        # Candidate-level ambiguity remains fail-closed. Whole-wall and
+        # zero-opening frame addresses must have every sealed member free of
+        # unresolved physical-wall equivalence.
         equivalence = getattr(candidates_result, "equivalence", None)
         if equivalence is not None and hasattr(equivalence, "is_ambiguous"):
-            if equivalence.is_ambiguous(selector.physical_wall_id):
+            ambiguity_targets = (
+                frame_member_ids
+                if member_addressed
+                else (selector.physical_wall_id,)
+            )
+            if any(
+                equivalence.is_ambiguous(target_id)
+                for target_id in ambiguity_targets
+            ):
                 return self._store(
                     selector,
                     _blocked(
@@ -355,62 +691,6 @@ class GrossWallGeometryProducer:
                     ),
                 )
 
-        # 2. Resolve Whole-Wall Frame from OpeningHostFrameAuthority
-        matching_frames: list[OpeningHostFrameEvidence] = []
-        if hasattr(self._frame, "_results"):
-            for key, res in self._frame._results.items():
-                ev = getattr(res, "evidence", None)
-                if (
-                    ev is not None
-                    and res.status is EvidenceResolutionStatus.CORROBORATED
-                ):
-                    is_match = (
-                        ev.host_wall_id == selector.physical_wall_id
-                        or selector.physical_wall_id
-                        in getattr(ev, "whole_wall_candidate_ids", ())
-                    )
-                    if is_match:
-                        frame_sel = ev.selector
-                        if (
-                            frame_sel.document_id != selector.document_id
-                            or frame_sel.revision_id != selector.revision_id
-                            or frame_sel.source_sha256 != selector.source_sha256
-                            or frame_sel.snapshot_id != selector.snapshot_id
-                            or frame_sel.page_id != selector.page_id
-                        ):
-                            return self._store(
-                                selector,
-                                _blocked(
-                                    EvidenceResolutionStatus.CONFLICT,
-                                    GROSS_WALL_GEOMETRY_LINEAGE_MISMATCH,
-                                ),
-                            )
-                        matching_frames.append(ev)
-
-        if not matching_frames:
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED,
-                ),
-            )
-
-        # Check for multiple distinct whole-wall frames on the same wall
-        distinct_frame_ids = {ev.whole_wall_frame_id for ev in matching_frames}
-        if len(distinct_frame_ids) > 1:
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.CONFLICT,
-                    GROSS_WALL_GEOMETRY_FRAME_UNRESOLVED,
-                    "ambiguous_whole_wall_frame",
-                ),
-            )
-
-        frame_evidence = matching_frames[0]
-        wall_local_frame_id = frame_evidence.whole_wall_frame_id
-        length_pt = abs(float(frame_evidence.u1_pt) - float(frame_evidence.u0_pt))
         if not math.isfinite(length_pt) or length_pt <= 0:
             return self._store(
                 selector,
@@ -421,7 +701,6 @@ class GrossWallGeometryProducer:
             )
 
         # 3. Resolve Scale from PhysicalScaleAuthority
-        viewport_id = getattr(frame_evidence, "viewport_id", None)
         scale_sel = PhysicalScaleSelector(
             document_id=selector.document_id,
             revision_id=selector.revision_id,
@@ -477,46 +756,86 @@ class GrossWallGeometryProducer:
                 ),
             )
 
-        # 4. Resolve Wall Height from WallHeightAuthority (exact type guaranteed at construction).
-        # No duck-typing, no Mapping fallback — the authority was type-checked in __init__.
-        height_qty = self._height.resolve(selector)
+        # 4. Resolve Wall Height from WallHeightAuthority.
+        # Cross-sheet registration is candidate-addressed because source sheets
+        # contain producer-owned candidate geometry, not synthetic frame IDs.
+        # For a frame-addressed wall, only candidate IDs sealed into that exact
+        # whole-wall frame may support the shared wall height.
+        height_target_ids = (
+            frame_member_ids
+            if member_addressed
+            else (selector.physical_wall_id,)
+        )
+        height_candidates: list[tuple[str, QuantityEvidence]] = []
+        raw_height_quantities: list[QuantityEvidence] = []
+        for height_target_id in height_target_ids:
+            height_selector = WallHeightSelector(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                page_id=selector.page_id,
+                decision_scope_id=selector.decision_scope_id,
+                physical_wall_id=height_target_id,
+            )
+            candidate_quantity = self._height.resolve(height_selector)
+            if not isinstance(candidate_quantity, QuantityEvidence):
+                continue
+            raw_height_quantities.append(candidate_quantity)
+            if (
+                not candidate_quantity.abstained
+                and candidate_quantity.value is not None
+                and candidate_quantity.family == WALL_HEIGHT_FAMILY
+                and candidate_quantity.unit in ("m", "metre", "meter")
+                and candidate_quantity.status == AuthorityStatus.FIRM.value
+            ):
+                height_candidates.append(
+                    (height_target_id, candidate_quantity)
+                )
 
-        if height_qty is None:
+        if not height_candidates:
+            upstream_reasons = tuple(
+                dict.fromkeys(
+                    reason
+                    for quantity in raw_height_quantities
+                    for reason in (
+                        getattr(quantity, "blocking_reasons", ())
+                        or getattr(quantity, "reason_codes", ())
+                    )
+                    if str(reason)
+                )
+            )
             return self._store(
                 selector,
                 _blocked(
                     EvidenceResolutionStatus.ABSTAINED,
                     GROSS_WALL_GEOMETRY_HEIGHT_UNRESOLVED,
-                ),
-            )
-        if not isinstance(height_qty, QuantityEvidence):
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    GROSS_WALL_GEOMETRY_HEIGHT_UNRESOLVED,
+                    *upstream_reasons,
                 ),
             )
 
-        # Validate FIRM wall height
-        if (
-            height_qty.abstained
-            or height_qty.value is None
-            or height_qty.family != WALL_HEIGHT_FAMILY
-            or height_qty.unit not in ("m", "metre", "meter")
-            or height_qty.status != AuthorityStatus.FIRM.value
-        ):
+        distinct_height_values = {
+            round(float(quantity.value), 9)
+            for _target_id, quantity in height_candidates
+            if quantity.value is not None
+        }
+        if len(distinct_height_values) != 1:
             return self._store(
                 selector,
                 _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
+                    EvidenceResolutionStatus.CONFLICT,
                     GROSS_WALL_GEOMETRY_HEIGHT_UNRESOLVED,
-                    *(getattr(height_qty, "blocking_reasons", ()) or ()),
+                    "conflicting_whole_wall_member_heights",
                 ),
             )
 
-        # Enforce exact physical wall identity match (no cross-wiring!)
-        if height_qty.input_entity_ids != (selector.physical_wall_id,):
+        height_target_id, height_qty = sorted(
+            height_candidates,
+            key=lambda item: (item[0], item[1].quantity_id),
+        )[0]
+
+        # Enforce exact producer-owned candidate identity for the source height.
+        if height_qty.input_entity_ids != (height_target_id,):
             return self._store(
                 selector,
                 _blocked(
@@ -529,11 +848,7 @@ class GrossWallGeometryProducer:
         h_meta = (
             height_qty.metadata if isinstance(height_qty.metadata, Mapping) else {}
         )
-
-        # Item 18 accepts a wall-specific height only when Item 17 proves the
-        # exact plan-wall identity through producer-owned cross-sheet
-        # registration. Merely sealing a QuantityEvidence object is not enough.
-        if h_meta.get("target_entity_id") != selector.physical_wall_id:
+        if h_meta.get("target_entity_id") != height_target_id:
             return self._store(
                 selector,
                 _blocked(
@@ -576,10 +891,6 @@ class GrossWallGeometryProducer:
                 ),
             )
 
-        # Lineage is exact. The height-evidence page is intentionally allowed
-        # to differ from the plan wall page; source_page_id must equal the plan
-        # wall page, and the differing page is authenticated by the registration
-        # record carried by producer-owned Item 17 metadata.
         if (
             h_meta.get("source_sha256") != selector.source_sha256
             or h_meta.get("revision_id") != selector.revision_id
@@ -594,7 +905,6 @@ class GrossWallGeometryProducer:
                 ),
             )
 
-        # Forbid default / assumed wall height
         if _is_forbidden_default_height(height_qty):
             return self._store(
                 selector,
@@ -632,6 +942,7 @@ class GrossWallGeometryProducer:
             "height_m": height_m,
             "gross_area_m2": gross_area_m2,
             "polygon_wkb_hex": polygon.wkb_hex,
+            "member_wall_candidate_ids": frame_member_ids,
             "coordinate_unit": METRE,
             "schema_version": GROSS_WALL_GEOMETRY_SCHEMA_VERSION,
         }

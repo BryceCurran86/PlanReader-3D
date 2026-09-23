@@ -5,9 +5,11 @@ commercial identities or quantities.  It proves page-scoped physical walls,
 semantic physical openings, and exact opening->host bindings from one immutable
 SourceVisibilityProducer snapshot.
 
-It intentionally stops before opening voids, deduction applicability, gross
-wall geometry, net-wall union, wall-role aggregation, or commercial
-publication.  Those later propositions remain independently fail-closed.
+It also composes the already-reviewed source-authenticated semantic opening
+inventory into OpeningUniverseCompletenessAuthority. It intentionally stops
+before opening voids, deduction applicability, gross wall geometry, net-wall
+union, wall-role aggregation, or commercial publication. Those later
+propositions remain independently fail-closed.
 """
 from __future__ import annotations
 
@@ -28,6 +30,14 @@ from pb_opening_host_frame_authority import (
     OpeningHostFrameAuthority,
     OpeningHostFrameProducer,
     OpeningHostFrameSelector,
+)
+from pb_opening_universe_completeness_authority import (
+    OpeningUniverseCompletenessAuthority,
+    OpeningUniverseCompletenessResult,
+    OpeningUniverseSelector,
+)
+from pb_opening_universe_completeness_source_adapter import (
+    build_semantic_opening_inventory_completeness,
 )
 from pb_physical_opening_authority import PhysicalOpeningAuthority
 from pb_physical_wall_candidate_authority import (
@@ -88,12 +98,18 @@ class LiveWallOpeningAuthorityComposition:
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
     semantic_enumeration_result: SemanticOpeningEnumerationResult
+    opening_universe_result: OpeningUniverseCompletenessResult
+    opening_universe_results: Mapping[str, OpeningUniverseCompletenessResult]
     wall_scopes: tuple[LiveWallScopeTrace, ...]
     opening_bindings: tuple[LiveOpeningHostTrace, ...]
     host_frames: tuple[LiveOpeningHostFrameTrace, ...]
     physical_wall_candidate_authority: PhysicalWallCandidateAuthority
     physical_opening_authority: PhysicalOpeningAuthority
     semantic_opening_enumeration_authority: SemanticOpeningEnumerationAuthority
+    opening_universe_completeness_authority: OpeningUniverseCompletenessAuthority
+    opening_universe_completeness_authorities: Mapping[
+        str, OpeningUniverseCompletenessAuthority
+    ]
     opening_host_binding_authority: OpeningHostBindingAuthority
     opening_host_frame_authority: OpeningHostFrameAuthority
     binding_selectors: Mapping[str, OpeningHostBindingSelector]
@@ -171,6 +187,52 @@ def compose_live_wall_opening_authority(
         decision_scope_id=semantic_scope_id,
         page_ids=selected_pages,
     )
+    opening_universe_authority = build_semantic_opening_inventory_completeness(
+        source_visibility_producer=source_visibility_producer,
+        revision_id=revision_id,
+        decision_scope_id=semantic_scope_id,
+        page_ids=selected_pages,
+    )
+    opening_universe_result = opening_universe_authority.resolve(
+        OpeningUniverseSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            decision_scope_id=semantic_scope_id,
+        )
+    )
+
+    # PhysicalWallCandidateAuthority owns the canonical page decision scope
+    # "wall-source:page-{page_id}". PhysicalOpeningVoidAuthority requires
+    # completeness, host binding, and void selectors to share that exact scope
+    # identity, so publish one source-authenticated semantic opening inventory
+    # completeness record per selected page under the producer-owned wall scope.
+    page_opening_universe_authorities: dict[
+        str, OpeningUniverseCompletenessAuthority
+    ] = {}
+    page_opening_universe_results: dict[
+        str, OpeningUniverseCompletenessResult
+    ] = {}
+    for page_id in selected_pages:
+        page_scope_id = f"wall-source:page-{page_id}"
+        page_authority = build_semantic_opening_inventory_completeness(
+            source_visibility_producer=source_visibility_producer,
+            revision_id=revision_id,
+            decision_scope_id=page_scope_id,
+            page_ids=(page_id,),
+        )
+        page_result = page_authority.resolve(
+            OpeningUniverseSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                decision_scope_id=page_scope_id,
+            )
+        )
+        page_opening_universe_authorities[page_id] = page_authority
+        page_opening_universe_results[page_id] = page_result
 
     binding_producer = OpeningHostBindingProducer.from_authorities(
         physical_opening_authority=physical_opening_authority,
@@ -349,17 +411,32 @@ def compose_live_wall_opening_authority(
         for trace in host_frame_traces
     )
     semantic_unavailable = semantic_result.record is None
+    opening_universe_unavailable = any(
+        result.status is not EvidenceResolutionStatus.CORROBORATED
+        or result.record is None
+        or not bool(result.decision_scope_complete)
+        for result in page_opening_universe_results.values()
+    )
     if semantic_unavailable:
         status = EvidenceResolutionStatus.ABSTAINED
         reasons = (
             LIVE_WALL_OPENING_COMPOSITION_UNAVAILABLE,
             *tuple(semantic_result.reason_codes),
         )
-    elif has_wall_failure or has_binding_failure or has_frame_failure:
+    elif (
+        opening_universe_unavailable
+        or has_wall_failure
+        or has_binding_failure
+        or has_frame_failure
+    ):
         status = (
             EvidenceResolutionStatus.CONFLICT
             if (
                 semantic_result.status is EvidenceResolutionStatus.CONFLICT
+                or any(
+                    result.status is EvidenceResolutionStatus.CONFLICT
+                    for result in page_opening_universe_results.values()
+                )
                 or any(t.status is EvidenceResolutionStatus.CONFLICT for t in opening_traces)
                 or any(t.status is EvidenceResolutionStatus.CONFLICT for t in wall_traces)
             )
@@ -368,6 +445,11 @@ def compose_live_wall_opening_authority(
         reasons = (
             LIVE_WALL_OPENING_COMPOSITION_PARTIAL,
             *tuple(semantic_result.reason_codes),
+            *(
+                reason
+                for result in page_opening_universe_results.values()
+                for reason in result.reason_codes
+            ),
             *(reason for trace in wall_traces for reason in trace.reason_codes),
             *(reason for trace in opening_traces for reason in trace.reason_codes),
             *(reason for trace in host_frame_traces for reason in trace.reason_codes),
@@ -385,12 +467,20 @@ def compose_live_wall_opening_authority(
         status=status,
         reason_codes=tuple(dict.fromkeys(reasons)),
         semantic_enumeration_result=semantic_result,
+        opening_universe_result=opening_universe_result,
+        opening_universe_results=MappingProxyType(
+            dict(page_opening_universe_results)
+        ),
         wall_scopes=tuple(wall_traces),
         opening_bindings=tuple(opening_traces),
         host_frames=tuple(host_frame_traces),
         physical_wall_candidate_authority=wall_authority,
         physical_opening_authority=physical_opening_authority,
         semantic_opening_enumeration_authority=semantic_producer.authority(),
+        opening_universe_completeness_authority=opening_universe_authority,
+        opening_universe_completeness_authorities=MappingProxyType(
+            dict(page_opening_universe_authorities)
+        ),
         opening_host_binding_authority=binding_authority,
         opening_host_frame_authority=host_frame_authority,
         binding_selectors=MappingProxyType(dict(binding_selectors)),

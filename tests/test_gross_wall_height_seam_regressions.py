@@ -104,7 +104,10 @@ def _setup_deps():
         host_binding_record_id="host-1", host_wall_id=WALL, whole_wall_frame_id=FRAME_ID,
         whole_wall_candidate_ids=(WALL,), source_observation_ids=(),
         origin_pt=(0.0, 0.0), axis_unit=(1.0, 0.0), normal_unit=(0.0, 1.0),
-        u0_pt=0.0, u1_pt=100.0, wall_thickness_pt=10.0,
+        # Opening is only 40 pt wide inside a 100 pt authenticated whole wall.
+        # Gross geometry must use 100 pt, not abs(u1-u0)=40 pt.
+        u0_pt=20.0, u1_pt=60.0, wall_thickness_pt=10.0,
+        whole_wall_length_pt=100.0,
     )
     frame_auth = OpeningHostFrameAuthority(
         {frame_sel.key: OpeningHostFrameResult(
@@ -230,6 +233,9 @@ def test_legitimate_wall_height_producer_positive_path() -> None:
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.record is not None
     assert result.record.height_m == 3.0
+    assert result.record.length_m == 1.0
+    assert result.record.gross_area_m2 == 3.0
+    assert result.record.member_wall_candidate_ids == (WALL,)
 
 
 def test_firm_height_without_exact_cross_sheet_binding_is_rejected() -> None:
