@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from types import MappingProxyType
+
 import fitz
 
 from pb_live_physical_opening_void_composition import (
     LIVE_PHYSICAL_OPENING_VOID_RESOLVED,
+    LIVE_PHYSICAL_OPENING_VOID_UPSTREAM_INCOMPLETE,
     compose_live_physical_opening_voids,
 )
 from pb_live_wall_opening_authority_composition import (
@@ -146,3 +150,40 @@ def test_live_void_composition_never_uses_default_height_when_source_height_is_m
     assert trace.height_record_id is None
     assert trace.void_status is not EvidenceResolutionStatus.CORROBORATED
     assert trace.void_record_id is None
+
+
+def test_live_void_composition_cannot_resolve_a_narrowed_opening_subset() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="live-physical-opening-void-subset-attack",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="live-physical-opening-void-subset",
+        source_bytes=_complete_void_pdf(),
+        source_locator="memory://live-physical-opening-void-subset.pdf",
+    )
+    wall_opening = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    assert wall_opening.status is EvidenceResolutionStatus.CORROBORATED
+    assert wall_opening.semantic_enumeration_result.record is not None
+    assert wall_opening.semantic_enumeration_result.record.physical_opening_record_ids
+
+    # Adversarially narrow the downstream binding-selector view. The semantic
+    # inventory remains complete and still names the opening, so a composer
+    # must not certify a successful subset merely because there are no failed
+    # traces for the omitted opening.
+    narrowed = replace(
+        wall_opening,
+        binding_selectors=MappingProxyType({}),
+    )
+    composition = compose_live_physical_opening_voids(
+        source_visibility_producer=source,
+        wall_opening_composition=narrowed,
+    )
+
+    assert composition.status is EvidenceResolutionStatus.ABSTAINED
+    assert LIVE_PHYSICAL_OPENING_VOID_UPSTREAM_INCOMPLETE in composition.reason_codes
+    assert composition.traces == ()
