@@ -1,4 +1,4 @@
-"""Benchmark extraction excludes diagnostic Item35 work without changing truth."""
+"""Benchmark extraction executes the same production Item35 path as normal extraction."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
 from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
 
 
-def test_benchmark_skips_only_item35_shadow(tmp_path, monkeypatch) -> None:
+def test_benchmark_uses_normal_production_extractor_path(tmp_path, monkeypatch) -> None:
     pdf_path = tmp_path / "drawing.pdf"
     doc = fitz.open()
     page = doc.new_page(width=700, height=650)
@@ -26,19 +26,9 @@ def test_benchmark_skips_only_item35_shadow(tmp_path, monkeypatch) -> None:
     doc.close()
 
     normal = GenericPlanReaderExtractor()
-    normal_predictions = [
-        item.to_dict() for item in normal.extract_from_pdf(pdf_path)
-    ]
+    normal_predictions = [item.to_dict() for item in normal.extract_from_pdf(pdf_path)]
     assert normal_predictions
     assert normal.item35_authority_shadow["reason"] != "not_collected"
-
-    skipped = GenericPlanReaderExtractor()
-    skipped_predictions = [
-        item.to_dict()
-        for item in skipped.extract_from_pdf(pdf_path, collect_item35_shadow=False)
-    ]
-    assert skipped_predictions == normal_predictions
-    assert skipped.item35_authority_shadow["reason"] == "not_collected"
 
     calls = []
 
@@ -53,4 +43,4 @@ def test_benchmark_skips_only_item35_shadow(tmp_path, monkeypatch) -> None:
     )
     engine = BenchmarkAccuracyEngine(output_dir=tmp_path / "reports")
     assert engine.extract_quantities_from_pdf(pdf_path, pages=[0]) == []
-    assert calls == [(pdf_path, [0], False)]
+    assert calls == [(pdf_path, [0], True)]
