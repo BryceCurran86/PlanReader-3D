@@ -18,6 +18,8 @@ from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeni
 from pb_schedule_opening_instance_binding_authority import (
     BINDING_AMBIGUOUS_ROWS,
     BINDING_NO_CONTAINED_TAG,
+    BINDING_PARTIAL_SOURCE_COVERAGE,
+    BINDING_RESOLVED,
     ScheduleOpeningInstanceBindingProducer,
 )
 from pb_source_observation_authority import ObservationSelector
@@ -127,4 +129,89 @@ def test_tag_on_adjacent_wall_segment_is_not_inside_opening_aperture() -> None:
 
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert BINDING_NO_CONTAINED_TAG in result.reason_codes
+    assert result.record is None
+
+
+def _scoped_plan_schedule_payload(*, omitted_text: str) -> bytes:
+    doc = fitz.open()
+
+    plan = doc.new_page(width=700, height=650)
+    plan.insert_text(fitz.Point(40.0, 40.0), "GROUND FLOOR PLAN")
+    _draw_opening(plan)
+    plan.insert_text(fitz.Point(112.0, 106.0), "W1", color=(0, 0, 0))
+
+    schedule = doc.new_page(width=700, height=650)
+    schedule.insert_text(fitz.Point(40.0, 40.0), "WINDOW SCHEDULE")
+    _insert_schedule(
+        schedule,
+        (("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "2100")),
+    )
+
+    omitted = doc.new_page(width=700, height=650)
+    omitted.insert_text(fitz.Point(40.0, 40.0), omitted_text)
+
+    payload = doc.tobytes()
+    doc.close()
+    return payload
+
+
+def _scoped_ingest(payload: bytes, document_id: str):
+    producer = SourceVisibilityProducer(
+        producer_method="schedule-binding-v2-scoped-regression",
+        producer_version="1",
+    )
+    published = producer.ingest_native_pdf_bytes(
+        document_id=document_id,
+        source_bytes=payload,
+        source_locator=f"memory://{document_id}.pdf",
+        page_ids=(1, 2),
+    )
+    assert published.coverage.state == "partial"
+    assert published.coverage.decoded_pages == (1, 2)
+    return producer, published
+
+
+def test_scoped_binding_accepts_only_producer_proven_omitted_boq_pages() -> None:
+    payload = _scoped_plan_schedule_payload(
+        omitted_text=(
+            "BILL OF QUANTITIES\n"
+            "ITEM DESCRIPTION UNIT QTY RATE AMOUNT KSHS\n"
+            "Carried Forward"
+        )
+    )
+    producer, published = _scoped_ingest(
+        payload,
+        "sched-scoped-explicit-boq-omission",
+    )
+
+    assert producer.schedule_binding_scope_complete(
+        published.revision.revision_id
+    ) is True
+
+    result = _bind(producer, _opening_selector(producer, published))
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.reason_codes == (BINDING_RESOLVED,)
+    assert result.record is not None
+    assert result.record.tag_mark == "W1"
+    assert result.record.schedule_page_id == "2"
+    assert result.record.schedule_row_width_mm == 900
+    assert result.record.schedule_row_height_mm == 2100
+
+
+def test_scoped_binding_rejects_unknown_omitted_page() -> None:
+    payload = _scoped_plan_schedule_payload(
+        omitted_text="GENERAL NOTES\nREFER TO ARCHITECT FOR DETAILS"
+    )
+    producer, published = _scoped_ingest(
+        payload,
+        "sched-scoped-unknown-omission",
+    )
+
+    assert producer.schedule_binding_scope_complete(
+        published.revision.revision_id
+    ) is False
+
+    result = _bind(producer, _opening_selector(producer, published))
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert BINDING_PARTIAL_SOURCE_COVERAGE in result.reason_codes
     assert result.record is None

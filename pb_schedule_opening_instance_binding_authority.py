@@ -861,7 +861,12 @@ class ScheduleOpeningInstanceBindingProducer:
                 ),
             )
 
-        if published.coverage.state != "complete" or published.coverage.failed_pages:
+        if published.coverage.failed_pages or (
+            published.coverage.state != "complete"
+            and not self._source_visibility_producer.schedule_binding_scope_complete(
+                opening.revision_id
+            )
+        ):
             return self._store(
                 key,
                 _blocked(
