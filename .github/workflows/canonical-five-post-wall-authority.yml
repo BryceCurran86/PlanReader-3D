@@ -1,0 +1,67 @@
+name: Canonical Five Project Post Wall Authority
+
+on:
+  push:
+    branches: [diag/canonical-five-post-wall-authority]
+    paths:
+      - .github/workflows/canonical-five-post-wall-authority.yml
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download canonical headline sources
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+
+          curl --fail --location --retry 4 --retry-delay 3 \
+            https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf \
+            -o benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+          echo "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/1727358888238-bq-nd-drawing.pdf" | sha256sum -c -
+
+          curl --fail --location --retry 4 --retry-delay 3 \
+            https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf \
+            -o benchmarks/sources/1785347143869-bqs-drawings.pdf
+          echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  benchmarks/sources/1785347143869-bqs-drawings.pdf" | sha256sum -c -
+
+          curl --fail --location --retry 4 --retry-delay 3 \
+            https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf \
+            -o benchmarks/sources/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf
+          echo "c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f  benchmarks/sources/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf" | sha256sum -c -
+
+          curl --fail --location --retry 4 --retry-delay 3 \
+            https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf \
+            -o benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+          echo "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf" | sha256sum -c -
+
+          curl --fail --location --retry 4 --retry-delay 3 \
+            https://umma.ac.ke/wp-content/uploads/2026/06/Builders-work.pdf \
+            -o benchmarks/sources/umma-university-hostels-builders-work.pdf
+          echo "f30711f69944e66ef993341180e35b49ccfcb36d6f402743284823ab588183af  benchmarks/sources/umma-university-hostels-builders-work.pdf" | sha256sum -c -
+      - name: Run canonical benchmark
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          rm -rf benchmark_results_post_wall
+          python pb_benchmark_accuracy_engine.py --all --auto-extract --require-local-sources --output-dir benchmark_results_post_wall | tee canonical-five.log
+      - name: Upload benchmark
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-five-post-wall-authority
+          path: |
+            benchmark_results_post_wall/
+            canonical-five.log
+          if-no-files-found: warn
