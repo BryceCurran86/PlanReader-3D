@@ -32,6 +32,7 @@ import pytest
 
 from pb_drawing_evidence_binding import (
     DrawingEvidenceBindingEngine,
+    DrawingViewClassifier,
     DrawingViewType,
     EvidenceGraph,
     EvidenceObservation,
