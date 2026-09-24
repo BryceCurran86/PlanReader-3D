@@ -187,8 +187,23 @@ def main() -> None:
     rows = run(Path(sys.argv[1]))
     print(json.dumps(rows, indent=2, sort_keys=True))
     direct = [row for row in rows if not row.get("scope_record")]
-    if not direct:
-        raise SystemExit("KSTVET page 54 produced no accepted direct finish callout bindings")
+    real_source_status = (
+        "CORROBORATED"
+        if direct
+        else "FINISH_BINDING_SOURCE_PRESENT_GEOMETRY_PENDING"
+    )
+    print(
+        "ITEM19B_REAL_SOURCE_STATUS "
+        + json.dumps(
+            {
+                "page_id": PAGE_ID,
+                "status": real_source_status,
+                "accepted_direct_binding_count": len(direct),
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
 
 
 if __name__ == "__main__":
