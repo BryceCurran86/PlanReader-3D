@@ -21,7 +21,7 @@ def test_f15_horizontal_chain_extractor_module_untouched_by_f23_depth_work():
     assert "F.15" in f15.__doc__
 
 
-def test_title_partition_viewport_cannot_supply_physical_secondary_edge_geometry():
+def test_columnar_title_grid_cannot_supply_physical_secondary_edge_geometry():
     from types import SimpleNamespace
 
     from pb_drawing_evidence_binding import DrawingViewType
@@ -36,10 +36,33 @@ def test_title_partition_viewport_cannot_supply_physical_secondary_edge_geometry
         view_type=DrawingViewType.FLOOR_PLAN.value,
         bounding_box=(0.0, 0.0, 600.0, 400.0),
         boundary_source=ViewportBoundarySource.TITLE_PARTITION.value,
+        provenance={"partition_mode": "columnar_title_grid", "grid_validated": True},
     )
     assert _eligible_plan_viewports(
         [derived_partition], allow_derived=True
     ) == []
+
+
+def test_ordinary_derived_partition_remains_available_for_depth_only_evidence():
+    from types import SimpleNamespace
+
+    from pb_drawing_evidence_binding import DrawingViewType
+    from pb_secondary_footprint_evidence import _eligible_plan_viewports
+    from pb_viewport_segmentation import (
+        ViewportBoundarySource,
+        ViewportSegmentationStatus,
+    )
+
+    derived_partition = SimpleNamespace(
+        status=ViewportSegmentationStatus.DERIVED.value,
+        view_type=DrawingViewType.FLOOR_PLAN.value,
+        bounding_box=(0.0, 0.0, 600.0, 400.0),
+        boundary_source=ViewportBoundarySource.TITLE_PARTITION.value,
+        provenance={"partition_mode": "axis_title_partition"},
+    )
+    assert _eligible_plan_viewports(
+        [derived_partition], allow_derived=True
+    ) == [derived_partition]
 
 
 def test_resolved_vector_frame_remains_valid_for_secondary_edge_geometry():
