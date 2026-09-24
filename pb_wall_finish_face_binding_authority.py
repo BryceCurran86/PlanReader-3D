@@ -606,22 +606,37 @@ class WallFinishFaceBindingProducer:
                             ))
                             if role_result.status is not EvidenceResolutionStatus.CORROBORATED or role_result.record is None:
                                 continue
+                            role_record = role_result.record
+                            if (
+                                role_record.document_id != published.revision.document_id
+                                or role_record.revision_id != published.revision.revision_id
+                                or role_record.source_sha256 != published.revision.source_sha256
+                                or role_record.snapshot_id != published.snapshot.snapshot_id
+                                or role_record.page_id != page_id
+                                or role_record.decision_scope_id != f"wall-source:page-{page_id}"
+                                or role_record.physical_wall_id != target.wall_candidate_id
+                            ):
+                                continue
                             for semantic in semantics:
-                                face_role = _semantic_face(role_result.record.role, semantic.direction)
+                                face_role = _semantic_face(role_record.role, semantic.direction)
                                 if face_role is None:
                                     continue
+                                # Physical face identity belongs to the exact wall and
+                                # semantic side, not to the current viewport segmentation.
+                                # Viewport lineage remains on the record / selector, but
+                                # viewport expansion must not mint a new physical face.
                                 face_payload = {
                                     "document_id": published.revision.document_id,
                                     "revision_id": published.revision.revision_id,
                                     "source_sha256": published.revision.source_sha256,
                                     "snapshot_id": published.snapshot.snapshot_id,
-                                    "page_id": page_id, "viewport_id": viewport.view_id,
+                                    "page_id": page_id,
                                     "physical_wall_id": target.wall_candidate_id,
                                     "physical_face_role": face_role.value,
                                 }
                                 face_id = stable_contract_id("physical_wall_semantic_face", face_payload, digest_chars=32)
                                 evidence_ids = tuple(dict.fromkeys(
-                                    (*annotation_ids, *leader_ids, terminator.primitive_id, role_result.record.record_id)
+                                    (*annotation_ids, *leader_ids, terminator.primitive_id, role_record.record_id)
                                 ))
                                 bind_payload = {
                                     **face_payload,
@@ -644,8 +659,8 @@ class WallFinishFaceBindingProducer:
                                     annotation_observation_ids=tuple(annotation_ids),
                                     leader_path_ids=tuple(leader_ids),
                                     terminator_primitive_ids=(terminator.primitive_id,),
-                                    wall_role_record_id=role_result.record.record_id,
-                                    wall_role=role_result.record.role,
+                                    wall_role_record_id=role_record.record_id,
+                                    wall_role=role_record.role,
                                     source_evidence_ids=evidence_ids,
                                     source_evidence_kind=SOURCE_EVIDENCE_KIND_NATIVE_DIRECT_CALLOUT,
                                     decision_scope_complete=False,
