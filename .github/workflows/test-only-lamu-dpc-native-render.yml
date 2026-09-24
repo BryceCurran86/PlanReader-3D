@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.13"}
       - run: pip install PyMuPDF==1.28.0
-      - name: Verify source and render page 41 floor plan
+      - name: Verify source and render classroom and adjacent drawing sheets
         run: |
           python - <<'PY'
           import hashlib,urllib.request
@@ -31,11 +31,16 @@ jobs:
           page.get_pixmap(matrix=fitz.Matrix(2.0,2.0),alpha=False).save(out/"page-41-full.png")
           clip=fitz.Rect(170,75,685,370)&page.rect
           page.get_pixmap(matrix=fitz.Matrix(4.0,4.0),clip=clip,alpha=False).save(out/"page-41-floor-plan.png")
+          for page_no in range(42,min(50,len(doc)+1)):
+              sheet=doc[page_no-1]
+              txt=sheet.get_text('text') or ''
+              print(f'LAMU_SHEET page={page_no} toilet={"toilet" in txt.lower()} floor_plan={"floor plan" in txt.lower()} dpc={"dpc" in txt.lower()}')
+              sheet.get_pixmap(matrix=fitz.Matrix(1.7,1.7),alpha=False).save(out/f'page-{page_no}-full.png')
           doc.close()
           PY
       - name: Upload verified source renders
         uses: actions/upload-artifact@v4
         with:
-          name: lamu-page-41-native-dpc
+          name: lamu-native-dpc-sheets
           path: /tmp/lamu-native/*.png
           if-no-files-found: error
