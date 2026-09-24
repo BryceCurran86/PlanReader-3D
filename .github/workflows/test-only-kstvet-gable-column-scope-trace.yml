@@ -1,0 +1,102 @@
+name: TEST-ONLY KSTVET Gable Column Scope Trace
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  trace:
+    if: startsWith(github.head_ref, 'diag/kstvet-gable-column-scope-trace')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install minimal runtime
+        run: pip install PyMuPDF shapely
+      - name: Trace candidate gable source span
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_source_roof_covering_authority import resolve_document_gable_roof_covering
+
+          url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          expected="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          p=Path("/tmp/kstvet.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-KSTVET-gable-column-scope-trace/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r: p.write_bytes(r.read())
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          if actual!=expected: raise SystemExit(actual)
+          doc=fitz.open(p)
+          from pb_viewport_segmentation import segment_page_viewports
+          from pb_source_roof_covering_authority import (
+              extract_elevation_segments_from_page,
+              get_elevation_viewport_search_bbox,
+              resolve_gable_apex_in_viewport,
+          )
+
+          page=doc[53]
+          per_view=[]
+          vps=segment_page_viewports(page,page_number=54)
+          for vp in vps:
+              if vp.view_type!="elevation":
+                  continue
+              bbox=get_elevation_viewport_search_bbox(vp,vps,page.rect)
+              diags,verts=extract_elevation_segments_from_page(page,bbox)
+              ev0,reasons0=resolve_gable_apex_in_viewport(
+                  diags,verts,
+                  source_viewport_id=vp.view_id,
+                  source_page=54,
+                  source_scale_denominator=(
+                      float(vp.scale_denominator)
+                      if getattr(vp,"scale_denominator",None) is not None else None
+                  ),
+              )
+              per_view.append({
+                  "label":vp.label,"view_id":vp.view_id,"status":vp.status,
+                  "viewport_bbox":list(vp.bounding_box) if vp.bounding_box else None,
+                  "search_bbox":list(bbox),"scale":vp.scale_denominator,
+                  "diagonal_count":len(diags),"vertical_count":len(verts),
+                  "reasons":list(reasons0),
+                  "evidence":None if ev0 is None else {
+                      "pitch_deg":ev0.pitch_deg,"left_run_pt":ev0.left_run_pt,
+                      "right_run_pt":ev0.right_run_pt,
+                      "left_support_xy":ev0.left_support_xy,
+                      "right_support_xy":ev0.right_support_xy,
+                      "reason_codes":ev0.reason_codes,
+                  },
+              })
+
+          res=resolve_document_gable_roof_covering(
+              doc,
+              building_length_m=9.85,
+              building_width_m=8.35,
+              source_sha256=actual,
+              target_pages=[53],
+          )
+          ev=res.gable_evidence
+          print("KSTVET_GABLE_COLUMN_SCOPE_TRACE="+json.dumps({
+              "per_view":per_view,
+              "status":res.status.value,
+              "reason_codes":list(res.reason_codes),
+              "cross_ridge_span_m":res.cross_ridge_span_m,
+              "ridge_length_m":res.ridge_length_m,
+              "metadata":dict(res.metadata),
+              "evidence":None if ev is None else {
+                  "pitch_deg":ev.pitch_deg,
+                  "left_run_pt":ev.left_run_pt,
+                  "right_run_pt":ev.right_run_pt,
+                  "left_support_xy":ev.left_support_xy,
+                  "right_support_xy":ev.right_support_xy,
+                  "scale":ev.source_scale_denominator,
+                  "reason_codes":ev.reason_codes,
+                  "viewport":ev.source_viewport_id,
+              },
+          },sort_keys=True),flush=True)
+          doc.close()
+          PY
