@@ -1,0 +1,111 @@
+name: TEST-ONLY Murera Foundation Plan Authority V2
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-foundation-plan-authority-v2:
+    if: startsWith(github.head_ref, 'diag/murera-foundation-plan-authority-v2')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Probe Murera plan-owned foundation geometry
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,re,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_drawing_ocr_evidence_layer import DrawingOCREngine
+          from pb_figured_dimension_evidence import extract_native_dimension_observations
+          from pb_viewport_segmentation import extract_view_title_anchors
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          path=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-foundation-plan-v2/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              path.write_bytes(r.read())
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(actual)
+
+          eng=DrawingOCREngine()
+          pages=[]
+          doc=fitz.open(path)
+          try:
+              for pno in (224,225,226,227,228,229):
+                  page=doc[pno-1]
+                  rect=page.rect
+                  native=page.get_text("text") or ""
+                  words=page.get_text("words") or []
+                  obs=extract_native_dimension_observations(page,page_num=pno)
+                  anchors=extract_view_title_anchors(page)
+
+                  # High-res OCR on full sheet and broad quadrants. This is diagnostic only.
+                  ocr_rows=eng.recognize_page_rect(page,dpi=450)
+                  ocr_text="\n".join(str(r.get("text") or "") for r in ocr_rows)
+                  dim_rows=[]
+                  for r in ocr_rows:
+                      t=str(r.get("text") or "").strip()
+                      nums=[]
+                      for token in re.findall(r"(?<!\d)(\d{3,5})(?!\d)",t.replace(",","")):
+                          v=int(token)
+                          if 2500 <= v <= 35000:
+                              nums.append(v)
+                      if nums:
+                          dim_rows.append({"text":t,"nums_mm":nums,"bbox":r.get("bounding_box"),"confidence":r.get("confidence")})
+
+                  candidates=[]
+                  for o in obs:
+                      try:
+                          value=float(o.value)
+                          if str(o.unit).lower()=="mm":
+                              value/=1000.0
+                      except Exception:
+                          continue
+                      if 2.5 <= value <= 35.0:
+                          candidates.append({
+                              "raw":o.raw_text,"value_m":round(value,4),"bbox":o.bbox,
+                              "orientation":o.orientation
+                          })
+
+                  draw_rects=[]
+                  for i,d in enumerate(page.get_drawings() or []):
+                      r=d.get("rect")
+                      if r and r.width>80 and r.height>50:
+                          draw_rects.append({
+                              "i":i,"rect":[round(r.x0,2),round(r.y0,2),round(r.x1,2),round(r.y1,2)],
+                              "w":round(r.width,2),"h":round(r.height,2),
+                              "items":len(d.get("items") or [])
+                          })
+                  draw_rects=sorted(draw_rects,key=lambda x:x["w"]*x["h"],reverse=True)[:80]
+
+                  title_lines=[ln.strip() for ln in native.splitlines() if re.search(r"(?i)(foundation|roof|layout|plan|section|science lab)",ln)]
+                  pages.append({
+                      "page":pno,
+                      "size":[rect.width,rect.height],
+                      "title_lines":title_lines[:80],
+                      "anchors":[{"text":a.text,"type":a.view_type,"bbox":a.bbox} for a in anchors],
+                      "native_dimension_candidates":candidates[:150],
+                      "ocr_dimension_rows":dim_rows[:250],
+                      "large_draw_rects":draw_rects,
+                      "images":[list(x) for x in page.get_images(full=True)[:30]],
+                      "first_native_lines":[ln.strip() for ln in native.splitlines() if ln.strip()][:80],
+                  })
+          finally:
+              doc.close()
+          print("MURERA_FOUNDATION_PLAN_AUTHORITY_V2="+json.dumps({"sha":actual,"pages":pages},sort_keys=True,default=str),flush=True)
+          PY
