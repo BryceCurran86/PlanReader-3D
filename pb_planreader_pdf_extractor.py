@@ -2833,6 +2833,70 @@ class GenericPlanReaderExtractor:
                     source_sha256=getattr(self, "source_sha256", "") or ("0" * 64),
                     target_pages=target_pages,
                 )
+
+                # A source-scaled structural gable span can legitimately align
+                # to the clear wall-face axis while the orthogonal ridge axis
+                # remains the gross building axis. When the initial gross-axis
+                # call can only use the legacy long-axis fallback, retry the
+                # two independently evidenced clear-axis substitutions and
+                # accept one only when exactly one produces a real scaled-span
+                # footprint-axis match. Ambiguity leaves the legacy result
+                # untouched.
+                if (
+                    _roof_meas.status.value == "corroborated"
+                    and _roof_meas.metadata.get("matched_footprint_axis")
+                    == "legacy_long_axis_fallback"
+                    and _floor_pred is not None
+                    and isinstance(_floor_pred.metadata, dict)
+                ):
+                    _clear_dims = _floor_pred.metadata.get("main_clear_dimensions_m")
+                    if (
+                        isinstance(_clear_dims, (list, tuple))
+                        and len(_clear_dims) >= 2
+                    ):
+                        try:
+                            _clear0 = float(_clear_dims[0])
+                            _clear1 = float(_clear_dims[1])
+                        except (TypeError, ValueError):
+                            _clear0 = _clear1 = 0.0
+
+                        if _clear0 > 0.0 and _clear1 > 0.0:
+                            _clear_len = max(_clear0, _clear1)
+                            _clear_wid = min(_clear0, _clear1)
+                            _axis_trials = []
+                            for _trial_len, _trial_wid in (
+                                (_clear_len, _b_wid_m),
+                                (_b_len_m, _clear_wid),
+                            ):
+                                if (
+                                    abs(_trial_len - _b_len_m) <= 1e-9
+                                    and abs(_trial_wid - _b_wid_m) <= 1e-9
+                                ):
+                                    continue
+                                _trial = resolve_document_gable_roof_covering(
+                                    doc,
+                                    building_length_m=_trial_len,
+                                    building_width_m=_trial_wid,
+                                    source_sha256=(
+                                        getattr(self, "source_sha256", "")
+                                        or ("0" * 64)
+                                    ),
+                                    target_pages=target_pages,
+                                )
+                                if (
+                                    _trial.status.value == "corroborated"
+                                    and _trial.metadata.get("matched_footprint_axis")
+                                    in {"length", "width"}
+                                    and _trial.metadata.get(
+                                        "scaled_structural_span_m"
+                                    )
+                                    is not None
+                                ):
+                                    _axis_trials.append(_trial)
+
+                            if len(_axis_trials) == 1:
+                                _roof_meas = _axis_trials[0]
+
                 self.roof_covering_shadow = {
                     "status": _roof_meas.status.value,
                     "reason_codes": list(_roof_meas.reason_codes),
