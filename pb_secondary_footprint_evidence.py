@@ -116,6 +116,8 @@ def _eligible_plan_viewports(
         and not (
             v.status == ViewportSegmentationStatus.DERIVED.value
             and v.boundary_source == ViewportBoundarySource.TITLE_PARTITION.value
+            and (getattr(v, "provenance", {}) or {}).get("partition_mode")
+            == "columnar_title_grid"
         )
     ]
 
