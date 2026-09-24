@@ -523,7 +523,41 @@ def _filled_terminators(
             center=((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2),
             primitive_ids=primitive_ids,
         ))
+    if not out:
+        # Curve-only PDFs may expose a filled marker as a native drawing path
+        # without decomposed line primitives. This is still exact path
+        # connectivity; it is never a proximity fallback. Segmented CAD
+        # terminators use the exact primitive-id branch above.
+        for index, drawing in enumerate(page.get_drawings() or ()):
+            rect, fill = drawing.get("rect"), drawing.get("fill")
+            if rect is None or fill is None:
+                continue
+            bbox = (float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
+            width, height = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            if width <= 0 or height <= 0 or max(width, height) > max_span:
+                continue
+            if not 0.65 <= width / height <= 1.55:
+                continue
+            items = drawing.get("items") or ()
+            if not any(item and item[0] == "c" for item in items):
+                continue
+            payload = {
+                "page": int(page.number) + 1,
+                "drawing_index": index,
+                "bbox": tuple(round(v, 6) for v in bbox),
+            }
+            primitive_id = stable_contract_id(
+                "finish_curve_terminator", payload, digest_chars=32
+            )
+            out.append(_Terminator(
+                primitive_id=primitive_id,
+                bbox=bbox,
+                center=((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2),
+                primitive_ids=(primitive_id,),
+            ))
     return tuple(sorted(out, key=lambda item: item.primitive_id))
+
+
 def _leader_paths(
     annotation_bbox: Sequence[float],
     lines: Sequence[_Line],
