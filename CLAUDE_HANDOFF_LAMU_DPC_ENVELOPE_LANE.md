@@ -1,14 +1,34 @@
 # Handoff — Lamu DPC / dimension-binding / envelope-decomposition lane
 
 Session end-of-turn handoff. Covers everything from the KSTVET window lane close-out
-through the envelope-decomposition investigation. Written so a fresh agent or Bryce
-can pick this up without re-deriving anything below.
+through the envelope-decomposition investigation and the PR #552 close-out. Written
+so a fresh agent or Bryce can pick this up without re-deriving anything below.
+
+**`main` at end of session: `29e245c` (includes PR #552's merge below). Branches in
+§2/§3 were cut from `7a498ef` and have not been rebased onto `29e245c` — `gh pr view
+890` still reports `MERGEABLE` as of last check; re-check before merging if much
+time has passed.**
 
 ## TL;DR — what's safe to act on right now
 
+0. **[PR #552](https://github.com/BryceCurran86/PlanReader-3D/pull/552) is MERGED** (`29e245c`) — rebased onto current main, re-verified, CI-green, merged this session. Nothing further to do here. See §0 for detail.
 1. **[PR #890](https://github.com/BryceCurran86/PlanReader-3D/pull/890)** is a draft, CI-green, isolated, real bug fix — ready for a merge decision. Nothing else here is.
 2. Two more branches hold real, tested, but **intentionally unmerged** work — read why before touching them.
 3. LMU-E3-B (Lamu DPC) is **not** resolved and, on current evidence, may not be resolvable from this source page — see "Disproven / closed" below before re-opening it.
+
+---
+
+## 0. PR #552 — item35 opening-count/schedule test coverage (MERGED, closed out)
+
+**Was:** `claude/item35-pr3-additional-test-coverage-v1`, 209 commits stale against main, open since 2026-09-20.
+**Action taken this session:** rebased cleanly onto `main` @ `a7980ed` (no conflicts), verified every test against the current, live architecture before touching anything:
+- `pb_generic_opening_count_authority.py` (the module these tests exercise) is still imported by `pb_item35_production_authority_shadow.py`, which is wired directly into `pb_planreader_pdf_extractor.py` (lines ~2690/2703) — confirmed still live, not superseded, despite 209 commits of intervening item35 work (semantic opening disposition, opening-universe-by-source-candidate-closure, etc.).
+- `test_producer_signature_cannot_accept_caller_instance_bundles` — a structural introspection test of `GenericOpeningCountProducer.from_authorities`'s exact parameter set — still passed unmodified, proving the core producer contract has not drifted.
+- All 176 targeted tests passed; broader sweep (+ `test_item35_production_authority_shadow_v1.py`, `test_opening_universe_completeness_source_adapter_v1.py`, `test_opening_universe_page_scope_coverage_v1.py`, `test_source_opening_universe_evidence_v1.py`) — 296 passed.
+- `compileall`, `ruff F821/F823`, benchmark-gold separation, provider-gold isolation, `ci_smoke.py` — all passed locally.
+- Force-pushed the rebase to the PR's own branch, updated the PR description with the rebase/re-verification detail, waited for GitHub Actions (`test`+`fastpath`, 3.13/3.14 — all passed), then **merged** (`--merge`, branch deleted): commit `29e245c6a9d108bf421a8017384c663c90b5328e`.
+
+**Conclusion:** none of the 10 added tests were obsolete or tested replaced architecture — all still represented valid, current, live-consumed contracts. No "close as superseded" path was needed. Nothing further to do here.
 
 ---
 
@@ -110,9 +130,10 @@ I started a branch for this (`fix/boundary-thickness-dimension-binding-v1`) and 
 
 ## 7. Test/CI status summary
 
-| Branch | Local targeted tests | GitHub Actions CI |
+| Branch / PR | Local targeted tests | GitHub Actions CI |
 |---|---|---|
-| `fix/dimension-line-fragment-merge-v1` | 220+ passed (dimension/wall-span/opening-binding/F.23 sweep) | **Green** — `test` + `fastpath`, both Python 3.13/3.14 (confirmed via `gh pr checks 890`) |
+| PR #552 (`claude/item35-pr3-additional-test-coverage-v1`) | 176 passed (targeted) + 296 passed (broader sweep) | **Green, MERGED** — `test` + `fastpath`, both 3.13/3.14 |
+| `fix/dimension-line-fragment-merge-v1` (PR #890) | 220+ passed (dimension/wall-span/opening-binding/F.23 sweep) | **Green** — `test` + `fastpath`, both Python 3.13/3.14 (confirmed via `gh pr checks 890`) |
 | `investigate/lamu-dpc-residual-v1` | 70 passed (F.23 + merge-fix + mutation suites, tested together with PR #890's fix temporarily applied) | Not opened as a PR, no CI run |
 | `investigate/footprint-envelope-decomposition-v1` | 17/17 new tests + 119 passed regression sweep | Not opened as a PR, no CI run |
 
