@@ -40,7 +40,8 @@ jobs:
 
       - name: Real KSTVET page 54 Item 19B shadow
         run: |
-          PYTHONPATH=. python scripts/wall_finish_face_binding_kstvet_shadow.py /tmp/1727358888238-bq-nd-drawing.pdf | tee /tmp/item19b-kstvet-shadow.json
+          set -o pipefail
+          PYTHONPATH=. timeout 150s python -u scripts/wall_finish_face_binding_kstvet_shadow.py /tmp/1727358888238-bq-nd-drawing.pdf | tee /tmp/item19b-kstvet-shadow.json
 
       - name: Integrity gates
         run: |
