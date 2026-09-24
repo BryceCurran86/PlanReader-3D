@@ -49,6 +49,9 @@ FINISH_SCOPE_PARTIAL = "wall_finish_scope_partial"
 FINISH_SCOPE_COMPLETE = "wall_finish_scope_complete"
 FINISH_SCOPE_UNIVERSE_UNAVAILABLE = "wall_finish_scope_target_face_universe_unavailable"
 FINISH_SOURCE_INTEGRITY_FAILURE = "wall_finish_source_integrity_failure"
+FINISH_BINDING_RECORD_INTEGRITY_FAILURE = "wall_finish_binding_record_integrity_failure"
+FINISH_SCOPE_RECORD_INTEGRITY_FAILURE = "wall_finish_scope_record_integrity_failure"
+FINISH_CALLER_FACE_ASSIGNMENT_FORBIDDEN = "wall_finish_caller_authority_input_forbidden"
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
@@ -120,6 +123,7 @@ class WallFinishFaceBindingRecord:
     decision_scope_complete: bool
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
+    integrity_id: str = ""
     schema_version: str = WALL_FINISH_FACE_BINDING_SCHEMA_VERSION
     _seal: object = None
 
@@ -130,6 +134,10 @@ class WallFinishFaceBindingRecord:
             raise ValueError("positive binding record must be CORROBORATED")
         if self.decision_scope_complete:
             raise ValueError("direct local callout cannot self-certify complete finish scope")
+        expected = _binding_integrity_id(self)
+        if self.integrity_id and self.integrity_id != expected:
+            raise ValueError(FINISH_BINDING_RECORD_INTEGRITY_FAILURE)
+        object.__setattr__(self, "integrity_id", expected)
 
 
 @dataclass(frozen=True)
@@ -151,6 +159,7 @@ class WallFinishCompleteScopeRecord:
     scope_status: FinishScopeStatus
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
+    integrity_id: str = ""
     schema_version: str = WALL_FINISH_FACE_BINDING_SCHEMA_VERSION
     _seal: object = None
 
@@ -163,6 +172,10 @@ class WallFinishCompleteScopeRecord:
             or self.scope_status is not FinishScopeStatus.COMPLETE
         ):
             raise ValueError("complete scope requires an enumerated fully-covered face universe")
+        expected = _scope_integrity_id(self)
+        if self.integrity_id and self.integrity_id != expected:
+            raise ValueError(FINISH_SCOPE_RECORD_INTEGRITY_FAILURE)
+        object.__setattr__(self, "integrity_id", expected)
 
 
 @dataclass(frozen=True)
@@ -172,6 +185,59 @@ class WallFinishFaceBindingScopeResult:
     bindings: tuple[WallFinishFaceBindingRecord, ...] = ()
     scope_records: tuple[WallFinishCompleteScopeRecord, ...] = ()
     schema_version: str = WALL_FINISH_FACE_BINDING_SCHEMA_VERSION
+
+
+def _binding_integrity_id(record: WallFinishFaceBindingRecord) -> str:
+    payload = {
+        "binding_id": record.binding_id,
+        "document_id": record.document_id,
+        "revision_id": record.revision_id,
+        "source_sha256": record.source_sha256,
+        "snapshot_id": record.snapshot_id,
+        "page_id": record.page_id,
+        "viewport_id": record.viewport_id,
+        "decision_scope_id": record.decision_scope_id,
+        "physical_wall_id": record.physical_wall_id,
+        "physical_face_id": record.physical_face_id,
+        "physical_face_role": record.physical_face_role.value,
+        "source_face_segment_ids": tuple(record.source_face_segment_ids),
+        "trade_scope_id": record.trade_scope_id,
+        "finish_material": record.finish_material,
+        "annotation_observation_ids": tuple(record.annotation_observation_ids),
+        "leader_path_ids": tuple(record.leader_path_ids),
+        "terminator_primitive_ids": tuple(record.terminator_primitive_ids),
+        "wall_role_record_id": record.wall_role_record_id,
+        "wall_role": record.wall_role.value,
+        "source_evidence_ids": tuple(record.source_evidence_ids),
+        "source_evidence_kind": record.source_evidence_kind,
+        "decision_scope_complete": record.decision_scope_complete,
+        "status": record.status.value,
+        "reason_codes": tuple(record.reason_codes),
+    }
+    return stable_contract_id("wall_finish_face_binding_integrity", payload, digest_chars=32)
+
+
+def _scope_integrity_id(record: WallFinishCompleteScopeRecord) -> str:
+    payload = {
+        "scope_id": record.scope_id,
+        "document_id": record.document_id,
+        "revision_id": record.revision_id,
+        "source_sha256": record.source_sha256,
+        "snapshot_id": record.snapshot_id,
+        "page_id": record.page_id,
+        "viewport_id": record.viewport_id,
+        "decision_scope_id": record.decision_scope_id,
+        "trade_scope_id": record.trade_scope_id,
+        "finish_material": record.finish_material,
+        "target_face_ids": tuple(record.target_face_ids),
+        "covered_face_ids": tuple(record.covered_face_ids),
+        "binding_ids": tuple(record.binding_ids),
+        "decision_scope_complete": record.decision_scope_complete,
+        "scope_status": record.scope_status.value,
+        "status": record.status.value,
+        "reason_codes": tuple(record.reason_codes),
+    }
+    return stable_contract_id("wall_finish_scope_integrity", payload, digest_chars=32)
 
 
 @dataclass(frozen=True)
@@ -214,9 +280,9 @@ def _finish_semantics(text: str) -> tuple[_Semantic, ...]:
 
 
 def _semantic_face(role: WallRoleClassification, direction: str) -> Optional[PhysicalFaceRole]:
-    if role is WallRoleClassification.EXTERNAL and direction == "externally":
+    if role in (WallRoleClassification.EXTERNAL, WallRoleClassification.GABLE) and direction == "externally":
         return PhysicalFaceRole.EXTERIOR_FACE
-    if role is WallRoleClassification.EXTERNAL and direction == "internally":
+    if role in (WallRoleClassification.EXTERNAL, WallRoleClassification.GABLE) and direction == "internally":
         return PhysicalFaceRole.ROOM_FACING_INTERIOR_FACE
     return None
 
@@ -453,9 +519,9 @@ def _target_from_terminator(
         for record in matching
     }
     if len(normalized) != 1:
-        # Multiple physical-wall owners are ambiguous, not a positive conflict
-        # proposition. The caller must abstain rather than select or rank them.
-        return None, tuple(sorted(raw_hits)), EvidenceResolutionStatus.ABSTAINED
+        # Multiple authenticated owners are a real ownership conflict.
+        # Never rank, choose nearest, or silently select one.
+        return None, tuple(sorted(raw_hits)), EvidenceResolutionStatus.CONFLICT
     target_id = next(iter(normalized))
     target = next((r for r in wall_scope.records if r.wall_candidate_id == target_id), None)
     return target or sorted(matching, key=lambda r: r.wall_candidate_id)[0], tuple(sorted(raw_hits)), EvidenceResolutionStatus.CORROBORATED
@@ -517,7 +583,10 @@ class WallFinishFaceBindingProducer:
         source_visibility_producer: SourceVisibilityProducer,
         *,
         page_ids: Optional[Sequence[str]] = None,
+        **caller_authority_inputs,
     ) -> "WallFinishFaceBindingProducer":
+        if caller_authority_inputs:
+            raise TypeError(FINISH_CALLER_FACE_ASSIGNMENT_FORBIDDEN)
         if type(source_visibility_producer) is not SourceVisibilityProducer:
             raise TypeError("source_visibility_producer must be an actual SourceVisibilityProducer")
         selected = None if page_ids is None else tuple(sorted(
@@ -586,10 +655,14 @@ class WallFinishFaceBindingProducer:
                             continue
 
                         accepted: dict[tuple[str, str, str], WallFinishFaceBindingRecord] = {}
+                        target_conflict = False
                         for leader_ids, terminator in paths:
                             target, source_segments, target_status = _target_from_terminator(
                                 terminator, owned_lines, wall_scope
                             )
+                            if target_status is EvidenceResolutionStatus.CONFLICT:
+                                target_conflict = True
+                                continue
                             if (
                                 target_status is not EvidenceResolutionStatus.CORROBORATED
                                 or target is None
@@ -686,7 +759,13 @@ class WallFinishFaceBindingProducer:
                             page_id=page_id, viewport_id=viewport.view_id,
                             decision_scope_id=f"finish-callout:{viewport.view_id}",
                         )
-                        if records:
+                        if target_conflict:
+                            result = WallFinishFaceBindingScopeResult(
+                                status=EvidenceResolutionStatus.CONFLICT,
+                                reason_codes=(FINISH_BINDING_TARGET_CONFLICT,),
+                                bindings=(), scope_records=(),
+                            )
+                        elif records:
                             result = WallFinishFaceBindingScopeResult(
                                 status=EvidenceResolutionStatus.CORROBORATED,
                                 reason_codes=(FINISH_BINDING_RESOLVED, FINISH_SCOPE_PARTIAL),
@@ -741,6 +820,9 @@ class WallFinishFaceBindingProducer:
 
 __all__ = [
     "FINISH_BINDING_FACE_FINISH_CONFLICT",
+    "FINISH_BINDING_RECORD_INTEGRITY_FAILURE",
+    "FINISH_SCOPE_RECORD_INTEGRITY_FAILURE",
+    "FINISH_CALLER_FACE_ASSIGNMENT_FORBIDDEN",
     "FINISH_BINDING_RESOLVED",
     "FINISH_BINDING_TARGET_CONFLICT",
     "FINISH_BINDING_UNAVAILABLE",
