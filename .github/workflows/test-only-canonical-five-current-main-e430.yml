@@ -21,6 +21,6 @@ jobs:
           docker run --rm \
             --cpus=2.0 \
             planreader-canonical \
-            python scripts/diagnostic_canonical_five_current_main.py \
+            python scripts/diagnostic_canonical_five_after_763.py \
             | tee /tmp/canonical-five.txt
-          grep -q 'CANONICAL_FIVE_CURRENT_MAIN=' /tmp/canonical-five.txt
+          grep -q 'CANONICAL_FIVE_AFTER_763=' /tmp/canonical-five.txt
