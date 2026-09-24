@@ -37,6 +37,8 @@ jobs:
           import urllib.request
 
           from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          from pb_drawing_ocr_evidence_layer import DrawingOCREngine
           from pb_portable_raster_ocr_authority import detect_ocr_capabilities
 
           benchmark_id = "tenders_ke_lamu_ishakani_ecd_classrooms"
@@ -65,6 +67,21 @@ jobs:
                   f"unexpected_default_ocr_backend:{capabilities.default_backend}"
               )
 
+          def _ocr_text_for_page_120dpi(self, page, page_index):
+              cached = self._ocr_text_by_page.get(page_index)
+              if cached is not None:
+                  return cached
+              text = ""
+              try:
+                  lines = DrawingOCREngine().recognize_page_rect(page, dpi=120)
+                  text = "\\n".join(str(line.get("text") or "") for line in lines)
+              except Exception:
+                  text = ""
+              self._ocr_text_by_page[page_index] = text
+              return text
+
+          GenericPlanReaderExtractor._ocr_text_for_page = _ocr_text_for_page_120dpi
+
           engine = BenchmarkAccuracyEngine(
               benchmarks_dir="benchmarks/public_tenders",
               output_dir="/tmp/lamu-tesseract-results",
@@ -89,7 +106,7 @@ jobs:
               if item.status.value == "hallucinated_item"
           ]
           result = {
-              "diagnostic": "lamu_tesseract_full_canonical",
+              "diagnostic": "lamu_tesseract_full_canonical_120dpi",
               "source_sha256": actual_sha,
               "ocr": {
                   "available_backends": list(capabilities.available_backends),
