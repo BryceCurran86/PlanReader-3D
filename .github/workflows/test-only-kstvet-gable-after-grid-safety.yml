@@ -1,0 +1,88 @@
+name: TEST-ONLY KSTVET Gable After Grid Safety
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  gable:
+    if: startsWith(github.head_ref, 'diag/kstvet-gable-after-grid-safety')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Resolve source-scaled KSTVET gables
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,math,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_source_roof_covering_authority import (
+              extract_elevation_segments_from_page,
+              get_elevation_viewport_search_bbox,
+              resolve_gable_apex_in_viewport,
+          )
+          from pb_viewport_segmentation import segment_page_viewports
+
+          url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          expected="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-KSTVET-gable-grid-safe/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              payload=r.read()
+          actual=hashlib.sha256(payload).hexdigest()
+          if actual != expected:
+              raise SystemExit(actual)
+          src=Path("/tmp/kstvet.pdf"); src.write_bytes(payload)
+
+          doc=fitz.open(src)
+          try:
+              page=doc[53]
+              vps=segment_page_viewports(page,page_number=54)
+              out=[]
+              for vp in vps:
+                  if vp.view_type!="elevation" or vp.bounding_box is None:
+                      continue
+                  bbox=get_elevation_viewport_search_bbox(vp,vps,page.rect)
+                  diags,verts=extract_elevation_segments_from_page(page,bbox)
+                  ev,reasons=resolve_gable_apex_in_viewport(
+                      diags,verts,source_viewport_id=vp.view_id,source_page=54
+                  )
+                  row={
+                      "view_id":vp.view_id,"label":vp.label,"status":vp.status,
+                      "bbox":bbox,"scale_raw":vp.scale_raw,
+                      "scale_denominator":vp.scale_denominator,
+                      "diagonal_count":len(diags),"vertical_count":len(verts),
+                      "reasons":list(reasons),"evidence":ev.__dict__ if ev else None,
+                  }
+                  if ev and vp.scale_denominator:
+                      m_per_pt=(25.4/72.0)*float(vp.scale_denominator)/1000.0
+                      left_m=ev.left_run_pt*m_per_pt
+                      right_m=ev.right_run_pt*m_per_pt
+                      left_rise=left_m*math.tan(math.radians(ev.pitch_deg))
+                      right_rise=right_m*math.tan(math.radians(ev.pitch_deg))
+                      two_gable_area=left_m*left_rise+right_m*right_rise
+                      row.update({
+                          "left_run_m":round(left_m,4),
+                          "right_run_m":round(right_m,4),
+                          "structural_span_m":round(left_m+right_m,4),
+                          "left_rise_m":round(left_rise,4),
+                          "right_rise_m":round(right_rise,4),
+                          "two_gable_area_m2":round(two_gable_area,4),
+                      })
+                  out.append(row)
+              print("KSTVET_GABLE_AFTER_GRID_SAFETY="+json.dumps({
+                  "candidate_sha":"4b023243e8e85230f20b63d59a50e488055b38db",
+                  "source_sha256":actual,"elevations":out,
+              },sort_keys=True,default=str),flush=True)
+          finally:
+              doc.close()
+          PY
