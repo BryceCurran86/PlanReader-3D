@@ -2060,6 +2060,64 @@ class GenericPlanReaderExtractor:
                 )
 
         # ------------------------------------------------------------------
+        # Document-level native fixture-label reconciliation
+        # ------------------------------------------------------------------
+        # Some CAD/PDF producers expose standalone fixture labels in structured
+        # native spans even when the page does not enter the earlier semantic
+        # page branch. Recover those labels conservatively across the document.
+        #
+        # Fail-closed rules:
+        # - only exact standalone supported labels count;
+        # - repeated labels on the same page are de-duplicated by native bbox;
+        # - one non-zero page count is authoritative;
+        # - multiple pages may agree on the same count (duplicate views);
+        # - conflicting non-zero counts abstain rather than guessing/summing.
+        if "chalkboard" not in pred_dict:
+            try:
+                from pb_native_fixture_label_evidence import (
+                    count_standalone_chalkboard_spans,
+                )
+
+                _chalkboard_page_counts: list[tuple[int, int]] = []
+                for _page_index in target_pages:
+                    if _page_index < 0 or _page_index >= len(doc):
+                        continue
+                    _count = count_standalone_chalkboard_spans(
+                        doc[_page_index].get_text("dict")
+                    )
+                    if _count > 0:
+                        _chalkboard_page_counts.append((_page_index + 1, _count))
+
+                if _chalkboard_page_counts:
+                    _distinct_counts = {
+                        _count for _, _count in _chalkboard_page_counts
+                    }
+                    if len(_distinct_counts) == 1:
+                        _qty = float(next(iter(_distinct_counts)))
+                        _source_page = _chalkboard_page_counts[0][0]
+                        pred_dict["chalkboard"] = ExtractedPrediction(
+                            tag="chalkboard",
+                            trade_type="fixtures",
+                            description=(
+                                f"Classroom chalkboard ({int(_qty)} standalone "
+                                "native labelled instances on drawing)"
+                            ),
+                            quantity=_qty,
+                            unit="NO",
+                            confidence=0.92,
+                            source_page=_source_page,
+                            metadata={
+                                "derivation": "document_native_fixture_label_reconciliation",
+                                "page_counts": [
+                                    {"source_page": _page, "count": _count}
+                                    for _page, _count in _chalkboard_page_counts
+                                ],
+                            },
+                        )
+            except Exception:
+                pass
+
+        # ------------------------------------------------------------------
         # Generic Schedule & Table Extraction (Phase F.8)
         # ------------------------------------------------------------------
         try:
