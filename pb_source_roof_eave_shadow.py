@@ -23,16 +23,40 @@ class RoofPath:
 
 
 @dataclass(frozen=True)
+class RoofSourceScope:
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    source_page: int
+    viewport_id: str
+
+    def __post_init__(self) -> None:
+        if not self.document_id or not self.revision_id or not self.viewport_id:
+            raise ValueError("document, revision and viewport ownership are required")
+        if len(self.source_sha256) != 64 or any(c not in "0123456789abcdef" for c in self.source_sha256):
+            raise ValueError("source_sha256 must be a lower-case SHA-256 digest")
+        if self.source_page < 1:
+            raise ValueError("source_page must be positive")
+
+
+@dataclass(frozen=True)
 class RoofEdgeCandidate:
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
-    source_page: int
-    viewport_id: str
+    scope: RoofSourceScope
     span_pt: Optional[float] = None
     start_pt: Optional[float] = None
     end_pt: Optional[float] = None
     path_ids: tuple[str, ...] = ()
     candidate_id: Optional[str] = None
+
+    @property
+    def source_page(self) -> int:
+        return self.scope.source_page
+
+    @property
+    def viewport_id(self) -> str:
+        return self.scope.viewport_id
 
 
 @dataclass(frozen=True)
@@ -45,6 +69,7 @@ class RoofEaveGeometryShadow:
     source_page: Optional[int]
     viewport_ids: tuple[str, ...]
     path_ids: tuple[str, ...]
+    source_scope: Optional[RoofSourceScope] = None
     quantity_m2: None = None  # Native geometry cannot confer measurement authority.
 
 
@@ -66,21 +91,23 @@ def _inside(path: RoofPath, bbox: tuple[float, float, float, float]) -> bool:
 
 
 def _result(
-    status: EvidenceResolutionStatus, reason: str, page: int, viewport: str,
+    status: EvidenceResolutionStatus, reason: str, scope: RoofSourceScope,
     *, start: Optional[float] = None, end: Optional[float] = None,
     path_ids: tuple[str, ...] = (),
 ) -> RoofEdgeCandidate:
     span = None if start is None or end is None else round(end-start,4)
     cid = None if span is None else stable_contract_id("roof_edge", {
-        "source_page":page,"viewport_id":viewport,
+        "document_id":scope.document_id,"revision_id":scope.revision_id,
+        "source_sha256":scope.source_sha256,
+        "source_page":scope.source_page,"viewport_id":scope.viewport_id,
         "start_pt":round(start,4),"end_pt":round(end,4),
         "path_ids":path_ids,
     })
-    return RoofEdgeCandidate(status,(reason,),page,viewport,span,start,end,path_ids,cid)
+    return RoofEdgeCandidate(status,(reason,),scope,span,start,end,path_ids,cid)
 
 
 def collect_longitudinal_roof_edge(
-    paths: Sequence[RoofPath], *, source_page: int, viewport_id: str,
+    paths: Sequence[RoofPath], *, scope: RoofSourceScope,
     viewport_bbox: tuple[float,float,float,float],
     page_width_pt: float, roof_material_annotations: Sequence[str],
 ) -> RoofEdgeCandidate:
@@ -91,11 +118,11 @@ def collect_longitudinal_roof_edge(
     outline are required. All competing outlines remain a conflict.
     """
     if not roof_material_annotations or not any(str(s).strip() for s in roof_material_annotations):
-        return _result(EvidenceResolutionStatus.ABSTAINED,"roof_material_unowned",source_page,viewport_id)
+        return _result(EvidenceResolutionStatus.ABSTAINED,"roof_material_unowned",scope)
     vx0,vy0,vx1,vy1=viewport_bbox
     w,h=vx1-vx0,vy1-vy0
     if w<=0 or h<=0 or page_width_pt<=0:
-        return _result(EvidenceResolutionStatus.ABSTAINED,"invalid_viewport",source_page,viewport_id)
+        return _result(EvidenceResolutionStatus.ABSTAINED,"invalid_viewport",scope)
     xtol=.002*w
     ytol=.003*h
     scoped=[p for p in paths if _visible_line(p) and _inside(p,viewport_bbox)]
@@ -126,15 +153,15 @@ def collect_longitudinal_roof_edge(
         ids=tuple(sorted({*(r[3].path_id for r in group),*side}))
         candidates.append((round(xlo,4),round(xhi,4),ids))
     if not candidates:
-        return _result(EvidenceResolutionStatus.ABSTAINED,"roof_outline_unavailable",source_page,viewport_id)
+        return _result(EvidenceResolutionStatus.ABSTAINED,"roof_outline_unavailable",scope)
     if len(candidates)>1:
-        return _result(EvidenceResolutionStatus.CONFLICT,"competing_roof_outlines",source_page,viewport_id)
+        return _result(EvidenceResolutionStatus.CONFLICT,"competing_roof_outlines",scope)
     a,b,ids=candidates[0]
-    return _result(EvidenceResolutionStatus.CANDIDATE,"roof_outline_native_points_only",source_page,viewport_id,start=a,end=b,path_ids=ids)
+    return _result(EvidenceResolutionStatus.CANDIDATE,"roof_outline_native_points_only",scope,start=a,end=b,path_ids=ids)
 
 
 def collect_gable_outer_roof_edge(
-    paths: Sequence[RoofPath], *, source_page: int, viewport_id: str,
+    paths: Sequence[RoofPath], *, scope: RoofSourceScope,
     viewport_bbox: tuple[float,float,float,float],
     apex_xy: tuple[float,float], pitch_deg: float,
     structural_left_x: float, structural_right_x: float,
@@ -142,10 +169,10 @@ def collect_gable_outer_roof_edge(
 ) -> RoofEdgeCandidate:
     """Keep both outer slope endpoints from one authenticated gable apex."""
     if not roof_material_annotations or not any(str(s).strip() for s in roof_material_annotations):
-        return _result(EvidenceResolutionStatus.ABSTAINED,"roof_material_unowned",source_page,viewport_id)
+        return _result(EvidenceResolutionStatus.ABSTAINED,"roof_material_unowned",scope)
     x0,y0,x1,y1=viewport_bbox
     if x1<=x0 or y1<=y0 or not (5<=pitch_deg<=65 and structural_left_x<structural_right_x):
-        return _result(EvidenceResolutionStatus.ABSTAINED,"gable_context_invalid",source_page,viewport_id)
+        return _result(EvidenceResolutionStatus.ABSTAINED,"gable_context_invalid",scope)
     tol=.01*(x1-x0)
     apex_x,apex_y=apex_xy
     sides={-1:[],1:[]}
@@ -160,12 +187,12 @@ def collect_gable_outer_roof_edge(
         direction=-1 if dx<0 else 1
         sides[direction].append((b[0],p.path_id))
     if not sides[-1] or not sides[1]:
-        return _result(EvidenceResolutionStatus.ABSTAINED,"outer_gable_pair_unavailable",source_page,viewport_id)
+        return _result(EvidenceResolutionStatus.ABSTAINED,"outer_gable_pair_unavailable",scope)
     left=min(x for x,_ in sides[-1]);right=max(x for x,_ in sides[1])
     if not (left<=structural_left_x<structural_right_x<=right):
-        return _result(EvidenceResolutionStatus.CONFLICT,"gable_edges_do_not_enclose_supports",source_page,viewport_id)
+        return _result(EvidenceResolutionStatus.CONFLICT,"gable_edges_do_not_enclose_supports",scope)
     ids=tuple(sorted({pid for x,pid in sides[-1] if abs(x-left)<=tol}|{pid for x,pid in sides[1] if abs(x-right)<=tol}))
-    return _result(EvidenceResolutionStatus.CANDIDATE,"gable_edge_native_points_only",source_page,viewport_id,start=round(left,4),end=round(right,4),path_ids=ids)
+    return _result(EvidenceResolutionStatus.CANDIDATE,"gable_edge_native_points_only",scope,start=round(left,4),end=round(right,4),path_ids=ids)
 
 
 def reconcile_roof_eave_geometry(
@@ -175,8 +202,8 @@ def reconcile_roof_eave_geometry(
     """Corroborate native geometry, never its physical scale or a quantity."""
     if len(longitudinal)<2 or any(c.status is not EvidenceResolutionStatus.CANDIDATE for c in longitudinal) or transverse.status is not EvidenceResolutionStatus.CANDIDATE:
         return RoofEaveGeometryShadow(EvidenceResolutionStatus.ABSTAINED,("incomplete_roof_view_universe",),None,None,None,None,(),())
-    if any(c.source_page!=transverse.source_page for c in longitudinal):
-        return RoofEaveGeometryShadow(EvidenceResolutionStatus.CONFLICT,("cross_page_building_identity_unresolved",),None,None,None,None,(),())
+    if any((c.scope.document_id,c.scope.revision_id,c.scope.source_sha256,c.scope.source_page)!=(transverse.scope.document_id,transverse.scope.revision_id,transverse.scope.source_sha256,transverse.scope.source_page) for c in longitudinal):
+        return RoofEaveGeometryShadow(EvidenceResolutionStatus.CONFLICT,("source_scope_conflict",),None,None,None,None,(),())
     view_ids=[c.viewport_id for c in longitudinal]+[transverse.viewport_id]
     if len(view_ids)!=len(set(view_ids)) or not math.isfinite(pitch_deg):
         return RoofEaveGeometryShadow(EvidenceResolutionStatus.CONFLICT,("roof_view_identity_conflict",),None,None,None,None,(),())
@@ -185,7 +212,7 @@ def reconcile_roof_eave_geometry(
         return RoofEaveGeometryShadow(EvidenceResolutionStatus.CONFLICT,("longitudinal_elevations_disagree",),None,None,None,None,(),())
     ids=tuple(sorted({p for c in (*longitudinal,transverse) for p in c.path_ids}))
     return RoofEaveGeometryShadow(
-        EvidenceResolutionStatus.CORROBORATED,("native_roof_edges_correspond_but_scale_unresolved",),
+        EvidenceResolutionStatus.CANDIDATE,("native_roof_edges_correspond_but_scale_unresolved",),
         round(sum(spans)/len(spans),4),transverse.span_pt,round(pitch_deg,4),
-        transverse.source_page,tuple(sorted(view_ids)),ids,
+        transverse.source_page,tuple(sorted(view_ids)),ids,transverse.scope,
     )
