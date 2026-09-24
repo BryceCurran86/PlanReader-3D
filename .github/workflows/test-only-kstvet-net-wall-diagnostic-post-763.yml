@@ -42,7 +42,7 @@ jobs:
           source.write_bytes(payload)
 
           ex=GenericPlanReaderExtractor()
-          preds=ex.extract_from_pdf(source)
+          preds=ex.extract_from_pdf(source, collect_item35_shadow=False)
           focus=[]
           for p in preds:
               if (
