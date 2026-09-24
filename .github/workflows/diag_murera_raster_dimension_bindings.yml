@@ -1,0 +1,353 @@
+name: TEST-ONLY Murera Raster Dimension Bindings
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  murera-raster-dimensions:
+    if: startsWith(github.head_ref, 'diag/murera-raster-dimension-bindings')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Bind source-owned raster figured dimensions
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY' | tee /tmp/murera-raster-dimension-bindings.txt
+          import hashlib, io, json, urllib.request
+          from pathlib import Path
+
+          import cv2
+          import fitz
+          import numpy as np
+          from PIL import Image
+
+          from pb_figured_dimension_evidence import RasterCoordinateTransform, classify_dimension_token
+          from pb_migration_contracts import stable_contract_id
+          from pb_portable_raster_ocr_authority import OCRLine, RasterOCREvidenceRecord, TesseractOCRBackend
+          from pb_raster_figured_dimension_shadow import (
+              RasterAxisSegment,
+              RasterDimensionScope,
+              collect_raster_figured_dimension_shadow,
+          )
+          from pb_viewport_segmentation import (
+              ViewportSegmentationStatus,
+              segment_page_viewports,
+          )
+          from pb_drawing_evidence_binding import DrawingViewType
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          want="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          pdf_path=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-raster-dimension-binding/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as response:
+              pdf_path.write_bytes(response.read())
+          got=hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+          if got != want:
+              raise SystemExit(f"source hash mismatch: {got}")
+
+          backend=TesseractOCRBackend()
+          if not backend.is_available():
+              raise SystemExit("tesseract backend unavailable")
+
+          def canonical_work_image(gray):
+              return cv2.resize(gray,None,fx=2.0,fy=3.0,interpolation=cv2.INTER_CUBIC)
+
+          def line_clean(work):
+              bw=cv2.threshold(work,0,255,cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)[1]
+              hk=cv2.getStructuringElement(cv2.MORPH_RECT,(max(12,work.shape[1]//55),1))
+              vk=cv2.getStructuringElement(cv2.MORPH_RECT,(1,max(12,work.shape[0]//22)))
+              h=cv2.morphologyEx(bw,cv2.MORPH_OPEN,hk)
+              v=cv2.morphologyEx(bw,cv2.MORPH_OPEN,vk)
+              cleaned=cv2.bitwise_and(bw,cv2.bitwise_not(cv2.bitwise_or(h,v)))
+              cleaned=cv2.morphologyEx(
+                  cleaned,cv2.MORPH_CLOSE,cv2.getStructuringElement(cv2.MORPH_RECT,(2,2))
+              )
+              return 255-cleaned
+
+          def axis_segments(work):
+              bw=cv2.threshold(work,0,255,cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)[1]
+              h_kernel=max(12,work.shape[1]//100)
+              v_kernel=max(12,work.shape[0]//40)
+              hmask=cv2.morphologyEx(
+                  bw,cv2.MORPH_OPEN,cv2.getStructuringElement(cv2.MORPH_RECT,(h_kernel,1))
+              )
+              vmask=cv2.morphologyEx(
+                  bw,cv2.MORPH_OPEN,cv2.getStructuringElement(cv2.MORPH_RECT,(1,v_kernel))
+              )
+              rows=[]
+              for orientation,mask in (("h",hmask),("v",vmask)):
+                  contours,_=cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+                  boxes=[]
+                  for contour in contours:
+                      x,y,w,h=cv2.boundingRect(contour)
+                      if orientation=="h":
+                          if w < h_kernel or w < 3*max(h,1):
+                              continue
+                          boxes.append((x,y,w,h))
+                      else:
+                          if h < v_kernel or h < 3*max(w,1):
+                              continue
+                          boxes.append((x,y,w,h))
+                  for index,(x,y,w,h) in enumerate(sorted(boxes)):
+                      if orientation=="h":
+                          rows.append(RasterAxisSegment(
+                              f"h:{index}:{x}:{y}:{w}:{h}",
+                              (float(x),float(y+h/2.0)),
+                              (float(x+w),float(y+h/2.0)),
+                          ))
+                      else:
+                          rows.append(RasterAxisSegment(
+                              f"v:{index}:{x}:{y}:{w}:{h}",
+                              (float(x+w/2.0),float(y)),
+                              (float(x+w/2.0),float(y+h)),
+                          ))
+              return tuple(rows)
+
+          def rotate_image(image, rotation):
+              if rotation==0:
+                  return image
+              if rotation==90:
+                  return cv2.rotate(image,cv2.ROTATE_90_CLOCKWISE)
+              if rotation==270:
+                  return cv2.rotate(image,cv2.ROTATE_90_COUNTERCLOCKWISE)
+              raise ValueError(rotation)
+
+          def inverse_point(x,y,rotation,width,height):
+              if rotation==0:
+                  return float(x),float(y)
+              if rotation==90:
+                  return float(y),float(height-x)
+              if rotation==270:
+                  return float(width-y),float(x)
+              raise ValueError(rotation)
+
+          def inverse_bbox(bbox,rotation,width,height):
+              x0,y0,x1,y1=(float(v) for v in bbox)
+              pts=[
+                  inverse_point(x0,y0,rotation,width,height),
+                  inverse_point(x1,y0,rotation,width,height),
+                  inverse_point(x0,y1,rotation,width,height),
+                  inverse_point(x1,y1,rotation,width,height),
+              ]
+              xs=[p[0] for p in pts]; ys=[p[1] for p in pts]
+              return min(xs),min(ys),max(xs),max(ys)
+
+          def typed_dimension_lines(lines):
+              out=[]
+              for line in lines:
+                  token=classify_dimension_token(line.text)
+                  if token.is_linear_dimension:
+                      out.append(line)
+              return tuple(out)
+
+          def bbox_inside(inner,outer,tol=1.0):
+              return (
+                  inner[0] >= outer[0]-tol and inner[1] >= outer[1]-tol
+                  and inner[2] <= outer[2]+tol and inner[3] <= outer[3]+tol
+              )
+
+          doc=fitz.open(pdf_path)
+          page=doc[227]
+          viewports=segment_page_viewports(page,page_number=228)
+          plan_viewports=[
+              viewport for viewport in viewports
+              if viewport.view_type==DrawingViewType.FLOOR_PLAN.value
+              and viewport.status in {
+                  ViewportSegmentationStatus.RESOLVED.value,
+                  ViewportSegmentationStatus.DERIVED.value,
+              }
+              and viewport.bounding_box is not None
+          ]
+
+          page_summary={
+              "viewports":[
+                  {
+                      "view_id":v.view_id,
+                      "view_type":v.view_type,
+                      "status":v.status,
+                      "bbox":list(v.bounding_box) if v.bounding_box else None,
+                      "label":v.label,
+                  }
+                  for v in viewports
+              ]
+          }
+          source_rows=[]
+          seen_xrefs=set()
+          for image_order,image_meta in enumerate(page.get_images(full=True) or []):
+              xref=int(image_meta[0])
+              if xref in seen_xrefs:
+                  continue
+              seen_xrefs.add(xref)
+              extracted=doc.extract_image(xref)
+              gray=np.array(Image.open(io.BytesIO(extracted["image"])).convert("L"))
+              work=canonical_work_image(gray)
+              segments=axis_segments(work)
+              variants={"gray":work,"lineclean":line_clean(work)}
+              placements=list(page.get_image_rects(xref) or [])
+              if not placements:
+                  source_rows.append({
+                      "xref":xref,"image_order":image_order,"status":"no_placement"
+                  })
+                  continue
+
+              for placement_index,rect in enumerate(placements):
+                  placement=(float(rect.x0),float(rect.y0),float(rect.x1),float(rect.y1))
+                  owners=[
+                      viewport for viewport in plan_viewports
+                      if bbox_inside(placement,tuple(float(v) for v in viewport.bounding_box),tol=1.0)
+                  ]
+                  viewport_id=owners[0].view_id if len(owners)==1 else f"diagnostic-unowned-p228-xref{xref}-{placement_index}"
+                  viewport_ownership=(
+                      {"status":"owned","viewport_id":owners[0].view_id,"viewport_status":owners[0].status}
+                      if len(owners)==1
+                      else {"status":"unresolved","owner_count":len(owners)}
+                  )
+
+                  transform=RasterCoordinateTransform(
+                      page_width_pt=placement[2]-placement[0],
+                      page_height_pt=placement[3]-placement[1],
+                      raster_width_px=float(work.shape[1]),
+                      raster_height_px=float(work.shape[0]),
+                      rotation_deg=0,
+                  )
+                  scope=RasterDimensionScope(
+                      document_id=f"source:{got[:32]}",
+                      revision_id=f"sha256:{got}",
+                      source_sha256=got,
+                      snapshot_id=f"sha256:{got}",
+                      page_id="228",
+                      viewport_id=viewport_id,
+                      image_id=f"xref:{xref}:placement:{placement_index}",
+                      placement_bbox_pt=placement,
+                  )
+
+                  pass_rows=[]
+                  for variant_name,variant in variants.items():
+                      for rotation in (0,90,270):
+                          rotated=rotate_image(variant,rotation)
+                          observed=backend.extract_lines(Image.fromarray(rotated),dpi=300)
+                          remapped=[]
+                          for line in observed:
+                              remapped.append(OCRLine(
+                                  text=line.text,
+                                  confidence=line.confidence,
+                                  bbox_px=inverse_bbox(
+                                      line.bbox_px,
+                                      rotation,
+                                      float(work.shape[1]),
+                                      float(work.shape[0]),
+                                  ),
+                                  bbox_pt=None,
+                              ))
+                          typed=typed_dimension_lines(remapped)
+                          if not typed:
+                              continue
+                          record=RasterOCREvidenceRecord(
+                              record_id=stable_contract_id("diag_ocr",{
+                                  "source_sha256":got,
+                                  "page_id":"228",
+                                  "xref":xref,
+                                  "placement_index":placement_index,
+                                  "variant":variant_name,
+                                  "rotation":rotation,
+                              }),
+                              document_id=scope.document_id,
+                              revision_id=scope.revision_id,
+                              source_sha256=got,
+                              snapshot_id=scope.snapshot_id,
+                              page_id="228",
+                              viewport_id=viewport_id,
+                              target_region_pt=placement,
+                              lines=typed,
+                              full_text=" ".join(line.text for line in typed),
+                              backend_name=backend.name,
+                              backend_version=backend.version,
+                              dpi=300,
+                              confidence=None,
+                              reconciliation_status="provisional",
+                          )
+                          result=collect_raster_figured_dimension_shadow(
+                              ocr_record=record,
+                              segments=segments,
+                              transform=transform,
+                              scope=scope,
+                          )
+                          pass_rows.append({
+                              "variant":variant_name,
+                              "rotation":rotation,
+                              "typed_ocr":[
+                                  {
+                                      "text":line.text,
+                                      "confidence":line.confidence,
+                                      "bbox_px":[round(float(v),2) for v in line.bbox_px],
+                                  }
+                                  for line in typed
+                              ],
+                              "binding_status":result.status.value,
+                              "reason_codes":result.reason_codes,
+                              "candidates":[
+                                  {
+                                      "status":candidate.status.value,
+                                      "reason_codes":candidate.reason_codes,
+                                      "raw_text":candidate.raw_text,
+                                      "value_mm":candidate.value_mm,
+                                      "bbox_pt":candidate.bbox_pt,
+                                      "orientation":candidate.orientation,
+                                      "dimension_line_ids":candidate.dimension_line_ids,
+                                      "witness_line_ids":candidate.witness_line_ids,
+                                      "endpoints_pt":candidate.endpoints_pt,
+                                      "candidate_id":candidate.candidate_id,
+                                      "alternative_count":len(candidate.alternatives),
+                                  }
+                                  for candidate in result.candidates
+                              ],
+                          })
+
+                  if pass_rows:
+                      source_rows.append({
+                          "xref":xref,
+                          "image_order":image_order,
+                          "placement_index":placement_index,
+                          "placement_bbox_pt":placement,
+                          "source_px":[int(gray.shape[1]),int(gray.shape[0])],
+                          "work_px":[int(work.shape[1]),int(work.shape[0])],
+                          "axis_segment_count":len(segments),
+                          "viewport_ownership":viewport_ownership,
+                          "passes":pass_rows,
+                      })
+          doc.close()
+
+          print("MURERA_RASTER_DIMENSION_BINDINGS="+json.dumps({
+              "source_sha256":got,
+              "page":228,
+              "page_summary":page_summary,
+              "source_rows":source_rows,
+              "quantity_m2":None,
+              "authority":"candidate_only_no_live_publication",
+          },sort_keys=True,default=str),flush=True)
+          PY
+      - name: Post diagnostic summary
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -f /tmp/murera-raster-dimension-bindings.txt ]; then
+            gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body-file /tmp/murera-raster-dimension-bindings.txt
+          fi
