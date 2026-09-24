@@ -117,6 +117,32 @@ jobs:
                   except Exception as exc:
                       dim_obs=[{"error":repr(exc)}]
 
+                  twelve_hundred_context=[]
+                  for w in words:
+                      token=str(w[4]).replace(",","").strip()
+                      if token != "1200":
+                          continue
+                      block_no=int(w[5]) if len(w) > 5 else -1
+                      line_no=int(w[6]) if len(w) > 6 else -1
+                      context_words=[]
+                      for v in words:
+                          vb=int(v[5]) if len(v) > 5 else -2
+                          vl=int(v[6]) if len(v) > 6 else -99
+                          if vb == block_no and abs(vl-line_no) <= 2:
+                              context_words.append({
+                                  "text":str(v[4]),
+                                  "bbox":[float(v[0]),float(v[1]),float(v[2]),float(v[3])],
+                                  "block":vb,
+                                  "line":vl,
+                              })
+                      context_words.sort(key=lambda z:(z["line"],z["bbox"][0]))
+                      twelve_hundred_context.append({
+                          "bbox":[float(w[0]),float(w[1]),float(w[2]),float(w[3])],
+                          "block":block_no,
+                          "line":line_no,
+                          "context_words":context_words,
+                      })
+
                   bindings=[]
                   for idx,c in enumerate(callouts):
                       cb=c["bbox"]
@@ -166,6 +192,7 @@ jobs:
                       "callout_count":len(callouts),
                       "target_native":[n for n in native_numbers if n["value_mm"] in target_values],
                       "target_dimension_observations":[n for n in dim_obs if n.get("value_mm") in target_values],
+                      "twelve_hundred_context":twelve_hundred_context,
                       "bindings":bindings,
                   })
               print("KSTVET_WINDOW_SPATIAL_BINDING_POST_763="+json.dumps(out,sort_keys=True),flush=True)
