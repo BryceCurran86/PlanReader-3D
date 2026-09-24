@@ -424,15 +424,19 @@ def _leader_paths(
     return tuple(found[key] for key in sorted(found))
 
 
-def _target_from_terminator(
+def _target_candidates_from_terminator(
     terminator: _Terminator,
     lines: Sequence[_Line],
     wall_scope,
-    epsilon: float = 0.0,
-):
-    # epsilon is retained only for compatibility. Wall ownership requires an
-    # actual terminator/primitive intersection; proximity is never authority.
-    del epsilon
+) -> tuple[tuple[object, ...], tuple[str, ...]]:
+    """Return exact-touch wall-candidate groups without ranking.
+
+    Visible annotation leaders can enter the generic W2-W5 wall candidate
+    universe even though source-derived room/envelope topology later proves
+    they are not authenticated physical walls. Preserve all exact-touch
+    candidate groups here so the producer can require independent topology
+    corroboration before accepting exactly one physical wall.
+    """
     raw_hits = {
         line.raw_id for line in lines
         if _segment_intersects_bbox(line.geometry, terminator.bbox)
@@ -442,47 +446,73 @@ def _target_from_terminator(
         if raw_hits & set(record.physical_identity.source_primitive_ids)
     ]
     if not matching:
-        return None, (), EvidenceResolutionStatus.ABSTAINED
+        return (), tuple(sorted(raw_hits))
+
     representative_for: dict[str, str] = {}
     for group in tuple(getattr(wall_scope.equivalence, "equivalence_groups", ()) or ()):
         rep = sorted(group)[0]
         for wall_id in group:
             representative_for[wall_id] = rep
-    normalized = {
-        representative_for.get(record.wall_candidate_id, record.wall_candidate_id)
-        for record in matching
-    }
-    if len(normalized) != 1:
-        # Multiple physical-wall owners are ambiguous, not a positive conflict
-        # proposition. The caller must abstain rather than select or rank them.
-        return None, tuple(sorted(raw_hits)), EvidenceResolutionStatus.ABSTAINED
-    target_id = next(iter(normalized))
-    target = next((r for r in wall_scope.records if r.wall_candidate_id == target_id), None)
-    resolved_target = target or sorted(matching, key=lambda r: r.wall_candidate_id)[0]
 
-    # Provenance on a positive binding must contain only source primitives
-    # actually owned by the resolved physical wall. A non-wall leader may
-    # legitimately touch the same terminator, but it must remain leader
-    # evidence rather than being mislabeled as wall-face evidence.
-    target_owned_raw_hits: set[str] = set()
+    grouped: dict[str, list[object]] = {}
     for record in matching:
-        normalized_id = representative_for.get(
+        representative = representative_for.get(
             record.wall_candidate_id,
             record.wall_candidate_id,
         )
-        if normalized_id != target_id:
-            continue
-        target_owned_raw_hits.update(
-            raw_hits & set(record.physical_identity.source_primitive_ids)
+        grouped.setdefault(representative, []).append(record)
+
+    targets = []
+    for representative in sorted(grouped):
+        exact_representative = next(
+            (
+                record
+                for record in wall_scope.records
+                if record.wall_candidate_id == representative
+            ),
+            None,
         )
+        targets.append(
+            exact_representative
+            or sorted(
+                grouped[representative],
+                key=lambda record: record.wall_candidate_id,
+            )[0]
+        )
+    return tuple(targets), tuple(sorted(raw_hits))
+
+
+def _target_from_terminator(
+    terminator: _Terminator,
+    lines: Sequence[_Line],
+    wall_scope,
+    epsilon: float = 0.0,
+):
+    # epsilon is retained only for compatibility. Wall ownership requires an
+    # actual terminator/primitive intersection; proximity is never authority.
+    del epsilon
+    targets, raw_hits = _target_candidates_from_terminator(
+        terminator,
+        lines,
+        wall_scope,
+    )
+    if len(targets) != 1:
+        return None, raw_hits, EvidenceResolutionStatus.ABSTAINED
+
+    target = targets[0]
+    target_owned_raw_hits = tuple(
+        sorted(
+            raw_hits
+            & set(target.physical_identity.source_primitive_ids)
+        )
+    )
     if not target_owned_raw_hits:
         return None, (), EvidenceResolutionStatus.ABSTAINED
     return (
-        resolved_target,
-        tuple(sorted(target_owned_raw_hits)),
+        target,
+        target_owned_raw_hits,
         EvidenceResolutionStatus.CORROBORATED,
     )
-
 
 def _partial_scope(records: Sequence[WallFinishFaceBindingRecord]) -> WallFinishCompleteScopeRecord:
     first = records[0]
@@ -610,35 +640,61 @@ class WallFinishFaceBindingProducer:
 
                         accepted: dict[tuple[str, str, str], WallFinishFaceBindingRecord] = {}
                         for leader_ids, terminator in paths:
-                            target, source_segments, target_status = _target_from_terminator(
-                                terminator, owned_lines, wall_scope
+                            # Exact source geometry may touch both a real wall and
+                            # the annotation leader because all visible linework
+                            # enters W2-W5 candidate generation. Never rank those
+                            # candidates geometrically. Require independent
+                            # source-derived wall-role/topology corroboration and
+                            # proceed only when exactly one exact-touch candidate
+                            # survives that proof.
+                            target_candidates, raw_hits = _target_candidates_from_terminator(
+                                terminator,
+                                owned_lines,
+                                wall_scope,
                             )
-                            if (
-                                target_status is not EvidenceResolutionStatus.CORROBORATED
-                                or target is None
-                            ):
+                            corroborated_targets = []
+                            for candidate in target_candidates:
+                                role_result = role_producer.publish(WallRoleSelector(
+                                    document_id=published.revision.document_id,
+                                    revision_id=published.revision.revision_id,
+                                    source_sha256=published.revision.source_sha256,
+                                    snapshot_id=published.snapshot.snapshot_id,
+                                    page_id=page_id,
+                                    decision_scope_id=f"wall-source:page-{page_id}",
+                                    physical_wall_id=candidate.wall_candidate_id,
+                                ))
+                                if (
+                                    role_result.status is not EvidenceResolutionStatus.CORROBORATED
+                                    or role_result.record is None
+                                ):
+                                    continue
+                                candidate_role_record = role_result.record
+                                if (
+                                    candidate_role_record.document_id != published.revision.document_id
+                                    or candidate_role_record.revision_id != published.revision.revision_id
+                                    or candidate_role_record.source_sha256 != published.revision.source_sha256
+                                    or candidate_role_record.snapshot_id != published.snapshot.snapshot_id
+                                    or candidate_role_record.page_id != page_id
+                                    or candidate_role_record.decision_scope_id != f"wall-source:page-{page_id}"
+                                    or candidate_role_record.physical_wall_id != candidate.wall_candidate_id
+                                ):
+                                    continue
+                                corroborated_targets.append(
+                                    (candidate, candidate_role_record)
+                                )
+
+                            if len(corroborated_targets) != 1:
                                 continue
-                            role_result = role_producer.publish(WallRoleSelector(
-                                document_id=published.revision.document_id,
-                                revision_id=published.revision.revision_id,
-                                source_sha256=published.revision.source_sha256,
-                                snapshot_id=published.snapshot.snapshot_id,
-                                page_id=page_id,
-                                decision_scope_id=f"wall-source:page-{page_id}",
-                                physical_wall_id=target.wall_candidate_id,
-                            ))
-                            if role_result.status is not EvidenceResolutionStatus.CORROBORATED or role_result.record is None:
-                                continue
-                            role_record = role_result.record
-                            if (
-                                role_record.document_id != published.revision.document_id
-                                or role_record.revision_id != published.revision.revision_id
-                                or role_record.source_sha256 != published.revision.source_sha256
-                                or role_record.snapshot_id != published.snapshot.snapshot_id
-                                or role_record.page_id != page_id
-                                or role_record.decision_scope_id != f"wall-source:page-{page_id}"
-                                or role_record.physical_wall_id != target.wall_candidate_id
-                            ):
+                            target, role_record = corroborated_targets[0]
+                            source_segments = tuple(
+                                sorted(
+                                    raw_hits
+                                    & set(
+                                        target.physical_identity.source_primitive_ids
+                                    )
+                                )
+                            )
+                            if not source_segments:
                                 continue
                             for semantic in semantics:
                                 face_role = _semantic_face(role_record.role, semantic.direction)
