@@ -1,0 +1,171 @@
+name: TEST-ONLY Murera Door Swing Seed Repeats
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-door-swing-seeds:
+    if: startsWith(github.head_ref, 'diag/murera-door-swing-seed-repeats')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Probe D-tag-seeded chromatic door swing repeats
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,math,urllib.request
+          from pathlib import Path
+          import cv2
+          import fitz
+          import numpy as np
+
+          from pb_plan_opening_instance_marks import extract_marks_from_page
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          source=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-door-swing-seeds/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              source.write_bytes(r.read())
+          actual=hashlib.sha256(source.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(actual)
+
+          def circular_hue_diff(h, center):
+              d=np.abs(h.astype(np.int16)-int(center))
+              return np.minimum(d,180-d)
+
+          def candidates_for_hue(hsv, center, scale):
+              h=hsv[:,:,0]
+              s=hsv[:,:,1]
+              v=hsv[:,:,2]
+              mask=((circular_hue_diff(h,center)<=7)&(s>=55)&(v>=70)).astype(np.uint8)*255
+              mask=cv2.morphologyEx(mask,cv2.MORPH_CLOSE,np.ones((2,2),np.uint8))
+              contours,_=cv2.findContours(mask,cv2.RETR_LIST,cv2.CHAIN_APPROX_NONE)
+              out=[]
+              for c in contours:
+                  x,y,w,hh=cv2.boundingRect(c)
+                  area=float(cv2.contourArea(c))
+                  wp=float(w)/scale
+                  hp=float(hh)/scale
+                  area_pt2=area/(scale*scale)
+                  if not (8.0<=wp<=65.0 and 8.0<=hp<=65.0):
+                      continue
+                  aspect=min(wp,hp)/max(wp,hp)
+                  if aspect < 0.35:
+                      continue
+                  if not (6.0<=area_pt2<=450.0):
+                      continue
+                  if len(c)<20:
+                      continue
+                  out.append({
+                      "bbox_px":[int(x),int(y),int(w),int(hh)],
+                      "bbox_pt":[round(x/scale,2),round(y/scale,2),round(wp,2),round(hp,2)],
+                      "center_pt":[round((x+w/2)/scale,2),round((y+hh/2)/scale,2)],
+                      "area_pt2":round(area_pt2,2),
+                      "points":int(len(c)),
+                  })
+              return out
+
+          doc=fitz.open(source)
+          try:
+              page_num=228
+              page=doc[page_num-1]
+              marks=extract_marks_from_page(page,page_num)
+              door_marks=[
+                  {
+                      "tag":m.tag,"raw":m.raw,"complete":bool(m.complete),
+                      "conf":float(m.conf),"x":float(m.x),"y":float(m.y),
+                  }
+                  for m in marks if m.trade=="doors"
+              ]
+              seeds=[(m["x"],m["y"]) for m in door_marks]
+              dpi=150
+              scale=dpi/72.0
+              pix=page.get_pixmap(dpi=dpi,alpha=False)
+              arr=np.frombuffer(pix.samples,dtype=np.uint8).reshape(pix.height,pix.width,pix.n)
+              if pix.n>3:
+                  arr=arr[:,:,:3]
+              hsv=cv2.cvtColor(arr,cv2.COLOR_RGB2HSV)
+
+              scored=[]
+              match_radius=38.0
+              for hue in range(0,180,5):
+                  cands=candidates_for_hue(hsv,hue,scale)
+                  matched=set()
+                  dists=[]
+                  for si,(sx,sy) in enumerate(seeds):
+                      if not cands:
+                          continue
+                      ds=[
+                          math.hypot(c["center_pt"][0]-sx,c["center_pt"][1]-sy)
+                          for c in cands
+                      ]
+                      d=min(ds)
+                      dists.append(round(d,2))
+                      if d<=match_radius:
+                          matched.add(si)
+                  scored.append({
+                      "hue":hue,
+                      "matched_seed_count":len(matched),
+                      "candidate_count":len(cands),
+                      "distance_sum":round(sum(dists),2),
+                      "candidates":cands,
+                  })
+
+              scored.sort(key=lambda r:(-r["matched_seed_count"],r["candidate_count"],r["distance_sum"],r["hue"]))
+              best=scored[0] if scored else None
+              recovery=None
+              if best is not None and len(seeds)>=3 and best["matched_seed_count"]>=len(seeds)-1:
+                  assigned={i:[] for i in range(len(seeds))}
+                  unassigned=[]
+                  for c in best["candidates"]:
+                      cx,cy=c["center_pt"]
+                      ds=[math.hypot(cx-sx,cy-sy) for sx,sy in seeds]
+                      if ds and min(ds)<=match_radius:
+                          assigned[int(np.argmin(ds))].append(c)
+                      else:
+                          unassigned.append(c)
+                  # Only accept local same-colour repeats near the authenticated
+                  # D-tag cluster. This prevents page furniture/title-block colour
+                  # from becoming doors merely because it shares a hue.
+                  local_unassigned=[]
+                  for c in unassigned:
+                      cx,cy=c["center_pt"]
+                      nearest=min((math.hypot(cx-sx,cy-sy) for sx,sy in seeds),default=9999.0)
+                      if nearest<=95.0:
+                          local_unassigned.append(c)
+                  matched_groups=sum(1 for rows in assigned.values() if rows)
+                  geometry_total=matched_groups+len(local_unassigned)
+                  recovery={
+                      "matched_groups":matched_groups,
+                      "assigned":assigned,
+                      "local_unassigned":local_unassigned,
+                      "geometry_total":geometry_total,
+                  }
+
+              print("MURERA_DOOR_SWING_SEED_REPEAT="+json.dumps({
+                  "production_sha":"3ec1573c823e6ea1c09ec7ac96ae3c38d3a01728",
+                  "source_sha256":actual,
+                  "page":page_num,
+                  "page_rect":[float(page.rect.x0),float(page.rect.y0),float(page.rect.x1),float(page.rect.y1)],
+                  "door_marks":door_marks,
+                  "best_hue":best,
+                  "top_hues":scored[:8],
+                  "recovery":recovery,
+              },sort_keys=True),flush=True)
+          finally:
+              doc.close()
+          PY
