@@ -29,6 +29,9 @@ jobs:
           from pathlib import Path
           from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
           from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          from pb_secondary_footprint_evidence import resolve_secondary_footprint_width_m
+          from pb_viewport_segmentation import segment_page_viewports
+          from pb_figured_dimension_evidence import extract_dimension_evidence_bundle, calibrate_dimension_layout
 
           benchmark_id="tenders_ke_lamu_ishakani_ecd_classrooms"
           url="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
@@ -82,6 +85,48 @@ jobs:
               "physical_net_wall_live":getattr(extractor,"physical_net_wall_live",None),
           }
           print("LAMU_WALL_DETAIL="+json.dumps(detail,sort_keys=True,default=str),flush=True)
+          import fitz
+          doc=fitz.open(source)
+          try:
+              page=doc[40]
+              sec=resolve_secondary_footprint_width_m(page,page_num=41)
+              viewports=segment_page_viewports(page,page_number=41)
+              bundle=extract_dimension_evidence_bundle(page,page_num=41,view_id=None,view_type=None)
+              labels=[w for w in page.get_text("words") if "verand" in str(w[4]).lower()]
+              sec_detail={
+                  "resolved":None if sec is None else {
+                      "label_text":sec.label_text,
+                      "width_m":sec.width_m,
+                      "view_id":sec.view_id,
+                      "edge":sec.edge,
+                      "chain_id":sec.chain_id,
+                      "binding_status":sec.binding_status,
+                      "label_bbox":sec.label_bbox,
+                      "notes":sec.notes,
+                  },
+                  "labels":labels,
+                  "viewports":[{
+                      "view_id":v.view_id,
+                      "view_type":v.view_type,
+                      "status":v.status,
+                      "bbox":v.bounding_box,
+                  } for v in viewports],
+                  "observations":[{
+                      "id":o.dimension_id,
+                      "value_m":o.value_m,
+                      "bbox":o.bbox,
+                      "orientation":getattr(o,"orientation",None),
+                      "endpoints":getattr(o,"endpoints",None),
+                  } for o in bundle.observations],
+                  "bindings":[{
+                      "observation_id":b.observation_id,
+                      "status":b.status,
+                      "reason_codes":getattr(b,"reason_codes",None),
+                  } for b in bundle.bindings],
+              }
+              print("LAMU_VERANDAH_DETAIL="+json.dumps(sec_detail,sort_keys=True,default=str),flush=True)
+          finally:
+              doc.close()
           scoped={}
           for label,page_index in (("classrooms",40),("toilets",41)):
               ex=GenericPlanReaderExtractor()
