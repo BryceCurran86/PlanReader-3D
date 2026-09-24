@@ -32,6 +32,7 @@ jobs:
           from pb_secondary_footprint_evidence import resolve_secondary_footprint_width_m
           from pb_viewport_segmentation import segment_page_viewports
           from pb_figured_dimension_evidence import extract_dimension_evidence_bundle, calibrate_dimension_layout
+          from pb_wall_height_evidence import resolve_wall_height_dimension_m
 
           benchmark_id="tenders_ke_lamu_ishakani_ecd_classrooms"
           url="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
@@ -125,6 +126,26 @@ jobs:
                   } for b in bundle.bindings],
               }
               print("LAMU_VERANDAH_DETAIL="+json.dumps(sec_detail,sort_keys=True,default=str),flush=True)
+              words=page.get_text("words")
+              height_words=[w for w in words if str(w[4]).strip().lower().strip(".,:;") in {"height","ht"}]
+              elevation_vps=[v for v in viewports if v.view_type in {"elevation","section"} and v.bounding_box is not None]
+              wall_height_probes=[]
+              for v in elevation_vps:
+                  ev=resolve_wall_height_dimension_m(page,page_num=41,target_geometry_bbox=v.bounding_box)
+                  wall_height_probes.append({
+                      "view_id":v.view_id,
+                      "view_type":v.view_type,
+                      "status":v.status,
+                      "bbox":v.bounding_box,
+                      "result":None if ev is None else {
+                          "height_m":ev.height_m,
+                          "label_text":ev.label_text,
+                          "chain_id":ev.chain_id,
+                          "binding_status":ev.binding_status,
+                          "label_bbox":ev.label_bbox,
+                      },
+                  })
+              print("LAMU_HEIGHT_DETAIL="+json.dumps({"height_words":height_words,"probes":wall_height_probes},sort_keys=True,default=str),flush=True)
           finally:
               doc.close()
           scoped={}
