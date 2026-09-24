@@ -141,6 +141,34 @@ jobs:
           finally:
               doc.close()
 
+          elevation_reproduction=[]
+          for rec in page_records:
+              title_text=" ".join(rec["titles"]).lower()
+              if "elevation" not in title_text:
+                  continue
+              vals=rec["dims"]
+              c=Counter(round(v,2) for v in vals)
+              bay_candidates=sorted(
+                  [(d,n) for d,n in c.items() if 1.0 <= d <= 6.5 and n >= 2],
+                  key=lambda x:(-x[1],-x[0]),
+              )
+              seq=[]
+              for d,n in bay_candidates:
+                  seq.extend([d]*n)
+              seq.sort()
+              if len(seq) >= 2 and detected_span is not None:
+                  bay_sum=round(sum(seq),2)
+                  if 8.0 <= bay_sum <= 60.0 and 4.0 <= detected_span <= 20.0:
+                      elevation_reproduction.append({
+                          "page":rec["page"],
+                          "bay_candidates":bay_candidates,
+                          "bay_sequence":seq,
+                          "bay_sum_m":bay_sum,
+                          "detected_span_m":detected_span,
+                          "area_m2":round(bay_sum*detected_span,4),
+                          "titles":rec["titles"],
+                      })
+
           cross_page=[]
           for rec in page_records:
               vals=rec["dims"]
@@ -167,5 +195,6 @@ jobs:
               "detected_span_final":detected_span,
               "detected_span_updates":span_updates,
               "cross_page_area_candidates":sorted(cross_page,key=lambda x:x["distance_from_149_26"])[:100],
+              "elevation_reproduction":elevation_reproduction,
           },sort_keys=True),flush=True)
           PY
