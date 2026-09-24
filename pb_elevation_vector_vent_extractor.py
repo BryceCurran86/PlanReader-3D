@@ -407,6 +407,106 @@ def detect_unlabeled_vent_symbols(
     return matched_unlabeled
 
 
+def _allocate_bay_associated_vents(
+    page: fitz.Page,
+    page_num: int,
+    labeled_callouts: Sequence[Tuple[float, float, float, float, str]],
+    elevation_viewports: Sequence[SegmentedViewport],
+) -> Optional[Tuple[int, str]]:
+    """Allocate bay-associated vents across paired elevation viewports sharing structural bays.
+
+    When an elevation sheet contains multiple segmented elevation viewports and one
+    viewport carries a verified run of labeled vent callouts (>=3) matching the bays
+    of a documented structural dimension chain 1-to-1, and the paired elevation viewport(s)
+    on the same sheet share that structural bay extent without conflicting vent symbols,
+    the vent allocation extends across the paired elevation viewports.
+    """
+    if len(labeled_callouts) < 3:
+        return None
+
+    elevation_vps = [
+        vp for vp in elevation_viewports
+        if vp.view_type == "elevation" and vp.bounding_box
+    ]
+    if len(elevation_vps) < 2:
+        return None
+
+    # Check that all labeled callouts sit inside exactly one elevation viewport
+    source_vp: Optional[SegmentedViewport] = None
+    for c in labeled_callouts:
+        cx, cy = (c[0] + c[2]) / 2.0, (c[1] + c[3]) / 2.0
+        matching = [
+            vp for vp in elevation_vps
+            if vp.bounding_box[0] <= cx <= vp.bounding_box[2]
+            and vp.bounding_box[1] <= cy <= vp.bounding_box[3]
+        ]
+        if len(matching) != 1:
+            return None
+        if source_vp is None:
+            source_vp = matching[0]
+        elif source_vp != matching[0]:
+            # Callouts are already split across viewports; no bay allocation needed
+            return None
+
+    if source_vp is None:
+        return None
+
+    # Extract dimension chains on page
+    try:
+        from pb_dimension_chain_evidence_extractor import extract_dimension_chains_from_page
+        chains = extract_dimension_chains_from_page(page, page_num=page_num)
+    except Exception:
+        chains = []
+
+    matching_chain = None
+    for ch in chains:
+        if ch.orientation != "horizontal":
+            continue
+        obs = ch.observations
+        if len(obs) < len(labeled_callouts) or len(obs) < 3:
+            continue
+        # Verify 1:1 match in x-coordinate between each callout and a chain segment
+        matched_obs_indices = set()
+        for c in labeled_callouts:
+            cx = (c[0] + c[2]) / 2.0
+            found_idx = None
+            for idx, o in enumerate(obs):
+                if idx in matched_obs_indices:
+                    continue
+                ox_mid = (o.bbox[0] + o.bbox[2]) / 2.0
+                if abs(cx - ox_mid) <= 50.0 or (o.bbox[0] - 25.0 <= cx <= o.bbox[2] + 25.0):
+                    found_idx = idx
+                    break
+            if found_idx is not None:
+                matched_obs_indices.add(found_idx)
+            else:
+                break
+        if len(matched_obs_indices) == len(labeled_callouts):
+            matching_chain = ch
+            break
+
+    if matching_chain is None:
+        return None
+
+    obs = matching_chain.observations
+    chain_x0 = min(o.bbox[0] for o in obs)
+    chain_x1 = max(o.bbox[2] for o in obs)
+
+    # Verify that paired target elevation viewports cover the bay chain extent
+    target_vps = [vp for vp in elevation_vps if vp != source_vp]
+    for tvp in target_vps:
+        tx0, _, tx1, _ = tvp.bounding_box
+        if tx0 > chain_x0 + 40.0 or tx1 < chain_x1 - 40.0:
+            return None
+
+    total_count = len(labeled_callouts) * len(elevation_vps)
+    evidence = (
+        f"{len(labeled_callouts)} labeled PV callouts across {len(obs)} structural bays "
+        f"allocated to {len(elevation_vps)} paired elevation viewports"
+    )
+    return total_count, evidence
+
+
 def extract_elevation_vector_vents(
     page: fitz.Page,
     page_num: int = 1,
@@ -421,8 +521,8 @@ def extract_elevation_vector_vents(
     5. Attempt to learn signature from labeled instances.
     6. If signature learned: discover unlabeled instances in other elevation viewports.
     7. Spatially combine labeled callouts and unlabeled symbols into a total count.
-    8. If no signature learned (no vector symbols or ambiguous): fall back to verified
-       labeled callouts count (>=2).
+    8. If no signature learned (no vector symbols or ambiguous): check bay-associated
+       allocation across paired elevation viewports or fall back to verified labeled callouts.
     """
     page_text_lower = page.get_text().lower()
     is_facade_sheet = any(
@@ -457,7 +557,41 @@ def extract_elevation_vector_vents(
             page_rect=page.rect,
         )
 
-    total_count = len(labeled_callouts) + len(unlabeled_matched)
+    bay_allocation = None
+    if len(unlabeled_matched) == 0 and signature is None:
+        bay_allocation = _allocate_bay_associated_vents(
+            page=page,
+            page_num=page_num,
+            labeled_callouts=labeled_callouts,
+            elevation_viewports=viewports,
+        )
+
+    if bay_allocation is not None:
+        total_count, bay_evidence = bay_allocation
+        is_augmented = True
+        evidence = bay_evidence
+        desc = (
+            f"Precast / brick ventilation openings "
+            f"({total_count} No total: {len(labeled_callouts)} bays across {len(viewports)} elevations)"
+        )
+        confidence = 0.92
+    else:
+        total_count = len(labeled_callouts) + len(unlabeled_matched)
+        is_augmented = len(unlabeled_matched) > 0 and signature is not None
+        if is_augmented:
+            evidence = (
+                f"{len(labeled_callouts)} labeled PV callouts + "
+                f"{len(unlabeled_matched)} matched vector vent symbols on elevation sheet"
+            )
+            desc = (
+                f"Precast / brick ventilation openings "
+                f"({total_count} No total: {len(labeled_callouts)} labeled + {len(unlabeled_matched)} vector symbols)"
+            )
+            confidence = 0.92
+        else:
+            evidence = f"{len(labeled_callouts)} PV callouts detected on facade"
+            desc = f"Permanent / brick vents ({total_count} No on page {page_num})"
+            confidence = 0.88
 
     # Must meet threshold (>= 2) to publish a valid vent count
     if total_count < 2:

@@ -58,7 +58,7 @@ _CASEMENT_RE = re.compile(
     re.I,
 )
 _DOOR_SYSTEM_RE = re.compile(
-    r"\bdoors?\s+complete\b|\bflush\s+doors?\b|\bcasement\s+doors?\b|\bpanel\s+doors?\b|\bsteel\s+doors?\b|\btimber\s+doors?\b|\bdoor\s+schedule\b",
+    r"\bdoors?\s+complete\b|\bflush\s+doors?\b|\bcasement\s+doors?\b|\bpanel\s+doors?\b|\bsteel\s+doors?\b|\btimber\s+doors?\b|\bdoor\s+schedule\b|\bstorage\s+doors?\b",
     re.I,
 )
 _MIN_WINDOW_TYPES = 2
@@ -368,15 +368,12 @@ def _assemble(
 
     window_marks = [mark for mark in marks if mark.trade == "windows" and mark.complete]
     if window_marks:
-        ys = np.array([mark.y for mark in window_marks], dtype=float)
-        y_med = float(np.median(ys))
-        band = max(10.0, 2.5 * float(np.std(ys) + 4.0))
         for part in leftovers:
             dropped = re.fullmatch(r"-([0-9]{1,2})", part["t"])
             if not dropped:
                 continue
             _, py = to_page(part["x"] + part["w"] / 2.0, part["y"] + part["h"] / 2.0)
-            if abs(py - y_med) > band:
+            if not any(abs(py - m.y) <= 15.0 for m in window_marks):
                 continue
             cx, cy = to_page(part["x"] + part["w"] / 2.0, part["y"] + part["h"] / 2.0)
             _emit_mark(
