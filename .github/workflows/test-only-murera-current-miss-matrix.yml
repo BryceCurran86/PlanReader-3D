@@ -43,7 +43,7 @@ jobs:
           source=Path("/tmp/murera.pdf"); source.write_bytes(payload)
 
           extractor=GenericPlanReaderExtractor()
-          predictions=extractor.extract_from_pdf(source)
+          predictions=extractor.extract_from_pdf(source, pages=list(range(218, 238)))
           engine=BenchmarkAccuracyEngine(
               benchmarks_dir="benchmarks/public_tenders",
               output_dir="/tmp/murera-results",
