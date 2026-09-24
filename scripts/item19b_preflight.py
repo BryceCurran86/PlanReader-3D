@@ -14,7 +14,6 @@ from pb_physical_wall_candidate_authority import (
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_vector_geometry_v130 import extract_native_page
 from pb_viewport_segmentation import assign_bbox_to_viewport, segment_page_viewports
-from pb_wall_role_authority import WallRoleProducer, WallRoleSelector
 
 PDF = Path("benchmarks/sources/1727358888238-bq-nd-drawing.pdf")
 PAGE_ID = "54"
@@ -89,10 +88,6 @@ def main():
 
     native = extract_native_page(page)
     raw = {str(s["id"]): s for s in native.get("segments") or ()}
-    role_prod = WallRoleProducer.from_source_topology(
-        physical_wall_candidate_authority=walls
-    )
-
     targets = {
         "external": (644.3074, 476.6662, 651.8647, 484.2264),
         "internal": (266.3530, 618.2343, 273.9123, 625.7916),
@@ -106,17 +101,6 @@ def main():
             hit_ids = tuple(sorted(sid for sid in source_ids if sid in raw and intersects(raw[sid], box)))
             if not hit_ids:
                 continue
-            role = role_prod.publish(
-                WallRoleSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=published.snapshot.snapshot_id,
-                    page_id=PAGE_ID,
-                    decision_scope_id=SCOPE_ID,
-                    physical_wall_id=rec.wall_candidate_id,
-                )
-            )
             touched.append({
                 "wall_id": rec.wall_candidate_id,
                 "identity_id": rec.physical_identity.candidate_identity_id,
@@ -126,9 +110,6 @@ def main():
                 "face_a": rec.wall_candidate.face_a_segment_ids,
                 "face_b": rec.wall_candidate.face_b_segment_ids,
                 "representation": rec.wall_candidate.representation,
-                "role_status": role.status.value,
-                "role": None if role.record is None else role.record.role.value,
-                "role_reasons": role.reason_codes,
             })
         print("TOUCHED", name, json.dumps(touched, default=str, sort_keys=True))
     doc.close()
