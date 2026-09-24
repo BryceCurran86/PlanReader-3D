@@ -1,0 +1,117 @@
+name: TEST-ONLY KSTVET Opening Evidence
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  kstvet-opening-evidence:
+    if: startsWith(github.head_ref, 'diag/kstvet-opening-evidence-current')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Probe SHA-pinned KSTVET opening evidence
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib, json, re, urllib.request
+          from pathlib import Path
+          import fitz
+
+          from pb_drawing_ocr_evidence_layer import DrawingOCREngine
+          from pb_plan_opening_instance_marks import extract_plan_instance_opening_totals
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          from pb_raster_schedule_extractor import GenericScheduleTableExtractor
+          from pb_viewport_segmentation import segment_page_viewports
+
+          url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          expected_sha="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-KSTVET-opening-evidence/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              payload=r.read()
+          actual=hashlib.sha256(payload).hexdigest()
+          if actual != expected_sha:
+              raise SystemExit(f"source hash mismatch: {actual}")
+          source=Path("/tmp/kstvet.pdf"); source.write_bytes(payload)
+
+          doc=fitz.open(source)
+          extractor=GenericPlanReaderExtractor()
+          pages=[53,54]
+          try:
+              drawing_pages=[
+                  p for p in pages
+                  if extractor.is_drawing_page(doc[p].get_text("text"),doc[p])
+              ]
+              schedule=GenericScheduleTableExtractor().extract_from_document(
+                  doc,pages=drawing_pages
+              )
+              opening_rows=[
+                  r.to_dict() for r in schedule
+                  if r.trade_type in ("windows","doors")
+              ]
+              totals=extract_plan_instance_opening_totals(doc,drawing_pages)
+              page_rows=[]
+              for p in drawing_pages:
+                  page=doc[p]
+                  native=page.get_text("text") or ""
+                  native_lines=[
+                      ln.strip() for ln in native.splitlines()
+                      if re.search(
+                          r"\b(?:W\s*[- ]?\d|D\s*[- ]?\d|window|door|3000|2900|1200|2100)\b",
+                          ln,re.I
+                      )
+                  ]
+                  ocr=DrawingOCREngine().recognize_page_rect(page,dpi=150)
+                  ocr_lines=[
+                      row for row in ocr
+                      if re.search(
+                          r"\b(?:W\s*[- ]?\d|D\s*[- ]?\d|window|door|3000|2900|1200|2100)\b",
+                          str(row.get("text") or ""),re.I
+                      )
+                  ]
+                  viewports=segment_page_viewports(page,page_number=p+1)
+                  page_rows.append({
+                      "page":p+1,
+                      "native_chars":len(native.strip()),
+                      "image_count":len(page.get_images() or []),
+                      "drawing_count":len(page.get_drawings() or []),
+                      "native_relevant_lines":native_lines[:160],
+                      "ocr_relevant_lines":ocr_lines[:160],
+                      "viewports":[{
+                          "view_id":v.view_id,
+                          "view_type":v.view_type,
+                          "status":v.status,
+                          "boundary_source":v.boundary_source,
+                          "bbox":list(v.bounding_box) if v.bounding_box else None,
+                          "label":v.label,
+                      } for v in viewports],
+                  })
+              out={
+                  "source_sha256":actual,
+                  "drawing_pages":[p+1 for p in drawing_pages],
+                  "schedule_opening_rows":opening_rows,
+                  "plan_totals":None if totals is None else {
+                      "window_count":totals.window_count,
+                      "door_count":totals.door_count,
+                      "window_types":list(totals.window_types),
+                      "door_types":list(totals.door_types),
+                      "source_page":totals.source_page,
+                      "evidence_text":totals.evidence_text,
+                  },
+                  "pages":page_rows,
+              }
+              print("KSTVET_OPENING_EVIDENCE="+json.dumps(out,sort_keys=True),flush=True)
+          finally:
+              doc.close()
+          PY
