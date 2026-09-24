@@ -2678,9 +2678,10 @@ class GenericPlanReaderExtractor:
                 "openings": [],
             }
 
-        # Item 35 production-authority SHADOW only. This executes the real
-        # source-visibility -> semantic-opening -> commercial-count gate on the
-        # same PDF bytes, but never mutates pred_dict or the F.9 deduction path.
+        # Item 35 source-authority execution. The authority chain remains
+        # optional for benchmark execution, but when enabled it may publish a
+        # W/D type mark only after complete-universe classification and unique
+        # schedule dimensions are independently corroborated.
         #
         # Scoped extraction passes only page addresses. The Item 35 producer
         # still owns source observations, physical-opening discovery, and
@@ -2699,6 +2700,57 @@ class GenericPlanReaderExtractor:
                 self.extraction_status["item35_authority_shadow"] = str(
                     self.item35_authority_shadow.get("status") or "abstained"
                 )
+
+                # Publish only fully source-authoritative W/D type marks that
+                # the Item35 chain resolved from a complete physical-opening
+                # universe and one unambiguous schedule size.
+                for mark, item35_mark in (
+                    self.item35_authority_shadow.get("opening_mark_predictions") or {}
+                ).items():
+                    normalized_mark = str(mark or "").strip().upper()
+                    if not normalized_mark or normalized_mark in pred_dict:
+                        continue
+                    quantity = item35_mark.get("quantity")
+                    width_mm = item35_mark.get("width_mm")
+                    height_mm = item35_mark.get("height_mm")
+                    source_pages = [
+                        int(value)
+                        for value in (item35_mark.get("source_pages") or [])
+                        if str(value).isdigit()
+                    ]
+                    trade_type = str(item35_mark.get("trade_type") or "")
+                    if (
+                        quantity is None
+                        or float(quantity) <= 0.0
+                        or width_mm is None
+                        or height_mm is None
+                        or float(width_mm) <= 0.0
+                        or float(height_mm) <= 0.0
+                        or not source_pages
+                        or trade_type not in {"windows", "doors"}
+                    ):
+                        continue
+                    pred_dict[normalized_mark] = ExtractedPrediction(
+                        tag=normalized_mark,
+                        trade_type=trade_type,
+                        description=(
+                            f"{normalized_mark} source-authenticated opening type "
+                            f"({int(quantity)} physical instances; "
+                            f"{int(width_mm)} x {int(height_mm)} mm schedule size)"
+                        ),
+                        quantity=float(quantity),
+                        unit="NO",
+                        confidence=0.96,
+                        source_page=min(source_pages),
+                        dimensions=[float(width_mm), float(height_mm)],
+                        metadata={
+                            "derivation": "item35_source_authenticated_opening_mark",
+                            "authority": item35_mark.get("authority"),
+                            "source_pages": source_pages,
+                            "physical_opening_universe_complete": True,
+                            "all_members_classified": True,
+                        },
+                    )
             except Exception as exc:
                 from pb_item35_production_authority_shadow import (
                     empty_item35_authority_shadow,

@@ -21,6 +21,7 @@ from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_opening_schedule_v171 import ScheduleEntry, detect_header, parse_schedule_rows
 from pb_opening_tag_normalization import normalize_opening_tag
 from pb_physical_opening_authority import (
+    GAP_CORROBORATED_WINDOW_JAMB_PAIR,
     PHYSICAL_OPENING_EXISTS,
     PhysicalOpeningAuthority,
 )
@@ -169,6 +170,39 @@ def _geometry_points(geometry: Sequence[float]) -> tuple[Point, ...]:
     return tuple((coords[index], coords[index + 1]) for index in range(0, len(coords), 2))
 
 
+def _bbox_iou(left: BBox, right: BBox) -> float:
+    lx0, ly0, lx1, ly1 = left
+    rx0, ry0, rx1, ry1 = right
+    ix0, iy0 = max(lx0, rx0), max(ly0, ry0)
+    ix1, iy1 = min(lx1, rx1), min(ly1, ry1)
+    intersection = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
+    if intersection <= 0.0:
+        return 0.0
+    left_area = max(0.0, lx1 - lx0) * max(0.0, ly1 - ly0)
+    right_area = max(0.0, rx1 - rx0) * max(0.0, ry1 - ry0)
+    union = left_area + right_area - intersection
+    return intersection / union if union > 0.0 else 0.0
+
+
+def _bbox_overlap_fraction_of_smaller(left: BBox, right: BBox) -> float:
+    """Fraction of the smaller observation box covered by the intersection.
+
+    Native PDF word boxes and OCR boxes often have different ascender/descender
+    extents for the same printed mark, so IoU alone can understate duplicate
+    overlap. Distinct nearby marks still score zero when their boxes do not
+    physically overlap.
+    """
+    lx0, ly0, lx1, ly1 = left
+    rx0, ry0, rx1, ry1 = right
+    ix0, iy0 = max(lx0, rx0), max(ly0, ry0)
+    ix1, iy1 = min(lx1, rx1), min(ly1, ry1)
+    intersection = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
+    left_area = max(0.0, lx1 - lx0) * max(0.0, ly1 - ly0)
+    right_area = max(0.0, rx1 - rx0) * max(0.0, ry1 - ry0)
+    smaller = min(left_area, right_area)
+    return intersection / smaller if smaller > 0.0 else 0.0
+
+
 def _line(record: SourceObservationRecord) -> Line | None:
     if len(record.geometry) != 4:
         return None
@@ -282,54 +316,92 @@ def _face_breaks(lines: Sequence[Line]) -> tuple[_FaceBreak, ...]:
     return tuple(found)
 
 
-def _opening_aperture(records: Sequence[SourceObservationRecord]) -> _OpeningAperture | None:
-    """Derive the actual jamb-bounded G17 opening aperture.
+def _opening_aperture(
+    records: Sequence[SourceObservationRecord],
+    *,
+    structural_pattern: str,
+) -> _OpeningAperture | None:
+    """Derive a source-backed jamb-bounded opening aperture.
 
-    The six G17 support segments include long wall continuations. Their overall
-    bbox is therefore not the opening. We independently recover the two matching
-    face breaks and require the two jamb segments that connect their endpoints.
+    Six-segment G17 openings are reconstructed from two matching wall-face
+    breaks and two closing jambs. The independently proven four-segment
+    gap+window-jamb path has one wall-face break plus one jamb at each gap
+    endpoint; those four source points also define a complete aperture.
+
+    Three-segment door candidates remain unsupported here because one jamb/leaf
+    does not independently define the opposite aperture depth.
     """
     lines = tuple(line for record in records if (line := _line(record)) is not None)
-    if len(lines) != len(records) or len(lines) != 6:
+    if len(lines) != len(records):
         return None
 
     candidates: list[_OpeningAperture] = []
-    breaks = _face_breaks(lines)
-    for index, first in enumerate(breaks):
-        for second in breaks[index + 1 :]:
-            if abs(abs(_dot(first.axis, second.axis)) - 1.0) > _PARALLEL_REL_TOL:
-                continue
-            if (
-                abs(first.gap_start - second.gap_start) > _COORD_TOL
-                or abs(first.gap_end - second.gap_end) > _COORD_TOL
-            ):
-                continue
 
-            has_left_jamb = any(
-                _segment_matches(line, first.start_point, second.start_point)
-                for line in lines
-            )
-            has_right_jamb = any(
-                _segment_matches(line, first.end_point, second.end_point)
-                for line in lines
-            )
-            if not has_left_jamb or not has_right_jamb:
-                continue
+    if structural_pattern == GAP_CORROBORATED_WINDOW_JAMB_PAIR:
+        if len(lines) != 4:
+            return None
 
-            axis = first.axis
+        def _point_close(left: Point, right: Point) -> bool:
+            return (
+                abs(left[0] - right[0]) <= _COORD_TOL
+                and abs(left[1] - right[1]) <= _COORD_TOL
+            )
+
+        def _other_endpoint(line: Line, attached: Point) -> Point | None:
+            first, second = _endpoints(line)
+            if _point_close(first, attached) and not _point_close(second, attached):
+                return second
+            if _point_close(second, attached) and not _point_close(first, attached):
+                return first
+            return None
+
+        for opening_break in _face_breaks(lines):
+            axis = opening_break.axis
             normal = (-axis[1], axis[0])
-            along_values = (
-                _dot(first.start_point, axis),
-                _dot(first.end_point, axis),
-                _dot(second.start_point, axis),
-                _dot(second.end_point, axis),
+
+            def _jambs_at(point: Point) -> list[tuple[Line, Point]]:
+                found: list[tuple[Line, Point]] = []
+                for line in lines:
+                    line_axis = _canonical_unit(line)
+                    if line_axis is None:
+                        continue
+                    # The two wall continuations that create the gap are
+                    # parallel to the break axis; only non-parallel support
+                    # segments may define jamb depth.
+                    if abs(_cross(axis, line_axis)) <= _PARALLEL_REL_TOL:
+                        continue
+                    other = _other_endpoint(line, point)
+                    if other is not None:
+                        found.append((line, other))
+                return found
+
+            start_jambs = _jambs_at(opening_break.start_point)
+            end_jambs = _jambs_at(opening_break.end_point)
+            if len(start_jambs) != 1 or len(end_jambs) != 1:
+                continue
+            if start_jambs[0][0] == end_jambs[0][0]:
+                continue
+
+            far_start = start_jambs[0][1]
+            far_end = end_jambs[0][1]
+            base_normal_start = _dot(opening_break.start_point, normal)
+            base_normal_end = _dot(opening_break.end_point, normal)
+            start_depth = _dot(far_start, normal) - base_normal_start
+            end_depth = _dot(far_end, normal) - base_normal_end
+            if abs(start_depth) <= _COORD_TOL or abs(end_depth) <= _COORD_TOL:
+                continue
+            # Both jambs must project to the same side of the wall face.
+            if start_depth * end_depth <= 0.0:
+                continue
+
+            points = (
+                opening_break.start_point,
+                opening_break.end_point,
+                far_start,
+                far_end,
             )
-            normal_values = (
-                _dot(first.start_point, normal),
-                _dot(first.end_point, normal),
-                _dot(second.start_point, normal),
-                _dot(second.end_point, normal),
-            )
+            along_values = tuple(_dot(point, axis) for point in points)
+            normal_values = tuple(_dot(point, normal) for point in points)
             along_min, along_max = min(along_values), max(along_values)
             normal_min, normal_max = min(normal_values), max(normal_values)
             if (
@@ -347,6 +419,62 @@ def _opening_aperture(records: Sequence[SourceObservationRecord]) -> _OpeningApe
                     normal_max=normal_max,
                 )
             )
+    else:
+        if len(lines) != 6:
+            return None
+        breaks = _face_breaks(lines)
+        for index, first in enumerate(breaks):
+            for second in breaks[index + 1 :]:
+                if abs(abs(_dot(first.axis, second.axis)) - 1.0) > _PARALLEL_REL_TOL:
+                    continue
+                if (
+                    abs(first.gap_start - second.gap_start) > _COORD_TOL
+                    or abs(first.gap_end - second.gap_end) > _COORD_TOL
+                ):
+                    continue
+
+                has_left_jamb = any(
+                    _segment_matches(line, first.start_point, second.start_point)
+                    for line in lines
+                )
+                has_right_jamb = any(
+                    _segment_matches(line, first.end_point, second.end_point)
+                    for line in lines
+                )
+                if not has_left_jamb or not has_right_jamb:
+                    continue
+
+                axis = first.axis
+                normal = (-axis[1], axis[0])
+                along_values = (
+                    _dot(first.start_point, axis),
+                    _dot(first.end_point, axis),
+                    _dot(second.start_point, axis),
+                    _dot(second.end_point, axis),
+                )
+                normal_values = (
+                    _dot(first.start_point, normal),
+                    _dot(first.end_point, normal),
+                    _dot(second.start_point, normal),
+                    _dot(second.end_point, normal),
+                )
+                along_min, along_max = min(along_values), max(along_values)
+                normal_min, normal_max = min(normal_values), max(normal_values)
+                if (
+                    along_max - along_min <= _COORD_TOL
+                    or normal_max - normal_min <= _COORD_TOL
+                ):
+                    continue
+                candidates.append(
+                    _OpeningAperture(
+                        axis=axis,
+                        normal=normal,
+                        along_min=along_min,
+                        along_max=along_max,
+                        normal_min=normal_min,
+                        normal_max=normal_max,
+                    )
+                )
 
     unique: dict[tuple[float, ...], _OpeningAperture] = {}
     for candidate in candidates:
@@ -766,7 +894,10 @@ class ScheduleOpeningInstanceBindingProducer:
                 )
             opening_records.append(resolved.observation)
 
-        aperture = _opening_aperture(opening_records)
+        aperture = _opening_aperture(
+            opening_records,
+            structural_pattern=opening.structural_pattern,
+        )
         if aperture is None:
             return self._store(
                 key,
@@ -802,16 +933,35 @@ class ScheduleOpeningInstanceBindingProducer:
                 )
             )
 
-        contained_tags: list[tuple[str, str]] = []
+        contained_tag_candidates: list[tuple[str, str, BBox, str]] = []
         for observation_id, text, geometry in trusted_by_page.get(opening.page_id, []):
             bbox = _bbox_of_points(_geometry_points(geometry))
             if bbox is None or not _aperture_contains_bbox(aperture, bbox):
                 continue
             normalized = normalize_opening_tag(text)
             if normalized is not None:
-                contained_tags.append((observation_id, normalized.tag))
+                contained_tag_candidates.append(
+                    (observation_id, normalized.tag, bbox, "native")
+                )
 
-        if not contained_tags:
+        # OCR tags are admitted only through SourceVisibilityProducer's
+        # producer-owned, immutable-page lineage handoff.  They may classify
+        # a plan aperture, but they are never used as schedule-row text.
+        for observation in self._source_visibility_producer.authenticated_ocr_tag_observations(
+            opening.revision_id
+        ):
+            if str(observation.page_id) != str(opening.page_id):
+                continue
+            bbox = _bbox_of_points(_geometry_points(observation.geometry))
+            if bbox is None or not _aperture_contains_bbox(aperture, bbox):
+                continue
+            normalized = normalize_opening_tag(observation.raw_text)
+            if normalized is not None:
+                contained_tag_candidates.append(
+                    (observation.observation_id, normalized.tag, bbox, "ocr")
+                )
+
+        if not contained_tag_candidates:
             return self._store(
                 key,
                 _blocked(
@@ -819,7 +969,34 @@ class ScheduleOpeningInstanceBindingProducer:
                     BINDING_NO_CONTAINED_TAG,
                 ),
             )
-        if len(contained_tags) != 1:
+
+        # Native text and OCR can legitimately observe the same printed mark.
+        # Collapse only same-mark, substantially-overlapping duplicates; two
+        # spatially distinct marks or two different marks remain ambiguous.
+        deduped_tags: list[tuple[str, str, BBox, str]] = []
+        for candidate in contained_tag_candidates:
+            observation_id, mark, bbox, source_kind = candidate
+            duplicate_index = next(
+                (
+                    index
+                    for index, existing in enumerate(deduped_tags)
+                    if existing[1] == mark
+                    and (
+                        _bbox_iou(existing[2], bbox) >= 0.5
+                        or _bbox_overlap_fraction_of_smaller(existing[2], bbox) >= 0.7
+                    )
+                ),
+                None,
+            )
+            if duplicate_index is None:
+                deduped_tags.append(candidate)
+                continue
+            # Prefer the independently text-integrity-receipted native word
+            # when both native and OCR describe the same physical mark.
+            if deduped_tags[duplicate_index][3] == "ocr" and source_kind == "native":
+                deduped_tags[duplicate_index] = candidate
+
+        if len(deduped_tags) != 1:
             return self._store(
                 key,
                 _blocked(
@@ -827,7 +1004,7 @@ class ScheduleOpeningInstanceBindingProducer:
                     BINDING_AMBIGUOUS_TAGS,
                 ),
             )
-        tag_observation_id, tag_mark = contained_tags[0]
+        tag_observation_id, tag_mark, _tag_bbox, _tag_source = deduped_tags[0]
 
         discovered: dict[
             tuple[str, tuple[str, ...]],
