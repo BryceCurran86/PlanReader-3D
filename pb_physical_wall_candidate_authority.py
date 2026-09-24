@@ -45,7 +45,11 @@ from pb_source_visibility_authority import (
     classify_native_segment_visibility,
 )
 from pb_vector_geometry_v130 import extract_native_page
-from pb_viewport_segmentation import (\n    ViewportSegmentationStatus,\n    is_authoritative_derived_viewport,\n    segment_page_viewports,\n)
+from pb_viewport_segmentation import (
+    ViewportSegmentationStatus,
+    is_authoritative_derived_viewport,
+    segment_page_viewports,
+)
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 from pb_wall_room_topology_junction_classifier import classify_junctions
 from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
