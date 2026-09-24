@@ -64,8 +64,18 @@ jobs:
               for pno in range(218,238):
                   page=doc[pno]
                   txt=page.get_text("text") or ""
-                  parsed=ex.parse_dimensions(txt)
-                  dims=[d.value_m for d in parsed]
+                  import re
+                  clean_lines=[ln for ln in txt.splitlines() if not any(k in ln.upper() for k in ("P.O. BOX","P.O BOX","PO BOX","P O BOX","TEL:","FAX:","EMAIL:","BOX 100727","BOX 9656"))]
+                  filtered="\n".join(
+                      ln for ln in clean_lines
+                      if not re.search(r"version\s*\d+[\.\d]+",ln,re.I)
+                      and not re.search(r"GSPublisher",ln,re.I)
+                  )
+                  dims=[]
+                  for major,minor in re.findall(r"\b(\d{1,2})[,.]?(\d{3})\b",filtered):
+                      val=float(major)+float(minor)/1000.0
+                      if 2.0 <= val <= 35.0:
+                          dims.append(round(val,3))
                   env=ex._detect_outer_envelope(dims,None,False)
                   page_summaries.append({
                       "page":pno+1,
