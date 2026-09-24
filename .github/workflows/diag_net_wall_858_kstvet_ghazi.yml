@@ -1,0 +1,61 @@
+name: TEST-ONLY Net Wall 858 KSTVET Ghazi
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  net-wall-real-source:
+    if: startsWith(github.head_ref, 'diag/net-wall-858-kstvet-ghazi')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13", cache: pip}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Probe exact 858 live wall authority on real drawing pages
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+
+          cases=[
+            {
+              "name":"kstvet",
+              "url":"https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf",
+              "sha":"6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              "pages":[53],
+            },
+            {
+              "name":"ghazi",
+              "url":"https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf",
+              "sha":"c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f",
+              "pages":[166],
+            },
+          ]
+          out={}
+          for case in cases:
+              p=Path("/tmp")/(case["name"]+".pdf")
+              req=urllib.request.Request(case["url"],headers={"User-Agent":"PlanReader-net-wall-858/1.0"})
+              with urllib.request.urlopen(req,timeout=120) as r:p.write_bytes(r.read())
+              actual=hashlib.sha256(p.read_bytes()).hexdigest()
+              if actual!=case["sha"]:raise SystemExit(f'{case["name"]}:{actual}')
+              ex=GenericPlanReaderExtractor()
+              preds=ex.extract_from_pdf(p,pages=case["pages"],collect_item35_shadow=False)
+              wall=next((x.to_dict() for x in preds if x.tag=="perimeter_walling"),None)
+              out[case["name"]]={
+                  "source_sha256":actual,
+                  "wall":wall,
+                  "physical_net_wall_live":ex.physical_net_wall_live,
+                  "live_net_wall_shadow":ex.live_net_wall_shadow,
+                  "hosted_opening_shadow":ex.hosted_opening_shadow,
+                  "opening_provenance_shadow":ex.opening_provenance_shadow,
+                  "extraction_status":ex.extraction_status,
+              }
+          print("NET_WALL_858_REAL_SOURCE="+json.dumps(out,sort_keys=True,default=str),flush=True)
+          PY
