@@ -51,7 +51,6 @@ def main():
         document_id="kstvet-item19b-preflight",
         source_bytes=payload,
         source_locator=str(PDF),
-        page_ids=(PAGE_ID,),
     )
     walls = PhysicalWallCandidateProducer.from_source_visibility_producer(
         source,
@@ -68,7 +67,10 @@ def main():
         decision_scope_id=SCOPE_ID,
     )
     scope = walls.resolve_scope(selector)
-    print("SCOPE", scope.status, "complete", scope.scope_complete, "records", len(scope.records))
+    print(
+        "SCOPE", scope.status, "complete", scope.scope_complete,
+        "records", len(scope.records), "reasons", scope.reason_codes,
+    )
     print("LINEAGE", published.revision.revision_id, published.revision.source_sha256, published.snapshot.snapshot_id)
 
     doc = fitz.open(PDF)
