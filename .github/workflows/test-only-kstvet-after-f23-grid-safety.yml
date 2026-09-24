@@ -1,0 +1,92 @@
+name: TEST-ONLY KSTVET After F23 Grid Safety
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  kstvet:
+    if: startsWith(github.head_ref, 'diag/kstvet-after-f23-grid-safety')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Run KSTVET trace and benchmark
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
+          from pb_secondary_footprint_evidence import resolve_secondary_footprint_width_m
+          import fitz
+
+          url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          expected_sha="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-KSTVET-F23-grid-safety/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              payload=r.read()
+          actual=hashlib.sha256(payload).hexdigest()
+          if actual != expected_sha:
+              raise SystemExit(actual)
+          source=Path("/tmp/kstvet.pdf"); source.write_bytes(payload)
+
+          doc=fitz.open(source)
+          try:
+              secondary=resolve_secondary_footprint_width_m(doc[53],page_num=54)
+          finally:
+              doc.close()
+
+          ex=GenericPlanReaderExtractor()
+          preds=ex.extract_from_pdf(source,collect_item35_shadow=False)
+          focus=[
+              {
+                  "tag":p.tag,"quantity":p.quantity,"dimensions":p.dimensions,
+                  "source_page":p.source_page,"metadata":p.metadata
+              }
+              for p in preds
+              if p.tag in {
+                  "floor_screed","substructure_surface_bed","perimeter_walling",
+                  "internal_plaster","internal_paint","verandah_pillars","D1","W1","W2"
+              }
+          ]
+          print("KSTVET_F23_GRID_SAFETY_TRACE="+json.dumps({
+              "candidate_sha":"7b2fb40ac40f9fa18a1d9eafbf5d16608a09dc39",
+              "source_sha256":actual,
+              "secondary_f23":secondary.__dict__ if secondary else None,
+              "hosted_opening_status":ex.hosted_opening_shadow.get("status"),
+              "hosted_opening_reason":ex.hosted_opening_shadow.get("reason"),
+              "hosted_evidence_count":len(ex.hosted_opening_shadow.get("evidence") or []),
+              "opening_provenance_status":ex.opening_provenance_shadow.get("status"),
+              "physical_opening_count":len(ex.opening_provenance_shadow.get("physical_openings") or []),
+              "focus_predictions":focus,
+          },sort_keys=True,default=str),flush=True)
+
+          report=BenchmarkAccuracyEngine(
+              benchmarks_dir="benchmarks/public_tenders",
+              output_dir="/tmp/kstvet-f23-grid-safety",
+          ).evaluate_benchmark(
+              benchmark_id="tenders_ke_kstvet_cbc_classroom",
+              pdf_path=source,
+              auto_extract=True,
+          )
+          print("KSTVET_F23_GRID_SAFETY_BENCHMARK="+json.dumps({
+              "accepted":int(report.exact_matches+report.within_5_percent),
+              "denominator":int(report.total_items_compared),
+              "accuracy_percentage":report.overall_accuracy_percentage,
+              "strict_exact_percentage":report.strict_exact_accuracy_percentage,
+              "hallucinated":int(report.hallucinated_items),
+              "items":[item.to_dict() for item in report.item_results],
+          },sort_keys=True),flush=True)
+          PY
