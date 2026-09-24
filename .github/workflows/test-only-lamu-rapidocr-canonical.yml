@@ -121,3 +121,38 @@ jobs:
 
           /usr/bin/time -v env PYTHONPATH=. python /tmp/lamu_rapidocr_canonical.py             2> /tmp/lamu_rapidocr_time.txt | tee /tmp/lamu_rapidocr_result.txt
           cat /tmp/lamu_rapidocr_time.txt
+
+
+      - name: Measure isolated RapidOCR worker memory on Lamu page 44
+        run: |
+          set -euo pipefail
+          cat > /tmp/rapidocr_worker.py <<'PY'
+          from __future__ import annotations
+          import json
+          from pathlib import Path
+
+          import fitz
+          from PIL import Image
+          from rapidocr import RapidOCR
+
+          source = Path("/tmp/lamu.pdf")
+          doc = fitz.open(source)
+          try:
+              page = doc[43]
+              pix = page.get_pixmap(dpi=220, alpha=False)
+              image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+          finally:
+              doc.close()
+
+          engine = RapidOCR()
+          result = engine(image)
+          rows = []
+          if result is not None and getattr(result, "txts", None):
+              for text, score in zip(result.txts, result.scores):
+                  s = str(text or "").strip()
+                  if any(k in s.lower() for k in ("poly", "a142", "mesh", "hardcore", "slab")):
+                      rows.append({"text": s, "score": float(score)})
+          print("RAPIDOCR_WORKER_RESULT=" + json.dumps(rows, sort_keys=True), flush=True)
+          PY
+          /usr/bin/time -v env PYTHONPATH=. python /tmp/rapidocr_worker.py             2> /tmp/rapidocr_worker_time.txt | tee /tmp/rapidocr_worker_result.txt
+          cat /tmp/rapidocr_worker_time.txt
