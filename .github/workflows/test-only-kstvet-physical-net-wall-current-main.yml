@@ -1,0 +1,63 @@
+name: TEST-ONLY KSTVET Physical Net Wall Current Main
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  kstvet-physical-net-wall:
+    if: startsWith(github.head_ref, 'diag/kstvet-physical-net-wall-current-main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Run source-owned physical net-wall chain on KSTVET
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib, json, urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          expected="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          path=Path("/tmp/kstvet.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-KSTVET-physical-net-wall-current-main/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              path.write_bytes(r.read())
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(f"source hash mismatch: {actual}")
+
+          doc=fitz.open(path)
+          try:
+              pages=[i for i in range(len(doc)) if i in (53,54)]
+          finally:
+              doc.close()
+
+          claim=collect_live_physical_net_wall_claim(path,pages=pages)
+          payload={
+              "source_sha256":actual,
+              "production_base_sha":"65bbdb077333e376e2c0ee0cb6dd002afa28197c",
+              "status":claim.status.value,
+              "reason_codes":list(claim.reason_codes),
+              "quantity_m2":claim.quantity_m2,
+              "source_pages":list(claim.source_pages),
+              "external_wall_ids":list(claim.external_wall_ids),
+              "evidence_ids":list(claim.evidence_ids),
+              "quantity_id":claim.quantity_id,
+              "confidence":claim.confidence,
+          }
+          print("KSTVET_PHYSICAL_NET_WALL_CURRENT_MAIN="+json.dumps(payload,sort_keys=True),flush=True)
+          PY
