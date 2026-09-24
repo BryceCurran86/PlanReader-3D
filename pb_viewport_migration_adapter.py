@@ -215,14 +215,15 @@ def adapt_f07_viewport_to_migration(
         if not is_segment_page_viewports_product(viewport):
             reasons.append(f"{F07_VIEWPORT_PRODUCER_LINEAGE_INVALID}:{viewport.view_id}")
 
-    if not validate_non_overlapping_viewports(rows):
-        reasons.append(F07_VIEWPORT_SIBLING_OVERLAP)
-
     if target.bounding_box is None:
         reasons.append("viewport_bbox_missing")
     if target.status == ViewportSegmentationStatus.RESOLVED.value:
+        # Preserve the pre-existing RESOLVED contract. The stricter sibling
+        # non-overlap proof is the additional gate for DERIVED authority only.
         pass
     elif target.status == ViewportSegmentationStatus.DERIVED.value:
+        if not validate_non_overlapping_viewports(rows):
+            reasons.append(F07_VIEWPORT_SIBLING_OVERLAP)
         if not is_authoritative_derived_viewport(target):
             reasons.append(F07_VIEWPORT_NOT_AUTHORITATIVE)
     else:
