@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - gpt/item19b-direct-finish-face-binding
+  pull_request:
+    branches:
+      - main
 
 jobs:
   kstvet-shadow:
