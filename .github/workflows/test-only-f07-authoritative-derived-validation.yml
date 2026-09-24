@@ -1,0 +1,244 @@
+name: TEST-ONLY F07 Authoritative Derived Validation
+on:
+  pull_request:
+    branches: [shadow/f07-authoritative-derived-migration-ownership]
+
+jobs:
+  focused:
+    if: startsWith(github.head_ref, 'diag/f07-authoritative-derived-real-validation')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: |
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+      - name: Focused ownership and scale shadow tests
+        run: |
+          python -m pytest -q \
+            tests/test_f07_viewport_migration_adapter.py \
+            tests/test_figured_span_scale_shadow.py \
+            tests/benchmarks/test_mutation_viewport_segmentation.py \
+            tests/test_viewport_scale_binding.py \
+            tests/test_migration_contracts.py
+
+  real-shadow:
+    if: startsWith(github.head_ref, 'diag/f07-authoritative-derived-real-validation')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r requirements.txt
+      - name: KSTVET and Lamu F07 ownership plus figured-span validation
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          import urllib.request
+
+          import fitz
+
+          from pb_figured_dimension_evidence import BindingStatus
+          from pb_figured_span_scale_shadow import (
+              build_figured_span_scale_calibration_shadow,
+              FiguredSpanScaleScope,
+              resolve_figured_span_scale_shadow,
+          )
+          from pb_migration_contracts import EvidenceResolutionStatus, ViewportResolutionStatus
+          from pb_migration_provider_envelope import ProviderContext
+          from pb_viewport_dimension_binding import extract_dimension_evidence_by_viewport
+          from pb_viewport_migration_adapter import adapt_f07_viewport_to_migration
+          from pb_viewport_segmentation import (
+              is_authoritative_derived_viewport,
+              segment_page_viewports,
+          )
+
+          SOURCES = (
+              {
+                  "name": "KSTVET",
+                  "url": "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf",
+                  "sha256": "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+                  "page_no": 54,
+              },
+              {
+                  "name": "LAMU",
+                  "url": "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf",
+                  "sha256": "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2",
+                  "page_no": 41,
+              },
+          )
+
+          def download(url):
+              req = urllib.request.Request(
+                  url,
+                  headers={"User-Agent": "PlanReader-F07-authoritative-derived-shadow/1.0"},
+              )
+              with urllib.request.urlopen(req, timeout=120) as response:
+                  return response.read()
+
+          def enum_value(value):
+              return value.value if hasattr(value, "value") else str(value)
+
+          reports = []
+          for source in SOURCES:
+              payload = download(source["url"])
+              got = hashlib.sha256(payload).hexdigest()
+              if got != source["sha256"]:
+                  raise SystemExit(f'{source["name"]} SHA mismatch: {got}')
+
+              page_no = int(source["page_no"])
+              revision = "sha256:" + got
+              document_id = "source:" + got[:24]
+              doc = fitz.open(stream=payload, filetype="pdf")
+              try:
+                  page = doc[page_no - 1]
+                  viewports = segment_page_viewports(page, page_number=page_no)
+                  dimension_evidence = extract_dimension_evidence_by_viewport(
+                      page,
+                      page_num=page_no,
+                      viewports=viewports,
+                      sheet="",
+                      allow_derived=True,
+                  )
+                  owned_ids = tuple(viewport.view_id for viewport in viewports)
+                  context = ProviderContext(
+                      run_id="f07-real-" + source["name"].lower(),
+                      workspace_id="real-shadow",
+                      project_id="real-shadow",
+                      document_id=document_id,
+                      source_sha256=got,
+                      revision_id=revision,
+                      current_revision_id=revision,
+                      selected_pages=(page_no - 1,),
+                      owned_viewport_ids=owned_ids,
+                      evidence_snapshot_id="f07-native-vector-shadow",
+                      owned_page_numbers=(page_no,),
+                      viewport_page_ownership=tuple(
+                          (viewport_id, page_no) for viewport_id in owned_ids
+                      ),
+                  )
+
+                  rows = []
+                  for segmented in viewports:
+                      bundle = dimension_evidence.bundles.get(segmented.view_id)
+                      witness_bound = 0
+                      total = 0
+                      if bundle is not None:
+                          total = len(bundle.observations)
+                          statuses = {}
+                          for binding in bundle.bindings:
+                              statuses.setdefault(binding.observation_id, []).append(binding.status)
+                          witness_bound = sum(
+                              1
+                              for observation in bundle.observations
+                              if BindingStatus.WITNESS_BOUND.value
+                              in statuses.get(observation.dimension_id, [])
+                          )
+
+                      adapter = adapt_f07_viewport_to_migration(
+                          viewports,
+                          viewport_id=segmented.view_id,
+                          context=context,
+                          page_no=page_no,
+                      )
+                      row = {
+                          "view_id": segmented.view_id,
+                          "type": segmented.view_type,
+                          "label": segmented.label,
+                          "status": segmented.status,
+                          "boundary_source": segmented.boundary_source,
+                          "partition_mode": segmented.provenance.get("partition_mode"),
+                          "grid_validated": segmented.provenance.get("grid_validated"),
+                          "column_index": segmented.provenance.get("column_index"),
+                          "column_count": segmented.provenance.get("column_count"),
+                          "row_index": segmented.provenance.get("row_index"),
+                          "row_count": segmented.provenance.get("row_count"),
+                          "title_bbox": segmented.provenance.get("title_bbox"),
+                          "duplicate_title_bboxes": segmented.provenance.get("duplicate_title_bboxes"),
+                          "authoritative_derived": is_authoritative_derived_viewport(segmented),
+                          "figured_observation_count": total,
+                          "witness_bound_count": witness_bound,
+                          "migration_adapter_abstained": adapter.abstained,
+                          "migration_blockers": list(adapter.blocking_reasons),
+                          "scale_candidates": [],
+                          "scale_candidate_count": 0,
+                          "reconciliation_result": None,
+                          "physical_scale_status": "not_run",
+                          "canonical_scale_status": None,
+                          "canonical_measurement_authority": None,
+                          "conflicts": [],
+                      }
+
+                      if not adapter.abstained and adapter.viewport is not None and bundle is not None:
+                          proof = (
+                              adapter.ownership_proof
+                              if adapter.viewport.status is ViewportResolutionStatus.DERIVED
+                              else None
+                          )
+                          scope = FiguredSpanScaleScope(
+                              document_id=document_id,
+                              revision_id=revision,
+                              source_sha256=got,
+                              page_no=page_no,
+                              viewport_id=segmented.view_id,
+                          )
+                          physical = resolve_figured_span_scale_shadow(
+                              bundle,
+                              scope=scope,
+                              context=context,
+                              viewport=adapter.viewport,
+                              viewport_ownership_proof=proof,
+                          )
+                          row["physical_scale_status"] = enum_value(physical.status)
+                          row["reconciliation_result"] = physical.reconciliation_status
+                          row["scale_candidate_count"] = len(physical.candidates)
+                          row["scale_candidates"] = [
+                              {
+                                  "observation_id": candidate.observation_id,
+                                  "raw_text": candidate.raw_text,
+                                  "native_span_pt": candidate.source_span_pt,
+                                  "physical_span_mm": candidate.physical_span_mm,
+                                  "points_per_mm": candidate.points_per_mm,
+                                  "points_per_m": (
+                                      None
+                                      if candidate.points_per_mm is None
+                                      else candidate.points_per_mm * 1000.0
+                                  ),
+                                  "independence_group_id": candidate.independence_group_id,
+                              }
+                              for candidate in physical.candidates
+                          ]
+                          row["conflicts"] = list(physical.reconciliation_issues)
+                          bridge = build_figured_span_scale_calibration_shadow(
+                              physical_scale_result=physical,
+                              scope=scope,
+                              context=context,
+                              viewport=adapter.viewport,
+                              viewport_ownership_proof=proof,
+                          )
+                          row["canonical_measurement_authority"] = bridge.measurement_authority
+                          if bridge.calibration is not None:
+                              row["canonical_scale_status"] = bridge.calibration.status
+
+                      rows.append(row)
+
+                  reports.append(
+                      {
+                          "source": source["name"],
+                          "source_sha256": got,
+                          "page_no": page_no,
+                          "viewports": rows,
+                      }
+                  )
+              finally:
+                  doc.close()
+
+          print("F07_AUTHORITATIVE_DERIVED_REAL_SHADOW=" + json.dumps(reports, sort_keys=True, default=str))
+          PY
