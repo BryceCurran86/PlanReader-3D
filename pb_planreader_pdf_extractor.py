@@ -827,7 +827,7 @@ class GenericPlanReaderExtractor:
         global_roof_pitch_deg: Optional[float] = None
         global_has_dpc = False
         global_has_dpm = False
-        global_has_mesh = False
+        mesh_evidence_pages: set[int] = set()
         global_has_surface_bed = False
         global_level_markers: List[Any] = []  # List[LevelMarker], imported lazily below
         global_dimension_chains: List[Any] = []  # List[DimensionChain], imported lazily below
@@ -900,7 +900,13 @@ class GenericPlanReaderExtractor:
             if self._has_dpm_specification(norm_pg):
                 global_has_dpm = True
             if "mesh a142" in norm_pg or "b.r.c" in norm_pg or "a142" in norm_pg:
-                global_has_mesh = True
+                # Mesh reinforcement is component-specific structural evidence.
+                # Record the source page instead of promoting a package-wide flag:
+                # an A142/BRC note on an unrelated detail sheet must not silently
+                # bind to whichever floor envelope happens to be reconstructed on
+                # another page. Cross-sheet promotion requires an explicit binding
+                # authority; until then this path fails closed to same-page evidence.
+                mesh_evidence_pages.add(p_idx + 1)
             if self._has_surface_bed_specification(norm_pg):
                 global_has_surface_bed = True
 
@@ -1757,7 +1763,7 @@ class GenericPlanReaderExtractor:
                         sheet_number=sheet_no,
                         metadata=flr_meta,
                     )
-                if global_has_mesh and self._should_replace_slab_bound_quantity(
+                if page_num in mesh_evidence_pages and self._should_replace_slab_bound_quantity(
                     pred_dict.get("substructure_a142_mesh"),
                     bed_area_for_substructure_m2,
                     flr_meta,
