@@ -1,0 +1,58 @@
+name: TEST-ONLY Ghazi Wall Finish Current Main E430
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ghazi-wall-finish:
+    if: startsWith(github.head_ref, 'diag/ghazi-wall-finish-current-main-e430')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Trace current Ghazi wall and finish publication blockers
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+
+          url="https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf"
+          expected="c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f"
+          p=Path("/tmp/ghazi.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Ghazi-wall-finish-e430/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r: p.write_bytes(r.read())
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          if actual!=expected: raise SystemExit(actual)
+
+          ex=GenericPlanReaderExtractor()
+          preds=ex.extract_from_pdf(p,pages=[166],collect_item35_shadow=False)
+          focus=[]
+          for x in preds:
+              if (
+                  x.trade_type in {"walls","finishes"}
+                  or x.tag in {"perimeter_walling","gable_walling","internal_plaster","internal_paint","external_key_pointing","external_render"}
+              ):
+                  focus.append(x.to_dict())
+          out={
+              "production_sha":"e430fde9f8e0b6a47a6be2d02d7dafee397dcd8f",
+              "source_sha256":actual,
+              "focus_predictions":focus,
+              "extraction_status":ex.extraction_status,
+              "live_net_wall_shadow":ex.live_net_wall_shadow,
+              "opening_authority_shadow":ex.opening_authority_shadow,
+              "opening_provenance_shadow":ex.opening_provenance_shadow,
+              "hosted_opening_shadow":ex.hosted_opening_shadow,
+          }
+          print("GHAZI_WALL_FINISH_CURRENT_MAIN_E430="+json.dumps(out,sort_keys=True,default=str),flush=True)
+          PY
