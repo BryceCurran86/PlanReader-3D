@@ -103,11 +103,23 @@ jobs:
               }
 
           reports = []
-          sibling_summary = []
 
-          for viewport in viewports:
+          # Reuse the same producer-owned page observations for both exact targets.
+          observation_selector = PhysicalScaleSelector(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              page_id=str(PAGE_NO),
+              viewport_id=TARGETS[0],
+          )
+          page_words = producer._trusted_words(observation_selector, published)
+          page_segments = producer._visible_segments(observation_selector, published)
+
+          for viewport_id in TARGETS:
+              viewport = by_id[viewport_id]
               if viewport.bounding_box is None:
-                  continue
+                  raise SystemExit(f"{viewport_id} missing bbox")
               selector = PhysicalScaleSelector(
                   document_id=published.revision.document_id,
                   revision_id=published.revision.revision_id,
@@ -116,10 +128,8 @@ jobs:
                   page_id=str(PAGE_NO),
                   viewport_id=viewport.view_id,
               )
-              native_words = producer._trusted_words(selector, published)
-              native_segments = producer._visible_segments(selector, published)
-              scoped_words = _scope_words(native_words, viewport.bounding_box)
-              scoped_segments = _scope_segments(native_segments, viewport.bounding_box)
+              scoped_words = _scope_words(page_words, viewport.bounding_box)
+              scoped_segments = _scope_segments(page_segments, viewport.bounding_box)
               bars = _bar_candidates(scoped_segments, scoped_words)
               physical_words = [
                   word_row(word) for word in scoped_words
@@ -186,23 +196,6 @@ jobs:
                   if len(left_ticks) == 1 and len(right_ticks) == 1:
                       geometry_qualified.append(row)
 
-              sibling_summary.append(
-                  {
-                      "view_id": viewport.view_id,
-                      "label": viewport.label,
-                      "status": viewport.status,
-                      "authoritative_derived": is_authoritative_derived_viewport(viewport),
-                      "bbox": bbox(viewport.bounding_box),
-                      "native_bar_candidate_count": len(bars),
-                      "physical_label_count": len(physical_words),
-                      "zero_label_count": len(zero_words),
-                      "ratio_text_count": len(ratio_words),
-                  }
-              )
-
-              if viewport.view_id not in TARGETS:
-                  continue
-
               authority_result = producer.publish_scope(selector)
               evidence = authority_result.evidence
 
@@ -264,7 +257,6 @@ jobs:
               "snapshot_id": published.snapshot.snapshot_id,
               "decoded_pages": list(published.coverage.decoded_pages),
               "targets": reports,
-              "page54_sibling_diagnostic": sibling_summary,
           }
           print("KSTVET_P54_NATIVE_SCALE_BAR_AUDIT=" + json.dumps(output, sort_keys=True, default=str))
           doc.close()
