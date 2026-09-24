@@ -69,3 +69,29 @@ def test_memory_bounded_ocr_dpi_reduces_large_sheet_pixel_area() -> None:
     assert 60 <= dpi < 120
     raster_pixels = 1684.0 * 2384.0 * (dpi / 72.0) ** 2
     assert raster_pixels <= 3_100_000
+
+
+def test_ocr_fallback_has_bounded_page_budget(monkeypatch) -> None:
+    calls: list[int] = []
+
+    def fake_recognize_page_rect(self, page, clip_rect=None, dpi=150):
+        calls.append(int(dpi))
+        return [{"text": "OCR EVIDENCE"}]
+
+    monkeypatch.setattr(
+        DrawingOCREngine,
+        "recognize_page_rect",
+        fake_recognize_page_rect,
+    )
+
+    extractor = GenericPlanReaderExtractor()
+    texts = [
+        extractor._ocr_text_for_page(object(), page_index)
+        for page_index in range(10)
+    ]
+
+    assert texts[:8] == ["OCR EVIDENCE"] * 8
+    assert texts[8:] == ["", ""]
+    assert len(calls) == 8
+    assert extractor._ocr_text_for_page(object(), 0) == "OCR EVIDENCE"
+    assert len(calls) == 8
