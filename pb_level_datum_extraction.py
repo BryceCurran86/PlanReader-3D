@@ -91,6 +91,55 @@ def find_level_markers(
     markers: List[LevelMarker] = []
     seq = 0
 
+    # Some CAD/PDF exports print a signed datum before its label, and may
+    # split one annotation across two adjacent text lines, e.g.
+    # "+3000 ROOF" / "LEVEL". Accept this reverse convention only when
+    # the complete one-line or adjacent-two-line candidate FULL-MATCHES one
+    # signed value plus one recognized level label. For a wrapped pair the
+    # first line must already contain the signed value plus at least the first
+    # label token; this prevents an unrelated standalone dimension on the
+    # previous line from being attached to a following level label.
+    raw_lines = [
+        re.sub(r"\s+", " ", raw_line).strip()
+        for raw_line in page_text.splitlines()
+        if re.sub(r"\s+", " ", raw_line).strip()
+    ]
+    reverse_candidates: List[str] = []
+    for index, line in enumerate(raw_lines):
+        reverse_candidates.append(line)
+        if (
+            index + 1 < len(raw_lines)
+            and re.match(r"^[+\-](?:\d{1,4}|\d{1,3},\d{3})\s+[A-Za-z]", line)
+        ):
+            reverse_candidates.append(f"{line} {raw_lines[index + 1]}")
+
+    seen_reverse: set[Tuple[str, float, str]] = set()
+    for candidate in reverse_candidates:
+        for marker_type, label_patterns in _LEVEL_LABELS.items():
+            for label_pat in label_patterns:
+                reverse = re.fullmatch(
+                    rf"{_LEVEL_VALUE}\s*:?\s*{label_pat}",
+                    candidate,
+                    re.I,
+                )
+                if reverse is None:
+                    continue
+                level_m = _parse_level_value_m(reverse.group(1))
+                dedupe_key = (marker_type, level_m, candidate.casefold())
+                if dedupe_key in seen_reverse:
+                    continue
+                seen_reverse.add(dedupe_key)
+                markers.append(LevelMarker(
+                    marker_id=f"level_p{source_page}_{marker_type}_{seq}",
+                    level_m=level_m,
+                    raw_text=candidate,
+                    marker_type=marker_type,
+                    view_id=view_id,
+                    source_page=source_page,
+                    scope_id=None,
+                ))
+                seq += 1
+
     for marker_type, label_patterns in _LEVEL_LABELS.items():
         for label_pat in label_patterns:
             # Only ":" is an optional label/value separator -- "-" is not,
