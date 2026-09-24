@@ -1,0 +1,33 @@
+name: Item19B implementation validation
+
+on:
+  push:
+    branches:
+      - gpt/item19b-direct-finish-binding-v3
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Targeted synthetic proof
+        run: |
+          python -m compileall -q pb_wall_finish_face_binding_authority.py tests/test_wall_finish_face_binding_authority_v1.py
+          ruff check --select F821,F823 pb_wall_finish_face_binding_authority.py tests/test_wall_finish_face_binding_authority_v1.py
+          PYTHONPATH=. pytest -q tests/test_wall_finish_face_binding_authority_v1.py
+      - name: Download verified KSTVET source
+        run: |
+          mkdir -p benchmarks/sources
+          curl -fL --retry 3 -o benchmarks/sources/1727358888238-bq-nd-drawing.pdf \
+            https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf
+          echo "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/1727358888238-bq-nd-drawing.pdf" | sha256sum -c -
+      - name: Real KSTVET page-54 shadow validation
+        run: PYTHONPATH=. python scripts/item19b_kstvet_shadow_validate.py
