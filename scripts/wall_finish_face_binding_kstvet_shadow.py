@@ -19,6 +19,7 @@ from pb_wall_finish_face_binding_authority import (
     WallFinishFaceBindingProducer,
     _authoritative_viewports,
     _filled_terminators,
+    _finish_semantics,
     _leader_paths,
     _page_visible_lines,
     _trusted_finish_blocks,
@@ -58,7 +59,39 @@ def run(pdf_path: Path) -> list[dict]:
         blocks = _trusted_finish_blocks(source, published, PAGE_ID)
         viewports = _authoritative_viewports(page, int(PAGE_ID))
         lines = _page_visible_lines(source, published, PAGE_ID)
+        raw_blocks: dict[int, list[tuple[int, str]]] = {}
+        for word in page.get_text("words") or ():
+            if len(word) < 8:
+                continue
+            block_no = int(word[5])
+            line_no = int(word[6])
+            word_no = int(word[7])
+            raw_blocks.setdefault(block_no, []).append(
+                (line_no * 10000 + word_no, str(word[4] or ""))
+            )
+        raw_semantic_finish_blocks = []
+        for block_no, items in sorted(raw_blocks.items()):
+            raw_text = " ".join(text for _, text in sorted(items))
+            semantics = _finish_semantics(raw_text)
+            if semantics:
+                raw_semantic_finish_blocks.append(
+                    {
+                        "block_no": block_no,
+                        "text": raw_text,
+                        "semantics": [
+                            {
+                                "trade_scope_id": semantic.trade_scope_id,
+                                "finish_material": semantic.finish_material,
+                                "direction": semantic.direction,
+                            }
+                            for semantic in semantics
+                        ],
+                        "authority": "diagnostic_raw_native_text_only",
+                    }
+                )
+
         preflight = {
+            "raw_semantic_finish_blocks_diagnostic": raw_semantic_finish_blocks,
             "trusted_finish_blocks": [
                 {
                     "text": text,
@@ -187,11 +220,23 @@ def main() -> None:
     rows = run(Path(sys.argv[1]))
     print(json.dumps(rows, indent=2, sort_keys=True))
     direct = [row for row in rows if not row.get("scope_record")]
-    real_source_status = (
-        "CORROBORATED"
-        if direct
-        else "FINISH_BINDING_SOURCE_PRESENT_GEOMETRY_PENDING"
+    raw_semantic_count = len(
+        preflight.get("raw_semantic_finish_blocks_diagnostic", ())
     )
+    trusted_semantic_count = len(preflight.get("trusted_finish_blocks", ()))
+    leader_path_count = sum(
+        len(item.get("leader_paths", ()))
+        for item in preflight.get("callout_preflight", ())
+    )
+    if direct:
+        real_source_status = "CORROBORATED"
+    elif raw_semantic_count and not trusted_semantic_count:
+        real_source_status = "FINISH_BINDING_SOURCE_PRESENT_TEXT_AUTHORITY_PENDING"
+    elif trusted_semantic_count and not leader_path_count:
+        real_source_status = "FINISH_BINDING_SOURCE_PRESENT_GEOMETRY_PENDING"
+    else:
+        real_source_status = "FINISH_BINDING_SOURCE_PRESENT_DOWNSTREAM_AUTHORITY_PENDING"
+
     print(
         "ITEM19B_REAL_SOURCE_STATUS "
         + json.dumps(
@@ -199,6 +244,9 @@ def main() -> None:
                 "page_id": PAGE_ID,
                 "status": real_source_status,
                 "accepted_direct_binding_count": len(direct),
+                "raw_semantic_finish_block_count_diagnostic": raw_semantic_count,
+                "trusted_semantic_finish_block_count": trusted_semantic_count,
+                "leader_path_count": leader_path_count,
             },
             sort_keys=True,
         ),
