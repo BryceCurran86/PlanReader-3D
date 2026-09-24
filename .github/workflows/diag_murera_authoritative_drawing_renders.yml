@@ -1,0 +1,45 @@
+name: TEST-ONLY Murera Authoritative Drawing Renders
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  renders:
+    if: startsWith(github.head_ref, 'diag/murera-authoritative-drawing-renders')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install PyMuPDF==1.28.0
+      - name: Render verified Murera drawing pages 219-226
+        run: |
+          python - <<'PY'
+          import hashlib,urllib.request
+          from pathlib import Path
+          import fitz
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          want="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          p=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-authoritative-renders/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:p.write_bytes(r.read())
+          got=hashlib.sha256(p.read_bytes()).hexdigest()
+          if got!=want:raise SystemExit(got)
+
+          out=Path("/tmp/murera-renders");out.mkdir()
+          doc=fitz.open(p)
+          for page_no in range(219,227):
+              page=doc[page_no-1]
+              pix=page.get_pixmap(matrix=fitz.Matrix(2.0,2.0),alpha=False)
+              pix.save(out/f"page-{page_no}.png")
+          doc.close()
+          PY
+      - name: Upload verified drawing renders
+        uses: actions/upload-artifact@v4
+        with:
+          name: murera-pages-219-226
+          path: /tmp/murera-renders/*.png
+          if-no-files-found: error
