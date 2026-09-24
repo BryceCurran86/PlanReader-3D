@@ -1,0 +1,86 @@
+name: TEST-ONLY Lamu DPC Wall Pair F07
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  summary-f07:
+    if: startsWith(github.head_ref, 'diag/lamu-dpc-internal-wall-census')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install PyMuPDF
+      - run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_wall_fill_internal_partition_evidence import resolve_internal_partition_length_m
+          from pb_viewport_segmentation import segment_page_viewports
+          u="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          want="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          p=Path("/tmp/lamu.pdf")
+          with urllib.request.urlopen(urllib.request.Request(u,headers={"User-Agent":"PlanReader-Lamu-DPC-F07"}),timeout=120) as r:p.write_bytes(r.read())
+          got=hashlib.sha256(p.read_bytes()).hexdigest()
+          if got!=want: raise SystemExit(got)
+          d=fitz.open(p); page=d[40]; drawings=page.get_drawings() or []
+          vps=segment_page_viewports(page,page_number=41)
+          fp=[v for v in vps if v.view_type=="floor_plan" and v.status=="resolved" and v.bounding_box]
+          if len(fp)!=1: raise SystemExit(f"floor plan viewport count={len(fp)}")
+          vx0,vy0,vx1,vy1=map(float,fp[0].bounding_box)
+          cur=resolve_internal_partition_length_m(drawings,length_m=16.0,width_m=8.2,page=page)
+          scale=float(cur.scale_pt_per_m or 0); thick=float(cur.wall_thickness_m or 0)
+          seg=[]; seen=set()
+          for g in drawings:
+            for it in g.get("items",[]) or []:
+              if not it or it[0]!="l" or len(it)<3: continue
+              a,b=it[1],it[2]; x0,y0,x1,y1=map(float,(a.x,a.y,b.x,b.y))
+              mx,my=(x0+x1)/2,(y0+y1)/2
+              if not(vx0-2<=mx<=vx1+2 and vy0-2<=my<=vy1+2): continue
+              dx,dy=abs(x1-x0),abs(y1-y0)
+              if dx>=max(5,dy*8): o,c,s0,s1="h",(y0+y1)/2,min(x0,x1),max(x0,x1)
+              elif dy>=max(5,dx*8): o,c,s0,s1="v",(x0+x1)/2,min(y0,y1),max(y0,y1)
+              else: continue
+              if scale<=0 or (s1-s0)/scale<0.35: continue
+              k=(o,round(c,1),round(s0,1),round(s1,1))
+              if k in seen: continue
+              seen.add(k); seg.append((o,c,s0,s1))
+          runs=[]; seenruns=set()
+          for i,a in enumerate(seg):
+            ao,ac,a0,a1=a
+            for bo,bc,b0,b1 in seg[i+1:]:
+              if ao!=bo: continue
+              sep=abs(ac-bc)/scale
+              if not .08<=sep<=.35: continue
+              s0,s1=max(a0,b0),min(a1,b1)
+              if s1<=s0 or (s1-s0)/scale<.5: continue
+              center=(ac+bc)/2
+              edge=(min(abs(center-vx0),abs(vx1-center)) if ao=="v" else min(abs(center-vy0),abs(vy1-center)))/scale
+              if edge<=max(.4,2*thick): continue
+              k=(ao,round(center,1),round(s0,1),round(s1,1))
+              if k in seenruns: continue
+              seenruns.add(k)
+              runs.append({"orientation":ao,"center_pt":round(center,2),"start_pt":round(s0,2),"end_pt":round(s1,2),"length_m":round((s1-s0)/scale,3),"sep_m":round(sep,3),"edge_m":round(edge,3)})
+          # Collapse same physical wall by grouping centerlines within one wall thickness and unioning intervals.
+          groups=[]
+          for r in sorted(runs,key=lambda z:(z["orientation"],z["center_pt"],z["start_pt"])):
+            placed=False
+            for g in groups:
+              if g["orientation"]==r["orientation"] and abs(g["center_pt"]-r["center_pt"])/scale<=max(.06,thick):
+                g["intervals"].append((r["start_pt"],r["end_pt"])); placed=True; break
+            if not placed: groups.append({"orientation":r["orientation"],"center_pt":r["center_pt"],"intervals":[(r["start_pt"],r["end_pt"])]})
+          merged=[]
+          for g in groups:
+            ints=sorted(g["intervals"]); a,b=ints[0]
+            total=0
+            for x,y in ints[1:]:
+              if x<=b+2: b=max(b,y)
+              else: total+=(b-a); a,b=x,y
+            total+=(b-a)
+            merged.append({"orientation":g["orientation"],"center_pt":g["center_pt"],"length_m":round(total/scale,3)})
+          total=round(sum(x["length_m"] for x in merged),3)
+          print("LAMU_DPC_WALL_PAIR_F07="+json.dumps({"sha":got,"viewport":[vx0,vy0,vx1,vy1],"fill":cur.__dict__,"scale_pt_per_m":scale,"wall_thickness_m":thick,"raw_internal_pairs":runs,"merged_internal_walls":merged,"parallel_total_m":total,"external_plus_parallel_m":round(48.4+total,3),"external_plus_fill_m":round(48.4+cur.total_length_m,3)},sort_keys=True,default=str))
+          d.close()
+          PY
