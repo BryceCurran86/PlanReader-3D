@@ -1,0 +1,126 @@
+name: TEST-ONLY Ghazi External Wall Authority
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ghazi-external-wall:
+    if: startsWith(github.head_ref, 'diag/ghazi-external-wall-authority')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Probe source wall height and facade opening authority
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,math,re,statistics,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          from pb_viewport_segmentation import segment_page_viewports,is_authoritative_derived_viewport
+          from pb_source_roof_covering_authority import get_elevation_viewport_search_bbox
+          from pb_level_datum_extraction import find_level_markers
+          from pb_wall_height_evidence import resolve_wall_height_dimension_m
+
+          url="https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf"
+          expected="c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f"
+          p=Path("/tmp/ghazi.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Ghazi-external-wall-authority/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:p.write_bytes(r.read())
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          if actual!=expected:raise SystemExit(actual)
+
+          ex=GenericPlanReaderExtractor()
+          preds=ex.extract_from_pdf(p,collect_item35_shadow=False)
+          openings=[x.to_dict() for x in preds if x.tag in {"W1","D1","D2"}]
+          walls=[x.to_dict() for x in preds if x.tag in {"perimeter_walling","internal_walling","internal_plaster","internal_paint","gable_walling"}]
+
+          doc=fitz.open(p)
+          pages=[]
+          start=max(0,len(doc)-20)
+          for idx in range(start,len(doc)):
+              page=doc[idx]
+              txt=page.get_text("text") or ""
+              if not ex.is_drawing_page(txt,page):
+                  continue
+              vps=segment_page_viewports(page,page_number=idx+1)
+              page_rows=[]
+              for vp in vps:
+                  row={
+                      "id":vp.view_id,"type":vp.view_type,"label":vp.label,
+                      "status":vp.status,"bbox":vp.bounding_box,
+                      "scale":vp.scale_denominator,
+                      "authoritative_derived":is_authoritative_derived_viewport(vp),
+                  }
+                  if vp.view_type in {"elevation","section"} and vp.bounding_box is not None:
+                      try:
+                          h=resolve_wall_height_dimension_m(
+                              page,page_num=idx+1,target_geometry_bbox=vp.bounding_box
+                          )
+                      except Exception as exc:
+                          h=f"ERROR:{type(exc).__name__}"
+                      row["height_evidence"]=None if h is None else (
+                          h if isinstance(h,str) else h.__dict__
+                      )
+                      if vp.scale_denominator:
+                          try:
+                              bbox=get_elevation_viewport_search_bbox(vp,vps,page.rect)
+                              x0,y0,x1,y1=map(float,bbox)
+                              mpt=(25.4/72.0)*float(vp.scale_denominator)/1000.0
+                              hs=[]
+                              for d in page.get_drawings() or []:
+                                  for it in d.get("items",[]) or []:
+                                      if not it or it[0]!="l" or len(it)<3: continue
+                                      a,b=it[1],it[2]
+                                      ax,ay,bx,by=map(float,(a.x,a.y,b.x,b.y))
+                                      if not (x0<=min(ax,bx) and max(ax,bx)<=x1 and y0<=min(ay,by) and max(ay,by)<=y1): continue
+                                      if abs(bx-ax)<=1.0 and abs(by-ay)>=15:
+                                          hm=abs(by-ay)*mpt
+                                          if 2.0<=hm<=4.5: hs.append(round(hm,3))
+                              row["scaled_vertical_height_candidates_m"]=sorted(hs)[:200]
+                              if hs:
+                                  bins={}
+                                  for hval in hs:
+                                      k=round(hval/0.05)*0.05
+                                      bins.setdefault(round(k,2),0);bins[round(k,2)]+=1
+                                  row["scaled_height_clusters"]=sorted(
+                                      [{"height_m":k,"count":v} for k,v in bins.items()],
+                                      key=lambda z:(-z["count"],z["height_m"])
+                                  )[:20]
+                          except Exception as exc:
+                              row["scaled_height_error"]=type(exc).__name__
+                  page_rows.append(row)
+
+              hits=[
+                  ln.strip() for ln in txt.splitlines()
+                  if re.search(r"(?i)(height|\bht\b|level|W1|D1|D2|window|door|1800|1500|2400|2120)",ln)
+              ]
+              pages.append({
+                  "page":idx+1,
+                  "hits":hits[:200],
+                  "level_markers":[m.__dict__ for m in find_level_markers(txt,source_page=idx+1)],
+                  "viewports":page_rows,
+              })
+          doc.close()
+
+          print("GHAZI_EXTERNAL_WALL_AUTHORITY="+json.dumps({
+              "production_sha":"713e62001779303ecc38046bf7a099d1318f086a",
+              "source_sha256":actual,
+              "openings":openings,
+              "walls":walls,
+              "opening_authority_shadow":ex.opening_authority_shadow,
+              "hosted_opening_shadow":ex.hosted_opening_shadow,
+              "live_net_wall_shadow":ex.live_net_wall_shadow,
+              "pages":pages,
+          },sort_keys=True,default=str),flush=True)
+          PY
