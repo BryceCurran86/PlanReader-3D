@@ -67,21 +67,31 @@ jobs:
 
           doc=fitz.open(path)
           out=[]
+          all_candidates=[]
           try:
-              for pno in range(218,238):
+              for pno in range(len(doc)):
                   page=doc[pno]
                   txt=page.get_text("text") or ""
                   vals=dims_from_text(txt)
                   env=envelope(vals)
-                  titles=[ln.strip() for ln in txt.splitlines() if ln.strip() and re.search(r"(?i)(floor plan|foundation|layout|section|elevation|roof plan|science lab)",ln)]
-                  out.append({
-                      "page":pno+1,
-                      "titles":titles[:30],
-                      "dims":vals,
-                      "envelope":env,
-                      "area_near_149_26": bool(env and abs(env[2]-149.26)<3.0),
-                  })
+                  titles=[ln.strip() for ln in txt.splitlines() if ln.strip() and re.search(r"(?i)(floor plan|foundation|layout|section|elevation|roof plan|science lab|bill|quantity|amount)",ln)]
+                  if env is not None and 100.0 <= env[2] <= 220.0:
+                      all_candidates.append({
+                          "page":pno+1,
+                          "titles":titles[:30],
+                          "dims":vals[:100],
+                          "envelope":env,
+                          "distance_from_149_26":round(abs(env[2]-149.26),4),
+                      })
+                  if 218 <= pno <= 237:
+                      out.append({
+                          "page":pno+1,
+                          "titles":titles[:30],
+                          "dims":vals,
+                          "envelope":env,
+                          "area_near_149_26": bool(env and abs(env[2]-149.26)<3.0),
+                      })
           finally:
               doc.close()
-          print("MURERA_NATIVE_ENVELOPE_MAP="+json.dumps({"sha":actual,"pages":out},sort_keys=True),flush=True)
+          print("MURERA_NATIVE_ENVELOPE_MAP="+json.dumps({"sha":actual,"pages":out,"all_100_220_candidates":all_candidates},sort_keys=True),flush=True)
           PY
