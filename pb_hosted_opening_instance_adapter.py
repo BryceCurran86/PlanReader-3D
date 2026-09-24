@@ -136,7 +136,10 @@ def empty_hosted_opening_shadow(
 def summarize_viewport_authority(viewports: Sequence[Any], *, page_number: int) -> Dict[str, Any]:
     """Diagnostic census. Does not promote DERIVED/AMBIGUOUS into authority."""
     from pb_drawing_evidence_binding import DrawingViewType
-    from pb_viewport_segmentation import ViewportSegmentationStatus
+    from pb_viewport_segmentation import (
+        ViewportSegmentationStatus,
+        is_authoritative_derived_viewport,
+    )
 
     status_counts: Dict[str, int] = {}
     view_type_counts: Dict[str, int] = {}
@@ -147,13 +150,14 @@ def summarize_viewport_authority(viewports: Sequence[Any], *, page_number: int) 
         view_type_counts[viewport.view_type] = view_type_counts.get(viewport.view_type, 0) + 1
         is_floor_plan = viewport.view_type == DrawingViewType.FLOOR_PLAN.value
         is_resolved = viewport.status == ViewportSegmentationStatus.RESOLVED.value
+        is_strict_derived = is_authoritative_derived_viewport(viewport)
         has_bbox = viewport.bounding_box is not None
-        if is_floor_plan and is_resolved and has_bbox:
+        if is_floor_plan and (is_resolved or is_strict_derived) and has_bbox:
             authoritative += 1
             continue
         if is_floor_plan:
-            if not is_resolved:
-                reject_reason = "floor_plan_not_resolved"
+            if not (is_resolved or is_strict_derived):
+                reject_reason = "floor_plan_not_authoritative"
             else:
                 reject_reason = "floor_plan_missing_bbox"
             rejected_floor_plans.append(
@@ -221,17 +225,26 @@ def hosted_span_to_shadow_record(span: HostedOpeningSpan) -> Optional[Dict[str, 
 
 
 def authoritative_floor_plan_viewports(page: Any, *, page_number: int) -> List[Any]:
-    """Reuse F.07 RESOLVED floor-plan frames only. Never guess from page class."""
+    """Return only source-owned authoritative F.07 floor-plan regions.
+
+    Native vector-frame RESOLVED viewports remain authoritative. The only
+    DERIVED subtype admitted is the strictly validated multi-column title grid;
+    ordinary one-axis title partitions remain diagnostic and are rejected.
+    """
     from pb_drawing_evidence_binding import DrawingViewType
     from pb_viewport_segmentation import (
         ViewportSegmentationStatus,
+        is_authoritative_derived_viewport,
         segment_page_viewports,
     )
 
     return [
         viewport
         for viewport in segment_page_viewports(page, page_number=page_number)
-        if viewport.status == ViewportSegmentationStatus.RESOLVED.value
+        if (
+            viewport.status == ViewportSegmentationStatus.RESOLVED.value
+            or is_authoritative_derived_viewport(viewport)
+        )
         and viewport.view_type == DrawingViewType.FLOOR_PLAN.value
         and viewport.bounding_box is not None
     ]
