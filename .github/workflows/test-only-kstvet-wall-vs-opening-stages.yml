@@ -110,9 +110,15 @@ jobs:
           )
           out={
               "sha":actual,"status":res.status,"reason_codes":res.reason_codes,
-              "decision_scope_complete":res.decision_scope_complete,
-              "record_count":len(res.records),
-              "records":res.records,
+              "decision_scope_complete":(
+                  bool(res.record.physical_opening_universe_complete)
+                  if res.record is not None else False
+              ),
+              "record_count":(
+                  len(res.record.physical_opening_record_ids)
+                  if res.record is not None else 0
+              ),
+              "record":res.record,
           }
           def serial(v):
               if is_dataclass(v): return asdict(v)
