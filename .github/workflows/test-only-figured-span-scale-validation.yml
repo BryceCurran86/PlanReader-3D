@@ -50,7 +50,10 @@ jobs:
           )
           from pb_migration_provider_envelope import ProviderContext
           from pb_viewport_dimension_binding import extract_dimension_evidence_by_viewport
-          from pb_viewport_segmentation import segment_page_viewports
+          from pb_viewport_segmentation import (
+              is_authoritative_derived_viewport,
+              segment_page_viewports,
+          )
 
           SOURCES = (
               {
@@ -97,6 +100,7 @@ jobs:
                       page_num=page_no,
                       viewports=viewports,
                       sheet="",
+                      allow_derived=True,
                   )
                   viewport_rows = []
                   for viewport in viewports:
@@ -107,6 +111,8 @@ jobs:
                           "view_type": viewport.view_type,
                           "viewport_status": viewport.status,
                           "boundary_source": viewport.boundary_source,
+                          "authoritative_derived": is_authoritative_derived_viewport(viewport),
+                          "provenance": viewport.provenance,
                           "bbox": viewport.bounding_box,
                           "total_figured_observations": 0,
                           "witness_bound_observations": 0,
@@ -139,8 +145,8 @@ jobs:
                           if "witness_bound" in status_map.get(observation.dimension_id, [])
                       )
 
-                      if viewport.status != "resolved" or viewport.bounding_box is None:
-                          row["conflicts"].append("viewport_not_exact_resolved_owner")
+                      if viewport.bounding_box is None:
+                          row["conflicts"].append("viewport_has_no_owned_bbox")
                           viewport_rows.append(row)
                           continue
 
@@ -164,7 +170,11 @@ jobs:
                           page_id=str(page_no),
                           bbox=tuple(float(v) for v in viewport.bounding_box),
                           view_type=viewport.view_type,
-                          status=ViewportResolutionStatus.RESOLVED,
+                          status=(
+                              ViewportResolutionStatus.RESOLVED
+                              if viewport.status == "resolved"
+                              else ViewportResolutionStatus.DERIVED
+                          ),
                           confidence=float(viewport.confidence),
                       )
                       scope = FiguredSpanScaleScope(
