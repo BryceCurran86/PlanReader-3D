@@ -2153,10 +2153,12 @@ class GenericPlanReaderExtractor:
                 if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])
             ]
             drawing_texts = [doc[p].get_text("text") or "" for p in dwg_pages]
-            package_texts = [doc[p].get_text("text") or "" for p in range(len(doc))]
 
-            has_casement_spec = package_documents_casement_windows(drawing_texts) or package_documents_casement_windows(package_texts)
-            has_door_spec = package_documents_door_system(drawing_texts) or package_documents_door_system(package_texts)
+            # Opening-system semantics must come from drawing-owned source pages.
+            # BOQ/specification pages may describe commercial scope but cannot
+            # authorize a drawing-derived instance count.
+            has_casement_spec = package_documents_casement_windows(drawing_texts)
+            has_door_spec = package_documents_door_system(drawing_texts)
 
             if has_casement_spec or has_door_spec:
                 totals = extract_plan_instance_opening_totals(doc, dwg_pages)
