@@ -1,0 +1,103 @@
+name: TEST-ONLY Lamu Figured Span Scale Shadow
+on:
+  pull_request:
+    branches: [shadow/figured-span-scale-evidence]
+jobs:
+  trace:
+    if: startsWith(github.head_ref, 'diag/lamu-figured-span-scale-shadow')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install -r requirements.txt
+      - name: Trace viewport-owned figured-span scale candidates
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib, json, urllib.request
+          import fitz
+
+          from pb_figured_span_scale_shadow import (
+              FiguredSpanScaleScope,
+              resolve_figured_span_scale_shadow,
+          )
+          from pb_viewport_dimension_binding import extract_dimension_evidence_by_viewport
+          from pb_viewport_segmentation import segment_page_viewports
+
+          url="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          want="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Lamu-figured-span-shadow/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as response:
+              data=response.read()
+          got=hashlib.sha256(data).hexdigest()
+          if got != want:
+              raise SystemExit(f"source SHA mismatch: {got}")
+
+          doc=fitz.open(stream=data,filetype="pdf")
+          try:
+              page=doc[40]
+              viewports=segment_page_viewports(page,page_number=41)
+              evidence=extract_dimension_evidence_by_viewport(
+                  page,
+                  page_num=41,
+                  viewports=viewports,
+                  sheet="",
+              )
+              rows=[]
+              for viewport in viewports:
+                  bundle=evidence.bundles.get(viewport.view_id)
+                  if bundle is None:
+                      continue
+                  result=resolve_figured_span_scale_shadow(
+                      bundle,
+                      scope=FiguredSpanScaleScope(
+                          document_id="lamu-public-source-diagnostic",
+                          revision_id="sha256:"+got,
+                          source_sha256=got,
+                          page_no=41,
+                          viewport_id=viewport.view_id,
+                      ),
+                  )
+                  binding_statuses={}
+                  for binding in bundle.bindings:
+                      binding_statuses.setdefault(binding.observation_id,[]).append(binding.status)
+                  rows.append({
+                      "viewport_id":viewport.view_id,
+                      "view_type":viewport.view_type,
+                      "viewport_status":viewport.status,
+                      "label":viewport.label,
+                      "result_status":result.status.value,
+                      "reason_codes":list(result.reason_codes),
+                      "reconciliation_status":result.reconciliation_status,
+                      "candidate_count":len(result.candidates),
+                      "candidates":[{
+                          "observation_id":candidate.observation_id,
+                          "raw_text":candidate.raw_text,
+                          "dimension_line_id":candidate.dimension_line_id,
+                          "witness_line_ids":list(candidate.witness_line_ids),
+                          "endpoints":candidate.endpoints,
+                          "source_span_pt":round(candidate.source_span_pt,6),
+                          "physical_span_mm":round(candidate.physical_span_mm,6),
+                          "points_per_mm":round(candidate.points_per_mm,12),
+                      } for candidate in result.candidates],
+                      "observations":[{
+                          "dimension_id":observation.dimension_id,
+                          "raw_text":observation.raw_text,
+                          "view_id":observation.view_id,
+                          "binding_statuses":binding_statuses.get(observation.dimension_id,[]),
+                      } for observation in bundle.observations],
+                  })
+                  if result.quantity_m2 is not None:
+                      raise SystemExit("shadow producer unexpectedly emitted quantity")
+              print("LAMU_FIGURED_SPAN_SCALE_SHADOW="+json.dumps({
+                  "source_sha256":got,
+                  "source_page":41,
+                  "status":"diagnostic_only",
+                  "rows":rows,
+                  "skipped_viewports":evidence.skipped_viewports,
+              },sort_keys=True,default=str))
+          finally:
+              doc.close()
+          PY
