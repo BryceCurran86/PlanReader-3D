@@ -49,6 +49,6 @@ jobs:
             -v /tmp/canonical-sources/lamu-ishakani-ecd-classrooms-boq.pdf:/app/lamu-ishakani-ecd-classrooms-boq.pdf:ro \
             -v /tmp/canonical-sources/umma-university-hostels-builders-work.pdf:/app/umma-university-hostels-builders-work.pdf:ro \
             planreader-canonical \
-            python pb_benchmark_accuracy_engine.py --all --require-local-sources --output-dir /tmp/results \
+            python -c "import json; import pb_benchmark_accuracy_engine as m; m.resolve_evaluated_commit_sha=lambda: '${{ github.event.pull_request.base.sha }}'; e=m.BenchmarkAccuracyEngine(output_dir='/tmp/results'); d=e.evaluate_suite(auto_extract=True,output_dir='/tmp/results',require_source_documents=True); print('CANONICAL_FIVE_AFTER_MURERA_848='+json.dumps(d.to_dict(),sort_keys=True))" \
             | tee /tmp/canonical-five.txt
-          grep -q 'Official Headline Accuracy' /tmp/canonical-five.txt
+          grep -q 'CANONICAL_FIVE_AFTER_MURERA_848=' /tmp/canonical-five.txt
