@@ -4,8 +4,12 @@ from copy import deepcopy
 from dataclasses import replace
 from random import Random
 
+from pb_drawing_evidence_binding import DrawingViewType
 from pb_figured_dimension_evidence import RasterCoordinateTransform
-from pb_migration_contracts import EvidenceResolutionStatus as Status
+from pb_migration_contracts import (
+    EvidenceResolutionStatus as Status,
+    ViewportResolutionStatus,
+)
 from pb_portable_raster_ocr_authority import OCRLine, RasterOCREvidenceRecord
 from pb_raster_figured_dimension_shadow import (
     RasterAxisSegment,
@@ -18,6 +22,9 @@ def _scope(
     *,
     placement=(0.0, 0.0, 200.0, 120.0),
     viewport="plan-1",
+    viewport_status=ViewportResolutionStatus.RESOLVED.value,
+    viewport_type=DrawingViewType.FLOOR_PLAN.value,
+    viewport_bbox=(0.0, 0.0, 200.0, 120.0),
     source_hash="0" * 64,
 ):
     return RasterDimensionScope(
@@ -27,6 +34,9 @@ def _scope(
         snapshot_id="snap-1",
         page_id="228",
         viewport_id=viewport,
+        viewport_status=viewport_status,
+        viewport_type=viewport_type,
+        viewport_bbox_pt=viewport_bbox,
         image_id="xref-899",
         placement_bbox_pt=placement,
     )
@@ -271,6 +281,46 @@ def test_unrelated_geometry_and_target_region_expansion_do_not_change_candidate(
 
     assert candidate.candidate_id == base.candidate_id
     assert candidate.endpoints_pt == base.endpoints_pt
+
+
+def test_same_perpendicular_stroke_cannot_satisfy_both_witness_endpoints():
+    # A short candidate line inside a broad OCR tolerance used to let one
+    # perpendicular source stroke count as both endpoint witnesses.
+    lines = [OCRLine("4100", 0.96, (90.0, 40.0, 150.0, 70.0))]
+    segments = [
+        RasterAxisSegment("dimension-short", (90.0, 80.0), (120.0, 80.0)),
+        RasterAxisSegment("one-witness", (105.0, 60.0), (105.0, 100.0)),
+    ]
+    result = _run(lines=lines, segments=segments)
+
+    assert result.status is Status.ABSTAINED
+    assert result.candidates[0].status is Status.ABSTAINED
+    assert result.candidates[0].endpoints_pt is None
+
+
+def test_unresolved_or_non_plan_viewport_abstains_before_dimension_binding():
+    unresolved = _run(scope=_scope(
+        viewport_status=ViewportResolutionStatus.AMBIGUOUS.value
+    ))
+    assert unresolved.status is Status.ABSTAINED
+    assert unresolved.reason_codes == ("viewport_ownership_unresolved",)
+    assert unresolved.candidates == ()
+
+    section = _run(scope=_scope(viewport_type=DrawingViewType.SECTION.value))
+    assert section.status is Status.ABSTAINED
+    assert section.reason_codes == ("viewport_not_floor_plan",)
+    assert section.candidates == ()
+
+
+def test_raster_placement_must_be_fully_owned_by_floor_plan_viewport():
+    result = _run(scope=_scope(
+        placement=(0.0, 0.0, 200.0, 120.0),
+        viewport_bbox=(0.0, 0.0, 150.0, 120.0),
+    ))
+
+    assert result.status is Status.ABSTAINED
+    assert result.reason_codes == ("raster_placement_outside_owned_viewport",)
+    assert result.candidates == ()
 
 
 def test_lineage_mismatch_abstains_before_geometry():
