@@ -2787,15 +2787,43 @@ class GenericPlanReaderExtractor:
                 resolve_document_gable_roof_covering,
             )
 
-            # Discover building footprint dimensions from authenticated perimeter or floor
+            # Discover actual building footprint axes. A wall-area prediction's
+            # dimensions are [wall perimeter, wall height], not plan length/width,
+            # so they must never be reused as roof/gable footprint axes.
             _b_len_m: float | None = None
             _b_wid_m: float | None = None
-            for _p in pred_dict.values():
-                if _p.tag in ("perimeter_walling", "floor_screed") and _p.dimensions and len(_p.dimensions) >= 2:
-                    _d0, _d1 = float(_p.dimensions[0]), float(_p.dimensions[1])
+
+            _floor_pred = pred_dict.get("floor_screed")
+            if (
+                _floor_pred is not None
+                and _floor_pred.dimensions
+                and len(_floor_pred.dimensions) >= 2
+            ):
+                _d0 = float(_floor_pred.dimensions[0])
+                _d1 = float(_floor_pred.dimensions[1])
+                if _d0 > 0.0 and _d1 > 0.0:
                     _b_len_m = max(_d0, _d1)
                     _b_wid_m = min(_d0, _d1)
-                    break
+
+            # Fallback only to explicitly carried footprint metadata. Never
+            # reinterpret perimeter_walling.dimensions as plan axes.
+            if _b_len_m is None or _b_wid_m is None:
+                _wall_pred = pred_dict.get("perimeter_walling")
+                _wall_meta = (
+                    _wall_pred.metadata
+                    if _wall_pred is not None and isinstance(_wall_pred.metadata, dict)
+                    else {}
+                )
+                _footprint_dims = _wall_meta.get("footprint_dimensions_m")
+                if (
+                    isinstance(_footprint_dims, (list, tuple))
+                    and len(_footprint_dims) >= 2
+                ):
+                    _d0 = float(_footprint_dims[0])
+                    _d1 = float(_footprint_dims[1])
+                    if _d0 > 0.0 and _d1 > 0.0:
+                        _b_len_m = max(_d0, _d1)
+                        _b_wid_m = min(_d0, _d1)
 
             if _b_len_m is not None and _b_wid_m is not None and _b_wid_m <= _b_len_m:
                 _roof_meas = resolve_document_gable_roof_covering(
