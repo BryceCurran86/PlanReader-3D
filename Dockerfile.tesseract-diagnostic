@@ -1,0 +1,18 @@
+FROM python:3.14-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt requirements-ci-v1228.txt ./
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt -r requirements-ci-v1228.txt pytesseract
+
+COPY . .
+
+CMD ["python", "scripts/diagnostic_lamu_tesseract_512mb.py"]
