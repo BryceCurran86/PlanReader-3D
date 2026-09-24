@@ -9,10 +9,17 @@ No benchmark project quantities, IDs, or expected BOQ values.
 """
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import fitz
 import pytest
 
 from pb_secondary_footprint_evidence import resolve_secondary_footprint_width_m
+from pb_viewport_segmentation import (
+    SegmentedViewport,
+    ViewportBoundarySource,
+    ViewportSegmentationStatus,
+)
 
 
 def _reopen(doc: fitz.Document) -> fitz.Document:
@@ -345,6 +352,37 @@ def test_full_witness_bound_still_resolves():
     assert result is not None
     assert result.binding_status == "witness_bound"
     assert result.width_m == pytest.approx(1.8)
+
+
+def test_derived_title_partition_edge_cannot_become_physical_depth_authority():
+    """A layout cell boundary is not a drawn building/verandah boundary.
+
+    Even perfect witness-bound depth geometry inside a DERIVED title partition
+    must fail closed here; callers may still use explicit source text fallback.
+    """
+    doc = _build_plan_with_orthogonal_depth(edge="bottom", depth_text="1800")
+    page = doc[0]
+    derived = SegmentedViewport(
+        view_id="view_p1_grid",
+        page_number=1,
+        view_type="floor_plan",
+        label="GROUND FLOOR PLAN",
+        title_bbox=(50.0, 292.0, 170.0, 306.0),
+        bounding_box=(30.0, 30.0, 310.0, 310.0),
+        status=ViewportSegmentationStatus.DERIVED.value,
+        boundary_source=ViewportBoundarySource.TITLE_PARTITION.value,
+        confidence=0.75,
+        provenance={
+            "partition_mode": "columnar_title_grid",
+            "grid_validated": True,
+        },
+    )
+    with patch(
+        "pb_secondary_footprint_evidence.segment_page_viewports",
+        return_value=[derived],
+    ):
+        assert resolve_secondary_footprint_width_m(page, page_num=1) is None
+    doc.close()
 
 
 def test_conflicting_orthogonal_depths_fail_closed():
