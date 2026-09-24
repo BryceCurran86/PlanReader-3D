@@ -592,7 +592,6 @@ class WallFinishFaceBindingProducer:
                                     **face_payload,
                                     "trade_scope_id": semantic.trade_scope_id,
                                     "finish_material": semantic.finish_material,
-                                    "source_evidence_ids": evidence_ids,
                                 }
                                 record = WallFinishFaceBindingRecord(
                                     binding_id=stable_contract_id("wall_finish_face_binding", bind_payload, digest_chars=32),
@@ -658,16 +657,28 @@ class WallFinishFaceBindingProducer:
                                 {record.binding_id: record for record in (*previous.bindings, *result.bindings)}.values(),
                                 key=lambda r: r.binding_id,
                             ))
+                            face_trade: dict[tuple[str, str], set[str]] = {}
+                            for record in merged:
+                                face_trade.setdefault(
+                                    (record.physical_face_id, record.trade_scope_id), set()
+                                ).add(record.finish_material)
+                            material_conflict = any(len(materials) > 1 for materials in face_trade.values())
                             grouped = {}
                             for record in merged:
                                 grouped.setdefault((record.trade_scope_id, record.finish_material), []).append(record)
                             results[selector.key] = WallFinishFaceBindingScopeResult(
                                 status=(
                                     EvidenceResolutionStatus.CONFLICT
-                                    if previous.status is EvidenceResolutionStatus.CONFLICT or result.status is EvidenceResolutionStatus.CONFLICT
+                                    if material_conflict
+                                    or previous.status is EvidenceResolutionStatus.CONFLICT
+                                    or result.status is EvidenceResolutionStatus.CONFLICT
                                     else EvidenceResolutionStatus.CORROBORATED
                                 ),
-                                reason_codes=tuple(dict.fromkeys((*previous.reason_codes, *result.reason_codes))),
+                                reason_codes=tuple(dict.fromkeys((
+                                    *previous.reason_codes,
+                                    *result.reason_codes,
+                                    *((FINISH_BINDING_FACE_FINISH_CONFLICT,) if material_conflict else ()),
+                                ))),
                                 bindings=merged,
                                 scope_records=tuple(_partial_scope(group) for _, group in sorted(grouped.items())),
                             )
