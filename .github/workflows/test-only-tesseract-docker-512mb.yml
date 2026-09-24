@@ -1,0 +1,26 @@
+name: TEST-ONLY Tesseract Docker 512MB
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  constrained-lamu:
+    if: startsWith(github.head_ref, 'diag/tesseract-docker-512mb')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Tesseract diagnostic image
+        run: docker build -f Dockerfile.tesseract-diagnostic -t planreader-tesseract-diagnostic .
+
+      - name: Run Lamu under 512MB hard memory limit
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --memory=512m \
+            --memory-swap=512m \
+            --cpus=0.5 \
+            planreader-tesseract-diagnostic | tee /tmp/lamu-docker-result.txt
+          grep -q 'LAMU_TESSERACT_DOCKER_RESULT=' /tmp/lamu-docker-result.txt
