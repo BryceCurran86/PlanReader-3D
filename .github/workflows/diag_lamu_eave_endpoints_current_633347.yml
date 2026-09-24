@@ -40,6 +40,25 @@ jobs:
           actual=hashlib.sha256(payload).hexdigest()
           if actual!=expected: raise SystemExit(actual)
 
+          def axis_segments(page,bbox):
+              x0,y0,x1,y1=bbox
+              hs=[]; vs=[]
+              for drawing in page.get_drawings() or ():
+                  for item in drawing.get("items",()) or ():
+                      if not item or item[0]!="l" or len(item)<3: continue
+                      a,b=item[1],item[2]
+                      ax,ay,bx,by=map(float,(a.x,a.y,b.x,b.y))
+                      if not (x0<=min(ax,bx) and max(ax,bx)<=x1 and y0<=min(ay,by) and max(ay,by)<=y1):
+                          continue
+                      length=math.hypot(bx-ax,by-ay)
+                      if abs(by-ay)<=1.0 and length>=60.0:
+                          hs.append({"p0":[round(ax,3),round(ay,3)],"p1":[round(bx,3),round(by,3)],"length":round(length,3)})
+                      if abs(bx-ax)<=1.0 and length>=25.0:
+                          vs.append({"p0":[round(ax,3),round(ay,3)],"p1":[round(bx,3),round(by,3)],"length":round(length,3)})
+              hs.sort(key=lambda r:(r["p0"][1],-r["length"],min(r["p0"][0],r["p1"][0])))
+              vs.sort(key=lambda r:(min(r["p0"][0],r["p1"][0]),-r["length"],min(r["p0"][1],r["p1"][1])))
+              return hs,vs
+
           doc=fitz.open(stream=payload,filetype="pdf")
           out=[]
           for pidx in range(40,45):
@@ -49,6 +68,7 @@ jobs:
                   if vp.view_type!="elevation": continue
                   bbox=get_elevation_viewport_search_bbox(vp,vps,page.rect)
                   diags,verts=extract_elevation_segments_from_page(page,bbox)
+                  horizontals,structural_verticals=axis_segments(page,bbox)
                   ev,reasons=resolve_gable_apex_in_viewport(
                       diags,verts,
                       source_viewport_id=vp.view_id,
@@ -62,6 +82,8 @@ jobs:
                       "resolve_reasons":reasons,
                       "evidence":None,
                       "apex_clusters":[],
+                      "long_horizontals":horizontals[:120],
+                      "structural_verticals":structural_verticals[:120],
                   }
                   if ev is not None:
                       support_span=abs(ev.right_support_xy[0]-ev.left_support_xy[0])
