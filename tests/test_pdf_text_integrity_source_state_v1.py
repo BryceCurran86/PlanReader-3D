@@ -134,6 +134,21 @@ def test_word_split_across_consecutive_whole_spans_is_owned_and_trusted() -> Non
     assert decision.trace_sequence_numbers[1] == decision.trace_sequence_numbers[0] + 1
 
 
+def test_two_single_spans_with_unequal_overlap_are_ambiguous_not_ranked() -> None:
+    # Two independent paints both contain the same word and overlap the same
+    # extracted word box, but by different amounts. A geometric score would
+    # prefer one; authority must abstain because source ownership is not unique.
+    pdf = _pdf(
+        "BT /F1 12 Tf 40 120 Td (900) Tj ET "
+        "BT /F1 12 Tf 41 120 Td (900) Tj ET"
+    )
+    words = _word_texts(pdf)
+    assert words
+    decision = _classify(pdf, index=0)
+    assert not decision.trusted
+    assert TEXT_TRACE_AMBIGUOUS in decision.reason_codes
+
+
 def test_split_word_is_not_owned_when_foreign_paint_separates_its_spans() -> None:
     pdf = _pdf(
         "BT /F1 12 Tf 40 120 Td (Note) Tj ET 0 0 1 rg 200 10 5 5 re f 0 g "
