@@ -1,0 +1,87 @@
+name: TEST-ONLY Lamu Gable Wall Height Calibration
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lamu-gable-height:
+    if: startsWith(github.head_ref, 'diag/lamu-gable-wall-height-calibration')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13", cache: pip}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Calibrate elevation wall height from authenticated gable span
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,math,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_viewport_segmentation import segment_page_viewports
+          from pb_source_roof_covering_authority import (
+              extract_elevation_segments_from_page,
+              get_elevation_viewport_search_bbox,
+              resolve_gable_apex_in_viewport,
+          )
+
+          url="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          expected="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          p=Path("/tmp/lamu.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Lamu-gable-wall-height/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:p.write_bytes(r.read())
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          if actual!=expected:raise SystemExit(actual)
+
+          doc=fitz.open(p); page=doc[40]
+          vps=segment_page_viewports(page,page_number=41)
+          out=[]
+          for vp in vps:
+              if vp.view_type!="elevation": continue
+              bbox=get_elevation_viewport_search_bbox(vp,vps,page.rect)
+              diags,verticals=extract_elevation_segments_from_page(page,bbox)
+              ev,reasons=resolve_gable_apex_in_viewport(
+                  diags,verticals,
+                  source_viewport_id=vp.view_id,
+                  source_page=41,
+                  source_scale_denominator=vp.scale_denominator,
+              )
+              row={
+                  "view_id":vp.view_id,"label":vp.label,"status":vp.status,
+                  "bbox":bbox,"scale_denominator":vp.scale_denominator,
+                  "reasons":list(reasons),
+                  "gable":None if ev is None else ev.__dict__,
+                  "verticals":[v.__dict__ for v in verticals],
+              }
+              if ev is not None:
+                  span_pt=float(ev.left_run_pt)+float(ev.right_run_pt)
+                  # Only diagnostic: production candidate must establish the same
+                  # one-to-one source footprint-axis match before using this scale.
+                  scale_pt_per_m=span_pt/8.2
+                  row["diagnostic_scale_pt_per_m_from_matched_8_2m_span"]=scale_pt_per_m
+                  support_rows=[]
+                  for side,pt in (("left",ev.left_support_xy),("right",ev.right_support_xy)):
+                      sx,sy=map(float,pt)
+                      matches=[
+                          v for v in verticals
+                          if abs(float(v.x)-sx)<=1.5 and abs(float(v.top_y)-sy)<=2.0
+                      ]
+                      support_rows.append({
+                          "side":side,"support_xy":[sx,sy],
+                          "matches":[{
+                              **v.__dict__,
+                              "height_m_at_diagnostic_scale":round(float(v.length)/scale_pt_per_m,4),
+                          } for v in matches],
+                      })
+                  row["matched_support_verticals"]=support_rows
+              out.append(row)
+          doc.close()
+          print("LAMU_GABLE_WALL_HEIGHT_CALIBRATION="+json.dumps({
+              "sha":actual,"elevations":out,
+          },sort_keys=True,default=str),flush=True)
+          PY
