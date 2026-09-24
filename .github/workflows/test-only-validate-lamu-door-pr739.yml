@@ -1,0 +1,74 @@
+name: TEST-ONLY Validate Lamu Door PR739
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-lamu-door:
+    if: startsWith(github.head_ref, 'diag/lamu-door-pr739-validation')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install production OCR/runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Run SHA-pinned Lamu benchmark
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          from __future__ import annotations
+          import hashlib, json, urllib.request
+          from pathlib import Path
+          from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
+
+          benchmark_id="tenders_ke_lamu_ishakani_ecd_classrooms"
+          url="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          expected_sha="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-PR739-Lamu-validation/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              payload=r.read()
+          actual=hashlib.sha256(payload).hexdigest()
+          if actual != expected_sha:
+              raise SystemExit(f"source hash mismatch: {actual}")
+          source=Path("/tmp/lamu.pdf"); source.write_bytes(payload)
+
+          engine=BenchmarkAccuracyEngine(
+              benchmarks_dir="benchmarks/public_tenders",
+              output_dir="/tmp/lamu-pr739",
+          )
+          report=engine.evaluate_benchmark(
+              benchmark_id=benchmark_id,
+              pdf_path=source,
+              auto_extract=True,
+          )
+          d1=next((i.to_dict() for i in report.item_results if i.item_id=="LMU-E5-A"),None)
+          result={
+              "source_sha256":actual,
+              "project":{
+                  "accepted":int(report.exact_matches+report.within_5_percent),
+                  "denominator":int(report.total_items_compared),
+                  "accuracy_percentage":report.overall_accuracy_percentage,
+                  "strict_exact_percentage":report.strict_exact_accuracy_percentage,
+                  "exact":int(report.exact_matches),
+                  "within_5":int(report.within_5_percent),
+                  "gross":int(report.gross_mismatches),
+                  "missed":int(report.missed_items),
+                  "hallucinated":int(report.hallucinated_items),
+              },
+              "door_item":d1,
+              "hallucinated_results":[
+                  i.to_dict() for i in report.item_results
+                  if i.status.value=="hallucinated_item"
+              ],
+          }
+          print("LAMU_PR739_RESULT="+json.dumps(result,sort_keys=True),flush=True)
+          PY
