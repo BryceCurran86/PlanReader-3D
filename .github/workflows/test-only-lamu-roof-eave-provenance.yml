@@ -1,0 +1,84 @@
+name: TEST-ONLY Lamu Roof Eave Primitive Provenance
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  trace:
+    if: startsWith(github.head_ref, 'diag/lamu-roof-eave-source-provenance')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install -r requirements.txt
+      - name: Trace SHA-pinned roof primitives without publishing
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,math,urllib.request
+          import fitz
+          from pb_viewport_segmentation import segment_page_viewports
+          from pb_source_roof_covering_authority import (
+              extract_elevation_segments_from_page,
+              extract_roof_material_annotations,
+              get_elevation_viewport_search_bbox,
+              resolve_gable_apex_in_viewport,
+          )
+          url="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          want="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Lamu-roof-primitive-provenance/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r: data=r.read()
+          got=hashlib.sha256(data).hexdigest()
+          if got!=want: raise SystemExit(f"source SHA mismatch: {got}")
+          doc=fitz.open(stream=data,filetype="pdf")
+          page=doc[40]; vps=segment_page_viewports(page,page_number=41)
+          views=[]
+          for vp in vps:
+              if vp.view_type!="elevation":continue
+              bbox=get_elevation_viewport_search_bbox(vp,vps,page.rect)
+              xlo,ylo,xhi,yhi=map(float,bbox)
+              diags,verticals=extract_elevation_segments_from_page(page,bbox)
+              material=extract_roof_material_annotations(page,bbox)
+              gable,reasons=resolve_gable_apex_in_viewport(
+                  diags,verticals,source_viewport_id=vp.view_id,source_page=41,
+                  source_scale_denominator=getattr(vp,"scale_denominator",None),
+                  material_annotations=material,
+              )
+              paths=[]
+              for pi,drawing in enumerate(page.get_drawings() or ()):
+                  for ii,item in enumerate(drawing.get("items",()) or ()):
+                      if not item or item[0]!="l" or len(item)<3: continue
+                      a,b=item[1:3]
+                      x0,y0,x1,y1=map(float,(a.x,a.y,b.x,b.y))
+                      if not(xlo<=min(x0,x1) and max(x0,x1)<=xhi and ylo<=min(y0,y1) and max(y0,y1)<=yhi):continue
+                      dx,dy=abs(x1-x0),abs(y1-y0)
+                      if dy<=1 and dx>=.20*(xhi-xlo):kind="long_horizontal"
+                      elif dx>=.05*(xhi-xlo) and .15<=dy/dx<=.7:kind="diagonal"
+                      elif dx<=1 and dy>=.20*(yhi-ylo):kind="long_vertical"
+                      else:continue
+                      paths.append({
+                          "path_index":pi,"item_index":ii,"kind":kind,
+                          "a":[round(x0,3),round(y0,3)],"b":[round(x1,3),round(y1,3)],
+                          "stroke":drawing.get("color"),"width":drawing.get("width"),
+                          "dash":drawing.get("dashes"),"fill":drawing.get("fill"),
+                      })
+              views.append({
+                  "viewport_id":vp.view_id,"label":vp.label,"status":vp.status,
+                  "bbox":bbox,"scale_denominator":getattr(vp,"scale_denominator",None),
+                  "material_annotations":material,
+                  "gable":None if gable is None else {
+                      "apex":gable.apex_xy,"pitch_deg":gable.pitch_deg,
+                      "support_left":gable.left_support_xy,
+                      "support_right":gable.right_support_xy,
+                      "member_count":gable.member_count,
+                  },
+                  "gable_reasons":reasons,
+                  "paths":sorted(paths,key=lambda row:(row["kind"],row["path_index"],row["item_index"])),
+              })
+          doc.close()
+          print("LAMU_ROOF_EAVE_PROVENANCE="+json.dumps({
+              "source_sha256":got,"source_page":41,"status":"diagnostic_only",
+              "views":views,
+          },sort_keys=True,default=str))
+          PY
