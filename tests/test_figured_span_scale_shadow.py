@@ -171,7 +171,22 @@ def test_duplicate_binding_identity_fails_closed() -> None:
     result = resolve_figured_span_scale_shadow(bundle, scope=_scope())
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert result.reason_codes == (FIGURED_SPAN_SCALE_SCOPE_CONFLICT,)
-    assert result.candidates == ()
+    assert len(result.candidates) == 2
+
+
+def test_duplicate_observation_identity_retains_distinct_alternatives() -> None:
+    binding = _binding("dup-obs", span_pt=283.5)
+    bundle = DimensionEvidenceBundle(
+        observations=[
+            _obs("dup-obs", value_mm=10000.0),
+            _obs("dup-obs", value_mm=9000.0),
+        ],
+        bindings=[binding],
+    )
+    result = resolve_figured_span_scale_shadow(bundle, scope=_scope())
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.reason_codes == (FIGURED_SPAN_SCALE_SCOPE_CONFLICT,)
+    assert len(result.candidates) == 2
 
 
 def test_translation_rotation_endpoint_order_and_uniform_scale_metamorphics() -> None:
