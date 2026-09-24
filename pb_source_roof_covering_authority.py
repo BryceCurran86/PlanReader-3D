@@ -405,25 +405,46 @@ def resolve_gable_apex_in_viewport(
     clusters = _cluster_apex_candidates(diagonals)
     if not clusters:
         return None, ("no_gable_apex_found",)
-    if len(clusters) > 1:
+
+    compatible: list[
+        tuple[
+            tuple[float, float],
+            list[DiagonalSlopeSegment],
+            float,
+            float,
+            float,
+        ]
+    ] = []
+    for candidate_apex, candidate_members in clusters:
+        candidate_left = [m for m in candidate_members if m.direction == -1]
+        candidate_right = [m for m in candidate_members if m.direction == 1]
+        if not candidate_left or not candidate_right:
+            continue
+        candidate_left_pitch = sum(m.pitch_deg for m in candidate_left) / len(candidate_left)
+        candidate_right_pitch = sum(m.pitch_deg for m in candidate_right) / len(candidate_right)
+        candidate_mean = (candidate_left_pitch + candidate_right_pitch) / 2.0
+        if abs(candidate_left_pitch - candidate_right_pitch) > MAX_PITCH_DISAGREEMENT_DEG:
+            continue
+        if not (MIN_PLAUSIBLE_PITCH_DEG <= candidate_mean <= MAX_PLAUSIBLE_PITCH_DEG):
+            continue
+        compatible.append(
+            (
+                candidate_apex,
+                candidate_members,
+                candidate_left_pitch,
+                candidate_right_pitch,
+                candidate_mean,
+            )
+        )
+
+    if not compatible:
+        if len(clusters) == 1:
+            return None, ("mismatched_slope_pitch",)
+        return None, ("competing_apex_candidates",)
+    if len(compatible) > 1:
         return None, ("competing_apex_candidates",)
 
-    apex_xy, members = clusters[0]
-
-    left_members = [m for m in members if m.direction == -1]
-    right_members = [m for m in members if m.direction == 1]
-    if not left_members or not right_members:
-        return None, ("unilateral_slope_not_gable",)
-
-    left_pitch = sum(m.pitch_deg for m in left_members) / len(left_members)
-    right_pitch = sum(m.pitch_deg for m in right_members) / len(right_members)
-
-    if abs(left_pitch - right_pitch) > MAX_PITCH_DISAGREEMENT_DEG:
-        return None, ("mismatched_slope_pitch",)
-
-    mean_pitch = (left_pitch + right_pitch) / 2.0
-    if not (MIN_PLAUSIBLE_PITCH_DEG <= mean_pitch <= MAX_PLAUSIBLE_PITCH_DEG):
-        return None, ("pitch_out_of_structural_range",)
+    apex_xy, members, left_pitch, right_pitch, mean_pitch = compatible[0]
 
     left_res = _find_farthest_structural_run(apex_xy, mean_pitch, -1, verticals)
     right_res = _find_farthest_structural_run(apex_xy, mean_pitch, 1, verticals)
