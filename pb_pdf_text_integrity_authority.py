@@ -595,7 +595,7 @@ def _matching_trace_spans(
     spans = _texttrace_spans(page)
     if spans is None:
         return (), "", (TEXT_TRACE_UNAVAILABLE,)
-    candidates: list[tuple[float, Mapping[str, object], str]] = []
+    candidates: list[tuple[Mapping[str, object], str]] = []
     for span in spans:
         if not isinstance(span, Mapping):
             continue
@@ -603,14 +603,14 @@ def _matching_trace_spans(
         overlap = _intersection_ratio(bbox, span.get("bbox") or ())
         if overlap <= 0.0 or raw_text not in text:
             continue
-        exact_bonus = 1.0 if text.strip() == raw_text else 0.0
-        candidates.append((overlap + exact_bonus, span, text))
-    if candidates:
-        candidates.sort(key=lambda item: -item[0])
-        best = candidates[0]
-        if len(candidates) > 1 and abs(candidates[1][0] - best[0]) <= 1e-9:
-            return (), "", (TEXT_TRACE_AMBIGUOUS,)
-        return (best[1],), best[2], ()
+        candidates.append((span, text))
+    if len(candidates) == 1:
+        return (candidates[0][0],), candidates[0][1], ()
+    if len(candidates) > 1:
+        # Multiple source trace spans can each explain the same native word.
+        # Do not rank by overlap, exact-text bonus, geometry, sequence number,
+        # or any other preference: ownership is ambiguous unless unique.
+        return (), "", (TEXT_TRACE_AMBIGUOUS,)
 
     chain, reasons = _owned_span_chain(spans, raw_text, bbox)
     if chain is None:
