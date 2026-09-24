@@ -1,0 +1,120 @@
+name: TEST-ONLY Murera Door Instance Audit
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-door-audit:
+    if: startsWith(github.head_ref, 'diag/murera-door-instance-audit-current')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Audit SHA-pinned Murera door evidence
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib, json, re, urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_drawing_ocr_evidence_layer import DrawingOCREngine
+          from pb_plan_opening_instance_marks import (
+              extract_marks_from_page,
+              extract_plan_instance_opening_totals,
+              package_documents_door_system,
+          )
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected_sha="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-door-audit/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              payload=r.read()
+          actual=hashlib.sha256(payload).hexdigest()
+          if actual != expected_sha:
+              raise SystemExit(f"source hash mismatch: {actual}")
+          source=Path("/tmp/murera.pdf"); source.write_bytes(payload)
+
+          doc=fitz.open(source)
+          extractor=GenericPlanReaderExtractor()
+          ocr_engine=DrawingOCREngine()
+          page_indices=[218,224,227]
+          texts=[]
+          pages=[]
+          try:
+              for pno in page_indices:
+                  page=doc[pno]
+                  native=page.get_text("text") or ""
+                  texts.append(native)
+                  marks=extract_marks_from_page(page,pno+1)
+                  ocr=ocr_engine.recognize_page_rect(page,dpi=120)
+                  selected_native=[
+                      line.strip() for line in native.splitlines()
+                      if re.search(r"\bdoor\b|\bD\s*-?\s*[12]\b|flush|casement",line,re.I)
+                  ]
+                  selected_ocr=[
+                      row for row in ocr
+                      if re.search(r"\bdoor\b|\bD\s*-?\s*[12]\b|flush|casement",str(row.get("text") or ""),re.I)
+                  ]
+                  pages.append({
+                      "page":pno+1,
+                      "is_drawing_page":extractor.is_drawing_page(native,page),
+                      "native_chars":len(native.strip()),
+                      "image_count":len(page.get_images() or []),
+                      "marks":[
+                          {
+                              "tag":m.tag,
+                              "trade":m.trade,
+                              "conf":round(float(m.conf),3),
+                              "x":round(float(m.x),2),
+                              "y":round(float(m.y),2),
+                              "raw":m.raw,
+                              "complete":bool(m.complete),
+                          }
+                          for m in marks
+                      ],
+                      "selected_native_lines":selected_native[:80],
+                      "selected_ocr_lines":selected_ocr[:120],
+                  })
+
+              totals=extract_plan_instance_opening_totals(doc,page_indices)
+              predictions=extractor.extract_from_pdf(
+                  source,
+                  pages=page_indices,
+                  collect_item35_shadow=False,
+              )
+              pred_rows=[
+                  p.to_dict() for p in predictions
+                  if p.trade_type=="doors" or p.tag=="doors_complete"
+              ]
+              result={
+                  "source_sha256":actual,
+                  "package_documents_door_system":package_documents_door_system(texts),
+                  "totals":(
+                      {
+                          "window_count":totals.window_count,
+                          "door_count":totals.door_count,
+                          "window_types":list(totals.window_types),
+                          "door_types":list(totals.door_types),
+                          "source_page":totals.source_page,
+                          "evidence_text":totals.evidence_text,
+                      } if totals is not None else None
+                  ),
+                  "door_predictions":pred_rows,
+                  "pages":pages,
+              }
+          finally:
+              doc.close()
+          print("MURERA_DOOR_INSTANCE_AUDIT="+json.dumps(result,sort_keys=True),flush=True)
+          PY
