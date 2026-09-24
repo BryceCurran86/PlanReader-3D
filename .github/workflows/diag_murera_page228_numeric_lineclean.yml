@@ -1,0 +1,122 @@
+name: TEST-ONLY Murera Page228 Numeric Lineclean OCR
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  numeric-lineclean:
+    if: startsWith(github.head_ref, 'diag/murera-page228-numeric-lineclean')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13", cache: pip}
+      - name: Install OCR runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Remove grid lines and OCR numeric dimension tokens
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,io,json,re,urllib.request
+          from pathlib import Path
+          import fitz,cv2,numpy as np,pytesseract
+          from PIL import Image
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          want="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          p=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-numeric-lineclean/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:p.write_bytes(r.read())
+          got=hashlib.sha256(p.read_bytes()).hexdigest()
+          if got!=want: raise SystemExit(got)
+
+          def line_clean(gray):
+              # upscale first so thin CAD glyphs survive morphology
+              im=cv2.resize(gray,None,fx=2.0,fy=3.0,interpolation=cv2.INTER_CUBIC)
+              bw=cv2.threshold(im,0,255,cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)[1]
+              hk=cv2.getStructuringElement(cv2.MORPH_RECT,(90,1))
+              vk=cv2.getStructuringElement(cv2.MORPH_RECT,(1,60))
+              h=cv2.morphologyEx(bw,cv2.MORPH_OPEN,hk)
+              v=cv2.morphologyEx(bw,cv2.MORPH_OPEN,vk)
+              cleaned=cv2.bitwise_and(bw,cv2.bitwise_not(cv2.bitwise_or(h,v)))
+              cleaned=cv2.morphologyEx(cleaned,cv2.MORPH_CLOSE,cv2.getStructuringElement(cv2.MORPH_RECT,(2,2)))
+              return 255-cleaned
+
+          def numeric_rows(im,rotation,variant):
+              if rotation==90: work=cv2.rotate(im,cv2.ROTATE_90_CLOCKWISE)
+              elif rotation==270: work=cv2.rotate(im,cv2.ROTATE_90_COUNTERCLOCKWISE)
+              else: work=im
+              rows=[]
+              for psm in (6,11,12):
+                  cfg=f"--psm {psm} -c tessedit_char_whitelist=0123456789,."
+                  data=pytesseract.image_to_data(work,config=cfg,output_type=pytesseract.Output.DICT)
+                  for k,t in enumerate(data["text"]):
+                      raw=str(t or "").strip()
+                      if not raw or not re.search(r"\d",raw): continue
+                      try: conf=float(data["conf"][k])
+                      except Exception: conf=-1
+                      normalized=re.sub(r"[^0-9]","",raw)
+                      if not normalized: continue
+                      try: val=int(normalized)
+                      except ValueError: continue
+                      if not (100<=val<=50000): continue
+                      rows.append({
+                          "raw":raw,"digits":normalized,"value":val,
+                          "confidence":round(conf,2),"psm":psm,
+                          "rotation":rotation,"variant":variant,
+                          "bbox":[int(data["left"][k]),int(data["top"][k]),int(data["width"][k]),int(data["height"][k])],
+                          "block":int(data["block_num"][k]),"par":int(data["par_num"][k]),"line":int(data["line_num"][k]),
+                      })
+              return rows
+
+          doc=fitz.open(p); page=doc[227]
+          out=[]
+          seen=set()
+          for order,img in enumerate(page.get_images(full=True) or []):
+              xref=int(img[0])
+              if xref in seen: continue
+              seen.add(xref)
+              raw=doc.extract_image(xref)["image"]
+              gray=np.array(Image.open(io.BytesIO(raw)).convert("L"))
+              variants={
+                  "gray":cv2.resize(gray,None,fx=2.0,fy=3.0,interpolation=cv2.INTER_CUBIC),
+                  "lineclean":line_clean(gray),
+              }
+              rows=[]
+              for name,im in variants.items():
+                  for rot in (0,90,270):
+                      rows.extend(numeric_rows(im,rot,name))
+              # keep candidates that either have reasonable confidence or
+              # repeat across independent OCR modes/rotations.
+              bydigits={}
+              for row in rows: bydigits.setdefault(row["digits"],[]).append(row)
+              retained=[]
+              for digits,members in bydigits.items():
+                  high=max((m["confidence"] for m in members),default=-1)
+                  modes={(m["variant"],m["rotation"],m["psm"]) for m in members}
+                  val=int(digits)
+                  if high>=20 or len(modes)>=2:
+                      retained.append({
+                          "digits":digits,"value":val,
+                          "observations":sorted(members,key=lambda x:-x["confidence"])[:16],
+                          "mode_count":len(modes),
+                          "max_confidence":high,
+                      })
+              retained.sort(key=lambda x:(-x["mode_count"],-x["max_confidence"],x["value"]))
+              out.append({
+                  "order":order,"xref":xref,
+                  "px":[int(img[2]),int(img[3])],
+                  "placement_rects":[list(map(float,(r.x0,r.y0,r.x1,r.y1))) for r in page.get_image_rects(xref) or []],
+                  "numeric_candidates":retained[:120],
+              })
+          doc.close()
+          print("MURERA_PAGE228_NUMERIC_LINECLEAN="+json.dumps({
+              "sha":got,"page":228,"strips":out
+          },sort_keys=True),flush=True)
+          PY
