@@ -341,6 +341,31 @@ def test_two_possible_physical_walls_abstain_as_ambiguous_ownership() -> None:
     assert status is EvidenceResolutionStatus.ABSTAINED
 
 
+def test_positive_target_provenance_excludes_non_wall_terminator_hits() -> None:
+    lines = (
+        _line("leader", "raw-leader", 3.0, 10.0, 5.0, 10.0),
+        _line("wall", "raw-wall", 5.0, 0.0, 5.0, 20.0),
+    )
+    record = SimpleNamespace(
+        wall_candidate_id="wall-1",
+        physical_identity=SimpleNamespace(source_primitive_ids=("raw-wall",)),
+    )
+    scope = SimpleNamespace(
+        records=(record,),
+        equivalence=SimpleNamespace(equivalence_groups=()),
+    )
+
+    target, source_face_segments, status = _target_from_terminator(
+        _term(5.0, 10.0),
+        lines,
+        scope,
+    )
+
+    assert target is record
+    assert status is EvidenceResolutionStatus.CORROBORATED
+    assert source_face_segments == ("raw-wall",)
+
+
 def test_no_terminator_abstains_from_connectivity() -> None:
     annotation = (20.0, 8.0, 30.0, 12.0)
     lines = (_line("lead", "raw", 30.0, 10.0, 5.0, 10.0),)
