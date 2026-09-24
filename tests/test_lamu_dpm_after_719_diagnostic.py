@@ -14,6 +14,7 @@ import urllib.request
 
 import fitz
 import pytest
+import fitz
 
 from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
 from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
@@ -152,6 +153,7 @@ def test_lamu_dpm_after_structural_sheet_scan(tmp_path: Path) -> None:
         "page_audit": page_audit,
         "page_evidence": page_evidence,
         "dpm_prediction": dpm,
+        "page_audit": page_audit,
         "target_LMU_E3_C": target,
         "project": {
             "accepted": int(report.exact_matches + report.within_5_percent),
