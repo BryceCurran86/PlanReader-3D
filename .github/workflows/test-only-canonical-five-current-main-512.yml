@@ -1,0 +1,28 @@
+name: TEST-ONLY Canonical Five Current Main 512MB
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  canonical-five-current-main:
+    if: startsWith(github.head_ref, 'diag/canonical-five-current-main-512')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build current-main image without OCR additions
+        run: docker build -f Dockerfile.current-main-512 -t planreader-current-main-512 .
+
+      - name: Run five-project canonical benchmark under 512MB
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --memory=512m \
+            --memory-swap=512m \
+            --cpus=1.0 \
+            planreader-current-main-512 \
+            python scripts/diagnostic_canonical_five_tesseract.py \
+            | tee /tmp/canonical-five-current-main.txt
+          grep -q 'CANONICAL_FIVE_TESSERACT_RESULT=' /tmp/canonical-five-current-main.txt
