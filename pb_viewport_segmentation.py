@@ -606,6 +606,268 @@ def _frame_resolved_viewports(
     return out, consumed
 
 
+
+_AUTHORITATIVE_DERIVED_PARTITION_MODE = "columnar_title_grid"
+
+
+def is_authoritative_derived_viewport(viewport: Any) -> bool:
+    """Return True only for the strictly validated multi-column title grid.
+
+    Ordinary TITLE_PARTITION viewports remain diagnostic DERIVED evidence.
+    This stronger subtype is producer-owned: it requires a non-overlapping
+    columnar grid with independently separated title rows in every column.
+    """
+    provenance = getattr(viewport, "provenance", {}) or {}
+    return bool(
+        getattr(viewport, "status", None) == ViewportSegmentationStatus.DERIVED.value
+        and getattr(viewport, "boundary_source", None)
+        == ViewportBoundarySource.TITLE_PARTITION.value
+        and getattr(viewport, "bounding_box", None) is not None
+        and provenance.get("partition_mode") == _AUTHORITATIVE_DERIVED_PARTITION_MODE
+        and provenance.get("grid_validated") is True
+    )
+
+
+def _title_identity(anchor: _TitleAnchor) -> tuple[str, str]:
+    return (
+        re.sub(r"\s+", " ", str(anchor.text).strip().upper()),
+        str(anchor.view_type),
+    )
+
+
+def _cluster_title_columns(
+    anchors: Sequence[_TitleAnchor],
+    indices: Sequence[int],
+    *,
+    tolerance: float,
+) -> list[list[int]]:
+    """Cluster title anchors by X only; callers still prove Y separation."""
+    ordered = sorted(indices, key=lambda i: anchors[i].center[0])
+    clusters: list[list[int]] = []
+    for index in ordered:
+        x = anchors[index].center[0]
+        if not clusters:
+            clusters.append([index])
+            continue
+        center = statistics.median(anchors[i].center[0] for i in clusters[-1])
+        if abs(x - center) <= tolerance:
+            clusters[-1].append(index)
+        else:
+            clusters.append([index])
+    return clusters
+
+
+def _columnar_title_grid_partitions(
+    page: Any,
+    anchors: Sequence[_TitleAnchor],
+    unresolved_indices: Sequence[int],
+    calibration: ViewportLayoutCalibration,
+    *,
+    page_number: int,
+) -> Optional[list[SegmentedViewport]]:
+    """Derive a strict non-overlapping 2-D title grid.
+
+    This fallback exists for CAD sheets whose views form independent vertical
+    columns. It is deliberately stricter than the ordinary one-axis title
+    partition:
+
+    - at least two independently separated columns are required;
+    - every column must contain at least two distinct view-title rows;
+    - distinct row titles in one column must be separated by at least one
+      minimum plausible viewport span;
+    - exact same-label near-duplicates may collapse to one canonical anchor,
+      but different labels that collide remain ambiguous;
+    - every resulting cell must itself meet the minimum viewport span and
+      contain its canonical title;
+    - cells are page-partition rectangles and therefore cannot overlap.
+
+    The resulting viewports remain DERIVED, but carry producer-owned provenance
+    allowing downstream code to distinguish this validated grid from looser
+    diagnostic title partitions.
+    """
+    if len(unresolved_indices) < 4:
+        return None
+
+    x_clusters = _cluster_title_columns(
+        anchors,
+        unresolved_indices,
+        tolerance=calibration.title_separation_pt,
+    )
+    if len(x_clusters) < 2:
+        return None
+
+    column_rows: list[dict[str, Any]] = []
+    duplicate_indices: list[tuple[int, int]] = []
+
+    for cluster in x_clusters:
+        ordered = sorted(cluster, key=lambda i: anchors[i].center[1])
+        groups: list[list[int]] = []
+        for index in ordered:
+            if not groups:
+                groups.append([index])
+                continue
+            previous_group = groups[-1]
+            previous_y = statistics.median(
+                anchors[i].center[1] for i in previous_group
+            )
+            y = anchors[index].center[1]
+            if abs(y - previous_y) < calibration.title_separation_pt:
+                identities = {_title_identity(anchors[i]) for i in previous_group}
+                if identities == {_title_identity(anchors[index])}:
+                    previous_group.append(index)
+                    continue
+                # Two different titles too close to own separate viewports.
+                return None
+            groups.append([index])
+
+        canonical: list[int] = []
+        for group in groups:
+            # Preserve the strongest text anchor and explicitly mark exact
+            # near-duplicates as non-owning evidence.
+            winner = max(
+                group,
+                key=lambda i: (
+                    _bbox_area(anchors[i].bbox),
+                    anchors[i].center[1],
+                    -anchors[i].center[0],
+                ),
+            )
+            canonical.append(winner)
+            duplicate_indices.extend((i, winner) for i in group if i != winner)
+
+        canonical.sort(key=lambda i: anchors[i].center[1])
+        if len(canonical) < 2:
+            return None
+        row_centers = [anchors[i].center[1] for i in canonical]
+        if any(
+            row_centers[i + 1] - row_centers[i] < calibration.minimum_frame_span_pt
+            for i in range(len(row_centers) - 1)
+        ):
+            return None
+
+        column_rows.append(
+            {
+                "indices": canonical,
+                "center_x": statistics.median(
+                    anchors[i].center[0] for i in canonical
+                ),
+                "row_centers": row_centers,
+            }
+        )
+
+    column_rows.sort(key=lambda item: item["center_x"])
+    column_centers = [float(item["center_x"]) for item in column_rows]
+    if any(
+        column_centers[i + 1] - column_centers[i]
+        < calibration.minimum_frame_span_pt
+        for i in range(len(column_centers) - 1)
+    ):
+        return None
+
+    x_bounds = [0.0]
+    x_bounds.extend(
+        (column_centers[i] + column_centers[i + 1]) / 2.0
+        for i in range(len(column_centers) - 1)
+    )
+    x_bounds.append(calibration.page_width_pt)
+
+    out: list[SegmentedViewport] = []
+    for column_position, column in enumerate(column_rows):
+        row_indices = list(column["indices"])
+        row_centers = list(column["row_centers"])
+        y_bounds = [0.0]
+        y_bounds.extend(
+            (row_centers[i] + row_centers[i + 1]) / 2.0
+            for i in range(len(row_centers) - 1)
+        )
+        y_bounds.append(calibration.page_height_pt)
+
+        for row_position, index in enumerate(row_indices):
+            bbox = (
+                float(x_bounds[column_position]),
+                float(y_bounds[row_position]),
+                float(x_bounds[column_position + 1]),
+                float(y_bounds[row_position + 1]),
+            )
+            if (
+                bbox[2] - bbox[0] < calibration.minimum_frame_span_pt
+                or bbox[3] - bbox[1] < calibration.minimum_frame_span_pt
+            ):
+                return None
+            anchor = anchors[index]
+            if not _bbox_contains(bbox, anchor.bbox):
+                return None
+            raw, denominator, scale_conflict, scale_notes = _extract_scales_for_bbox(
+                page, bbox
+            )
+            duplicates = [
+                anchors[dup].bbox
+                for dup, owner in duplicate_indices
+                if owner == index
+            ]
+            out.append(
+                SegmentedViewport(
+                    view_id=f"view_p{page_number}_{index + 1}",
+                    page_number=page_number,
+                    view_type=anchor.view_type,
+                    label=anchor.text,
+                    title_bbox=anchor.bbox,
+                    bounding_box=bbox,
+                    status=ViewportSegmentationStatus.DERIVED.value,
+                    boundary_source=ViewportBoundarySource.TITLE_PARTITION.value,
+                    confidence=0.75,
+                    scale_raw=raw,
+                    scale_denominator=denominator,
+                    scale_conflict=scale_conflict,
+                    notes=[
+                        "viewport boundary derived from validated non-overlapping columnar title grid",
+                        *scale_notes,
+                    ],
+                    provenance={
+                        "partition_mode": _AUTHORITATIVE_DERIVED_PARTITION_MODE,
+                        "grid_validated": True,
+                        "column_index": column_position,
+                        "column_count": len(column_rows),
+                        "row_index": row_position,
+                        "row_count": len(row_indices),
+                        "title_bbox": anchor.bbox,
+                        "duplicate_title_bboxes": duplicates,
+                    },
+                )
+            )
+
+    # Preserve duplicate source titles as non-owning diagnostic evidence rather
+    # than minting a second viewport over the same region.
+    for duplicate, owner in duplicate_indices:
+        anchor = anchors[duplicate]
+        out.append(
+            SegmentedViewport(
+                view_id=f"view_p{page_number}_{duplicate + 1}",
+                page_number=page_number,
+                view_type=anchor.view_type,
+                label=anchor.text,
+                title_bbox=anchor.bbox,
+                bounding_box=None,
+                status=ViewportSegmentationStatus.AMBIGUOUS.value,
+                boundary_source=ViewportBoundarySource.NONE.value,
+                confidence=0.0,
+                notes=["near-duplicate same-label title collapsed into validated grid owner"],
+                provenance={
+                    "duplicate_of_view_id": f"view_p{page_number}_{owner + 1}",
+                    "duplicate_title_bbox": anchor.bbox,
+                },
+            )
+        )
+
+    usable = [
+        viewport for viewport in out
+        if viewport.bounding_box is not None
+    ]
+    if len(usable) < 4 or not validate_non_overlapping_viewports(usable):
+        return None
+    return out
+
+
 def _derived_partitions(
     page: Any,
     anchors: Sequence[_TitleAnchor],
@@ -631,6 +893,15 @@ def _derived_partitions(
     ordered = sorted(unresolved_indices, key=lambda i: (anchors[i].center[axis], anchors[i].center[1 - axis]))
     coords = [anchors[i].center[axis] for i in ordered]
     if any(abs(coords[i + 1] - coords[i]) < calibration.title_separation_pt for i in range(len(coords) - 1)):
+        grid = _columnar_title_grid_partitions(
+            page,
+            anchors,
+            unresolved_indices,
+            calibration,
+            page_number=page_number,
+        )
+        if grid is not None:
+            return grid
         return [SegmentedViewport(
             view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
             view_type=anchors[index].view_type, label=anchors[index].text,

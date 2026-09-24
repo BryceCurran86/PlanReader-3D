@@ -11,10 +11,12 @@ import fitz
 import pytest
 
 from pb_drawing_evidence_binding import DrawingViewType
+from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
 from pb_viewport_segmentation import (
     ViewportBoundarySource,
     ViewportSegmentationStatus,
     assign_bbox_to_viewport,
+    is_authoritative_derived_viewport,
     segment_page_viewports,
     validate_non_overlapping_viewports,
 )
@@ -172,6 +174,72 @@ def test_two_unframed_separated_titles_create_non_overlapping_derived_partition(
     by_type = {v.view_type: v for v in viewports}
     assert by_type[DrawingViewType.FLOOR_PLAN.value].scale_denominator == 100
     assert by_type[DrawingViewType.ELEVATION.value].scale_denominator == 50
+    # Ordinary one-axis title partitions remain diagnostic-only.
+    assert not is_authoritative_derived_viewport(
+        by_type[DrawingViewType.FLOOR_PLAN.value]
+    )
+    assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
+    doc.close()
+
+
+def _three_column_unframed_grid(*, conflicting_title: bool = False) -> fitz.Document:
+    doc = fitz.open()
+    page = doc.new_page(width=900, height=700)
+
+    # Left column.
+    page.insert_text((80, 250), "GROUND FLOOR PLAN", fontsize=11)
+    page.insert_text((90, 620), "ROOF PLAN", fontsize=11)
+
+    # Middle column.
+    page.insert_text((380, 200), "ELEVATION E-01", fontsize=11)
+    page.insert_text((380, 560), "SECTION S-01", fontsize=11)
+
+    # Right column.
+    page.insert_text((680, 200), "ELEVATION E-02", fontsize=11)
+    page.insert_text((680, 560), "SECTION S-02", fontsize=11)
+
+    if conflicting_title:
+        # A distinct title inside the same minimum-height ownership band must
+        # invalidate the grid rather than being collapsed as a duplicate.
+        page.insert_text((382, 225), "WEST ELEVATION", fontsize=11)
+
+    return _reopen(doc)
+
+
+def test_columnar_title_grid_is_strict_derived_floor_plan_authority():
+    doc = _three_column_unframed_grid()
+    viewports = segment_page_viewports(doc[0], page_number=1)
+    assert validate_non_overlapping_viewports(viewports)
+
+    plan = next(
+        viewport for viewport in viewports
+        if viewport.view_type == DrawingViewType.FLOOR_PLAN.value
+    )
+    assert plan.status == ViewportSegmentationStatus.DERIVED.value
+    assert plan.boundary_source == ViewportBoundarySource.TITLE_PARTITION.value
+    assert plan.bounding_box is not None
+    assert plan.provenance["partition_mode"] == "columnar_title_grid"
+    assert plan.provenance["grid_validated"] is True
+    assert is_authoritative_derived_viewport(plan)
+
+    authoritative = authoritative_floor_plan_viewports(doc[0], page_number=1)
+    assert len(authoritative) == 1
+    assert authoritative[0].label == "GROUND FLOOR PLAN"
+    assert authoritative[0].bounding_box == pytest.approx(plan.bounding_box)
+    doc.close()
+
+
+def test_columnar_title_grid_distinct_close_titles_fail_closed():
+    doc = _three_column_unframed_grid(conflicting_title=True)
+    viewports = segment_page_viewports(doc[0], page_number=1)
+    plan = next(
+        viewport for viewport in viewports
+        if viewport.view_type == DrawingViewType.FLOOR_PLAN.value
+    )
+    assert plan.status == ViewportSegmentationStatus.AMBIGUOUS.value
+    assert plan.bounding_box is None
+    assert not is_authoritative_derived_viewport(plan)
+    assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
     doc.close()
 
 
