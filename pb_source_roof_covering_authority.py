@@ -48,6 +48,10 @@ MIN_PLAUSIBLE_PITCH_DEG = 5.0
 MAX_PLAUSIBLE_PITCH_DEG = 65.0
 MIN_HORIZONTAL_RUN_PT = 30.0
 MAX_WALLCORNER_RAY_GAP_PT = 3.5
+MAX_PAIRED_BASELINE_DELTA_PT = 1.5
+MAX_PAIRED_RAY_GAP_FRACTION = 0.15
+MAX_AXIS_MATCH_REL_ERROR = 0.03
+MAX_AXIS_MATCH_ABS_ERROR_M = 0.25
 
 
 @dataclass(frozen=True)
@@ -164,6 +168,7 @@ class GableRoofApexEvidence:
     member_count: int
     source_viewport_id: str | None = None
     source_page: int = 1
+    source_scale_denominator: float | None = None
     material_annotations: tuple[str, ...] = ()
     reason_codes: tuple[str, ...] = ()
 
@@ -257,12 +262,139 @@ def _find_farthest_structural_run(
     return None
 
 
+def _find_paired_baseline_structural_runs(
+    apex_xy: tuple[float, float],
+    pitch_deg: float,
+    verticals: Sequence[VerticalSupportSegment],
+) -> tuple[
+    tuple[float, tuple[float, float]],
+    tuple[float, tuple[float, float]],
+] | None:
+    """Recover opposing structural endpoints from a shared wall baseline.
+
+    This is a conservative fallback used only when the strict roof-ray test
+    cannot resolve both sides. Each support must still lie reasonably close
+    to its projected roof ray, with tolerance bounded by its own structural
+    vertical length, and the two supports must share the same bottom baseline.
+    """
+    ax, ay = apex_xy
+    tan_pitch = math.tan(math.radians(pitch_deg))
+
+    sides: dict[int, list[tuple[VerticalSupportSegment, float, float]]] = {
+        -1: [],
+        1: [],
+    }
+    for direction in (-1, 1):
+        for v in verticals:
+            run = (v.x - ax) * direction
+            if run < MIN_HORIZONTAL_RUN_PT:
+                continue
+            expected_y = ay + run * tan_pitch
+            ray_gap = abs(v.top_y - expected_y)
+            allowed_gap = max(
+                MAX_WALLCORNER_RAY_GAP_PT,
+                MAX_PAIRED_RAY_GAP_FRACTION * float(v.length),
+            )
+            if ray_gap <= allowed_gap:
+                sides[direction].append((v, run, ray_gap))
+
+    if not sides[-1] or not sides[1]:
+        return None
+
+    pairs: list[
+        tuple[
+            float,
+            float,
+            float,
+            VerticalSupportSegment,
+            float,
+            VerticalSupportSegment,
+            float,
+        ]
+    ] = []
+    for lv, lrun, lgap in sides[-1]:
+        for rv, rrun, rgap in sides[1]:
+            baseline_delta = abs(float(lv.bottom_y) - float(rv.bottom_y))
+            if baseline_delta > MAX_PAIRED_BASELINE_DELTA_PT:
+                continue
+            # Prefer the widest source-owned structural pair; then the closest
+            # shared baseline and smallest aggregate roof-ray miss.
+            pairs.append(
+                (
+                    -(lrun + rrun),
+                    baseline_delta,
+                    lgap + rgap,
+                    lv,
+                    lrun,
+                    rv,
+                    rrun,
+                )
+            )
+
+    if not pairs:
+        return None
+
+    pairs.sort(key=lambda row: (row[0], row[1], row[2]))
+    _, _, _, lv, lrun, rv, rrun = pairs[0]
+    return (
+        (round(lrun, 4), (round(lv.x, 4), round(lv.top_y, 4))),
+        (round(rrun, 4), (round(rv.x, 4), round(rv.top_y, 4))),
+    )
+
+
+def _scaled_structural_span_m(
+    evidence: GableRoofApexEvidence,
+) -> float | None:
+    scale = evidence.source_scale_denominator
+    if scale is None or not math.isfinite(float(scale)) or float(scale) <= 0.0:
+        return None
+    span_pt = float(evidence.left_run_pt) + float(evidence.right_run_pt)
+    if not math.isfinite(span_pt) or span_pt <= 0.0:
+        return None
+    metres_per_point = (25.4 / 72.0) * float(scale) / 1000.0
+    return round(span_pt * metres_per_point, 6)
+
+
+def _match_scaled_gable_span_to_footprint(
+    evidence: GableRoofApexEvidence,
+    *,
+    building_length_m: float,
+    building_width_m: float,
+) -> tuple[float, float, str] | None:
+    """Match a source-scaled gable span to exactly one footprint axis."""
+    measured = _scaled_structural_span_m(evidence)
+    if measured is None:
+        return None
+
+    axes = (
+        ("length", float(building_length_m), float(building_width_m)),
+        ("width", float(building_width_m), float(building_length_m)),
+    )
+    matches: list[tuple[float, str, float, float]] = []
+    for name, axis, other in axes:
+        if axis <= 0.0:
+            continue
+        abs_err = abs(measured - axis)
+        rel_err = abs_err / axis
+        if (
+            rel_err <= MAX_AXIS_MATCH_REL_ERROR
+            or abs_err <= MAX_AXIS_MATCH_ABS_ERROR_M
+        ):
+            matches.append((rel_err, name, axis, other))
+
+    if len(matches) != 1:
+        return None
+    _, name, span, ridge = matches[0]
+    return round(span, 6), round(ridge, 6), name
+
+
 def resolve_gable_apex_in_viewport(
     diagonals: Sequence[DiagonalSlopeSegment],
     verticals: Sequence[VerticalSupportSegment],
     *,
     source_viewport_id: str | None = None,
     source_page: int = 1,
+    source_scale_denominator: float | None = None,
     material_annotations: Sequence[str] = (),
 ) -> tuple[GableRoofApexEvidence | None, tuple[str, ...]]:
     """Resolve an unambiguous gable apex within a segmented elevation viewport.
@@ -294,12 +426,21 @@ def resolve_gable_apex_in_viewport(
         return None, ("pitch_out_of_structural_range",)
 
     left_res = _find_farthest_structural_run(apex_xy, mean_pitch, -1, verticals)
-    if left_res is None:
-        return None, ("missing_structural_endpoint_left",)
-
     right_res = _find_farthest_structural_run(apex_xy, mean_pitch, 1, verticals)
-    if right_res is None:
-        return None, ("missing_structural_endpoint_right",)
+
+    endpoint_reason = "authenticated_gable_roofline"
+    if left_res is None or right_res is None:
+        paired = _find_paired_baseline_structural_runs(
+            apex_xy,
+            mean_pitch,
+            verticals,
+        )
+        if paired is None:
+            if left_res is None:
+                return None, ("missing_structural_endpoint_left",)
+            return None, ("missing_structural_endpoint_right",)
+        left_res, right_res = paired
+        endpoint_reason = "authenticated_gable_roofline_paired_baseline"
 
     left_run_pt, left_support = left_res
     right_run_pt, right_support = right_res
@@ -316,10 +457,11 @@ def resolve_gable_apex_in_viewport(
         member_count=len(members),
         source_viewport_id=source_viewport_id,
         source_page=source_page,
+        source_scale_denominator=source_scale_denominator,
         material_annotations=tuple(material_annotations),
-        reason_codes=("authenticated_gable_roofline",),
+        reason_codes=("authenticated_gable_roofline", endpoint_reason),
     )
-    return evidence, ("authenticated_gable_roofline",)
+    return evidence, tuple(dict.fromkeys(("authenticated_gable_roofline", endpoint_reason)))
 
 
 def measure_source_roof_covering(
@@ -348,23 +490,32 @@ def measure_source_roof_covering(
             reason_codes=("invalid_footprint_dimensions",),
         )
 
-    # In standard gable structures, the ridge runs along the long axis.
-    # When width > length without explicit ridge orientation, fail closed.
-    if building_width_m > building_length_m:
-        return SourceRoofCoveringMeasurement(
-            status=EvidenceResolutionStatus.ABSTAINED,
-            pitch_deg=None,
-            cross_ridge_span_m=None,
-            ridge_length_m=None,
-            slope_length_m=None,
-            roof_covering_area_m2=None,
-            gable_evidence=gable_evidence,
-            quantity_evidence=None,
-            reason_codes=("ambiguous_ridge_axis",),
-        )
-
-    cross_ridge_span_m = round(building_width_m, 3)
-    ridge_length_m = round(building_length_m, 3)
+    axis_match = _match_scaled_gable_span_to_footprint(
+        gable_evidence,
+        building_length_m=building_length_m,
+        building_width_m=building_width_m,
+    )
+    if axis_match is not None:
+        cross_ridge_span_m, ridge_length_m, matched_axis = axis_match
+    else:
+        # Backward-compatible fallback when the elevation has no trustworthy
+        # physical scale. In standard gable structures the ridge runs along
+        # the long axis; an inverted unsourced footprint remains ambiguous.
+        if building_width_m > building_length_m:
+            return SourceRoofCoveringMeasurement(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                pitch_deg=None,
+                cross_ridge_span_m=None,
+                ridge_length_m=None,
+                slope_length_m=None,
+                roof_covering_area_m2=None,
+                gable_evidence=gable_evidence,
+                quantity_evidence=None,
+                reason_codes=("ambiguous_ridge_axis",),
+            )
+        cross_ridge_span_m = round(building_width_m, 3)
+        ridge_length_m = round(building_length_m, 3)
+        matched_axis = "legacy_long_axis_fallback"
 
     pitch_rad = math.radians(gable_evidence.pitch_deg)
     cos_pitch = math.cos(pitch_rad)
@@ -453,6 +604,9 @@ def measure_source_roof_covering(
             "right_run_pt": gable_evidence.right_run_pt,
             "source_viewport_id": gable_evidence.source_viewport_id,
             "source_page": gable_evidence.source_page,
+            "source_scale_denominator": gable_evidence.source_scale_denominator,
+            "scaled_structural_span_m": _scaled_structural_span_m(gable_evidence),
+            "matched_footprint_axis": matched_axis,
             "material_annotations": list(gable_evidence.material_annotations),
             "evidence_atom": ev_atom.to_dict(),
         },
@@ -631,6 +785,11 @@ def resolve_document_gable_roof_covering(
                 verts,
                 source_viewport_id=vp.view_id,
                 source_page=p_idx + 1,
+                source_scale_denominator=(
+                    float(vp.scale_denominator)
+                    if getattr(vp, "scale_denominator", None) is not None
+                    else None
+                ),
                 material_annotations=mat_annos,
             )
             if evidence is not None:
