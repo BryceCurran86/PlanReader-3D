@@ -30,6 +30,8 @@ jobs:
           import fitz
 
           from pb_dimension_chain_evidence_extractor import extract_dimension_chains_from_page
+from pb_public_tender_benchmark import PublicTenderBenchmark
+from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
           from pb_drawing_ocr_evidence_layer import DrawingOCREngine
 
           url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
@@ -233,6 +235,23 @@ jobs:
                       "bindings":bindings,
                   })
               print("KSTVET_WINDOW_SPATIAL_BINDING_POST_763="+json.dumps(out,sort_keys=True),flush=True)
+
+              benchmark_id="tenders_ke_kstvet_cbc_classroom"
+              report=BenchmarkAccuracyEngine(
+                  benchmarks_dir="benchmarks/public_tenders",
+                  output_dir="/tmp/kstvet-current-items",
+              ).evaluate_benchmark(benchmark_id=benchmark_id,pdf_path=source,auto_extract=True)
+              current={
+                  "source_sha256":actual,
+                  "production_sha":"65bbdb077333e376e2c0ee0cb6dd002afa28197c",
+                  "accepted":int(report.exact_matches+report.within_5_percent),
+                  "denominator":int(report.total_items_compared),
+                  "accuracy_percentage":report.overall_accuracy_percentage,
+                  "strict_exact_percentage":report.strict_exact_accuracy_percentage,
+                  "hallucinated":int(report.hallucinated_items),
+                  "items":[item.to_dict() for item in report.item_results],
+              }
+              print("KSTVET_CURRENT_ITEMS_POST_763="+json.dumps(current,sort_keys=True),flush=True)
           finally:
               doc.close()
           PY
