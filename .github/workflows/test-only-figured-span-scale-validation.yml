@@ -1,0 +1,244 @@
+name: TEST-ONLY Figured Span Scale Validation
+on:
+  pull_request:
+    branches: [shadow/figured-span-scale-evidence]
+
+jobs:
+  focused:
+    if: startsWith(github.head_ref, 'diag/figured-span-scale-real-validation')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt
+      - name: Focused scale authority tests
+        run: |
+          pytest -q             tests/test_figured_span_scale_shadow.py             tests/test_physical_scale_calibration_bridge_v1.py             tests/geometry/test_page_scale_calibration_authority.py             tests/test_viewport_scale_binding.py             tests/test_measurement_input_authority.py             tests/test_measurement_input_authority_hardening.py
+
+  real-shadow:
+    if: startsWith(github.head_ref, 'diag/figured-span-scale-real-validation')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt
+      - name: KSTVET and Lamu native-vector shadow validation
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          import urllib.request
+
+          import fitz
+
+          from pb_figured_span_scale_shadow import (
+              FiguredSpanScaleScope,
+              build_figured_span_scale_calibration_shadow,
+              resolve_figured_span_scale_shadow,
+          )
+          from pb_migration_contracts import (
+              EvidenceResolutionStatus,
+              ViewportEvidence,
+              ViewportResolutionStatus,
+          )
+          from pb_migration_provider_envelope import ProviderContext
+          from pb_viewport_dimension_binding import extract_dimension_evidence_by_viewport
+          from pb_viewport_segmentation import segment_page_viewports
+
+          SOURCES = (
+              {
+                  "name": "KSTVET",
+                  "url": "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf",
+                  "sha256": "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+                  "page_no": 54,
+              },
+              {
+                  "name": "LAMU",
+                  "url": "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf",
+                  "sha256": "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2",
+                  "page_no": 41,
+              },
+          )
+
+          def download(url):
+              req = urllib.request.Request(
+                  url,
+                  headers={"User-Agent": "PlanReader-figured-span-scale-shadow/1.0"},
+              )
+              with urllib.request.urlopen(req, timeout=120) as response:
+                  return response.read()
+
+          def status_value(value):
+              return value.value if hasattr(value, "value") else str(value)
+
+          reports = []
+          for source in SOURCES:
+              payload = download(source["url"])
+              got = hashlib.sha256(payload).hexdigest()
+              if got != source["sha256"]:
+                  raise SystemExit(f'{source["name"]} SHA mismatch: {got}')
+              page_no = int(source["page_no"])
+              revision = "sha256:" + got
+              document_id = "source:" + got[:24]
+
+              doc = fitz.open(stream=payload, filetype="pdf")
+              try:
+                  page = doc[page_no - 1]
+                  viewports = segment_page_viewports(page, page_number=page_no)
+                  evidence = extract_dimension_evidence_by_viewport(
+                      page,
+                      page_num=page_no,
+                      viewports=viewports,
+                      sheet="",
+                  )
+                  viewport_rows = []
+                  for viewport in viewports:
+                      bundle = evidence.bundles.get(viewport.view_id)
+                      row = {
+                          "viewport_id": viewport.view_id,
+                          "label": viewport.label,
+                          "view_type": viewport.view_type,
+                          "viewport_status": viewport.status,
+                          "boundary_source": viewport.boundary_source,
+                          "bbox": viewport.bounding_box,
+                          "total_figured_observations": 0,
+                          "witness_bound_observations": 0,
+                          "valid_scale_candidates": 0,
+                          "rejected_candidates": 0,
+                          "independent_evidence_groups": 0,
+                          "candidate_mappings": [],
+                          "physical_scale_status": "not_evaluated",
+                          "reconciliation_status": None,
+                          "conflicts": [],
+                          "canonical_calibration_status": None,
+                          "canonical_source_type": None,
+                          "canonical_measurement_authority": None,
+                          "canonical_px_per_m": None,
+                      }
+                      if bundle is None:
+                          skip = evidence.skipped_viewports.get(viewport.view_id)
+                          if skip:
+                              row["conflicts"].append(skip)
+                          viewport_rows.append(row)
+                          continue
+
+                      status_map = {}
+                      for binding in bundle.bindings:
+                          status_map.setdefault(binding.observation_id, []).append(binding.status)
+                      row["total_figured_observations"] = len(bundle.observations)
+                      row["witness_bound_observations"] = sum(
+                          1
+                          for observation in bundle.observations
+                          if "witness_bound" in status_map.get(observation.dimension_id, [])
+                      )
+
+                      if viewport.status != "resolved" or viewport.bounding_box is None:
+                          row["conflicts"].append("viewport_not_exact_resolved_owner")
+                          viewport_rows.append(row)
+                          continue
+
+                      context = ProviderContext(
+                          run_id="real-shadow-" + source["name"].lower(),
+                          workspace_id="real-shadow",
+                          project_id="real-shadow",
+                          document_id=document_id,
+                          source_sha256=got,
+                          revision_id=revision,
+                          current_revision_id=revision,
+                          selected_pages=(page_no - 1,),
+                          owned_viewport_ids=(viewport.view_id,),
+                          evidence_snapshot_id="native-vector-shadow",
+                          owned_page_numbers=(page_no,),
+                          viewport_page_ownership=((viewport.view_id, page_no),),
+                      )
+                      vp_evidence = ViewportEvidence(
+                          viewport_id=viewport.view_id,
+                          document_id=document_id,
+                          page_id=str(page_no),
+                          bbox=tuple(float(v) for v in viewport.bounding_box),
+                          view_type=viewport.view_type,
+                          status=ViewportResolutionStatus.RESOLVED,
+                          confidence=float(viewport.confidence),
+                      )
+                      scope = FiguredSpanScaleScope(
+                          document_id=document_id,
+                          revision_id=revision,
+                          source_sha256=got,
+                          page_no=page_no,
+                          viewport_id=viewport.view_id,
+                      )
+                      result = resolve_figured_span_scale_shadow(
+                          bundle,
+                          scope=scope,
+                          context=context,
+                          viewport=vp_evidence,
+                      )
+                      bridge = build_figured_span_scale_calibration_shadow(
+                          physical_scale_result=result,
+                          scope=scope,
+                          context=context,
+                          viewport=vp_evidence,
+                      )
+
+                      row["valid_scale_candidates"] = len(result.candidates)
+                      row["rejected_candidates"] = len(result.rejected_candidates)
+                      row["independent_evidence_groups"] = len(result.independence_group_ids)
+                      row["candidate_mappings"] = [
+                          {
+                              "candidate_id": candidate.candidate_id,
+                              "observation_id": candidate.observation_id,
+                              "raw_text": candidate.raw_text,
+                              "unit": candidate.unit,
+                              "dimension_line_id": candidate.dimension_line_id,
+                              "witness_line_ids": list(candidate.witness_line_ids),
+                              "native_span_pt": candidate.source_span_pt,
+                              "physical_span_mm": candidate.physical_span_mm,
+                              "points_per_mm": candidate.points_per_mm,
+                              "points_per_m": None
+                              if candidate.points_per_mm is None
+                              else candidate.points_per_mm * 1000.0,
+                              "independence_group_id": candidate.independence_group_id,
+                              "duplicate_count": candidate.duplicate_count,
+                          }
+                          for candidate in result.candidates
+                      ]
+                      row["physical_scale_status"] = status_value(result.status)
+                      row["reconciliation_status"] = result.reconciliation_status
+                      row["conflicts"] = list(result.reconciliation_issues)
+                      if result.rejected_candidates:
+                          row["rejected_reason_counts"] = {}
+                          for candidate in result.rejected_candidates:
+                              for reason in candidate.blocker_reasons:
+                                  row["rejected_reason_counts"][reason] = (
+                                      row["rejected_reason_counts"].get(reason, 0) + 1
+                                  )
+                      if bridge.calibration is not None:
+                          row["canonical_calibration_status"] = bridge.calibration.status
+                          row["canonical_source_type"] = bridge.calibration.source_type
+                          row["canonical_measurement_authority"] = bridge.measurement_authority
+                          row["canonical_px_per_m"] = bridge.calibration.px_per_m
+                      else:
+                          row["canonical_measurement_authority"] = bridge.measurement_authority
+                      viewport_rows.append(row)
+
+                  reports.append(
+                      {
+                          "source": source["name"],
+                          "source_sha256": got,
+                          "page_no": page_no,
+                          "viewports": viewport_rows,
+                          "skipped_viewports": evidence.skipped_viewports,
+                      }
+                  )
+              finally:
+                  doc.close()
+
+          print("FIGURED_SPAN_REAL_SHADOW=" + json.dumps(reports, sort_keys=True, default=str))
+          PY
