@@ -1,0 +1,76 @@
+name: TEST-ONLY Lamu DPC Wall Pair Summary
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  summary:
+    if: startsWith(github.head_ref, 'diag/lamu-dpc-internal-wall-census')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install PyMuPDF
+      - run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_wall_fill_internal_partition_evidence import resolve_internal_partition_length_m
+          from pb_wall_hatch_perimeter_correction import _floor_plan_viewport_bbox
+          u="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          want="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          p=Path("/tmp/lamu.pdf")
+          with urllib.request.urlopen(urllib.request.Request(u,headers={"User-Agent":"PlanReader-Lamu-DPC-v2"}),timeout=120) as r:p.write_bytes(r.read())
+          got=hashlib.sha256(p.read_bytes()).hexdigest()
+          if got!=want: raise SystemExit(got)
+          d=fitz.open(p); page=d[40]; drawings=page.get_drawings() or []
+          cur=resolve_internal_partition_length_m(drawings,length_m=16.0,width_m=8.2,page=page)
+          scale=float(cur.scale_pt_per_m or 0); thick=float(cur.wall_thickness_m or 0)
+          vx0,vy0,vx1,vy1=map(float,_floor_plan_viewport_bbox(page))
+          seg=[]; seen=set()
+          for di,g in enumerate(drawings):
+            for it in g.get("items",[]) or []:
+              if not it or it[0]!="l" or len(it)<3: continue
+              a,b=it[1],it[2]; x0,y0,x1,y1=map(float,(a.x,a.y,b.x,b.y))
+              mx,my=(x0+x1)/2,(y0+y1)/2
+              if not(vx0-8<=mx<=vx1+8 and vy0-8<=my<=vy1+8): continue
+              dx,dy=abs(x1-x0),abs(y1-y0)
+              if dx>=max(5,dy*8): o,c,s0,s1="h",(y0+y1)/2,min(x0,x1),max(x0,x1)
+              elif dy>=max(5,dx*8): o,c,s0,s1="v",(x0+x1)/2,min(y0,y1),max(y0,y1)
+              else: continue
+              if scale<=0 or (s1-s0)/scale<0.35: continue
+              k=(o,round(c,1),round(s0,1),round(s1,1))
+              if k in seen: continue
+              seen.add(k); seg.append((o,c,s0,s1))
+          runs=[]
+          for i,a in enumerate(seg):
+            ao,ac,a0,a1=a
+            for bo,bc,b0,b1 in seg[i+1:]:
+              if ao!=bo: continue
+              sep=abs(ac-bc)/scale
+              if not .08<=sep<=.35: continue
+              s0,s1=max(a0,b0),min(a1,b1)
+              if s1<=s0 or (s1-s0)/scale<.5: continue
+              center=(ac+bc)/2
+              edge=(min(abs(center-vx0),abs(vx1-center)) if ao=="v" else min(abs(center-vy0),abs(vy1-center)))/scale
+              if edge<=max(.4,2*thick): continue
+              k=(ao,round(center,1),round(s0,1),round(s1,1))
+              if any(x["key"]==k for x in runs): continue
+              runs.append({"key":k,"orientation":ao,"center_pt":round(center,2),"start_pt":round(s0,2),"end_pt":round(s1,2),"length_m":round((s1-s0)/scale,3),"sep_m":round(sep,3),"edge_m":round(edge,3)})
+          # Merge touching/overlapping runs on the same centerline.
+          groups={}
+          for r in runs: groups.setdefault((r["orientation"],round(r["center_pt"]/2)*2),[]).append((r["start_pt"],r["end_pt"]))
+          merged=[]
+          for (o,c),ints in groups.items():
+            ints=sorted(ints); a,b=ints[0]
+            for x,y in ints[1:]:
+              if x<=b+2:b=max(b,y)
+              else: merged.append((o,c,a,b));a,b=x,y
+            merged.append((o,c,a,b))
+          mr=[{"orientation":o,"center_pt":c,"length_m":round((b-a)/scale,3),"start_pt":a,"end_pt":b} for o,c,a,b in merged]
+          total=round(sum(x["length_m"] for x in mr),3)
+          print("LAMU_DPC_WALL_PAIR_SUMMARY="+json.dumps({"sha":got,"viewport":[vx0,vy0,vx1,vy1],"fill":cur.__dict__,"scale_pt_per_m":scale,"wall_thickness_m":thick,"pair_runs":runs,"merged_internal_centerlines":mr,"parallel_total_m":total,"external_plus_fill_m":round(48.4+cur.total_length_m,3),"external_plus_parallel_m":round(48.4+total,3),"external_plus_fill_plus_parallel_m":round(48.4+cur.total_length_m+total,3)},sort_keys=True,default=str))
+          d.close()
+          PY
