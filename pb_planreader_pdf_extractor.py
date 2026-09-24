@@ -1081,8 +1081,12 @@ class GenericPlanReaderExtractor:
                 tag="verandah_pillars",
                 trade_type="structure",
                 description=(
-                    f"Verandah structural {global_resolved_secondary_support.support_kind}s "
-                    f"from {global_resolved_secondary_support.bay_count} corroborated "
+                    (
+                        "Verandah physical supports from "
+                        if global_resolved_secondary_support.evidence_mode == "physical_symbol"
+                        else f"Verandah structural {global_resolved_secondary_support.support_kind}s from "
+                    )
+                    + f"{global_resolved_secondary_support.bay_count} corroborated "
                     "repeated bay spans"
                 ),
                 quantity=float(global_resolved_secondary_support.support_count),
@@ -1091,9 +1095,17 @@ class GenericPlanReaderExtractor:
                 source_page=support_page,
                 sheet_number=support_sheet_no,
                 metadata={
-                    "derivation": "corroborated_secondary_area_bay_support_count",
+                    "derivation": (
+                        "physical_secondary_area_support_instances"
+                        if global_resolved_secondary_support.evidence_mode == "physical_symbol"
+                        else "corroborated_secondary_area_bay_support_count"
+                    ),
                     "zone_type": global_resolved_secondary_support.zone_type,
                     "support_kind": global_resolved_secondary_support.support_kind,
+                    "evidence_mode": global_resolved_secondary_support.evidence_mode,
+                    "support_symbol_ids": list(
+                        global_resolved_secondary_support.support_symbol_ids
+                    ),
                     "bay_count": global_resolved_secondary_support.bay_count,
                     "bay_spans_m": list(global_resolved_secondary_support.bay_spans_m),
                     "source_pages": list(global_resolved_secondary_support.source_pages),
