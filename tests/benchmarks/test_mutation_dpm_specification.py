@@ -142,6 +142,28 @@ def test_later_explicit_floor_area_replaces_early_envelope_without_local_dpm_tex
     )
 
 
+
+def test_mesh_note_on_unrelated_page_does_not_bind_to_floor_envelope(
+    tmp_path: Path,
+) -> None:
+    """Component-specific mesh evidence must not become a package-wide floor claim."""
+    pdf = _two_page_plan(
+        tmp_path,
+        "floor-plus-unbound-mesh-detail.pdf",
+        "GROUND FLOOR PLAN\nSCALE 1:100\nDRAWING NO: A-01\n"
+        "13,000 x 7,000\n"
+        "1000 gauge polythene DPM under floor bed\n",
+        "STRUCTURAL DETAIL\nSCALE 1:20\nDRAWING NO: S-04\n"
+        "A142 B.R.C. mesh reinforcement to local slab detail\n",
+    )
+    preds = {
+        p.tag: p for p in GenericPlanReaderExtractor().extract_from_pdf(pdf)
+    }
+
+    assert preds["substructure_bed_dpm"].quantity == 91.0
+    assert "substructure_a142_mesh" not in preds
+
+
 def test_later_explicit_plan_replaces_early_dpc_perimeter(tmp_path: Path) -> None:
     pdf = _two_page_plan(
         tmp_path,
