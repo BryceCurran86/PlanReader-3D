@@ -1,12 +1,14 @@
 name: TEST-ONLY KSTVET After Stacked Schedule 850
 
 on:
+  push:
+    branches: [diag/kstvet-after-stacked-schedule-850]
   pull_request:
     branches: [main]
 
 jobs:
   kstvet:
-    if: startsWith(github.head_ref, 'diag/kstvet-after-stacked-schedule-850')
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/diag/kstvet-after-stacked-schedule-850') || startsWith(github.head_ref, 'diag/kstvet-after-stacked-schedule-850')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
