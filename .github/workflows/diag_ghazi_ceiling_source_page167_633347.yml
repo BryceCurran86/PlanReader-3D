@@ -1,0 +1,86 @@
+name: TEST-ONLY Ghazi Ceiling Source Page167 633347
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ghazi-ceiling-source:
+    if: startsWith(github.head_ref, 'diag/ghazi-ceiling-source-page167-633347')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Probe source-owned Ghazi ceiling evidence
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,re,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_viewport_segmentation import segment_page_viewports,is_authoritative_derived_viewport
+          from pb_source_ceiling_finish_evidence import iter_explicit_ceiling_finish_matches
+          from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+
+          url="https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf"
+          expected="c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f"
+          p=Path("/tmp/ghazi.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Ghazi-ceiling-source/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              p.write_bytes(r.read())
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          if actual!=expected:
+              raise SystemExit(actual)
+
+          doc=fitz.open(p)
+          try:
+              page=doc.load_page(166)
+              text=page.get_text("text") or ""
+              ceiling_lines=[
+                  line.strip() for line in text.splitlines()
+                  if re.search(r"(?i)(ceiling|chip\s*board|chipboard|brandering|finish(?:es)?)",line)
+              ]
+              viewports=segment_page_viewports(page,page_number=167)
+              vp=[{
+                  "id":v.view_id,
+                  "type":v.view_type,
+                  "label":v.label,
+                  "status":v.status,
+                  "boundary_source":v.boundary_source,
+                  "bbox":v.bounding_box,
+                  "authoritative_derived":is_authoritative_derived_viewport(v),
+                  "provenance":v.provenance,
+              } for v in viewports]
+          finally:
+              doc.close()
+
+          live=collect_live_ceiling_lining_claims(p,pages=[166])
+          ex=GenericPlanReaderExtractor()
+          preds=ex.extract_from_pdf(p,pages=[166],collect_item35_shadow=False)
+          area_preds=[x.to_dict() for x in preds if any(k in x.tag.lower() for k in ("floor","dpm","screed","area"))]
+
+          print("GHAZI_CEILING_SOURCE_PAGE167="+json.dumps({
+              "production_sha":"633347965939aa4184d8edfc2330dd758601c1c9",
+              "source_sha256":actual,
+              "ceiling_lines":ceiling_lines,
+              "explicit_finish_matches":iter_explicit_ceiling_finish_matches(text),
+              "viewports":vp,
+              "live_ceiling":{
+                  "status":getattr(live.status,"value",str(live.status)),
+                  "reason_codes":live.reason_codes,
+                  "claims":[c.__dict__ for c in live.claims],
+              },
+              "extractor_ceiling_lining_live":ex.ceiling_lining_live,
+              "extraction_status":ex.extraction_status,
+              "area_predictions":area_preds,
+          },sort_keys=True,default=str),flush=True)
+          PY
