@@ -1,0 +1,74 @@
+name: TEST-ONLY KSTVET Scaled Wall Height Current
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  scaled-height:
+    if: startsWith(github.head_ref, 'diag/kstvet-scaled-wall-height-current')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install minimal runtime
+        run: pip install PyMuPDF
+      - name: Probe source-scaled elevation structural heights
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import collections,hashlib,json,math,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_viewport_segmentation import segment_page_viewports
+          from pb_source_roof_covering_authority import extract_elevation_segments_from_page
+
+          url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          expected="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          p=Path("/tmp/kstvet.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-KSTVET-scaled-height/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r: p.write_bytes(r.read())
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          if actual!=expected: raise SystemExit(actual)
+
+          doc=fitz.open(p); page=doc[53]
+          rows=[]
+          for vp in segment_page_viewports(page,page_number=54):
+              if vp.view_type!="elevation" or not vp.bounding_box or not vp.scale_denominator:
+                  continue
+              diags,verts=extract_elevation_segments_from_page(page,tuple(vp.bounding_box))
+              m_per_pt=(25.4/72.0)*float(vp.scale_denominator)/1000.0
+              vertical_rows=[]
+              for v in verts:
+                  if v.length < 30: continue
+                  vertical_rows.append({
+                      "x":round(v.x,3),"top_y":round(v.top_y,3),"bottom_y":round(v.bottom_y,3),
+                      "length_pt":round(v.length,3),"height_m":round(v.length*m_per_pt,4),
+                  })
+              # cluster by bottom baseline to expose structural supports sharing floor/ground line
+              baselines={}
+              for vr in vertical_rows:
+                  key=round(vr["bottom_y"]/2.0)*2.0
+                  baselines.setdefault(str(key),[]).append(vr)
+              baseline_rows=[]
+              for key,members in baselines.items():
+                  if len(members)<2: continue
+                  heights=[m["height_m"] for m in members]
+                  baseline_rows.append({
+                      "baseline_y":float(key),"count":len(members),
+                      "height_min_m":round(min(heights),4),"height_max_m":round(max(heights),4),
+                      "members":sorted(members,key=lambda x:x["x"])[:80],
+                  })
+              baseline_rows.sort(key=lambda x:(-x["count"],x["baseline_y"]))
+              rows.append({
+                  "label":vp.label,"view_id":vp.view_id,"bbox":list(vp.bounding_box),
+                  "scale_denominator":vp.scale_denominator,
+                  "vertical_count":len(verts),
+                  "baselines":baseline_rows[:30],
+              })
+          print("KSTVET_SCALED_WALL_HEIGHT="+json.dumps({"sha":actual,"elevations":rows},sort_keys=True),flush=True)
+          doc.close()
+          PY
