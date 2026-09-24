@@ -108,6 +108,17 @@ class TestFindUniformBayRuns:
         runs = find_uniform_bay_runs(values)
         assert runs == []
 
+    def test_out_of_range_dimension_does_not_join_separated_spans(self):
+        # Page text order can interleave an overall width between two
+        # identical, otherwise unrelated dimensions.
+        assert find_uniform_bay_runs([3.15, 12.5, 3.15]) == []
+
+    def test_out_of_range_dimension_splits_two_uniform_runs(self):
+        values = [3.15, 3.15, 12.5, 3.15, 3.15]
+        runs = find_uniform_bay_runs(values)
+        assert len(runs) == 2
+        assert [run.support_count for run in runs] == [3, 3]
+
     def test_maximal_run_is_reported_not_a_shorter_prefix(self):
         values = [3.15, 3.15, 3.15, 3.15]
         runs = find_uniform_bay_runs(values)
