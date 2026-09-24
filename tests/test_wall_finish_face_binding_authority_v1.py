@@ -104,7 +104,7 @@ def test_direct_leader_and_filled_terminator_connectivity_positive() -> None:
     assert paths[0][0] == ("lead-a", "lead-b")
 
 
-def test_two_possible_physical_walls_conflict() -> None:
+def test_two_possible_physical_walls_abstain_as_ambiguous_ownership() -> None:
     lines = (
         _line("w1", "raw-w1", 4.0, 0.0, 4.0, 20.0),
         _line("w2", "raw-w2", 6.0, 0.0, 6.0, 20.0),
@@ -118,9 +118,10 @@ def test_two_possible_physical_walls_conflict() -> None:
         physical_identity=SimpleNamespace(source_primitive_ids=("raw-w2",)),
     )
     scope = SimpleNamespace(records=(rec1, rec2), equivalence=SimpleNamespace(equivalence_groups=()))
-    target, _, status = _target_from_terminator(_term(5.0, 10.0), lines, scope, 0.01)
+    target, raw_hits, status = _target_from_terminator(_term(5.0, 10.0), lines, scope, 0.01)
     assert target is None
-    assert status is EvidenceResolutionStatus.CONFLICT
+    assert raw_hits == ("raw-w1", "raw-w2")
+    assert status is EvidenceResolutionStatus.ABSTAINED
 
 
 def test_no_terminator_abstains_from_connectivity() -> None:
@@ -134,10 +135,31 @@ def test_page_wide_keyword_does_not_create_finish_semantics() -> None:
     assert _finish_semantics("KEY TO FINISH EXTERNALLY") == ()
 
 
-def test_nearby_unconnected_note_does_not_bind() -> None:
+def test_leader_endpoint_merely_near_text_does_not_bind() -> None:
     annotation = (20.0, 8.0, 30.0, 12.0)
-    lines = (_line("nearby", "raw", 31.0, 10.0, 5.0, 10.0),)
+    # The 0.005pt gap is smaller than the legacy epsilon but is still a gap.
+    lines = (_line("nearby", "raw", 30.005, 10.0, 5.0, 10.0),)
     assert _leader_paths(annotation, lines, (_term(5.0, 10.0),), 0.01) == ()
+
+
+def test_terminator_merely_near_wall_does_not_bind() -> None:
+    wall = _line("wall", "raw-wall", 5.405, 0.0, 5.405, 20.0)
+    record = SimpleNamespace(
+        wall_candidate_id="wall-1",
+        physical_identity=SimpleNamespace(source_primitive_ids=("raw-wall",)),
+    )
+    scope = SimpleNamespace(records=(record,), equivalence=SimpleNamespace(equivalence_groups=()))
+    # Terminator bbox ends at x=5.4, leaving a real 0.005pt gap. The supplied
+    # epsilon must not expand the terminator into the wall.
+    target, raw_hits, status = _target_from_terminator(
+        _term(5.0, 10.0, size=0.4),
+        (wall,),
+        scope,
+        0.01,
+    )
+    assert target is None
+    assert raw_hits == ()
+    assert status is EvidenceResolutionStatus.ABSTAINED
 
 
 def test_external_wording_on_external_wall_resolves_exterior_face() -> None:
