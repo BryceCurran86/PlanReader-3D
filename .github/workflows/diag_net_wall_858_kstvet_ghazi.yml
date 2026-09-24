@@ -1,4 +1,4 @@
-name: TEST-ONLY Net Wall 858 KSTVET Ghazi
+name: TEST-ONLY Net Wall 858 KSTVET Ghazi Lamu
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ jobs:
   net-wall-real-source:
     if: startsWith(github.head_ref, 'diag/net-wall-858-kstvet-ghazi')
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,6 +36,12 @@ jobs:
               "url":"https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf",
               "sha":"c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f",
               "pages":[166],
+            },
+            {
+              "name":"lamu",
+              "url":"https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf",
+              "sha":"fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2",
+              "pages":[40],
             },
           ]
           out={}
