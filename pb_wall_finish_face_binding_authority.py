@@ -29,6 +29,7 @@ from pb_physical_wall_candidate_authority import (
 )
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import NATIVE_PDF_VISIBLE_SEGMENT, SourceVisibilityProducer
+from pb_vector_geometry_v130 import extract_native_page
 from pb_viewport_segmentation import (
     ViewportSegmentationStatus,
     assign_bbox_to_viewport,
@@ -252,6 +253,7 @@ class _Line:
     observation_id: str
     raw_id: str
     geometry: tuple[float, float, float, float]
+    path_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -259,6 +261,7 @@ class _Terminator:
     primitive_id: str
     bbox: tuple[float, float, float, float]
     center: tuple[float, float]
+    primitive_ids: tuple[str, ...] = ()
 
 
 def _normalise_text(value: str) -> str:
@@ -357,8 +360,16 @@ def _authoritative_viewports(page: fitz.Page, page_number: int):
 
 
 def _trusted_finish_blocks(source: SourceVisibilityProducer, published, page_id: str):
+    """Return narrow direct-finish intents from trusted native word order.
+
+    CAD exporters frequently split one visible callout across adjacent PDF text
+    blocks. Block number is therefore not finish-scope authority. We preserve
+    exact trusted word observations and scan only a short sentence-local window
+    ending at explicit externally/internally wording. Geometry connectivity,
+    not text proximity, still decides whether the note can bind.
+    """
     authority = source.text_integrity_authority()
-    blocks: dict[int, list[tuple[int, str, str, tuple[float, ...]]]] = {}
+    words: list[tuple[tuple[int, int, int, int], str, str, tuple[float, ...]]] = []
     for observation_id in published.text_observation_ids:
         result = authority.resolve_text(ObservationSelector(
             document_id=published.revision.document_id,
@@ -371,33 +382,71 @@ def _trusted_finish_blocks(source: SourceVisibilityProducer, published, page_id:
         if (
             result.status is not EvidenceResolutionStatus.CORROBORATED
             or receipt is None or receipt.page_id != page_id
-            or receipt.block_no is None or receipt.line_no is None or receipt.word_no is None
         ):
             continue
-        blocks.setdefault(int(receipt.block_no), []).append((
-            int(receipt.line_no) * 10000 + int(receipt.word_no),
+        block_no = -1 if receipt.block_no is None else int(receipt.block_no)
+        line_no = -1 if receipt.line_no is None else int(receipt.line_no)
+        word_no = -1 if receipt.word_no is None else int(receipt.word_no)
+        sequence = (
+            block_no * 1000000 + line_no * 10000 + word_no
+            if receipt.sequence_number is None
+            else int(receipt.sequence_number)
+        )
+        words.append((
+            (sequence, block_no, line_no, word_no),
             observation_id,
             str(result.trusted_text or ""),
             tuple(receipt.geometry),
         ))
+
+    ordered = sorted(words, key=lambda item: (item[0], item[1]))
     out = []
-    for block_no, values in sorted(blocks.items()):
-        ordered = sorted(values, key=lambda item: (item[0], item[1]))
-        text = " ".join(item[2] for item in ordered)
+    for index, item in enumerate(ordered):
+        token = re.sub(r"[^a-z0-9]+", "", item[2].lower())
+        if token not in {"externally", "internally"}:
+            continue
+        window_start = max(0, index - 15)
+        for prior in range(index - 1, window_start - 1, -1):
+            if re.search(r"[.;!?]\s*$", ordered[prior][2]):
+                window_start = prior + 1
+                break
+        window = ordered[window_start : index + 1]
+        text = " ".join(part[2] for part in window)
         semantics = _finish_semantics(text)
         if not semantics:
             continue
+        boxes = [part[3] for part in window if len(part[3]) == 4]
+        if not boxes:
+            continue
         out.append((
-            block_no, text, semantics, tuple(item[1] for item in ordered),
-            _bbox_union([item[3] for item in ordered]),
-            statistics.median(max(0.1, item[3][3] - item[3][1]) for item in ordered),
+            item[0],
+            text,
+            semantics,
+            tuple(part[1] for part in window),
+            _bbox_union(boxes),
+            statistics.median(max(0.1, box[3] - box[1]) for box in boxes),
         ))
-    return tuple(out)
-
-
-def _page_visible_lines(source: SourceVisibilityProducer, published, page_id: str) -> tuple[_Line, ...]:
+    unique = {}
+    for item in out:
+        key = (item[3], tuple(item[2]))
+        unique[key] = item
+    return tuple(unique[key] for key in sorted(unique, key=repr))
+def _page_visible_lines(
+    source: SourceVisibilityProducer,
+    published,
+    page_id: str,
+    *,
+    page: Optional[fitz.Page] = None,
+) -> tuple[_Line, ...]:
     authority = source.authority()
     prefix = "visible:segment:"
+    native_meta: dict[str, Mapping[str, object]] = {}
+    if page is not None:
+        for segment in extract_native_page(page).get("segments") or ():
+            raw_id = str(segment.get("id") or "").strip()
+            if raw_id:
+                native_meta[raw_id] = segment
+
     out = []
     for observation_id in published.visible_observation_ids:
         result = authority.resolve_visible(ObservationSelector(
@@ -416,44 +465,65 @@ def _page_visible_lines(source: SourceVisibilityProducer, published, page_id: st
             or len(obs.geometry) != 4
         ):
             continue
+        raw_id = obs.source_primitive_ref[len(prefix):]
+        meta = native_meta.get(raw_id) or {}
+        path_index = meta.get("path_index")
+        path_id = (
+            f"path:{int(path_index)}"
+            if path_index is not None
+            else observation_id
+        )
         out.append(_Line(
             observation_id=observation_id,
-            raw_id=obs.source_primitive_ref[len(prefix):],
+            raw_id=raw_id,
             geometry=tuple(float(v) for v in obs.geometry),
+            path_id=path_id,
         ))
     return tuple(sorted(out, key=lambda item: item.raw_id))
-
-
-def _filled_terminators(page: fitz.Page, text_height: float) -> tuple[_Terminator, ...]:
+def _filled_terminators(
+    page: fitz.Page,
+    text_height: float,
+    *,
+    visible_raw_ids: Optional[set[str]] = None,
+) -> tuple[_Terminator, ...]:
+    """Return small filled native paths with exact source primitive identity."""
     max_span = max(2.0, text_height * 2.5)
-    out = []
-    for index, drawing in enumerate(page.get_drawings() or ()):
-        rect, fill = drawing.get("rect"), drawing.get("fill")
-        if rect is None or fill is None:
+    by_path: dict[int, list[Mapping[str, object]]] = {}
+    for segment in extract_native_page(page).get("segments") or ():
+        raw_id = str(segment.get("id") or "").strip()
+        if not raw_id:
             continue
-        bbox = (float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
+        if visible_raw_ids is not None and raw_id not in visible_raw_ids:
+            continue
+        if not bool(segment.get("fill_present")):
+            continue
+        try:
+            path_index = int(segment["path_index"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        by_path.setdefault(path_index, []).append(segment)
+
+    out = []
+    for path_index, segments in sorted(by_path.items()):
+        xs = [float(v) for seg in segments for v in (seg["x1"], seg["x2"])]
+        ys = [float(v) for seg in segments for v in (seg["y1"], seg["y2"])]
+        if not xs or not ys:
+            continue
+        bbox = (min(xs), min(ys), max(xs), max(ys))
         width, height = bbox[2] - bbox[0], bbox[3] - bbox[1]
         if width <= 0 or height <= 0 or max(width, height) > max_span:
             continue
-        if not 0.65 <= width / height <= 1.55:
+        if not 0.65 <= width / height <= 1.55 or len(segments) < 3:
             continue
-        items = drawing.get("items") or ()
-        if not any(item and item[0] == "c" for item in items) and len(items) < 8:
-            continue
-        payload = {
-            "page": int(page.number) + 1,
-            "drawing_index": index,
-            "bbox": tuple(round(v, 6) for v in bbox),
-            "fill": tuple(round(float(v), 6) for v in fill),
-        }
+        primitive_ids = tuple(sorted(str(seg["id"]) for seg in segments))
+        path_id = f"path:{path_index}"
         out.append(_Terminator(
-            primitive_id=stable_contract_id("finish_terminator", payload, digest_chars=32),
+            primitive_id=path_id,
             bbox=bbox,
             center=((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2),
+            primitive_ids=primitive_ids,
         ))
     return tuple(sorted(out, key=lambda item: item.primitive_id))
-
-
 def _leader_paths(
     annotation_bbox: Sequence[float],
     lines: Sequence[_Line],
@@ -530,7 +600,9 @@ def _target_from_terminator(
         return None, tuple(sorted(raw_hits)), EvidenceResolutionStatus.CONFLICT
     target_id = next(iter(normalized))
     target = next((r for r in wall_scope.records if r.wall_candidate_id == target_id), None)
-    return target or sorted(matching, key=lambda r: r.wall_candidate_id)[0], tuple(sorted(raw_hits)), EvidenceResolutionStatus.CORROBORATED
+    target = target or sorted(matching, key=lambda r: r.wall_candidate_id)[0]
+    owned_hits = raw_hits & set(target.physical_identity.source_primitive_ids)
+    return target, tuple(sorted(owned_hits)), EvidenceResolutionStatus.CORROBORATED
 
 
 def _partial_scope(records: Sequence[WallFinishFaceBindingRecord]) -> WallFinishCompleteScopeRecord:
@@ -668,7 +740,12 @@ class WallFinishFaceBindingProducer:
 
                     page = doc.load_page(page_number - 1)
                     viewports = _authoritative_viewports(page, page_number)
-                    lines = _page_visible_lines(source_visibility_producer, published, page_id)
+                    lines = _page_visible_lines(
+                        source_visibility_producer,
+                        published,
+                        page_id,
+                        page=page,
+                    )
                     for _, _, semantics, annotation_ids, annotation_bbox, text_height in _trusted_finish_blocks(
                         source_visibility_producer, published, page_id
                     ):
@@ -684,7 +761,11 @@ class WallFinishFaceBindingProducer:
                             )
                         )
                         terminators = tuple(
-                            term for term in _filled_terminators(page, text_height)
+                            term for term in _filled_terminators(
+                                page,
+                                text_height,
+                                visible_raw_ids={line.raw_id for line in owned_lines},
+                            )
                             if viewport.bounding_box[0] <= term.center[0] <= viewport.bounding_box[2]
                             and viewport.bounding_box[1] <= term.center[1] <= viewport.bounding_box[3]
                         )
@@ -730,8 +811,18 @@ class WallFinishFaceBindingProducer:
                                     "physical_face_role": face_role.value,
                                 }
                                 face_id = stable_contract_id("physical_wall_semantic_face", face_payload, digest_chars=32)
+                                leader_path_ids = tuple(dict.fromkeys(
+                                    line.path_id
+                                    for line in owned_lines
+                                    if line.observation_id in set(leader_ids)
+                                ))
+                                terminator_ids = (
+                                    terminator.primitive_ids
+                                    if terminator.primitive_ids
+                                    else (terminator.primitive_id,)
+                                )
                                 evidence_ids = tuple(dict.fromkeys(
-                                    (*annotation_ids, *leader_ids, terminator.primitive_id, role_record.record_id)
+                                    (*annotation_ids, *leader_ids, *terminator_ids, role_record.record_id)
                                 ))
                                 bind_payload = {
                                     **face_payload,
@@ -752,8 +843,8 @@ class WallFinishFaceBindingProducer:
                                     trade_scope_id=semantic.trade_scope_id,
                                     finish_material=semantic.finish_material,
                                     annotation_observation_ids=tuple(annotation_ids),
-                                    leader_path_ids=tuple(leader_ids),
-                                    terminator_primitive_ids=(terminator.primitive_id,),
+                                    leader_path_ids=leader_path_ids,
+                                    terminator_primitive_ids=terminator_ids,
                                     wall_role_record_id=role_record.record_id,
                                     wall_role=role_record.role,
                                     source_evidence_ids=evidence_ids,
