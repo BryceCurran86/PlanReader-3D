@@ -115,7 +115,13 @@ def _write_direct_finish_plan(
     doc.close()
 
 
-def _run_direct_finish_plan(path: Path, monkeypatch):
+def _run_direct_finish_plan(
+    path: Path,
+    monkeypatch,
+    *,
+    viewport_id: str = "vp:test",
+    viewport_bbox=(0.0, 0.0, 300.0, 200.0),
+):
     source = SourceVisibilityProducer(
         producer_method="item19b-e2e-test",
         producer_version="1.0",
@@ -126,8 +132,8 @@ def _run_direct_finish_plan(path: Path, monkeypatch):
         source_locator=str(path),
     )
     viewport = SimpleNamespace(
-        view_id="vp:test",
-        bounding_box=(0.0, 0.0, 300.0, 200.0),
+        view_id=viewport_id,
+        bounding_box=viewport_bbox,
     )
     monkeypatch.setattr(
         finish_binding_module,
@@ -201,6 +207,46 @@ def test_producer_end_to_end_binds_native_callout_to_exact_external_face(
         and record.decision_scope_complete is False
         for record in bindings
     )
+
+
+def test_producer_end_to_end_viewport_expansion_preserves_binding_identity(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "direct-finish-viewport-invariance.pdf"
+    _write_direct_finish_plan(path)
+
+    first = _run_direct_finish_plan(
+        path,
+        monkeypatch,
+        viewport_id="vp:base",
+        viewport_bbox=(0.0, 0.0, 300.0, 200.0),
+    )
+    second = _run_direct_finish_plan(
+        path,
+        monkeypatch,
+        viewport_id="vp:expanded",
+        viewport_bbox=(-25.0, -25.0, 325.0, 225.0),
+    )
+
+    first_bindings = [
+        record
+        for result in first.published_results()
+        for record in result.bindings
+        if record.trade_scope_id == "external_key_pointing"
+    ]
+    second_bindings = [
+        record
+        for result in second.published_results()
+        for record in result.bindings
+        if record.trade_scope_id == "external_key_pointing"
+    ]
+
+    assert len(first_bindings) == 1
+    assert len(second_bindings) == 1
+    assert first_bindings[0].viewport_id != second_bindings[0].viewport_id
+    assert first_bindings[0].physical_face_id == second_bindings[0].physical_face_id
+    assert first_bindings[0].binding_id == second_bindings[0].binding_id
 
 
 def test_producer_end_to_end_near_text_gap_abstains(
