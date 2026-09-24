@@ -1,0 +1,101 @@
+name: TEST-ONLY Murera Foundation Native Placement Fast
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  native-placement:
+    if: startsWith(github.head_ref, 'diag/murera-foundation-native-placement-fast')
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install PyMuPDF only
+        run: pip install PyMuPDF==1.28.0
+      - name: Map page 226 image placements and vector geometry
+        run: |
+          python - <<'PY'
+          import hashlib,json,math,urllib.request
+          from collections import Counter,defaultdict
+          from pathlib import Path
+          import fitz
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          source=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-native-placement/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              source.write_bytes(r.read())
+          actual=hashlib.sha256(source.read_bytes()).hexdigest()
+          if actual != expected: raise SystemExit(actual)
+
+          def rr(r):
+              return [round(float(r.x0),3),round(float(r.y0),3),round(float(r.x1),3),round(float(r.y1),3)]
+
+          doc=fitz.open(source)
+          out={}
+          try:
+              for page_num in (225,226):
+                  page=doc[page_num-1]
+                  images=[]
+                  for img in page.get_images(full=True) or []:
+                      xref=int(img[0])
+                      for rect in page.get_image_rects(xref) or []:
+                          images.append({
+                              "xref":xref,"px":[int(img[2]),int(img[3])],
+                              "rect":rr(rect),
+                              "w_pt":round(float(rect.width),3),
+                              "h_pt":round(float(rect.height),3),
+                          })
+
+                  shapes=[]
+                  lines=[]
+                  for di,d in enumerate(page.get_drawings() or []):
+                      for ii,it in enumerate(d.get("items",[]) or []):
+                          if it[0]=="re":
+                              r=it[1]; w=float(r.width); h=float(r.height)
+                              if 0.5<=w<=100 and 0.5<=h<=100:
+                                  shapes.append({
+                                      "kind":"rect","bbox":rr(r),"w":round(w,3),"h":round(h,3),
+                                      "fill":d.get("fill") is not None,"stroke":d.get("color") is not None,
+                                      "drawing":di,"item":ii,
+                                  })
+                          elif it[0]=="l":
+                              p1,p2=it[1],it[2]
+                              dx=abs(float(p2.x-p1.x)); dy=abs(float(p2.y-p1.y))
+                              if dx<=100 and dy<=100:
+                                  lines.append({
+                                      "p1":[round(float(p1.x),3),round(float(p1.y),3)],
+                                      "p2":[round(float(p2.x),3),round(float(p2.y),3)],
+                                      "dx":round(dx,3),"dy":round(dy,3),
+                                      "drawing":di,"item":ii,
+                                  })
+
+                  # Group same-size rectangles to expose repeated physical glyph families.
+                  groups=defaultdict(list)
+                  for s in shapes:
+                      groups[(round(s["w"],1),round(s["h"],1),bool(s["fill"]))].append(s)
+                  repeated=[
+                      {"signature":[k[0],k[1],k[2]],"count":len(v),"members":v}
+                      for k,v in groups.items() if len(v)>=2
+                  ]
+                  repeated.sort(key=lambda x:-x["count"])
+
+                  out[str(page_num)]={
+                      "page_rect":rr(page.rect),
+                      "images":images,
+                      "rect_shape_count":len(shapes),
+                      "repeated_rect_groups":repeated[:50],
+                      "short_line_count":len(lines),
+                      "short_lines":lines[:400],
+                  }
+          finally:
+              doc.close()
+          print("MURERA_FOUNDATION_NATIVE_PLACEMENT="+json.dumps({
+              "sha":actual,"pages":out
+          },sort_keys=True),flush=True)
+          PY
