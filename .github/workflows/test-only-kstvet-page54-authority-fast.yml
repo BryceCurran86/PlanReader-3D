@@ -1,0 +1,79 @@
+name: TEST-ONLY KSTVET Page54 Authority Fast
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  page54-authority:
+    if: startsWith(github.head_ref, 'diag/kstvet-page54-authority-fast')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Replay exact source page 54 as a one-page authority snapshot
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from dataclasses import asdict,is_dataclass
+          import fitz
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+
+          url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          expected="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-KSTVET-page54-fast/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r: payload=r.read()
+          actual=hashlib.sha256(payload).hexdigest()
+          if actual!=expected: raise SystemExit(actual)
+
+          full=fitz.open(stream=payload,filetype="pdf")
+          one=fitz.open()
+          one.insert_pdf(full,from_page=53,to_page=53)
+          page_bytes=one.tobytes()
+          full.close(); one.close()
+
+          source=SourceVisibilityProducer(
+              producer_method="kstvet_page54_fast_diag",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="kstvet-page54-fast",
+              source_bytes=page_bytes,
+              source_locator="derived-from-canonical-page-54",
+          )
+          comp=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("1",),
+          )
+          def serial(v):
+              if is_dataclass(v): return asdict(v)
+              if isinstance(v,dict): return {str(k):serial(x) for k,x in v.items()}
+              if isinstance(v,(list,tuple)): return [serial(x) for x in v]
+              return v
+          out={
+              "canonical_source_sha256":actual,
+              "page_snapshot_sha256":hashlib.sha256(page_bytes).hexdigest(),
+              "status":comp.status,
+              "reason_codes":comp.reason_codes,
+              "semantic":comp.semantic_enumeration_result,
+              "universe":comp.opening_universe_result,
+              "page_universes":comp.opening_universe_results,
+              "wall_scopes":comp.wall_scopes,
+              "bindings":comp.opening_bindings,
+              "host_frames":comp.host_frames,
+          }
+          print("KSTVET_PAGE54_AUTHORITY_FAST="+json.dumps(serial(out),sort_keys=True,default=str),flush=True)
+          PY
