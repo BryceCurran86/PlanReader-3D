@@ -77,3 +77,29 @@ class TestUnresolvedWhenOneSidedEvidence:
         res = resolve_wall_height(markers, scope_id=None)
         assert res.status == ConstraintStatus.UNRESOLVED.value
         assert res.clear_height_m is None
+
+
+def test_strict_line_local_value_before_level_label_is_supported():
+    markers = find_level_markers(
+        "+3000 ROOF LEVEL\n+0000 GROUND FLOOR LEVEL",
+        source_page=1,
+    )
+    by_type = {m.marker_type: m for m in markers}
+    assert by_type["roof"].level_m == pytest.approx(3.0)
+    assert by_type["ground"].level_m == pytest.approx(0.0)
+
+
+def test_value_before_label_with_unrelated_same_line_numbers_is_rejected():
+    markers = find_level_markers(
+        "2400 +3000 ROOF LEVEL 1200",
+        source_page=1,
+    )
+    assert markers == []
+
+
+def test_unsigned_value_before_label_remains_rejected():
+    markers = find_level_markers(
+        "3000 ROOF LEVEL\n0000 GROUND FLOOR LEVEL",
+        source_page=1,
+    )
+    assert markers == []
