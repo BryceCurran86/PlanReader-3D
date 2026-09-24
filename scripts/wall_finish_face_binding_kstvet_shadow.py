@@ -30,7 +30,7 @@ EXPECTED_SHA256 = "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa
 PAGE_ID = "54"
 
 
-def run(pdf_path: Path) -> list[dict]:
+def run(pdf_path: Path) -> tuple[list[dict], dict]:
     faulthandler.dump_traceback_later(60, repeat=True)
     print("ITEM19B_STAGE read_source", flush=True)
     payload = pdf_path.read_bytes()
@@ -211,13 +211,13 @@ def run(pdf_path: Path) -> list[dict]:
                     "reason_codes": list(scope.reason_codes),
                 }
             )
-    return rows
+    return rows, preflight
 
 
 def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit("usage: wall_finish_face_binding_kstvet_shadow.py <canonical-kstvet.pdf>")
-    rows = run(Path(sys.argv[1]))
+    rows, preflight = run(Path(sys.argv[1]))
     print(json.dumps(rows, indent=2, sort_keys=True))
     direct = [row for row in rows if not row.get("scope_record")]
     raw_semantic_count = len(
