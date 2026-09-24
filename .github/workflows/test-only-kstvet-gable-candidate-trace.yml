@@ -33,6 +33,45 @@ jobs:
           actual=hashlib.sha256(p.read_bytes()).hexdigest()
           if actual!=expected: raise SystemExit(actual)
           doc=fitz.open(p)
+          from pb_viewport_segmentation import segment_page_viewports
+          from pb_source_roof_covering_authority import (
+              extract_elevation_segments_from_page,
+              get_elevation_viewport_search_bbox,
+              resolve_gable_apex_in_viewport,
+          )
+
+          page=doc[53]
+          per_view=[]
+          vps=segment_page_viewports(page,page_number=54)
+          for vp in vps:
+              if vp.view_type!="elevation":
+                  continue
+              bbox=get_elevation_viewport_search_bbox(vp,vps,page.rect)
+              diags,verts=extract_elevation_segments_from_page(page,bbox)
+              ev0,reasons0=resolve_gable_apex_in_viewport(
+                  diags,verts,
+                  source_viewport_id=vp.view_id,
+                  source_page=54,
+                  source_scale_denominator=(
+                      float(vp.scale_denominator)
+                      if getattr(vp,"scale_denominator",None) is not None else None
+                  ),
+              )
+              per_view.append({
+                  "label":vp.label,"view_id":vp.view_id,"status":vp.status,
+                  "viewport_bbox":list(vp.bounding_box) if vp.bounding_box else None,
+                  "search_bbox":list(bbox),"scale":vp.scale_denominator,
+                  "diagonal_count":len(diags),"vertical_count":len(verts),
+                  "reasons":list(reasons0),
+                  "evidence":None if ev0 is None else {
+                      "pitch_deg":ev0.pitch_deg,"left_run_pt":ev0.left_run_pt,
+                      "right_run_pt":ev0.right_run_pt,
+                      "left_support_xy":ev0.left_support_xy,
+                      "right_support_xy":ev0.right_support_xy,
+                      "reason_codes":ev0.reason_codes,
+                  },
+              })
+
           res=resolve_document_gable_roof_covering(
               doc,
               building_length_m=9.85,
@@ -42,6 +81,7 @@ jobs:
           )
           ev=res.gable_evidence
           print("KSTVET_GABLE_CANDIDATE_TRACE="+json.dumps({
+              "per_view":per_view,
               "status":res.status.value,
               "reason_codes":list(res.reason_codes),
               "cross_ridge_span_m":res.cross_ridge_span_m,
