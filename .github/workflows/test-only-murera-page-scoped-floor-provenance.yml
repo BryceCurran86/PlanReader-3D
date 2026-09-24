@@ -1,0 +1,60 @@
+name: TEST-ONLY Murera Page Scoped Floor Provenance
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-page-scoped-floor:
+    if: startsWith(github.head_ref, 'diag/murera-page-scoped-floor-provenance')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Run each Murera drawing page through production independently
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          path=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-page-scoped-floor/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              path.write_bytes(r.read())
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(actual)
+
+          focus={"floor_screed","substructure_surface_bed","substructure_bed_dpm","substructure_a142_mesh","damp_proof_course"}
+          out=[]
+          for pno in range(218,238):
+              ex=GenericPlanReaderExtractor()
+              preds=ex.extract_from_pdf(path,pages=[pno],collect_item35_shadow=False)
+              selected=[]
+              for p in preds:
+                  if p.tag in focus:
+                      selected.append({
+                          "tag":p.tag,
+                          "quantity":p.quantity,
+                          "source_page":p.source_page,
+                          "dimensions":p.dimensions,
+                          "description":p.description,
+                          "metadata":p.metadata,
+                      })
+              out.append({"page":pno+1,"predictions":selected,"status":ex.extraction_status})
+          print("MURERA_PAGE_SCOPED_FLOOR_PROVENANCE="+json.dumps({"sha":actual,"pages":out},sort_keys=True,default=str),flush=True)
+          PY
