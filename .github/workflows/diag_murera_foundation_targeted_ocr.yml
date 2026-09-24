@@ -1,0 +1,100 @@
+name: TEST-ONLY Murera Foundation Targeted OCR
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  targeted-ocr:
+    if: startsWith(github.head_ref, 'diag/murera-foundation-targeted-ocr')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Target raster foundation layout crops
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,re,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_drawing_ocr_evidence_layer import DrawingOCREngine
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          p=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-targeted-foundation-ocr/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:p.write_bytes(r.read())
+          got=hashlib.sha256(p.read_bytes()).hexdigest()
+          if got!=expected:raise SystemExit(got)
+
+          eng=DrawingOCREngine()
+          doc=fitz.open(p)
+          out=[]
+          try:
+              for pno in (225,226):
+                  page=doc[pno-1]
+                  W,H=float(page.rect.width),float(page.rect.height)
+                  # Exclude the known right-side title-block band where possible.
+                  work_right=min(W,590.0)
+                  work_bottom=min(H,535.0)
+                  crops=[("left_full",(0.0,0.0,work_right,work_bottom))]
+                  cols=3; rows=4
+                  for rr in range(rows):
+                      for cc in range(cols):
+                          x0=work_right*cc/cols
+                          x1=work_right*(cc+1)/cols
+                          y0=work_bottom*rr/rows
+                          y1=work_bottom*(rr+1)/rows
+                          # Small overlap protects dimension strings crossing tile boundaries.
+                          pad=12.0
+                          crops.append((
+                              f"r{rr}c{cc}",
+                              (max(0,x0-pad),max(0,y0-pad),min(work_right,x1+pad),min(work_bottom,y1+pad))
+                          ))
+                  page_rows=[]
+                  for name,box in crops:
+                      try:
+                          rows_ocr=eng.recognize_page_rect(
+                              page,clip_rect=fitz.Rect(*box),
+                              dpi=450 if name=="left_full" else 650,
+                          )
+                      except Exception as exc:
+                          page_rows.append({"crop":name,"box":box,"error":repr(exc)})
+                          continue
+                      relevant=[]
+                      for r in rows_ocr:
+                          text=str(r.get("text") or "").strip()
+                          if not text: continue
+                          compact=text.replace(",","")
+                          nums=[]
+                          for tok in re.findall(r"(?<!\d)(\d{3,5})(?!\d)",compact):
+                              v=int(tok)
+                              if 500<=v<=35000: nums.append(v)
+                          if nums or re.search(r"(?i)(foundation|layout|roof|grid|science|lab|pier|column|stanchion|overall|plan|section|mesh|polythene)",text):
+                              relevant.append({
+                                  "text":text,
+                                  "nums":nums,
+                                  "bbox":r.get("bounding_box"),
+                                  "confidence":r.get("confidence"),
+                              })
+                      page_rows.append({"crop":name,"box":box,"relevant":relevant[:160]})
+                  out.append({"page":pno,"size":[W,H],"crops":page_rows})
+          finally:
+              doc.close()
+          print("MURERA_FOUNDATION_TARGETED_OCR="+json.dumps({
+              "production_sha":"f62b178f58537c32278d8699ba70c9d38d3f97f8",
+              "source_sha256":got,
+              "pages":out,
+          },sort_keys=True,default=str),flush=True)
+          PY
