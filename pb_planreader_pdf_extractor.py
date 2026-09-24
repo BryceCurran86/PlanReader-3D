@@ -346,6 +346,7 @@ class GenericPlanReaderExtractor:
             "walls": [],
         }
         self._ocr_text_by_page: Dict[int, str] = {}
+        self._ocr_pages_attempted: set[int] = set()
         self.hosted_opening_shadow: Dict[str, Any] = {
             "status": "abstained",
             "reason": "not_collected",
@@ -624,10 +625,25 @@ class GenericPlanReaderExtractor:
         return max(int(minimum_dpi), min(int(preferred_dpi), bounded))
 
     def _ocr_text_for_page(self, page: fitz.Page, page_index: int) -> str:
-        """Raster-OCR a page once and cache the concatenated line text."""
+        """Raster-OCR a page once with a bounded per-document page budget."""
         cached = self._ocr_text_by_page.get(page_index)
         if cached is not None:
             return cached
+
+        # OCR is a fallback for source pages whose native text is sparse or
+        # absent, not an unbounded full-document rasterization pass. Eight
+        # pages is enough to cover multiple drawing/schedule sheets while
+        # placing a deterministic ceiling on CPU and memory pressure for very
+        # large tender packages. Exhaustion fails closed to native evidence.
+        ocr_page_budget = 8
+        if (
+            page_index not in self._ocr_pages_attempted
+            and len(self._ocr_pages_attempted) >= ocr_page_budget
+        ):
+            self._ocr_text_by_page[page_index] = ""
+            return ""
+        self._ocr_pages_attempted.add(page_index)
+
         text = ""
         try:
             from pb_drawing_ocr_evidence_layer import DrawingOCREngine
@@ -818,6 +834,10 @@ class GenericPlanReaderExtractor:
 
         doc = fitz.open(str(p_path))
         target_pages = list(pages) if pages else list(range(len(doc)))
+        # OCR evidence is source-document scoped. Never carry cached text or
+        # page-budget state across separate PDFs when an extractor instance is reused.
+        self._ocr_text_by_page = {}
+        self._ocr_pages_attempted = set()
         self.extraction_status = {}
         self.hosted_opening_shadow = {
             "status": "abstained",
