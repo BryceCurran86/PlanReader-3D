@@ -176,7 +176,7 @@ def test_derived_or_elevation_viewport_is_not_authority() -> None:
     census = shadow["viewport_census"]
     assert census["authoritative_floor_plan_count"] == 0
     assert census["view_type_counts"][DrawingViewType.FLOOR_PLAN.value] == 1
-    assert census["rejected_floor_plans"][0]["reject_reason"] == "floor_plan_not_resolved"
+    assert census["rejected_floor_plans"][0]["reject_reason"] == "floor_plan_not_authoritative"
     assert census["rejected_floor_plans"][0]["has_bbox"] is True
 
 
@@ -193,7 +193,7 @@ def test_ambiguous_floor_plan_without_bbox_is_censused_not_authoritative() -> No
             "status": ViewportSegmentationStatus.AMBIGUOUS.value,
             "has_bbox": False,
             "label": "GROUND FLOOR PLAN",
-            "reject_reason": "floor_plan_not_resolved",
+            "reject_reason": "floor_plan_not_authoritative",
         }
     ]
 
