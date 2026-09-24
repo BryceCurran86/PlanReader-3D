@@ -376,6 +376,15 @@ class GenericPlanReaderExtractor:
             "reason_codes": ["not_collected"],
             "claims": [],
         }
+        self.roof_covering_shadow: Dict[str, Any] = {
+            "status": "abstained",
+            "reason": "not_collected",
+            "pitch_deg": None,
+            "cross_ridge_span_m": None,
+            "ridge_length_m": None,
+            "slope_length_m": None,
+            "roof_covering_area_m2": None,
+        }
         # Live extraction visibility: distinguish absence from failure/conflict.
         self.extraction_status: Dict[str, str] = {}
 
@@ -867,6 +876,15 @@ class GenericPlanReaderExtractor:
             "status": "abstained",
             "reason_codes": ["not_collected"],
             "claims": [],
+        }
+        self.roof_covering_shadow = {
+            "status": "abstained",
+            "reason": "not_collected",
+            "pitch_deg": None,
+            "cross_ridge_span_m": None,
+            "ridge_length_m": None,
+            "slope_length_m": None,
+            "roof_covering_area_m2": None,
         }
 
         # ------------------------------------------------------------------
@@ -2673,6 +2691,70 @@ class GenericPlanReaderExtractor:
                 "claims": [],
             }
             self.extraction_status["ceiling_lining_live"] = "extraction_failed"
+
+        # ------------------------------------------------------------------
+        # Generic source-owned roof covering measurement (shadow mode)
+        # ------------------------------------------------------------------
+        try:
+            from pb_source_roof_covering_authority import (
+                resolve_document_gable_roof_covering,
+            )
+
+            # Discover building footprint dimensions from authenticated perimeter or floor
+            _b_len_m: float | None = None
+            _b_wid_m: float | None = None
+            for _p in pred_dict.values():
+                if _p.tag in ("perimeter_walling", "floor_screed") and _p.dimensions and len(_p.dimensions) >= 2:
+                    _d0, _d1 = float(_p.dimensions[0]), float(_p.dimensions[1])
+                    _b_len_m = max(_d0, _d1)
+                    _b_wid_m = min(_d0, _d1)
+                    break
+
+            if _b_len_m is not None and _b_wid_m is not None and _b_wid_m <= _b_len_m:
+                _roof_meas = resolve_document_gable_roof_covering(
+                    doc,
+                    building_length_m=_b_len_m,
+                    building_width_m=_b_wid_m,
+                    source_sha256=getattr(self, "source_sha256", "") or ("0" * 64),
+                    target_pages=target_pages,
+                )
+                self.roof_covering_shadow = {
+                    "status": _roof_meas.status.value,
+                    "reason_codes": list(_roof_meas.reason_codes),
+                    "pitch_deg": _roof_meas.pitch_deg,
+                    "cross_ridge_span_m": _roof_meas.cross_ridge_span_m,
+                    "ridge_length_m": _roof_meas.ridge_length_m,
+                    "slope_length_m": _roof_meas.slope_length_m,
+                    "roof_covering_area_m2": _roof_meas.roof_covering_area_m2,
+                    "quantity_evidence": (
+                        _roof_meas.quantity_evidence.to_dict()
+                        if _roof_meas.quantity_evidence
+                        else None
+                    ),
+                }
+                self.extraction_status["roof_covering_shadow"] = _roof_meas.status.value
+            else:
+                self.roof_covering_shadow = {
+                    "status": "abstained",
+                    "reason": "footprint_envelope_unavailable",
+                    "pitch_deg": None,
+                    "cross_ridge_span_m": None,
+                    "ridge_length_m": None,
+                    "slope_length_m": None,
+                    "roof_covering_area_m2": None,
+                }
+                self.extraction_status["roof_covering_shadow"] = "abstained"
+        except Exception as _exc:  # noqa: BLE001
+            self.roof_covering_shadow = {
+                "status": "abstained",
+                "reason": f"roof_covering_shadow_exception:{type(_exc).__name__}",
+                "pitch_deg": None,
+                "cross_ridge_span_m": None,
+                "ridge_length_m": None,
+                "slope_length_m": None,
+                "roof_covering_area_m2": None,
+            }
+            self.extraction_status["roof_covering_shadow"] = "failed"
 
         doc.close()
         return list(pred_dict.values())
