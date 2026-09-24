@@ -819,8 +819,32 @@ class GenericPlanReaderExtractor:
                         if length_m is not None:
                             break
 
+            if length_m is None:
+                # Small building / ancillary structure envelope check (e.g. toilet block, store):
+                # When no standard building (area >= 15 m2) matched, look for small orthogonal
+                # envelope with area >= 4.0 m2, length >= 2.0 m, width >= 1.5 m.
+                seen_sm: set = set()
+                unique_sm: List[float] = []
+                for d in parsed_dims_m:
+                    if d not in seen_sm:
+                        seen_sm.add(d)
+                        unique_sm.append(d)
+                if len(unique_sm) >= 2:
+                    sd = sorted(unique_sm, reverse=True)
+                    for i, l_cand in enumerate(sd):
+                        for w_cand in sd[i + 1:]:
+                            if (
+                                l_cand - w_cand > 0.4
+                                and 4.0 <= l_cand * w_cand < 15.0
+                                and w_cand >= 1.5
+                            ):
+                                length_m, width_m = l_cand, w_cand
+                                break
+                        if length_m is not None:
+                            break
+
         if length_m is not None and width_m is None and detected_span is not None:
-            if 15.0 <= length_m * detected_span <= 600.0:
+            if 4.0 <= length_m * detected_span <= 600.0:
                 width_m = detected_span
 
         return length_m, width_m
@@ -1230,9 +1254,40 @@ class GenericPlanReaderExtractor:
                         orthogonal_envelope_evidence.secondary_width_m
                     )
             else:
-                length_m, width_m = self._detect_outer_envelope(
-                    parsed_dims_m, detected_span, is_elevation_page
-                )
+                floor_plan_dims_m: Optional[List[float]] = None
+                if not is_elevation_page:
+                    try:
+                        from pb_wall_hatch_perimeter_correction import _floor_plan_viewport_bbox
+
+                        fp_box = _floor_plan_viewport_bbox(page)
+                        if fp_box is not None:
+                            fp_rect = fitz.Rect(fp_box)
+                            blocks = page.get_text("blocks")
+                            scoped_dims: List[float] = []
+                            for b in blocks:
+                                r = fitz.Rect(b[:4])
+                                center = fitz.Point((r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0)
+                                if center in fp_rect:
+                                    txt = b[4].strip()
+                                    for major, minor in re.findall(r"\b(\d{1,2})[,.]?(\d{3})\b", txt):
+                                        val = float(major) + float(minor) / 1000.0
+                                        if 2.0 <= val <= 35.0:
+                                            scoped_dims.append(round(val, 3))
+                            if len(scoped_dims) >= 2:
+                                floor_plan_dims_m = scoped_dims
+                    except Exception:
+                        floor_plan_dims_m = None
+
+                length_m, width_m = None, None
+                if floor_plan_dims_m is not None:
+                    length_m, width_m = self._detect_outer_envelope(
+                        floor_plan_dims_m, detected_span, is_elevation_page
+                    )
+
+                if length_m is None or width_m is None:
+                    length_m, width_m = self._detect_outer_envelope(
+                        parsed_dims_m, detected_span, is_elevation_page
+                    )
 
             if length_m is not None and width_m is not None:
                 from pb_multi_space_footprint_geometry import MultiSpaceFootprintBuilder
