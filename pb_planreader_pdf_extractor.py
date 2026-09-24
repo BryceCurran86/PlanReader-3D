@@ -1763,7 +1763,8 @@ class GenericPlanReaderExtractor:
                         sheet_number=sheet_no,
                         metadata=flr_meta,
                     )
-                if page_num in mesh_evidence_pages and self._should_replace_slab_bound_quantity(
+                floor_source_page = int(pred_dict["floor_screed"].source_page or page_num)
+                if floor_source_page in mesh_evidence_pages and self._should_replace_slab_bound_quantity(
                     pred_dict.get("substructure_a142_mesh"),
                     bed_area_for_substructure_m2,
                     flr_meta,
