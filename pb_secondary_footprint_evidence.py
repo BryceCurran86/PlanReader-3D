@@ -2,8 +2,10 @@
 
 Resolves a secondary strip width (e.g. verandah depth) only when:
 
-* a unique secondary-space label sits in one F.07 floor-plan viewport;
-* the label is adjacent to one viewport edge (not plan interior);
+* a unique secondary-space label sits in one source-backed RESOLVED F.07
+  floor-plan viewport;
+* the label is adjacent to one real vector-frame viewport edge (not plan
+  interior and never an inferred title-grid/layout partition edge);
 * a figured dimension is **fully witness-bound** (both endpoints) inside that
   viewport with orientation **orthogonal to that adjoining edge**;
 * no competing orthogonal depth values remain.
@@ -96,15 +98,24 @@ def _label_words(page: Any) -> List[Tuple[Tuple[float, float, float, float], str
 
 
 def _eligible_plan_viewports(
-    viewports: Sequence[SegmentedViewport], *, allow_derived: bool
+    viewports: Sequence[SegmentedViewport],
 ) -> List[SegmentedViewport]:
-    allowed = {ViewportSegmentationStatus.RESOLVED.value}
-    if allow_derived:
-        allowed.add(ViewportSegmentationStatus.DERIVED.value)
+    """Return plan viewports whose edges are physical-boundary authority.
+
+    F.23 interprets the selected viewport edge as the adjoining physical
+    boundary of the named secondary strip.  A DERIVED title-partition/grid
+    cell proves document-layout ownership only; its artificial cell edges are
+    not drawn building boundaries and therefore cannot establish which axis is
+    verandah depth.  Only RESOLVED source-backed plan frames are eligible here.
+
+    Other consumers may still use strictly validated DERIVED viewports for
+    ownership.  This is intentionally narrower because F.23 assigns physical
+    meaning to the viewport edge itself.
+    """
     return [
         v
         for v in viewports
-        if v.status in allowed
+        if v.status == ViewportSegmentationStatus.RESOLVED.value
         and v.view_type == DrawingViewType.FLOOR_PLAN.value
         and v.bounding_box is not None
     ]
@@ -317,22 +328,19 @@ def resolve_secondary_footprint_width_m(
 ) -> Optional[SecondaryFootprintEvidence]:
     """Resolve one secondary-footprint width from orthogonal depth evidence.
 
-    Tries ``RESOLVED`` floor-plan viewports first, then ``DERIVED``. Returns
-    ``None`` on ambiguity or missing evidence — callers keep their legacy
-    regex fallback rather than treating absence as erasure.
+    Only RESOLVED, source-backed floor-plan frames are admitted because this
+    resolver gives physical meaning to a viewport edge.  DERIVED title-grid
+    cells remain valid layout/ownership evidence for other consumers, but
+    their inferred cell boundaries cannot become verandah edges.
+
+    Returns ``None`` on ambiguity or missing physical-frame authority;
+    callers keep their legacy explicit-text fallback rather than treating
+    absence as erasure.
     """
     viewports = segment_page_viewports(page, page_number=page_num)
-
-    strict = _resolve_for_viewports(
-        page,
-        page_num=page_num,
-        plan_viewports=_eligible_plan_viewports(viewports, allow_derived=False),
-    )
-    if strict is not None:
-        return strict
 
     return _resolve_for_viewports(
         page,
         page_num=page_num,
-        plan_viewports=_eligible_plan_viewports(viewports, allow_derived=True),
+        plan_viewports=_eligible_plan_viewports(viewports),
     )
