@@ -1,0 +1,138 @@
+name: TEST-ONLY Lamu DPC Internal Wall Census
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lamu-dpc-census:
+    if: startsWith(github.head_ref, 'diag/lamu-dpc-internal-wall-census')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install PyMuPDF
+      - name: Census page 41 wall vectors
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,math,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_wall_fill_internal_partition_evidence import (
+              _is_wall_like_fill,
+              resolve_internal_partition_length_m,
+          )
+          from pb_wall_hatch_perimeter_correction import _floor_plan_viewport_bbox
+
+          url="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          expected="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          p=Path("/tmp/lamu.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Lamu-dpc-wall-census/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:p.write_bytes(r.read())
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          if actual!=expected:raise SystemExit(actual)
+
+          doc=fitz.open(p)
+          page=doc[40]
+          drawings=page.get_drawings() or []
+          viewport=_floor_plan_viewport_bbox(page)
+          vx0,vy0,vx1,vy1=viewport
+          scale_x=(vx1-vx0)/16.0
+          scale_y=(vy1-vy0)/8.2
+          scale=(scale_x+scale_y)/2.0
+
+          rows=[]
+          for idx,d in enumerate(drawings):
+              rect=d.get("rect")
+              if rect is None: continue
+              x0,y0,x1,y1=map(float,rect)
+              cx,cy=(x0+x1)/2,(y0+y1)/2
+              if not (vx0<=cx<=vx1 and vy0<=cy<=vy1): continue
+              w,h=x1-x0,y1-y0
+              fill=d.get("fill")
+              stroke=d.get("color")
+              rows.append({
+                  "i":idx,
+                  "rect":[x0,y0,x1,y1],
+                  "w_pt":round(w,3),"h_pt":round(h,3),
+                  "long_m":round(max(w,h)/scale,3) if scale>0 else None,
+                  "short_m":round(min(w,h)/scale,3) if scale>0 else None,
+                  "aspect":round(max(w,h)/max(1e-9,min(w,h)),2) if w>0 and h>0 else None,
+                  "fill":fill,
+                  "color":stroke,
+                  "width":d.get("width"),
+                  "items_count":len(d.get("items",[]) or []),
+                  "wall_like_current":_is_wall_like_fill(d,page.rect),
+              })
+
+          current=resolve_internal_partition_length_m(
+              drawings,length_m=16.0,width_m=8.2,page=page
+          )
+
+          # Parallel-line wall candidates: pairs of near-axis-aligned line segments
+          # separated by roughly a wall thickness (80-350 mm at source scale).
+          segs=[]
+          for di,d in enumerate(drawings):
+              for it in d.get("items",[]) or []:
+                  if not it or it[0]!="l" or len(it)<3: continue
+                  a,b=it[1],it[2]
+                  x0,y0,x1,y1=map(float,(a.x,a.y,b.x,b.y))
+                  mx,my=(x0+x1)/2,(y0+y1)/2
+                  if not (vx0<=mx<=vx1 and vy0<=my<=vy1): continue
+                  dx,dy=abs(x1-x0),abs(y1-y0)
+                  if dx<1 and dy<1: continue
+                  if dx>=dy*5:
+                      orient="h"; long=dx; coord=(y0+y1)/2; s0=min(x0,x1); s1=max(x0,x1)
+                  elif dy>=dx*5:
+                      orient="v"; long=dy; coord=(x0+x1)/2; s0=min(y0,y1); s1=max(y0,y1)
+                  else:
+                      continue
+                  if long/scale < 0.5: continue
+                  segs.append({
+                      "drawing":di,"orientation":orient,
+                      "coord":coord,"s0":s0,"s1":s1,
+                      "length_m":long/scale,
+                      "p0":[x0,y0],"p1":[x1,y1],
+                      "stroke":d.get("color"),"fill":d.get("fill"),"width":d.get("width")
+                  })
+
+          pairs=[]
+          for i,a in enumerate(segs):
+              for b in segs[i+1:]:
+                  if a["orientation"]!=b["orientation"]: continue
+                  sep=abs(a["coord"]-b["coord"])/scale
+                  if not (0.08<=sep<=0.35): continue
+                  overlap=max(0.0,min(a["s1"],b["s1"])-max(a["s0"],b["s0"]))
+                  overlap_m=overlap/scale
+                  if overlap_m<0.5: continue
+                  mid=(a["coord"]+b["coord"])/2
+                  # internal if centerline is not within 0.4m of corresponding outer edge
+                  if a["orientation"]=="v":
+                      dist_edge=min(abs(mid-vx0),abs(vx1-mid))/scale
+                  else:
+                      dist_edge=min(abs(mid-vy0),abs(vy1-mid))/scale
+                  pairs.append({
+                      "orientation":a["orientation"],
+                      "separation_m":round(sep,3),
+                      "overlap_m":round(overlap_m,3),
+                      "center_coord":round(mid,3),
+                      "distance_from_outer_edge_m":round(dist_edge,3),
+                      "internal_candidate":dist_edge>0.4,
+                      "a":a,"b":b,
+                  })
+
+          print("LAMU_DPC_INTERNAL_WALL_CENSUS="+json.dumps({
+              "sha":actual,
+              "viewport":list(viewport),
+              "scale_x_pt_per_m":scale_x,
+              "scale_y_pt_per_m":scale_y,
+              "current":current.__dict__,
+              "drawing_rects":rows,
+              "axis_segments":segs,
+              "parallel_wall_pairs":pairs,
+          },sort_keys=True,default=str),flush=True)
+          doc.close()
+          PY
