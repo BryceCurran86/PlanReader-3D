@@ -2,10 +2,10 @@
 
 Resolves a secondary strip width (e.g. verandah depth) only when:
 
-* a unique secondary-space label sits in one source-backed RESOLVED F.07
-  floor-plan viewport;
-* the label is adjacent to one real vector-frame viewport edge (not plan
-  interior and never an inferred title-grid/layout partition edge);
+* a unique secondary-space label sits in one eligible F.07 floor-plan viewport;
+* the label is adjacent to a safe physical-role edge: any RESOLVED frame edge,
+  or (for the existing DERIVED depth-only contract) only an edge coincident
+  with the source page boundary — never an interior title-grid separator;
 * a figured dimension is **fully witness-bound** (both endpoints) inside that
   viewport with orientation **orthogonal to that adjoining edge**;
 * no competing orthogonal depth values remain.
@@ -98,28 +98,52 @@ def _label_words(page: Any) -> List[Tuple[Tuple[float, float, float, float], str
 
 
 def _eligible_plan_viewports(
-    viewports: Sequence[SegmentedViewport],
+    viewports: Sequence[SegmentedViewport], *, allow_derived: bool
 ) -> List[SegmentedViewport]:
-    """Return plan viewports whose edges are physical-boundary authority.
-
-    F.23 interprets the selected viewport edge as the adjoining physical
-    boundary of the named secondary strip.  A DERIVED title-partition/grid
-    cell proves document-layout ownership only; its artificial cell edges are
-    not drawn building boundaries and therefore cannot establish which axis is
-    verandah depth.  Only RESOLVED source-backed plan frames are eligible here.
-
-    Other consumers may still use strictly validated DERIVED viewports for
-    ownership.  This is intentionally narrower because F.23 assigns physical
-    meaning to the viewport edge itself.
-    """
+    allowed = {ViewportSegmentationStatus.RESOLVED.value}
+    if allow_derived:
+        allowed.add(ViewportSegmentationStatus.DERIVED.value)
     return [
         v
         for v in viewports
-        if v.status == ViewportSegmentationStatus.RESOLVED.value
+        if v.status in allowed
         and v.view_type == DrawingViewType.FLOOR_PLAN.value
         and v.bounding_box is not None
     ]
 
+
+def _edge_is_physical_role_safe(
+    page: Any,
+    viewport: SegmentedViewport,
+    edge: str,
+) -> bool:
+    """Whether a viewport edge may establish secondary-strip depth role.
+
+    RESOLVED viewport edges are source-backed physical frame evidence.
+
+    DERIVED title partitions are weaker: their internal cell/grid separators
+    are document-layout constructs, not drawn building boundaries. Existing
+    F.23/Item-29 contracts still permit a witness-bound depth at an outer page
+    edge, where the partition edge coincides with the source page boundary.
+    An interior derived separator may never decide whether a secondary strip
+    is left/right/top/bottom of the plan.
+    """
+    if viewport.status == ViewportSegmentationStatus.RESOLVED.value:
+        return True
+    if viewport.status != ViewportSegmentationStatus.DERIVED.value:
+        return False
+    if viewport.bounding_box is None:
+        return False
+
+    vx0, vy0, vx1, vy1 = (float(v) for v in viewport.bounding_box)
+    rect = page.rect
+    tol = 1.0
+    return {
+        "left": abs(vx0 - float(rect.x0)) <= tol,
+        "right": abs(vx1 - float(rect.x1)) <= tol,
+        "top": abs(vy0 - float(rect.y0)) <= tol,
+        "bottom": abs(vy1 - float(rect.y1)) <= tol,
+    }.get(edge, False)
 
 def _label_edge(
     label_center: Tuple[float, float],
@@ -294,6 +318,8 @@ def _resolve_for_viewports(
     if edge_info is None:
         return None
     edge, _fraction = edge_info
+    if not _edge_is_physical_role_safe(page, viewport, edge):
+        return None
 
     resolved = _resolve_orthogonal_depth(
         page,
@@ -328,19 +354,25 @@ def resolve_secondary_footprint_width_m(
 ) -> Optional[SecondaryFootprintEvidence]:
     """Resolve one secondary-footprint width from orthogonal depth evidence.
 
-    Only RESOLVED, source-backed floor-plan frames are admitted because this
-    resolver gives physical meaning to a viewport edge.  DERIVED title-grid
-    cells remain valid layout/ownership evidence for other consumers, but
-    their inferred cell boundaries cannot become verandah edges.
-
-    Returns ``None`` on ambiguity or missing physical-frame authority;
-    callers keep their legacy explicit-text fallback rather than treating
-    absence as erasure.
+    RESOLVED floor-plan frames are preferred. DERIVED title partitions remain
+    eligible for the existing depth-only Item-29 contract, but an internal
+    partition/grid separator cannot establish the physical edge role; for a
+    DERIVED viewport the selected edge must coincide with the source page
+    boundary. Returns None on ambiguity or missing safe edge authority so
+    callers may retain their explicit source-text fallback.
     """
     viewports = segment_page_viewports(page, page_number=page_num)
+
+    strict = _resolve_for_viewports(
+        page,
+        page_num=page_num,
+        plan_viewports=_eligible_plan_viewports(viewports, allow_derived=False),
+    )
+    if strict is not None:
+        return strict
 
     return _resolve_for_viewports(
         page,
         page_num=page_num,
-        plan_viewports=_eligible_plan_viewports(viewports),
+        plan_viewports=_eligible_plan_viewports(viewports, allow_derived=True),
     )
