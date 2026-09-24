@@ -1,0 +1,61 @@
+name: TEST-ONLY Ghazi Item Results Current Main
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ghazi-items:
+    if: startsWith(github.head_ref, 'diag/ghazi-item-results-current-main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Run SHA-pinned Ghazi benchmark and print item results
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib, json, urllib.request
+          from pathlib import Path
+          from pb_public_tender_benchmark import PublicTenderBenchmark
+          from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
+
+          benchmark_id="tenders_ke_ghazi_science_lab"
+          bench=PublicTenderBenchmark.load(benchmark_id,base_dir="benchmarks/public_tenders")
+          drawing=next(d for d in bench.download_manifest["documents"] if d.get("role")=="architectural_drawings")
+          url=bench.download_manifest["source_url"]
+          expected=str(drawing["sha256"]).lower()
+          path=Path("/tmp/ghazi.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Ghazi-items-current-main/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              path.write_bytes(r.read())
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(f"source hash mismatch: {actual}")
+
+          report=BenchmarkAccuracyEngine(
+              benchmarks_dir="benchmarks/public_tenders",
+              output_dir="/tmp/ghazi-items-result",
+          ).evaluate_benchmark(benchmark_id=benchmark_id,pdf_path=path,auto_extract=True)
+          payload={
+              "production_sha":"65bbdb077333e376e2c0ee0cb6dd002afa28197c",
+              "source_sha256":actual,
+              "accepted":int(report.exact_matches+report.within_5_percent),
+              "denominator":int(report.total_items_compared),
+              "accuracy_percentage":report.overall_accuracy_percentage,
+              "strict_exact_percentage":report.strict_exact_accuracy_percentage,
+              "hallucinated":int(report.hallucinated_items),
+              "items":[item.to_dict() for item in report.item_results],
+          }
+          print("GHAZI_ITEM_RESULTS_CURRENT_MAIN="+json.dumps(payload,sort_keys=True),flush=True)
+          PY
