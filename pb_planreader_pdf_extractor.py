@@ -2213,6 +2213,11 @@ class GenericPlanReaderExtractor:
                         and totals.door_geometry_evidence
                         and totals.door_types
                     )
+                    has_verified_door_marks = bool(
+                        len(totals.door_types) >= 2
+                        and totals.door_count >= 2
+                        and all(t.startswith("D") for t in totals.door_types)
+                    )
                     if has_casement_spec and should_emit_casement_window_total(
                         totals, pred_dict.keys()
                     ):
@@ -2234,7 +2239,11 @@ class GenericPlanReaderExtractor:
                             },
                         )
 
-                    if (has_door_spec or has_seeded_door_geometry) and should_emit_door_total(
+                    if (
+                        has_door_spec
+                        or has_seeded_door_geometry
+                        or has_verified_door_marks
+                    ) and should_emit_door_total(
                         totals, pred_dict.keys()
                     ):
                         pred_dict["doors_complete"] = ExtractedPrediction(

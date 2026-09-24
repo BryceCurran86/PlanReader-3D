@@ -108,6 +108,18 @@ def test_lone_hyphen_digit_promotes_on_window_band() -> None:
     assert "W?" in tags
 
 
+def test_lone_hyphen_digit_rejected_outside_window_band() -> None:
+    """Stray dropped digit outside any horizontal window band must not promote to a window mark."""
+    parts = [
+        {"t": "W-1", "conf": 80, "x": 10, "y": 10, "w": 30, "h": 16},
+        {"t": "-6", "conf": 70, "x": 200, "y": 200, "w": 16, "h": 16},
+    ]
+    marks = _nms(_assemble(parts, origin_x=0, origin_y=0, scale_x=1, scale_y=1, page=1))
+    tags = [mark.tag for mark in marks if mark.trade == "windows"]
+    assert tags == ["W1"]
+    assert "W6" not in tags
+
+
 @pytest.mark.skipif(not OCR_AVAILABLE, reason="no usable Tesseract backend in this environment")
 def test_raster_plan_stamps_emit_casement_total_and_mutate(tmp_path: Path) -> None:
     first_labels = [
@@ -388,6 +400,42 @@ def test_seeded_door_geometry_can_authorize_drawing_owned_aggregate(
         preds["doors_complete"].metadata["derivation"]
         == "plan_instance_marks_plus_seeded_swing_repeat"
     )
+
+
+def test_verified_drawing_door_marks_authorize_doors_complete(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Multiple verified D-tags directly on the floor plan authorize doors_complete emission."""
+    import pb_plan_opening_instance_marks as mod
+
+    fake_totals = PlanInstanceOpeningTotals(
+        window_count=4,
+        door_count=5,
+        window_types=("W1", "W2"),
+        door_types=("D1", "D2"),
+        source_page=1,
+        evidence_text="D-1: 2 No, D-2: 3 No",
+    )
+    monkeypatch.setattr(
+        mod,
+        "extract_plan_instance_opening_totals",
+        lambda doc, pages: fake_totals,
+    )
+
+    path = tmp_path / "plan_with_verified_door_marks.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=842, height=595)
+    page.insert_text((40, 35), "GROUND FLOOR PLAN", fontsize=10)
+    page.insert_text((40, 50), "SCALE 1:100", fontsize=9)
+    page.insert_text((40, 80), "Steel casement windows with 4mm glass", fontsize=9)
+    doc.save(path)
+    doc.close()
+
+    preds = {p.tag: p for p in GenericPlanReaderExtractor().extract_from_pdf(path)}
+    assert "doors_complete" in preds
+    assert preds["doors_complete"].quantity == 5.0
+    assert preds["doors_complete"].metadata["derivation"] == "plan_instance_opening_marks"
+    assert preds["doors_complete"].metadata["door_types"] == ["D1", "D2"]
 
 
 def test_existing_typed_door_schedule_blocks_doors_complete_emission(
