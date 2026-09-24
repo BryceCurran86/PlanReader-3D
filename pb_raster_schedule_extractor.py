@@ -612,11 +612,14 @@ class GenericScheduleTableExtractor:
     def _extract_row_aligned_opening_schedules(self, page: fitz.Page, page_num: int) -> List[ScheduleRow]:
         """Recover explicit opening schedule rows from native word geometry.
 
-        This is a deterministic fallback for vector/CAD schedule sheets where
-        ``Page.find_tables()`` does not recognize the grid. A firm row requires
-        all three pieces of source evidence on one visual row: an explicit W/D
-        identity, figured dimensions, and an explicit count marker. Dimensions
-        or counts alone never manufacture an opening identity.
+        CAD exports do not always keep one logical schedule row on one PDF text
+        baseline. A tag may be on one line while the figured size and explicit
+        quantity are on the immediately adjacent line inside the same schedule
+        cell. This fallback accepts either one complete visual line or a compact
+        stack of adjacent, horizontally-overlapping lines.
+
+        Identity remains text-backed: dimensions or counts alone never create a
+        W/D tag, and stacks containing competing opening identities fail closed.
         """
         rows: List[ScheduleRow] = []
         try:
@@ -633,8 +636,6 @@ class GenericScheduleTableExtractor:
             if not words:
                 return rows
 
-            # Cluster by visual baseline rather than PDF block identity. CAD
-            # exports commonly place each schedule cell in a separate block.
             visual_rows: List[Dict[str, Any]] = []
             for word in sorted(words, key=lambda w: (((w[1] + w[3]) / 2.0), w[0])):
                 cy = (float(word[1]) + float(word[3])) / 2.0
@@ -650,26 +651,74 @@ class GenericScheduleTableExtractor:
                 n = len(target["words"])
                 target["cy"] = ((target["cy"] * (n - 1)) + cy) / n
 
+            lines: List[Dict[str, Any]] = []
             for visual in visual_rows:
                 row_words = sorted(visual["words"], key=lambda w: w[0])
-                row_text = " ".join(str(w[4]) for w in row_words).strip()
-                normalized_opening = normalize_opening_tag(row_text)
-                if normalized_opening is None:
+                text = " ".join(str(w[4]) for w in row_words).strip()
+                if not text:
                     continue
-
-                dims = self._parse_dimensions_string(row_text)
-                qty_match = re.search(r"\b(\d{1,3})\s*(?:no\.?s?|nos?)\b", row_text, re.I)
-                if dims is None or qty_match is None:
-                    continue
-
-                qty = float(qty_match.group(1))
-                if qty <= 0:
-                    continue
-
                 x0 = min(float(w[0]) for w in row_words)
                 y0 = min(float(w[1]) for w in row_words)
                 x1 = max(float(w[2]) for w in row_words)
                 y1 = max(float(w[3]) for w in row_words)
+                lines.append(
+                    {
+                        "text": text,
+                        "bbox": (x0, y0, x1, y1),
+                        "cy": float(visual["cy"]),
+                        "height": max(1.0, y1 - y0),
+                    }
+                )
+
+            def _identity_tokens(text: str) -> List[Tuple[str, str]]:
+                found: List[Tuple[str, str]] = []
+                for match in re.finditer(
+                    r"(?<![A-Za-z0-9])(?:WINDOW|WIN|W|DOOR|DR|D)\s*[-_]?\s*\d{1,3}(?![A-Za-z0-9])(?!\s*[-_]\s*\d)",
+                    text,
+                    re.I,
+                ):
+                    norm = normalize_opening_tag(match.group(0))
+                    if norm is not None:
+                        pair = (norm.tag, norm.trade_type)
+                        if pair not in found:
+                            found.append(pair)
+                return found
+
+            emitted: set[Tuple[str, float, Tuple[float, ...], int]] = set()
+
+            def _emit_from_text(
+                combined_text: str,
+                combined_bbox: Tuple[float, float, float, float],
+                *,
+                confidence: float,
+                evidence_prefix: str,
+            ) -> None:
+                identities = _identity_tokens(combined_text)
+                if len(identities) != 1:
+                    return
+                normalized_opening = normalize_opening_tag(identities[0][0])
+                if normalized_opening is None:
+                    return
+                dims = self._parse_dimensions_string(combined_text)
+                qty_match = re.search(
+                    r"\b(\d{1,3})\s*(?:no\.?s?|nos?)\b",
+                    combined_text,
+                    re.I,
+                )
+                if dims is None or qty_match is None:
+                    return
+                qty = float(qty_match.group(1))
+                if qty <= 0:
+                    return
+                key = (
+                    normalized_opening.tag,
+                    qty,
+                    tuple(float(value) for value in (dims or [])),
+                    page_num,
+                )
+                if key in emitted:
+                    return
+                emitted.add(key)
                 rows.append(
                     ScheduleRow(
                         tag=normalized_opening.tag,
@@ -682,10 +731,57 @@ class GenericScheduleTableExtractor:
                         unit="NO",
                         dimensions=dims,
                         source_page=page_num,
-                        bbox=(x0, y0, x1, y1),
-                        confidence=0.87,
-                        evidence_text=f"Row-aligned native schedule evidence: {row_text}",
+                        bbox=combined_bbox,
+                        confidence=confidence,
+                        evidence_text=f"{evidence_prefix}: {combined_text}",
                     )
+                )
+
+            for line in lines:
+                _emit_from_text(
+                    line["text"],
+                    line["bbox"],
+                    confidence=0.87,
+                    evidence_prefix="Row-aligned native schedule evidence",
+                )
+
+            for idx, anchor in enumerate(lines):
+                anchor_ids = _identity_tokens(anchor["text"])
+                if len(anchor_ids) != 1:
+                    continue
+                companions: List[Dict[str, Any]] = []
+                for j, other in enumerate(lines):
+                    if j == idx:
+                        continue
+                    ax0, ay0, ax1, ay1 = anchor["bbox"]
+                    bx0, by0, bx1, by1 = other["bbox"]
+                    vertical_gap = max(0.0, max(by0 - ay1, ay0 - by1))
+                    max_gap = 2.5 * max(anchor["height"], other["height"])
+                    if vertical_gap > max_gap:
+                        continue
+                    overlap = min(ax1, bx1) - max(ax0, bx0)
+                    narrower = max(1.0, min(ax1 - ax0, bx1 - bx0))
+                    if overlap / narrower < 0.35:
+                        continue
+                    companions.append(other)
+
+                companions = sorted(
+                    companions,
+                    key=lambda line: abs(line["cy"] - anchor["cy"]),
+                )[:2]
+                stack = sorted([anchor, *companions], key=lambda line: line["cy"])
+                combined_text = " ".join(line["text"] for line in stack)
+                if len(_identity_tokens(combined_text)) != 1:
+                    continue
+                sx0 = min(line["bbox"][0] for line in stack)
+                sy0 = min(line["bbox"][1] for line in stack)
+                sx1 = max(line["bbox"][2] for line in stack)
+                sy1 = max(line["bbox"][3] for line in stack)
+                _emit_from_text(
+                    combined_text,
+                    (sx0, sy0, sx1, sy1),
+                    confidence=0.84,
+                    evidence_prefix="Stacked native schedule evidence",
                 )
         except Exception:
             return []
