@@ -15,6 +15,12 @@ Design rules:
 - Never uses BOQ text, project IDs, or expected benchmark values as scope
   authority or length targets.
 - Unknown, ambiguous, or unevidenced scope or length fails closed (abstains).
+- Unknown material status fails closed (abstains); absence of negative
+  evidence does not prove masonry.
+- Foundation/plinth relationship must be positive source-owned evidence;
+  exterior role alone does not prove foundation support.
+- All consumed QuantityEvidence records are strictly revalidated against
+  source, revision, entity identity, equivalence, unit, and family before use.
 """
 from __future__ import annotations
 
@@ -53,10 +59,17 @@ REASON_WALL_OUT_OF_SCOPE = "wall_out_of_dpc_scope"
 REASON_NON_REPRESENTATIVE_DUPLICATE = "non_representative_duplicate_wall"
 REASON_WALL_LENGTH_NOT_FIRM = "wall_length_not_firm"
 REASON_WALL_NOT_FOUNDATION_SUPPORTED = "wall_lacks_foundation_plinth_support"
+REASON_FOUNDATION_SUPPORT_UNRESOLVED = "foundation_support_unresolved"
 REASON_NON_MASONRY_ELEMENT = "non_masonry_element_excluded"
+REASON_WALL_MATERIAL_UNRESOLVED = "wall_material_unresolved"
 REASON_SOURCE_INTEGRITY_MISMATCH = "source_integrity_mismatch"
 REASON_REVISION_MISMATCH = "revision_mismatch"
 REASON_NO_INCLUDED_WALLS = "no_in_scope_firm_walls_available"
+REASON_QUANTITY_WRONG_FAMILY = "quantity_wrong_family"
+REASON_QUANTITY_WRONG_UNIT = "quantity_wrong_unit"
+REASON_QUANTITY_WRONG_ENTITY = "quantity_wrong_entity"
+REASON_EQUIVALENCE_BLOCKER = "equivalence_blocker_present"
+REASON_STALE_QUANTITY_REVISION = "stale_quantity_revision"
 
 
 class DPCPlinthScope(str, Enum):
@@ -65,6 +78,78 @@ class DPCPlinthScope(str, Enum):
     EXTERNAL_WALLS_ONLY = "external_walls_only"
     ALL_MASONRY_WALLS = "all_masonry_walls"
     UNRESOLVED = "unresolved"
+
+
+class WallMaterialStatus(str, Enum):
+    """Drawing-evidenced material classification for wall candidate."""
+
+    MASONRY = "masonry"
+    NON_MASONRY = "non_masonry"
+    UNRESOLVED = "unresolved"
+
+
+class FoundationSupportStatus(str, Enum):
+    """Drawing-evidenced foundation/plinth support classification."""
+
+    SUPPORTED = "supported"
+    UNSUPPORTED = "unsupported"
+    UNRESOLVED = "unresolved"
+
+
+@dataclass(frozen=True)
+class WallMaterialEvidence:
+    """Positive source-owned material evidence for a wall candidate."""
+
+    evidence_id: str
+    wall_id: str
+    source_sha256: str
+    revision_id: str
+    material_status: WallMaterialStatus
+    material_description: str = ""
+    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
+    reason_codes: Tuple[str, ...] = ()
+    schema_version: str = DPC_PLINTH_RUN_SCHEMA_VERSION
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "evidence_id": self.evidence_id,
+            "wall_id": self.wall_id,
+            "source_sha256": self.source_sha256,
+            "revision_id": self.revision_id,
+            "material_status": self.material_status.value,
+            "material_description": self.material_description,
+            "status": self.status.value,
+            "reason_codes": list(self.reason_codes),
+            "schema_version": self.schema_version,
+        }
+
+
+@dataclass(frozen=True)
+class WallFoundationRelationshipEvidence:
+    """Positive source-owned foundation/plinth support relationship for a wall candidate."""
+
+    relationship_id: str
+    wall_id: str
+    source_sha256: str
+    revision_id: str
+    support_status: FoundationSupportStatus
+    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
+    supporting_evidence_ids: Tuple[str, ...] = ()
+    reason_codes: Tuple[str, ...] = ()
+    schema_version: str = DPC_PLINTH_RUN_SCHEMA_VERSION
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "relationship_id": self.relationship_id,
+            "wall_id": self.wall_id,
+            "source_sha256": self.source_sha256,
+            "revision_id": self.revision_id,
+            "support_status": self.support_status.value,
+            "status": self.status.value,
+            "supporting_evidence_ids": list(self.supporting_evidence_ids),
+            "reason_codes": list(self.reason_codes),
+            "schema_version": self.schema_version,
+        }
 
 
 @dataclass(frozen=True)
@@ -105,7 +190,9 @@ class DPCPlinthWallAssessment:
     representative_wall_id: Optional[str]
     interior_exterior: InteriorExterior
     is_masonry: bool
+    material_status: WallMaterialStatus
     foundation_supported: bool
+    foundation_support: FoundationSupportStatus
     length_m: Optional[float]
     length_status: str
     length_quantity_id: Optional[str]
@@ -120,7 +207,9 @@ class DPCPlinthWallAssessment:
             "representative_wall_id": self.representative_wall_id,
             "interior_exterior": self.interior_exterior,
             "is_masonry": self.is_masonry,
+            "material_status": self.material_status.value,
             "foundation_supported": self.foundation_supported,
+            "foundation_support": self.foundation_support.value,
             "length_m": self.length_m,
             "length_status": self.length_status,
             "length_quantity_id": self.length_quantity_id,
@@ -201,6 +290,7 @@ _ALL_WALLS_SCOPE_RE = re.compile(
 
 _EXTERNAL_WALLS_ONLY_RE = re.compile(
     r"\bunder\s+external\s+walls\s+only\b"
+    r"|\bexternal\s+walls\s+only\b"
     r"|\bexternal\s+walls\s+d\.?p\.?c\b"
     r"|\bperimeter\s+walls\s+only\b",
     re.I,
@@ -237,12 +327,10 @@ def extract_dpc_specification_evidence(
             scope = DPCPlinthScope.EXTERNAL_WALLS_ONLY
             reasons = (REASON_DPC_SPEC_AUTHENTICATED, REASON_DPC_SCOPE_EXTERNAL_ONLY)
         else:
-            # Default for typical foundation/section details where DPC is called
-            # out at the external wall plinth detail (e.g. Section A-A, Section F-F).
-            # Unless positive evidence extends DPC to internal partitions, scope
-            # stays external-only (fail-closed against guessing).
-            scope = DPCPlinthScope.EXTERNAL_WALLS_ONLY
-            reasons = (REASON_DPC_SPEC_AUTHENTICATED, REASON_DPC_SCOPE_EXTERNAL_ONLY)
+            # Bare D.P.C. callout or section marker without explicit scope wording
+            # stays UNRESOLVED (fail-closed against guessing).
+            scope = DPCPlinthScope.UNRESOLVED
+            reasons = (REASON_DPC_SPEC_AUTHENTICATED, REASON_DPC_SCOPE_UNRESOLVED)
 
         match = _DPC_SPEC_RE.search(page_text)
         spec_snippet = match.group(0) if match else "D.P.C."
@@ -260,7 +348,7 @@ def extract_dpc_specification_evidence(
             DPCPlinthSpecificationEvidence(
                 evidence_id=ev_id,
                 source_sha256=context.source_sha256,
-                revision_id=context.current_revision_id,
+                revision_id=context.current_revision_id or "",
                 page_no=page_num,
                 viewport_id=None,
                 spec_text=spec_snippet,
@@ -274,58 +362,207 @@ def extract_dpc_specification_evidence(
 
 
 # ---------------------------------------------------------------------------
+# Strict FIRM QuantityEvidence Validation
+# ---------------------------------------------------------------------------
+
+def validate_wall_length_quantity_evidence(
+    *,
+    quantity: Optional[QuantityEvidence],
+    wall_id: str,
+    equivalence: PhysicalWallEquivalenceResolution,
+    context: ProviderContext,
+    document: DocumentEvidence,
+) -> Tuple[bool, Optional[float], Tuple[str, ...]]:
+    """Strictly revalidate a supplied wall-length QuantityEvidence record.
+
+    Validates:
+    - quantity is not None and not abstained
+    - family is "wall_length"
+    - unit is "m"
+    - status is "FIRM"
+    - value is finite and > 0
+    - input_entity_ids includes the exact representative wall_id
+    - document/source ownership matches context.source_sha256
+    - revision_id matches context.current_revision_id
+    - wall_id is in equivalence.representative_wall_ids
+    - no blockers exist for wall_id in equivalence
+    """
+    reasons: list[str] = []
+    if quantity is None:
+        reasons.append(REASON_WALL_LENGTH_NOT_FIRM)
+        return False, None, tuple(reasons)
+
+    if quantity.abstained:
+        reasons.append(REASON_WALL_LENGTH_NOT_FIRM)
+        return False, None, tuple(reasons)
+
+    if quantity.family.lower() != "wall_length":
+        reasons.append(REASON_QUANTITY_WRONG_FAMILY)
+        reasons.append(REASON_WALL_LENGTH_NOT_FIRM)
+        return False, None, tuple(reasons)
+
+    if quantity.unit.lower() != "m":
+        reasons.append(REASON_QUANTITY_WRONG_UNIT)
+        reasons.append(REASON_WALL_LENGTH_NOT_FIRM)
+        return False, None, tuple(reasons)
+
+    if str(quantity.status).upper() != AuthorityStatus.FIRM.value.upper():
+        reasons.append(REASON_WALL_LENGTH_NOT_FIRM)
+        return False, None, tuple(reasons)
+
+    if quantity.value is None or not math.isfinite(quantity.value) or quantity.value <= 0.0:
+        reasons.append(REASON_WALL_LENGTH_NOT_FIRM)
+        return False, None, tuple(reasons)
+
+    # Must target the exact representative wall
+    if wall_id not in quantity.input_entity_ids:
+        reasons.append(REASON_QUANTITY_WRONG_ENTITY)
+        reasons.append(REASON_WALL_LENGTH_NOT_FIRM)
+        return False, None, tuple(reasons)
+
+    # Document / source ownership check
+    qty_sha = quantity.metadata.get("source_sha256")
+    if qty_sha is not None and qty_sha != context.source_sha256:
+        reasons.append(REASON_SOURCE_INTEGRITY_MISMATCH)
+        reasons.append(REASON_WALL_LENGTH_NOT_FIRM)
+        return False, None, tuple(reasons)
+    if document.source_sha256 != context.source_sha256:
+        reasons.append(REASON_SOURCE_INTEGRITY_MISMATCH)
+        reasons.append(REASON_WALL_LENGTH_NOT_FIRM)
+        return False, None, tuple(reasons)
+
+    # Revision check
+    qty_rev = quantity.metadata.get("revision_id")
+    if qty_rev is not None and context.current_revision_id is not None:
+        if qty_rev != context.current_revision_id:
+            reasons.append(REASON_REVISION_MISMATCH)
+            reasons.append(REASON_WALL_LENGTH_NOT_FIRM)
+            return False, None, tuple(reasons)
+
+    # Physical equivalence representative check
+    if wall_id not in equivalence.representative_wall_ids:
+        reasons.append(REASON_NON_REPRESENTATIVE_DUPLICATE)
+        return False, None, tuple(reasons)
+
+    # Equivalence blockers check
+    if (
+        equivalence.blockers_for(wall_id)
+        or wall_id in equivalence.abstained_wall_ids
+        or wall_id in equivalence.ambiguous_wall_ids
+    ):
+        reasons.append(REASON_EQUIVALENCE_BLOCKER)
+        reasons.append(REASON_WALL_LENGTH_NOT_FIRM)
+        return False, None, tuple(reasons)
+
+    return True, round(float(quantity.value), 4), ()
+
+
+# ---------------------------------------------------------------------------
 # Shadow DPC Plinth Run Producer
 # ---------------------------------------------------------------------------
 
 class DPCPlinthRunProducer:
     """Producer of deterministic, source-owned shadow DPC plinth-run records."""
 
-    @staticmethod
+    @classmethod
     def assess_walls(
+        cls,
         *,
         walls: Sequence[WallCandidate],
         equivalence: PhysicalWallEquivalenceResolution,
         wall_length_quantities: Mapping[str, QuantityEvidence],
         dpc_scope: DPCPlinthScope,
-        non_masonry_wall_ids: Optional[Sequence[str]] = None,
-        unsupported_internal_wall_ids: Optional[Sequence[str]] = None,
+        context: ProviderContext,
+        document: DocumentEvidence,
+        wall_material_evidences: Optional[Mapping[str, WallMaterialEvidence]] = None,
+        wall_foundation_relationships: Optional[Mapping[str, WallFoundationRelationshipEvidence]] = None,
     ) -> Sequence[DPCPlinthWallAssessment]:
         """Assess every candidate wall for inclusion in the DPC plinth run."""
         assessments: list[DPCPlinthWallAssessment] = []
-        non_masonry_set = set(non_masonry_wall_ids or ())
-        unsupported_internal_set = set(unsupported_internal_wall_ids or ())
+        mat_map = wall_material_evidences or {}
+        found_map = wall_foundation_relationships or {}
 
         for wall in walls:
             wid = wall.candidate_id
             reasons: list[str] = []
-            is_masonry = wid not in non_masonry_set
-            rep_id = (
-                wid if wid in equivalence.representative_wall_ids
-                else None
+
+            # 1. Physical equivalence check
+            is_rep = wid in equivalence.representative_wall_ids
+            rep_id = wid if is_rep else None
+            eq_blocked = (
+                bool(equivalence.blockers_for(wid))
+                or wid in equivalence.abstained_wall_ids
+                or wid in equivalence.ambiguous_wall_ids
             )
+            if not is_rep:
+                reasons.append(REASON_NON_REPRESENTATIVE_DUPLICATE)
+            elif eq_blocked:
+                reasons.append(REASON_EQUIVALENCE_BLOCKER)
 
-            # Check foundation/plinth support:
-            # External walls sit on continuous foundation strip plinth by default.
-            # Internal walls sit on plinth only if not marked unsupported.
-            if wall.interior_exterior == "interior" and wid in unsupported_internal_set:
-                foundation_supported = False
+            # 2. Material verification (positive source-owned evidence required)
+            mat_ev = mat_map.get(wid)
+            if mat_ev is None:
+                material_status = WallMaterialStatus.UNRESOLVED
+                reasons.append(REASON_WALL_MATERIAL_UNRESOLVED)
+            elif (
+                mat_ev.wall_id != wid
+                or mat_ev.source_sha256 != context.source_sha256
+                or (context.current_revision_id and mat_ev.revision_id != context.current_revision_id)
+                or mat_ev.status != EvidenceResolutionStatus.CORROBORATED
+            ):
+                material_status = WallMaterialStatus.UNRESOLVED
+                reasons.append(REASON_SOURCE_INTEGRITY_MISMATCH)
+                reasons.append(REASON_WALL_MATERIAL_UNRESOLVED)
             else:
-                foundation_supported = True
+                material_status = mat_ev.material_status
+                if material_status == WallMaterialStatus.NON_MASONRY:
+                    reasons.append(REASON_NON_MASONRY_ELEMENT)
+                elif material_status == WallMaterialStatus.UNRESOLVED:
+                    reasons.append(REASON_WALL_MATERIAL_UNRESOLVED)
 
-            # Length evidence from canonical QuantityEvidence
+            is_masonry = (material_status == WallMaterialStatus.MASONRY)
+
+            # 3. Foundation / plinth relationship verification (positive evidence required)
+            found_rel = found_map.get(wid)
+            if found_rel is None:
+                foundation_support = FoundationSupportStatus.UNRESOLVED
+                reasons.append(REASON_FOUNDATION_SUPPORT_UNRESOLVED)
+            elif (
+                found_rel.wall_id != wid
+                or found_rel.source_sha256 != context.source_sha256
+                or (context.current_revision_id and found_rel.revision_id != context.current_revision_id)
+                or found_rel.status != EvidenceResolutionStatus.CORROBORATED
+            ):
+                foundation_support = FoundationSupportStatus.UNRESOLVED
+                reasons.append(REASON_SOURCE_INTEGRITY_MISMATCH)
+                reasons.append(REASON_FOUNDATION_SUPPORT_UNRESOLVED)
+            else:
+                foundation_support = found_rel.support_status
+                if foundation_support == FoundationSupportStatus.UNSUPPORTED:
+                    reasons.append(REASON_WALL_NOT_FOUNDATION_SUPPORTED)
+                elif foundation_support == FoundationSupportStatus.UNRESOLVED:
+                    reasons.append(REASON_FOUNDATION_SUPPORT_UNRESOLVED)
+
+            foundation_supported = (foundation_support == FoundationSupportStatus.SUPPORTED)
+
+            # 4. Length QuantityEvidence revalidation
             qty = wall_length_quantities.get(wid)
-            length_m: Optional[float] = None
-            length_status: str = "unresolved"
-            length_qty_id: Optional[str] = None
-            if qty is not None:
-                length_qty_id = qty.quantity_id
-                length_status = str(qty.status).lower()
-                if not qty.abstained and qty.value is not None:
-                    length_m = round(float(qty.value), 4)
+            qty_valid, length_val, qty_reasons = validate_wall_length_quantity_evidence(
+                quantity=qty,
+                wall_id=wid,
+                equivalence=equivalence,
+                context=context,
+                document=document,
+            )
+            reasons.extend(qty_reasons)
+            length_m = length_val if qty_valid else None
+            length_status = "firm" if qty_valid else ("rejected" if qty else "unresolved")
+            length_qty_id = qty.quantity_id if qty else None
 
-            # Check scope
+            # 5. DPC Scope check
             if dpc_scope == DPCPlinthScope.UNRESOLVED:
                 dpc_scope_status = "unresolved"
+                reasons.append(REASON_DPC_SCOPE_UNRESOLVED)
             elif wall.interior_exterior == "exterior":
                 dpc_scope_status = "in_scope"
             elif wall.interior_exterior == "interior":
@@ -335,26 +572,28 @@ class DPCPlinthRunProducer:
                     dpc_scope_status = "out_of_scope"
             else:
                 dpc_scope_status = "unresolved"
+                reasons.append(REASON_DPC_SCOPE_UNRESOLVED)
 
-            # Determine inclusion / exclusion / abstention
-            if not is_masonry:
+            # 6. Overall wall evaluation status
+            if rep_id is None:
                 evaluation_status = "excluded"
-                reasons.append(REASON_NON_MASONRY_ELEMENT)
-            elif rep_id is None:
-                evaluation_status = "excluded"
-                reasons.append(REASON_NON_REPRESENTATIVE_DUPLICATE)
-            elif not foundation_supported:
-                evaluation_status = "excluded"
-                reasons.append(REASON_WALL_NOT_FOUNDATION_SUPPORTED)
             elif dpc_scope_status == "out_of_scope":
                 evaluation_status = "excluded"
                 reasons.append(REASON_WALL_OUT_OF_SCOPE)
+            elif material_status == WallMaterialStatus.NON_MASONRY:
+                evaluation_status = "excluded"
+            elif foundation_support == FoundationSupportStatus.UNSUPPORTED:
+                evaluation_status = "excluded"
             elif dpc_scope_status == "unresolved":
                 evaluation_status = "abstained"
-                reasons.append(REASON_DPC_SCOPE_UNRESOLVED)
-            elif length_status != AuthorityStatus.FIRM.value.lower() or length_m is None or length_m <= 0:
+            elif material_status == WallMaterialStatus.UNRESOLVED:
                 evaluation_status = "abstained"
-                reasons.append(REASON_WALL_LENGTH_NOT_FIRM)
+            elif foundation_support == FoundationSupportStatus.UNRESOLVED:
+                evaluation_status = "abstained"
+            elif eq_blocked:
+                evaluation_status = "abstained"
+            elif length_status != "firm" or length_m is None or length_m <= 0:
+                evaluation_status = "abstained"
             else:
                 evaluation_status = "included"
                 reasons.append(REASON_WALL_IN_SCOPE)
@@ -365,13 +604,15 @@ class DPCPlinthRunProducer:
                     representative_wall_id=rep_id,
                     interior_exterior=wall.interior_exterior,
                     is_masonry=is_masonry,
+                    material_status=material_status,
                     foundation_supported=foundation_supported,
+                    foundation_support=foundation_support,
                     length_m=length_m,
                     length_status=length_status,
                     length_quantity_id=length_qty_id,
                     dpc_scope_status=dpc_scope_status,
                     evaluation_status=evaluation_status,
-                    reason_codes=tuple(reasons),
+                    reason_codes=tuple(dict.fromkeys(reasons)),
                 )
             )
 
@@ -390,9 +631,9 @@ class DPCPlinthRunProducer:
         blocking_reasons: list[str] = []
         reason_codes: list[str] = []
 
-        # Validate DPC specification
-        if not dpc_spec_evidences:
-            blocking_reasons.append(REASON_DPC_SPEC_MISSING)
+        # Document/source ownership verification
+        if document.source_sha256 != context.source_sha256:
+            blocking_reasons.append(REASON_SOURCE_INTEGRITY_MISMATCH)
             return cls._empty_record(
                 context=context,
                 document=document,
@@ -403,10 +644,39 @@ class DPCPlinthRunProducer:
                 blocking_reasons=tuple(blocking_reasons),
             )
 
-        # Check for scope conflicts
-        scopes = {ev.scope for ev in dpc_spec_evidences if ev.status == EvidenceResolutionStatus.CORROBORATED}
-        if len(scopes) > 1 and DPCPlinthScope.EXTERNAL_WALLS_ONLY in scopes and DPCPlinthScope.ALL_MASONRY_WALLS in scopes:
-            # Conflicting scope notes across sheets
+        # Validate DPC spec evidences against context and document
+        valid_dpc_specs: list[DPCPlinthSpecificationEvidence] = []
+        for ev in dpc_spec_evidences:
+            if ev.source_sha256 != context.source_sha256:
+                blocking_reasons.append(REASON_SOURCE_INTEGRITY_MISMATCH)
+                continue
+            if context.current_revision_id and ev.revision_id != context.current_revision_id:
+                blocking_reasons.append(REASON_REVISION_MISMATCH)
+                continue
+            if ev.status != EvidenceResolutionStatus.CORROBORATED:
+                continue
+            valid_dpc_specs.append(ev)
+
+        if not valid_dpc_specs:
+            if not blocking_reasons:
+                blocking_reasons.append(REASON_DPC_SPEC_MISSING)
+            return cls._empty_record(
+                context=context,
+                document=document,
+                scope=DPCPlinthScope.UNRESOLVED,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                wall_assessments=wall_assessments,
+                dpc_spec_evidences=dpc_spec_evidences,
+                blocking_reasons=tuple(blocking_reasons),
+            )
+
+        # Check for scope conflicts among valid DPC specs
+        scopes = {ev.scope for ev in valid_dpc_specs}
+        has_ext = DPCPlinthScope.EXTERNAL_WALLS_ONLY in scopes
+        has_all = DPCPlinthScope.ALL_MASONRY_WALLS in scopes
+
+        if has_ext and has_all:
+            # Conflicting explicit scope notes across sheets
             blocking_reasons.append("conflicting_dpc_scope_specifications")
             return cls._empty_record(
                 context=context,
@@ -414,11 +684,20 @@ class DPCPlinthRunProducer:
                 scope=DPCPlinthScope.UNRESOLVED,
                 status=EvidenceResolutionStatus.CONFLICT,
                 wall_assessments=wall_assessments,
-                dpc_spec_evidences=dpc_spec_evidences,
+                dpc_spec_evidences=tuple(valid_dpc_specs),
                 blocking_reasons=tuple(blocking_reasons),
             )
 
-        effective_scope = next(iter(scopes)) if scopes else DPCPlinthScope.UNRESOLVED
+        if has_ext:
+            effective_scope = DPCPlinthScope.EXTERNAL_WALLS_ONLY
+            reason_codes.append(REASON_DPC_SCOPE_EXTERNAL_ONLY)
+        elif has_all:
+            effective_scope = DPCPlinthScope.ALL_MASONRY_WALLS
+            reason_codes.append(REASON_DPC_SCOPE_ALL_MASONRY)
+        else:
+            effective_scope = DPCPlinthScope.UNRESOLVED
+            blocking_reasons.append(REASON_DPC_SCOPE_UNRESOLVED)
+
         reason_codes.append(REASON_DPC_SPEC_AUTHENTICATED)
 
         # Categorize wall assessments
@@ -432,8 +711,11 @@ class DPCPlinthRunProducer:
         abstained_wall_ids = tuple(w.wall_id for w in abstained)
         rep_wall_ids = tuple(dict.fromkeys(w.wall_id for w in wall_assessments if w.representative_wall_id is not None))
 
-        # If any in-scope wall abstained on length, the aggregate cannot be FIRM
-        if abstained_wall_ids:
+        # Fail-closed aggregate evaluation
+        if effective_scope == DPCPlinthScope.UNRESOLVED:
+            status = EvidenceResolutionStatus.ABSTAINED
+            total_length_m = None
+        elif abstained_wall_ids:
             blocking_reasons.append("in_scope_walls_abstained_on_firm_length")
             status = EvidenceResolutionStatus.ABSTAINED
             total_length_m = None
@@ -445,8 +727,8 @@ class DPCPlinthRunProducer:
             total_length_m = round(sum(included_lengths), 4)
             status = EvidenceResolutionStatus.CORROBORATED
 
-        source_pages = tuple(dict.fromkeys(ev.page_no for ev in dpc_spec_evidences))
-        viewport_ids = tuple(dict.fromkeys(ev.viewport_id for ev in dpc_spec_evidences if ev.viewport_id))
+        source_pages = tuple(dict.fromkeys(ev.page_no for ev in valid_dpc_specs))
+        viewport_ids = tuple(dict.fromkeys(ev.viewport_id for ev in valid_dpc_specs if ev.viewport_id))
 
         payload = {
             "document_id": document.document_id,
@@ -462,7 +744,7 @@ class DPCPlinthRunProducer:
         return DPCPlinthRunRecord(
             record_id=record_id,
             document_id=document.document_id,
-            revision_id=context.current_revision_id,
+            revision_id=context.current_revision_id or "",
             source_sha256=context.source_sha256,
             scope=effective_scope,
             status=status,
@@ -474,11 +756,11 @@ class DPCPlinthRunProducer:
             excluded_wall_ids=excluded_wall_ids,
             abstained_wall_ids=abstained_wall_ids,
             wall_assessments=tuple(wall_assessments),
-            dpc_spec_evidence_ids=tuple(ev.evidence_id for ev in dpc_spec_evidences),
+            dpc_spec_evidence_ids=tuple(ev.evidence_id for ev in valid_dpc_specs),
             source_pages=source_pages,
             viewport_ids=viewport_ids,
-            blocking_reasons=tuple(blocking_reasons),
-            reason_codes=tuple(reason_codes),
+            blocking_reasons=tuple(dict.fromkeys(blocking_reasons)),
+            reason_codes=tuple(dict.fromkeys(reason_codes)),
         )
 
     @classmethod
@@ -505,7 +787,7 @@ class DPCPlinthRunProducer:
         return DPCPlinthRunRecord(
             record_id=record_id,
             document_id=document.document_id,
-            revision_id=context.current_revision_id,
+            revision_id=context.current_revision_id or "",
             source_sha256=context.source_sha256,
             scope=scope,
             status=status,
