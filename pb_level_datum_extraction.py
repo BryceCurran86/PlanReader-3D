@@ -66,7 +66,7 @@ _LEVEL_LABELS: Dict[str, Tuple[str, ...]] = {
 # "+3.325") outright rather than silently mis-parsing its leading digits
 # (e.g. capturing just "+3") -- a format this module does not recognize
 # must yield no marker, never a wrong one.
-_LEVEL_VALUE = r"([+\-]\d{1,3}(?:,\d{3})?)(?!\.\d)"
+_LEVEL_VALUE = r"([+\-](?:\d{1,4}|\d{1,3},\d{3}))(?!\.\d)"
 
 
 def _parse_level_value_m(raw: str) -> float:
@@ -90,6 +90,36 @@ def find_level_markers(
     norm = re.sub(r"\s+", " ", page_text)
     markers: List[LevelMarker] = []
     seq = 0
+
+    # Some source drawings put the signed datum first (for example
+    # "+3000 ROOF LEVEL"). Accept that drafting convention only when the
+    # entire source text line is exactly one signed level value followed by
+    # one recognized datum label. This deliberately does not restore the old
+    # unsafe flat-text value-before-label scan where an unrelated nearby
+    # dimension could be captured as the datum.
+    for raw_line in page_text.splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip()
+        if not line:
+            continue
+        for marker_type, label_patterns in _LEVEL_LABELS.items():
+            for label_pat in label_patterns:
+                reverse = re.fullmatch(
+                    rf"{_LEVEL_VALUE}\s*:?[ ]*{label_pat}",
+                    line,
+                    re.I,
+                )
+                if reverse is None:
+                    continue
+                markers.append(LevelMarker(
+                    marker_id=f"level_p{source_page}_{marker_type}_{seq}",
+                    level_m=_parse_level_value_m(reverse.group(1)),
+                    raw_text=line,
+                    marker_type=marker_type,
+                    view_id=view_id,
+                    source_page=source_page,
+                    scope_id=None,
+                ))
+                seq += 1
 
     for marker_type, label_patterns in _LEVEL_LABELS.items():
         for label_pat in label_patterns:
