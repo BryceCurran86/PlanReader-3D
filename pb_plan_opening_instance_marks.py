@@ -28,6 +28,7 @@ lumped BOQ item.
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence, Tuple
@@ -66,6 +67,22 @@ _MIN_DOOR_TYPES = 1
 _MIN_DOOR_INSTANCES = 1
 _MAX_MARK_INDEX = 12
 
+_DOOR_SWING_DPI = 150
+_DOOR_SWING_MIN_SEEDS = 3
+_DOOR_SWING_HUE_STEP = 5
+_DOOR_SWING_HUE_TOL = 7
+_DOOR_SWING_MIN_SAT = 55
+_DOOR_SWING_MIN_VAL = 70
+_DOOR_SWING_MIN_SIDE_PT = 8.0
+_DOOR_SWING_MAX_SIDE_PT = 65.0
+_DOOR_SWING_MIN_AREA_PT2 = 50.0
+_DOOR_SWING_MAX_AREA_PT2 = 450.0
+_DOOR_SWING_MIN_ASPECT = 0.35
+_DOOR_SWING_MIN_FILL_RATIO = 0.07
+_DOOR_SWING_MAX_FILL_RATIO = 0.28
+_DOOR_SWING_MATCH_RADIUS_PT = 38.0
+_DOOR_SWING_LOCAL_REPEAT_RADIUS_PT = 95.0
+
 
 @dataclass(frozen=True)
 class PlanInstanceMark:
@@ -87,6 +104,8 @@ class PlanInstanceOpeningTotals:
     door_types: Tuple[str, ...]
     source_page: int
     evidence_text: str
+    door_geometry_count: Optional[int] = None
+    door_geometry_evidence: str = ""
 
 
 def package_documents_casement_windows(texts: Iterable[str]) -> bool:
@@ -508,13 +527,259 @@ def extract_plan_instance_opening_totals(
     evidence = "; ".join(
         f"{mark.tag}:{mark.raw}@{mark.page}" for mark in marks[:24]
     )
+    door_count = len(doors)
+    door_geometry_count: Optional[int] = None
+    door_geometry_evidence = ""
+    if doors:
+        geometry = _recover_one_local_door_swing_repeat(
+            doc[source_page - 1],
+            doors,
+        )
+        if geometry is not None and geometry[0] > door_count:
+            door_geometry_count, door_geometry_evidence = geometry
+            door_count = door_geometry_count
+            evidence = (
+                f"{evidence}; {door_geometry_evidence}"
+                if evidence
+                else door_geometry_evidence
+            )
     return PlanInstanceOpeningTotals(
         window_count=len(windows),
-        door_count=len(doors),
+        door_count=door_count,
         window_types=window_types,
         door_types=door_types,
         source_page=source_page,
         evidence_text=evidence,
+        door_geometry_count=door_geometry_count,
+        door_geometry_evidence=door_geometry_evidence,
+    )
+
+
+
+def _circular_hue_diff(hue: np.ndarray, center: int) -> np.ndarray:
+    diff = np.abs(hue.astype(np.int16) - int(center))
+    return np.minimum(diff, 180 - diff)
+
+
+def _chromatic_swing_candidates(
+    rgb: np.ndarray,
+    *,
+    page_width_pt: float,
+) -> List[dict]:
+    """Return hue-grouped, open-arc-sized chromatic contour candidates.
+
+    The caller does not trust these contours by themselves.  They become
+    meaningful only when a hue group spatially corroborates already detected
+    D-# instance marks on the same floor-plan page.
+    """
+    if rgb is None or rgb.size == 0 or page_width_pt <= 0:
+        return []
+    scale = float(rgb.shape[1]) / float(page_width_pt)
+    if scale <= 0:
+        return []
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    hue = hsv[:, :, 0]
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+    grouped: List[dict] = []
+
+    for center in range(0, 180, _DOOR_SWING_HUE_STEP):
+        mask = (
+            (_circular_hue_diff(hue, center) <= _DOOR_SWING_HUE_TOL)
+            & (sat >= _DOOR_SWING_MIN_SAT)
+            & (val >= _DOOR_SWING_MIN_VAL)
+        ).astype(np.uint8) * 255
+        mask = cv2.morphologyEx(
+            mask, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8)
+        )
+        contours, _ = cv2.findContours(
+            mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE
+        )
+        candidates: List[dict] = []
+        for contour in contours:
+            x, y, width, height = cv2.boundingRect(contour)
+            area_px = float(cv2.contourArea(contour))
+            width_pt = float(width) / scale
+            height_pt = float(height) / scale
+            area_pt2 = area_px / (scale * scale)
+            if not (
+                _DOOR_SWING_MIN_SIDE_PT <= width_pt <= _DOOR_SWING_MAX_SIDE_PT
+                and _DOOR_SWING_MIN_SIDE_PT <= height_pt <= _DOOR_SWING_MAX_SIDE_PT
+            ):
+                continue
+            aspect = min(width_pt, height_pt) / max(width_pt, height_pt)
+            if aspect < _DOOR_SWING_MIN_ASPECT:
+                continue
+            if not (
+                _DOOR_SWING_MIN_AREA_PT2
+                <= area_pt2
+                <= _DOOR_SWING_MAX_AREA_PT2
+            ):
+                continue
+            bbox_area = max(width_pt * height_pt, 1e-6)
+            fill_ratio = area_pt2 / bbox_area
+            if not (
+                _DOOR_SWING_MIN_FILL_RATIO
+                <= fill_ratio
+                <= _DOOR_SWING_MAX_FILL_RATIO
+            ):
+                continue
+            if len(contour) < 20:
+                continue
+            candidates.append(
+                {
+                    "center": (
+                        (float(x) + float(width) / 2.0) / scale,
+                        (float(y) + float(height) / 2.0) / scale,
+                    ),
+                    "width": width_pt,
+                    "height": height_pt,
+                    "area": area_pt2,
+                    "fill_ratio": fill_ratio,
+                }
+            )
+        if candidates:
+            grouped.append({"hue": center, "candidates": candidates})
+    return grouped
+
+
+def _similar_swing_geometry(candidate: dict, reference: dict) -> bool:
+    def ratio(a: float, b: float) -> float:
+        lo = max(min(float(a), float(b)), 1e-6)
+        return max(float(a), float(b)) / lo
+
+    # A missing single-leaf swing should resemble one of the source-authenticated
+    # swing contours.  Double-leaf doors may split into two smaller contours, so
+    # only one good reference match is required.
+    return (
+        ratio(candidate["width"], reference["width"]) <= 1.75
+        and ratio(candidate["height"], reference["height"]) <= 1.75
+        and ratio(candidate["area"], reference["area"]) <= 2.0
+        and ratio(candidate["fill_ratio"], reference["fill_ratio"]) <= 1.8
+    )
+
+
+def _recover_one_local_door_swing_repeat_from_rgb(
+    rgb: np.ndarray,
+    *,
+    page_width_pt: float,
+    door_marks: Sequence[PlanInstanceMark],
+) -> Optional[Tuple[int, str]]:
+    """Recover exactly one OCR-missed door from repeated coloured swing geometry.
+
+    D-# OCR marks are the authority seeds.  Their nearby swing contours teach the
+    page-local hue and physical contour scale.  Publication is allowed only when
+    every seed is corroborated and exactly one additional local, same-geometry
+    repeat remains.  Multiple unmatched repeats fail closed.
+    """
+    seeds = [mark for mark in door_marks if mark.trade == "doors"]
+    if len(seeds) < _DOOR_SWING_MIN_SEEDS:
+        return None
+    if sum(1 for mark in seeds if mark.complete) < 2:
+        return None
+
+    scored: List[Tuple[int, int, float, dict]] = []
+    for group in _chromatic_swing_candidates(
+        rgb, page_width_pt=page_width_pt
+    ):
+        candidates = group["candidates"]
+        matched = 0
+        distance_sum = 0.0
+        for mark in seeds:
+            distances = [
+                math.hypot(
+                    cand["center"][0] - mark.x,
+                    cand["center"][1] - mark.y,
+                )
+                for cand in candidates
+            ]
+            if not distances:
+                continue
+            distance = min(distances)
+            distance_sum += distance
+            if distance <= _DOOR_SWING_MATCH_RADIUS_PT:
+                matched += 1
+        # Full seed corroboration is intentionally strict. A hue that cannot
+        # explain every detected D mark is not allowed to mint another door.
+        if matched != len(seeds):
+            continue
+        if len(candidates) > len(seeds) + 3:
+            continue
+        scored.append((matched, len(candidates), distance_sum, group))
+
+    if not scored:
+        return None
+    scored.sort(key=lambda item: (-item[0], item[1], item[2], item[3]["hue"]))
+    group = scored[0][3]
+    candidates = group["candidates"]
+
+    assigned: dict[int, List[dict]] = {idx: [] for idx in range(len(seeds))}
+    unassigned: List[dict] = []
+    for candidate in candidates:
+        distances = [
+            math.hypot(
+                candidate["center"][0] - mark.x,
+                candidate["center"][1] - mark.y,
+            )
+            for mark in seeds
+        ]
+        nearest = min(distances)
+        if nearest <= _DOOR_SWING_MATCH_RADIUS_PT:
+            assigned[distances.index(nearest)].append(candidate)
+        else:
+            unassigned.append(candidate)
+
+    if any(not rows for rows in assigned.values()):
+        return None
+    # Any second unassigned full-size contour in the learned hue group makes the
+    # recovery ambiguous, even if it lies farther from the seed cluster.
+    if len(unassigned) != 1:
+        return None
+    missing = unassigned[0]
+    nearest_seed = min(
+        math.hypot(
+            missing["center"][0] - mark.x,
+            missing["center"][1] - mark.y,
+        )
+        for mark in seeds
+    )
+    if nearest_seed > _DOOR_SWING_LOCAL_REPEAT_RADIUS_PT:
+        return None
+
+    reference_candidates = [
+        candidate for rows in assigned.values() for candidate in rows
+    ]
+    if not any(
+        _similar_swing_geometry(missing, reference)
+        for reference in reference_candidates
+    ):
+        return None
+
+    recovered = len(seeds) + 1
+    cx, cy = missing["center"]
+    evidence = (
+        "seeded_chromatic_door_swing_repeat:"
+        f"hue={group['hue']};seeds={len(seeds)};"
+        f"repeat=({cx:.1f},{cy:.1f})"
+    )
+    return recovered, evidence
+
+
+def _recover_one_local_door_swing_repeat(
+    page: fitz.Page,
+    door_marks: Sequence[PlanInstanceMark],
+) -> Optional[Tuple[int, str]]:
+    try:
+        pix = page.get_pixmap(dpi=_DOOR_SWING_DPI, alpha=False)
+        rgb = _rgb_from_pixmap(pix)
+    except Exception:
+        return None
+    if rgb is None:
+        return None
+    return _recover_one_local_door_swing_repeat_from_rgb(
+        rgb,
+        page_width_pt=float(page.rect.width),
+        door_marks=door_marks,
     )
 
 

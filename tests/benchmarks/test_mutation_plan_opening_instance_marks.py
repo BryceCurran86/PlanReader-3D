@@ -3,13 +3,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import cv2
 import fitz
+import numpy as np
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 
 from pb_plan_opening_instance_marks import (
+    PlanInstanceMark,
     PlanInstanceOpeningTotals,
     _assemble,
+    _recover_one_local_door_swing_repeat_from_rgb,
     _nms,
     _normalize_mark_token,
     package_documents_casement_windows,
@@ -207,6 +211,72 @@ def test_untagged_casement_callouts_still_do_not_mint_identities(tmp_path: Path)
     assert "steel_casement_windows" not in preds
 
 
+
+def _synthetic_door_mark(x: float, y: float, tag: str = "D1") -> PlanInstanceMark:
+    return PlanInstanceMark(
+        tag=tag,
+        trade="doors",
+        conf=90.0,
+        x=x,
+        y=y,
+        raw=tag.replace("D", "D-"),
+        page=1,
+        complete=True,
+    )
+
+
+def _chromatic_swing_fixture(count: int) -> tuple[np.ndarray, list[tuple[float, float]]]:
+    rgb = np.full((320, 700, 3), 255, dtype=np.uint8)
+    centers = [(120 + 70 * idx, 150) for idx in range(count)]
+    candidate_centers = []
+    for cx, cy in centers:
+        cv2.ellipse(
+            rgb,
+            (cx, cy),
+            (30, 30),
+            0,
+            180,
+            270,
+            (230, 130, 65),
+            5,
+        )
+        # The open quarter arc's contour center is offset from the circle centre.
+        candidate_centers.append((cx - 13.5, cy - 13.5))
+    return rgb, candidate_centers
+
+
+def test_seeded_chromatic_swing_repeat_recovers_one_missing_door() -> None:
+    rgb, centers = _chromatic_swing_fixture(5)
+    marks = [
+        _synthetic_door_mark(x, y, "D1" if idx < 2 else "D2")
+        for idx, (x, y) in enumerate(centers[:4])
+    ]
+    recovered = _recover_one_local_door_swing_repeat_from_rgb(
+        rgb,
+        page_width_pt=float(rgb.shape[1]),
+        door_marks=marks,
+    )
+    assert recovered is not None
+    assert recovered[0] == 5
+    assert "seeded_chromatic_door_swing_repeat" in recovered[1]
+
+
+def test_seeded_chromatic_swing_repeat_fails_closed_on_multiple_missing() -> None:
+    rgb, centers = _chromatic_swing_fixture(6)
+    marks = [
+        _synthetic_door_mark(x, y, "D1" if idx < 2 else "D2")
+        for idx, (x, y) in enumerate(centers[:4])
+    ]
+    assert (
+        _recover_one_local_door_swing_repeat_from_rgb(
+            rgb,
+            page_width_pt=float(rgb.shape[1]),
+            door_marks=marks,
+        )
+        is None
+    )
+
+
 def test_package_door_system_phrase_is_generic() -> None:
     assert package_documents_door_system(["Flush doors with 3 nos. butt hinges"])
     assert package_documents_door_system(["Double leaf casement doors"])
@@ -276,6 +346,48 @@ def test_extractor_emits_doors_complete_from_plan_instance_totals(
     assert preds["doors_complete"].trade_type == "doors"
     assert "D1" not in preds
     assert "D2" not in preds
+
+
+
+def test_seeded_door_geometry_can_authorize_drawing_owned_aggregate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import pb_plan_opening_instance_marks as mod
+
+    fake_totals = PlanInstanceOpeningTotals(
+        window_count=4,
+        door_count=5,
+        window_types=("W1", "W2"),
+        door_types=("D1", "D2"),
+        source_page=1,
+        evidence_text="D1, D2; seeded geometry",
+        door_geometry_count=5,
+        door_geometry_evidence="seeded_chromatic_door_swing_repeat:hue=10",
+    )
+    monkeypatch.setattr(
+        mod,
+        "extract_plan_instance_opening_totals",
+        lambda doc, pages: fake_totals,
+    )
+
+    path = tmp_path / "plan_with_seeded_door_geometry.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=842, height=595)
+    page.insert_text((40, 35), "GROUND FLOOR PLAN", fontsize=10)
+    page.insert_text((40, 50), "SCALE 1:100", fontsize=9)
+    # Casement wording causes plan-instance extraction to run, but there is no
+    # door-system prose. Door authority must therefore come from the D-tag-seeded
+    # same-page swing geometry carried by fake_totals.
+    page.insert_text((40, 80), "Steel casement frames with 4mm thick glass", fontsize=9)
+    doc.save(path)
+    doc.close()
+
+    preds = {p.tag: p for p in GenericPlanReaderExtractor().extract_from_pdf(path)}
+    assert preds["doors_complete"].quantity == 5.0
+    assert (
+        preds["doors_complete"].metadata["derivation"]
+        == "plan_instance_marks_plus_seeded_swing_repeat"
+    )
 
 
 def test_existing_typed_door_schedule_blocks_doors_complete_emission(
