@@ -1,0 +1,42 @@
+name: TEST-ONLY Net Wall 858 Direct Authority
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  direct:
+    if: startsWith(github.head_ref, 'diag/net-wall-858-kstvet-ghazi')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install -r requirements.txt
+      - run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          cases=[
+            ("kstvet","https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf","6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",[53]),
+            ("ghazi","https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf","c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f",[166]),
+          ]
+          out={}
+          for name,url,want,pages in cases:
+            p=Path("/tmp")/(name+".pdf")
+            with urllib.request.urlopen(urllib.request.Request(url,headers={"User-Agent":"PlanReader-netwall-direct"}),timeout=120) as r:p.write_bytes(r.read())
+            got=hashlib.sha256(p.read_bytes()).hexdigest()
+            if got!=want: raise SystemExit(name+":"+got)
+            claim=collect_live_physical_net_wall_claim(p,pages=pages)
+            out[name]={
+              "status":claim.status.value,
+              "reason_codes":claim.reason_codes,
+              "quantity_m2":claim.quantity_m2,
+              "source_pages":claim.source_pages,
+              "external_wall_ids":claim.external_wall_ids,
+              "evidence_ids":claim.evidence_ids,
+              "quantity_id":claim.quantity_id,
+              "confidence":claim.confidence,
+            }
+          print("NET_WALL_858_DIRECT="+json.dumps(out,sort_keys=True,default=str))
+          PY
