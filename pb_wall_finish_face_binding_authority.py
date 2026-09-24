@@ -458,7 +458,30 @@ def _target_from_terminator(
         return None, tuple(sorted(raw_hits)), EvidenceResolutionStatus.ABSTAINED
     target_id = next(iter(normalized))
     target = next((r for r in wall_scope.records if r.wall_candidate_id == target_id), None)
-    return target or sorted(matching, key=lambda r: r.wall_candidate_id)[0], tuple(sorted(raw_hits)), EvidenceResolutionStatus.CORROBORATED
+    resolved_target = target or sorted(matching, key=lambda r: r.wall_candidate_id)[0]
+
+    # Provenance on a positive binding must contain only source primitives
+    # actually owned by the resolved physical wall. A non-wall leader may
+    # legitimately touch the same terminator, but it must remain leader
+    # evidence rather than being mislabeled as wall-face evidence.
+    target_owned_raw_hits: set[str] = set()
+    for record in matching:
+        normalized_id = representative_for.get(
+            record.wall_candidate_id,
+            record.wall_candidate_id,
+        )
+        if normalized_id != target_id:
+            continue
+        target_owned_raw_hits.update(
+            raw_hits & set(record.physical_identity.source_primitive_ids)
+        )
+    if not target_owned_raw_hits:
+        return None, (), EvidenceResolutionStatus.ABSTAINED
+    return (
+        resolved_target,
+        tuple(sorted(target_owned_raw_hits)),
+        EvidenceResolutionStatus.CORROBORATED,
+    )
 
 
 def _partial_scope(records: Sequence[WallFinishFaceBindingRecord]) -> WallFinishCompleteScopeRecord:
