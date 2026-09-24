@@ -45,7 +45,7 @@ from pb_source_visibility_authority import (
     classify_native_segment_visibility,
 )
 from pb_vector_geometry_v130 import extract_native_page
-from pb_viewport_segmentation import ViewportSegmentationStatus, segment_page_viewports
+from pb_viewport_segmentation import (\n    ViewportSegmentationStatus,\n    is_authoritative_derived_viewport,\n    segment_page_viewports,\n)
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 from pb_wall_room_topology_junction_classifier import classify_junctions
 from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
@@ -442,25 +442,70 @@ def _scope_boundary_reason(
             continue
 
         resolved_viewports = [
-            v for v in all_viewports if v.status == ViewportSegmentationStatus.RESOLVED.value and v.bounding_box
+            v for v in all_viewports
+            if v.status == ViewportSegmentationStatus.RESOLVED.value and v.bounding_box
+        ]
+        validated_derived_viewports = [
+            v for v in all_viewports
+            if is_authoritative_derived_viewport(v) and v.bounding_box
         ]
 
-        containing = [
+        containing_resolved = [
             vp
             for vp in resolved_viewports
-            if _inside_rect(point, x0=vp.bounding_box[0], y0=vp.bounding_box[1], x1=vp.bounding_box[2], y1=vp.bounding_box[3])
+            if _inside_rect(
+                point,
+                x0=vp.bounding_box[0],
+                y0=vp.bounding_box[1],
+                x1=vp.bounding_box[2],
+                y1=vp.bounding_box[3],
+            )
         ]
-        if not containing:
+        containing_validated_derived = [
+            vp
+            for vp in validated_derived_viewports
+            if _inside_rect(
+                point,
+                x0=vp.bounding_box[0],
+                y0=vp.bounding_box[1],
+                x1=vp.bounding_box[2],
+                y1=vp.bounding_box[3],
+            )
+        ]
+        if not containing_resolved and not containing_validated_derived:
             # This page has authenticated viewport structure, but this
-            # dangling end falls outside every RESOLVED viewport's bounds
-            # (e.g. only DERIVED/AMBIGUOUS regions cover it) -- its true
+            # dangling end falls outside every physically RESOLVED frame and
+            # every producer-validated columnar ownership region. Its true
             # scope cannot be authenticated from this page alone.
             return PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED
+
         if any(
-            _on_rect_boundary(point, x0=vp.bounding_box[0], y0=vp.bounding_box[1], x1=vp.bounding_box[2], y1=vp.bounding_box[3])
-            for vp in containing
+            _on_rect_boundary(
+                point,
+                x0=vp.bounding_box[0],
+                y0=vp.bounding_box[1],
+                x1=vp.bounding_box[2],
+                y1=vp.bounding_box[3],
+            )
+            for vp in containing_resolved
         ):
             return PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY
+
+        if any(
+            _on_rect_boundary(
+                point,
+                x0=vp.bounding_box[0],
+                y0=vp.bounding_box[1],
+                x1=vp.bounding_box[2],
+                y1=vp.bounding_box[3],
+            )
+            for vp in containing_validated_derived
+        ):
+            # A validated title grid proves view ownership, not a physical
+            # wall boundary. Ends strictly inside the cell are known not to be
+            # page/view crops, but an end on the synthetic partition edge is
+            # still unresolved and must fail closed.
+            return PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED
 
     return None
 
