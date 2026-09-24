@@ -601,3 +601,59 @@ def test_extractor_roof_covering_shadow_end_to_end() -> None:
 
 
 
+
+
+def test_extractor_roof_footprint_prefers_floor_axes_over_wall_area_dimensions(
+    tmp_path, monkeypatch
+) -> None:
+    """Wall prediction dimensions are [perimeter,height], never roof footprint axes."""
+    import fitz
+    import pb_source_roof_covering_authority as roof_module
+    from pb_migration_contracts import EvidenceResolutionStatus
+    from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+    from pb_source_roof_covering_authority import SourceRoofCoveringMeasurement
+
+    doc = fitz.open()
+    page = doc.new_page(width=600, height=400)
+    page.insert_text((80, 80), "GROUND FLOOR PLAN", fontsize=11)
+    page.insert_text((80, 110), "10,150", fontsize=10)
+    page.insert_text((80, 130), "8,350", fontsize=10)
+    page.insert_text((80, 160), "15 degree roof pitch", fontsize=10)
+    pdf = tmp_path / "roof-footprint-axis.pdf"
+    doc.save(str(pdf))
+    doc.close()
+
+    seen = {}
+
+    def _fake_resolve(
+        _doc,
+        *,
+        building_length_m,
+        building_width_m,
+        source_sha256,
+        target_pages=None,
+    ):
+        seen["dims"] = (building_length_m, building_width_m)
+        return SourceRoofCoveringMeasurement(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            pitch_deg=None,
+            cross_ridge_span_m=None,
+            ridge_length_m=None,
+            slope_length_m=None,
+            roof_covering_area_m2=None,
+            gable_evidence=None,
+            quantity_evidence=None,
+            reason_codes=("synthetic_probe",),
+        )
+
+    monkeypatch.setattr(
+        roof_module,
+        "resolve_document_gable_roof_covering",
+        _fake_resolve,
+    )
+    GenericPlanReaderExtractor().extract_from_pdf(
+        pdf,
+        collect_item35_shadow=False,
+    )
+
+    assert seen["dims"] == pytest.approx((10.15, 8.35))
