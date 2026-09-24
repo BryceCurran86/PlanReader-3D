@@ -87,3 +87,66 @@ class TestStructuralColumnWiring:
         assert pred.metadata["derivation"] == "bay_count_plus_one_from_repeated_dimension_chain"
         assert pred.metadata["bay_spans_m"] == [4.0, 4.0, 4.0]
         assert pred.quantity == 4.0  # 3 bays + 1
+
+
+def _make_physical_verandah_pdf(
+    tmp_path: Path,
+    *,
+    centers: tuple[float, ...] = (160.0, 260.0, 360.0, 460.0),
+) -> Path:
+    doc = fitz.open()
+    page = doc.new_page(width=842, height=595)
+    page.insert_text((72, 72), "GROUND FLOOR PLAN\nSCALE 1:100", fontsize=10)
+    page.insert_text((275, 226), "VERANDAH", fontsize=10)
+    for x in (198.0, 298.0, 398.0):
+        page.insert_text((x, 275), "2,500", fontsize=8)
+    for x in centers:
+        page.draw_rect(
+            fitz.Rect(x - 2.0, 248.0, x + 2.0, 252.0),
+            color=(0.4, 0.4, 0.4),
+            fill=(0.8, 0.8, 0.8),
+            width=0.5,
+        )
+    pdf_path = tmp_path / "physical_verandah_supports.pdf"
+    doc.save(str(pdf_path))
+    doc.close()
+    return pdf_path
+
+
+class TestPhysicalVerandahSupportWiring:
+    def test_complete_physical_support_row_publishes_verandah_pillars(
+        self, tmp_path: Path
+    ) -> None:
+        pdf_path = _make_physical_verandah_pdf(tmp_path)
+        extractor = GenericPlanReaderExtractor()
+        pred_map = {
+            prediction.tag: prediction
+            for prediction in extractor.extract_from_pdf(pdf_path)
+        }
+
+        assert "verandah_pillars" in pred_map
+        prediction = pred_map["verandah_pillars"]
+        assert prediction.quantity == 4.0
+        assert prediction.unit == "NO"
+        assert prediction.metadata["derivation"] == (
+            "physical_secondary_area_support_instances"
+        )
+        assert prediction.metadata["evidence_mode"] == "physical_symbol"
+        assert len(prediction.metadata["support_symbol_ids"]) == 4
+        # No textual support keyword exists, so the older dimension+keyword
+        # structural_columns path must remain locked.
+        assert "structural_columns" not in pred_map
+
+    def test_incomplete_physical_support_row_fails_closed(
+        self, tmp_path: Path
+    ) -> None:
+        pdf_path = _make_physical_verandah_pdf(
+            tmp_path,
+            centers=(160.0, 260.0, 360.0),
+        )
+        extractor = GenericPlanReaderExtractor()
+        pred_map = {
+            prediction.tag: prediction
+            for prediction in extractor.extract_from_pdf(pdf_path)
+        }
+        assert "verandah_pillars" not in pred_map
