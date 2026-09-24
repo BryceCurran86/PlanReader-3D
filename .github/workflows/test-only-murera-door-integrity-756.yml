@@ -1,0 +1,112 @@
+name: TEST-ONLY Murera Door Integrity 756
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-door-integrity:
+    if: startsWith(github.head_ref, 'diag/murera-door-integrity-756')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Probe exact PR756 Murera authority
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib, json, urllib.request
+          from pathlib import Path
+          import fitz
+
+          from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
+          from pb_plan_opening_instance_marks import (
+              extract_plan_instance_opening_totals,
+              package_documents_door_system,
+          )
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected_sha="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-door-integrity/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              payload=r.read()
+          actual=hashlib.sha256(payload).hexdigest()
+          if actual != expected_sha:
+              raise SystemExit(f"source hash mismatch: {actual}")
+          source=Path("/tmp/murera.pdf"); source.write_bytes(payload)
+
+          extractor=GenericPlanReaderExtractor()
+          doc=fitz.open(source)
+          try:
+              candidate_pages=[
+                  p for p in range(218,238)
+                  if extractor.is_drawing_page(doc[p].get_text("text"),doc[p])
+              ]
+              drawing_texts=[doc[p].get_text("text") or "" for p in candidate_pages]
+              all_texts=[doc[p].get_text("text") or "" for p in range(len(doc))]
+              totals=extract_plan_instance_opening_totals(doc,candidate_pages)
+          finally:
+              doc.close()
+
+          predictions=extractor.extract_from_pdf(
+              source,
+              pages=list(range(218,238)),
+              collect_item35_shadow=False,
+          )
+          pred_rows=[p.to_dict() for p in predictions]
+          engine=BenchmarkAccuracyEngine(
+              benchmarks_dir="benchmarks/public_tenders",
+              output_dir=Path("/tmp/murera-results"),
+          )
+          report=engine.evaluate_benchmark(
+              benchmark_id="tenders_ke_murera_science_lab",
+              pdf_path=source,
+              predictions=pred_rows,
+              auto_extract=False,
+          )
+          target=next(
+              (x.to_dict() for x in report.item_results if x.item_id=="doors_complete"),
+              None,
+          )
+          out={
+              "source_sha256":actual,
+              "drawing_pages":[p+1 for p in candidate_pages],
+              "drawing_only_door_system":package_documents_door_system(drawing_texts),
+              "whole_package_door_system":package_documents_door_system(all_texts),
+              "plan_totals":None if totals is None else {
+                  "door_count":totals.door_count,
+                  "door_types":list(totals.door_types),
+                  "window_count":totals.window_count,
+                  "window_types":list(totals.window_types),
+                  "evidence_text":totals.evidence_text,
+                  "source_page":totals.source_page,
+              },
+              "doors_complete_prediction":next(
+                  (r for r in pred_rows if r.get("tag")=="doors_complete"),None
+              ),
+              "project":{
+                  "accepted":int(report.exact_matches+report.within_5_percent),
+                  "denominator":int(report.total_items_compared),
+                  "accuracy_percentage":report.overall_accuracy_percentage,
+                  "strict_exact_percentage":report.strict_exact_accuracy_percentage,
+                  "exact":int(report.exact_matches),
+                  "within_5":int(report.within_5_percent),
+                  "gross":int(report.gross_mismatches),
+                  "missed":int(report.missed_items),
+                  "hallucinated":int(report.hallucinated_items),
+              },
+              "doors_target":target,
+          }
+          print("MURERA_DOOR_756="+json.dumps(out,sort_keys=True),flush=True)
+          PY
