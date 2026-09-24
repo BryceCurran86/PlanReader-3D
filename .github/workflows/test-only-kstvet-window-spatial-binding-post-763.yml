@@ -1,0 +1,174 @@
+name: TEST-ONLY KSTVET Window Spatial Binding Post 763
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  kstvet-window-spatial-binding:
+    if: startsWith(github.head_ref, 'diag/kstvet-window-spatial-binding-post-763')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Probe spatial binding around KSTVET casement callouts
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib, json, math, re, urllib.request
+          from pathlib import Path
+          import fitz
+
+          from pb_dimension_chain_evidence_extractor import extract_dimension_chains_from_page
+          from pb_drawing_ocr_evidence_layer import DrawingOCREngine
+
+          url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          expected_sha="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-KSTVET-window-spatial-post-763/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              payload=r.read()
+          actual=hashlib.sha256(payload).hexdigest()
+          if actual != expected_sha:
+              raise SystemExit(f"source hash mismatch: {actual}")
+
+          source=Path("/tmp/kstvet.pdf")
+          source.write_bytes(payload)
+          engine=DrawingOCREngine()
+          target_values={1200,2900,3000}
+          number_re=re.compile(r"^\s*(\d{3,4})\s*$")
+          semantic_re=re.compile(r"(?i)\b(?:casement|window|windows)\b")
+
+          def center(b):
+              return ((b[0]+b[2])/2.0,(b[1]+b[3])/2.0)
+
+          def dist(a,b):
+              ax,ay=center(a); bx,by=center(b)
+              return math.hypot(ax-bx,ay-by)
+
+          def clip(page,bbox,padx=360,pady=180):
+              r=fitz.Rect(bbox)
+              rr=fitz.Rect(r.x0-padx,r.y0-pady,r.x1+padx,r.y1+pady)
+              return rr & page.rect
+
+          out={
+              "source_sha256":actual,
+              "production_sha":"65bbdb077333e376e2c0ee0cb6dd002afa28197c",
+              "pages":[]
+          }
+
+          doc=fitz.open(source)
+          try:
+              for pno in (53,54):
+                  page=doc[pno]
+                  words=page.get_text("words") or []
+                  textdict=page.get_text("dict") or {}
+                  callouts=[]
+                  for block in textdict.get("blocks",[]):
+                      for line in block.get("lines",[]):
+                          spans=line.get("spans",[])
+                          txt=" ".join(str(s.get("text") or "").strip() for s in spans).strip()
+                          if semantic_re.search(txt):
+                              boxes=[s.get("bbox") for s in spans if s.get("bbox")]
+                              if not boxes:
+                                  continue
+                              bbox=[
+                                  min(b[0] for b in boxes),min(b[1] for b in boxes),
+                                  max(b[2] for b in boxes),max(b[3] for b in boxes)
+                              ]
+                              callouts.append({"text":txt,"bbox":bbox})
+
+                  native_numbers=[]
+                  for w in words:
+                      token=str(w[4]).replace(",","").strip()
+                      m=number_re.match(token)
+                      if not m:
+                          continue
+                      val=int(m.group(1))
+                      if 100 <= val <= 6000:
+                          native_numbers.append({
+                              "value_mm":val,
+                              "text":str(w[4]),
+                              "bbox":[float(w[0]),float(w[1]),float(w[2]),float(w[3])]
+                          })
+
+                  dim_obs=[]
+                  try:
+                      chains=extract_dimension_chains_from_page(page,page_num=pno+1,view_id=f"page_{pno+1}")
+                      for chain in chains:
+                          for obs in list(getattr(chain,"observations",()) or ()):
+                              bbox=getattr(obs,"bbox",None)
+                              val=round(float(obs.value_m)*1000.0)
+                              if bbox:
+                                  dim_obs.append({
+                                      "value_mm":val,
+                                      "bbox":[float(x) for x in bbox],
+                                      "chain_id":str(getattr(chain,"chain_id",""))
+                                  })
+                  except Exception as exc:
+                      dim_obs=[{"error":repr(exc)}]
+
+                  bindings=[]
+                  for idx,c in enumerate(callouts):
+                      cb=c["bbox"]
+                      nearby_native=[
+                          {**n,"distance_pt":round(dist(cb,n["bbox"]),2)}
+                          for n in native_numbers
+                          if abs(center(cb)[1]-center(n["bbox"])[1]) <= 220
+                          and abs(center(cb)[0]-center(n["bbox"])[0]) <= 700
+                      ]
+                      nearby_native.sort(key=lambda x:x["distance_pt"])
+                      nearby_dim=[
+                          {**n,"distance_pt":round(dist(cb,n["bbox"]),2)}
+                          for n in dim_obs if "bbox" in n
+                          if abs(center(cb)[1]-center(n["bbox"])[1]) <= 220
+                          and abs(center(cb)[0]-center(n["bbox"])[0]) <= 700
+                      ]
+                      nearby_dim.sort(key=lambda x:x["distance_pt"])
+
+                      ocr_hits=[]
+                      region=clip(page,cb)
+                      for dpi in (320,400):
+                          rows=engine.recognize_page_rect(page,clip_rect=region,dpi=dpi)
+                          for row in rows:
+                              txt=str(row.get("text") or "").replace(","," ").strip()
+                              nums=[int(x) for x in re.findall(r"(?<!\d)(\d{3,4})(?!\d)",txt)]
+                              hits=[n for n in nums if 100 <= n <= 6000]
+                              if hits or semantic_re.search(txt):
+                                  ocr_hits.append({
+                                      "dpi":dpi,
+                                      "text":txt,
+                                      "numbers_mm":hits,
+                                      "bbox":row.get("bounding_box"),
+                                      "confidence":row.get("confidence")
+                                  })
+
+                      bindings.append({
+                          "callout_index":idx,
+                          "callout":c,
+                          "nearby_native_numbers":nearby_native[:30],
+                          "nearby_dimension_observations":nearby_dim[:30],
+                          "ocr_clip":[float(region.x0),float(region.y0),float(region.x1),float(region.y1)],
+                          "ocr_hits":ocr_hits[:120],
+                      })
+
+                  out["pages"].append({
+                      "page":pno+1,
+                      "callout_count":len(callouts),
+                      "target_native":[n for n in native_numbers if n["value_mm"] in target_values],
+                      "target_dimension_observations":[n for n in dim_obs if n.get("value_mm") in target_values],
+                      "bindings":bindings,
+                  })
+              print("KSTVET_WINDOW_SPATIAL_BINDING_POST_763="+json.dumps(out,sort_keys=True),flush=True)
+          finally:
+              doc.close()
+          PY
