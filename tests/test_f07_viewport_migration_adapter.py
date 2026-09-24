@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import fitz
@@ -28,7 +29,12 @@ from pb_viewport_migration_adapter import (
     F07_VIEWPORT_NOT_AUTHORITATIVE,
     F07_VIEWPORT_PRODUCER_LINEAGE_INVALID,
     F07_VIEWPORT_SIBLING_OVERLAP,
+    _proof_authority_payload,
+    _proof_ownership_id,
+    _proof_payload_fingerprint,
+    _sibling_set_fingerprint,
     adapt_f07_viewport_to_migration,
+    verify_f07_viewport_ownership_proof,
 )
 from pb_viewport_segmentation import (
     SegmentedViewport,
@@ -36,6 +42,7 @@ from pb_viewport_segmentation import (
     ViewportSegmentationStatus,
     is_authoritative_derived_viewport,
     segment_page_viewports,
+    segmented_viewport_producer_fingerprint,
     validate_non_overlapping_viewports,
 )
 
@@ -223,6 +230,33 @@ def _scope(viewport_id: str) -> FiguredSpanScaleScope:
         page_no=PAGE,
         viewport_id=viewport_id,
     )
+
+
+def _genuine_authoritative_derived_adapter_result():
+    doc = _columnar_grid_doc()
+    viewports = segment_page_viewports(doc[0], page_number=PAGE)
+    target = next(
+        viewport
+        for viewport in viewports
+        if is_authoritative_derived_viewport(viewport)
+    )
+    context = _context(*(viewport.view_id for viewport in viewports))
+    adapted = adapt_f07_viewport_to_migration(
+        viewports,
+        viewport_id=target.view_id,
+        context=context,
+        page_no=PAGE,
+    )
+    assert not adapted.abstained
+    assert adapted.viewport is not None
+    assert adapted.ownership_proof is not None
+    assert verify_f07_viewport_ownership_proof(
+        adapted.ownership_proof,
+        viewport=adapted.viewport,
+        context=context,
+        page_no=PAGE,
+    ) == ()
+    return doc, viewports, target, context, adapted
 
 
 def test_validated_columnar_title_grid_derived_is_preserved_and_accepted_by_shadow() -> None:
