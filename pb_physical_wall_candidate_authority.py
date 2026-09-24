@@ -1027,22 +1027,13 @@ class PhysicalWallCandidateProducer:
         source_visibility_producer,
         *,
         page_ids: Optional[Sequence[str]] = None,
-        include_raster_fallback: bool = True,
     ):
         """Build wall scopes, optionally narrowed by source page address.
 
         page_ids is addressing only: it can select which already-decoded source
         pages are materialized, but it cannot inject geometry, candidates,
         completeness, roles, quantities, or any other evidence-shaped input.
-
-        include_raster_fallback preserves the existing producer-owned raster
-        augmentation by default. Native-only evidence consumers may set it
-        False to materialize the same canonical physical-wall authority from
-        already receipted native visible segments without invoking raster
-        fallback. It never accepts caller pixels, segments, thresholds, wall
-        labels, or quantities, and does not create a second wall graph.
-
-        The legacy no-argument behavior remains unchanged.
+        The legacy no-argument behavior remains the complete decoded-page build.
         """
         if type(source_visibility_producer) is not SourceVisibilityProducer:
             raise TypeError(
@@ -1059,9 +1050,11 @@ class PhysicalWallCandidateProducer:
             if not selected_page_ids:
                 raise ValueError("page_ids must contain at least one source page")
 
-        # Preserve the current mainline raster-wall path by default while
-        # allowing strictly native-only consumers to skip producer-owned raster
-        # fallback. Page addressing is still validated either way.
+        # Preserve the current mainline raster-wall path while keeping page
+        # addressing operationally narrow. Validate the requested source pages
+        # against producer-owned decode coverage first, then render raster
+        # fallback only for those pages. No caller pixels, segments, DPI,
+        # thresholds, labels, or quantities enter this path.
         for revision_id in tuple(
             sorted(source_visibility_producer._published_by_revision)
         ):
@@ -1077,20 +1070,19 @@ class PhysicalWallCandidateProducer:
                 and not selected_page_ids <= decoded_page_ids
             ):
                 raise ValueError(PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
-            if include_raster_fallback:
-                source_visibility_producer.augment_with_raster_visible_segments(
-                    revision_id,
-                    page_ids=(
-                        tuple(
-                            sorted(
-                                selected_page_ids,
-                                key=lambda value: int(value),
-                            )
+            source_visibility_producer.augment_with_raster_visible_segments(
+                revision_id,
+                page_ids=(
+                    tuple(
+                        sorted(
+                            selected_page_ids,
+                            key=lambda value: int(value),
                         )
-                        if selected_page_ids is not None
-                        else None
-                    ),
-                )
+                    )
+                    if selected_page_ids is not None
+                    else None
+                ),
+            )
 
         published_by_revision = dict(source_visibility_producer._published_by_revision)
         store = source_visibility_producer._producer._store
