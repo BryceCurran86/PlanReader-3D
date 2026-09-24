@@ -1,0 +1,75 @@
+name: TEST-ONLY KSTVET After Stacked Schedule 850
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  kstvet:
+    if: startsWith(github.head_ref, 'diag/kstvet-after-stacked-schedule-850')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download SHA-pinned KSTVET source
+        run: |
+          python - <<'PY'
+          import hashlib, pathlib, urllib.request
+          url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          expected="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          out=pathlib.Path("/tmp/kstvet.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-KSTVET-850/1.0"})
+          with urllib.request.urlopen(req,timeout=180) as r:
+              out.write_bytes(r.read())
+          got=hashlib.sha256(out.read_bytes()).hexdigest()
+          print("SOURCE_SHA256="+got)
+          if got != expected:
+              raise SystemExit(f"source hash mismatch: {got}")
+          PY
+
+      - name: Build exact candidate image
+        run: docker build -t planreader-kstvet-850 .
+
+      - name: Run KSTVET benchmark
+        run: |
+          set -euo pipefail
+          docker run --rm --cpus=2.0 \
+            -v /tmp/kstvet.pdf:/app/kstvet.pdf:ro \
+            planreader-kstvet-850 \
+            python pb_benchmark_accuracy_engine.py \
+              --benchmark tenders_ke_kstvet_cbc_classroom \
+              --pdf /app/kstvet.pdf \
+              --output-dir /tmp/results \
+            | tee /tmp/kstvet-benchmark.txt
+
+      - name: Print item-level result
+        run: |
+          docker run --rm --cpus=2.0 \
+            -v /tmp/kstvet.pdf:/app/kstvet.pdf:ro \
+            planreader-kstvet-850 \
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
+          engine=BenchmarkAccuracyEngine(output_dir="/tmp/results")
+          report=engine.evaluate_benchmark(
+              benchmark_id="tenders_ke_kstvet_cbc_classroom",
+              pdf_path=Path("/app/kstvet.pdf"),
+              auto_extract=True,
+          )
+          focus=[]
+          for item in report.items:
+              d=item.to_dict()
+              if d.get("item_id") in {"BOQ-C41-B","BOQ-C41-C"} or d.get("status") != "exact_match":
+                  focus.append(d)
+          print("KSTVET_AFTER_STACKED_SCHEDULE_850="+json.dumps({
+              "accepted": report.exact_matches + report.within_5_percent,
+              "denominator": report.total_items_compared,
+              "accuracy_percentage": report.overall_accuracy_percentage,
+              "strict_exact_percentage": report.strict_exact_percentage,
+              "hallucinated": report.hallucinated_items,
+              "gross_mismatches": report.gross_mismatches,
+              "items": focus,
+          },sort_keys=True))
+          PY
