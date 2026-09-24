@@ -98,10 +98,16 @@ def _write_direct_finish_plan(
     radius = 2.0
     leader_start_x = 80.0 - note_gap
     leader_end_x = terminator_center_x + radius
+    # Mark the synthetic callout leader with source drafting metadata that
+    # the canonical wall Stage-A filter independently recognizes as non-wall.
+    # Item 19B still consumes the exact native visible segment as leader
+    # evidence; this avoids making the same primitive both a leader and an
+    # authenticated physical-wall candidate in the positive fixture.
     page.draw_line(
         fitz.Point(leader_start_x, 100.0),
         fitz.Point(leader_end_x, 100.0),
         color=(0, 0, 0),
+        dashes="[3 2] 0",
         width=0.5,
     )
     page.draw_circle(
