@@ -600,7 +600,9 @@ class GenericPlanReaderExtractor:
         text = ""
         try:
             from pb_drawing_ocr_evidence_layer import DrawingOCREngine
-            lines = DrawingOCREngine().recognize_page_rect(page, dpi=150)
+            # 120 DPI is sufficient for sparse drawing-note OCR while keeping
+            # the production Tesseract path inside the 512 MB deployment budget.
+            lines = DrawingOCREngine().recognize_page_rect(page, dpi=120)
             text = "\n".join(str(line.get("text") or "") for line in lines)
         except Exception:
             text = ""
