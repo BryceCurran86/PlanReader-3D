@@ -13,10 +13,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install -r requirements.txt
+      - run: |
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
       - name: Focused scale authority tests
         run: |
-          pytest -q             tests/test_figured_span_scale_shadow.py             tests/test_physical_scale_calibration_bridge_v1.py             tests/geometry/test_page_scale_calibration_authority.py             tests/test_viewport_scale_binding.py             tests/test_measurement_input_authority.py             tests/test_measurement_input_authority_hardening.py
+          python -m pytest -q \
+            tests/test_figured_span_scale_shadow.py \
+            tests/test_physical_scale_calibration_bridge_v1.py \
+            tests/geometry/test_page_scale_calibration_authority.py \
+            tests/test_viewport_scale_binding.py \
+            tests/test_measurement_input_authority.py \
+            tests/test_measurement_input_authority_hardening.py
 
   real-shadow:
     if: startsWith(github.head_ref, 'diag/figured-span-scale-real-validation')
