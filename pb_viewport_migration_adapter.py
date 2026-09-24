@@ -24,6 +24,7 @@ from typing import Any, Mapping, Optional, Sequence
 from pb_migration_contracts import (
     ViewportEvidence,
     ViewportResolutionStatus,
+    canonical_contract_json,
     stable_contract_id,
 )
 from pb_migration_provider_envelope import ProviderContext
@@ -47,7 +48,7 @@ F07_VIEWPORT_NOT_AUTHORITATIVE = "f07_viewport_not_authoritative"
 F07_VIEWPORT_TITLE_OWNERSHIP_CHANGED = "f07_viewport_title_ownership_changed"
 F07_VIEWPORT_SCOPE_MISMATCH = "f07_viewport_scope_mismatch"
 
-_PROOF_SEAL = object()
+_PROOF_SEAL_TOKEN = object()
 
 _PROVENANCE_KEYS = (
     "partition_mode",
@@ -77,11 +78,18 @@ class F07ViewportOwnershipProof:
     producer_fingerprint: str
     sibling_set_fingerprint: str
     authoritative_derived: bool
+    payload_fingerprint: str
     schema_version: str = F07_VIEWPORT_MIGRATION_SCHEMA_VERSION
     _seal: Any = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if self._seal is not _PROOF_SEAL:
+        seal = self._seal
+        if (
+            not isinstance(seal, tuple)
+            or len(seal) != 2
+            or seal[0] is not _PROOF_SEAL_TOKEN
+            or not str(seal[1] or "").strip()
+        ):
             raise ValueError(
                 "F07ViewportOwnershipProof may only be created by the F.07 migration adapter"
             )
@@ -142,6 +150,73 @@ def _sibling_set_fingerprint(viewports: Sequence[SegmentedViewport]) -> str:
     ]
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _proof_authority_payload_values(
+    *,
+    document_id: str,
+    source_sha256: str,
+    revision_id: str,
+    page_no: int,
+    viewport_id: str,
+    view_type: str,
+    status: str,
+    bbox: Sequence[float],
+    title_bbox: Sequence[float],
+    boundary_source: str,
+    producer_fingerprint: str,
+    sibling_set_fingerprint: str,
+    authoritative_derived: bool,
+    schema_version: str,
+) -> dict[str, Any]:
+    """Canonical authority-bearing payload for an F.07 ownership capability."""
+    return {
+        "document_id": str(document_id),
+        "source_sha256": str(source_sha256),
+        "revision_id": str(revision_id),
+        "page_no": int(page_no),
+        "viewport_id": str(viewport_id),
+        "view_type": str(view_type),
+        "status": str(status),
+        "bbox": _bbox_tuple(bbox),
+        "title_bbox": _bbox_tuple(title_bbox),
+        "boundary_source": str(boundary_source),
+        "producer_fingerprint": str(producer_fingerprint),
+        "sibling_set_fingerprint": str(sibling_set_fingerprint),
+        "authoritative_derived": bool(authoritative_derived),
+        "schema_version": str(schema_version),
+    }
+
+
+def _proof_authority_payload(proof: F07ViewportOwnershipProof) -> dict[str, Any]:
+    return _proof_authority_payload_values(
+        document_id=proof.document_id,
+        source_sha256=proof.source_sha256,
+        revision_id=proof.revision_id,
+        page_no=proof.page_no,
+        viewport_id=proof.viewport_id,
+        view_type=proof.view_type,
+        status=proof.status,
+        bbox=proof.bbox,
+        title_bbox=proof.title_bbox,
+        boundary_source=proof.boundary_source,
+        producer_fingerprint=proof.producer_fingerprint,
+        sibling_set_fingerprint=proof.sibling_set_fingerprint,
+        authoritative_derived=proof.authoritative_derived,
+        schema_version=proof.schema_version,
+    )
+
+
+def _proof_payload_fingerprint(payload: Mapping[str, Any]) -> str:
+    return hashlib.sha256(canonical_contract_json(payload).encode("utf-8")).hexdigest()
+
+
+def _proof_ownership_id(payload: Mapping[str, Any]) -> str:
+    return stable_contract_id(
+        "f07_viewport_ownership",
+        payload,
+        digest_chars=32,
+    )
 
 
 def _context_reasons(
@@ -259,27 +334,7 @@ def adapt_f07_viewport_to_migration(
     )
     producer_fingerprint = segmented_viewport_producer_fingerprint(target)
     sibling_fingerprint = _sibling_set_fingerprint(rows)
-    proof_payload = {
-        "document_id": context.document_id,
-        "source_sha256": context.source_sha256,
-        "revision_id": context.current_revision_id,
-        "page_no": int(page_no),
-        "viewport_id": target.view_id,
-        "view_type": target.view_type,
-        "status": target.status,
-        "bbox": evidence.bbox,
-        "title_bbox": _bbox_tuple(target.title_bbox),
-        "boundary_source": target.boundary_source,
-        "producer_fingerprint": producer_fingerprint,
-        "sibling_set_fingerprint": sibling_fingerprint,
-        "authoritative_derived": is_authoritative_derived_viewport(target),
-    }
-    proof = F07ViewportOwnershipProof(
-        ownership_id=stable_contract_id(
-            "f07_viewport_ownership",
-            proof_payload,
-            digest_chars=32,
-        ),
+    proof_payload = _proof_authority_payload_values(
         document_id=context.document_id,
         source_sha256=context.source_sha256,
         revision_id=str(context.current_revision_id),
@@ -293,7 +348,27 @@ def adapt_f07_viewport_to_migration(
         producer_fingerprint=producer_fingerprint,
         sibling_set_fingerprint=sibling_fingerprint,
         authoritative_derived=is_authoritative_derived_viewport(target),
-        _seal=_PROOF_SEAL,
+        schema_version=F07_VIEWPORT_MIGRATION_SCHEMA_VERSION,
+    )
+    payload_fingerprint = _proof_payload_fingerprint(proof_payload)
+    proof = F07ViewportOwnershipProof(
+        ownership_id=_proof_ownership_id(proof_payload),
+        document_id=context.document_id,
+        source_sha256=context.source_sha256,
+        revision_id=str(context.current_revision_id),
+        page_no=int(page_no),
+        viewport_id=target.view_id,
+        view_type=target.view_type,
+        status=target.status,
+        bbox=evidence.bbox,
+        title_bbox=_bbox_tuple(target.title_bbox),
+        boundary_source=target.boundary_source,
+        producer_fingerprint=producer_fingerprint,
+        sibling_set_fingerprint=sibling_fingerprint,
+        authoritative_derived=is_authoritative_derived_viewport(target),
+        payload_fingerprint=payload_fingerprint,
+        schema_version=F07_VIEWPORT_MIGRATION_SCHEMA_VERSION,
+        _seal=(_PROOF_SEAL_TOKEN, payload_fingerprint),
     )
     return F07ViewportMigrationResult(
         viewport=evidence,
@@ -312,10 +387,26 @@ def verify_f07_viewport_ownership_proof(
     """Verify a sealed F.07 proof without trusting ViewportEvidence.metadata."""
     if proof is None or not isinstance(proof, F07ViewportOwnershipProof):
         return ("authoritative_derived_ownership_missing",)
-    if proof._seal is not _PROOF_SEAL:
-        return ("authoritative_derived_ownership_unsealed",)
 
     reasons: list[str] = []
+    payload = _proof_authority_payload(proof)
+    recomputed_fingerprint = _proof_payload_fingerprint(payload)
+    recomputed_ownership_id = _proof_ownership_id(payload)
+
+    seal = proof._seal
+    if (
+        not isinstance(seal, tuple)
+        or len(seal) != 2
+        or seal[0] is not _PROOF_SEAL_TOKEN
+    ):
+        reasons.append("authoritative_derived_ownership_unsealed")
+    elif str(seal[1]) != recomputed_fingerprint:
+        reasons.append("authoritative_derived_seal_payload_mismatch")
+
+    if proof.payload_fingerprint != recomputed_fingerprint:
+        reasons.append("authoritative_derived_payload_fingerprint_mismatch")
+    if proof.ownership_id != recomputed_ownership_id:
+        reasons.append("authoritative_derived_ownership_id_mismatch")
     if proof.document_id != context.document_id or viewport.document_id != proof.document_id:
         reasons.append("authoritative_derived_document_mismatch")
     if proof.source_sha256 != context.source_sha256:
