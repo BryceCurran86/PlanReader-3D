@@ -495,6 +495,8 @@ def _target_from_terminator(
     lines: Sequence[_Line],
     wall_scope,
     epsilon: float = 0.0,
+    *,
+    eligible_wall_ids: Optional[set[str]] = None,
 ):
     # epsilon is retained only for compatibility. Wall ownership requires an
     # actual terminator/primitive intersection; proximity is never authority.
@@ -506,6 +508,10 @@ def _target_from_terminator(
     matching = [
         record for record in wall_scope.records
         if raw_hits & set(record.physical_identity.source_primitive_ids)
+        and (
+            eligible_wall_ids is None
+            or record.wall_candidate_id in eligible_wall_ids
+        )
     ]
     if not matching:
         return None, (), EvidenceResolutionStatus.ABSTAINED
@@ -628,6 +634,38 @@ class WallFinishFaceBindingProducer:
                     ))
                     if wall_scope.status is not EvidenceResolutionStatus.CORROBORATED:
                         continue
+
+                    # A geometric candidate is not yet an authenticated wall
+                    # assembly. Filter terminator ownership through the
+                    # independently source-derived role authority first so
+                    # annotation leaders / dimensions cannot masquerade as
+                    # target walls merely because they entered the generic
+                    # wall-candidate graph.
+                    role_records: dict[str, object] = {}
+                    for wall_record in wall_scope.records:
+                        role_result = role_producer.publish(WallRoleSelector(
+                            document_id=published.revision.document_id,
+                            revision_id=published.revision.revision_id,
+                            source_sha256=published.revision.source_sha256,
+                            snapshot_id=published.snapshot.snapshot_id,
+                            page_id=page_id,
+                            decision_scope_id=f"wall-source:page-{page_id}",
+                            physical_wall_id=wall_record.wall_candidate_id,
+                        ))
+                        role_record = role_result.record
+                        if (
+                            role_result.status is EvidenceResolutionStatus.CORROBORATED
+                            and role_record is not None
+                            and role_record.document_id == published.revision.document_id
+                            and role_record.revision_id == published.revision.revision_id
+                            and role_record.source_sha256 == published.revision.source_sha256
+                            and role_record.snapshot_id == published.snapshot.snapshot_id
+                            and role_record.page_id == page_id
+                            and role_record.decision_scope_id == f"wall-source:page-{page_id}"
+                            and role_record.physical_wall_id == wall_record.wall_candidate_id
+                        ):
+                            role_records[wall_record.wall_candidate_id] = role_record
+
                     page = doc.load_page(page_number - 1)
                     viewports = _authoritative_viewports(page, page_number)
                     lines = _page_visible_lines(source_visibility_producer, published, page_id)
@@ -658,7 +696,10 @@ class WallFinishFaceBindingProducer:
                         target_conflict = False
                         for leader_ids, terminator in paths:
                             target, source_segments, target_status = _target_from_terminator(
-                                terminator, owned_lines, wall_scope
+                                terminator,
+                                owned_lines,
+                                wall_scope,
+                                eligible_wall_ids=set(role_records),
                             )
                             if target_status is EvidenceResolutionStatus.CONFLICT:
                                 target_conflict = True
@@ -668,27 +709,8 @@ class WallFinishFaceBindingProducer:
                                 or target is None
                             ):
                                 continue
-                            role_result = role_producer.publish(WallRoleSelector(
-                                document_id=published.revision.document_id,
-                                revision_id=published.revision.revision_id,
-                                source_sha256=published.revision.source_sha256,
-                                snapshot_id=published.snapshot.snapshot_id,
-                                page_id=page_id,
-                                decision_scope_id=f"wall-source:page-{page_id}",
-                                physical_wall_id=target.wall_candidate_id,
-                            ))
-                            if role_result.status is not EvidenceResolutionStatus.CORROBORATED or role_result.record is None:
-                                continue
-                            role_record = role_result.record
-                            if (
-                                role_record.document_id != published.revision.document_id
-                                or role_record.revision_id != published.revision.revision_id
-                                or role_record.source_sha256 != published.revision.source_sha256
-                                or role_record.snapshot_id != published.snapshot.snapshot_id
-                                or role_record.page_id != page_id
-                                or role_record.decision_scope_id != f"wall-source:page-{page_id}"
-                                or role_record.physical_wall_id != target.wall_candidate_id
-                            ):
+                            role_record = role_records.get(target.wall_candidate_id)
+                            if role_record is None:
                                 continue
                             for semantic in semantics:
                                 face_role = _semantic_face(role_record.role, semantic.direction)
