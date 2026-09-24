@@ -1,0 +1,41 @@
+name: TEST-ONLY Lamu DPC Native Render
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  render:
+    if: startsWith(github.head_ref, 'diag/lamu-dpc-internal-wall-census')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install PyMuPDF==1.28.0
+      - name: Verify source and render page 41 floor plan
+        run: |
+          python - <<'PY'
+          import hashlib,urllib.request
+          from pathlib import Path
+          import fitz
+          u="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          want="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          p=Path("/tmp/lamu.pdf")
+          req=urllib.request.Request(u,headers={"User-Agent":"PlanReader-Lamu-DPC-source-render/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:p.write_bytes(r.read())
+          got=hashlib.sha256(p.read_bytes()).hexdigest()
+          if got!=want:raise SystemExit(f"source hash mismatch: {got}")
+          out=Path("/tmp/lamu-native");out.mkdir()
+          doc=fitz.open(p);page=doc[40]
+          print(f"LAMU_NATIVE_RENDER sha={got} page={page.number+1} rect={tuple(page.rect)}")
+          page.get_pixmap(matrix=fitz.Matrix(2.0,2.0),alpha=False).save(out/"page-41-full.png")
+          clip=fitz.Rect(170,75,685,370)&page.rect
+          page.get_pixmap(matrix=fitz.Matrix(4.0,4.0),clip=clip,alpha=False).save(out/"page-41-floor-plan.png")
+          doc.close()
+          PY
+      - name: Upload verified source renders
+        uses: actions/upload-artifact@v4
+        with:
+          name: lamu-page-41-native-dpc
+          path: /tmp/lamu-native/*.png
+          if-no-files-found: error
