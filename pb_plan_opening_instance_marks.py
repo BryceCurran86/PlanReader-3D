@@ -57,11 +57,13 @@ _CASEMENT_RE = re.compile(
     re.I,
 )
 _DOOR_SYSTEM_RE = re.compile(
-    r"\bdoors?\s+complete\b|\bflush\s+doors?\b|\bcasement\s+doors?\b",
+    r"\bdoors?\s+complete\b|\bflush\s+doors?\b|\bcasement\s+doors?\b|\bpanel\s+doors?\b|\bsteel\s+doors?\b|\btimber\s+doors?\b|\bdoor\s+schedule\b",
     re.I,
 )
 _MIN_WINDOW_TYPES = 2
 _MIN_WINDOW_INSTANCES = 3
+_MIN_DOOR_TYPES = 1
+_MIN_DOOR_INSTANCES = 1
 _MAX_MARK_INDEX = 12
 
 
@@ -156,34 +158,80 @@ def _rgb_from_pixmap(pix: fitz.Pixmap) -> Optional[np.ndarray]:
 
 
 def _ocr_parts_from_ink(ink: np.ndarray, min_conf: float = 20.0) -> List[dict]:
-    if pytesseract is None:
-        return []
-    data = pytesseract.image_to_data(
-        Image.fromarray(ink),
-        output_type=pytesseract.Output.DICT,
-        config=f"--psm 11 -c tessedit_char_whitelist={_OCR_WHITELIST}",
-    )
     parts: List[dict] = []
-    for i, raw in enumerate(data["text"]):
-        token = _normalize_mark_token((raw or "").strip())
-        if not token:
-            continue
+    if pytesseract is not None:
         try:
-            conf = float(data["conf"][i])
-        except (TypeError, ValueError):
-            continue
-        if conf < min_conf:
-            continue
-        parts.append(
-            {
-                "t": token,
-                "conf": conf,
-                "x": float(data["left"][i]),
-                "y": float(data["top"][i]),
-                "w": float(data["width"][i]),
-                "h": float(data["height"][i]),
-            }
-        )
+            data = pytesseract.image_to_data(
+                Image.fromarray(ink),
+                output_type=pytesseract.Output.DICT,
+                config=f"--psm 11 -c tessedit_char_whitelist={_OCR_WHITELIST}",
+            )
+            for i, raw in enumerate(data.get("text", [])):
+                token = _normalize_mark_token((raw or "").strip())
+                if not token:
+                    continue
+                try:
+                    conf = float(data["conf"][i])
+                except (TypeError, ValueError):
+                    continue
+                if conf < min_conf:
+                    continue
+                parts.append(
+                    {
+                        "t": token,
+                        "conf": conf,
+                        "x": float(data["left"][i]),
+                        "y": float(data["top"][i]),
+                        "w": float(data["width"][i]),
+                        "h": float(data["height"][i]),
+                    }
+                )
+            if parts:
+                return parts
+        except Exception:
+            pass
+
+    # Portable RapidOCR fallback when Tesseract is absent or returns no marks
+    try:
+        from pb_portable_raster_ocr_authority import RapidOCRBackend
+
+        rapid = RapidOCRBackend()
+        if rapid.is_available():
+            img = Image.fromarray(ink)
+            lines = rapid.extract_lines(img, dpi=150)
+            for line in lines:
+                c = 100.0 if line.confidence is None else float(line.confidence) * 100.0
+                if c < min_conf:
+                    continue
+                text = (line.text or "").strip()
+                if not text:
+                    continue
+                words = text.split()
+                if not words:
+                    continue
+                x0, y0, x1, y1 = line.bbox_px
+                total_w = max(1.0, float(x1 - x0))
+                h = max(1.0, float(y1 - y0))
+                word_w = total_w / len(words)
+                for idx, w_raw in enumerate(words):
+                    tok = _normalize_mark_token(w_raw)
+                    if not tok:
+                        continue
+                    wx0 = x0 + idx * word_w
+                    parts.append(
+                        {
+                            "t": tok,
+                            "conf": c,
+                            "x": float(wx0),
+                            "y": float(y0),
+                            "w": float(word_w),
+                            "h": h,
+                        }
+                    )
+            return parts
+    except Exception:
+        pass
+
     return parts
 
 
@@ -362,35 +410,37 @@ def extract_marks_from_page(page: fitz.Page, page_num: int) -> List[PlanInstance
         infos = page.get_image_info(xrefs=True)
     except Exception:
         infos = []
-    for info in infos:
-        width = int(info.get("width") or 0)
-        height = int(info.get("height") or 0)
-        if width * height < 400 * 180:
-            continue
-        try:
-            pix = fitz.Pixmap(page.parent, info["xref"])
-        except Exception:
-            continue
-        rgb = _rgb_from_pixmap(pix)
-        if rgb is None:
-            continue
-        bbox = info["bbox"]
-        scale_x = (bbox[2] - bbox[0]) / max(rgb.shape[1], 1)
-        scale_y = (bbox[3] - bbox[1]) / max(rgb.shape[0], 1)
-        hits.extend(
-            _assemble(
-                _ocr_parts(rgb),
-                origin_x=float(bbox[0]),
-                origin_y=float(bbox[1]),
-                scale_x=scale_x,
-                scale_y=scale_y,
-                page=page_num,
+    # If the page is sliced into many horizontal strips (common PDF print artifact),
+    # individual strip OCR slices marks across seams. Full-page renders are authoritative.
+    if len(infos) <= 3:
+        for info in infos:
+            width = int(info.get("width") or 0)
+            height = int(info.get("height") or 0)
+            if width * height < 400 * 180:
+                continue
+            try:
+                pix = fitz.Pixmap(page.parent, info["xref"])
+            except Exception:
+                continue
+            rgb = _rgb_from_pixmap(pix)
+            if rgb is None:
+                continue
+            bbox = info["bbox"]
+            scale_x = (bbox[2] - bbox[0]) / max(rgb.shape[1], 1)
+            scale_y = (bbox[3] - bbox[1]) / max(rgb.shape[0], 1)
+            hits.extend(
+                _assemble(
+                    _ocr_parts(rgb),
+                    origin_x=float(bbox[0]),
+                    origin_y=float(bbox[1]),
+                    scale_x=scale_x,
+                    scale_y=scale_y,
+                    page=page_num,
+                )
             )
-        )
 
-    # Two render scales recover marks that a single downsample drops
-    # (a neighbouring W-3 / W-1 pair is a typical example).
-    for dpi in (200, 240):
+    # 200 DPI is the primary calibrated resolution for architectural floor plan stamps.
+    for dpi in (200,):
         try:
             pix = page.get_pixmap(dpi=dpi)
             rgb = _rgb_from_pixmap(pix)
@@ -471,10 +521,35 @@ def should_emit_casement_window_total(
     existing_tags: Iterable[str],
 ) -> bool:
     """True when plan stamps should become a lumped casement-window total."""
-    if any(normalize_opening_tag(tag) for tag in existing_tags):
+    if any(
+        (norm := normalize_opening_tag(tag)) is not None and norm.trade_type == "windows"
+        for tag in existing_tags
+    ):
+        return False
+    if "steel_casement_windows" in existing_tags or "windows_complete" in existing_tags:
         return False
     if len(totals.window_types) < _MIN_WINDOW_TYPES:
         return False
     if totals.window_count < _MIN_WINDOW_INSTANCES:
         return False
     return True
+
+
+def should_emit_door_total(
+    totals: PlanInstanceOpeningTotals,
+    existing_tags: Iterable[str],
+) -> bool:
+    """True when plan stamps should become a lumped doors_complete total."""
+    if any(
+        (norm := normalize_opening_tag(tag)) is not None and norm.trade_type == "doors"
+        for tag in existing_tags
+    ):
+        return False
+    if "doors_complete" in existing_tags or "doors" in existing_tags:
+        return False
+    if len(totals.door_types) < _MIN_DOOR_TYPES:
+        return False
+    if totals.door_count < _MIN_DOOR_INSTANCES:
+        return False
+    return True
+

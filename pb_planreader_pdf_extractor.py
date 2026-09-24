@@ -2143,7 +2143,9 @@ class GenericPlanReaderExtractor:
             from pb_plan_opening_instance_marks import (
                 extract_plan_instance_opening_totals,
                 package_documents_casement_windows,
+                package_documents_door_system,
                 should_emit_casement_window_total,
+                should_emit_door_total,
             )
 
             dwg_pages = [
@@ -2151,28 +2153,55 @@ class GenericPlanReaderExtractor:
                 if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])
             ]
             drawing_texts = [doc[p].get_text("text") or "" for p in dwg_pages]
-            if package_documents_casement_windows(drawing_texts):
+            package_texts = [doc[p].get_text("text") or "" for p in range(len(doc))]
+
+            has_casement_spec = package_documents_casement_windows(drawing_texts) or package_documents_casement_windows(package_texts)
+            has_door_spec = package_documents_door_system(drawing_texts) or package_documents_door_system(package_texts)
+
+            if has_casement_spec or has_door_spec:
                 totals = extract_plan_instance_opening_totals(doc, dwg_pages)
-                if totals is not None and should_emit_casement_window_total(
-                    totals, pred_dict.keys()
-                ):
-                    pred_dict["steel_casement_windows"] = ExtractedPrediction(
-                        tag="steel_casement_windows",
-                        trade_type="windows",
-                        description=(
-                            "Steel casement windows complete "
-                            f"({totals.window_count} No from plan instance marks)"
-                        ),
-                        quantity=float(totals.window_count),
-                        unit="NO",
-                        confidence=0.86,
-                        source_page=totals.source_page,
-                        metadata={
-                            "derivation": "plan_instance_opening_marks",
-                            "window_types": list(totals.window_types),
-                            "raw_evidence_ref": totals.evidence_text,
-                        },
-                    )
+                if totals is not None:
+                    if has_casement_spec and should_emit_casement_window_total(
+                        totals, pred_dict.keys()
+                    ):
+                        pred_dict["steel_casement_windows"] = ExtractedPrediction(
+                            tag="steel_casement_windows",
+                            trade_type="windows",
+                            description=(
+                                "Steel casement windows complete "
+                                f"({totals.window_count} No from plan instance marks)"
+                            ),
+                            quantity=float(totals.window_count),
+                            unit="NO",
+                            confidence=0.86,
+                            source_page=totals.source_page,
+                            metadata={
+                                "derivation": "plan_instance_opening_marks",
+                                "window_types": list(totals.window_types),
+                                "raw_evidence_ref": totals.evidence_text,
+                            },
+                        )
+
+                    if has_door_spec and should_emit_door_total(
+                        totals, pred_dict.keys()
+                    ):
+                        pred_dict["doors_complete"] = ExtractedPrediction(
+                            tag="doors_complete",
+                            trade_type="doors",
+                            description=(
+                                "Doors complete "
+                                f"({totals.door_count} No from plan instance marks)"
+                            ),
+                            quantity=float(totals.door_count),
+                            unit="NO",
+                            confidence=0.86,
+                            source_page=totals.source_page,
+                            metadata={
+                                "derivation": "plan_instance_opening_marks",
+                                "door_types": list(totals.door_types),
+                                "raw_evidence_ref": totals.evidence_text,
+                            },
+                        )
         except Exception:
             self.extraction_status["plan_instance_marks"] = "extraction_failed"
 
