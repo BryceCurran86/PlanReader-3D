@@ -33,11 +33,13 @@ jobs:
       - name: Build exact candidate image
         run: docker build -t planreader-kstvet-850 .
 
-      - name: Run KSTVET benchmark
+      - name: Run KSTVET benchmark once
         run: |
           set -euo pipefail
+          mkdir -p /tmp/kstvet-results
           docker run --rm --cpus=2.0 \
             -v /tmp/kstvet.pdf:/app/kstvet.pdf:ro \
+            -v /tmp/kstvet-results:/tmp/results \
             planreader-kstvet-850 \
             python pb_benchmark_accuracy_engine.py \
               --benchmark tenders_ke_kstvet_cbc_classroom \
@@ -45,44 +47,48 @@ jobs:
               --output-dir /tmp/results \
             | tee /tmp/kstvet-benchmark.txt
 
-      - name: Print item-level result
+      - name: Print benchmark item-level result
         run: |
-          docker run --rm --cpus=2.0 \
-            -v /tmp/kstvet.pdf:/app/kstvet.pdf:ro \
-            planreader-kstvet-850 \
-            python - <<'PY'
-          import json, fitz
+          python - <<'PY'
+          import json
           from pathlib import Path
-          from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
+          p=Path("/tmp/kstvet-results/tenders_ke_kstvet_cbc_classroom_accuracy_report.json")
+          data=json.loads(p.read_text())
+          s=data["summary"]
+          focus=[
+              item for item in data["item_results"]
+              if item.get("item_id") in {"BOQ-C41-B","BOQ-C41-C"}
+              or item.get("status") != "exact_match"
+          ]
+          print("KSTVET_AFTER_STACKED_SCHEDULE_850="+json.dumps({
+              "accepted": s["exact_matches"] + s["within_5_percent"],
+              "denominator": s["total_items_compared"],
+              "accuracy_percentage": s["overall_accuracy_percentage"],
+              "strict_exact_percentage": s["strict_exact_accuracy_percentage"],
+              "hallucinated": s["hallucinated_items"],
+              "gross_mismatches": s["gross_mismatches"],
+              "items": focus,
+          },sort_keys=True))
+          PY
+
+      - name: Print page54 opening schedule rows
+        run: |
+          cat >/tmp/kstvet_schedule_probe.py <<'PY'
+          import json, fitz
           from pb_raster_schedule_extractor import GenericScheduleTableExtractor
           doc=fitz.open("/app/kstvet.pdf")
           try:
-              schedule_rows=[
+              rows=[
                   row.to_dict()
                   for row in GenericScheduleTableExtractor().extract_from_page(doc[53],54)
                   if row.trade_type in {"windows","doors"}
               ]
           finally:
               doc.close()
-          engine=BenchmarkAccuracyEngine(output_dir="/tmp/results")
-          report=engine.evaluate_benchmark(
-              benchmark_id="tenders_ke_kstvet_cbc_classroom",
-              pdf_path=Path("/app/kstvet.pdf"),
-              auto_extract=True,
-          )
-          focus=[]
-          for item in report.items:
-              d=item.to_dict()
-              if d.get("item_id") in {"BOQ-C41-B","BOQ-C41-C"} or d.get("status") != "exact_match":
-                  focus.append(d)
-          print("KSTVET_AFTER_STACKED_SCHEDULE_850="+json.dumps({
-              "accepted": report.exact_matches + report.within_5_percent,
-              "denominator": report.total_items_compared,
-              "accuracy_percentage": report.overall_accuracy_percentage,
-              "strict_exact_percentage": report.strict_exact_percentage,
-              "hallucinated": report.hallucinated_items,
-              "gross_mismatches": report.gross_mismatches,
-              "page54_opening_schedule_rows": schedule_rows,
-              "items": focus,
-          },sort_keys=True))
+          print("KSTVET_PAGE54_OPENING_SCHEDULE_ROWS="+json.dumps(rows,sort_keys=True))
           PY
+          docker run --rm --cpus=2.0 \
+            -v /tmp/kstvet.pdf:/app/kstvet.pdf:ro \
+            -v /tmp/kstvet_schedule_probe.py:/tmp/kstvet_schedule_probe.py:ro \
+            planreader-kstvet-850 \
+            python /tmp/kstvet_schedule_probe.py
