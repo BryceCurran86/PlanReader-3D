@@ -307,3 +307,43 @@ def test_existing_typed_door_schedule_blocks_doors_complete_emission(
     assert "doors_complete" not in preds
 
 
+
+
+def test_boq_only_door_wording_cannot_authorize_plan_door_total(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import pb_plan_opening_instance_marks as mod
+
+    fake_totals = PlanInstanceOpeningTotals(
+        window_count=0,
+        door_count=5,
+        window_types=(),
+        door_types=("D1", "D2"),
+        source_page=1,
+        evidence_text="D1, D2",
+    )
+    monkeypatch.setattr(
+        mod,
+        "extract_plan_instance_opening_totals",
+        lambda doc, pages: fake_totals,
+    )
+
+    path = tmp_path / "drawing_plus_boq.pdf"
+    doc = fitz.open()
+    drawing = doc.new_page(width=842, height=595)
+    drawing.insert_text((40, 35), "GROUND FLOOR PLAN", fontsize=10)
+    drawing.insert_text((40, 50), "SCALE 1:100", fontsize=9)
+    drawing.insert_text((40, 80), "Window W1 and W2", fontsize=9)
+
+    boq = doc.new_page(width=842, height=595)
+    boq.insert_text((40, 35), "BILL OF QUANTITIES", fontsize=10)
+    boq.insert_text((40, 60), "Supply and fix doors complete with ironmongery", fontsize=9)
+    boq.insert_text((40, 80), "Rate Amount", fontsize=9)
+    doc.save(path)
+    doc.close()
+
+    preds = {
+        p.tag: p
+        for p in GenericPlanReaderExtractor().extract_from_pdf(path, pages=[0])
+    }
+    assert "doors_complete" not in preds

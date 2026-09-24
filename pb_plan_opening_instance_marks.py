@@ -410,37 +410,39 @@ def extract_marks_from_page(page: fitz.Page, page_num: int) -> List[PlanInstance
         infos = page.get_image_info(xrefs=True)
     except Exception:
         infos = []
-    # If the page is sliced into many horizontal strips (common PDF print artifact),
-    # individual strip OCR slices marks across seams. Full-page renders are authoritative.
-    if len(infos) <= 3:
-        for info in infos:
-            width = int(info.get("width") or 0)
-            height = int(info.get("height") or 0)
-            if width * height < 400 * 180:
-                continue
-            try:
-                pix = fitz.Pixmap(page.parent, info["xref"])
-            except Exception:
-                continue
-            rgb = _rgb_from_pixmap(pix)
-            if rgb is None:
-                continue
-            bbox = info["bbox"]
-            scale_x = (bbox[2] - bbox[0]) / max(rgb.shape[1], 1)
-            scale_y = (bbox[3] - bbox[1]) / max(rgb.shape[0], 1)
-            hits.extend(
-                _assemble(
-                    _ocr_parts(rgb),
-                    origin_x=float(bbox[0]),
-                    origin_y=float(bbox[1]),
-                    scale_x=scale_x,
-                    scale_y=scale_y,
-                    page=page_num,
-                )
+    # Preserve OCR from qualifying embedded image regions even when a PDF printer
+    # slices a page into multiple strips. Cross-source NMS below removes duplicates,
+    # while the full-page passes recover labels that happen to straddle strip seams.
+    for info in infos:
+        width = int(info.get("width") or 0)
+        height = int(info.get("height") or 0)
+        if width * height < 400 * 180:
+            continue
+        try:
+            pix = fitz.Pixmap(page.parent, info["xref"])
+        except Exception:
+            continue
+        rgb = _rgb_from_pixmap(pix)
+        if rgb is None:
+            continue
+        bbox = info["bbox"]
+        scale_x = (bbox[2] - bbox[0]) / max(rgb.shape[1], 1)
+        scale_y = (bbox[3] - bbox[1]) / max(rgb.shape[0], 1)
+        hits.extend(
+            _assemble(
+                _ocr_parts(rgb),
+                origin_x=float(bbox[0]),
+                origin_y=float(bbox[1]),
+                scale_x=scale_x,
+                scale_y=scale_y,
+                page=page_num,
             )
+        )
 
-    # 200 DPI is the primary calibrated resolution for architectural floor plan stamps.
-    for dpi in (200,):
+    # Two calibrated render scales are intentionally retained. The second pass
+    # recovers small neighbouring marks lost by a single downsample; NMS makes
+    # duplicate detections harmless.
+    for dpi in (200, 240):
         try:
             pix = page.get_pixmap(dpi=dpi)
             rgb = _rgb_from_pixmap(pix)
