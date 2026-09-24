@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   lamu:
     if: startsWith(github.head_ref, 'diag/lamu-wrapped-datum-865')
@@ -24,7 +28,7 @@ jobs:
       - name: Validate source datums and Lamu benchmark
         run: |
           set -euo pipefail
-          PYTHONPATH=. python - <<'PY'
+          PYTHONPATH=. python - <<'PY' | tee /tmp/lamu_wrapped_datum_diag.txt
           import hashlib,json,urllib.request
           from pathlib import Path
           import fitz
@@ -86,3 +90,13 @@ jobs:
               "items":[i.to_dict() for i in report.item_results],
           },sort_keys=True),flush=True)
           PY
+
+      - name: Post diagnostic summary
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -f /tmp/lamu_wrapped_datum_diag.txt ]; then
+            gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body-file /tmp/lamu_wrapped_datum_diag.txt
+          fi
