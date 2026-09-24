@@ -731,24 +731,24 @@ def _recover_one_local_door_swing_repeat_from_rgb(
 
     if any(not rows for rows in assigned.values()):
         return None
-    local_unassigned = []
-    for candidate in unassigned:
-        nearest_seed = min(
-            math.hypot(
-                candidate["center"][0] - mark.x,
-                candidate["center"][1] - mark.y,
-            )
-            for mark in seeds
-        )
-        if nearest_seed <= _DOOR_SWING_LOCAL_REPEAT_RADIUS_PT:
-            local_unassigned.append(candidate)
-
-    if len(local_unassigned) != 1:
+    # Any second unassigned full-size contour in the learned hue group makes the
+    # recovery ambiguous, even if it lies farther from the seed cluster.
+    if len(unassigned) != 1:
         return None
+    missing = unassigned[0]
+    nearest_seed = min(
+        math.hypot(
+            missing["center"][0] - mark.x,
+            missing["center"][1] - mark.y,
+        )
+        for mark in seeds
+    )
+    if nearest_seed > _DOOR_SWING_LOCAL_REPEAT_RADIUS_PT:
+        return None
+
     reference_candidates = [
         candidate for rows in assigned.values() for candidate in rows
     ]
-    missing = local_unassigned[0]
     if not any(
         _similar_swing_geometry(missing, reference)
         for reference in reference_candidates
