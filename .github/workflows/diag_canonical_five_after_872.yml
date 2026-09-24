@@ -52,3 +52,5 @@ jobs:
             python -c "import json; import pb_benchmark_accuracy_engine as m; m.resolve_evaluated_commit_sha=lambda: '${{ github.event.pull_request.head.sha }}'; e=m.BenchmarkAccuracyEngine(output_dir='/tmp/results'); d=e.evaluate_suite(auto_extract=True,output_dir='/tmp/results',require_source_documents=True); print('CANONICAL_FIVE_AFTER_872='+json.dumps(d.to_dict(),sort_keys=True))" \
             | tee /tmp/canonical-five.txt
           grep -q 'CANONICAL_FIVE_AFTER_872=' /tmp/canonical-five.txt
+
+# Validation candidate: PR #872 at 2bb44fd585b0fe79f5e3e43f020c12c030851d77
