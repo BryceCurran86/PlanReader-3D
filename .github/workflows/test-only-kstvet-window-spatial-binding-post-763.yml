@@ -143,6 +143,42 @@ jobs:
                           "context_words":context_words,
                       })
 
+                  twelve_hundred_observation_context=[]
+                  for obs in dim_obs:
+                      if obs.get("value_mm") != 1200 or "bbox" not in obs:
+                          continue
+                      ob=obs["bbox"]
+                      region=clip(page,ob,padx=180,pady=120)
+                      nearby_words=[]
+                      for v in words:
+                          vb=[float(v[0]),float(v[1]),float(v[2]),float(v[3])]
+                          if fitz.Rect(vb).intersects(region):
+                              nearby_words.append({
+                                  "text":str(v[4]),
+                                  "bbox":vb,
+                                  "block":int(v[5]) if len(v)>5 else -1,
+                                  "line":int(v[6]) if len(v)>6 else -1,
+                              })
+                      nearby_words.sort(key=lambda z:(z["bbox"][1],z["bbox"][0]))
+                      ocr=[]
+                      for dpi in (320,400):
+                          rows=engine.recognize_page_rect(page,clip_rect=region,dpi=dpi)
+                          for row in rows:
+                              txt=str(row.get("text") or "").strip()
+                              if txt:
+                                  ocr.append({
+                                      "dpi":dpi,
+                                      "text":txt,
+                                      "bbox":row.get("bounding_box"),
+                                      "confidence":row.get("confidence"),
+                                  })
+                      twelve_hundred_observation_context.append({
+                          "observation":obs,
+                          "clip":[float(region.x0),float(region.y0),float(region.x1),float(region.y1)],
+                          "nearby_words":nearby_words[:120],
+                          "ocr":ocr[:160],
+                      })
+
                   bindings=[]
                   for idx,c in enumerate(callouts):
                       cb=c["bbox"]
@@ -193,6 +229,7 @@ jobs:
                       "target_native":[n for n in native_numbers if n["value_mm"] in target_values],
                       "target_dimension_observations":[n for n in dim_obs if n.get("value_mm") in target_values],
                       "twelve_hundred_context":twelve_hundred_context,
+                      "twelve_hundred_observation_context":twelve_hundred_observation_context,
                       "bindings":bindings,
                   })
               print("KSTVET_WINDOW_SPATIAL_BINDING_POST_763="+json.dumps(out,sort_keys=True),flush=True)
