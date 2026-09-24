@@ -301,7 +301,7 @@ def test_three_independent_compatible_mappings_are_deterministic() -> None:
     pairs = [
         _pair("a", 10000.0, origin=(100.0, 150.0)),
         _pair("b", 5000.0, origin=(100.0, 350.0)),
-        _pair("c", 2000.0, origin=(600.0, 150.0), vertical=True),
+        _pair("c", 2500.0, origin=(600.0, 150.0), vertical=True),
     ]
     first = _run(_bundle(pairs))
     second = _run(_bundle(list(reversed(pairs))))
