@@ -1,0 +1,101 @@
+name: TEST-ONLY Murera Page228 Floor Strip OCR
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  strip-ocr:
+    if: startsWith(github.head_ref, 'diag/murera-page228-floor-strip-ocr')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: OCR native raster strips from laboratory floor plan
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,io,json,re,urllib.request
+          from pathlib import Path
+          import fitz
+          import numpy as np
+          import cv2
+          import pytesseract
+          from PIL import Image
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          want="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          p=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-page228-strip-ocr/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:p.write_bytes(r.read())
+          got=hashlib.sha256(p.read_bytes()).hexdigest()
+          if got!=want:raise SystemExit(got)
+
+          doc=fitz.open(p)
+          page=doc[227]
+          strips=[]
+          seen=set()
+          for order,img in enumerate(page.get_images(full=True) or []):
+              xref=int(img[0])
+              if xref in seen: continue
+              seen.add(xref)
+              extracted=doc.extract_image(xref)
+              raw=extracted["image"]
+              pil=Image.open(io.BytesIO(raw)).convert("L")
+              arr=np.array(pil)
+              # Upscale only the strip height; source width is already ~5k px.
+              scaled=cv2.resize(arr,None,fx=1.5,fy=2.5,interpolation=cv2.INTER_CUBIC)
+              variants={
+                  "gray":scaled,
+                  "otsu":cv2.threshold(scaled,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)[1],
+              }
+              findings=[]
+              all_text=[]
+              for vname,v in variants.items():
+                  for psm in (6,11,12):
+                      text=pytesseract.image_to_string(v,config=f"--psm {psm}")
+                      all_text.append({"variant":vname,"psm":psm,"text":text[:12000]})
+                      for line in text.splitlines():
+                          line=line.strip()
+                          if not line: continue
+                          compact=line.replace(",","")
+                          nums=[
+                              int(tok)
+                              for tok in re.findall(r"(?<!\d)(\d{3,5})(?!\d)",compact)
+                              if 500<=int(tok)<=35000
+                          ]
+                          if nums or re.search(r"(?i)(floor|plan|lab|verand|dimension|overall|foundation|section|grid|wall)",line):
+                              findings.append({"variant":vname,"psm":psm,"text":line,"nums":nums})
+              # dedupe exact text while preserving OCR mode provenance
+              uniq=[]; texts=set()
+              for row in findings:
+                  key=row["text"].casefold()
+                  if key in texts: continue
+                  texts.add(key); uniq.append(row)
+              rects=[list(map(float,(r.x0,r.y0,r.x1,r.y1))) for r in page.get_image_rects(xref) or []]
+              strips.append({
+                  "order":order,"xref":xref,
+                  "px":[int(img[2]),int(img[3])],
+                  "placement_rects":rects,
+                  "relevant":uniq[:250],
+                  "ocr_text":all_text,
+              })
+          print("MURERA_PAGE228_STRIP_OCR="+json.dumps({
+              "sha":got,
+              "page":228,
+              "page_rect":[float(page.rect.x0),float(page.rect.y0),float(page.rect.x1),float(page.rect.y1)],
+              "native_text":page.get_text("text") or "",
+              "strips":strips,
+          },sort_keys=True,default=str),flush=True)
+          doc.close()
+          PY
