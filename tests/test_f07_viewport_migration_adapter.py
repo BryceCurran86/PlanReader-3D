@@ -36,6 +36,7 @@ from pb_viewport_segmentation import (
     ViewportSegmentationStatus,
     is_authoritative_derived_viewport,
     segment_page_viewports,
+    validate_non_overlapping_viewports,
 )
 
 
@@ -66,6 +67,16 @@ def _ordinary_partition_doc() -> fitz.Document:
     page = doc.new_page(width=640, height=420)
     page.insert_text((80, 320), "GROUND FLOOR PLAN", fontsize=11)
     page.insert_text((390, 320), "EAST ELEVATION", fontsize=11)
+    return _reopen(doc)
+
+
+def _resolved_plus_unframed_doc() -> fitz.Document:
+    doc = fitz.open()
+    page = doc.new_page(width=900, height=700)
+    page.draw_rect(fitz.Rect(30, 30, 300, 320))
+    page.insert_text((80, 280), "GROUND FLOOR PLAN", fontsize=11)
+    page.insert_text((480, 240), "ELEVATION E-01", fontsize=11)
+    page.insert_text((720, 520), "SECTION S-01", fontsize=11)
     return _reopen(doc)
 
 
@@ -278,6 +289,29 @@ def test_resolved_viewport_remains_accepted_without_new_proof() -> None:
         viewport=viewport,
     )
     assert shadow.status is EvidenceResolutionStatus.CANDIDATE
+
+
+def test_resolved_adapter_keeps_existing_authority_even_if_ordinary_derived_siblings_overlap() -> None:
+    doc = _resolved_plus_unframed_doc()
+    viewports = segment_page_viewports(doc[0], page_number=PAGE)
+    plan = next(
+        viewport
+        for viewport in viewports
+        if viewport.view_type == DrawingViewType.FLOOR_PLAN.value
+    )
+    assert plan.status == ViewportSegmentationStatus.RESOLVED.value
+    assert not validate_non_overlapping_viewports(viewports)
+
+    result = adapt_f07_viewport_to_migration(
+        viewports,
+        viewport_id=plan.view_id,
+        context=_context(*(v.view_id for v in viewports)),
+        page_no=PAGE,
+    )
+    assert not result.abstained
+    assert result.viewport is not None
+    assert result.viewport.status is ViewportResolutionStatus.RESOLVED
+    doc.close()
 
 
 def test_ordinary_title_partition_derived_is_rejected() -> None:
