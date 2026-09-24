@@ -24,3 +24,30 @@ jobs:
             --cpus=0.5 \
             planreader-tesseract-diagnostic | tee /tmp/lamu-docker-result.txt
           grep -q 'LAMU_TESSERACT_DOCKER_RESULT=' /tmp/lamu-docker-result.txt
+
+      - name: Smoke-test Streamlit app under 512MB hard memory limit
+        run: |
+          set -euo pipefail
+          docker run -d --name planreader-app \
+            --memory=512m \
+            --memory-swap=512m \
+            --cpus=0.5 \
+            -e PORT=10000 \
+            -e PLANREADER_DATA_DIR=/tmp/planreader \
+            -p 10000:10000 \
+            planreader-tesseract-diagnostic \
+            sh -c 'streamlit run pb_planreader_v133_app.py --server.address 0.0.0.0 --server.port 10000'
+          trap 'docker logs planreader-app || true; docker rm -f planreader-app >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:10000/_stcore/health >/tmp/health.txt; then
+              break
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' planreader-app)" != "true" ]; then
+              docker logs planreader-app
+              exit 1
+            fi
+            sleep 2
+          done
+          grep -q 'ok' /tmp/health.txt
+          docker stats --no-stream planreader-app
+          test "$(docker inspect -f '{{.State.OOMKilled}}' planreader-app)" = "false"
