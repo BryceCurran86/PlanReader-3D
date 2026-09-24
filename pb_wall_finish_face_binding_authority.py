@@ -228,17 +228,46 @@ def _bbox_union(boxes: Sequence[Sequence[float]]) -> tuple[float, float, float, 
     )
 
 
-def _point_bbox_distance(point: Sequence[float], bbox: Sequence[float]) -> float:
-    dx = max(float(bbox[0]) - point[0], 0.0, point[0] - float(bbox[2]))
-    dy = max(float(bbox[1]) - point[1], 0.0, point[1] - float(bbox[3]))
-    return math.hypot(dx, dy)
-
-
-def _bbox_intersects(a: Sequence[float], b: Sequence[float], eps: float = 0.0) -> bool:
-    return not (
-        a[2] < b[0] - eps or a[0] > b[2] + eps
-        or a[3] < b[1] - eps or a[1] > b[3] + eps
+def _point_in_bbox(point: Sequence[float], bbox: Sequence[float]) -> bool:
+    """True only when the source point actually touches or lies inside bbox."""
+    return (
+        float(bbox[0]) <= float(point[0]) <= float(bbox[2])
+        and float(bbox[1]) <= float(point[1]) <= float(bbox[3])
     )
+
+
+def _segment_intersects_bbox(
+    geometry: Sequence[float],
+    bbox: Sequence[float],
+) -> bool:
+    """Exact inclusive segment/rectangle intersection with no proximity expansion."""
+    x1, y1, x2, y2 = (float(v) for v in geometry)
+    xmin, ymin, xmax, ymax = (float(v) for v in bbox)
+    if _point_in_bbox((x1, y1), bbox) or _point_in_bbox((x2, y2), bbox):
+        return True
+
+    dx, dy = x2 - x1, y2 - y1
+    lower, upper = 0.0, 1.0
+    for p, q in (
+        (-dx, x1 - xmin),
+        (dx, xmax - x1),
+        (-dy, y1 - ymin),
+        (dy, ymax - y1),
+    ):
+        if p == 0.0:
+            if q < 0.0:
+                return False
+            continue
+        ratio = q / p
+        if p < 0.0:
+            if ratio > upper:
+                return False
+            lower = max(lower, ratio)
+        else:
+            if ratio < lower:
+                return False
+            upper = min(upper, ratio)
+    return lower <= upper
 
 
 def _endpoints(line: _Line) -> tuple[tuple[float, float], tuple[float, float]]:
@@ -247,7 +276,8 @@ def _endpoints(line: _Line) -> tuple[tuple[float, float], tuple[float, float]]:
 
 
 def _endpoint_key(point: Sequence[float]) -> tuple[float, float]:
-    return (round(float(point[0]), _COORD_DIGITS), round(float(point[1]), _COORD_DIGITS))
+    # Native leader continuity is authority-bearing. Do not round across a gap.
+    return (float(point[0]), float(point[1]))
 
 
 def _authoritative_viewports(page: fitz.Page, page_number: int):
@@ -362,15 +392,18 @@ def _leader_paths(
     annotation_bbox: Sequence[float],
     lines: Sequence[_Line],
     terminators: Sequence[_Terminator],
-    epsilon: float,
+    epsilon: float = 0.0,
 ) -> tuple[tuple[tuple[str, ...], _Terminator], ...]:
+    # epsilon is retained only for call-site compatibility. Positive authority
+    # never expands source geometry: near-but-not-touching must fail closed.
+    del epsilon
     by_endpoint: dict[tuple[float, float], list[int]] = {}
     for index, line in enumerate(lines):
         for point in _endpoints(line):
             by_endpoint.setdefault(_endpoint_key(point), []).append(index)
     starts = [
         index for index, line in enumerate(lines)
-        if any(_point_bbox_distance(point, annotation_bbox) <= epsilon for point in _endpoints(line))
+        if any(_point_in_bbox(point, annotation_bbox) for point in _endpoints(line))
     ]
     found = {}
     for start in starts:
@@ -382,7 +415,7 @@ def _leader_paths(
             line = lines[current]
             for endpoint in _endpoints(line):
                 for term in terminators:
-                    if _point_bbox_distance(endpoint, term.bbox) <= epsilon:
+                    if _point_in_bbox(endpoint, term.bbox):
                         ids = tuple(lines[i].observation_id for i in path)
                         found[(ids, term.primitive_id)] = (ids, term)
                 for nxt in by_endpoint.get(_endpoint_key(endpoint), ()):
@@ -391,17 +424,18 @@ def _leader_paths(
     return tuple(found[key] for key in sorted(found))
 
 
-def _target_from_terminator(terminator: _Terminator, lines: Sequence[_Line], wall_scope, epsilon: float):
+def _target_from_terminator(
+    terminator: _Terminator,
+    lines: Sequence[_Line],
+    wall_scope,
+    epsilon: float = 0.0,
+):
+    # epsilon is retained only for compatibility. Wall ownership requires an
+    # actual terminator/primitive intersection; proximity is never authority.
+    del epsilon
     raw_hits = {
         line.raw_id for line in lines
-        if _bbox_intersects(
-            terminator.bbox,
-            (
-                min(line.geometry[0], line.geometry[2]), min(line.geometry[1], line.geometry[3]),
-                max(line.geometry[0], line.geometry[2]), max(line.geometry[1], line.geometry[3]),
-            ),
-            epsilon,
-        )
+        if _segment_intersects_bbox(line.geometry, terminator.bbox)
     }
     matching = [
         record for record in wall_scope.records
@@ -419,7 +453,9 @@ def _target_from_terminator(terminator: _Terminator, lines: Sequence[_Line], wal
         for record in matching
     }
     if len(normalized) != 1:
-        return None, tuple(sorted(raw_hits)), EvidenceResolutionStatus.CONFLICT
+        # Multiple physical-wall owners are ambiguous, not a positive conflict
+        # proposition. The caller must abstain rather than select or rank them.
+        return None, tuple(sorted(raw_hits)), EvidenceResolutionStatus.ABSTAINED
     target_id = next(iter(normalized))
     target = next((r for r in wall_scope.records if r.wall_candidate_id == target_id), None)
     return target or sorted(matching, key=lambda r: r.wall_candidate_id)[0], tuple(sorted(raw_hits)), EvidenceResolutionStatus.CORROBORATED
@@ -546,21 +582,19 @@ class WallFinishFaceBindingProducer:
                             if viewport.bounding_box[0] <= term.center[0] <= viewport.bounding_box[2]
                             and viewport.bounding_box[1] <= term.center[1] <= viewport.bounding_box[3]
                         )
-                        epsilon = max(1e-6, text_height * 0.08)
-                        paths = _leader_paths(annotation_bbox, owned_lines, terminators, epsilon)
+                        paths = _leader_paths(annotation_bbox, owned_lines, terminators)
                         if not paths:
                             continue
 
                         accepted: dict[tuple[str, str, str], WallFinishFaceBindingRecord] = {}
-                        target_conflict = False
                         for leader_ids, terminator in paths:
                             target, source_segments, target_status = _target_from_terminator(
-                                terminator, owned_lines, wall_scope, epsilon
+                                terminator, owned_lines, wall_scope
                             )
-                            if target_status is EvidenceResolutionStatus.CONFLICT:
-                                target_conflict = True
-                                continue
-                            if target is None:
+                            if (
+                                target_status is not EvidenceResolutionStatus.CORROBORATED
+                                or target is None
+                            ):
                                 continue
                             role_result = role_producer.publish(WallRoleSelector(
                                 document_id=published.revision.document_id,
@@ -643,11 +677,6 @@ class WallFinishFaceBindingProducer:
                                 status=EvidenceResolutionStatus.CORROBORATED,
                                 reason_codes=(FINISH_BINDING_RESOLVED, FINISH_SCOPE_PARTIAL),
                                 bindings=records, scope_records=scopes,
-                            )
-                        elif target_conflict:
-                            result = WallFinishFaceBindingScopeResult(
-                                status=EvidenceResolutionStatus.CONFLICT,
-                                reason_codes=(FINISH_BINDING_TARGET_CONFLICT,),
                             )
                         else:
                             continue
