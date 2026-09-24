@@ -1,0 +1,115 @@
+name: TEST-ONLY Murera Foundation Geometry Authority
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-foundation-geometry:
+    if: startsWith(github.head_ref, 'diag/murera-foundation-geometry-authority')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Probe Murera foundation/floor geometry evidence
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,re,urllib.request
+          from pathlib import Path
+          import fitz
+
+          from pb_dimension_chain_evidence_extractor import extract_dimension_chains_from_page
+          from pb_viewport_segmentation import segment_page_viewports, extract_view_title_anchors
+          from pb_drawing_ocr_evidence_layer import DrawingOCREngine
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          path=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-foundation-geometry/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              path.write_bytes(r.read())
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(actual)
+
+          eng=DrawingOCREngine()
+          out=[]
+          doc=fitz.open(path)
+          try:
+              for page_num in (219,220,221,223,225,226):
+                  page=doc[page_num-1]
+                  native=page.get_text("text") or ""
+                  words=page.get_text("words") or []
+                  chains=[]
+                  try:
+                      for ch in extract_dimension_chains_from_page(page,page_num=page_num,view_id=f"p{page_num}"):
+                          obs=[]
+                          for o in list(getattr(ch,"observations",()) or ()):
+                              if 0.5 <= float(o.value_m) <= 35.0:
+                                  obs.append({
+                                      "value_m":round(float(o.value_m),4),
+                                      "bbox":list(o.bbox) if getattr(o,"bbox",None) else None,
+                                      "orientation":str(getattr(o,"orientation","")),
+                                      "endpoints":getattr(o,"endpoints",None),
+                                  })
+                          if obs:
+                              chains.append({"chain_id":str(getattr(ch,"chain_id","")),"observations":obs})
+                  except Exception as exc:
+                      chains=[{"error":repr(exc)}]
+
+                  viewports=[]
+                  try:
+                      viewports=[{
+                          "view_id":v.view_id,"type":v.view_type,"label":v.label,
+                          "status":v.status,"source":v.boundary_source,"bbox":v.bounding_box
+                      } for v in segment_page_viewports(page,page_number=page_num)]
+                  except Exception as exc:
+                      viewports=[{"error":repr(exc)}]
+
+                  anchors=[]
+                  try:
+                      anchors=[{"text":a.text,"bbox":a.bbox,"type":a.view_type} for a in extract_view_title_anchors(page)]
+                  except Exception as exc:
+                      anchors=[{"error":repr(exc)}]
+
+                  ocr=[]
+                  if page_num in (221,226):
+                      try:
+                          rows=eng.recognize_page_rect(page,dpi=400)
+                          for row in rows:
+                              txt=str(row.get("text") or "").strip()
+                              nums=re.findall(r"(?<!\d)(\d{3,5})(?!\d)",txt.replace(",",""))
+                              if nums or re.search(r"(?i)(floor|foundation|layout|plan|overall|dimension|science lab)",txt):
+                                  ocr.append({"text":txt,"bbox":row.get("bounding_box"),"confidence":row.get("confidence")})
+                      except Exception as exc:
+                          ocr=[{"error":repr(exc)}]
+
+                  out.append({
+                      "page":page_num,
+                      "native_title_lines":[ln.strip() for ln in native.splitlines() if ln.strip() and re.search(r"(?i)(floor|foundation|layout|plan|section|elevation|science lab)",ln)][:60],
+                      "viewports":viewports,
+                      "anchors":anchors,
+                      "dimension_chains":chains,
+                      "native_numeric_words":[
+                          {"text":str(w[4]),"bbox":[float(w[0]),float(w[1]),float(w[2]),float(w[3])]}
+                          for w in words if re.fullmatch(r"[\d,\.]{3,8}",str(w[4]).strip())
+                      ][:220],
+                      "drawing_count":len(page.get_drawings() or []),
+                      "images":[list(i[:10]) for i in (page.get_images(full=True) or [])],
+                      "ocr_relevant":ocr[:250],
+                  })
+          finally:
+              doc.close()
+          print("MURERA_FOUNDATION_GEOMETRY_AUTHORITY="+json.dumps({"sha":actual,"pages":out},sort_keys=True,default=str),flush=True)
+          PY
