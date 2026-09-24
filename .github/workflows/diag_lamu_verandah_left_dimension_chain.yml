@@ -1,0 +1,52 @@
+name: TEST-ONLY Lamu Verandah Left Dimension Chain
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  left-chain:
+    if: startsWith(github.head_ref, 'diag/lamu-dpc-internal-wall-census')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install PyMuPDF
+      - run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_figured_dimension_evidence import extract_dimension_evidence_bundle
+          from pb_viewport_segmentation import segment_page_viewports
+          u="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          want="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          p=Path("/tmp/lamu.pdf")
+          with urllib.request.urlopen(urllib.request.Request(u,headers={"User-Agent":"PlanReader-Lamu-left-chain"}),timeout=120) as r:p.write_bytes(r.read())
+          got=hashlib.sha256(p.read_bytes()).hexdigest()
+          if got!=want: raise SystemExit(got)
+          d=fitz.open(p); page=d[40]
+          words=[]
+          for w in page.get_text("words") or []:
+            x0,y0,x1,y1=map(float,w[:4])
+            if 120<=x0<=210 and 260<=y0<=355:
+              words.append({"text":str(w[4]),"bbox":[x0,y0,x1,y1],"block":w[5],"line":w[6],"word":w[7]})
+          lines=[]
+          for di,g in enumerate(page.get_drawings() or []):
+            for it in g.get("items",[]) or []:
+              if not it or it[0]!="l" or len(it)<3: continue
+              a,b=it[1],it[2]; x0,y0,x1,y1=map(float,(a.x,a.y,b.x,b.y))
+              if max(x0,x1)<120 or min(x0,x1)>215 or max(y0,y1)<255 or min(y0,y1)>360: continue
+              lines.append({"drawing":di,"p0":[x0,y0],"p1":[x1,y1],"color":g.get("color"),"fill":g.get("fill"),"width":g.get("width")})
+          bundle=extract_dimension_evidence_bundle(page,page_num=41,view_id=None,view_type=None)
+          binding={b.observation_id:b.status for b in bundle.bindings}
+          dims=[]
+          for o in bundle.observations:
+            if o.bbox is None: continue
+            x0,y0,x1,y1=map(float,o.bbox)
+            if 120<=x0<=210 and 260<=y0<=355:
+              dims.append({"id":o.dimension_id,"value_m":o.value_m,"bbox":[x0,y0,x1,y1],"orientation":getattr(o,"orientation",None),"endpoints":getattr(o,"endpoints",None),"binding":binding.get(o.dimension_id)})
+          vps=[{"id":v.view_id,"type":v.view_type,"label":v.label,"status":v.status,"bbox":v.bounding_box} for v in segment_page_viewports(page,page_number=41)]
+          print("LAMU_VERANDAH_LEFT_CHAIN="+json.dumps({"sha":got,"words":words,"lines":lines,"dimensions":dims,"viewports":vps},sort_keys=True,default=str))
+          d.close()
+          PY
