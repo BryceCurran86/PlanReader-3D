@@ -1,0 +1,288 @@
+name: TEST-ONLY Murera Known Raster Placements
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  known-placements:
+    if: startsWith(github.head_ref, 'diag/murera-raster-known-placements')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Trace known source raster placements through shadow binder
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY' | tee /tmp/murera-known-raster-bindings.txt
+          import hashlib, io, json, re, urllib.request
+          from pathlib import Path
+
+          import cv2
+          import fitz
+          import numpy as np
+          import pytesseract
+          from PIL import Image
+
+          from pb_figured_dimension_evidence import RasterCoordinateTransform
+          from pb_migration_contracts import stable_contract_id
+          from pb_portable_raster_ocr_authority import OCRLine, RasterOCREvidenceRecord
+          from pb_raster_figured_dimension_shadow import (
+              RasterAxisSegment,
+              RasterDimensionScope,
+              collect_raster_figured_dimension_shadow,
+          )
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          want="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          path=Path("/tmp/murera.pdf")
+          request=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-known-raster/1.0"})
+          with urllib.request.urlopen(request,timeout=120) as response:
+              path.write_bytes(response.read())
+          got=hashlib.sha256(path.read_bytes()).hexdigest()
+          if got != want:
+              raise SystemExit(f"source hash mismatch: {got}")
+
+          def work_image(gray):
+              return cv2.resize(gray,None,fx=2.0,fy=3.0,interpolation=cv2.INTER_CUBIC)
+
+          def lineclean(work):
+              bw=cv2.threshold(work,0,255,cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)[1]
+              h=cv2.morphologyEx(
+                  bw,cv2.MORPH_OPEN,
+                  cv2.getStructuringElement(cv2.MORPH_RECT,(max(12,work.shape[1]//55),1))
+              )
+              v=cv2.morphologyEx(
+                  bw,cv2.MORPH_OPEN,
+                  cv2.getStructuringElement(cv2.MORPH_RECT,(1,max(12,work.shape[0]//22)))
+              )
+              cleaned=cv2.bitwise_and(bw,cv2.bitwise_not(cv2.bitwise_or(h,v)))
+              return 255-cv2.morphologyEx(
+                  cleaned,cv2.MORPH_CLOSE,cv2.getStructuringElement(cv2.MORPH_RECT,(2,2))
+              )
+
+          def segments(work):
+              bw=cv2.threshold(work,0,255,cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)[1]
+              rows=[]
+              specs=(
+                  ("h",cv2.getStructuringElement(cv2.MORPH_RECT,(max(12,work.shape[1]//100),1))),
+                  ("v",cv2.getStructuringElement(cv2.MORPH_RECT,(1,max(12,work.shape[0]//40)))),
+              )
+              for orientation,kernel in specs:
+                  mask=cv2.morphologyEx(bw,cv2.MORPH_OPEN,kernel)
+                  contours,_=cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+                  boxes=[]
+                  for contour in contours:
+                      x,y,w,h=cv2.boundingRect(contour)
+                      if orientation=="h" and (w < kernel.shape[1] or w < 3*max(h,1)):
+                          continue
+                      if orientation=="v" and (h < kernel.shape[0] or h < 3*max(w,1)):
+                          continue
+                      boxes.append((x,y,w,h))
+                  for index,(x,y,w,h) in enumerate(sorted(boxes)):
+                      if orientation=="h":
+                          rows.append(RasterAxisSegment(
+                              f"h:{index}:{x}:{y}:{w}:{h}",
+                              (float(x),float(y+h/2)),
+                              (float(x+w),float(y+h/2)),
+                          ))
+                      else:
+                          rows.append(RasterAxisSegment(
+                              f"v:{index}:{x}:{y}:{w}:{h}",
+                              (float(x+w/2),float(y)),
+                              (float(x+w/2),float(y+h)),
+                          ))
+              return tuple(rows)
+
+          def rotate(image,rotation):
+              if rotation==0: return image
+              if rotation==90: return cv2.rotate(image,cv2.ROTATE_90_CLOCKWISE)
+              if rotation==270: return cv2.rotate(image,cv2.ROTATE_90_COUNTERCLOCKWISE)
+              raise ValueError(rotation)
+
+          def inverse_point(x,y,rotation,width,height):
+              if rotation==0: return float(x),float(y)
+              if rotation==90: return float(y),float(height-x)
+              if rotation==270: return float(width-y),float(x)
+              raise ValueError(rotation)
+
+          def inverse_bbox(x,y,w,h,rotation,width,height):
+              pts=[
+                  inverse_point(x,y,rotation,width,height),
+                  inverse_point(x+w,y,rotation,width,height),
+                  inverse_point(x,y+h,rotation,width,height),
+                  inverse_point(x+w,y+h,rotation,width,height),
+              ]
+              xs=[p[0] for p in pts]; ys=[p[1] for p in pts]
+              return min(xs),min(ys),max(xs),max(ys)
+
+          def numeric_lines(image,rotation,width,height,psm):
+              cfg=f"--psm {psm} -c tessedit_char_whitelist=0123456789,."
+              data=pytesseract.image_to_data(
+                  image,config=cfg,output_type=pytesseract.Output.DICT
+              )
+              out=[]
+              for i,text in enumerate(data.get("text",[])):
+                  raw=str(text or "").strip()
+                  digits=re.sub(r"[^0-9]","",raw)
+                  if not digits:
+                      continue
+                  try:
+                      value=int(digits)
+                  except ValueError:
+                      continue
+                  if not (100 <= value <= 50000):
+                      continue
+                  conf_raw=float(data.get("conf",[-1])[i])
+                  confidence=(
+                      max(0.0,min(1.0,conf_raw/100.0))
+                      if conf_raw >= 0 else None
+                  )
+                  bbox=inverse_bbox(
+                      float(data["left"][i]),float(data["top"][i]),
+                      float(data["width"][i]),float(data["height"][i]),
+                      rotation,width,height,
+                  )
+                  out.append(OCRLine(digits,confidence,bbox,bbox_pt=None))
+              return tuple(out)
+
+          doc=fitz.open(path)
+          page=doc[227]
+          targets={899,900}
+          summaries=[]
+          for xref in sorted(targets):
+              rects=list(page.get_image_rects(xref) or [])
+              if not rects:
+                  summaries.append({"xref":xref,"status":"placement_missing"})
+                  continue
+              extracted=doc.extract_image(xref)
+              gray=np.array(Image.open(io.BytesIO(extracted["image"])).convert("L"))
+              work=work_image(gray)
+              raster_segments=segments(work)
+              variants={"gray":work,"lineclean":lineclean(work)}
+              for placement_index,rect in enumerate(rects):
+                  placement=(float(rect.x0),float(rect.y0),float(rect.x1),float(rect.y1))
+                  scope=RasterDimensionScope(
+                      document_id=f"source:{got[:32]}",
+                      revision_id=f"sha256:{got}",
+                      source_sha256=got,
+                      snapshot_id=f"sha256:{got}",
+                      page_id="228",
+                      viewport_id="diagnostic-page-228-unowned",
+                      image_id=f"xref:{xref}:placement:{placement_index}",
+                      placement_bbox_pt=placement,
+                  )
+                  transform=RasterCoordinateTransform(
+                      page_width_pt=placement[2]-placement[0],
+                      page_height_pt=placement[3]-placement[1],
+                      raster_width_px=float(work.shape[1]),
+                      raster_height_px=float(work.shape[0]),
+                      rotation_deg=0,
+                  )
+                  passes=[]
+                  for variant_name,image in variants.items():
+                      for rotation in (0,90,270):
+                          rotated=rotate(image,rotation)
+                          for psm in (6,11,12):
+                              lines=numeric_lines(
+                                  rotated,rotation,
+                                  float(work.shape[1]),float(work.shape[0]),psm,
+                              )
+                              if not lines:
+                                  continue
+                              record=RasterOCREvidenceRecord(
+                                  record_id=stable_contract_id("diag_ocr",{
+                                      "source_sha256":got,
+                                      "page":"228",
+                                      "xref":xref,
+                                      "placement":placement_index,
+                                      "variant":variant_name,
+                                      "rotation":rotation,
+                                      "psm":psm,
+                                  }),
+                                  document_id=scope.document_id,
+                                  revision_id=scope.revision_id,
+                                  source_sha256=got,
+                                  snapshot_id=scope.snapshot_id,
+                                  page_id="228",
+                                  viewport_id=scope.viewport_id,
+                                  target_region_pt=placement,
+                                  lines=lines,
+                                  full_text=" ".join(line.text for line in lines),
+                                  backend_name="tesseract",
+                                  backend_version=str(getattr(pytesseract,"__version__","unknown")),
+                                  dpi=300,
+                                  confidence=None,
+                                  reconciliation_status="provisional",
+                              )
+                              result=collect_raster_figured_dimension_shadow(
+                                  ocr_record=record,
+                                  segments=raster_segments,
+                                  transform=transform,
+                                  scope=scope,
+                              )
+                              interesting=[
+                                  {
+                                      "status":c.status.value,
+                                      "reason_codes":c.reason_codes,
+                                      "raw_text":c.raw_text,
+                                      "value_mm":c.value_mm,
+                                      "bbox_pt":c.bbox_pt,
+                                      "orientation":c.orientation,
+                                      "endpoints_pt":c.endpoints_pt,
+                                      "candidate_id":c.candidate_id,
+                                      "alternative_count":len(c.alternatives),
+                                  }
+                                  for c in result.candidates
+                                  if c.status.value in {"candidate","conflict"}
+                              ]
+                              if interesting:
+                                  passes.append({
+                                      "variant":variant_name,
+                                      "rotation":rotation,
+                                      "psm":psm,
+                                      "result_status":result.status.value,
+                                      "candidates":interesting,
+                                  })
+                  summaries.append({
+                      "xref":xref,
+                      "placement_index":placement_index,
+                      "placement_bbox_pt":placement,
+                      "source_px":[int(gray.shape[1]),int(gray.shape[0])],
+                      "work_px":[int(work.shape[1]),int(work.shape[0])],
+                      "axis_segment_count":len(raster_segments),
+                      "viewport_ownership":"not_asserted_diagnostic_only",
+                      "passes":passes,
+                  })
+          doc.close()
+          print("MURERA_KNOWN_RASTER_BINDINGS="+json.dumps({
+              "source_sha256":got,
+              "page":228,
+              "summaries":summaries,
+              "quantity_m2":None,
+              "authority":"candidate_only_no_viewport_or_quantity_promotion",
+          },sort_keys=True,default=str),flush=True)
+          PY
+      - name: Post diagnostic summary
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -f /tmp/murera-known-raster-bindings.txt ]; then
+            gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body-file /tmp/murera-known-raster-bindings.txt
+          fi
