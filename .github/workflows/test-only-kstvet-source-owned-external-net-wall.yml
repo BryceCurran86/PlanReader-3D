@@ -1,0 +1,125 @@
+name: TEST-ONLY KSTVET Source Owned External Net Wall
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  source-owned-external-net-wall:
+    if: startsWith(github.head_ref, 'diag/kstvet-source-owned-external-net-wall')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Compose source-owned KSTVET external net wall authority
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib, json, urllib.request
+          from dataclasses import asdict, is_dataclass
+          from pathlib import Path
+
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
+          from pb_live_gross_wall_geometry_composition import compose_live_gross_wall_geometry
+          from pb_live_whole_wall_role_composition import compose_live_whole_wall_roles
+          from pb_live_external_physical_net_wall_publication import (
+              compose_live_external_physical_net_wall_publication,
+          )
+
+          url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          expected="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-KSTVET-source-net-wall/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              payload=r.read()
+          actual=hashlib.sha256(payload).hexdigest()
+          if actual != expected:
+              raise SystemExit(f"source hash mismatch: {actual}")
+
+          def serial(value):
+              if is_dataclass(value):
+                  return asdict(value)
+              if isinstance(value, dict):
+                  return {str(k): serial(v) for k,v in value.items()}
+              if isinstance(value, (list,tuple)):
+                  return [serial(v) for v in value]
+              return value
+
+          source=SourceVisibilityProducer(
+              producer_method="kstvet_source_owned_external_net_wall_diag",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="kstvet-source-owned-external-net-wall",
+              source_bytes=payload,
+              source_locator=url,
+          )
+          revision_id=published.revision.revision_id
+
+          wall_opening=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=revision_id,
+              page_ids=("54",),
+          )
+          print("KSTVET_WALL_OPENING="+json.dumps(serial({
+              "status":wall_opening.status,
+              "reason_codes":wall_opening.reason_codes,
+              "semantic_enumeration_result":wall_opening.semantic_enumeration_result,
+              "opening_universe_result":wall_opening.opening_universe_result,
+              "opening_universe_results":wall_opening.opening_universe_results,
+              "wall_scopes":wall_opening.wall_scopes,
+              "opening_bindings":wall_opening.opening_bindings,
+              "host_frames":wall_opening.host_frames,
+              "binding_selectors":wall_opening.binding_selectors,
+          }),sort_keys=True,default=str),flush=True)
+
+          physical_void=compose_live_physical_opening_voids(
+              source_visibility_producer=source,
+              wall_opening_composition=wall_opening,
+          )
+          print("KSTVET_PHYSICAL_VOID="+json.dumps(serial({
+              "status":physical_void.status,
+              "reason_codes":physical_void.reason_codes,
+              "traces":physical_void.traces,
+              "void_selectors":physical_void.void_selectors,
+          }),sort_keys=True,default=str),flush=True)
+
+          gross=compose_live_gross_wall_geometry(
+              source_visibility_producer=source,
+              wall_opening_composition=wall_opening,
+              physical_void_composition=physical_void,
+          )
+          print("KSTVET_GROSS_WALL="+json.dumps(serial({
+              "status":gross.status,
+              "reason_codes":gross.reason_codes,
+              "traces":gross.traces,
+              "gross_selectors":gross.gross_selectors,
+          }),sort_keys=True,default=str),flush=True)
+
+          roles=compose_live_whole_wall_roles(gross_wall_composition=gross)
+          print("KSTVET_WHOLE_WALL_ROLES="+json.dumps(serial({
+              "status":roles.status,
+              "reason_codes":roles.reason_codes,
+              "traces":roles.traces,
+              "role_selectors":roles.role_selectors,
+          }),sort_keys=True,default=str),flush=True)
+
+          publication=compose_live_external_physical_net_wall_publication(
+              wall_opening_composition=wall_opening,
+              physical_void_composition=physical_void,
+              gross_wall_composition=gross,
+              whole_wall_role_composition=roles,
+          )
+          print("KSTVET_EXTERNAL_PHYSICAL_NET_WALL="+json.dumps(serial(publication),sort_keys=True,default=str),flush=True)
+          PY
