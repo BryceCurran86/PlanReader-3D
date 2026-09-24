@@ -1,0 +1,81 @@
+name: TEST-ONLY KSTVET Gable Axis Current Main
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  gable-axis:
+    if: startsWith(github.head_ref, 'diag/kstvet-gable-axis-current-main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install minimal runtime
+        run: pip install PyMuPDF
+      - name: Map KSTVET plan/roof/elevation axis evidence
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,math,re,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_viewport_segmentation import segment_page_viewports
+
+          url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          expected="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          p=Path("/tmp/kstvet.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-KSTVET-gable-axis/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r: p.write_bytes(r.read())
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          if actual!=expected: raise SystemExit(actual)
+
+          doc=fitz.open(p); page=doc[53]
+          viewports=segment_page_viewports(page,page_number=54)
+          rows=[]
+          for v in viewports:
+              if v.view_type not in ("floor_plan","roof_plan","elevation"): continue
+              rows.append({
+                  "view_id":v.view_id,"type":v.view_type,"label":v.label,
+                  "status":v.status,"bbox":list(v.bounding_box) if v.bounding_box else None,
+                  "scale":v.scale_denominator,"provenance":v.provenance,
+              })
+
+          words=page.get_text("words") or []
+          target_words=[]
+          for w in words:
+              text=str(w[4]).strip()
+              norm=text.replace(",","").replace(" ","")
+              if norm in {"9850","10150","8350","8050","1800"} or re.search(r"(?i)E[- ]?0?[1-5]$",text):
+                  target_words.append({"text":text,"bbox":[float(x) for x in w[:4]]})
+
+          roof_lines=[]
+          roof_vps=[v for v in viewports if v.view_type=="roof_plan" and v.bounding_box]
+          drawings=page.get_drawings() or []
+          for vp in roof_vps:
+              x0,y0,x1,y1=vp.bounding_box
+              for d in drawings:
+                  for item in d.get("items",[]) or []:
+                      if not item or item[0]!="l" or len(item)<3: continue
+                      a,b=item[1],item[2]
+                      mx=(float(a.x)+float(b.x))/2; my=(float(a.y)+float(b.y))/2
+                      if not (x0<=mx<=x1 and y0<=my<=y1): continue
+                      dx=abs(float(b.x)-float(a.x)); dy=abs(float(b.y)-float(a.y))
+                      length=math.hypot(dx,dy)
+                      if length<80: continue
+                      orientation="horizontal" if dx>=4*max(dy,1e-6) else ("vertical" if dy>=4*max(dx,1e-6) else "diagonal")
+                      roof_lines.append({
+                          "view_id":vp.view_id,"orientation":orientation,"length_pt":round(length,3),
+                          "a":[round(float(a.x),3),round(float(a.y),3)],
+                          "b":[round(float(b.x),3),round(float(b.y),3)],
+                      })
+          roof_lines=sorted(roof_lines,key=lambda r:-r["length_pt"])[:80]
+
+          print("KSTVET_GABLE_AXIS="+json.dumps({
+              "sha":actual,"viewports":rows,"target_words":target_words,"roof_lines":roof_lines
+          },sort_keys=True),flush=True)
+          doc.close()
+          PY
