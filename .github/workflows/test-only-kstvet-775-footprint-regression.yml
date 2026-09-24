@@ -1,0 +1,80 @@
+name: TEST-ONLY KSTVET 775 Footprint Regression
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  kstvet-775-footprint-regression:
+    if: startsWith(github.head_ref, 'diag/kstvet-775-footprint-regression')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Trace KSTVET viewport/footprint regression
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          from pb_viewport_segmentation import segment_page_viewports
+          from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
+
+          url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          expected="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          path=Path("/tmp/kstvet.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-KSTVET-775-footprint-regression/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              path.write_bytes(r.read())
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(actual)
+
+          ex=GenericPlanReaderExtractor()
+          preds=ex.extract_from_pdf(path,collect_item35_shadow=False)
+          focus={}
+          for p in preds:
+              if p.tag in {
+                  "floor_screed","substructure_surface_bed","perimeter_walling",
+                  "internal_plaster","internal_paint","D1"
+              }:
+                  focus[p.tag]=p.to_dict()
+
+          doc=fitz.open(path)
+          page=doc[53]
+          viewports=segment_page_viewports(page,page_number=54)
+          auth=authoritative_floor_plan_viewports(page,page_number=54)
+          def vdict(v):
+              return {
+                  "view_id":v.view_id,"view_type":v.view_type,"label":v.label,
+                  "bbox":v.bounding_box,"title_bbox":v.title_bbox,
+                  "status":v.status,"boundary_source":v.boundary_source,
+                  "scale_denominator":v.scale_denominator,
+                  "scale_conflict":v.scale_conflict,
+                  "provenance":v.provenance,
+              }
+          print("KSTVET_775_FOOTPRINT_REGRESSION="+json.dumps({
+              "sha":actual,
+              "candidate_sha":"983fff2c1d228306e1b5e730be3ef2336437b2b3",
+              "viewports":[vdict(v) for v in viewports],
+              "authoritative_floor_plans":[vdict(v) for v in auth],
+              "focus_predictions":focus,
+              "hosted_opening_shadow":ex.hosted_opening_shadow,
+              "opening_provenance_shadow":ex.opening_provenance_shadow,
+              "live_net_wall_shadow":ex.live_net_wall_shadow,
+              "extraction_status":ex.extraction_status,
+          },sort_keys=True,default=str),flush=True)
+          doc.close()
+          PY
