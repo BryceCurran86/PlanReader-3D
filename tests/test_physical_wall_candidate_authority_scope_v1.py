@@ -411,3 +411,71 @@ def test_validated_columnar_grid_synthetic_edge_still_fails_closed() -> None:
         page_height=700.0,
     )
     assert reason == PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED
+
+
+def _validated_plan_legend_scope_page() -> fitz.Page:
+    doc = fitz.open()
+    page = doc.new_page(width=840.0, height=600.0)
+    page.insert_text((150.0, 510.0), "PLAN : FLOOR LAYOUT", fontsize=11)
+    page.insert_text((700.0, 330.0), "LEGEND", fontsize=11)
+    return page
+
+
+def test_validated_plan_legend_interior_can_prove_not_cropped() -> None:
+    from pb_viewport_segmentation import (
+        is_authoritative_derived_viewport,
+        segment_page_viewports,
+    )
+
+    page = _validated_plan_legend_scope_page()
+    viewports = segment_page_viewports(page, page_number=1)
+    plan = next(
+        v for v in viewports
+        if v.view_type == "floor_plan" and is_authoritative_derived_viewport(v)
+    )
+    assert plan.bounding_box is not None
+    x0, y0, x1, y1 = plan.bounding_box
+
+    wall = _wall(
+        pts=(
+            (x0 + 0.30 * (x1 - x0), y0 + 0.35 * (y1 - y0)),
+            (x0 + 0.70 * (x1 - x0), y0 + 0.35 * (y1 - y0)),
+        )
+    )
+    assert _scope_boundary_reason(
+        wall,
+        page=page,
+        page_number=1,
+        page_width=840.0,
+        page_height=600.0,
+    ) is None
+
+
+def test_validated_plan_legend_synthetic_separator_still_fails_closed() -> None:
+    from pb_viewport_segmentation import (
+        is_authoritative_derived_viewport,
+        segment_page_viewports,
+    )
+
+    page = _validated_plan_legend_scope_page()
+    viewports = segment_page_viewports(page, page_number=1)
+    plan = next(
+        v for v in viewports
+        if v.view_type == "floor_plan" and is_authoritative_derived_viewport(v)
+    )
+    assert plan.bounding_box is not None
+    x0, y0, x1, y1 = plan.bounding_box
+
+    wall = _wall(
+        pts=(
+            (x0 + 0.35 * (x1 - x0), y0 + 0.35 * (y1 - y0)),
+            (x1, y0 + 0.35 * (y1 - y0)),
+        )
+    )
+    assert _scope_boundary_reason(
+        wall,
+        page=page,
+        page_number=1,
+        page_width=840.0,
+        page_height=600.0,
+    ) == PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED
