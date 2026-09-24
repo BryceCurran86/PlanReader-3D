@@ -1,0 +1,125 @@
+name: TEST-ONLY KSTVET F23 After Columnar Grid
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  kstvet-f23:
+    if: startsWith(github.head_ref, 'diag/kstvet-f23-after-columnar-grid')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Trace F23 verandah depth on KSTVET page 54
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          import fitz
+
+          import pb_secondary_footprint_evidence as f23
+          from pb_figured_dimension_evidence import (
+              BindingStatus,
+              calibrate_dimension_layout,
+              extract_dimension_evidence_bundle,
+          )
+          from pb_viewport_segmentation import segment_page_viewports
+
+          url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          expected="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-KSTVET-F23-grid-trace/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              payload=r.read()
+          actual=hashlib.sha256(payload).hexdigest()
+          if actual != expected:
+              raise SystemExit(actual)
+          source=Path("/tmp/kstvet.pdf"); source.write_bytes(payload)
+
+          doc=fitz.open(source)
+          try:
+              page=doc[53]
+              vps=segment_page_viewports(page,page_number=54)
+              plan=[v for v in vps if v.view_type=="floor_plan" and v.bounding_box is not None]
+              labels=f23._label_words(page)
+              resolved=f23.resolve_secondary_footprint_width_m(page,page_num=54)
+              traces=[]
+              for vp in plan:
+                  bundle=extract_dimension_evidence_bundle(
+                      page,page_num=54,view_id=vp.view_id,view_type=vp.view_type
+                  )
+                  bind={b.observation_id:b for b in bundle.bindings}
+                  for label_bbox,label_text in labels:
+                      if not f23._bbox_fully_inside(label_bbox,vp.bounding_box):
+                          continue
+                      lc=f23._bbox_center(label_bbox)
+                      edge_info=f23._label_edge(lc,vp.bounding_box)
+                      if edge_info is None:
+                          continue
+                      edge,_=edge_info
+                      required=f23._DEPTH_ORIENTATION_FOR_EDGE[edge]
+                      layout=calibrate_dimension_layout(page)
+                      along_tol=max(layout.median_word_height_pt*8.0,layout.chain_axis_tolerance_pt*4.0)
+                      depth_tol=max(layout.median_word_height_pt*10.0,layout.line_search_distance_pt)
+                      candidates=[]
+                      for o in bundle.observations:
+                          if o.bbox is None:
+                              continue
+                          b=bind.get(o.dimension_id)
+                          orientation=f23._observation_orientation(o)
+                          oc=f23._bbox_center(o.bbox)
+                          inside=f23._bbox_fully_inside(o.bbox,vp.bounding_box,tolerance=layout.median_word_height_pt)
+                          assoc=f23._spatially_associated_with_edge(
+                              edge=edge,label_center=lc,obs_center=oc,viewport_bbox=vp.bounding_box,
+                              along_tolerance_pt=along_tol,depth_tolerance_pt=depth_tol,
+                          )
+                          if (
+                              inside and b is not None and
+                              b.status==BindingStatus.WITNESS_BOUND.value and
+                              orientation==required and assoc
+                          ):
+                              candidates.append({
+                                  "id":o.dimension_id,
+                                  "raw":o.raw_text,
+                                  "value_m":o.value_m,
+                                  "bbox":o.bbox,
+                                  "orientation":orientation,
+                                  "endpoints":o.endpoints,
+                                  "binding_status":b.status,
+                                  "dimension_line_id":b.dimension_line_id,
+                                  "witness_line_ids":list(b.witness_line_ids),
+                                  "center":oc,
+                              })
+                      traces.append({
+                          "view_id":vp.view_id,
+                          "viewport_status":vp.status,
+                          "viewport_bbox":vp.bounding_box,
+                          "viewport_provenance":vp.provenance,
+                          "label":label_text,
+                          "label_bbox":label_bbox,
+                          "label_center":lc,
+                          "edge":edge,
+                          "required_orientation":required,
+                          "along_tol":along_tol,
+                          "depth_tol":depth_tol,
+                          "candidates":candidates,
+                      })
+              print("KSTVET_F23_AFTER_COLUMNAR_GRID="+json.dumps({
+                  "source_sha256":actual,
+                  "candidate_sha":"6982e4d5e9906396d4ab8399d8bfa53ce7f6bb8a",
+                  "resolved":resolved.__dict__ if resolved else None,
+                  "viewports":[v.__dict__ for v in vps],
+                  "traces":traces,
+              },sort_keys=True,default=str),flush=True)
+          finally:
+              doc.close()
+          PY
