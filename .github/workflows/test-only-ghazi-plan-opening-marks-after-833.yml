@@ -1,0 +1,68 @@
+name: TEST-ONLY Ghazi Plan Opening Marks After 833
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  marks:
+    if: startsWith(github.head_ref, 'diag/ghazi-plan-opening-marks-after-833')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install PyMuPDF
+      - name: Inspect native opening marks in authoritative plan column
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,re,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_viewport_segmentation import segment_page_viewports,is_authoritative_derived_viewport
+
+          url="https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf"
+          expected="c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f"
+          p=Path("/tmp/ghazi.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Ghazi-opening-marks/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:p.write_bytes(r.read())
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          if actual!=expected:raise SystemExit(actual)
+
+          doc=fitz.open(p); page=doc[166]
+          vps=segment_page_viewports(page,page_number=167)
+          plan=next(v for v in vps if v.view_type=="floor_plan" and (v.status=="resolved" or is_authoritative_derived_viewport(v)))
+          bx=plan.bounding_box
+          words=page.get_text("words") or []
+          mark_re=re.compile(r"^(?:W|D)[-_ ]?\d+$",re.I)
+          marks=[]
+          for w in words:
+              t=str(w[4]).strip().upper()
+              if not mark_re.match(t): continue
+              cx=(float(w[0])+float(w[2]))/2; cy=(float(w[1])+float(w[3]))/2
+              marks.append({
+                  "text":t,"bbox":[float(x) for x in w[:4]],
+                  "in_plan":bool(bx and bx[0]<=cx<=bx[2] and bx[1]<=cy<=bx[3]),
+                  "block":int(w[5]),"line":int(w[6]),
+              })
+
+          # Also report local native context around each mark so legend/schedule
+          # definitions can be distinguished from plan-instance labels.
+          for m in marks:
+              mx=(m["bbox"][0]+m["bbox"][2])/2; my=(m["bbox"][1]+m["bbox"][3])/2
+              local=[]
+              for w in words:
+                  cx=(float(w[0])+float(w[2]))/2; cy=(float(w[1])+float(w[3]))/2
+                  if abs(cx-mx)<=90 and abs(cy-my)<=55:
+                      local.append({"text":str(w[4]),"bbox":[float(x) for x in w[:4]]})
+              m["context"]=local[:80]
+
+          print("GHAZI_PLAN_OPENING_MARKS="+json.dumps({
+              "sha":actual,
+              "plan":{"view_id":plan.view_id,"bbox":list(bx),"status":plan.status,"provenance":plan.provenance},
+              "marks":marks,
+          },sort_keys=True),flush=True)
+          doc.close()
+          PY
