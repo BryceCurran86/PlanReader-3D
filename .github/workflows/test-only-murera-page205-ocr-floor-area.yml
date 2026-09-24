@@ -1,0 +1,124 @@
+name: TEST-ONLY Murera Page205 OCR Floor Area
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  page205-ocr:
+    if: startsWith(github.head_ref, 'diag/murera-page205-ocr-floor-area')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Probe OCR-derived envelope candidates on suspicious Murera sheets
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,re,urllib.request
+          from collections import Counter
+          from pathlib import Path
+          import fitz
+          from pb_drawing_ocr_evidence_layer import DrawingOCREngine
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          path=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-page205-ocr/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              path.write_bytes(r.read())
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(actual)
+
+          addr=("P.O. BOX","P.O BOX","PO BOX","P O BOX","TEL:","FAX:","EMAIL:","BOX 100727","BOX 9656")
+          dim_re=re.compile(r"\b(\d{1,2})[,.]?(\d{3})\b")
+          def parse(txt):
+              clean="\n".join(ln for ln in txt.splitlines() if not any(k in ln.upper() for k in addr))
+              vals=[]
+              for a,b in dim_re.findall(clean):
+                  v=round(float(a)+float(b)/1000.0,3)
+                  if 2.0 <= v <= 35.0:
+                      vals.append(v)
+              return vals
+          def env(vals,detected_span=None):
+              c=Counter(round(v,2) for v in vals)
+              overall=[d for d,n in c.items() if n<=2 and d>=5.0]
+              large=[d for d in c if d>=10.0]
+              pool=sorted(set(overall+large),reverse=True)
+              for i,l in enumerate(pool):
+                  for w in pool[i+1:]:
+                      if l-w<=0.6: continue
+                      if 15.0<=l*w<=600.0 and w>=4.0:
+                          return [l,w,round(l*w,4)]
+              uniq=sorted(set(vals),reverse=True)
+              for i,l in enumerate(uniq):
+                  for w in uniq[i+1:]:
+                      if l-w>0.6 and 15.0<=l*w<=600.0 and w>=3.0:
+                          return [l,w,round(l*w,4)]
+              if detected_span is not None:
+                  # mirror production's one-axis + detected-span fallback
+                  for l in sorted(set(vals),reverse=True):
+                      if 15.0 <= l*detected_span <= 600.0:
+                          return [l,detected_span,round(l*detected_span,4)]
+              return None
+
+          engine=DrawingOCREngine()
+          out=[]
+          doc=fitz.open(path)
+          try:
+              for page_num in (188,205,219,225,226,231):
+                  page=doc[page_num-1]
+                  native=page.get_text("text") or ""
+                  native_sparse=len(native.strip())<150
+                  large_raster=any(
+                      (img[2]*img[3] >= 500000)
+                      for img in page.get_images(full=True)
+                  )
+                  ocr_rows=[]
+                  try:
+                      ocr_rows=engine.recognize_page_rect(page,dpi=300)
+                  except Exception as exc:
+                      ocr_rows=[{"text":f"OCR_ERROR:{type(exc).__name__}:{exc}"}]
+                  ocr_text="\n".join(str(r.get("text") or "") for r in ocr_rows)
+                  merged=native+"\n"+ocr_text
+                  vals_native=parse(native)
+                  vals_ocr=parse(ocr_text)
+                  vals_merged=parse(merged)
+                  candidate_pairs=[]
+                  uniq=sorted(set(vals_merged),reverse=True)
+                  for i,l in enumerate(uniq):
+                      for w in uniq[i+1:]:
+                          area=round(l*w,4)
+                          if 100.0<=area<=220.0:
+                              candidate_pairs.append({
+                                  "length_m":l,"width_m":w,"area_m2":area,
+                                  "distance_from_149_26":round(abs(area-149.26),4)
+                              })
+                  candidate_pairs.sort(key=lambda x:x["distance_from_149_26"])
+                  out.append({
+                      "page":page_num,
+                      "native_sparse":native_sparse,
+                      "large_raster":large_raster,
+                      "native_dims":vals_native,
+                      "ocr_dims":vals_ocr,
+                      "merged_dims":vals_merged,
+                      "envelope_merged":env(vals_merged),
+                      "candidate_pairs_100_220":candidate_pairs[:30],
+                      "native_title_lines":[ln.strip() for ln in native.splitlines() if ln.strip()][:25],
+                      "ocr_lines":[str(r.get("text") or "") for r in ocr_rows if str(r.get("text") or "").strip()][:80],
+                  })
+          finally:
+              doc.close()
+          print("MURERA_PAGE205_OCR_FLOOR_AREA="+json.dumps({"sha":actual,"pages":out},sort_keys=True),flush=True)
+          PY
