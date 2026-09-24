@@ -44,6 +44,7 @@ jobs:
                   page_num=41,
                   viewports=viewports,
                   sheet="",
+                  allow_derived=True,
               )
               rows=[]
               for viewport in viewports:
@@ -95,6 +96,7 @@ jobs:
                   "source_sha256":got,
                   "source_page":41,
                   "status":"diagnostic_only",
+                  "allow_derived":True,
                   "rows":rows,
                   "skipped_viewports":evidence.skipped_viewports,
               },sort_keys=True,default=str))
