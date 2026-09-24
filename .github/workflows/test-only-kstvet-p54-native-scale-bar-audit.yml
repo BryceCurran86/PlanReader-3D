@@ -130,7 +130,6 @@ jobs:
               )
               scoped_words = _scope_words(page_words, viewport.bounding_box)
               scoped_segments = _scope_segments(page_segments, viewport.bounding_box)
-              bars = _bar_candidates(scoped_segments, scoped_words)
               physical_words = [
                   word_row(word) for word in scoped_words
                   if _physical_mm(word.text) is not None
@@ -139,6 +138,14 @@ jobs:
                   word_row(word) for word in scoped_words
                   if _ZERO_RE.match(word.text)
               ]
+              # Exact logical short-circuit of the existing bar contract:
+              # _bar_candidates cannot emit a candidate without both a trusted
+              # zero endpoint label and an explicit physical-unit endpoint label.
+              bars = (
+                  _bar_candidates(scoped_segments, scoped_words)
+                  if zero_words and physical_words
+                  else ()
+              )
               ratio_words = [
                   word_row(word) for word in scoped_words
                   if re.search(r"\b\d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?\b", word.text)
@@ -146,7 +153,8 @@ jobs:
 
               plausible = []
               geometry_qualified = []
-              for baseline in scoped_segments:
+              geometry_scan_segments = scoped_segments if zero_words and physical_words else ()
+              for baseline in geometry_scan_segments:
                   left_ticks = _tick_for_endpoint(
                       baseline, baseline.start, scoped_segments
                   )
