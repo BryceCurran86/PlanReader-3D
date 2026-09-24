@@ -387,10 +387,13 @@ def _alternative_for_line(
         endpoints_px = ((first[0], coord), (second[0], coord))
     else:
         endpoints_px = ((coord, first[0]), (coord, second[0]))
-    endpoints_pt = tuple(
-        _point_to_pdf(point, transform=transform, scope=scope)
-        for point in endpoints_px
-    )
+    endpoints_pt = tuple(sorted(
+        (
+            _point_to_pdf(point, transform=transform, scope=scope)
+            for point in endpoints_px
+        ),
+        key=lambda point: (point[0], point[1]),
+    ))
     witness_ids = tuple(sorted(set(first[1] + second[1])))
     payload = {
         "document_id": scope.document_id,
