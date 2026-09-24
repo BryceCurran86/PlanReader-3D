@@ -14,7 +14,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.13"}
       - run: pip install PyMuPDF==1.28.0
-      - name: Render verified Murera drawing pages 219-226
+      - name: Render Murera drawing pages 219-238
         run: |
           python - <<'PY'
           import hashlib,urllib.request
@@ -31,7 +31,7 @@ jobs:
 
           out=Path("/tmp/murera-renders");out.mkdir()
           doc=fitz.open(p)
-          for page_no in range(219,227):
+          for page_no in range(219,239):
               page=doc[page_no-1]
               pix=page.get_pixmap(matrix=fitz.Matrix(2.0,2.0),alpha=False)
               pix.save(out/f"page-{page_no}.png")
@@ -40,6 +40,6 @@ jobs:
       - name: Upload verified drawing renders
         uses: actions/upload-artifact@v4
         with:
-          name: murera-pages-219-226
+          name: murera-pages-219-238
           path: /tmp/murera-renders/*.png
           if-no-files-found: error
