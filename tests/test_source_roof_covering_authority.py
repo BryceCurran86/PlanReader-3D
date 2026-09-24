@@ -430,6 +430,42 @@ def test_get_elevation_viewport_search_bbox_unframed_extends_upward() -> None:
     assert sbox[2] == 500.0
 
 
+def test_elevation_search_bbox_ignores_preceding_title_in_other_column() -> None:
+    """A closer title in another column must not clip this elevation's roof."""
+    from unittest.mock import MagicMock
+
+    from pb_source_roof_covering_authority import get_elevation_viewport_search_bbox
+
+    same_column_prev = MagicMock()
+    same_column_prev.view_id = "view_p1_mid_prev"
+    same_column_prev.title_bbox = (360.0, 300.0, 460.0, 320.0)
+    same_column_prev.boundary_source = "title_partition"
+    same_column_prev.bounding_box = (300.0, 0.0, 600.0, 360.0)
+
+    other_column_closer = MagicMock()
+    other_column_closer.view_id = "view_p1_right"
+    other_column_closer.title_bbox = (700.0, 650.0, 800.0, 690.0)
+    other_column_closer.boundary_source = "title_partition"
+    other_column_closer.bounding_box = (650.0, 500.0, 900.0, 710.0)
+
+    current = MagicMock()
+    current.view_id = "view_p1_mid"
+    current.title_bbox = (380.0, 700.0, 480.0, 720.0)
+    current.boundary_source = "title_partition"
+    current.bounding_box = (300.0, 500.0, 600.0, 800.0)
+
+    page_rect = MagicMock()
+    page_rect.width = 900.0
+    page_rect.height = 800.0
+
+    sbox = get_elevation_viewport_search_bbox(
+        current,
+        [same_column_prev, other_column_closer, current],
+        page_rect,
+    )
+    assert sbox == pytest.approx((300.0, 320.0, 600.0, 735.0))
+
+
 def test_extractor_roof_covering_shadow_end_to_end() -> None:
     """Verify that extractor populates roof_covering_shadow with corroborated evidence on Lamu sheet."""
     from unittest.mock import patch
