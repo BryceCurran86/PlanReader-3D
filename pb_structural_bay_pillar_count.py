@@ -93,12 +93,13 @@ def find_uniform_bay_runs(
     restricted to a broad, generic plausible bay-span range (1.0-8.0m by
     default — a structural bay smaller than 1m or larger than 8m is
     implausible for ordinary columns/pillars/posts, but this is a
-    plausibility bound, not an exact-value lookup). Only maximal runs are
-    returned — a run already covered by a longer run is not reported
-    separately.
+    plausibility bound, not an exact-value lookup). Out-of-range dimensions
+    interrupt a run: removing them could join unrelated dimension chains.
+    Only maximal runs are returned — a run already covered by a longer run
+    is not reported separately.
     """
     lo, hi = bay_span_range_m
-    candidates = [v for v in values_m if lo <= v <= hi]
+    candidates = list(values_m)
     if len(candidates) < min_bays:
         return []
 
@@ -106,6 +107,9 @@ def find_uniform_bay_runs(
     i = 0
     n = len(candidates)
     while i < n:
+        if not lo <= candidates[i] <= hi:
+            i += 1
+            continue
         # A window shorter than min_bays is always "unresolved" by
         # definition (see derive_support_count_from_bay_chain), so start
         # growth at the smallest window that could possibly resolve.
@@ -114,6 +118,8 @@ def find_uniform_bay_runs(
         best_result: Optional[BayCountResult] = None
         while j <= n:
             window = candidates[i:j]
+            if any(not lo <= value <= hi for value in window):
+                break
             res = derive_support_count_from_bay_chain(
                 window, min_bays=min_bays, relative_tolerance=relative_tolerance,
             )
