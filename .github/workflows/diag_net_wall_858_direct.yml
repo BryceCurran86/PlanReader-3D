@@ -2,6 +2,10 @@ name: TEST-ONLY Net Wall 858 Direct Authority
 on:
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
 jobs:
   direct:
     if: startsWith(github.head_ref, 'diag/net-wall-858-kstvet-ghazi')
@@ -13,7 +17,7 @@ jobs:
         with: {python-version: "3.13"}
       - run: pip install -r requirements.txt
       - run: |
-          PYTHONPATH=. python - <<'PY'
+          PYTHONPATH=. python - <<'PY' | tee /tmp/net_wall_858_direct.txt
           import hashlib,json,urllib.request
           from pathlib import Path
           from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
@@ -40,3 +44,13 @@ jobs:
             }
           print("NET_WALL_858_DIRECT="+json.dumps(out,sort_keys=True,default=str))
           PY
+
+      - name: Post diagnostic summary
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -f /tmp/net_wall_858_direct.txt ]; then
+            gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body-file /tmp/net_wall_858_direct.txt
+          fi
