@@ -1,0 +1,88 @@
+name: TEST-ONLY Murera OCR Secondary Width
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-ocr-width:
+    if: startsWith(github.head_ref, 'diag/murera-ocr-secondary-width-current')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Probe SHA-pinned Murera plan OCR
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib, json, re, urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_drawing_ocr_evidence_layer import DrawingOCREngine
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected_sha="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-OCR-width/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              payload=r.read()
+          actual=hashlib.sha256(payload).hexdigest()
+          if actual != expected_sha:
+              raise SystemExit(f"source hash mismatch: {actual}")
+          source=Path("/tmp/murera.pdf"); source.write_bytes(payload)
+
+          doc=fitz.open(source)
+          engine=DrawingOCREngine()
+          extractor=GenericPlanReaderExtractor()
+          pages=[]
+          try:
+              for page_no in (219,225,228):
+                  page=doc[page_no-1]
+                  native=page.get_text("text") or ""
+                  ocr=engine.recognize_page_rect(page,dpi=120)
+                  anchors=[
+                      row for row in ocr
+                      if re.search(r"verand|veranda|verandah|porch|terrace",str(row.get("text") or ""),re.I)
+                  ]
+                  numeric=[
+                      row for row in ocr
+                      if re.search(r"(?<!\d)(?:\d{3,5}|\d+[.,]\d{2,3})(?!\d)",str(row.get("text") or ""))
+                  ]
+                  nearby=[]
+                  for anchor in anchors:
+                      ab=anchor.get("bounding_box") or [0,0,0,0]
+                      acx=(ab[0]+ab[2])/2; acy=(ab[1]+ab[3])/2
+                      for row in numeric:
+                          rb=row.get("bounding_box") or [0,0,0,0]
+                          rcx=(rb[0]+rb[2])/2; rcy=(rb[1]+rb[3])/2
+                          if abs(rcx-acx)<=260 and abs(rcy-acy)<=180:
+                              nearby.append(row)
+                  pages.append({
+                      "page":page_no,
+                      "is_drawing_page":extractor.is_drawing_page(native,page),
+                      "native_chars":len(native.strip()),
+                      "drawing_count":len(page.get_drawings() or []),
+                      "image_count":len(page.get_images() or []),
+                      "ocr_line_count":len(ocr),
+                      "anchors":anchors,
+                      "nearby_numeric_lines":nearby[:120],
+                      "selected_material_lines":[
+                          row for row in ocr
+                          if re.search(r"floor|slab|dpm|polythene|mesh|a142|foundation",str(row.get("text") or ""),re.I)
+                      ][:80],
+                  })
+          finally:
+              doc.close()
+
+          print("MURERA_OCR_SECONDARY_WIDTH="+json.dumps({"source_sha256":actual,"pages":pages},sort_keys=True),flush=True)
+          PY
