@@ -12,6 +12,7 @@ from pathlib import Path
 import sys
 import urllib.request
 
+import fitz
 import pytest
 
 from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
@@ -39,6 +40,54 @@ def test_lamu_dpm_after_structural_sheet_scan(tmp_path: Path) -> None:
     assert actual == SHA256
 
     extractor = GenericPlanReaderExtractor()
+    page_evidence = []
+    doc = fitz.open(source)
+    try:
+        for page_index in range(40, 45):
+            page = doc[page_index]
+            native = page.get_text("text") or ""
+            drawing = extractor.is_drawing_page(native, page)
+            ocr = ""
+            native_sparse = len(native.strip()) < 150
+            has_large_raster = extractor._page_has_large_raster(page)
+            if native_sparse or has_large_raster:
+                ocr = extractor._ocr_text_for_page(page, page_index)
+            combined = f"{native}\n{ocr}" if ocr.strip() else native
+            material_lines = [
+                line.strip()
+                for line in combined.splitlines()
+                if any(
+                    token in line.lower()
+                    for token in (
+                        "polythene",
+                        "polyethylene",
+                        "d.p.m",
+                        "dpm",
+                        "membrane",
+                        "a142",
+                        "foundation",
+                        "slab",
+                        "blinding",
+                    )
+                )
+            ]
+            page_evidence.append(
+                {
+                    "page": page_index + 1,
+                    "is_drawing_page": drawing,
+                    "native_char_count": len(native.strip()),
+                    "native_sparse": native_sparse,
+                    "has_large_raster": has_large_raster,
+                    "drawing_count": len(page.get_drawings() or []),
+                    "ocr_char_count": len(ocr.strip()),
+                    "dpm_detector_native": extractor._has_dpm_specification(native),
+                    "dpm_detector_combined": extractor._has_dpm_specification(combined),
+                    "material_lines": material_lines[:40],
+                }
+            )
+    finally:
+        doc.close()
+
     predictions = extractor.extract_from_pdf(
         source,
         pages=list(range(40, 45)),
@@ -101,6 +150,7 @@ def test_lamu_dpm_after_structural_sheet_scan(tmp_path: Path) -> None:
     payload = {
         "production_sha": "095353d2a39e8b09c1e321f03d98abdaa8cb8f6d",
         "page_audit": page_audit,
+        "page_evidence": page_evidence,
         "dpm_prediction": dpm,
         "target_LMU_E3_C": target,
         "project": {
