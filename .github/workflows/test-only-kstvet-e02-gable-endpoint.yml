@@ -1,11 +1,11 @@
-name: TEST-ONLY KSTVET E02 Gable Endpoint
+name: TEST-ONLY KSTVET E02 E05 Gable Endpoint
 
 on:
   pull_request:
     branches: [main]
 
 jobs:
-  e02-endpoint:
+  gable-endpoints:
     if: startsWith(github.head_ref, 'diag/kstvet-e02-gable-endpoint')
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -43,60 +43,66 @@ jobs:
           try:
               page=doc[53]
               vps=segment_page_viewports(page,page_number=54)
-              vp=next(v for v in vps if v.label=="ELEVATION E-02" and v.bounding_box is not None)
-              bbox=roof.get_elevation_viewport_search_bbox(vp,vps,page.rect)
-              diags,verts=roof.extract_elevation_segments_from_page(page,bbox)
-              clusters=roof._cluster_apex_candidates(diags)
               out={
                   "source_sha256":actual,
                   "candidate_sha":"61060b7e1a3ba39968f32bfa13e6e2c3742d93a3",
-                  "bbox":bbox,
-                  "scale_denominator":vp.scale_denominator,
-                  "diagonals":[d.__dict__ for d in diags],
-                  "vertical_count":len(verts),
-                  "clusters":[],
+                  "elevations":[],
               }
-              for apex,members in clusters:
-                  left=[m for m in members if m.direction==-1]
-                  right=[m for m in members if m.direction==1]
-                  lp=sum(m.pitch_deg for m in left)/len(left) if left else None
-                  rp=sum(m.pitch_deg for m in right)/len(right) if right else None
-                  mean=(lp+rp)/2.0 if lp is not None and rp is not None else None
-                  row={
-                      "apex":apex,
-                      "members":[m.__dict__ for m in members],
-                      "left_pitch":lp,
-                      "right_pitch":rp,
-                      "mean_pitch":mean,
-                      "vertical_candidates":[],
+              for label in ("ELEVATION E-02","ELEVATION E-05"):
+                  vp=next(v for v in vps if v.label==label and v.bounding_box is not None)
+                  bbox=roof.get_elevation_viewport_search_bbox(vp,vps,page.rect)
+                  diags,verts=roof.extract_elevation_segments_from_page(page,bbox)
+                  clusters=roof._cluster_apex_candidates(diags)
+                  view={
+                      "label":label,
+                      "bbox":bbox,
+                      "scale_denominator":vp.scale_denominator,
+                      "diagonals":[d.__dict__ for d in diags],
+                      "vertical_count":len(verts),
+                      "clusters":[],
                   }
-                  if mean is not None:
-                      ax,ay=apex
-                      tanp=math.tan(math.radians(mean))
-                      for v in verts:
-                          dx=v.x-ax
-                          direction=1 if dx>0 else -1
-                          run=abs(dx)
-                          expected_y=ay+run*tanp
-                          gap=abs(v.top_y-expected_y)
-                          if run >= 10.0 and gap <= 25.0:
-                              row["vertical_candidates"].append({
-                                  **v.__dict__,
-                                  "direction":"right" if direction==1 else "left",
-                                  "run_pt":round(run,4),
-                                  "expected_top_y":round(expected_y,4),
-                                  "ray_gap_pt":round(gap,4),
-                                  "qualifies_current":(
-                                      run>=roof.MIN_HORIZONTAL_RUN_PT and
-                                      gap<=roof.MAX_WALLCORNER_RAY_GAP_PT
-                                  ),
-                              })
-                      row["vertical_candidates"].sort(key=lambda x:(x["direction"],x["ray_gap_pt"],-x["run_pt"]))
-                      row["left_current"]=roof._find_farthest_structural_run(apex,mean,-1,verts)
-                      row["right_current"]=roof._find_farthest_structural_run(apex,mean,1,verts)
-                  out["clusters"].append(row)
+                  for apex,members in clusters:
+                      left=[m for m in members if m.direction==-1]
+                      right=[m for m in members if m.direction==1]
+                      lp=sum(m.pitch_deg for m in left)/len(left) if left else None
+                      rp=sum(m.pitch_deg for m in right)/len(right) if right else None
+                      mean=(lp+rp)/2.0 if lp is not None and rp is not None else None
+                      row={
+                          "apex":apex,
+                          "members":[m.__dict__ for m in members],
+                          "left_pitch":lp,
+                          "right_pitch":rp,
+                          "mean_pitch":mean,
+                          "vertical_candidates":[],
+                      }
+                      if mean is not None:
+                          ax,ay=apex
+                          tanp=math.tan(math.radians(mean))
+                          for v in verts:
+                              dx=v.x-ax
+                              direction=1 if dx>0 else -1
+                              run=abs(dx)
+                              expected_y=ay+run*tanp
+                              gap=abs(v.top_y-expected_y)
+                              if run >= 10.0 and gap <= 25.0:
+                                  row["vertical_candidates"].append({
+                                      **v.__dict__,
+                                      "direction":"right" if direction==1 else "left",
+                                      "run_pt":round(run,4),
+                                      "expected_top_y":round(expected_y,4),
+                                      "ray_gap_pt":round(gap,4),
+                                      "qualifies_current":(
+                                          run>=roof.MIN_HORIZONTAL_RUN_PT and
+                                          gap<=roof.MAX_WALLCORNER_RAY_GAP_PT
+                                      ),
+                                  })
+                          row["vertical_candidates"].sort(key=lambda x:(x["direction"],x["ray_gap_pt"],-x["run_pt"]))
+                          row["left_current"]=roof._find_farthest_structural_run(apex,mean,-1,verts)
+                          row["right_current"]=roof._find_farthest_structural_run(apex,mean,1,verts)
+                      view["clusters"].append(row)
+                  out["elevations"].append(view)
 
-              print("KSTVET_E02_GABLE_ENDPOINT="+json.dumps(out,sort_keys=True,default=str),flush=True)
+              print("KSTVET_E02_E05_GABLE_ENDPOINT="+json.dumps(out,sort_keys=True,default=str),flush=True)
           finally:
               doc.close()
           PY
