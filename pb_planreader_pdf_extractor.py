@@ -2193,6 +2193,47 @@ class GenericPlanReaderExtractor:
             pass
 
         # ------------------------------------------------------------------
+        # Repeated dimension-backed native double-leaf door swings
+        # ------------------------------------------------------------------
+        try:
+            from pb_plan_door_swing_geometry import (
+                extract_dimensioned_repeated_plan_doors,
+                should_emit_dimensioned_repeated_door_total,
+            )
+
+            dwg_pages = [
+                p for p in target_pages
+                if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])
+            ]
+            repeated_native_doors = extract_dimensioned_repeated_plan_doors(
+                doc, dwg_pages
+            )
+            if (
+                repeated_native_doors is not None
+                and should_emit_dimensioned_repeated_door_total(
+                    repeated_native_doors.count, pred_dict.keys()
+                )
+            ):
+                pred_dict["D1"] = ExtractedPrediction(
+                    tag="D1",
+                    trade_type="doors",
+                    description=(
+                        "Repeated dimension-backed native plan doors "
+                        f"({repeated_native_doors.count} No)"
+                    ),
+                    quantity=float(repeated_native_doors.count),
+                    unit="NO",
+                    confidence=0.90,
+                    source_page=repeated_native_doors.source_page,
+                    metadata={
+                        "derivation": "paired_native_quarter_circle_swings_plus_local_width",
+                        "raw_evidence_ref": repeated_native_doors.evidence_text,
+                    },
+                )
+        except Exception:
+            pass
+
+        # ------------------------------------------------------------------
         # Interior unlabeled door swings on inverted CAD floor-plan rasters
         # ------------------------------------------------------------------
         try:
