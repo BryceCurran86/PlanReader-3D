@@ -10,8 +10,10 @@ import pytest
 import pb_wall_finish_face_binding_authority as finish_binding_module
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_wall_finish_face_binding_authority import (
+    FINISH_BINDING_RECORD_INTEGRITY_FAILURE,
     FINISH_BINDING_TARGET_CONFLICT,
     FINISH_BINDING_UNAVAILABLE,
+    FINISH_SCOPE_RECORD_INTEGRITY_FAILURE,
     FINISH_SCOPE_PARTIAL,
     FINISH_SCOPE_UNIVERSE_UNAVAILABLE,
     FinishScopeStatus,
@@ -315,7 +317,7 @@ def test_direct_leader_and_filled_terminator_connectivity_positive() -> None:
     assert paths[0][0] == ("lead-a", "lead-b")
 
 
-def test_two_possible_physical_walls_abstain_as_ambiguous_ownership() -> None:
+def test_two_possible_physical_walls_are_explicit_conflict() -> None:
     lines = (
         _line("w1", "raw-w1", 4.0, 0.0, 4.0, 20.0),
         _line("w2", "raw-w2", 6.0, 0.0, 6.0, 20.0),
@@ -332,7 +334,7 @@ def test_two_possible_physical_walls_abstain_as_ambiguous_ownership() -> None:
     target, raw_hits, status = _target_from_terminator(_term(5.0, 10.0), lines, scope, 0.01)
     assert target is None
     assert raw_hits == ("raw-w1", "raw-w2")
-    assert status is EvidenceResolutionStatus.ABSTAINED
+    assert status is EvidenceResolutionStatus.CONFLICT
 
 
 def test_no_terminator_abstains_from_connectivity() -> None:
@@ -506,6 +508,24 @@ def test_public_record_and_authority_construction_is_sealed() -> None:
         replace(_binding(), _seal=None)
     with pytest.raises(TypeError, match="producer-owned"):
         WallFinishFaceBindingAuthority({})
+
+
+def test_replace_cannot_tamper_binding_payload_with_preserved_seal() -> None:
+    original = _binding()
+    with pytest.raises(ValueError, match=FINISH_BINDING_RECORD_INTEGRITY_FAILURE):
+        replace(original, physical_wall_id="forged-wall")
+
+
+def test_replace_cannot_tamper_scope_payload_with_preserved_seal() -> None:
+    scope = _partial_scope((_binding(),))
+    with pytest.raises(ValueError, match=FINISH_SCOPE_RECORD_INTEGRITY_FAILURE):
+        replace(scope, covered_face_ids=("forged-face",))
+
+
+def test_gable_external_role_is_semantically_exterior() -> None:
+    assert _semantic_face(
+        WallRoleClassification.GABLE, "externally"
+    ) is PhysicalFaceRole.EXTERIOR_FACE
 
 
 def test_stable_id_and_no_input_mutation() -> None:
