@@ -592,6 +592,37 @@ class GenericPlanReaderExtractor:
             return False
         return False
 
+    @staticmethod
+    def _memory_bounded_ocr_dpi(
+        page: fitz.Page,
+        *,
+        preferred_dpi: int = 120,
+        max_raster_pixels: int = 3_000_000,
+        minimum_dpi: int = 60,
+    ) -> int:
+        """Choose OCR DPI from page size while capping rendered pixel area.
+
+        A fixed DPI is unsafe for mixed drawing packages: an A3 sheet at
+        120 DPI is modest, while A1/A0 sheets can create multi-megapixel
+        rasters large enough to push a 512 MB worker over its limit.  The
+        cap is purely geometric and project-agnostic.  Small sheets keep the
+        preferred DPI; oversized sheets reduce DPI just enough to stay near
+        the same raster-pixel budget.
+        """
+        try:
+            rect = page.rect
+            area_points = float(rect.width) * float(rect.height)
+        except Exception:
+            return int(preferred_dpi)
+        if not math.isfinite(area_points) or area_points <= 0:
+            return int(preferred_dpi)
+        bounded = int(
+            math.floor(
+                72.0 * math.sqrt(float(max_raster_pixels) / area_points)
+            )
+        )
+        return max(int(minimum_dpi), min(int(preferred_dpi), bounded))
+
     def _ocr_text_for_page(self, page: fitz.Page, page_index: int) -> str:
         """Raster-OCR a page once and cache the concatenated line text."""
         cached = self._ocr_text_by_page.get(page_index)
@@ -600,9 +631,8 @@ class GenericPlanReaderExtractor:
         text = ""
         try:
             from pb_drawing_ocr_evidence_layer import DrawingOCREngine
-            # 120 DPI is sufficient for sparse drawing-note OCR while keeping
-            # the production Tesseract path inside the 512 MB deployment budget.
-            lines = DrawingOCREngine().recognize_page_rect(page, dpi=120)
+            dpi = self._memory_bounded_ocr_dpi(page)
+            lines = DrawingOCREngine().recognize_page_rect(page, dpi=dpi)
             text = "\n".join(str(line.get("text") or "") for line in lines)
         except Exception:
             text = ""
