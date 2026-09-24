@@ -1,0 +1,102 @@
+name: TEST-ONLY Lamu DPC Wall Network
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  trace:
+    if: startsWith(github.head_ref, 'diag/lamu-dpc-wall-network-current')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Trace source-owned wall candidates
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib, json, math, urllib.request
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateProducer,
+              PhysicalWallCandidateSelector,
+          )
+
+          url="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          expected="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Lamu-wall-network/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              data=r.read()
+          actual=hashlib.sha256(data).hexdigest()
+          if actual != expected:
+              raise SystemExit(f"source hash mismatch: {actual}")
+
+          source=SourceVisibilityProducer(
+              producer_method="lamu-dpc-wall-network-diagnostic",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="lamu-dpc-wall-network",
+              source_bytes=data,
+              source_locator="memory://lamu.pdf",
+              page_ids=("41","44"),
+          )
+          producer=PhysicalWallCandidateProducer.from_source_visibility_producer(
+              source,page_ids=("41","44")
+          )
+          authority=producer.authority()
+          out={}
+          for page_id in ("41","44"):
+              sel=PhysicalWallCandidateSelector(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  page_id=page_id,
+                  decision_scope_id=f"wall-source:page-{page_id}",
+              )
+              res=authority.resolve_scope(sel)
+              records=[]
+              total_metric=0.0
+              total_pt=0.0
+              for rec in res.records:
+                  w=rec.wall_candidate
+                  pts=list(w.centerline_pts)
+                  pt_len=0.0
+                  for a,b in zip(pts,pts[1:]):
+                      pt_len += math.hypot(b[0]-a[0],b[1]-a[1])
+                  total_pt += pt_len
+                  if w.length_m is not None:
+                      total_metric += float(w.length_m)
+                  records.append({
+                      "id":rec.wall_candidate_id,
+                      "representation":w.representation,
+                      "centerline_pts":pts,
+                      "length_pt":round(pt_len,4),
+                      "length_m":w.length_m,
+                      "thickness_m":w.thickness_m,
+                      "status":w.status.value,
+                      "confidence":w.confidence,
+                      "junction_types":[x.value for x in w.junction_types],
+                      "reason_codes":list(w.reason_codes),
+                  })
+              out[page_id]={
+                  "status":res.status.value,
+                  "scope_complete":res.scope_complete,
+                  "reason_codes":list(res.reason_codes),
+                  "record_count":len(records),
+                  "total_centerline_pt":round(total_pt,4),
+                  "total_length_m_when_resolved":round(total_metric,4),
+                  "records":records,
+              }
+          print("LAMU_DPC_WALL_NETWORK="+json.dumps(out,sort_keys=True),flush=True)
+          PY
