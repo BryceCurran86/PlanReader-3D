@@ -65,6 +65,7 @@ jobs:
                   "hallucinated":int(report.hallucinated_items),
               },
               "door_item":d1,
+              "items":[i.to_dict() for i in report.item_results],
               "hallucinated_results":[
                   i.to_dict() for i in report.item_results
                   if i.status.value=="hallucinated_item"
