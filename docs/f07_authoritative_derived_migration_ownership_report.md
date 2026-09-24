@@ -91,7 +91,7 @@ Add the smallest producer-owned migration adapter/seal without changing F.07 geo
    - Input: full page-level F.07 viewport set, selected viewport ID, document/source/revision ownership.
    - Validate the producer token/fingerprint.
    - Validate exact page/view identity.
-   - Validate the complete sibling set remains non-overlapping.
+   - For DERIVED authority, validate the complete sibling set remains non-overlapping. RESOLVED keeps its existing contract unchanged.
    - For DERIVED authority, call the existing `is_authoritative_derived_viewport` unchanged.
    - Preserve all requested F.07 provenance fields into `ViewportEvidence.metadata` for observability.
    - Return a separate sealed ownership proof object for authority decisions; do not trust metadata itself.
