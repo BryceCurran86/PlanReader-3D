@@ -502,7 +502,7 @@ def _target_from_terminator(
     target = targets[0]
     target_owned_raw_hits = tuple(
         sorted(
-            raw_hits
+            set(raw_hits)
             & set(target.physical_identity.source_primitive_ids)
         )
     )
@@ -688,7 +688,7 @@ class WallFinishFaceBindingProducer:
                             target, role_record = corroborated_targets[0]
                             source_segments = tuple(
                                 sorted(
-                                    raw_hits
+                                    set(raw_hits)
                                     & set(
                                         target.physical_identity.source_primitive_ids
                                     )
