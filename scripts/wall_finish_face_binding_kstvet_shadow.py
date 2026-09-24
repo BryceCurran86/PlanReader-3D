@@ -15,7 +15,14 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from pb_wall_finish_face_binding_authority import WallFinishFaceBindingProducer
+from pb_wall_finish_face_binding_authority import (
+    WallFinishFaceBindingProducer,
+    _authoritative_viewports,
+    _filled_terminators,
+    _leader_paths,
+    _page_visible_lines,
+    _trusted_finish_blocks,
+)
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 EXPECTED_SHA256 = "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
@@ -45,6 +52,86 @@ def run(pdf_path: Path) -> list[dict]:
         page_ids=(PAGE_ID,),
     )
     print("ITEM19B_STAGE ingest_page54_done", flush=True)
+    pdf = __import__("fitz").open(stream=payload, filetype="pdf")
+    try:
+        page = pdf.load_page(int(PAGE_ID) - 1)
+        blocks = _trusted_finish_blocks(source, published, PAGE_ID)
+        viewports = _authoritative_viewports(page, int(PAGE_ID))
+        lines = _page_visible_lines(source, published, PAGE_ID)
+        preflight = {
+            "trusted_finish_blocks": [
+                {
+                    "text": text,
+                    "annotation_observation_ids": list(annotation_ids),
+                    "bbox": list(annotation_bbox),
+                    "semantics": [
+                        {
+                            "trade_scope_id": semantic.trade_scope_id,
+                            "finish_material": semantic.finish_material,
+                            "direction": semantic.direction,
+                        }
+                        for semantic in semantics
+                    ],
+                }
+                for _, text, semantics, annotation_ids, annotation_bbox, _ in blocks
+            ],
+            "authoritative_viewports": [
+                {
+                    "view_id": viewport.view_id,
+                    "label": viewport.label,
+                    "status": viewport.status,
+                    "bbox": list(viewport.bounding_box) if viewport.bounding_box else None,
+                }
+                for viewport in viewports
+            ],
+            "native_visible_line_count": len(lines),
+            "callout_preflight": [],
+        }
+        from pb_viewport_segmentation import assign_bbox_to_viewport
+        for _, text, semantics, annotation_ids, annotation_bbox, text_height in blocks:
+            viewport = assign_bbox_to_viewport(annotation_bbox, viewports, allow_derived=True)
+            terms = _filled_terminators(page, text_height)
+            owned_lines = ()
+            owned_terms = ()
+            paths = ()
+            if viewport is not None and viewport.bounding_box is not None:
+                owned_lines = tuple(
+                    line for line in lines
+                    if all(
+                        viewport.bounding_box[0] <= point[0] <= viewport.bounding_box[2]
+                        and viewport.bounding_box[1] <= point[1] <= viewport.bounding_box[3]
+                        for point in (
+                            (line.geometry[0], line.geometry[1]),
+                            (line.geometry[2], line.geometry[3]),
+                        )
+                    )
+                )
+                owned_terms = tuple(
+                    term for term in terms
+                    if viewport.bounding_box[0] <= term.center[0] <= viewport.bounding_box[2]
+                    and viewport.bounding_box[1] <= term.center[1] <= viewport.bounding_box[3]
+                )
+                epsilon = max(1e-6, text_height * 0.08)
+                paths = _leader_paths(annotation_bbox, owned_lines, owned_terms, epsilon)
+            preflight["callout_preflight"].append(
+                {
+                    "text": text,
+                    "viewport_id": getattr(viewport, "view_id", None),
+                    "owned_line_count": len(owned_lines),
+                    "terminator_count": len(owned_terms),
+                    "leader_paths": [
+                        {
+                            "leader_path_ids": list(ids),
+                            "terminator_id": term.primitive_id,
+                            "terminator_bbox": list(term.bbox),
+                        }
+                        for ids, term in paths
+                    ],
+                }
+            )
+        print("ITEM19B_PREFLIGHT " + json.dumps(preflight, sort_keys=True), flush=True)
+    finally:
+        pdf.close()
     print("ITEM19B_STAGE finish_producer_start", flush=True)
     producer = WallFinishFaceBindingProducer.from_source_visibility_producer(
         source,
