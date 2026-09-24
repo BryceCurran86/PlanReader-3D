@@ -213,10 +213,27 @@ jobs:
                           continue
                       face_sep=abs((b.start_point[0]-a.start_point[0])*(-a.direction[1])+(b.start_point[1]-a.start_point[1])*a.direction[0])
                       gap_width=a.gap_end-a.gap_start
+                      def line_length(record):
+                          g=tuple(record.geometry or ())
+                          return ((float(g[2])-float(g[0]))**2+(float(g[3])-float(g[1]))**2)**0.5
+                      context_a=line_length(a.first)+line_length(a.second)
+                      context_b=line_length(b.first)+line_length(b.second)
+                      min_face_segment=min(
+                          line_length(a.first),line_length(a.second),
+                          line_length(b.first),line_length(b.second),
+                      )
                       return {
                           "face_sep":face_sep,
                           "gap_width":gap_width,
                           "ratio":gap_width/face_sep if face_sep>1e-9 else None,
+                          "context_a":context_a,
+                          "context_b":context_b,
+                          "min_face_segment":min_face_segment,
+                          "context_guard":gap_width <= context_a and gap_width <= context_b,
+                          "context_local_guard":(
+                              gap_width <= context_a and gap_width <= context_b
+                              and face_sep <= min_face_segment
+                          ),
                       }
               return None
 
@@ -244,6 +261,54 @@ jobs:
               if len(dim_samples[cls])<20:
                   dim_samples[cls].append({"candidate_id":cid,**{k:round(v,4) if isinstance(v,float) else v for k,v in dims.items()}})
 
+          strong_dims={}
+          for cid,cand in by_id.items():
+              if cand.structural_pattern=="jamb_bounded_two_face_interruption":
+                  strong_dims[cid]=candidate_dimensions(cand)
+
+          original_support_candidate_ids=set()
+          for oid,obs in floor_rows:
+              disp=physical.classify_disposition(selector(oid))
+              if disp.disposition=="opening_support":
+                  original_support_candidate_ids.update(disp.candidate_ids)
+
+          candidate_support_ids={
+              cid:set(cand.source_observation_ids)
+              for cid,cand in by_id.items()
+          }
+
+          filter_summaries={}
+          for guard_name in ("context_guard","context_local_guard"):
+              retained_ids=set()
+              rejected_strong=0
+              for cid,cand in by_id.items():
+                  if cand.structural_pattern!="jamb_bounded_two_face_interruption":
+                      retained_ids.add(cid)
+                      continue
+                  dims=strong_dims.get(cid)
+                  if dims is not None and dims.get(guard_name):
+                      retained_ids.add(cid)
+                  else:
+                      rejected_strong+=1
+
+              obs_members={}
+              for cid in retained_ids:
+                  for oid in candidate_support_ids[cid]:
+                      obs_members.setdefault(oid,[]).append(cid)
+              new_counts=Counter()
+              for oid,obs in floor_rows:
+                  n=len(obs_members.get(oid,()))
+                  new_counts["no_candidate" if n==0 else ("unique_candidate" if n==1 else "conflict")]+=1
+
+              filter_summaries[guard_name]={
+                  "retained_candidates":len(retained_ids),
+                  "rejected_strong_candidates":rejected_strong,
+                  "floor_dispositions_by_membership":dict(new_counts),
+                  "original_opening_support_candidates":len(original_support_candidate_ids),
+                  "original_opening_support_retained":len(original_support_candidate_ids & retained_ids),
+                  "original_opening_support_rejected":sorted(original_support_candidate_ids-retained_ids),
+              }
+
           def hist_rows(counter):
               return [{"key":str(k),"count":v} for k,v in sorted(counter.items(),key=lambda kv:(-kv[1],str(kv[0])))]
 
@@ -267,6 +332,7 @@ jobs:
               "candidate_face_separation_hist":{k:hist_rows(v)[:40] for k,v in sep_by_class.items()},
               "candidate_gap_ratio_hist":{k:hist_rows(v)[:40] for k,v in ratio_by_class.items()},
               "candidate_dimension_samples":dim_samples,
+              "filter_summaries":filter_summaries,
               "total_visible_candidates":len(candidates),
               "samples":samples,
           },sort_keys=True,default=str),flush=True)
