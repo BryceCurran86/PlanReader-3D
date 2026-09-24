@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   net-wall-real-source:
     if: startsWith(github.head_ref, 'diag/net-wall-858-kstvet-ghazi')
@@ -19,7 +23,7 @@ jobs:
       - name: Probe exact 858 live wall authority on real drawing pages
         run: |
           set -euo pipefail
-          PYTHONPATH=. python - <<'PY'
+          PYTHONPATH=. python - <<'PY' | tee /tmp/net_wall_858_real_source.txt
           import hashlib,json,urllib.request
           from pathlib import Path
           from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
@@ -65,3 +69,13 @@ jobs:
               }
           print("NET_WALL_858_REAL_SOURCE="+json.dumps(out,sort_keys=True,default=str),flush=True)
           PY
+
+      - name: Post diagnostic summary
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -f /tmp/net_wall_858_real_source.txt ]; then
+            gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body-file /tmp/net_wall_858_real_source.txt
+          fi
