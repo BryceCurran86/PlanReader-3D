@@ -45,3 +45,27 @@ def test_page_ocr_renders_grayscale_before_backend() -> None:
     assert seen["mode"] == "L"
     assert seen["size"][0] > 0
     assert seen["size"][1] > 0
+
+
+def test_memory_bounded_ocr_dpi_keeps_a3_at_preferred_resolution() -> None:
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=842.0, height=1191.0)
+        dpi = GenericPlanReaderExtractor._memory_bounded_ocr_dpi(page)
+    finally:
+        doc.close()
+
+    assert dpi == 120
+
+
+def test_memory_bounded_ocr_dpi_reduces_large_sheet_pixel_area() -> None:
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=1684.0, height=2384.0)
+        dpi = GenericPlanReaderExtractor._memory_bounded_ocr_dpi(page)
+    finally:
+        doc.close()
+
+    assert 60 <= dpi < 120
+    raster_pixels = 1684.0 * 2384.0 * (dpi / 72.0) ** 2
+    assert raster_pixels <= 3_100_000
