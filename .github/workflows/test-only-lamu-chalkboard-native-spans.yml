@@ -27,7 +27,6 @@ jobs:
           import hashlib, json, urllib.request
           from pathlib import Path
           import fitz
-          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
 
           url = "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
           expected_sha = "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
@@ -56,16 +55,10 @@ jobs:
                           "line_bbox": line.get("bbox"),
                           "spans":[{"text":s.get("text"),"bbox":s.get("bbox"),"size":s.get("size")} for s in spans],
                       })
-          predictions=GenericPlanReaderExtractor().extract_from_pdf(source)
-          relevant=[
-              p.to_dict() for p in predictions
-              if p.tag=="chalkboard" or "chalk" in p.description.lower() or "blackboard" in p.description.lower()
-          ]
           result={
               "source_sha256":actual,
               "page_text_lines":[ln for ln in text.splitlines() if any(k in ln.lower() for k in ("chalk","blackboard","black board","classroom"))],
               "native_hits":hits,
-              "prediction":relevant,
           }
           print("LAMU_CHALKBOARD_RESULT="+json.dumps(result,sort_keys=True),flush=True)
           PY
