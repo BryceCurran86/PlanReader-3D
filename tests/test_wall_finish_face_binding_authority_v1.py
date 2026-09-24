@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
+import fitz
 import pytest
 
+import pb_wall_finish_face_binding_authority as finish_binding_module
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_wall_finish_face_binding_authority import (
     FINISH_BINDING_TARGET_CONFLICT,
@@ -15,6 +18,7 @@ from pb_wall_finish_face_binding_authority import (
     PhysicalFaceRole,
     WallFinishCompleteScopeRecord,
     WallFinishFaceBindingAuthority,
+    WallFinishFaceBindingProducer,
     WallFinishFaceBindingRecord,
     WallFinishFaceBindingScopeResult,
     WallFinishFaceBindingScopeSelector,
@@ -28,6 +32,7 @@ from pb_wall_finish_face_binding_authority import (
     _semantic_face,
     _target_from_terminator,
 )
+from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_wall_role_authority import WallRoleClassification
 
 
@@ -61,6 +66,85 @@ def _transform_box(box, *, tx=0.0, ty=0.0, scale=1.0, quarter_turns=0):
     return (min(p[0] for p in pts), min(p[1] for p in pts), max(p[0] for p in pts), max(p[1] for p in pts))
 
 
+def _write_direct_finish_plan(
+    path: Path,
+    *,
+    note_gap: float = 0.0,
+    wall_gap: float = 0.0,
+) -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=300.0, height=200.0)
+    for first, second in (
+        ((50.0, 50.0), (250.0, 50.0)),
+        ((250.0, 50.0), (250.0, 150.0)),
+        ((250.0, 150.0), (50.0, 150.0)),
+        ((50.0, 150.0), (50.0, 50.0)),
+        ((150.0, 50.0), (150.0, 150.0)),
+    ):
+        page.draw_line(fitz.Point(*first), fitz.Point(*second), color=(0, 0, 0), width=1)
+
+    # Native finish annotation. With insert_text(), the first word begins at x=80
+    # and its source bbox spans the baseline y=100.
+    page.insert_text(
+        fitz.Point(80.0, 100.0),
+        "wall key to finish externally",
+        fontsize=8,
+        color=(0, 0, 0),
+    )
+
+    # Positive geometry is source contact, not a tolerance search. note_gap moves
+    # only the annotation-side endpoint; wall_gap moves the terminator off wall x=50.
+    terminator_center_x = 50.0 + wall_gap
+    radius = 2.0
+    leader_start_x = 80.0 - note_gap
+    leader_end_x = terminator_center_x + radius
+    page.draw_line(
+        fitz.Point(leader_start_x, 100.0),
+        fitz.Point(leader_end_x, 100.0),
+        color=(0, 0, 0),
+        width=0.5,
+    )
+    page.draw_circle(
+        fitz.Point(terminator_center_x, 100.0),
+        radius,
+        color=(0, 0, 0),
+        fill=(0, 0, 0),
+        width=0.5,
+    )
+    doc.save(path)
+    doc.close()
+
+
+def _run_direct_finish_plan(path: Path, monkeypatch):
+    source = SourceVisibilityProducer(
+        producer_method="item19b-e2e-test",
+        producer_version="1.0",
+    )
+    source.ingest_native_pdf_bytes(
+        document_id=f"test:{path.name}",
+        source_bytes=path.read_bytes(),
+        source_locator=str(path),
+    )
+    viewport = SimpleNamespace(
+        view_id="vp:test",
+        bounding_box=(0.0, 0.0, 300.0, 200.0),
+    )
+    monkeypatch.setattr(
+        finish_binding_module,
+        "_authoritative_viewports",
+        lambda page, page_number: (viewport,),
+    )
+    monkeypatch.setattr(
+        finish_binding_module,
+        "assign_bbox_to_viewport",
+        lambda bbox, viewports, allow_derived=True: viewport,
+    )
+    return WallFinishFaceBindingProducer.from_source_visibility_producer(
+        source,
+        page_ids=("1",),
+    )
+
+
 def _binding(**changes) -> WallFinishFaceBindingRecord:
     base = dict(
         binding_id="bind-1",
@@ -91,6 +175,87 @@ def _binding(**changes) -> WallFinishFaceBindingRecord:
     )
     base.update(changes)
     return WallFinishFaceBindingRecord(**base)
+
+
+def test_producer_end_to_end_binds_native_callout_to_exact_external_face(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "direct-finish-positive.pdf"
+    _write_direct_finish_plan(path)
+
+    producer = _run_direct_finish_plan(path, monkeypatch)
+    bindings = [
+        record
+        for result in producer.published_results()
+        for record in result.bindings
+    ]
+
+    assert bindings
+    assert all(record.status is EvidenceResolutionStatus.CORROBORATED for record in bindings)
+    assert any(
+        record.wall_role is WallRoleClassification.EXTERNAL
+        and record.physical_face_role is PhysicalFaceRole.EXTERIOR_FACE
+        and record.trade_scope_id == "external_key_pointing"
+        and record.finish_material == "key_pointing"
+        and record.decision_scope_complete is False
+        for record in bindings
+    )
+
+
+def test_producer_end_to_end_near_text_gap_abstains(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "direct-finish-note-gap.pdf"
+    # 0.005pt would have been accepted by the old epsilon-expanded path.
+    _write_direct_finish_plan(path, note_gap=0.005)
+
+    producer = _run_direct_finish_plan(path, monkeypatch)
+
+    assert not [
+        record
+        for result in producer.published_results()
+        for record in result.bindings
+    ]
+
+
+def test_producer_end_to_end_near_wall_gap_abstains(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "direct-finish-wall-gap.pdf"
+    # Circle radius is 2pt, so center x=52.005 leaves a 0.005pt gap to wall x=50.
+    _write_direct_finish_plan(path, wall_gap=2.005)
+
+    producer = _run_direct_finish_plan(path, monkeypatch)
+
+    assert not [
+        record
+        for result in producer.published_results()
+        for record in result.bindings
+    ]
+
+
+def test_producer_api_rejects_caller_both_faces(tmp_path: Path) -> None:
+    path = tmp_path / "direct-finish-both-faces.pdf"
+    _write_direct_finish_plan(path)
+    source = SourceVisibilityProducer(
+        producer_method="item19b-both-faces-rejection-test",
+        producer_version="1.0",
+    )
+    source.ingest_native_pdf_bytes(
+        document_id="test:both-faces",
+        source_bytes=path.read_bytes(),
+        source_locator=str(path),
+    )
+
+    with pytest.raises(TypeError):
+        WallFinishFaceBindingProducer.from_source_visibility_producer(
+            source,
+            page_ids=("1",),
+            both_faces=True,
+        )
 
 
 def test_direct_leader_and_filled_terminator_connectivity_positive() -> None:
