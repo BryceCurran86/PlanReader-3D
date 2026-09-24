@@ -42,5 +42,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lamu-native-dpc-sheets
-          path: /tmp/lamu-native/*.png
+          path: |
+            /tmp/lamu-native/*.png
+            /tmp/lamu.pdf
           if-no-files-found: error
