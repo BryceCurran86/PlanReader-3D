@@ -72,7 +72,7 @@ jobs:
           )
           out={
               "source_sha256":actual,
-              "production_candidate_sha":"a8207507d78f284ad60b10c305cdfe725b5dc6f2",
+              "production_candidate_sha":"f39c2f4ad2d674c702ec0437865e8a79b610bf6e",
               "totals":None if totals is None else {
                   "door_count":totals.door_count,
                   "door_types":list(totals.door_types),
