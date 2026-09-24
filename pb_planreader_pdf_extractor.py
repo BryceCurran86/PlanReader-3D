@@ -2787,15 +2787,43 @@ class GenericPlanReaderExtractor:
                 resolve_document_gable_roof_covering,
             )
 
-            # Discover building footprint dimensions from authenticated perimeter or floor
+            # Discover actual building footprint axes. A wall-area prediction's
+            # dimensions are [wall perimeter, wall height], not plan length/width,
+            # so they must never be reused as roof/gable footprint axes.
             _b_len_m: float | None = None
             _b_wid_m: float | None = None
-            for _p in pred_dict.values():
-                if _p.tag in ("perimeter_walling", "floor_screed") and _p.dimensions and len(_p.dimensions) >= 2:
-                    _d0, _d1 = float(_p.dimensions[0]), float(_p.dimensions[1])
+
+            _floor_pred = pred_dict.get("floor_screed")
+            if (
+                _floor_pred is not None
+                and _floor_pred.dimensions
+                and len(_floor_pred.dimensions) >= 2
+            ):
+                _d0 = float(_floor_pred.dimensions[0])
+                _d1 = float(_floor_pred.dimensions[1])
+                if _d0 > 0.0 and _d1 > 0.0:
                     _b_len_m = max(_d0, _d1)
                     _b_wid_m = min(_d0, _d1)
-                    break
+
+            # Fallback only to explicitly carried footprint metadata. Never
+            # reinterpret perimeter_walling.dimensions as plan axes.
+            if _b_len_m is None or _b_wid_m is None:
+                _wall_pred = pred_dict.get("perimeter_walling")
+                _wall_meta = (
+                    _wall_pred.metadata
+                    if _wall_pred is not None and isinstance(_wall_pred.metadata, dict)
+                    else {}
+                )
+                _footprint_dims = _wall_meta.get("footprint_dimensions_m")
+                if (
+                    isinstance(_footprint_dims, (list, tuple))
+                    and len(_footprint_dims) >= 2
+                ):
+                    _d0 = float(_footprint_dims[0])
+                    _d1 = float(_footprint_dims[1])
+                    if _d0 > 0.0 and _d1 > 0.0:
+                        _b_len_m = max(_d0, _d1)
+                        _b_wid_m = min(_d0, _d1)
 
             if _b_len_m is not None and _b_wid_m is not None and _b_wid_m <= _b_len_m:
                 _roof_meas = resolve_document_gable_roof_covering(
@@ -2805,6 +2833,70 @@ class GenericPlanReaderExtractor:
                     source_sha256=getattr(self, "source_sha256", "") or ("0" * 64),
                     target_pages=target_pages,
                 )
+
+                # A source-scaled structural gable span can legitimately align
+                # to the clear wall-face axis while the orthogonal ridge axis
+                # remains the gross building axis. When the initial gross-axis
+                # call can only use the legacy long-axis fallback, retry the
+                # two independently evidenced clear-axis substitutions and
+                # accept one only when exactly one produces a real scaled-span
+                # footprint-axis match. Ambiguity leaves the legacy result
+                # untouched.
+                if (
+                    _roof_meas.status.value == "corroborated"
+                    and _roof_meas.metadata.get("matched_footprint_axis")
+                    == "legacy_long_axis_fallback"
+                    and _floor_pred is not None
+                    and isinstance(_floor_pred.metadata, dict)
+                ):
+                    _clear_dims = _floor_pred.metadata.get("main_clear_dimensions_m")
+                    if (
+                        isinstance(_clear_dims, (list, tuple))
+                        and len(_clear_dims) >= 2
+                    ):
+                        try:
+                            _clear0 = float(_clear_dims[0])
+                            _clear1 = float(_clear_dims[1])
+                        except (TypeError, ValueError):
+                            _clear0 = _clear1 = 0.0
+
+                        if _clear0 > 0.0 and _clear1 > 0.0:
+                            _clear_len = max(_clear0, _clear1)
+                            _clear_wid = min(_clear0, _clear1)
+                            _axis_trials = []
+                            for _trial_len, _trial_wid in (
+                                (_clear_len, _b_wid_m),
+                                (_b_len_m, _clear_wid),
+                            ):
+                                if (
+                                    abs(_trial_len - _b_len_m) <= 1e-9
+                                    and abs(_trial_wid - _b_wid_m) <= 1e-9
+                                ):
+                                    continue
+                                _trial = resolve_document_gable_roof_covering(
+                                    doc,
+                                    building_length_m=_trial_len,
+                                    building_width_m=_trial_wid,
+                                    source_sha256=(
+                                        getattr(self, "source_sha256", "")
+                                        or ("0" * 64)
+                                    ),
+                                    target_pages=target_pages,
+                                )
+                                if (
+                                    _trial.status.value == "corroborated"
+                                    and _trial.metadata.get("matched_footprint_axis")
+                                    in {"length", "width"}
+                                    and _trial.metadata.get(
+                                        "scaled_structural_span_m"
+                                    )
+                                    is not None
+                                ):
+                                    _axis_trials.append(_trial)
+
+                            if len(_axis_trials) == 1:
+                                _roof_meas = _axis_trials[0]
+
                 self.roof_covering_shadow = {
                     "status": _roof_meas.status.value,
                     "reason_codes": list(_roof_meas.reason_codes),
@@ -2820,6 +2912,64 @@ class GenericPlanReaderExtractor:
                     ),
                 }
                 self.extraction_status["roof_covering_shadow"] = _roof_meas.status.value
+
+                # If the source-owned elevation geometry resolves a physically
+                # scaled gable span and uniquely matches one footprint axis,
+                # revise only the already-present legacy gable prediction.
+                # This prevents the historical width-axis assumption from
+                # selecting the wrong orthogonal dimension while preserving
+                # fail-closed behavior when span/axis ownership is ambiguous.
+                if (
+                    "gable_walling" in pred_dict
+                    and _roof_meas.status.value == "corroborated"
+                    and _roof_meas.pitch_deg is not None
+                    and _roof_meas.cross_ridge_span_m is not None
+                    and _roof_meas.gable_evidence is not None
+                    and _roof_meas.metadata.get("matched_footprint_axis")
+                    in {"length", "width"}
+                    and _roof_meas.metadata.get("scaled_structural_span_m")
+                    is not None
+                ):
+                    _gable_span_m = float(_roof_meas.cross_ridge_span_m)
+                    _gable_pitch_deg = float(_roof_meas.pitch_deg)
+                    _gable_h_m = (
+                        _gable_span_m
+                        / 2.0
+                        * math.tan(math.radians(_gable_pitch_deg))
+                    )
+                    _gable_area_m2 = round(_gable_span_m * _gable_h_m, 2)
+                    _gable_pred = pred_dict["gable_walling"]
+                    _gable_pred.quantity = _gable_area_m2
+                    _gable_pred.description = (
+                        "Gable walling (2 ends x "
+                        f"{_gable_span_m}m source-scaled structural span at "
+                        f"{_gable_pitch_deg} deg pitch)"
+                    )
+                    _gable_pred.dimensions = [
+                        _gable_span_m,
+                        round(_gable_h_m, 3),
+                    ]
+                    _gable_pred.confidence = max(_gable_pred.confidence, 0.9)
+                    _gable_pred.metadata.update(
+                        {
+                            "gable_span_authority": (
+                                "source_scaled_elevation_structural_endpoints"
+                            ),
+                            "matched_footprint_axis": _roof_meas.metadata.get(
+                                "matched_footprint_axis"
+                            ),
+                            "scaled_structural_span_m": _roof_meas.metadata.get(
+                                "scaled_structural_span_m"
+                            ),
+                            "source_scale_denominator": (
+                                _roof_meas.gable_evidence.source_scale_denominator
+                            ),
+                            "source_gable_viewport_id": (
+                                _roof_meas.gable_evidence.source_viewport_id
+                            ),
+                            "source_gable_page": _roof_meas.gable_evidence.source_page,
+                        }
+                    )
             else:
                 self.roof_covering_shadow = {
                     "status": "abstained",

@@ -130,6 +130,113 @@ def test_valid_asymmetric_verandah_extension_picks_farthest_post() -> None:
     assert abs(evidence.left_run_pt - far_run) < 0.1
 
 
+def test_paired_baseline_recovers_obscured_roof_wall_endpoint() -> None:
+    """A same-baseline support pair can corroborate an endpoint hidden below the roof ray."""
+    ax, ay = 500.0, 900.0
+    pitch_deg = 15.0
+    run = 100.0
+    expected_eave = ay + run * math.tan(math.radians(pitch_deg))
+
+    diagonals = [
+        d
+        for d in (
+            DiagonalSlopeSegment.from_endpoints(ax, ay, ax - run, expected_eave),
+            DiagonalSlopeSegment.from_endpoints(ax, ay, ax + run, expected_eave),
+        )
+        if d is not None
+    ]
+    shared_bottom = 1000.0
+    verticals = [
+        v
+        for v in (
+            VerticalSupportSegment.from_endpoints(
+                ax - run, expected_eave, ax - run, shared_bottom
+            ),
+            # Top is 8 pt below the exact roof ray, outside the strict 3.5 pt
+            # tolerance but still bounded relative to this real vertical.
+            VerticalSupportSegment.from_endpoints(
+                ax + run, expected_eave + 8.0, ax + run, shared_bottom
+            ),
+        )
+        if v is not None
+    ]
+
+    evidence, reasons = resolve_gable_apex_in_viewport(
+        diagonals,
+        verticals,
+        source_scale_denominator=75.0,
+    )
+    assert evidence is not None
+    assert "authenticated_gable_roofline_paired_baseline" in reasons
+    assert evidence.left_run_pt == pytest.approx(run, abs=0.1)
+    assert evidence.right_run_pt == pytest.approx(run, abs=0.1)
+    assert evidence.source_scale_denominator == 75.0
+
+
+def test_paired_baseline_rejects_mismatched_support_bottoms() -> None:
+    """Relaxed ray proximity alone is insufficient without a shared structural baseline."""
+    ax, ay = 500.0, 900.0
+    pitch_deg = 15.0
+    run = 100.0
+    expected_eave = ay + run * math.tan(math.radians(pitch_deg))
+
+    diagonals = [
+        d
+        for d in (
+            DiagonalSlopeSegment.from_endpoints(ax, ay, ax - run, expected_eave),
+            DiagonalSlopeSegment.from_endpoints(ax, ay, ax + run, expected_eave),
+        )
+        if d is not None
+    ]
+    verticals = [
+        v
+        for v in (
+            VerticalSupportSegment.from_endpoints(
+                ax - run, expected_eave, ax - run, 1000.0
+            ),
+            VerticalSupportSegment.from_endpoints(
+                ax + run, expected_eave + 8.0, ax + run, 1005.0
+            ),
+        )
+        if v is not None
+    ]
+
+    evidence, reasons = resolve_gable_apex_in_viewport(diagonals, verticals)
+    assert evidence is None
+    assert "missing_structural_endpoint_right" in reasons
+
+
+def test_source_scaled_gable_span_can_match_long_footprint_axis() -> None:
+    """Physical elevation span, not dimension ordering, selects the cross-ridge axis."""
+    diagonals, verticals = _make_symmetric_gable_segments(
+        pitch_deg=15.0,
+        run_pt=100.0,
+    )
+    evidence, _ = resolve_gable_apex_in_viewport(
+        diagonals,
+        verticals,
+        source_scale_denominator=75.0,
+    )
+    assert evidence is not None
+
+    # 200 pt at 1:75 is about 5.292 m, so it uniquely corroborates the
+    # 5.30 m footprint axis even though that axis is supplied as "length".
+    result = measure_source_roof_covering(
+        evidence,
+        building_length_m=5.30,
+        building_width_m=4.00,
+        source_sha256="scaled-span-test",
+    )
+    assert result.status == EvidenceResolutionStatus.CORROBORATED
+    assert result.cross_ridge_span_m == pytest.approx(5.30, abs=1e-6)
+    assert result.ridge_length_m == pytest.approx(4.00, abs=1e-6)
+    assert result.metadata.get("matched_footprint_axis") == "length"
+    assert result.metadata.get("scaled_structural_span_m") == pytest.approx(
+        5.291667,
+        abs=1e-5,
+    )
+
+
 def test_flat_roof_or_long_elevation_negative_abstains() -> None:
     """Longitudinal elevations or flat roofs have no opposing diagonals meeting at an apex."""
     diagonals: list[DiagonalSlopeSegment] = []
@@ -358,6 +465,42 @@ def test_real_source_gold_free_lamu_diagnostic() -> None:
         doc.close()
 
 
+def test_elevation_search_bbox_ignores_preceding_title_in_other_column() -> None:
+    """A closer title in another column must not clip this elevation's roof."""
+    from unittest.mock import MagicMock
+
+    from pb_source_roof_covering_authority import get_elevation_viewport_search_bbox
+
+    same_column_prev = MagicMock()
+    same_column_prev.view_id = "view_p1_mid_prev"
+    same_column_prev.title_bbox = (360.0, 300.0, 460.0, 320.0)
+    same_column_prev.boundary_source = "title_partition"
+    same_column_prev.bounding_box = (300.0, 0.0, 600.0, 360.0)
+
+    other_column_closer = MagicMock()
+    other_column_closer.view_id = "view_p1_right"
+    other_column_closer.title_bbox = (700.0, 650.0, 800.0, 690.0)
+    other_column_closer.boundary_source = "title_partition"
+    other_column_closer.bounding_box = (650.0, 500.0, 900.0, 710.0)
+
+    current = MagicMock()
+    current.view_id = "view_p1_mid"
+    current.title_bbox = (380.0, 700.0, 480.0, 720.0)
+    current.boundary_source = "title_partition"
+    current.bounding_box = (300.0, 500.0, 600.0, 800.0)
+
+    page_rect = MagicMock()
+    page_rect.width = 900.0
+    page_rect.height = 800.0
+
+    sbox = get_elevation_viewport_search_bbox(
+        current,
+        [same_column_prev, other_column_closer, current],
+        page_rect,
+    )
+    assert sbox == pytest.approx((300.0, 320.0, 600.0, 735.0))
+
+
 def test_extractor_roof_covering_shadow_initialization() -> None:
     """Verify that GenericPlanReaderExtractor initializes roof_covering_shadow properly."""
     from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
@@ -458,3 +601,59 @@ def test_extractor_roof_covering_shadow_end_to_end() -> None:
 
 
 
+
+
+def test_extractor_roof_footprint_prefers_floor_axes_over_wall_area_dimensions(
+    tmp_path, monkeypatch
+) -> None:
+    """Wall prediction dimensions are [perimeter,height], never roof footprint axes."""
+    import fitz
+    import pb_source_roof_covering_authority as roof_module
+    from pb_migration_contracts import EvidenceResolutionStatus
+    from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+    from pb_source_roof_covering_authority import SourceRoofCoveringMeasurement
+
+    doc = fitz.open()
+    page = doc.new_page(width=600, height=400)
+    page.insert_text((80, 80), "GROUND FLOOR PLAN", fontsize=11)
+    page.insert_text((80, 110), "10,150", fontsize=10)
+    page.insert_text((80, 130), "8,350", fontsize=10)
+    page.insert_text((80, 160), "15 degree roof pitch", fontsize=10)
+    pdf = tmp_path / "roof-footprint-axis.pdf"
+    doc.save(str(pdf))
+    doc.close()
+
+    seen = {}
+
+    def _fake_resolve(
+        _doc,
+        *,
+        building_length_m,
+        building_width_m,
+        source_sha256,
+        target_pages=None,
+    ):
+        seen["dims"] = (building_length_m, building_width_m)
+        return SourceRoofCoveringMeasurement(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            pitch_deg=None,
+            cross_ridge_span_m=None,
+            ridge_length_m=None,
+            slope_length_m=None,
+            roof_covering_area_m2=None,
+            gable_evidence=None,
+            quantity_evidence=None,
+            reason_codes=("synthetic_probe",),
+        )
+
+    monkeypatch.setattr(
+        roof_module,
+        "resolve_document_gable_roof_covering",
+        _fake_resolve,
+    )
+    GenericPlanReaderExtractor().extract_from_pdf(
+        pdf,
+        collect_item35_shadow=False,
+    )
+
+    assert seen["dims"] == pytest.approx((10.15, 8.35))
