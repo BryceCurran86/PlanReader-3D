@@ -66,7 +66,7 @@ jobs:
                   aspect=min(wp,hp)/max(wp,hp)
                   if aspect < 0.35:
                       continue
-                  if not (6.0<=area_pt2<=450.0):
+                  if not (50.0<=area_pt2<=450.0):
                       continue
                   if len(c)<20:
                       continue
