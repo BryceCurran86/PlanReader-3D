@@ -1,0 +1,71 @@
+name: TEST-ONLY Lamu Chalkboard Native Spans
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lamu-chalkboard:
+    if: startsWith(github.head_ref, 'diag/lamu-chalkboard-native-spans')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install diagnostic dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Inspect SHA-pinned Lamu chalkboard source evidence
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          from __future__ import annotations
+          import hashlib, json, urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+
+          url = "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          expected_sha = "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          req = urllib.request.Request(url, headers={"User-Agent":"PlanReader-Lamu-chalkboard-diagnostic/1.0"})
+          with urllib.request.urlopen(req, timeout=120) as r:
+              payload = r.read()
+          actual = hashlib.sha256(payload).hexdigest()
+          if actual != expected_sha:
+              raise SystemExit(f"source hash mismatch: {actual}")
+          source=Path("/tmp/lamu.pdf"); source.write_bytes(payload)
+
+          doc=fitz.open(source)
+          page=doc[40]
+          text=page.get_text("text")
+          text_dict=page.get_text("dict")
+          hits=[]
+          for block_i, block in enumerate(text_dict.get("blocks", [])):
+              for line_i, line in enumerate(block.get("lines", []) if isinstance(block, dict) else []):
+                  spans=line.get("spans", [])
+                  line_text=" | ".join(str(s.get("text","")) for s in spans)
+                  if any(k in line_text.lower() for k in ("chalk","blackboard","black board","classroom")):
+                      hits.append({
+                          "block": block_i,
+                          "line": line_i,
+                          "line_text": line_text,
+                          "line_bbox": line.get("bbox"),
+                          "spans":[{"text":s.get("text"),"bbox":s.get("bbox"),"size":s.get("size")} for s in spans],
+                      })
+          predictions=GenericPlanReaderExtractor().extract_from_pdf(source)
+          relevant=[
+              p.to_dict() for p in predictions
+              if p.tag=="chalkboard" or "chalk" in p.description.lower() or "blackboard" in p.description.lower()
+          ]
+          result={
+              "source_sha256":actual,
+              "page_text_lines":[ln for ln in text.splitlines() if any(k in ln.lower() for k in ("chalk","blackboard","black board","classroom"))],
+              "native_hits":hits,
+              "prediction":relevant,
+          }
+          print("LAMU_CHALKBOARD_RESULT="+json.dumps(result,sort_keys=True),flush=True)
+          PY
