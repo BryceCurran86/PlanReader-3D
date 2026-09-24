@@ -13,7 +13,9 @@ from pb_plan_opening_instance_marks import (
     _nms,
     _normalize_mark_token,
     package_documents_casement_windows,
+    package_documents_door_system,
     should_emit_casement_window_total,
+    should_emit_door_total,
 )
 from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
 from tests.benchmarks._ocr_backend import OCR_AVAILABLE
@@ -203,3 +205,105 @@ def test_untagged_casement_callouts_still_do_not_mint_identities(tmp_path: Path)
     assert "W2" not in preds
     assert "D1" not in preds
     assert "steel_casement_windows" not in preds
+
+
+def test_package_door_system_phrase_is_generic() -> None:
+    assert package_documents_door_system(["Flush doors with 3 nos. butt hinges"])
+    assert package_documents_door_system(["Double leaf casement doors"])
+    assert package_documents_door_system(["Supply and fix doors complete"])
+    assert package_documents_door_system(["Hardwood timber doors to architect's approval"])
+    assert not package_documents_door_system(["Steel casement frames with 4mm glass"])
+
+
+def test_typed_schedule_door_tags_block_aggregate_door_emission() -> None:
+    totals = PlanInstanceOpeningTotals(
+        window_count=0,
+        door_count=5,
+        window_types=(),
+        door_types=("D1", "D2"),
+        source_page=1,
+        evidence_text="D1, D2",
+    )
+    assert should_emit_door_total(totals, [])
+    # Typed door identity suppresses lumped door total
+    assert not should_emit_door_total(totals, ["D1"])
+    assert not should_emit_door_total(totals, ["D2"])
+    assert not should_emit_door_total(totals, ["doors_complete"])
+    # Existing window tags do NOT block door total emission
+    assert should_emit_door_total(totals, ["W1", "W2", "steel_casement_windows"])
+
+
+def test_door_system_does_not_block_window_emission() -> None:
+    totals = PlanInstanceOpeningTotals(
+        window_count=12,
+        door_count=5,
+        window_types=("W1", "W2"),
+        door_types=("D1", "D2"),
+        source_page=1,
+        evidence_text="W1, W2, D1, D2",
+    )
+    # Having door tags in pred_dict does NOT block window total emission
+    assert should_emit_casement_window_total(totals, ["D1", "D2", "doors_complete"])
+
+
+def test_extractor_emits_doors_complete_from_plan_instance_totals(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import pb_plan_opening_instance_marks as mod
+
+    fake_totals = PlanInstanceOpeningTotals(
+        window_count=0,
+        door_count=5,
+        window_types=(),
+        door_types=("D1", "D2"),
+        source_page=1,
+        evidence_text="D1, D2",
+    )
+    monkeypatch.setattr(mod, "extract_plan_instance_opening_totals", lambda doc, pages: fake_totals)
+
+    path = tmp_path / "plan_with_doors.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=842, height=595)
+    page.insert_text((40, 35), "GROUND FLOOR PLAN", fontsize=10)
+    page.insert_text((40, 50), "SCALE 1:100", fontsize=9)
+    page.insert_text((40, 80), "Flush doors complete with ironmongery", fontsize=9)
+    doc.save(path)
+    doc.close()
+
+    preds = {p.tag: p for p in GenericPlanReaderExtractor().extract_from_pdf(path)}
+    assert "doors_complete" in preds
+    assert preds["doors_complete"].quantity == 5.0
+    assert preds["doors_complete"].trade_type == "doors"
+    assert "D1" not in preds
+    assert "D2" not in preds
+
+
+def test_existing_typed_door_schedule_blocks_doors_complete_emission(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import pb_plan_opening_instance_marks as mod
+
+    fake_totals = PlanInstanceOpeningTotals(
+        window_count=0,
+        door_count=5,
+        window_types=(),
+        door_types=("D1", "D2"),
+        source_page=1,
+        evidence_text="D1, D2",
+    )
+    monkeypatch.setattr(mod, "extract_plan_instance_opening_totals", lambda doc, pages: fake_totals)
+
+    path = tmp_path / "plan_with_typed_doors.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=842, height=595)
+    page.insert_text((40, 35), "GROUND FLOOR PLAN", fontsize=10)
+    page.insert_text((40, 50), "SCALE 1:100", fontsize=9)
+    page.insert_text((40, 80), "Flush doors complete with ironmongery", fontsize=9)
+    page.insert_text((40, 110), "DOOR D1: 900 x 2100 - 3 No.", fontsize=9)
+    doc.save(path)
+    doc.close()
+
+    preds = {p.tag: p for p in GenericPlanReaderExtractor().extract_from_pdf(path)}
+    assert "doors_complete" not in preds
+
+
