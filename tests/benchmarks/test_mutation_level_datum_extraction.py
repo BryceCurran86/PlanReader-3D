@@ -5,6 +5,8 @@ Every value in this file is synthetic and invented for this test.
 """
 from __future__ import annotations
 
+import pytest
+
 from pb_dimension_graph_constraint_engine import ConstraintStatus, resolve_wall_height
 from pb_level_datum_extraction import find_level_markers
 
