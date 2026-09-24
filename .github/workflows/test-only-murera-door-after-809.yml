@@ -1,0 +1,107 @@
+name: TEST-ONLY Murera Door Recovery After 809
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-door-validation:
+    if: startsWith(github.head_ref, 'diag/murera-door-seeded-after-809')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Validate SHA-pinned Murera doors and benchmark
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          import fitz
+
+          from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
+          from pb_plan_opening_instance_marks import extract_plan_instance_opening_totals
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          source=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-door-809/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              source.write_bytes(r.read())
+          actual=hashlib.sha256(source.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(actual)
+
+          extractor=GenericPlanReaderExtractor()
+          doc=fitz.open(source)
+          try:
+              drawing_pages=[
+                  p for p in range(218,238)
+                  if extractor.is_drawing_page(doc[p].get_text("text"),doc[p])
+              ]
+              totals=extract_plan_instance_opening_totals(doc,drawing_pages)
+          finally:
+              doc.close()
+
+          predictions=extractor.extract_from_pdf(
+              source,
+              pages=list(range(218,238)),
+              collect_item35_shadow=False,
+          )
+          rows=[p.to_dict() for p in predictions]
+          engine=BenchmarkAccuracyEngine(
+              benchmarks_dir="benchmarks/public_tenders",
+              output_dir=Path("/tmp/murera-results"),
+          )
+          report=engine.evaluate_benchmark(
+              benchmark_id="tenders_ke_murera_science_lab",
+              pdf_path=source,
+              predictions=rows,
+              auto_extract=False,
+          )
+          out={
+              "source_sha256":actual,
+              "production_candidate_sha":"a8207507d78f284ad60b10c305cdfe725b5dc6f2",
+              "totals":None if totals is None else {
+                  "door_count":totals.door_count,
+                  "door_types":list(totals.door_types),
+                  "door_geometry_count":totals.door_geometry_count,
+                  "door_geometry_evidence":totals.door_geometry_evidence,
+                  "window_count":totals.window_count,
+                  "window_types":list(totals.window_types),
+                  "source_page":totals.source_page,
+                  "evidence_text":totals.evidence_text,
+              },
+              "opening_predictions":[
+                  r for r in rows
+                  if r.get("tag") in ("doors_complete","steel_casement_windows")
+              ],
+              "project":{
+                  "accepted":int(report.exact_matches+report.within_5_percent),
+                  "denominator":int(report.total_items_compared),
+                  "accuracy_percentage":report.overall_accuracy_percentage,
+                  "strict_exact_percentage":report.strict_exact_accuracy_percentage,
+                  "exact":int(report.exact_matches),
+                  "within_5":int(report.within_5_percent),
+                  "gross":int(report.gross_mismatches),
+                  "missed":int(report.missed_items),
+                  "hallucinated":int(report.hallucinated_items),
+              },
+              "items":[
+                  x.to_dict() for x in report.item_results
+                  if x.item_id in ("doors_complete","steel_casement_windows")
+              ],
+          }
+          print("MURERA_DOOR_AFTER_809="+json.dumps(out,sort_keys=True),flush=True)
+          PY
