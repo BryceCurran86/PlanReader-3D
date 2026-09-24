@@ -191,6 +191,59 @@ jobs:
                   "candidates":cand_rows,
               })
 
+          def candidate_dimensions(c):
+              support=[record_by_id.get(sid) for sid in c.source_observation_ids]
+              if any(r is None for r in support) or len(support)!=6:
+                  return None
+              bs=[]
+              for i,a in enumerate(support):
+                  for b in support[i+1:]:
+                      br=physical._PhysicalOpeningAuthority__noop if False else None
+                      from pb_physical_opening_authority import _face_break,_same_gap,_distinct_parallel_axes,_segment_matches
+                      x=_face_break(a,b)
+                      if x is not None:
+                          bs.append(x)
+              for i,a in enumerate(bs):
+                  for b in bs[i+1:]:
+                      if not _same_gap(a,b) or not _distinct_parallel_axes(a,b):
+                          continue
+                      left=[r for r in support if _segment_matches(r,a.start_point,b.start_point)]
+                      right=[r for r in support if _segment_matches(r,a.end_point,b.end_point)]
+                      if not left or not right:
+                          continue
+                      face_sep=abs((b.start_point[0]-a.start_point[0])*(-a.direction[1])+(b.start_point[1]-a.start_point[1])*a.direction[0])
+                      gap_width=a.gap_end-a.gap_start
+                      return {
+                          "face_sep":face_sep,
+                          "gap_width":gap_width,
+                          "ratio":gap_width/face_sep if face_sep>1e-9 else None,
+                      }
+              return None
+
+          candidate_dispositions={}
+          for oid,obs in floor_rows:
+              disp=physical.classify_disposition(selector(oid))
+              for cid in disp.candidate_ids:
+                  candidate_dispositions.setdefault(cid,set()).add(disp.disposition)
+
+          sep_by_class={}
+          ratio_by_class={}
+          dim_samples={}
+          for cid,cand in by_id.items():
+              dims=candidate_dimensions(cand)
+              if dims is None:
+                  continue
+              classes=candidate_dispositions.get(cid,{"unreferenced"})
+              cls="opening_support" if "opening_support" in classes else ("conflict" if "conflict" in classes else sorted(classes)[0])
+              sep=round(dims["face_sep"],3)
+              ratio=None if dims["ratio"] is None else round(dims["ratio"],3)
+              sep_by_class.setdefault(cls,Counter())[sep]+=1
+              if ratio is not None:
+                  ratio_by_class.setdefault(cls,Counter())[ratio]+=1
+              dim_samples.setdefault(cls,[])
+              if len(dim_samples[cls])<20:
+                  dim_samples[cls].append({"candidate_id":cid,**{k:round(v,4) if isinstance(v,float) else v for k,v in dims.items()}})
+
           def hist_rows(counter):
               return [{"key":str(k),"count":v} for k,v in sorted(counter.items(),key=lambda kv:(-kv[1],str(kv[0])))]
 
@@ -211,6 +264,9 @@ jobs:
               "candidate_count_hist":hist_rows(candidate_count_hist),
               "distinct_signature_hist":hist_rows(distinct_signature_hist),
               "pattern_multisets":hist_rows(pattern_multisets),
+              "candidate_face_separation_hist":{k:hist_rows(v)[:40] for k,v in sep_by_class.items()},
+              "candidate_gap_ratio_hist":{k:hist_rows(v)[:40] for k,v in ratio_by_class.items()},
+              "candidate_dimension_samples":dim_samples,
               "total_visible_candidates":len(candidates),
               "samples":samples,
           },sort_keys=True,default=str),flush=True)
