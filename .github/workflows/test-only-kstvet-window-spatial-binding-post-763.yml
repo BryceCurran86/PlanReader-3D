@@ -65,11 +65,35 @@ jobs:
           out={
               "source_sha256":actual,
               "production_sha":"65bbdb077333e376e2c0ee0cb6dd002afa28197c",
-              "pages":[]
+              "pages":[],
+              "source_wide_1200_window_context":[]
           }
 
           doc=fitz.open(source)
           try:
+              window_ctx_re=re.compile(r"(?i)(window|windows|casement|W\s*[-_/]?\s*\d)")
+              for pno_all in range(len(doc)):
+                  page_all=doc[pno_all]
+                  words_all=page_all.get_text("words") or []
+                  for i,w in enumerate(words_all):
+                      token=str(w[4]).replace(",","").strip()
+                      if token != "1200":
+                          continue
+                      block_no=int(w[5]) if len(w)>5 else -1
+                      line_no=int(w[6]) if len(w)>6 else -1
+                      context=[]
+                      for v in words_all:
+                          vb=int(v[5]) if len(v)>5 else -2
+                          vl=int(v[6]) if len(v)>6 else -99
+                          if vb == block_no and abs(vl-line_no) <= 3:
+                              context.append(str(v[4]))
+                      context_text=" ".join(context)
+                      if window_ctx_re.search(context_text):
+                          out["source_wide_1200_window_context"].append({
+                              "page":pno_all+1,
+                              "bbox":[float(w[0]),float(w[1]),float(w[2]),float(w[3])],
+                              "context":context_text,
+                          })
               for pno in (53,54):
                   page=doc[pno]
                   words=page.get_text("words") or []
