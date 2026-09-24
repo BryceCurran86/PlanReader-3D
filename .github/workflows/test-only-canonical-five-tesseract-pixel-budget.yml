@@ -1,0 +1,28 @@
+name: TEST-ONLY Canonical Five Tesseract Pixel Budget
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  canonical-five:
+    if: startsWith(github.head_ref, 'diag/canonical-five-tesseract-pixel-budget')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build exact production image
+        run: docker build -t planreader-canonical .
+
+      - name: Run five-project canonical benchmark under production memory cap
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --memory=512m \
+            --memory-swap=512m \
+            --cpus=1.0 \
+            planreader-canonical \
+            python scripts/diagnostic_canonical_five_tesseract.py \
+            | tee /tmp/canonical-five.txt
+          grep -q 'CANONICAL_FIVE_TESSERACT_RESULT=' /tmp/canonical-five.txt
