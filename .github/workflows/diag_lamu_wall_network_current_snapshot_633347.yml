@@ -1,0 +1,129 @@
+name: TEST-ONLY Lamu Wall Network Current Snapshot
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lamu-wall-network:
+    if: startsWith(github.head_ref, 'diag/lamu-wall-network-current-snapshot-633347')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Resolve page-41 wall network from producer current snapshot
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,math,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateProducer,
+              PhysicalWallCandidateSelector,
+          )
+          from pb_viewport_segmentation import segment_page_viewports,is_authoritative_derived_viewport
+
+          url="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          expected="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Lamu-wall-network-current-snapshot/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r: data=r.read()
+          actual=hashlib.sha256(data).hexdigest()
+          if actual!=expected: raise SystemExit(actual)
+
+          source=SourceVisibilityProducer(
+              producer_method="lamu-wall-network-current-snapshot",
+              producer_version="1",
+          )
+          initial=source.ingest_native_pdf_bytes(
+              document_id="lamu-wall-network-current-snapshot",
+              source_bytes=data,
+              source_locator="memory://lamu.pdf",
+              page_ids=("41",),
+          )
+          producer=PhysicalWallCandidateProducer.from_source_visibility_producer(
+              source,page_ids=("41",)
+          )
+          current=source.published_snapshot_for_revision(initial.revision.revision_id)
+          if current is None: raise SystemExit("current snapshot unavailable")
+          authority=producer.authority()
+          sel=PhysicalWallCandidateSelector(
+              document_id=current.revision.document_id,
+              revision_id=current.revision.revision_id,
+              source_sha256=current.revision.source_sha256,
+              snapshot_id=current.snapshot.snapshot_id,
+              page_id="41",
+              decision_scope_id="wall-source:page-41",
+          )
+          res=authority.resolve_scope(sel)
+
+          records=[]
+          for rec in res.records:
+              w=rec.wall_candidate
+              pts=[list(p) for p in w.centerline_pts]
+              pt_len=sum(
+                  math.hypot(b[0]-a[0],b[1]-a[1])
+                  for a,b in zip(w.centerline_pts,w.centerline_pts[1:])
+              )
+              records.append({
+                  "id":rec.wall_candidate_id,
+                  "representation":w.representation,
+                  "centerline_pts":pts,
+                  "length_pt":round(pt_len,4),
+                  "length_m":w.length_m,
+                  "thickness_m":w.thickness_m,
+                  "interior_exterior":w.interior_exterior,
+                  "status":w.status.value,
+                  "confidence":w.confidence,
+                  "junction_types":[x.value for x in w.junction_types],
+                  "face_a_segment_ids":list(w.face_a_segment_ids),
+                  "face_b_segment_ids":list(w.face_b_segment_ids or ()),
+                  "reason_codes":list(w.reason_codes),
+                  "identity":{
+                      "usable":rec.physical_identity.usable,
+                      "source_primitive_ids":list(rec.physical_identity.source_primitive_ids),
+                  },
+              })
+
+          doc=fitz.open(stream=data,filetype="pdf")
+          page=doc[40]
+          viewports=segment_page_viewports(page,page_number=41)
+          vp=[{
+              "id":v.view_id,"type":v.view_type,"label":v.label,"status":v.status,
+              "bbox":v.bounding_box,"scale":v.scale_denominator,
+              "boundary_source":v.boundary_source,
+              "authoritative_derived":is_authoritative_derived_viewport(v),
+          } for v in viewports]
+          doc.close()
+
+          print("LAMU_WALL_NETWORK_CURRENT="+json.dumps({
+              "production_sha":"633347965939aa4184d8edfc2330dd758601c1c9",
+              "source_sha256":actual,
+              "initial_snapshot":initial.snapshot.snapshot_id,
+              "current_snapshot":current.snapshot.snapshot_id,
+              "snapshot_advanced":initial.snapshot.snapshot_id!=current.snapshot.snapshot_id,
+              "coverage":{
+                  "state":current.coverage.state,
+                  "decoded_pages":list(current.coverage.decoded_pages),
+                  "failed_pages":list(current.coverage.failed_pages),
+              },
+              "scope":{
+                  "status":res.status.value,
+                  "scope_complete":res.scope_complete,
+                  "reason_codes":list(res.reason_codes),
+                  "record_count":len(records),
+                  "total_centerline_pt":round(sum(r["length_pt"] for r in records),4),
+              },
+              "viewports":vp,
+              "records":records,
+          },sort_keys=True,default=str),flush=True)
+          PY
