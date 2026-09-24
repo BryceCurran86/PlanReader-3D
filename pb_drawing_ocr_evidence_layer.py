@@ -155,7 +155,35 @@ class DrawingOCREngine:
                 })
             return out
 
-        # 2. Windows Media OCR (winocr) on Windows systems
+        # 2. Portable RapidOCR backend when its optional runtime is genuinely installed.
+        # This keeps the drawing layer aligned with pb_portable_raster_ocr_authority
+        # without claiming the backend exists on hosts that do not install it.
+        try:
+            from pb_portable_raster_ocr_authority import RapidOCRBackend
+
+            rapid_backend = RapidOCRBackend()
+            if rapid_backend.is_available():
+                rapid_lines = rapid_backend.extract_lines(image, dpi=150)
+                out = []
+                for line in rapid_lines:
+                    line_text = str(line.text or "").strip()
+                    if not line_text:
+                        continue
+                    bbox = list(line.bbox_px)
+                    confidence = line.confidence
+                    if confidence is None:
+                        confidence = 0.0
+                    out.append({
+                        "text": line_text,
+                        "bounding_box": bbox,
+                        "confidence": round(max(0.0, min(1.0, float(confidence))) * quality, 4),
+                    })
+                if out:
+                    return out
+        except Exception:
+            pass
+
+        # 3. Windows Media OCR (winocr) on Windows systems
         if _HAS_WINOCR and winocr is not None:
             try:
                 res = winocr.recognize_pil_sync(image, lang)
@@ -186,7 +214,7 @@ class DrawingOCREngine:
             except Exception:
                 pass
 
-        # 3. Tesseract fallback (Linux CI / Cloud Agent / any host with tesseract).
+        # 4. Tesseract fallback (Linux CI / Cloud Agent / any host with tesseract).
         tesseract_lines = self._recognize_with_tesseract(image, quality)
         if tesseract_lines:
             return tesseract_lines
