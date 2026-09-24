@@ -1,0 +1,173 @@
+name: TEST-ONLY Murera Foundation Raster Strips Post 783
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  foundation-raster-strips:
+    if: startsWith(github.head_ref, 'diag/murera-foundation-raster-strips-post-783')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Inspect Murera foundation raster strips and repeated support geometry
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,math,re,urllib.request
+          from collections import Counter,defaultdict
+          from pathlib import Path
+          import fitz
+          import cv2
+          import numpy as np
+
+          from pb_drawing_ocr_evidence_layer import DrawingOCREngine
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          source=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-foundation-raster-strips/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              source.write_bytes(r.read())
+          actual=hashlib.sha256(source.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(actual)
+
+          def rect_list(r):
+              return [round(float(r.x0),3),round(float(r.y0),3),round(float(r.x1),3),round(float(r.y1),3)]
+
+          engine=DrawingOCREngine()
+          doc=fitz.open(source)
+          out={}
+          try:
+              for page_num in (225,226):
+                  page=doc[page_num-1]
+                  image_rows=[]
+                  for img in page.get_images(full=True) or []:
+                      xref=int(img[0])
+                      rects=page.get_image_rects(xref) or []
+                      for idx,rect in enumerate(rects):
+                          area=float(rect.width*rect.height)
+                          ocr=[]
+                          if area > 200.0:
+                              try:
+                                  rows=engine.recognize_page_rect(page,clip_rect=rect,dpi=600)
+                                  for row in rows:
+                                      txt=str(row.get("text") or "").strip()
+                                      if not txt:
+                                          continue
+                                      if (
+                                          re.search(r"(?i)(pier|column|post|foundation|grid|layout|300|4500|science|lab|roof)",txt)
+                                          or re.search(r"(?<!\d)\d{3,5}(?!\d)",txt.replace(",",""))
+                                      ):
+                                          ocr.append({
+                                              "text":txt,
+                                              "bbox":row.get("bounding_box"),
+                                              "confidence":row.get("confidence"),
+                                          })
+                              except Exception as exc:
+                                  ocr=[{"error":repr(exc)}]
+                          image_rows.append({
+                              "xref":xref,
+                              "image_px":[int(img[2]),int(img[3])],
+                              "rect":rect_list(rect),
+                              "area_pt2":round(area,2),
+                              "ocr":ocr[:160],
+                          })
+
+                  # Vector rectangle/circle-like geometry census.  Keep physical
+                  # sizes/positions only; do not assume any expected count.
+                  vector_shapes=[]
+                  for di,d in enumerate(page.get_drawings() or []):
+                      for ii,it in enumerate(d.get("items",[]) or []):
+                          kind=it[0]
+                          if kind=="re":
+                              r=it[1]
+                              w,h=float(r.width),float(r.height)
+                              if 1.0<=w<=80.0 and 1.0<=h<=80.0:
+                                  vector_shapes.append({
+                                      "kind":"rect","bbox":rect_list(r),
+                                      "w":round(w,3),"h":round(h,3),
+                                      "aspect":round(w/h,3) if h else None,
+                                      "drawing":di,"item":ii,
+                                  })
+                          elif kind=="qu":
+                              q=it[1]
+                              try:
+                                  r=q.rect
+                                  w,h=float(r.width),float(r.height)
+                                  if 1.0<=w<=80.0 and 1.0<=h<=80.0:
+                                      vector_shapes.append({
+                                          "kind":"quad","bbox":rect_list(r),
+                                          "w":round(w,3),"h":round(h,3),
+                                          "aspect":round(w/h,3) if h else None,
+                                          "drawing":di,"item":ii,
+                                      })
+                              except Exception:
+                                  pass
+
+                  # Render page and detect small near-square dark contours. This
+                  # is diagnostic only; report raw candidates and size clusters.
+                  pix=page.get_pixmap(matrix=fitz.Matrix(3.0,3.0),alpha=False,colorspace=fitz.csGRAY)
+                  arr=np.frombuffer(pix.samples,dtype=np.uint8).reshape(pix.height,pix.width)
+                  _,bw=cv2.threshold(arr,180,255,cv2.THRESH_BINARY_INV)
+                  contours,_=cv2.findContours(bw,cv2.RETR_LIST,cv2.CHAIN_APPROX_SIMPLE)
+                  squares=[]
+                  sx=page.rect.width/pix.width
+                  sy=page.rect.height/pix.height
+                  for cnt in contours:
+                      x,y,w,h=cv2.boundingRect(cnt)
+                      if not (8<=w<=140 and 8<=h<=140):
+                          continue
+                      ar=w/h if h else 99
+                      if not 0.70<=ar<=1.30:
+                          continue
+                      area=cv2.contourArea(cnt)
+                      if area < 0.15*w*h:
+                          continue
+                      bbox=[round(x*sx,3),round(y*sy,3),round((x+w)*sx,3),round((y+h)*sy,3)]
+                      squares.append({
+                          "bbox":bbox,
+                          "w_pt":round(w*sx,3),"h_pt":round(h*sy,3),
+                          "fill_ratio":round(area/(w*h),3),
+                      })
+
+                  # Cluster near-square candidates by rounded physical size.
+                  size_groups=defaultdict(list)
+                  for s in squares:
+                      key=(round(s["w_pt"],1),round(s["h_pt"],1))
+                      size_groups[key].append(s)
+                  clusters=[
+                      {"size_pt":list(k),"count":len(v),"members":v[:60]}
+                      for k,v in size_groups.items() if len(v)>=3
+                  ]
+                  clusters.sort(key=lambda x:(-x["count"],x["size_pt"]))
+
+                  out[str(page_num)]={
+                      "page_rect":rect_list(page.rect),
+                      "image_placements":image_rows,
+                      "vector_shape_count":len(vector_shapes),
+                      "vector_shapes":vector_shapes[:300],
+                      "near_square_count":len(squares),
+                      "near_square_clusters":clusters[:50],
+                  }
+          finally:
+              doc.close()
+
+          print("MURERA_FOUNDATION_RASTER_STRIPS="+json.dumps({
+              "production_sha":"3ec1573c823e6ea1c09ec7ac96ae3c38d3a01728",
+              "source_sha256":actual,
+              "pages":out,
+          },sort_keys=True,default=str),flush=True)
+          PY
