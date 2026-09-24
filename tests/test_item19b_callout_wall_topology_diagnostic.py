@@ -129,4 +129,6 @@ def test_item19b_callout_geometry_topology_diagnostic(tmp_path: Path) -> None:
         "callout_resolved_roles": callout_resolved_roles,
     }
 
+    import json
+    print("ITEM19B_CALLOUT_TOPOLOGY_DIAGNOSTIC=" + json.dumps(diagnostic, sort_keys=True))
     assert False, diagnostic
