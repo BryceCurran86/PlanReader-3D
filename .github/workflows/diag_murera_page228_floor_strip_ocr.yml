@@ -43,6 +43,11 @@ jobs:
 
           doc=fitz.open(p)
           page=doc[227]
+          # Persist a visual render so the dimension bands can be inspected
+          # directly instead of inferred from noisy OCR strings.
+          pix=page.get_pixmap(matrix=fitz.Matrix(2.5,2.5),alpha=False)
+          pix.save("/tmp/murera-page228.png")
+
           strips=[]
           seen=set()
           for order,img in enumerate(page.get_images(full=True) or []):
@@ -53,7 +58,6 @@ jobs:
               raw=extracted["image"]
               pil=Image.open(io.BytesIO(raw)).convert("L")
               arr=np.array(pil)
-              # Upscale only the strip height; source width is already ~5k px.
               scaled=cv2.resize(arr,None,fx=1.5,fy=2.5,interpolation=cv2.INTER_CUBIC)
               variants={
                   "gray":scaled,
@@ -76,7 +80,6 @@ jobs:
                           ]
                           if nums or re.search(r"(?i)(floor|plan|lab|verand|dimension|overall|foundation|section|grid|wall)",line):
                               findings.append({"variant":vname,"psm":psm,"text":line,"nums":nums})
-              # dedupe exact text while preserving OCR mode provenance
               uniq=[]; texts=set()
               for row in findings:
                   key=row["text"].casefold()
@@ -99,3 +102,9 @@ jobs:
           },sort_keys=True,default=str),flush=True)
           doc.close()
           PY
+      - name: Upload page render
+        uses: actions/upload-artifact@v4
+        with:
+          name: murera-page228-render
+          path: /tmp/murera-page228.png
+          if-no-files-found: error
