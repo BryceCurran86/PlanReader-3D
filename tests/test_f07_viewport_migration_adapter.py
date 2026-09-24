@@ -581,7 +581,7 @@ def test_live_extractor_remains_unwired_to_new_shadow_ownership_path() -> None:
         ("viewport_id", "retargeted-view"),
         ("bbox", (1.0, 2.0, 301.0, 352.0)),
         ("title_bbox", (11.0, 12.0, 111.0, 132.0)),
-        ("view_type", DrawingViewType.ELEVATION.value),
+        ("view_type", "retargeted_view_type"),
         ("boundary_source", ViewportBoundarySource.VECTOR_FRAME.value),
         ("producer_fingerprint", "0" * 64),
         ("sibling_set_fingerprint", "1" * 64),
