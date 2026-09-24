@@ -20,6 +20,7 @@ from pb_viewport_segmentation import (
     extract_view_title_anchors,
     extract_vector_frames,
     calibrate_viewport_layout,
+    is_authoritative_derived_viewport,
     segment_page_viewports,
 )
 
@@ -43,7 +44,7 @@ def _floor_plans(viewports):
     return [v for v in viewports if v.view_type == DrawingViewType.FLOOR_PLAN.value]
 
 
-def test_kstvet_ground_floor_plan_stays_unframed_ambiguous() -> None:
+def test_kstvet_ground_floor_plan_uses_validated_columnar_title_grid() -> None:
     doc = fitz.open(str(_require(_KSTVET)))
     page = doc[53]
     viewports = segment_page_viewports(page, page_number=54)
@@ -51,9 +52,15 @@ def test_kstvet_ground_floor_plan_stays_unframed_ambiguous() -> None:
     assert len(plans) == 1
     plan = plans[0]
     assert plan.label.upper() == "GROUND FLOOR PLAN"
-    assert plan.status == ViewportSegmentationStatus.AMBIGUOUS.value
-    assert plan.bounding_box is None
-    assert authoritative_floor_plan_viewports(page, page_number=54) == []
+    assert plan.status == ViewportSegmentationStatus.DERIVED.value
+    assert plan.boundary_source == ViewportBoundarySource.TITLE_PARTITION.value
+    assert plan.bounding_box is not None
+    assert plan.provenance.get("partition_mode") == "columnar_title_grid"
+    assert plan.provenance.get("grid_validated") is True
+    assert is_authoritative_derived_viewport(plan)
+    authoritative = authoritative_floor_plan_viewports(page, page_number=54)
+    assert len(authoritative) == 1
+    assert authoritative[0].bounding_box == pytest.approx(plan.bounding_box)
     doc.close()
 
 
