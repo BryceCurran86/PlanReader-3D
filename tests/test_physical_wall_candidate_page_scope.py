@@ -100,3 +100,22 @@ def test_empty_page_scope_rejected_instead_of_falling_back_to_all_pages() -> Non
             source,
             page_ids=("", "  "),
         )
+
+
+def test_native_only_page_scope_skips_raster_augmentation() -> None:
+    source, published = _source()
+    with patch.object(
+        source,
+        "augment_with_raster_visible_segments",
+        wraps=source.augment_with_raster_visible_segments,
+    ) as augment:
+        authority = PhysicalWallCandidateProducer.from_source_visibility_producer(
+            source,
+            page_ids=("2",),
+            include_raster_fallback=False,
+        ).authority()
+
+    augment.assert_not_called()
+    page_two = authority.resolve_scope(_selector(published, "2"))
+    assert page_two.status is EvidenceResolutionStatus.CORROBORATED
+    assert page_two.records
