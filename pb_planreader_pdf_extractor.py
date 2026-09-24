@@ -2203,6 +2203,16 @@ class GenericPlanReaderExtractor:
             if has_casement_spec or has_door_spec:
                 totals = extract_plan_instance_opening_totals(doc, dwg_pages)
                 if totals is not None:
+                    # A D-tag-seeded chromatic swing repeat is self-authenticating
+                    # drawing evidence: OCR identifies the door system while the
+                    # same-page physical swing geometry supplies the missed count.
+                    # BOQ/spec text is still never consulted for this authority.
+                    has_seeded_door_geometry = bool(
+                        totals.door_geometry_count is not None
+                        and totals.door_geometry_count == totals.door_count
+                        and totals.door_geometry_evidence
+                        and totals.door_types
+                    )
                     if has_casement_spec and should_emit_casement_window_total(
                         totals, pred_dict.keys()
                     ):
@@ -2224,7 +2234,7 @@ class GenericPlanReaderExtractor:
                             },
                         )
 
-                    if has_door_spec and should_emit_door_total(
+                    if (has_door_spec or has_seeded_door_geometry) and should_emit_door_total(
                         totals, pred_dict.keys()
                     ):
                         pred_dict["doors_complete"] = ExtractedPrediction(
@@ -2239,8 +2249,14 @@ class GenericPlanReaderExtractor:
                             confidence=0.86,
                             source_page=totals.source_page,
                             metadata={
-                                "derivation": "plan_instance_opening_marks",
+                                "derivation": (
+                                    "plan_instance_marks_plus_seeded_swing_repeat"
+                                    if has_seeded_door_geometry
+                                    else "plan_instance_opening_marks"
+                                ),
                                 "door_types": list(totals.door_types),
+                                "door_geometry_count": totals.door_geometry_count,
+                                "door_geometry_evidence": totals.door_geometry_evidence,
                                 "raw_evidence_ref": totals.evidence_text,
                             },
                         )
