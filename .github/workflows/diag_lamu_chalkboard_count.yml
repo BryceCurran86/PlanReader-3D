@@ -1,0 +1,43 @@
+name: TEST-ONLY Lamu Chalkboard Count
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  chalkboard:
+    if: startsWith(github.head_ref, 'diag/lamu-dpc-internal-wall-census')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install -r requirements.txt
+      - run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          from pb_native_fixture_label_evidence import count_standalone_chalkboard_spans
+          u="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          want="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          p=Path("/tmp/lamu.pdf")
+          with urllib.request.urlopen(urllib.request.Request(u,headers={"User-Agent":"PlanReader-Lamu-chalkboard"}),timeout=120) as r:p.write_bytes(r.read())
+          got=hashlib.sha256(p.read_bytes()).hexdigest()
+          if got!=want: raise SystemExit(got)
+          d=fitz.open(p); page=d[40]
+          txt=page.get_text("text") or ""
+          ex=GenericPlanReaderExtractor()
+          line_count=ex._standalone_chalkboard_label_count(txt)
+          native_count=count_standalone_chalkboard_spans(page.get_text("dict"))
+          spans=[]
+          for b in page.get_text("dict").get("blocks",[]):
+            for l in b.get("lines",[]):
+              for s in l.get("spans",[]):
+                if "chalk" in str(s.get("text","")).lower() or "blackboard" in str(s.get("text","")).lower():
+                  spans.append({"text":s.get("text"),"bbox":s.get("bbox")})
+          d.close()
+          ex2=GenericPlanReaderExtractor()
+          preds=ex2.extract_from_pdf(p,pages=[40],collect_item35_shadow=False)
+          print("LAMU_CHALKBOARD_COUNT="+json.dumps({"sha":got,"line_count":line_count,"native_count":native_count,"spans":spans,"chalkboard_predictions":[x.to_dict() for x in preds if x.tag=="chalkboard"],"all_tags":[x.tag for x in preds]},sort_keys=True,default=str))
+          PY
