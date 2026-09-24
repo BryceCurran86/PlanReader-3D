@@ -44,6 +44,20 @@ jobs:
                   "scale":v.scale_denominator,"provenance":v.provenance,
               })
 
+          line_directions=[]
+          payload=page.get_text("dict") or {}
+          for block in payload.get("blocks",[]) or []:
+              for line in block.get("lines",[]) or []:
+                  spans=line.get("spans",[]) or []
+                  text_line=" ".join(str(s.get("text","")) for s in spans).strip()
+                  norm_line=text_line.replace(",","").replace(" ","")
+                  if any(t in norm_line for t in ("9850","10150","8350","8050","1800")):
+                      line_directions.append({
+                          "text":text_line,
+                          "dir":[round(float(line.get("dir",(1,0))[0]),4),round(float(line.get("dir",(1,0))[1]),4)],
+                          "bbox":[round(float(x),3) for x in line.get("bbox",(0,0,0,0))],
+                      })
+
           words=page.get_text("words") or []
           target_words=[]
           for w in words:
@@ -75,7 +89,8 @@ jobs:
           roof_lines=sorted(roof_lines,key=lambda r:-r["length_pt"])[:80]
 
           print("KSTVET_GABLE_AXIS="+json.dumps({
-              "sha":actual,"viewports":rows,"target_words":target_words,"roof_lines":roof_lines
+              "sha":actual,"viewports":rows,"target_words":target_words,
+              "dimension_line_directions":line_directions,"roof_lines":roof_lines
           },sort_keys=True),flush=True)
           doc.close()
           PY
