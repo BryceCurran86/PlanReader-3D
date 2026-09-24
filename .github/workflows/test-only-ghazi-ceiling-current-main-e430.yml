@@ -1,0 +1,67 @@
+name: TEST-ONLY Ghazi Ceiling Current Main E430
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ghazi-ceiling:
+    if: startsWith(github.head_ref, 'diag/ghazi-ceiling-current-main-e430')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Probe current Ghazi ceiling and score target
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
+
+          url="https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf"
+          expected="c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f"
+          p=Path("/tmp/ghazi.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Ghazi-ceiling-e430/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r: p.write_bytes(r.read())
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          if actual!=expected: raise SystemExit(actual)
+
+          ex=GenericPlanReaderExtractor()
+          preds=ex.extract_from_pdf(p,pages=[166],collect_item35_shadow=False)
+          ceiling=[x.to_dict() for x in preds if "ceiling" in x.tag.lower() or "ceiling" in x.description.lower()]
+
+          report=BenchmarkAccuracyEngine(
+              benchmarks_dir="benchmarks/public_tenders",
+              output_dir="/tmp/ghazi-ceiling-e430",
+          ).evaluate_benchmark(
+              benchmark_id="tenders_ke_ghazi_science_lab",
+              pdf_path=p,
+              auto_extract=True,
+          )
+          target=next((x.to_dict() for x in report.item_results if x.item_id=="GZ-E8-H"),None)
+          print("GHAZI_CEILING_CURRENT_MAIN_E430="+json.dumps({
+              "production_sha":"e430fde9f8e0b6a47a6be2d02d7dafee397dcd8f",
+              "source_sha256":actual,
+              "ceiling_lining_live":ex.ceiling_lining_live,
+              "extraction_status":ex.extraction_status,
+              "ceiling_predictions":ceiling,
+              "target":target,
+              "project":{
+                  "accepted":int(report.exact_matches+report.within_5_percent),
+                  "denominator":int(report.total_items_compared),
+                  "accuracy_percentage":report.overall_accuracy_percentage,
+                  "strict_exact_percentage":report.strict_exact_accuracy_percentage,
+                  "hallucinated":int(report.hallucinated_items),
+              },
+          },sort_keys=True,default=str),flush=True)
+          PY
