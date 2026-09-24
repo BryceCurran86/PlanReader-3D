@@ -717,30 +717,47 @@ def get_elevation_viewport_search_bbox(
 
     _tx0, ty0, _tx1, ty1 = vp.title_bbox
 
-    # Preceding elements strictly above ty0:
-    prev_bottom = 0.0
-    for other in all_page_viewports:
-        if getattr(other, "view_id", None) == getattr(vp, "view_id", None):
-            continue
-        other_tb = getattr(other, "title_bbox", None)
-        if other_tb and ty0 > other_tb[3] > prev_bottom:
-            prev_bottom = float(other_tb[3])
-        if (
-            getattr(other, "boundary_source", None) == "vector_frame"
-            and getattr(other, "bounding_box", None)
-            and ty0 > other.bounding_box[3] > prev_bottom
-        ):
-            prev_bottom = float(other.bounding_box[3])
-
-    y_top = max(0.0, prev_bottom)
-    y_bottom = min(page_h, ty1 + 15.0)
-
+    # Establish this elevation's horizontal ownership band before looking for
+    # the preceding title. On multi-column sheets a closer title in another
+    # column must never clip away the current elevation's roof/wall geometry.
     if getattr(vp, "bounding_box", None):
         x_left = float(vp.bounding_box[0])
         x_right = float(vp.bounding_box[2])
     else:
         x_left = 0.0
         x_right = page_w
+
+    def _same_horizontal_column(bbox: Sequence[float]) -> bool:
+        if len(bbox) < 4:
+            return False
+        center_x = (float(bbox[0]) + float(bbox[2])) / 2.0
+        return x_left <= center_x <= x_right
+
+    # Preceding elements strictly above ty0 AND inside the same horizontal
+    # ownership band. TITLE_PARTITION edges remain ownership evidence only;
+    # they are not treated as physical drawing boundaries.
+    prev_bottom = 0.0
+    for other in all_page_viewports:
+        if getattr(other, "view_id", None) == getattr(vp, "view_id", None):
+            continue
+        other_tb = getattr(other, "title_bbox", None)
+        if (
+            other_tb
+            and _same_horizontal_column(other_tb)
+            and ty0 > other_tb[3] > prev_bottom
+        ):
+            prev_bottom = float(other_tb[3])
+        other_bbox = getattr(other, "bounding_box", None)
+        if (
+            getattr(other, "boundary_source", None) == "vector_frame"
+            and other_bbox
+            and _same_horizontal_column(other_bbox)
+            and ty0 > other_bbox[3] > prev_bottom
+        ):
+            prev_bottom = float(other_bbox[3])
+
+    y_top = max(0.0, prev_bottom)
+    y_bottom = min(page_h, ty1 + 15.0)
 
     return (x_left, y_top, x_right, y_bottom)
 
