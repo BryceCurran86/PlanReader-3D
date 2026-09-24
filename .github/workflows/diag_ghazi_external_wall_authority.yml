@@ -41,7 +41,7 @@ jobs:
           if actual!=expected:raise SystemExit(actual)
 
           ex=GenericPlanReaderExtractor()
-          preds=ex.extract_from_pdf(p,collect_item35_shadow=False)
+          preds=ex.extract_from_pdf(p,pages=[166,167,168],collect_item35_shadow=False)
           openings=[x.to_dict() for x in preds if x.tag in {"W1","D1","D2"}]
           walls=[x.to_dict() for x in preds if x.tag in {"perimeter_walling","internal_walling","internal_plaster","internal_paint","gable_walling"}]
 
