@@ -1,0 +1,112 @@
+name: TEST-ONLY Murera All Elevation Vent Authority Post 783
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-vent-authority:
+    if: startsWith(github.head_ref, 'diag/murera-all-elevation-vent-authority-post-783')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Probe all Murera elevation sheets for vent authority
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,re,urllib.request
+          from pathlib import Path
+          import fitz
+
+          from pb_drawing_ocr_evidence_layer import DrawingOCREngine
+          from pb_elevation_vector_vent_extractor import (
+              _extract_candidate_vector_symbols,
+              extract_elevation_vector_vents,
+              extract_verified_pv_callouts,
+              learn_vector_vent_signature,
+          )
+          from pb_viewport_segmentation import segment_page_viewports
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          source=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-all-vent-authority/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              source.write_bytes(r.read())
+          actual=hashlib.sha256(source.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(actual)
+
+          engine=DrawingOCREngine()
+          out=[]
+          doc=fitz.open(source)
+          try:
+              for page_num in range(219,224):
+                  page=doc[page_num-1]
+                  native=page.get_text("text") or ""
+                  words=page.get_text("words") or []
+                  native_pv=[
+                      {
+                          "text":str(w[4]),
+                          "bbox":[float(w[0]),float(w[1]),float(w[2]),float(w[3])],
+                          "block":int(w[5]),"line":int(w[6]),"word":int(w[7]),
+                      }
+                      for w in words
+                      if re.fullmatch(r"(?i)P\.?V\.?",str(w[4]).strip().rstrip(".,:;"))
+                  ]
+                  labels=extract_verified_pv_callouts(page)
+                  candidates=_extract_candidate_vector_symbols(page)
+                  sig=learn_vector_vent_signature(candidates,labels)
+                  viewports=segment_page_viewports(page,page_number=page_num)
+                  result=extract_elevation_vector_vents(page,page_num=page_num)
+
+                  ocr_rows=engine.recognize_page_rect(page,dpi=400)
+                  ocr_pv=[
+                      {
+                          "text":str(r.get("text") or ""),
+                          "bbox":r.get("bounding_box"),
+                          "confidence":r.get("confidence"),
+                      }
+                      for r in ocr_rows
+                      if re.search(r"(?i)(?:^|[^A-Z])P\.?\s*V\.?(?:[^A-Z]|$)|permanent\s+vent|brick\s+vent",
+                                   str(r.get("text") or ""))
+                      and not re.search(r"(?i)P\.?\s*V\.?\s+denotes",str(r.get("text") or ""))
+                  ]
+
+                  out.append({
+                      "page":page_num,
+                      "native_title_lines":[ln.strip() for ln in native.splitlines() if ln.strip() and re.search(r"(?i)(elevation|section|floor|plan)",ln)][:40],
+                      "native_pv":native_pv,
+                      "verified_labels":labels,
+                      "candidate_count":len(candidates),
+                      "signature":None if sig is None else sig.__dict__,
+                      "viewports":[v.__dict__ for v in viewports],
+                      "ocr_pv":ocr_pv,
+                      "result":None if result is None else {
+                          "quantity":result.quantity,
+                          "evidence_text":result.evidence_text,
+                          "labeled_callout_count":result.labeled_callout_count,
+                          "unlabeled_vector_count":result.unlabeled_vector_count,
+                          "is_vector_augmented":result.is_vector_augmented,
+                          "metadata":result.metadata,
+                      },
+                  })
+          finally:
+              doc.close()
+          print("MURERA_ALL_ELEVATION_VENT_AUTHORITY="+json.dumps({
+              "production_sha":"3ec1573c823e6ea1c09ec7ac96ae3c38d3a01728",
+              "source_sha256":actual,
+              "pages":out,
+          },sort_keys=True,default=str),flush=True)
+          PY
