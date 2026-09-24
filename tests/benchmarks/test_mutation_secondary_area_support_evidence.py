@@ -181,3 +181,87 @@ def test_document_resolution_rejects_conflicting_building_counts() -> None:
         support_text="100mm steel poles",
     )
     assert resolve_document_secondary_area_support_evidence([first, second]) is None
+
+
+def _physical_support_page(
+    *,
+    centers: tuple[float, ...] = (160.0, 260.0, 360.0, 460.0),
+    include_zone: bool = True,
+    include_noise_circle: bool = False,
+) -> fitz.Document:
+    """One figured bay row plus independently drawn physical support glyphs."""
+    doc = fitz.open()
+    page = doc.new_page(width=842, height=595)
+    page.insert_text((72, 72), "GROUND FLOOR PLAN", fontsize=10)
+    if include_zone:
+        page.insert_text((275, 226), "VERANDAH", fontsize=10)
+
+    # Three equal figured bays. Text starts are chosen so the dimension-word
+    # centres sit at the physical pair midpoints (210, 310, 410).
+    for x in (198.0, 298.0, 398.0):
+        page.insert_text((x, 275), "2,500", fontsize=8)
+
+    for x in centers:
+        page.draw_rect(
+            fitz.Rect(x - 2.0, 248.0, x + 2.0, 252.0),
+            color=(0.4, 0.4, 0.4),
+            fill=(0.8, 0.8, 0.8),
+            width=0.5,
+        )
+
+    if include_noise_circle:
+        # A grid/legend-like circular symbol must not become a support.
+        page.draw_circle(
+            fitz.Point(310, 250),
+            10,
+            color=(0.0, 0.0, 0.0),
+            fill=(0.8, 0.8, 0.8),
+            width=0.5,
+        )
+    return _reopen(doc)
+
+
+def test_one_bay_chain_plus_complete_physical_support_row_resolves() -> None:
+    evidence = _resolve(_physical_support_page())
+    assert evidence is not None
+    assert evidence.zone_type == "verandah"
+    assert evidence.support_kind == "physical_support"
+    assert evidence.evidence_mode == "physical_symbol"
+    assert evidence.bay_count == 3
+    assert evidence.support_count == 4
+    assert evidence.bay_spans_m == (2.5, 2.5, 2.5)
+    assert len(evidence.support_symbol_ids) == 4
+    assert len(evidence.chain_ids) == 1
+
+
+def test_physical_support_path_requires_complete_n_plus_one_instance_row() -> None:
+    assert _resolve(
+        _physical_support_page(centers=(160.0, 260.0, 360.0))
+    ) is None
+
+
+def test_physical_support_path_rejects_extra_ambiguous_instance() -> None:
+    assert _resolve(
+        _physical_support_page(
+            centers=(160.0, 260.0, 310.0, 360.0, 460.0)
+        )
+    ) is None
+
+
+def test_physical_support_path_rejects_spacing_that_disagrees_with_figured_bays() -> None:
+    assert _resolve(
+        _physical_support_page(
+            centers=(160.0, 245.0, 365.0, 460.0)
+        )
+    ) is None
+
+
+def test_physical_support_path_requires_named_secondary_zone() -> None:
+    assert _resolve(_physical_support_page(include_zone=False)) is None
+
+
+def test_circular_grid_noise_does_not_change_physical_support_count() -> None:
+    evidence = _resolve(_physical_support_page(include_noise_circle=True))
+    assert evidence is not None
+    assert evidence.support_count == 4
+    assert len(evidence.support_symbol_ids) == 4
