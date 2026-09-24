@@ -48,6 +48,10 @@ from pb_migration_contracts import (
     stable_contract_id,
 )
 from pb_migration_provider_envelope import ProviderContext
+from pb_viewport_migration_adapter import (
+    F07ViewportOwnershipProof,
+    verify_f07_viewport_ownership_proof,
+)
 from pb_page_scale_calibration_authority import (
     POINTS_PER_METRE_AT_1_1,
     ScaleCalibrationStatus,
@@ -209,6 +213,7 @@ def _scope_blockers(
     scope: FiguredSpanScaleScope,
     context: ProviderContext,
     viewport: ViewportEvidence,
+    viewport_ownership_proof: Optional[F07ViewportOwnershipProof] = None,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
     if scope.document_id != context.document_id:
@@ -238,7 +243,19 @@ def _scope_blockers(
     mapped = context.page_for_viewport(scope.viewport_id)
     if mapped is None or int(mapped) != int(scope.page_no):
         reasons.append("viewport_page_ownership_missing")
-    if viewport.status is not ViewportResolutionStatus.RESOLVED:
+    if viewport.status is ViewportResolutionStatus.RESOLVED:
+        pass
+    elif viewport.status is ViewportResolutionStatus.DERIVED:
+        proof_reasons = verify_f07_viewport_ownership_proof(
+            viewport_ownership_proof,
+            viewport=viewport,
+            context=context,
+            page_no=scope.page_no,
+        )
+        if proof_reasons:
+            reasons.extend(proof_reasons)
+            reasons.append("viewport_not_resolved")
+    else:
         reasons.append("viewport_not_resolved")
     if viewport.view_type in _NON_DRAWING_VIEW_TYPES:
         reasons.append("viewport_not_scale_bearing_drawing")
@@ -634,6 +651,7 @@ def resolve_figured_span_scale_shadow(
     scope: FiguredSpanScaleScope,
     context: ProviderContext,
     viewport: ViewportEvidence,
+    viewport_ownership_proof: Optional[F07ViewportOwnershipProof] = None,
 ) -> FiguredSpanScaleShadowResult:
     """Derive physical-scale evidence without minting canonical scale authority."""
     if type(bundle) is not DimensionEvidenceBundle:
@@ -645,7 +663,12 @@ def resolve_figured_span_scale_shadow(
     if type(viewport) is not ViewportEvidence:
         raise TypeError("viewport must be ViewportEvidence")
 
-    scope_reasons = _scope_blockers(scope=scope, context=context, viewport=viewport)
+    scope_reasons = _scope_blockers(
+        scope=scope,
+        context=context,
+        viewport=viewport,
+        viewport_ownership_proof=viewport_ownership_proof,
+    )
     if scope_reasons:
         return FiguredSpanScaleShadowResult(
             status=EvidenceResolutionStatus.ABSTAINED,
@@ -743,6 +766,7 @@ def build_figured_span_scale_calibration_shadow(
     scope: FiguredSpanScaleScope,
     context: ProviderContext,
     viewport: ViewportEvidence,
+    viewport_ownership_proof: Optional[F07ViewportOwnershipProof] = None,
 ) -> FiguredSpanScaleCalibrationBridgeResult:
     """Route CORROBORATED figured-span evidence through canonical scale authority.
 
@@ -750,7 +774,12 @@ def build_figured_span_scale_calibration_shadow(
     neither rewrites source type nor upgrades the authority returned by the
     canonical resolver.
     """
-    scope_reasons = _scope_blockers(scope=scope, context=context, viewport=viewport)
+    scope_reasons = _scope_blockers(
+        scope=scope,
+        context=context,
+        viewport=viewport,
+        viewport_ownership_proof=viewport_ownership_proof,
+    )
     if (
         physical_scale_result.scope != scope
         or scope_reasons

@@ -28,6 +28,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import hashlib
+import json
 import re
 import statistics
 from typing import Any, Iterable, Optional, Sequence
@@ -74,6 +76,8 @@ class SegmentedViewport:
     scale_conflict: bool = False
     notes: list[str] = field(default_factory=list)
     provenance: dict[str, Any] = field(default_factory=dict)
+    _producer_token: Any = field(default=None, repr=False, compare=False)
+    _producer_fingerprint: str = field(default="", repr=False, compare=False)
 
     def to_drawing_view_region(self) -> DrawingViewRegion:
         return DrawingViewRegion(
@@ -110,6 +114,76 @@ _TITLE_HORIZONTAL_OVERLAP_FRACTION = 0.5
 _NESTED_BAND_SPAN_FRACTION = 0.35
 _TITLE_BLOCK_AREA_FRACTION = 0.20
 _TABLE_CELL_COUNT = 8
+
+# Private in-process producer token. Migration authority must not be minted from
+# caller-copied provenance dictionaries. Only segment_page_viewports stamps this
+# token after F.07 has completed ownership resolution for the whole page.
+_SEGMENT_PAGE_VIEWPORTS_PRODUCER_TOKEN = object()
+
+
+def _producer_fingerprint_payload(viewport: SegmentedViewport) -> dict[str, Any]:
+    return {
+        "view_id": str(viewport.view_id),
+        "page_number": int(viewport.page_number),
+        "view_type": str(viewport.view_type),
+        "label": str(viewport.label),
+        "title_bbox": tuple(float(v) for v in viewport.title_bbox),
+        "bounding_box": (
+            None
+            if viewport.bounding_box is None
+            else tuple(float(v) for v in viewport.bounding_box)
+        ),
+        "status": str(viewport.status),
+        "boundary_source": str(viewport.boundary_source),
+        "confidence": float(viewport.confidence),
+        "scale_raw": viewport.scale_raw,
+        "scale_denominator": viewport.scale_denominator,
+        "scale_conflict": bool(viewport.scale_conflict),
+        "notes": list(viewport.notes),
+        "provenance": dict(viewport.provenance),
+    }
+
+
+def segmented_viewport_producer_fingerprint(viewport: SegmentedViewport) -> str:
+    """Stable fingerprint of the exact F.07 ownership record.
+
+    This is an integrity fingerprint, not an authority token. Authority also
+    requires the private producer token stamped by segment_page_viewports.
+    """
+    if not isinstance(viewport, SegmentedViewport):
+        raise TypeError("viewport must be SegmentedViewport")
+    canonical = json.dumps(
+        _producer_fingerprint_payload(viewport),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def is_segment_page_viewports_product(viewport: Any) -> bool:
+    """True only for an unmodified viewport stamped by segment_page_viewports."""
+    if not isinstance(viewport, SegmentedViewport):
+        return False
+    if getattr(viewport, "_producer_token", None) is not _SEGMENT_PAGE_VIEWPORTS_PRODUCER_TOKEN:
+        return False
+    fingerprint = str(getattr(viewport, "_producer_fingerprint", "") or "")
+    return bool(
+        fingerprint
+        and fingerprint == segmented_viewport_producer_fingerprint(viewport)
+    )
+
+
+def _stamp_segment_page_viewports_product(
+    viewports: Sequence[SegmentedViewport],
+) -> list[SegmentedViewport]:
+    stamped = list(viewports)
+    for viewport in stamped:
+        viewport._producer_token = _SEGMENT_PAGE_VIEWPORTS_PRODUCER_TOKEN
+        viewport._producer_fingerprint = segmented_viewport_producer_fingerprint(viewport)
+    return stamped
+
+
 _TITLE_SHAPE_RE = re.compile(
     r"^\s*(?:"
     r"(?:GROUND|FIRST|SECOND|THIRD|UPPER|LOWER|LEVEL\s*[A-Z0-9.-]+)?\s*FLOOR\s+PLAN|"
@@ -944,7 +1018,11 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
     framed, consumed = _frame_resolved_viewports(page, anchors, frames, calibration, page_number=page_number)
     unresolved = [i for i in range(len(anchors)) if i not in consumed]
     derived = _derived_partitions(page, anchors, unresolved, calibration, page_number=page_number) if unresolved else []
-    return sorted(framed + derived, key=lambda v: (v.title_bbox[1], v.title_bbox[0], v.view_id))
+    ordered = sorted(
+        framed + derived,
+        key=lambda v: (v.title_bbox[1], v.title_bbox[0], v.view_id),
+    )
+    return _stamp_segment_page_viewports_product(ordered)
 
 
 def assign_bbox_to_viewport(
