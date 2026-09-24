@@ -76,9 +76,9 @@ jobs:
               })
           doc.close()
 
-          live=collect_live_ceiling_lining_claims(p,pages=None)
+          live=collect_live_ceiling_lining_claims(p,pages=[166,167,168])
           prod=GenericPlanReaderExtractor()
-          preds=prod.extract_from_pdf(p,collect_item35_shadow=False)
+          preds=prod.extract_from_pdf(p,pages=[166,167,168],collect_item35_shadow=False)
           print("GHAZI_CEILING_ALL_DRAWINGS="+json.dumps({
               "production_sha":"713e62001779303ecc38046bf7a099d1318f086a",
               "source_sha256":actual,
