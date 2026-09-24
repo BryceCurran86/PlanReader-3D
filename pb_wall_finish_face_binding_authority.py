@@ -491,7 +491,9 @@ class WallFinishFaceBindingProducer:
             raise ValueError("page_ids must contain at least one source page")
 
         wall_authority = PhysicalWallCandidateProducer.from_source_visibility_producer(
-            source_visibility_producer, page_ids=selected
+            source_visibility_producer,
+            page_ids=selected,
+            include_raster_fallback=False,
         ).authority()
         role_producer = WallRoleProducer.from_source_topology(
             physical_wall_candidate_authority=wall_authority
