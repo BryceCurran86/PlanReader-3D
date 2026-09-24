@@ -310,6 +310,45 @@ def test_producer_api_rejects_caller_both_faces(tmp_path: Path) -> None:
         )
 
 
+def test_producer_rejects_mismatched_exact_wall_role_lineage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "direct-finish-wall-role-lineage-mismatch.pdf"
+    _write_direct_finish_plan(path)
+
+    class _WrongWallRoleProducer:
+        def publish(self, selector):
+            return SimpleNamespace(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                record=SimpleNamespace(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    page_id=selector.page_id,
+                    decision_scope_id=selector.decision_scope_id,
+                    physical_wall_id="different-physical-wall",
+                    role=WallRoleClassification.EXTERNAL,
+                    record_id="wrong-wall-role-record",
+                ),
+            )
+
+    monkeypatch.setattr(
+        finish_binding_module.WallRoleProducer,
+        "from_source_topology",
+        lambda **kwargs: _WrongWallRoleProducer(),
+    )
+
+    producer = _run_direct_finish_plan(path, monkeypatch)
+
+    assert not [
+        record
+        for result in producer.published_results()
+        for record in result.bindings
+    ]
+
+
 def test_direct_leader_and_filled_terminator_connectivity_positive() -> None:
     annotation = (20.0, 8.0, 30.0, 12.0)
     lines = (
@@ -506,7 +545,15 @@ def test_input_order_and_unrelated_content_do_not_change_positive_path() -> None
     unrelated = _line("noise", "raw-noise", 100.0, 100.0, 120.0, 100.0)
     p1 = _leader_paths(annotation, base, (_term(5.0, 10.0),), 0.01)
     p2 = _leader_paths(annotation, (unrelated, *reversed(base)), (_term(5.0, 10.0),), 0.01)
-    assert {ids for ids, _ in p1} == {tuple(reversed(ids)) for ids, _ in p2} or bool(p2)
+
+    def signatures(paths):
+        return {
+            (frozenset(leader_ids), terminator.primitive_id)
+            for leader_ids, terminator in paths
+        }
+
+    assert signatures(p1)
+    assert signatures(p1) == signatures(p2)
 
 
 def test_scope_is_partial_without_independent_target_face_universe() -> None:
