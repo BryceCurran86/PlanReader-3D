@@ -1,0 +1,84 @@
+name: TEST-ONLY Ghazi Gable Source Geometry
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ghazi-gable:
+    if: startsWith(github.head_ref, 'diag/ghazi-gable-source-geometry')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13", cache: pip}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Inspect final design sheets for source-vector gable geometry
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,re,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          from pb_source_roof_covering_authority import (
+              extract_elevation_segments_from_page,
+              resolve_gable_apex_in_viewport,
+          )
+          from pb_viewport_segmentation import segment_page_viewports
+
+          url="https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf"
+          expected="c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f"
+          p=Path("/tmp/ghazi.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Ghazi-gable-source/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:p.write_bytes(r.read())
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          if actual!=expected:raise SystemExit(actual)
+
+          doc=fitz.open(p)
+          rows=[]
+          page_indices=list(range(max(0,len(doc)-5),len(doc)))
+          for idx in page_indices:
+              page=doc[idx]
+              txt=page.get_text("text") or ""
+              W,H=float(page.rect.width),float(page.rect.height)
+              diags,verts=extract_elevation_segments_from_page(page,(0.0,0.0,W,H))
+              ev,reasons=resolve_gable_apex_in_viewport(
+                  diags,verts,source_page=idx+1
+              )
+              vps=segment_page_viewports(page,page_number=idx+1)
+              title_lines=[
+                  ln.strip() for ln in txt.splitlines()
+                  if re.search(r"(?i)(elevation|section|roof|plan|scale|gable|pitch)",ln)
+              ]
+              rows.append({
+                  "page":idx+1,
+                  "title_lines":title_lines[:120],
+                  "diag_count":len(diags),
+                  "vertical_count":len(verts),
+                  "full_page_gable":None if ev is None else ev.__dict__,
+                  "full_page_reasons":list(reasons),
+                  "viewports":[{
+                      "id":v.view_id,"type":v.view_type,"label":v.label,
+                      "status":v.status,"bbox":v.bounding_box,
+                      "scale":v.scale_denominator,
+                      "boundary_source":v.boundary_source,
+                  } for v in vps],
+              })
+          doc.close()
+
+          ex=GenericPlanReaderExtractor()
+          preds=ex.extract_from_pdf(p,pages=page_indices,collect_item35_shadow=False)
+          print("GHAZI_GABLE_SOURCE_GEOMETRY="+json.dumps({
+              "production_sha":"f62b178f58537c32278d8699ba70c9d38d3f97f8",
+              "source_sha256":actual,
+              "pages":rows,
+              "gable_prediction":next((x.to_dict() for x in preds if x.tag=="gable_walling"),None),
+              "floor_prediction":next((x.to_dict() for x in preds if x.tag=="floor_screed"),None),
+              "roof_covering_shadow":ex.roof_covering_shadow,
+              "extraction_status":ex.extraction_status,
+          },sort_keys=True,default=str),flush=True)
+          PY
