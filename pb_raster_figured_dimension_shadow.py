@@ -30,7 +30,12 @@ from pb_figured_dimension_evidence import (
     RasterCoordinateTransform,
     classify_dimension_token,
 )
-from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_drawing_evidence_binding import DrawingViewType
+from pb_migration_contracts import (
+    EvidenceResolutionStatus,
+    ViewportResolutionStatus,
+    stable_contract_id,
+)
 from pb_portable_raster_ocr_authority import OCRLine, RasterOCREvidenceRecord
 
 
@@ -45,6 +50,9 @@ class RasterDimensionScope:
     snapshot_id: str
     page_id: str
     viewport_id: str
+    viewport_status: str
+    viewport_type: str
+    viewport_bbox_pt: tuple[float, float, float, float]
     image_id: str
     placement_bbox_pt: tuple[float, float, float, float]
 
@@ -55,6 +63,8 @@ class RasterDimensionScope:
             self.snapshot_id,
             self.page_id,
             self.viewport_id,
+            self.viewport_status,
+            self.viewport_type,
             self.image_id,
         )
         if any(not str(value or "").strip() for value in required):
@@ -64,6 +74,11 @@ class RasterDimensionScope:
             or any(c not in "0123456789abcdef" for c in self.source_sha256)
         ):
             raise ValueError("source_sha256 must be a lower-case SHA-256 digest")
+        vx0, vy0, vx1, vy1 = self.viewport_bbox_pt
+        if not all(math.isfinite(float(v)) for v in self.viewport_bbox_pt):
+            raise ValueError("viewport_bbox_pt must be finite")
+        if not (vx1 > vx0 and vy1 > vy0):
+            raise ValueError("viewport_bbox_pt must have positive width and height")
         x0, y0, x1, y1 = self.placement_bbox_pt
         if not all(math.isfinite(float(v)) for v in self.placement_bbox_pt):
             raise ValueError("placement_bbox_pt must be finite")
@@ -368,6 +383,11 @@ def _witness_groups(
         coordinate = sum(item[0] for item in group) / len(group)
         ids = tuple(sorted({source_id for _coord, row_ids in group for source_id in row_ids}))
         resolved.append((coordinate, ids))
+    # Two-sided authority requires two physically distinct witness coordinates.
+    # One long perpendicular stroke must never be allowed to satisfy both ends
+    # of a short candidate line merely because the search tolerance overlaps.
+    if abs(resolved[1][0] - resolved[0][0]) <= witness_tolerance_px:
+        return None
     return resolved[0], resolved[1]
 
 
@@ -441,6 +461,38 @@ def collect_raster_figured_dimension_shadow(
     The function never computes physical area or changes OCR authority.
     """
     _validate_transform(transform, scope)
+    usable_viewport_statuses = {
+        ViewportResolutionStatus.RESOLVED.value,
+        ViewportResolutionStatus.DERIVED.value,
+    }
+    if scope.viewport_status not in usable_viewport_statuses:
+        return RasterFiguredDimensionShadow(
+            EvidenceResolutionStatus.ABSTAINED,
+            ("viewport_ownership_unresolved",),
+            scope,
+            (),
+        )
+    if scope.viewport_type != DrawingViewType.FLOOR_PLAN.value:
+        return RasterFiguredDimensionShadow(
+            EvidenceResolutionStatus.ABSTAINED,
+            ("viewport_not_floor_plan",),
+            scope,
+            (),
+        )
+    vx0, vy0, vx1, vy1 = scope.viewport_bbox_pt
+    px0, py0, px1, py1 = scope.placement_bbox_pt
+    if not (
+        px0 >= vx0 - 1e-6
+        and py0 >= vy0 - 1e-6
+        and px1 <= vx1 + 1e-6
+        and py1 <= vy1 + 1e-6
+    ):
+        return RasterFiguredDimensionShadow(
+            EvidenceResolutionStatus.ABSTAINED,
+            ("raster_placement_outside_owned_viewport",),
+            scope,
+            (),
+        )
     lineage_reason = _validate_ocr_lineage(ocr_record, scope)
     if lineage_reason is not None:
         return RasterFiguredDimensionShadow(
