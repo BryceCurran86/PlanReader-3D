@@ -131,8 +131,8 @@ def test_missing_or_competing_witnesses_fail_closed():
 
     competing = (
         _seg("line", (0.0, 10.0, 100.0, 10.0), "horizontal"),
-        _seg("left-a", (0.0, 0.0, 0.0, 20.0), "vertical"),
-        _seg("left-b", (3.0, 0.0, 3.0, 20.0), "vertical"),
+        _seg("left-a", (-0.9, 0.0, -0.9, 20.0), "vertical"),
+        _seg("left-b", (0.9, 0.0, 0.9, 20.0), "vertical"),
         _seg("right", (100.0, 0.0, 100.0, 20.0), "vertical"),
     )
     assert _bind_text_to_geometry(text, competing) is None
@@ -205,20 +205,24 @@ def _image_only_dimension_pdf() -> bytes:
     v(40, 24, 36)
     v(240, 24, 36)
     h(40, 60, 140)
-    h(140, 60, 240)
     v(40, 54, 66)
     v(140, 54, 66)
-    v(240, 54, 66)
+    h(140, 80, 240)
+    v(140, 74, 86)
+    v(240, 74, 86)
 
-    # Vertical overall 5m and 2.5m + 2.5m child chain.
+    # Vertical overall 5m and 2.5m + 2.5m child chain. Adjacent members are
+    # deliberately placed on separate drafting tracks so the raster detector
+    # does not collapse them into one continuous physical line.
     v(280, 30, 130)
     h(274, 30, 286)
     h(274, 130, 286)
     v(310, 30, 80)
-    v(310, 80, 130)
     h(304, 30, 316)
     h(304, 80, 316)
-    h(304, 130, 316)
+    v(330, 80, 130)
+    h(324, 80, 336)
+    h(324, 130, 336)
 
     buf = io.BytesIO()
     image.save(buf, format="PNG")
@@ -250,10 +254,10 @@ def test_end_to_end_producer_resolves_only_source_owned_orthogonal_chains():
         (
             _ocr("10000", (125.0, 26.0, 155.0, 34.0)),
             _ocr("5000", (75.0, 56.0, 105.0, 64.0)),
-            _ocr("5000", (175.0, 56.0, 205.0, 64.0)),
+            _ocr("5000", (175.0, 76.0, 205.0, 84.0)),
             _ocr("5000", (276.0, 68.0, 284.0, 92.0)),
             _ocr("2500", (306.0, 44.0, 314.0, 66.0)),
-            _ocr("2500", (306.0, 94.0, 314.0, 116.0)),
+            _ocr("2500", (326.0, 94.0, 334.0, 116.0)),
         )
     )
     producer = RasterPlanDimensionProducer.create_for_tests(
@@ -299,10 +303,10 @@ def test_producer_scale_conflict_fails_closed():
         (
             _ocr("10000", (125.0, 26.0, 155.0, 34.0)),
             _ocr("5000", (75.0, 56.0, 105.0, 64.0)),
-            _ocr("5000", (175.0, 56.0, 205.0, 64.0)),
+            _ocr("5000", (175.0, 76.0, 205.0, 84.0)),
             _ocr("4000", (276.0, 68.0, 284.0, 92.0)),
             _ocr("2000", (306.0, 44.0, 314.0, 66.0)),
-            _ocr("2000", (306.0, 94.0, 314.0, 116.0)),
+            _ocr("2000", (326.0, 94.0, 334.0, 116.0)),
         )
     )
     result = RasterPlanDimensionProducer.create_for_tests(
