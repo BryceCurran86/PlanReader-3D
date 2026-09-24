@@ -827,7 +827,8 @@ class GenericPlanReaderExtractor:
         global_roof_pitch_deg: Optional[float] = None
         global_has_dpc = False
         global_has_dpm = False
-        global_has_mesh = False
+        mesh_evidence_pages: set[int] = set()
+        global_has_mesh_specification = False
         global_has_surface_bed = False
         global_level_markers: List[Any] = []  # List[LevelMarker], imported lazily below
         global_dimension_chains: List[Any] = []  # List[DimensionChain], imported lazily below
@@ -900,7 +901,27 @@ class GenericPlanReaderExtractor:
             if self._has_dpm_specification(norm_pg):
                 global_has_dpm = True
             if "mesh a142" in norm_pg or "b.r.c" in norm_pg or "a142" in norm_pg:
-                global_has_mesh = True
+                # Mesh reinforcement is component-specific structural evidence.
+                # Keep exact source-page lineage, and only allow package-wide
+                # cross-sheet use when the wording appears in a general drawing/
+                # section specification context. Local foundation/slab/detail
+                # callouts must not silently bind to an unrelated floor envelope.
+                mesh_evidence_pages.add(p_idx + 1)
+                local_mesh_detail_context = any(
+                    marker in norm_pg
+                    for marker in (
+                        "foundation plan",
+                        "foundation layout",
+                        "slab detail",
+                        "slab details",
+                        "rc detail",
+                        "r.c. detail",
+                        "reinforcement detail",
+                        "structural detail",
+                    )
+                )
+                if not local_mesh_detail_context:
+                    global_has_mesh_specification = True
             if self._has_surface_bed_specification(norm_pg):
                 global_has_surface_bed = True
 
@@ -1757,7 +1778,12 @@ class GenericPlanReaderExtractor:
                         sheet_number=sheet_no,
                         metadata=flr_meta,
                     )
-                if global_has_mesh and self._should_replace_slab_bound_quantity(
+                floor_source_page = int(pred_dict["floor_screed"].source_page or page_num)
+                mesh_is_bound_to_floor = (
+                    floor_source_page in mesh_evidence_pages
+                    or global_has_mesh_specification
+                )
+                if mesh_is_bound_to_floor and self._should_replace_slab_bound_quantity(
                     pred_dict.get("substructure_a142_mesh"),
                     bed_area_for_substructure_m2,
                     flr_meta,
