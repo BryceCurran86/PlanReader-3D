@@ -23,7 +23,7 @@ jobs:
           import hashlib, json, re, urllib.request
           from pathlib import Path
           import fitz
-          from pb_wall_fill_internal_partition_evidence import resolve_internal_partition_length_m
+          from pb_wall_fill_internal_partition_evidence import resolve_internal_partition_length_m\n          from pb_dimension_chain_evidence_extractor import extract_dimension_chains_from_page
 
           url="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
           expected_sha="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
@@ -78,7 +78,7 @@ jobs:
                       "scale_pt_per_m":partition.scale_pt_per_m,
                       "segment_lengths_m":list(partition.segment_lengths_m),
                   },
-                  "all_walls_dpc_m":(
+                  "dimension_chains":chains,\n                  "all_walls_dpc_m":(
                       round(2*(3.45+2.45)+partition.total_length_m,3)
                       if partition.status=="found" else None
                   ),
