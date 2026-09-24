@@ -1,0 +1,87 @@
+name: TEST-ONLY Murera Native Envelope Map
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-native-envelope-map:
+    if: startsWith(github.head_ref, 'diag/murera-native-envelope-map')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install minimal runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyMuPDF
+      - name: Map native Murera drawing dimensions
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib,json,re,urllib.request
+          from pathlib import Path
+          import fitz
+          from collections import Counter
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          path=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-native-map/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              path.write_bytes(r.read())
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(actual)
+
+          addr=("P.O. BOX","P.O BOX","PO BOX","P O BOX","TEL:","FAX:","EMAIL:","BOX 100727","BOX 9656")
+          def dims_from_text(txt):
+              clean="\n".join(ln for ln in txt.splitlines() if not any(k in ln.upper() for k in addr))
+              vals=[]
+              for major,minor in re.findall(r"\b(\d{1,2})[,.]?(\d{3})\b",clean):
+                  v=round(float(major)+float(minor)/1000.0,3)
+                  if 2.0 <= v <= 35.0:
+                      vals.append(v)
+              return vals
+
+          def envelope(vals):
+              c=Counter(round(v,2) for v in vals)
+              overall=[d for d,n in c.items() if n<=2 and d>=5.0]
+              large=[d for d in c if d>=10.0]
+              pool=sorted(set(overall+large),reverse=True)
+              for i,l in enumerate(pool):
+                  for w in pool[i+1:]:
+                      if l-w<=0.6: continue
+                      if 15.0 <= l*w <=600.0 and w>=4.0:
+                          return [l,w,round(l*w,4)]
+              uniq=sorted(set(vals),reverse=True)
+              for i,l in enumerate(uniq):
+                  for w in uniq[i+1:]:
+                      if l-w>0.6 and 15.0<=l*w<=600.0 and w>=3.0:
+                          return [l,w,round(l*w,4)]
+              return None
+
+          doc=fitz.open(path)
+          out=[]
+          try:
+              for pno in range(218,238):
+                  page=doc[pno]
+                  txt=page.get_text("text") or ""
+                  vals=dims_from_text(txt)
+                  env=envelope(vals)
+                  titles=[ln.strip() for ln in txt.splitlines() if ln.strip() and re.search(r"(?i)(floor plan|foundation|layout|section|elevation|roof plan|science lab)",ln)]
+                  out.append({
+                      "page":pno+1,
+                      "titles":titles[:30],
+                      "dims":vals,
+                      "envelope":env,
+                      "area_near_149_26": bool(env and abs(env[2]-149.26)<3.0),
+                  })
+          finally:
+              doc.close()
+          print("MURERA_NATIVE_ENVELOPE_MAP="+json.dumps({"sha":actual,"pages":out},sort_keys=True),flush=True)
+          PY
