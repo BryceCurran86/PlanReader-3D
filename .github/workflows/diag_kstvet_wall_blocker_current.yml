@@ -1,0 +1,53 @@
+name: TEST-ONLY KSTVET Current Wall Blocker
+
+on:
+  push:
+    branches: [diag/kstvet-page54-opening-marks-current]
+
+jobs:
+  wall-blocker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Download SHA-pinned KSTVET source
+        run: |
+          python - <<'PY'
+          import hashlib,pathlib,urllib.request
+          url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          expected="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          p=pathlib.Path("/tmp/kstvet.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-KSTVET-wall-blocker/1.0"})
+          with urllib.request.urlopen(req,timeout=180) as r:p.write_bytes(r.read())
+          got=hashlib.sha256(p.read_bytes()).hexdigest()
+          print("SOURCE_SHA256="+got)
+          if got!=expected: raise SystemExit("source hash mismatch")
+          PY
+      - name: Trace current wall and finish publication blockers
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+          ex=GenericPlanReaderExtractor()
+          preds=ex.extract_from_pdf("/tmp/kstvet.pdf",pages=[53,54],collect_item35_shadow=False)
+          tags={"perimeter_walling","internal_plaster","internal_paint","external_key_pointing","external_render","gable_walling","W1","W2","D1"}
+          focus=[p.to_dict() for p in preds if p.tag in tags or p.trade_type in {"walls","finishes"}]
+          print("KSTVET_CURRENT_WALL_BLOCKER="+json.dumps({
+             "focus_predictions":focus,
+             "extraction_status":ex.extraction_status,
+             "live_net_wall_shadow":ex.live_net_wall_shadow,
+             "opening_authority_shadow":ex.opening_authority_shadow,
+             "opening_provenance_shadow":ex.opening_provenance_shadow,
+             "hosted_opening_shadow":ex.hosted_opening_shadow,
+          },sort_keys=True,default=str))
+          PY
