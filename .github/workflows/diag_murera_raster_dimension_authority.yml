@@ -1,0 +1,94 @@
+name: TEST-ONLY Murera Raster Dimension Authority
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-raster-dimensions:
+    if: startsWith(github.head_ref, 'diag/murera-raster-dimension-authority-real')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install narrow diagnostic dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyMuPDF==1.28.0 Pillow==12.3.0 numpy==2.3.5 opencv-python-headless==4.14.0.94 rapidocr onnxruntime
+      - name: Run source-owned p228 raster dimension diagnostic
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          import urllib.request
+
+          from pb_raster_plan_dimension_authority import RasterPlanDimensionProducer
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          url = "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          want = "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          req = urllib.request.Request(
+              url,
+              headers={"User-Agent": "PlanReader-raster-dimension-authority-diagnostic/1.0"},
+          )
+          with urllib.request.urlopen(req, timeout=120) as response:
+              source_bytes = response.read()
+          got = hashlib.sha256(source_bytes).hexdigest()
+          if got != want:
+              raise SystemExit(f"source sha mismatch: {got}")
+
+          visibility = SourceVisibilityProducer(
+              producer_method="murera-raster-dimension-diagnostic",
+              producer_version="1.0",
+          )
+          published = visibility.ingest_native_pdf_bytes(
+              document_id="murera-source-diagnostic",
+              source_bytes=source_bytes,
+              source_locator=url,
+              page_ids=("228",),
+          )
+          producer = RasterPlanDimensionProducer.create(source_visibility=visibility)
+          result = producer.publish(
+              revision_id=published.revision.revision_id,
+              page_id="228",
+          )
+          payload = {
+              "status": result.status.value,
+              "reasons": result.reason_codes,
+              "length_m": result.length_m,
+              "width_m": result.width_m,
+              "scale_status": result.scale_status,
+              "bound": [
+                  {
+                      "value_mm": item.value_mm,
+                      "orientation": item.orientation,
+                      "span_pt": item.span_pt,
+                      "line_ids": item.dimension_line_observation_ids,
+                      "witness_ids": item.witness_observation_ids,
+                  }
+                  for item in result.bound_dimensions
+              ],
+              "horizontal": (
+                  {
+                      "value_mm": result.horizontal.value_mm,
+                      "child_values_mm": result.horizontal.child_values_mm,
+                      "span_pt": result.horizontal.span_pt,
+                  }
+                  if result.horizontal else None
+              ),
+              "vertical": (
+                  {
+                      "value_mm": result.vertical.value_mm,
+                      "child_values_mm": result.vertical.child_values_mm,
+                      "span_pt": result.vertical.span_pt,
+                  }
+                  if result.vertical else None
+              ),
+          }
+          print(json.dumps(payload, indent=2, default=str))
+          if result.length_m != 18.4 or result.width_m != 10.5:
+              raise SystemExit("source figured orthogonal overall chains did not resolve")
+          PY
