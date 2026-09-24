@@ -140,3 +140,55 @@ def test_structured_evidence_failure_fails_closed_to_existing_exact_line_count(
 
     prediction = _chalkboard_prediction(pdf_path)
     assert prediction.quantity == 1.0
+
+
+def test_document_level_reconciliation_recovers_labels_on_page_outside_semantic_branch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pdf_path = tmp_path / "fixture-label-document-reconciliation.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_text((50, 150), "Chalkboard", fontsize=11)
+    page.insert_text((120, 150), "Chalkboard", fontsize=11, color=(1, 0, 0))
+    doc.save(pdf_path)
+    doc.close()
+
+    # Simulate a sparse/native CAD sheet that the semantic page classifier
+    # does not admit. Document-level exact-span reconciliation must still
+    # recover the two source-owned labels.
+    monkeypatch.setattr(
+        GenericPlanReaderExtractor,
+        "_is_drawing_page",
+        lambda self, text, page=None: False,
+    )
+
+    prediction = _chalkboard_prediction(pdf_path)
+    assert prediction.quantity == 2.0
+    assert prediction.metadata["derivation"] == (
+        "document_native_fixture_label_reconciliation"
+    )
+
+
+def test_document_level_reconciliation_abstains_on_conflicting_page_counts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pdf_path = tmp_path / "fixture-label-conflict.pdf"
+    doc = fitz.open()
+    page1 = doc.new_page(width=595, height=842)
+    page1.insert_text((50, 150), "Chalkboard", fontsize=11)
+    page2 = doc.new_page(width=595, height=842)
+    page2.insert_text((50, 150), "Chalkboard", fontsize=11)
+    page2.insert_text((120, 150), "Chalkboard", fontsize=11, color=(1, 0, 0))
+    doc.save(pdf_path)
+    doc.close()
+
+    monkeypatch.setattr(
+        GenericPlanReaderExtractor,
+        "_is_drawing_page",
+        lambda self, text, page=None: False,
+    )
+
+    predictions = GenericPlanReaderExtractor().extract_from_pdf(pdf_path)
+    assert not [p for p in predictions if p.tag == "chalkboard"]
