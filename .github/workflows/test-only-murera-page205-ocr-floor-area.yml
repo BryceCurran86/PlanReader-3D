@@ -77,7 +77,7 @@ jobs:
           out=[]
           doc=fitz.open(path)
           try:
-              for page_num in (188,205,219,225,226,231):
+              for page_num in (188,205,219,225,226,227,229,231,233,235,237):
                   page=doc[page_num-1]
                   native=page.get_text("text") or ""
                   native_sparse=len(native.strip())<150
@@ -106,6 +106,13 @@ jobs:
                                   "distance_from_149_26":round(abs(area-149.26),4)
                               })
                   candidate_pairs.sort(key=lambda x:x["distance_from_149_26"])
+                  merged_norm=" ".join(merged.lower().split())
+                  span_candidate=None
+                  if any(k in merged_norm for k in ("section","span","truss","layout")):
+                      for v in vals_merged:
+                          if 7.0 <= v <= 14.0:
+                              span_candidate=v
+                              break
                   out.append({
                       "page":page_num,
                       "native_sparse":native_sparse,
@@ -114,6 +121,7 @@ jobs:
                       "ocr_dims":vals_ocr,
                       "merged_dims":vals_merged,
                       "envelope_merged":env(vals_merged),
+                      "span_candidate_if_production_prescan":span_candidate,
                       "candidate_pairs_100_220":candidate_pairs[:30],
                       "native_title_lines":[ln.strip() for ln in native.splitlines() if ln.strip()][:25],
                       "ocr_lines":[str(r.get("text") or "") for r in ocr_rows if str(r.get("text") or "").strip()][:80],
