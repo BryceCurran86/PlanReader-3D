@@ -665,6 +665,30 @@ class GenericPlanReaderExtractor:
         return text
 
     @staticmethod
+    def _has_plan_footprint_context(page_text: str) -> bool:
+        """Return whether this page explicitly identifies a plan view that can
+        own a measured building footprint.
+
+        Floor/slab quantities must not be synthesized by combining an
+        elevation's repeated-bay length with a span discovered on an unrelated
+        section or services sheet. This gate is intentionally page-local and
+        semantic: only an explicit floor/foundation/slab plan title (or layout
+        plan wording) can authorize envelope area publication. Generic
+        electrical/mechanical layout titles, elevations and sections do not
+        satisfy the contract.
+        """
+        normalized = re.sub(r"\s+", " ", str(page_text or "").lower())
+        return bool(
+            re.search(
+                r"\b(?:ground\s+floor|first\s+floor|second\s+floor|"
+                r"lower\s+floor|upper\s+floor|floor)\s+plan\b|"
+                r"\bfoundation\s+plan\b|\bfoundation\s+layout\b|"
+                r"\bslab\s+plan\b|\bslab\s+layout\b|\blayout\s+plan\b",
+                normalized,
+            )
+        )
+
+    @staticmethod
     def _has_surface_bed_specification(page_text: str) -> bool:
         """Return whether drawing text explicitly specifies a substructure
         surface bed / ground-bearing slab -- the same floor area that
@@ -1334,7 +1358,11 @@ class GenericPlanReaderExtractor:
                     existing_area_meta.get("area_authority") == "explicit_drawing_floor_area"
                 )
                 current_is_explicit = explicit_floor_area_for_page is not None
-                should_replace_area = (
+                page_has_plan_footprint_authority = (
+                    explicit_floor_area_for_page is not None
+                    or self._has_plan_footprint_context(page_text)
+                )
+                should_replace_area = page_has_plan_footprint_authority and (
                     (current_is_explicit and not existing_is_explicit)
                     or (
                         current_is_explicit == existing_is_explicit
