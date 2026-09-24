@@ -435,6 +435,81 @@ def _intersection_with_perpendicular(
     return None
 
 
+def _merge_text_split_line_fragments(
+    observation_bbox: tuple[float, float, float, float],
+    seg_a: ObservedGeometrySegment,
+    seg_b: ObservedGeometrySegment,
+    *,
+    axis_tolerance: float,
+    text_margin: float,
+) -> Optional[ObservedGeometrySegment]:
+    """Merge two same-orientation, same-axis-coordinate line fragments into
+    one logical dimension line when the gap between them is consistent with
+    the observation's own figured-dimension text sitting directly on the
+    line (a common CAD convention: the line is drawn right up to the text
+    bbox on each side, breaking one visual line into two vector fragments).
+
+    Never merges fragments whose gap does not bracket the observation's own
+    text -- two genuinely separate, merely coincidentally-aligned dimension
+    lines elsewhere on the page must not be merged. Overlapping fragments
+    (not a clean split) are also refused.
+    """
+    if seg_a.orientation != seg_b.orientation:
+        return None
+    orientation = seg_a.orientation
+    if orientation not in (DimensionOrientation.HORIZONTAL.value, DimensionOrientation.VERTICAL.value):
+        return None
+
+    if orientation == DimensionOrientation.HORIZONTAL.value:
+        axis_a = (seg_a.start[1] + seg_a.end[1]) / 2.0
+        axis_b = (seg_b.start[1] + seg_b.end[1]) / 2.0
+        along_a = sorted((seg_a.start[0], seg_a.end[0]))
+        along_b = sorted((seg_b.start[0], seg_b.end[0]))
+        text_lo, text_hi = observation_bbox[0], observation_bbox[2]
+    else:
+        axis_a = (seg_a.start[0] + seg_a.end[0]) / 2.0
+        axis_b = (seg_b.start[0] + seg_b.end[0]) / 2.0
+        along_a = sorted((seg_a.start[1], seg_a.end[1]))
+        along_b = sorted((seg_b.start[1], seg_b.end[1]))
+        text_lo, text_hi = observation_bbox[1], observation_bbox[3]
+
+    if abs(axis_a - axis_b) > axis_tolerance:
+        return None
+
+    if along_a[1] <= along_b[0]:
+        gap_lo, gap_hi = along_a[1], along_b[0]
+        far_lo, far_hi = along_a[0], along_b[1]
+    elif along_b[1] <= along_a[0]:
+        gap_lo, gap_hi = along_b[1], along_a[0]
+        far_lo, far_hi = along_b[0], along_a[1]
+    else:
+        return None  # overlapping fragments -- not a clean text-gap split
+
+    # The gap between the two fragments must bracket the observation's own
+    # text span (the reason the line was split in the first place), and must
+    # not be so much larger than the text that unrelated line ends elsewhere
+    # on the page are being stitched together.
+    if not (gap_lo <= text_hi + text_margin and gap_hi >= text_lo - text_margin):
+        return None
+    if (gap_hi - gap_lo) > (text_hi - text_lo) + 2.0 * text_margin:
+        return None
+
+    merged_axis = (axis_a + axis_b) / 2.0
+    merged_id = f"{seg_a.segment_id}+{seg_b.segment_id}"
+    if orientation == DimensionOrientation.HORIZONTAL.value:
+        start, end = (far_lo, merged_axis), (far_hi, merged_axis)
+    else:
+        start, end = (merged_axis, far_lo), (merged_axis, far_hi)
+    return ObservedGeometrySegment(
+        segment_id=merged_id,
+        source_page=seg_a.source_page,
+        start=start,
+        end=end,
+        coordinate_space=seg_a.coordinate_space,
+        view_id=seg_a.view_id or seg_b.view_id,
+    )
+
+
 def bind_observation_to_vector_geometry(
     observation: DimensionObservation,
     segments: Sequence[ObservedGeometrySegment],
@@ -467,11 +542,27 @@ def bind_observation_to_vector_geometry(
         # If two different line candidates are spatially indistinguishable at
         # the page's own text-height resolution, do not choose by arbitrary ID.
         if abs(d1 - d0) <= calibration.median_word_height_pt * 0.25:
-            return DimensionAnchorBinding(
-                observation.dimension_id,
-                BindingStatus.AMBIGUOUS.value,
-                notes=[f"multiple equally plausible dimension lines: {candidates[0].segment_id}, {candidates[1].segment_id}"],
+            # Before declaring ambiguity: a dimension line is frequently
+            # exported as two collinear vector fragments split by the
+            # observation's own figured-dimension text sitting on top of it
+            # (the line is drawn up to the text bbox on each side). That is
+            # one logical line, not two competing ones -- merge it narrowly
+            # (same orientation, same axis coordinate, gap bracketing this
+            # observation's own text only) and keep using it as `best`.
+            merged = _merge_text_split_line_fragments(
+                observation.bbox,
+                candidates[0],
+                candidates[1],
+                axis_tolerance=calibration.chain_axis_tolerance_pt,
+                text_margin=calibration.median_word_height_pt,
             )
+            if merged is None:
+                return DimensionAnchorBinding(
+                    observation.dimension_id,
+                    BindingStatus.AMBIGUOUS.value,
+                    notes=[f"multiple equally plausible dimension lines: {candidates[0].segment_id}, {candidates[1].segment_id}"],
+                )
+            best = merged
 
     witness_hits: list[tuple[ObservedGeometrySegment, tuple[float, float]]] = []
     for segment in same_scope:
