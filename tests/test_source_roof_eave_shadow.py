@@ -6,6 +6,7 @@ from random import Random
 
 from pb_migration_contracts import EvidenceResolutionStatus as Status
 from pb_source_roof_eave_shadow import (
+    RoofMaterialAnnotation,
     RoofPath,
     RoofSourceScope,
     collect_gable_outer_roof_edge,
@@ -15,7 +16,7 @@ from pb_source_roof_eave_shadow import (
 
 
 def _scope(viewport: str, page: int = 1, revision: str = "rev-1") -> RoofSourceScope:
-    return RoofSourceScope("doc-1", revision, "0"*64, page, viewport)
+    return RoofSourceScope("doc-1", revision, "0"*64, page, viewport, "roof-1")
 
 
 def _long_paths(dx: float = 0, dy: float = 0, scale: float = 1):
@@ -42,11 +43,15 @@ def _long(paths=None, *, viewport="front", dy=0, scale=1, material=("corrugated 
         paths,
         scope=_scope(viewport),
         viewport_bbox=(0,0+dy,200*scale,120*scale+dy),
-        page_width_pt=200*scale,roof_material_annotations=material,
+        page_width_pt=200*scale,
+        roof_material_annotations=tuple(RoofMaterialAnnotation(
+            f"callout:{i}",text,_scope(viewport),
+            (40*scale,10*scale+dy,90*scale,18*scale+dy))
+            for i,text in enumerate(material)),
     )
 
 
-def _gable(paths=None, *, dx=0, dy=0, scale=1, material=("sheet roofing",)):
+def _gable(paths=None, *, dx=0, dy=0, scale=1, material=("sheet roofing",), apex=None):
     def pt(x,y):return (x*scale+dx,y*scale+dy)
     paths=paths if paths is not None else [
         RoofPath("left-outer",pt(15,65),pt(100,30)),
@@ -59,9 +64,12 @@ def _gable(paths=None, *, dx=0, dy=0, scale=1, material=("sheet roofing",)):
     return collect_gable_outer_roof_edge(
         paths,scope=_scope("gable"),
         viewport_bbox=(dx,dy,200*scale+dx,120*scale+dy),
-        apex_xy=pt(100,30),pitch_deg=22.38,
+        apex_xy=apex if apex is not None else pt(100,30),pitch_deg=22.38,
         structural_left_x=40*scale+dx,structural_right_x=160*scale+dx,
-        roof_material_annotations=material,
+        roof_material_annotations=tuple(RoofMaterialAnnotation(
+            f"gable-callout:{i}",text,_scope("gable"),
+            (40*scale+dx,5*scale+dy,90*scale+dx,18*scale+dy))
+            for i,text in enumerate(material)),
     )
 
 
@@ -89,6 +97,21 @@ def test_missing_material_border_dimension_and_dashes_do_not_mint_roof():
     assert _gable(material=()).status is Status.ABSTAINED
 
 
+def test_material_callout_must_share_viewport_source_and_entity():
+    for wrong in (
+        RoofMaterialAnnotation("x","roofing",_scope("rear"),(40,10,90,18)),
+        RoofMaterialAnnotation("x","roofing",replace(_scope("front"),entity_id="other"),(40,10,90,18)),
+        RoofMaterialAnnotation("x","roofing",replace(_scope("front"),source_sha256="1"*64),(40,10,90,18)),
+        RoofMaterialAnnotation("x","roofing",_scope("front"),(40,121,90,130)),
+        RoofMaterialAnnotation("x","window",_scope("front"),(40,10,90,18)),
+    ):
+        result=collect_longitudinal_roof_edge(
+            _long_paths(),scope=_scope("front"),viewport_bbox=(0,0,200,120),
+            page_width_pt=200,roof_material_annotations=(wrong,),
+        )
+        assert result.status is Status.ABSTAINED
+
+
 def test_competing_long_roof_rectangles_conflict_rather_than_choose_longest():
     paths=_long_paths()+[
         RoofPath("other-top",(30,40),(170,40)),
@@ -99,6 +122,8 @@ def test_competing_long_roof_rectangles_conflict_rather_than_choose_longest():
     result=_long(paths)
     assert result.status is Status.CONFLICT
     assert result.span_pt is None
+    assert {a.end_pt-a.start_pt for a in result.alternatives}=={140,160}
+    assert all(a.candidate_id for a in result.alternatives)
 
 
 def test_gable_needs_opposing_roof_slopes_enclosing_structural_supports():
@@ -138,3 +163,90 @@ def test_cross_revision_and_source_hash_cannot_reconcile():
     assert reconcile_roof_eave_geometry([front,other_revision],gable,pitch_deg=22.38).status is Status.CONFLICT
     changed_hash=replace(rear,scope=replace(rear.scope,source_sha256="1"*64))
     assert reconcile_roof_eave_geometry([front,changed_hash],gable,pitch_deg=22.38).status is Status.CONFLICT
+
+
+def test_split_paths_preserve_geometry_and_contract_id():
+    original=_long()
+    whole=_long_paths()
+    split=[]
+    for p in whole:
+        if p.path_id in {"roof-top","roof-bottom"}:
+            middle=((p.start[0]+p.end[0])/2,p.start[1])
+            split.extend([replace(p,path_id=p.path_id+":a",end=middle),
+                          replace(p,path_id=p.path_id+":b",start=middle)])
+        else:
+            split.append(p)
+    result=_long(split)
+    assert result.status is Status.CANDIDATE
+    assert result.span_pt==original.span_pt
+    assert result.candidate_id==original.candidate_id
+    assert len(result.path_ids)==len(original.path_ids)+2
+
+    gable=_gable()
+    def bisect(p):
+        middle=tuple((x+y)/2 for x,y in zip(p.start,p.end))
+        return [replace(p,path_id=p.path_id+":a",end=middle),
+                replace(p,path_id=p.path_id+":b",start=middle)]
+    split_gable=[*bisect(RoofPath("left-outer",(15,65),(100,30))),
+                 *bisect(RoofPath("right-outer",(100,30),(185,65)))]
+    gable_result=_gable(split_gable)
+    assert gable_result.status is Status.CANDIDATE
+    assert gable_result.span_pt==gable.span_pt
+    assert gable_result.candidate_id==gable.candidate_id
+
+
+def test_unrelated_content_and_viewport_expansion_preserve_candidate():
+    original=_long()
+    expanded=collect_longitudinal_roof_edge(
+        _long_paths()+[RoofPath("furniture",(205,60),(220,70)),
+                       RoofPath("grid",(10,90),(190,90),dashes="[2 2] 0")],
+        scope=_scope("front"),viewport_bbox=(-10,-10,230,140),
+        page_width_pt=230,roof_material_annotations=(RoofMaterialAnnotation(
+            "callout:0","corrugated roofing",_scope("front"),(40,10,90,18)),),
+    )
+    assert expanded.status is Status.CANDIDATE
+    assert expanded.span_pt==original.span_pt
+    assert expanded.candidate_id==original.candidate_id
+
+
+def test_rotation_180_preserves_long_span_and_gable_span():
+    original=_long()
+    def turn(p):
+        return replace(p,start=(200-p.start[0],120-p.start[1]),
+                       end=(200-p.end[0],120-p.end[1]))
+    turned=collect_longitudinal_roof_edge(
+        [turn(p) for p in _long_paths()],scope=_scope("front"),
+        viewport_bbox=(0,0,200,120),page_width_pt=200,
+        roof_material_annotations=(RoofMaterialAnnotation(
+            "callout:0","corrugated roofing",_scope("front"),(40,10,90,18)),),
+    )
+    assert turned.status is Status.CANDIDATE
+    assert turned.span_pt==original.span_pt
+    paths=[RoofPath("left-outer",(15,65),(100,30)),
+           RoofPath("right-outer",(100,30),(185,65))]
+    turned_gable=_gable([turn(p) for p in paths],apex=(100,90))
+    assert turned_gable.status is Status.CANDIDATE
+    assert turned_gable.span_pt==_gable().span_pt
+
+
+def test_competing_gable_endpoints_and_entity_or_pitch_conflicts_abstain():
+    ambiguous=[RoofPath("left-a",(15,65),(100,30)),
+               RoofPath("left-b",(25,60.88),(100,30)),
+               RoofPath("right",(100,30),(185,65))]
+    gable_conflict=_gable(ambiguous)
+    assert gable_conflict.status is Status.CONFLICT
+    assert len(gable_conflict.alternatives)==2
+    assert {a.start_pt for a in gable_conflict.alternatives}=={15,25}
+    front=_long();rear=_long(viewport="rear",dy=150);gable=_gable()
+    other_entity=replace(rear,scope=replace(rear.scope,entity_id="roof-2"))
+    assert reconcile_roof_eave_geometry([front,other_entity],gable,pitch_deg=22.38).status is Status.CONFLICT
+    assert reconcile_roof_eave_geometry([front,rear],gable,pitch_deg=30).status is Status.CONFLICT
+
+
+def test_replay_is_deterministic_and_inputs_are_unchanged():
+    paths=_long_paths()
+    original=deepcopy(paths)
+    results=[_long(paths) for _ in range(4)]
+    assert all(r==results[0] for r in results)
+    assert results[0].candidate_id
+    assert paths==original
