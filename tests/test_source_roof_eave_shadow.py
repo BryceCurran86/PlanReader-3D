@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from random import Random
 
 from pb_migration_contracts import EvidenceResolutionStatus as Status
 from pb_source_roof_eave_shadow import (
     RoofPath,
+    RoofSourceScope,
     collect_gable_outer_roof_edge,
     collect_longitudinal_roof_edge,
     reconcile_roof_eave_geometry,
 )
+
+
+def _scope(viewport: str, page: int = 1, revision: str = "rev-1") -> RoofSourceScope:
+    return RoofSourceScope("doc-1", revision, "0"*64, page, viewport)
 
 
 def _long_paths(dx: float = 0, dy: float = 0, scale: float = 1):
@@ -34,7 +40,7 @@ def _long(paths=None, *, viewport="front", dy=0, scale=1, material=("corrugated 
                for p in _long_paths(dy=dy,scale=scale)]
     return collect_longitudinal_roof_edge(
         paths,
-        source_page=1,viewport_id=viewport,
+        scope=_scope(viewport),
         viewport_bbox=(0,0+dy,200*scale,120*scale+dy),
         page_width_pt=200*scale,roof_material_annotations=material,
     )
@@ -51,7 +57,7 @@ def _gable(paths=None, *, dx=0, dy=0, scale=1, material=("sheet roofing",)):
     ]
     # atan(35/85) is about 22.38 degrees; inner segments also share it.
     return collect_gable_outer_roof_edge(
-        paths,source_page=1,viewport_id="gable",
+        paths,scope=_scope("gable"),
         viewport_bbox=(dx,dy,200*scale+dx,120*scale+dy),
         apex_xy=pt(100,30),pitch_deg=22.38,
         structural_left_x=40*scale+dx,structural_right_x=160*scale+dx,
@@ -67,7 +73,7 @@ def test_two_owned_long_elevations_and_gable_keep_native_geometry_only():
     assert front.span_pt==rear.span_pt==160
     assert gable.span_pt==170
     result=reconcile_roof_eave_geometry([front,rear],gable,pitch_deg=22.38)
-    assert result.status is Status.CORROBORATED
+    assert result.status is Status.CANDIDATE
     assert result.longitudinal_span_pt==160
     assert result.transverse_span_pt==170
     assert result.quantity_m2 is None
@@ -122,5 +128,13 @@ def test_incomplete_or_cross_page_view_universe_abstains():
     front=_long();gable=_gable()
     assert reconcile_roof_eave_geometry([front],gable,pitch_deg=22.38).status is Status.ABSTAINED
     rear=_long(viewport="rear",dy=150)
-    swapped=type(rear)(rear.status,rear.reason_codes,2,rear.viewport_id,rear.span_pt,rear.start_pt,rear.end_pt,rear.path_ids,rear.candidate_id)
+    swapped=replace(rear,scope=_scope("rear",page=2))
     assert reconcile_roof_eave_geometry([front,swapped],gable,pitch_deg=22.38).status is Status.CONFLICT
+
+
+def test_cross_revision_and_source_hash_cannot_reconcile():
+    front=_long();rear=_long(viewport="rear",dy=150);gable=_gable()
+    other_revision=replace(rear,scope=_scope("rear",revision="rev-2"))
+    assert reconcile_roof_eave_geometry([front,other_revision],gable,pitch_deg=22.38).status is Status.CONFLICT
+    changed_hash=replace(rear,scope=replace(rear.scope,source_sha256="1"*64))
+    assert reconcile_roof_eave_geometry([front,changed_hash],gable,pitch_deg=22.38).status is Status.CONFLICT
