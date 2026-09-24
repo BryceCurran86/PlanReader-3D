@@ -574,3 +574,226 @@ def test_live_extractor_remains_unwired_to_new_shadow_ownership_path() -> None:
     source = Path("pb_planreader_pdf_extractor.py").read_text(encoding="utf-8")
     assert "pb_viewport_migration_adapter" not in source
     assert "pb_figured_span_scale_shadow" not in source
+
+@pytest.mark.parametrize(
+    ("field_name", "replacement_value"),
+    [
+        ("viewport_id", "retargeted-view"),
+        ("bbox", (1.0, 2.0, 301.0, 352.0)),
+        ("title_bbox", (11.0, 12.0, 111.0, 132.0)),
+        ("view_type", DrawingViewType.ELEVATION.value),
+        ("boundary_source", ViewportBoundarySource.VECTOR_FRAME.value),
+        ("producer_fingerprint", "0" * 64),
+        ("sibling_set_fingerprint", "1" * 64),
+        ("page_no", PAGE + 1),
+        ("revision_id", "rev-retargeted"),
+        ("source_sha256", "d" * 64),
+        ("authoritative_derived", False),
+        ("status", ViewportSegmentationStatus.RESOLVED.value),
+        ("schema_version", "retargeted-schema"),
+    ],
+)
+def test_dataclasses_replace_of_any_authority_field_invalidates_adapter_seal(
+    field_name: str,
+    replacement_value: object,
+) -> None:
+    doc, _viewports, _target, context, adapted = (
+        _genuine_authoritative_derived_adapter_result()
+    )
+    assert adapted.viewport is not None
+    assert adapted.ownership_proof is not None
+
+    forged = replace(
+        adapted.ownership_proof,
+        **{field_name: replacement_value},
+    )
+    reasons = verify_f07_viewport_ownership_proof(
+        forged,
+        viewport=adapted.viewport,
+        context=context,
+        page_no=PAGE,
+    )
+
+    assert reasons
+    assert "authoritative_derived_seal_payload_mismatch" in reasons
+    assert "authoritative_derived_payload_fingerprint_mismatch" in reasons
+    assert "authoritative_derived_ownership_id_mismatch" in reasons
+    doc.close()
+
+
+def test_modified_authority_field_with_original_ownership_id_is_rejected() -> None:
+    doc, _viewports, _target, context, adapted = (
+        _genuine_authoritative_derived_adapter_result()
+    )
+    assert adapted.viewport is not None
+    assert adapted.ownership_proof is not None
+
+    original_ownership_id = adapted.ownership_proof.ownership_id
+    forged = replace(
+        adapted.ownership_proof,
+        title_bbox=(
+            adapted.ownership_proof.title_bbox[0] + 1.0,
+            adapted.ownership_proof.title_bbox[1],
+            adapted.ownership_proof.title_bbox[2],
+            adapted.ownership_proof.title_bbox[3],
+        ),
+    )
+    assert forged.ownership_id == original_ownership_id
+
+    reasons = verify_f07_viewport_ownership_proof(
+        forged,
+        viewport=adapted.viewport,
+        context=context,
+        page_no=PAGE,
+    )
+    assert "authoritative_derived_seal_payload_mismatch" in reasons
+    assert "authoritative_derived_ownership_id_mismatch" in reasons
+    doc.close()
+
+
+def test_caller_recomputed_id_and_payload_fingerprint_cannot_reuse_original_seal() -> None:
+    doc, _viewports, _target, _context_original, adapted = (
+        _genuine_authoritative_derived_adapter_result()
+    )
+    assert adapted.viewport is not None
+    assert adapted.ownership_proof is not None
+
+    retargeted_viewport_id = "retargeted-view"
+    retargeted_viewport = replace(
+        adapted.viewport,
+        viewport_id=retargeted_viewport_id,
+    )
+    retargeted_context = _context(retargeted_viewport_id)
+
+    changed = replace(
+        adapted.ownership_proof,
+        viewport_id=retargeted_viewport_id,
+    )
+    changed_payload = _proof_authority_payload(changed)
+    caller_recomputed = replace(
+        changed,
+        payload_fingerprint=_proof_payload_fingerprint(changed_payload),
+        ownership_id=_proof_ownership_id(changed_payload),
+    )
+
+    reasons = verify_f07_viewport_ownership_proof(
+        caller_recomputed,
+        viewport=retargeted_viewport,
+        context=retargeted_context,
+        page_no=PAGE,
+    )
+    assert reasons == ("authoritative_derived_seal_payload_mismatch",)
+    doc.close()
+
+
+def test_stored_payload_fingerprint_tampering_is_rejected() -> None:
+    doc, _viewports, _target, context, adapted = (
+        _genuine_authoritative_derived_adapter_result()
+    )
+    assert adapted.viewport is not None
+    assert adapted.ownership_proof is not None
+
+    forged = replace(
+        adapted.ownership_proof,
+        payload_fingerprint="f" * 64,
+    )
+    reasons = verify_f07_viewport_ownership_proof(
+        forged,
+        viewport=adapted.viewport,
+        context=context,
+        page_no=PAGE,
+    )
+    assert reasons == ("authoritative_derived_payload_fingerprint_mismatch",)
+    doc.close()
+
+
+def test_ownership_id_tampering_is_rejected() -> None:
+    doc, _viewports, _target, context, adapted = (
+        _genuine_authoritative_derived_adapter_result()
+    )
+    assert adapted.viewport is not None
+    assert adapted.ownership_proof is not None
+
+    forged = replace(
+        adapted.ownership_proof,
+        ownership_id="f07_viewport_ownership_" + ("f" * 32),
+    )
+    reasons = verify_f07_viewport_ownership_proof(
+        forged,
+        viewport=adapted.viewport,
+        context=context,
+        page_no=PAGE,
+    )
+    assert reasons == ("authoritative_derived_ownership_id_mismatch",)
+    doc.close()
+
+
+def test_legitimate_proof_cannot_be_retargeted_to_ordinary_derived_viewport() -> None:
+    valid_doc, _valid_viewports, _valid_target, _valid_context, adapted = (
+        _genuine_authoritative_derived_adapter_result()
+    )
+    assert adapted.ownership_proof is not None
+    original_seal = adapted.ownership_proof._seal
+
+    ordinary_doc = _ordinary_partition_doc()
+    ordinary_viewports = segment_page_viewports(ordinary_doc[0], page_number=PAGE)
+    ordinary = next(
+        viewport
+        for viewport in ordinary_viewports
+        if viewport.view_type == DrawingViewType.FLOOR_PLAN.value
+    )
+    assert ordinary.status == ViewportSegmentationStatus.DERIVED.value
+    assert not is_authoritative_derived_viewport(ordinary)
+    assert ordinary.bounding_box is not None
+
+    ordinary_context = _context(*(viewport.view_id for viewport in ordinary_viewports))
+    ordinary_evidence = ViewportEvidence(
+        viewport_id=ordinary.view_id,
+        document_id="doc",
+        page_id=str(PAGE),
+        bbox=tuple(float(value) for value in ordinary.bounding_box),
+        view_type=ordinary.view_type,
+        status=ViewportResolutionStatus.DERIVED,
+        confidence=float(ordinary.confidence),
+        metadata={
+            "boundary_source": ordinary.boundary_source,
+            "partition_mode": "columnar_title_grid",
+            "grid_validated": True,
+        },
+    )
+
+    retargeted = replace(
+        adapted.ownership_proof,
+        document_id="doc",
+        source_sha256=SHA,
+        revision_id="rev-1",
+        page_no=PAGE,
+        viewport_id=ordinary.view_id,
+        view_type=ordinary.view_type,
+        status=ordinary.status,
+        bbox=tuple(float(value) for value in ordinary.bounding_box),
+        title_bbox=tuple(float(value) for value in ordinary.title_bbox),
+        boundary_source=ordinary.boundary_source,
+        producer_fingerprint=segmented_viewport_producer_fingerprint(ordinary),
+        sibling_set_fingerprint=_sibling_set_fingerprint(ordinary_viewports),
+        authoritative_derived=True,
+    )
+    retargeted_payload = _proof_authority_payload(retargeted)
+    retargeted = replace(
+        retargeted,
+        payload_fingerprint=_proof_payload_fingerprint(retargeted_payload),
+        ownership_id=_proof_ownership_id(retargeted_payload),
+    )
+    assert retargeted._seal is original_seal
+
+    reasons = verify_f07_viewport_ownership_proof(
+        retargeted,
+        viewport=ordinary_evidence,
+        context=ordinary_context,
+        page_no=PAGE,
+    )
+    assert reasons == ("authoritative_derived_seal_payload_mismatch",)
+
+    ordinary_doc.close()
+    valid_doc.close()
+
