@@ -608,6 +608,11 @@ def _frame_resolved_viewports(
 
 
 _AUTHORITATIVE_DERIVED_PARTITION_MODE = "columnar_title_grid"
+_AUTHORITATIVE_PLAN_LEGEND_PARTITION_MODE = "plan_legend_columns"
+_AUTHORITATIVE_DERIVED_PARTITION_MODES = frozenset({
+    _AUTHORITATIVE_DERIVED_PARTITION_MODE,
+    _AUTHORITATIVE_PLAN_LEGEND_PARTITION_MODE,
+})
 
 
 def is_authoritative_derived_viewport(viewport: Any) -> bool:
@@ -623,7 +628,7 @@ def is_authoritative_derived_viewport(viewport: Any) -> bool:
         and getattr(viewport, "boundary_source", None)
         == ViewportBoundarySource.TITLE_PARTITION.value
         and getattr(viewport, "bounding_box", None) is not None
-        and provenance.get("partition_mode") == _AUTHORITATIVE_DERIVED_PARTITION_MODE
+        and provenance.get("partition_mode") in _AUTHORITATIVE_DERIVED_PARTITION_MODES
         and provenance.get("grid_validated") is True
     )
 
@@ -914,6 +919,24 @@ def _derived_partitions(
     bounds = [0.0]
     bounds.extend((coords[i] + coords[i + 1]) / 2.0 for i in range(len(coords) - 1))
     bounds.append(calibration.page_width_pt if axis == 0 else calibration.page_height_pt)
+
+    # A single drawing column beside a dedicated legend column can prove
+    # ownership scope even without physical viewport frames. This is stricter
+    # than the generic one-axis partition: exactly two columns are required,
+    # one and only one title must be a floor plan, the other must be a legend,
+    # and both resulting columns must satisfy the calibrated minimum span.
+    plan_legend_scope = False
+    if len(ordered) == 2 and axis == 0:
+        view_types = {str(anchors[i].view_type) for i in ordered}
+        plan_legend_scope = (
+            view_types == {"floor_plan", "legend"}
+            and all(
+                float(bounds[i + 1]) - float(bounds[i])
+                >= calibration.minimum_frame_span_pt
+                for i in range(2)
+            )
+        )
+
     out: list[SegmentedViewport] = []
     for position, index in enumerate(ordered):
         bbox = (
@@ -927,10 +950,32 @@ def _derived_partitions(
             view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
             view_type=anchor.view_type, label=anchor.text, title_bbox=anchor.bbox,
             bounding_box=bbox, status=ViewportSegmentationStatus.DERIVED.value,
-            boundary_source=ViewportBoundarySource.TITLE_PARTITION.value, confidence=0.5,
+            boundary_source=ViewportBoundarySource.TITLE_PARTITION.value,
+            confidence=0.75 if plan_legend_scope else 0.5,
             scale_raw=raw, scale_denominator=denominator, scale_conflict=scale_conflict,
-            notes=["viewport boundary derived from non-overlapping title partition", *scale_notes],
-            provenance={"partition_axis": "x" if axis == 0 else "y", "title_bbox": anchor.bbox},
+            notes=[
+                (
+                    "viewport ownership derived from validated floor-plan/legend columns"
+                    if plan_legend_scope
+                    else "viewport boundary derived from non-overlapping title partition"
+                ),
+                *scale_notes,
+            ],
+            provenance={
+                "partition_axis": "x" if axis == 0 else "y",
+                "title_bbox": anchor.bbox,
+                **(
+                    {
+                        "partition_mode": _AUTHORITATIVE_PLAN_LEGEND_PARTITION_MODE,
+                        "grid_validated": True,
+                        "column_index": position,
+                        "column_count": 2,
+                        "scope_only": True,
+                    }
+                    if plan_legend_scope
+                    else {}
+                ),
+            },
         ))
     return out
 

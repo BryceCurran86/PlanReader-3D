@@ -328,3 +328,154 @@ def test_resolved_viewports_returns_none_when_segmentation_raises(monkeypatch) -
     monkeypatch.setattr(module, "segment_page_viewports", _boom)
     page = _unresolved_bounds_page()
     assert _resolved_viewports(page, page_number=1) is None
+
+
+def _validated_columnar_grid_page() -> fitz.Page:
+    doc = fitz.open()
+    page = doc.new_page(width=900.0, height=700.0)
+
+    # Three independently separated columns, two title rows each. This is the
+    # exact producer-owned columnar grid subtype admitted by F.07.
+    page.insert_text((80.0, 250.0), "GROUND FLOOR PLAN", fontsize=11)
+    page.insert_text((90.0, 620.0), "ROOF PLAN", fontsize=11)
+
+    page.insert_text((380.0, 200.0), "ELEVATION E-01", fontsize=11)
+    page.insert_text((380.0, 560.0), "SECTION S-01", fontsize=11)
+
+    page.insert_text((680.0, 200.0), "ELEVATION E-02", fontsize=11)
+    page.insert_text((680.0, 560.0), "SECTION S-02", fontsize=11)
+    return page
+
+
+def test_validated_columnar_grid_interior_can_prove_not_cropped() -> None:
+    from pb_viewport_segmentation import (
+        is_authoritative_derived_viewport,
+        segment_page_viewports,
+    )
+
+    page = _validated_columnar_grid_page()
+    viewports = segment_page_viewports(page, page_number=1)
+    plan = next(
+        v
+        for v in viewports
+        if v.label.upper() == "GROUND FLOOR PLAN"
+        and is_authoritative_derived_viewport(v)
+    )
+    assert plan.bounding_box is not None
+    x0, y0, x1, y1 = plan.bounding_box
+
+    wall = _wall(
+        pts=(
+            (x0 + 0.30 * (x1 - x0), y0 + 0.35 * (y1 - y0)),
+            (x0 + 0.70 * (x1 - x0), y0 + 0.35 * (y1 - y0)),
+        )
+    )
+    reason = _scope_boundary_reason(
+        wall,
+        page=page,
+        page_number=1,
+        page_width=900.0,
+        page_height=700.0,
+    )
+    assert reason is None
+
+
+def test_validated_columnar_grid_synthetic_edge_still_fails_closed() -> None:
+    from pb_viewport_segmentation import (
+        is_authoritative_derived_viewport,
+        segment_page_viewports,
+    )
+
+    page = _validated_columnar_grid_page()
+    viewports = segment_page_viewports(page, page_number=1)
+    plan = next(
+        v
+        for v in viewports
+        if v.label.upper() == "GROUND FLOOR PLAN"
+        and is_authoritative_derived_viewport(v)
+    )
+    assert plan.bounding_box is not None
+    x0, y0, x1, y1 = plan.bounding_box
+
+    wall = _wall(
+        pts=(
+            (x0 + 0.35 * (x1 - x0), y0 + 0.35 * (y1 - y0)),
+            (x1, y0 + 0.35 * (y1 - y0)),
+        )
+    )
+    reason = _scope_boundary_reason(
+        wall,
+        page=page,
+        page_number=1,
+        page_width=900.0,
+        page_height=700.0,
+    )
+    assert reason == PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED
+
+
+def _validated_plan_legend_scope_page() -> fitz.Page:
+    doc = fitz.open()
+    page = doc.new_page(width=840.0, height=600.0)
+    page.insert_text((150.0, 510.0), "PLAN : FLOOR LAYOUT", fontsize=11)
+    page.insert_text((700.0, 330.0), "LEGEND", fontsize=11)
+    return page
+
+
+def test_validated_plan_legend_interior_can_prove_not_cropped() -> None:
+    from pb_viewport_segmentation import (
+        is_authoritative_derived_viewport,
+        segment_page_viewports,
+    )
+
+    page = _validated_plan_legend_scope_page()
+    viewports = segment_page_viewports(page, page_number=1)
+    plan = next(
+        v for v in viewports
+        if v.view_type == "floor_plan" and is_authoritative_derived_viewport(v)
+    )
+    assert plan.bounding_box is not None
+    x0, y0, x1, y1 = plan.bounding_box
+
+    wall = _wall(
+        pts=(
+            (x0 + 0.30 * (x1 - x0), y0 + 0.35 * (y1 - y0)),
+            (x0 + 0.70 * (x1 - x0), y0 + 0.35 * (y1 - y0)),
+        )
+    )
+    assert _scope_boundary_reason(
+        wall,
+        page=page,
+        page_number=1,
+        page_width=840.0,
+        page_height=600.0,
+    ) is None
+
+
+def test_validated_plan_legend_synthetic_separator_still_fails_closed() -> None:
+    from pb_viewport_segmentation import (
+        is_authoritative_derived_viewport,
+        segment_page_viewports,
+    )
+
+    page = _validated_plan_legend_scope_page()
+    viewports = segment_page_viewports(page, page_number=1)
+    plan = next(
+        v for v in viewports
+        if v.view_type == "floor_plan" and is_authoritative_derived_viewport(v)
+    )
+    assert plan.bounding_box is not None
+    x0, y0, x1, y1 = plan.bounding_box
+
+    wall = _wall(
+        pts=(
+            (x0 + 0.35 * (x1 - x0), y0 + 0.35 * (y1 - y0)),
+            (x1, y0 + 0.35 * (y1 - y0)),
+        )
+    )
+    assert _scope_boundary_reason(
+        wall,
+        page=page,
+        page_number=1,
+        page_width=840.0,
+        page_height=600.0,
+    ) == PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED

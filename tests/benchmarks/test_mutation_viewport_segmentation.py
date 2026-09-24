@@ -314,3 +314,44 @@ def test_plan_floor_layout_title_is_supported_without_relaxing_prose_guard():
     prose = _reopen(prose)
     assert segment_page_viewports(prose[0], page_number=1) == []
     prose.close()
+
+
+def _unframed_plan_legend_columns(*, other_title: str = "LEGEND") -> fitz.Document:
+    doc = fitz.open()
+    page = doc.new_page(width=840, height=600)
+    page.insert_text((150, 510), "PLAN : FLOOR LAYOUT", fontsize=11)
+    page.insert_text((700, 330), other_title, fontsize=11)
+    return _reopen(doc)
+
+
+def test_unframed_plan_plus_legend_columns_are_scope_authoritative():
+    doc = _unframed_plan_legend_columns()
+    viewports = segment_page_viewports(doc[0], page_number=1)
+    by_type = {v.view_type: v for v in viewports}
+    plan = by_type[DrawingViewType.FLOOR_PLAN.value]
+    legend = by_type[DrawingViewType.LEGEND.value]
+
+    assert plan.status == ViewportSegmentationStatus.DERIVED.value
+    assert legend.status == ViewportSegmentationStatus.DERIVED.value
+    assert plan.provenance["partition_mode"] == "plan_legend_columns"
+    assert plan.provenance["grid_validated"] is True
+    assert plan.provenance["scope_only"] is True
+    assert is_authoritative_derived_viewport(plan)
+    assert is_authoritative_derived_viewport(legend)
+
+    authoritative = authoritative_floor_plan_viewports(doc[0], page_number=1)
+    assert len(authoritative) == 1
+    assert authoritative[0].view_id == plan.view_id
+    doc.close()
+
+
+def test_two_drawing_columns_do_not_gain_plan_legend_scope_authority():
+    doc = _unframed_plan_legend_columns(other_title="EAST ELEVATION")
+    viewports = segment_page_viewports(doc[0], page_number=1)
+    plan = next(v for v in viewports if v.view_type == DrawingViewType.FLOOR_PLAN.value)
+
+    assert plan.status == ViewportSegmentationStatus.DERIVED.value
+    assert plan.provenance.get("partition_mode") != "plan_legend_columns"
+    assert not is_authoritative_derived_viewport(plan)
+    assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
+    doc.close()
