@@ -104,5 +104,68 @@ jobs:
                       })
           finally:
               doc.close()
-          print("MURERA_NATIVE_ENVELOPE_MAP="+json.dumps({"sha":actual,"pages":out,"all_100_220_candidates":all_candidates,"floor_area_hits":floor_area_hits},sort_keys=True),flush=True)
+          # Reproduce the dangerous document-global detected_span behavior.
+          drawing_indicators=(
+              "scale 1:","scale: 1:","scale 1 :","scale: 1 :","ground floor plan",
+              "floor plan","foundation plan","foundation layout","ground floor slab detail",
+              "ground floor slab details","slab detail","slab details","elevation","section",
+              "roof plan","layout plan","working drawing","drawing no","drawing title","sheet no",
+              "window schedule","door schedule","schedule of doors","schedule of windows",
+              "schedule of finishes",
+          )
+          detected_span=None
+          span_updates=[]
+          page_records=[]
+          doc=fitz.open(path)
+          try:
+              for pno in range(len(doc)):
+                  page=doc[pno]
+                  txt=page.get_text("text") or ""
+                  low=txt.lower()
+                  is_drawing=any(ind in low for ind in drawing_indicators)
+                  if not is_drawing:
+                      continue
+                  vals=dims_from_text(txt)
+                  norm=" ".join(low.split())
+                  if any(k in norm for k in ("section","span","truss","layout")):
+                      for v in vals:
+                          if 7.0 <= v <= 14.0:
+                              detected_span=v
+                              span_updates.append({"page":pno+1,"value":v})
+                              break
+                  page_records.append({
+                      "page":pno+1,
+                      "dims":vals,
+                      "titles":[ln.strip() for ln in txt.splitlines() if ln.strip() and re.search(r"(?i)(floor plan|foundation|layout|section|elevation|roof plan|science lab)",ln)][:20],
+                  })
+          finally:
+              doc.close()
+
+          cross_page=[]
+          for rec in page_records:
+              vals=rec["dims"]
+              c=Counter(round(v,2) for v in vals)
+              # Exact production fallback where one resolved length can borrow detected_span.
+              # First see whether this page supplies any candidate length >=5m.
+              uniq=sorted(set(vals),reverse=True)
+              for l in uniq:
+                  if l < 5.0 or detected_span is None:
+                      continue
+                  area=round(l*detected_span,4)
+                  if 100.0 <= area <= 220.0:
+                      cross_page.append({
+                          "page":rec["page"],"length_m":l,"detected_span_m":detected_span,
+                          "area_m2":area,"distance_from_149_26":round(abs(area-149.26),4),
+                          "titles":rec["titles"],
+                      })
+
+          print("MURERA_NATIVE_ENVELOPE_MAP="+json.dumps({
+              "sha":actual,
+              "pages":out,
+              "all_100_220_candidates":all_candidates,
+              "floor_area_hits":floor_area_hits,
+              "detected_span_final":detected_span,
+              "detected_span_updates":span_updates,
+              "cross_page_area_candidates":sorted(cross_page,key=lambda x:x["distance_from_149_26"])[:100],
+          },sort_keys=True),flush=True)
           PY
