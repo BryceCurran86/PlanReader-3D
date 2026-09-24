@@ -126,6 +126,13 @@ def test_competing_long_roof_rectangles_conflict_rather_than_choose_longest():
     assert all(a.candidate_id for a in result.alternatives)
 
 
+def test_duplicate_side_strokes_are_retained_without_first_match_selection():
+    paths=_long_paths()+[RoofPath("roof-left-second",(20,20),(20,35))]
+    result=_long(paths)
+    assert result.status is Status.CANDIDATE
+    assert {"roof-left","roof-left-second"} <= set(result.path_ids)
+
+
 def test_gable_needs_opposing_roof_slopes_enclosing_structural_supports():
     p=[RoofPath("one-side",(15,65),(100,30))]
     assert _gable(p).status is Status.ABSTAINED
