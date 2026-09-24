@@ -82,4 +82,23 @@ jobs:
               "physical_net_wall_live":getattr(extractor,"physical_net_wall_live",None),
           }
           print("LAMU_WALL_DETAIL="+json.dumps(detail,sort_keys=True,default=str),flush=True)
+          scoped={}
+          for label,page_index in (("classrooms",40),("toilets",41)):
+              ex=GenericPlanReaderExtractor()
+              ps=ex.extract_from_pdf(source,pages=[page_index])
+              scoped[label]={
+                  "predictions":{
+                      p.tag:{
+                          "quantity":p.quantity,
+                          "unit":p.unit,
+                          "dimensions":p.dimensions,
+                          "source_page":p.source_page,
+                          "metadata":p.metadata,
+                      }
+                      for p in ps
+                      if p.tag in {"perimeter_walling","damp_proof_course","internal_plaster","internal_paint","floor_screed"}
+                  },
+                  "status":ex.extraction_status,
+              }
+          print("LAMU_SCOPED_BUILDINGS="+json.dumps(scoped,sort_keys=True,default=str),flush=True)
           PY
