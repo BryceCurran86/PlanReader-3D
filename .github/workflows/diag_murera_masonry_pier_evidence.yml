@@ -1,0 +1,65 @@
+name: TEST-ONLY Murera Masonry Pier Evidence
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-piers:
+    if: startsWith(github.head_ref, 'diag/murera-masonry-pier-evidence')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install PyMuPDF
+      - name: Inspect drawing-owned masonry pier count evidence
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,re,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_structural_bay_pillar_count import find_uniform_bay_runs
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          p=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-pier-evidence/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:p.write_bytes(r.read())
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          if actual!=expected:raise SystemExit(actual)
+
+          doc=fitz.open(p)
+          pages=[]
+          for idx in range(218,238):
+              page=doc[idx]
+              txt=page.get_text("text") or ""
+              norm=re.sub(r"\s+"," ",txt.lower())
+              if not any(k in norm for k in ("pier","pillar","column","post","foundation","floor plan","layout")):
+                  continue
+              dims=[]
+              for major,minor in re.findall(r"\b(\d{1,2})[,.]?(\d{3})\b",txt):
+                  val=float(major)+float(minor)/1000.0
+                  if 1.0<=val<=8.0:dims.append(round(val,3))
+              runs=find_uniform_bay_runs(dims)
+              hits=[ln.strip() for ln in txt.splitlines() if re.search(r"(?i)(pier|pillar|column|post|foundation|\bno\.?s?\b)",ln)]
+              pages.append({
+                  "page":idx+1,
+                  "hits":hits[:100],
+                  "candidate_dims_m":dims[:200],
+                  "bay_runs":[{
+                      "status":r.status,
+                      "bay_count":r.bay_count,
+                      "support_count":r.support_count,
+                      "bay_spans_m":r.bay_spans_m,
+                      "notes":r.notes,
+                  } for r in runs],
+              })
+          doc.close()
+          print("MURERA_MASONRY_PIER_EVIDENCE="+json.dumps({
+              "sha":actual,
+              "pages":pages,
+          },sort_keys=True),flush=True)
+          PY
