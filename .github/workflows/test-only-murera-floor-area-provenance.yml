@@ -1,0 +1,86 @@
+name: TEST-ONLY Murera Floor Area Provenance
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-floor-area:
+    if: startsWith(github.head_ref, 'diag/murera-floor-area-provenance')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Trace current Murera floor-area prediction provenance
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib, json, urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+
+          url="https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          path=Path("/tmp/murera.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Murera-floor-area-provenance/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              path.write_bytes(r.read())
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(f"source hash mismatch: {actual}")
+
+          ex=GenericPlanReaderExtractor()
+          preds=ex.extract_from_pdf(path,collect_item35_shadow=False)
+          focus={"floor_screed","substructure_surface_bed","substructure_bed_dpm","substructure_a142_mesh","damp_proof_course"}
+          selected=[]
+          for p in preds:
+              if p.tag in focus:
+                  selected.append({
+                      "tag":p.tag,
+                      "quantity":p.quantity,
+                      "unit":p.unit,
+                      "source_page":p.source_page,
+                      "sheet_number":p.sheet_number,
+                      "dimensions":p.dimensions,
+                      "description":p.description,
+                      "confidence":p.confidence,
+                      "metadata":p.metadata,
+                  })
+
+          page_summaries=[]
+          doc=fitz.open(path)
+          try:
+              for pno in range(218,238):
+                  page=doc[pno]
+                  txt=page.get_text("text") or ""
+                  parsed=ex.parse_dimensions(txt)
+                  dims=[d.value_m for d in parsed]
+                  env=ex._detect_outer_envelope(dims,None,False)
+                  page_summaries.append({
+                      "page":pno+1,
+                      "title_lines":[ln.strip() for ln in txt.splitlines() if ln.strip()][:18],
+                      "dims_m":dims[:80],
+                      "envelope_without_detected_span":env,
+                  })
+          finally:
+              doc.close()
+
+          print("MURERA_FLOOR_AREA_PROVENANCE="+json.dumps({
+              "production_sha":"65bbdb077333e376e2c0ee0cb6dd002afa28197c",
+              "source_sha256":actual,
+              "predictions":selected,
+              "pages":page_summaries,
+              "extraction_status":ex.extraction_status,
+          },sort_keys=True,default=str),flush=True)
+          PY
