@@ -177,36 +177,64 @@ def _observation_orientation(observation: Any) -> str:
     return str(getattr(observation, "orientation", DimensionOrientation.UNKNOWN.value))
 
 
-def _spatially_associated_with_edge(
+def _witnesses_bracket_edge_strip(
     *,
     edge: str,
-    label_center: Tuple[float, float],
-    obs_center: Tuple[float, float],
+    endpoints: Tuple[Tuple[float, float], Tuple[float, float]],
     viewport_bbox: Sequence[float],
-    along_tolerance_pt: float,
-    depth_tolerance_pt: float,
+    tolerance_pt: float,
 ) -> bool:
-    """Require along-edge alignment and proximity in the depth direction."""
+    """Require the dimension's own witness endpoints to physically bracket
+    the secondary strip: one endpoint near the viewport's own outer boundary
+    for this edge (the strip's outer edge/column line), the other a
+    genuinely interior boundary -- strictly inside the viewport and NOT
+    itself near the OPPOSITE edge (which would make this the compound
+    overall-depth chain spanning the whole viewport, not this strip's own
+    local depth against the shared primary/secondary boundary). Source-owned
+    witness geometry proves the physical depth; it does not need to sit
+    near the semantic label along the edge -- a long verandah's depth
+    dimension is commonly printed at one end of the strip (or in an outer
+    margin dimension chain) while the label itself is centered along it. A
+    single page-typography-derived tolerance is used throughout: dimension
+    lines are conventionally offset a small, consistent margin from the
+    object edge they measure, not drawn exactly coincident with it.
+    """
     vx0, vy0, vx1, vy1 = (float(v) for v in viewport_bbox)
+    p0, p1 = endpoints
     if edge in ("top", "bottom"):
-        if abs(obs_center[0] - label_center[0]) > along_tolerance_pt:
+        ys = sorted((p0[1], p1[1]))
+        xs = (p0[0], p1[0])
+        if not (vx0 - tolerance_pt <= xs[0] <= vx1 + tolerance_pt):
             return False
-        if abs(obs_center[1] - label_center[1]) > depth_tolerance_pt:
+        if not (vx0 - tolerance_pt <= xs[1] <= vx1 + tolerance_pt):
             return False
-        # Stay inside the plan viewport (no title-block leakage below frame).
-        if not (vy0 - depth_tolerance_pt <= obs_center[1] <= vy1 + depth_tolerance_pt):
+        outer_y = ys[1] if edge == "bottom" else ys[0]
+        inner_y = ys[0] if edge == "bottom" else ys[1]
+        edge_y = vy1 if edge == "bottom" else vy0
+        opposite_edge_y = vy0 if edge == "bottom" else vy1
+        if abs(outer_y - edge_y) > tolerance_pt:
             return False
-        if not (vx0 <= obs_center[0] <= vx1):
+        if abs(inner_y - opposite_edge_y) <= tolerance_pt:
+            return False  # spans the whole viewport -- the compound/overall chain, not this strip
+        if not (vy0 - tolerance_pt <= inner_y <= vy1 + tolerance_pt):
             return False
         return True
 
-    if abs(obs_center[1] - label_center[1]) > along_tolerance_pt:
+    xs = sorted((p0[0], p1[0]))
+    ys = (p0[1], p1[1])
+    if not (vy0 - tolerance_pt <= ys[0] <= vy1 + tolerance_pt):
         return False
-    if abs(obs_center[0] - label_center[0]) > depth_tolerance_pt:
+    if not (vy0 - tolerance_pt <= ys[1] <= vy1 + tolerance_pt):
         return False
-    if not (vx0 - depth_tolerance_pt <= obs_center[0] <= vx1 + depth_tolerance_pt):
+    outer_x = xs[1] if edge == "right" else xs[0]
+    inner_x = xs[0] if edge == "right" else xs[1]
+    edge_x = vx1 if edge == "right" else vx0
+    opposite_edge_x = vx0 if edge == "right" else vx1
+    if abs(outer_x - edge_x) > tolerance_pt:
         return False
-    if not (vy0 <= obs_center[1] <= vy1):
+    if abs(inner_x - opposite_edge_x) <= tolerance_pt:
+        return False
+    if not (vx0 - tolerance_pt <= inner_x <= vx1 + tolerance_pt):
         return False
     return True
 
@@ -223,7 +251,6 @@ def _resolve_orthogonal_depth(
     assert viewport.bounding_box is not None
     required_orientation = _DEPTH_ORIENTATION_FOR_EDGE[edge]
     layout = calibrate_dimension_layout(page)
-    along_tol = max(layout.median_word_height_pt * 8.0, layout.chain_axis_tolerance_pt * 4.0)
     depth_tol = max(layout.median_word_height_pt * 10.0, layout.line_search_distance_pt)
 
     bundle = extract_dimension_evidence_bundle(
@@ -234,12 +261,9 @@ def _resolve_orthogonal_depth(
     )
     binding_by_id = {b.observation_id: b.status for b in bundle.bindings}
 
-    label_center = _bbox_center(label_bbox)
     candidates: List[Tuple[float, str, str]] = []
     for observation in bundle.observations:
         if observation.bbox is None:
-            continue
-        if not _bbox_fully_inside(observation.bbox, viewport.bounding_box, tolerance=layout.median_word_height_pt):
             continue
         status = binding_by_id.get(observation.dimension_id, BindingStatus.UNSUPPORTED.value)
         if status not in _ACCEPTED_BINDINGS:
@@ -249,16 +273,29 @@ def _resolve_orthogonal_depth(
             # Parallel-to-edge / unknown figures (e.g. wall-thickness marks
             # along a verandah front) cannot become depth.
             continue
-        obs_center = _bbox_center(observation.bbox)
-        if not _spatially_associated_with_edge(
-            edge=edge,
-            label_center=label_center,
-            obs_center=obs_center,
-            viewport_bbox=viewport.bounding_box,
-            along_tolerance_pt=along_tol,
-            depth_tolerance_pt=depth_tol,
-        ):
-            continue
+        if observation.endpoints is not None:
+            # The dimension's own witness endpoints prove its physical span
+            # and already establish viewport ownership more precisely than
+            # the caption text's bbox can -- a depth dimension's text
+            # routinely sits in the margin outside the viewport's own
+            # vector-frame bbox (normal drafting practice: annotate beside
+            # the geometry, not on top of it). Requiring the text itself to
+            # sit inside the frame would reject exactly this common case.
+            if not _witnesses_bracket_edge_strip(
+                edge=edge,
+                endpoints=observation.endpoints,
+                viewport_bbox=viewport.bounding_box,
+                tolerance_pt=depth_tol,
+            ):
+                continue
+        else:
+            # No witness geometry to anchor the observation physically --
+            # fall back to requiring the caption text itself to sit inside
+            # the viewport frame. (Currently unreachable in practice since
+            # _ACCEPTED_BINDINGS admits only WITNESS_BOUND, which always
+            # carries endpoints; kept as a defensive fallback.)
+            if not _bbox_fully_inside(observation.bbox, viewport.bounding_box, tolerance=layout.median_word_height_pt):
+                continue
         try:
             width_m = float(observation.value_m)
         except (TypeError, ValueError):
