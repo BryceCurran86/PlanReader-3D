@@ -11,3 +11,4 @@ benchmark_results/runs/
 benchmark_results/current.json
 benchmark_results/.report_set.lock
 *.tmp
+.vs/
