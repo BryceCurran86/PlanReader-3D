@@ -37,6 +37,7 @@ def run(pdf_path: Path) -> list[dict]:
         document_id="kstvet-item19b-shadow",
         source_bytes=payload,
         source_locator=f"sha256://{EXPECTED_SHA256}",
+        page_ids=(PAGE_ID,),
     )
     producer = WallFinishFaceBindingProducer.from_source_visibility_producer(
         source,
