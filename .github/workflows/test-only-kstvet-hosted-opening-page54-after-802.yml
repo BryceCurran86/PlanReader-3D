@@ -1,0 +1,90 @@
+name: TEST-ONLY KSTVET Hosted Opening Page54 After 802
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  hosted-opening-page54:
+    if: startsWith(github.head_ref, 'diag/kstvet-hosted-opening-page54-after-802')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Probe page54 hosted openings with and without authoritative viewport
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_hosted_opening_geometry import resolve_hosted_opening_spans
+          from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
+          from pb_viewport_segmentation import segment_page_viewports
+
+          url="https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          expected="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          path=Path("/tmp/kstvet.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-KSTVET-hosted-page54-after-802/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              path.write_bytes(r.read())
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(actual)
+
+          def span_dict(s):
+              return {
+                  "page":s.page,
+                  "orientation":s.host_orientation_deg,
+                  "jamb_start":s.jamb_start,
+                  "jamb_end":s.jamb_end,
+                  "span_pt":s.span_pt,
+                  "width_m":s.width_m,
+                  "wall_thickness_pt":s.wall_thickness_pt,
+                  "subtype":s.subtype,
+                  "evidence_flags":list(s.evidence_flags),
+                  "reason":s.reason,
+              }
+
+          doc=fitz.open(path)
+          page=doc[53]
+          viewports=segment_page_viewports(page,page_number=54)
+          auth=authoritative_floor_plan_viewports(page,page_number=54)
+          full=resolve_hosted_opening_spans(page,viewport_bbox=None,scale_authority=None)
+          scoped=[]
+          for v in auth:
+              bbox=tuple(float(x) for x in v.bounding_box)
+              res=resolve_hosted_opening_spans(page,viewport_bbox=bbox,scale_authority=None)
+              scoped.append({
+                  "view_id":v.view_id,
+                  "label":v.label,
+                  "status":v.status,
+                  "boundary_source":v.boundary_source,
+                  "bbox":bbox,
+                  "provenance":v.provenance,
+                  "result_status":res.status,
+                  "reason":res.reason,
+                  "openings":[span_dict(s) for s in res.openings],
+              })
+          print("KSTVET_HOSTED_OPENING_PAGE54_AFTER_802="+json.dumps({
+              "sha":actual,
+              "candidate_sha":"024d75558950e55b2e67a6b0a38387cf37cc8c4b",
+              "all_viewports":[{
+                  "view_id":v.view_id,"label":v.label,"view_type":v.view_type,
+                  "status":v.status,"boundary_source":v.boundary_source,
+                  "bbox":v.bounding_box,"provenance":v.provenance,
+              } for v in viewports],
+              "authoritative_count":len(auth),
+              "full_page":{"status":full.status,"reason":full.reason,"openings":[span_dict(s) for s in full.openings]},
+              "scoped":scoped,
+          },sort_keys=True,default=str),flush=True)
+          doc.close()
+          PY
