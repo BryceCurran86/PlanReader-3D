@@ -575,19 +575,7 @@ def collect_raster_figured_dimension_shadow(
             continue
 
         chosen = alternatives[0]
-        orientation = next(
-            dimension_line[0]
-            for dimension_line, witnesses in full_alternatives
-            if _alternative_for_line(
-                line=dimension_line,
-                witnesses=witnesses,
-                value_mm=value_mm,
-                raw_text=line.text,
-                bbox_px=bbox_px,
-                transform=transform,
-                scope=scope,
-            ).candidate_id == chosen.candidate_id
-        )
+        orientation = full_alternatives[0][0][0]
         candidates.append(
             RasterFiguredDimensionCandidate(
                 EvidenceResolutionStatus.CANDIDATE,
@@ -606,11 +594,10 @@ def collect_raster_figured_dimension_shadow(
             )
         )
 
-    # Exact repeated OCR observations of the same bound candidate collapse
-    # without choosing by confidence/order.  Conflicts and abstentions remain.
-    collapsed: list[RasterFiguredDimensionCandidate] = []
-    seen_ids: set[str] = set()
-    for candidate in sorted(
+    # Preserve every OCR observation, including exact repeats from separate
+    # passes.  A shared stable candidate_id records physical equivalence
+    # without deleting source observations or selecting by confidence.
+    retained = tuple(sorted(
         candidates,
         key=lambda c: (
             c.bbox_pt,
@@ -618,15 +605,11 @@ def collect_raster_figured_dimension_shadow(
             c.raw_text,
             c.candidate_id or "",
             c.status.value,
+            -1.0 if c.confidence is None else float(c.confidence),
         ),
-    ):
-        if candidate.candidate_id is not None:
-            if candidate.candidate_id in seen_ids:
-                continue
-            seen_ids.add(candidate.candidate_id)
-        collapsed.append(candidate)
+    ))
 
-    statuses = {candidate.status for candidate in collapsed}
+    statuses = {candidate.status for candidate in retained}
     if EvidenceResolutionStatus.CONFLICT in statuses:
         status = EvidenceResolutionStatus.CONFLICT
         reasons = ("raster_dimension_conflict_retained",)
@@ -641,7 +624,7 @@ def collect_raster_figured_dimension_shadow(
         status,
         reasons,
         scope,
-        tuple(collapsed),
+        retained,
     )
 
 
