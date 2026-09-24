@@ -1,0 +1,134 @@
+name: TEST-ONLY LAMU Scaled Wall Height V2
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  structural-height:
+    if: startsWith(github.head_ref, 'diag/lamu-scaled-wall-height-v2')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install minimal runtime
+        run: pip install PyMuPDF
+      - name: Resolve structural wall-height candidates
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,math,statistics,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_viewport_segmentation import segment_page_viewports
+          from pb_source_roof_covering_authority import get_elevation_viewport_search_bbox
+
+          url="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          expected="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          p=Path("/tmp/lamu.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-LAMU-scaled-height-v2/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r: p.write_bytes(r.read())
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          if actual!=expected: raise SystemExit(actual)
+
+          doc=fitz.open(p); page=doc[40]
+          allvps=segment_page_viewports(page,page_number=41)
+          drawings=page.get_drawings() or []
+          results=[]
+
+          def near(a,b,tol=1.5): return abs(a-b)<=tol
+          def dedupe(rows):
+              out=[]
+              for r in sorted(rows,key=lambda z:(z["x"],z["top_y"],z["bottom_y"])):
+                  if any(abs(r["x"]-q["x"])<=0.8 and abs(r["top_y"]-q["top_y"])<=0.8 and abs(r["bottom_y"]-q["bottom_y"])<=0.8 for q in out):
+                      continue
+                  out.append(r)
+              return out
+
+          for vp in allvps:
+              if vp.view_type!="elevation" or not vp.scale_denominator:
+                  continue
+              bbox=get_elevation_viewport_search_bbox(vp,allvps,page.rect)
+              x0,y0,x1,y1=bbox
+              verticals=[]; horizontals=[]; diagonals=[]
+              for d in drawings:
+                  for it in d.get("items",[]) or []:
+                      if not it or it[0]!="l" or len(it)<3: continue
+                      a,b=it[1],it[2]
+                      ax,ay,bx,by=map(float,(a.x,a.y,b.x,b.y))
+                      if not (x0<=min(ax,bx) and max(ax,bx)<=x1 and y0<=min(ay,by) and max(ay,by)<=y1): continue
+                      dx=bx-ax; dy=by-ay; length=math.hypot(dx,dy)
+                      if abs(dx)<=1.0 and abs(dy)>=15:
+                          verticals.append((round((ax+bx)/2,3),round(min(ay,by),3),round(max(ay,by),3),length))
+                      elif abs(dy)<=1.0 and abs(dx)>=25:
+                          horizontals.append((min(ax,bx),max(ax,bx),round((ay+by)/2,3),length))
+                      elif length>=20:
+                          diagonals.append((ax,ay,bx,by,length))
+
+              m_per_pt=(25.4/72.0)*float(vp.scale_denominator)/1000.0
+              cand=[]
+              for x,top,bottom,length in verticals:
+                  hm=length*m_per_pt
+                  if not (2.0<=hm<=4.5): continue
+
+                  top_links=[h for h in horizontals if h[0]-2<=x<=h[1]+2 and near(h[2],top,2.0)]
+                  bottom_links=[h for h in horizontals if h[0]-2<=x<=h[1]+2 and near(h[2],bottom,2.0)]
+                  # A wall-height vertical should participate in actual structural
+                  # levels at both ends, not just be an isolated hatch/tick.
+                  if not top_links or not bottom_links: continue
+                  max_top=max(h[3] for h in top_links)
+                  max_bottom=max(h[3] for h in bottom_links)
+                  if max_top<45 or max_bottom<45: continue
+
+                  cand.append({
+                      "x":round(x,3),"top_y":round(top,3),"bottom_y":round(bottom,3),
+                      "height_m":round(hm,4),"length_pt":round(length,3),
+                      "top_link_max_pt":round(max_top,3),
+                      "bottom_link_max_pt":round(max_bottom,3),
+                  })
+              cand=dedupe(cand)
+
+              # Remove dense regular hatch/batten families. Genuine wall corners
+              # should be sparse; repeated near-identical verticals every few pt
+              # across a long band are graphic fill/detail patterns.
+              groups={}
+              for r in cand:
+                  key=(round(r["top_y"]/2)*2,round(r["bottom_y"]/2)*2,round(r["height_m"],2))
+                  groups.setdefault(key,[]).append(r)
+              retained=[]
+              rejected_dense=[]
+              for key,members in groups.items():
+                  xs=sorted(m["x"] for m in members)
+                  gaps=[b-a for a,b in zip(xs,xs[1:])]
+                  median_gap=statistics.median(gaps) if gaps else None
+                  dense=(len(members)>=8 and median_gap is not None and median_gap<15.0)
+                  if dense:
+                      rejected_dense.append({"key":key,"count":len(members),"median_gap_pt":round(median_gap,3)})
+                  else:
+                      retained.extend(members)
+
+              # Cluster retained physical heights independent of benchmark values.
+              height_groups={}
+              for r in retained:
+                  key=round(r["height_m"]/0.05)*0.05
+                  height_groups.setdefault(round(key,2),[]).append(r)
+              clusters=[
+                  {"height_m":h,"count":len(ms),"members":sorted(ms,key=lambda z:z["x"])}
+                  for h,ms in height_groups.items()
+              ]
+              clusters.sort(key=lambda z:(-z["count"],z["height_m"]))
+              results.append({
+                  "label":vp.label,"view_id":vp.view_id,"scale":vp.scale_denominator,
+                  "search_bbox":list(bbox),"raw_vertical_count":len(verticals),
+                  "linked_candidate_count":len(cand),
+                  "retained_candidate_count":len(retained),
+                  "rejected_dense_groups":rejected_dense,
+                  "height_clusters":clusters[:20],
+              })
+
+          print("LAMU_SCALED_WALL_HEIGHT_V2="+json.dumps({"sha":actual,"elevations":results},sort_keys=True),flush=True)
+          doc.close()
+          PY
