@@ -224,13 +224,14 @@ def collect_longitudinal_roof_edge(
         if len(ys)<2 or ys[-1]-ys[0]<=ytol:continue
         xlo=sum(r[0] for r in group)/len(group)
         xhi=sum(r[1] for r in group)/len(group)
-        side=[]
+        side_groups=[]
         for x in (xlo,xhi):
             options=[v for v in vs if abs(v[0]-x)<=xtol and v[1]<=ys[0]+ytol and v[2]>=ys[-1]-ytol]
             if not options:break
-            side.append(sorted(options,key=lambda v:v[3].path_id)[0][3].path_id)
-        if len(side)!=2:continue
-        ids=tuple(sorted({*(pid for r in group for pid in r[3]),*side}))
+            side_groups.append(tuple(sorted(v[3].path_id for v in options)))
+        if len(side_groups)!=2:continue
+        ids=tuple(sorted({*(pid for r in group for pid in r[3]),
+                          *(pid for side in side_groups for pid in side)}))
         candidates.append((round(xlo,4),round(xhi,4),ids))
     if not candidates:
         return _result(EvidenceResolutionStatus.ABSTAINED,"roof_outline_unavailable",scope)
