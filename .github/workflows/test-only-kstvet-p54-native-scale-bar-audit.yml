@@ -1,0 +1,271 @@
+name: TEST-ONLY KSTVET P54 Native Scale Bar Audit
+
+on:
+  push:
+    branches:
+      - diag/kstvet-p54-native-scale-bar-audit
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r requirements.txt
+      - name: Audit exact page-54 native scale-bar evidence
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          import re
+          import urllib.request
+
+          import fitz
+
+          from pb_physical_scale_authority import (
+              PhysicalScaleProducer,
+              PhysicalScaleSelector,
+              _bar_candidates,
+              _endpoint_semantics,
+              _endpoint_words,
+              _physical_mm,
+              _ratios,
+              _scope_segments,
+              _scope_words,
+              _tick_for_endpoint,
+              _ZERO_RE,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_viewport_segmentation import (
+              is_authoritative_derived_viewport,
+              segment_page_viewports,
+          )
+
+          URL = "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          EXPECTED_SHA = "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          PAGE_NO = 54
+          TARGETS = ("view_p54_7", "view_p54_9")
+
+          request = urllib.request.Request(
+              URL,
+              headers={"User-Agent": "PlanReader-KSTVET-native-scale-bar-audit/1.0"},
+          )
+          with urllib.request.urlopen(request, timeout=120) as response:
+              payload = response.read()
+          got_sha = hashlib.sha256(payload).hexdigest()
+          if got_sha != EXPECTED_SHA:
+              raise SystemExit(f"SHA mismatch: {got_sha}")
+
+          doc = fitz.open(stream=payload, filetype="pdf")
+          page = doc[PAGE_NO - 1]
+          viewports = segment_page_viewports(page, page_number=PAGE_NO)
+          by_id = {viewport.view_id: viewport for viewport in viewports}
+
+          source = SourceVisibilityProducer(
+              producer_method="kstvet-p54-native-scale-bar-audit",
+              producer_version="1.0",
+          )
+          published = source.ingest_native_pdf_bytes(
+              document_id="kstvet-source-" + got_sha[:24],
+              source_bytes=payload,
+              source_locator=URL,
+              page_ids=(str(PAGE_NO),),
+          )
+          producer = PhysicalScaleProducer.from_source_visibility_producer(source)
+
+          def point(value):
+              return [round(float(value[0]), 6), round(float(value[1]), 6)]
+
+          def bbox(value):
+              return [round(float(v), 6) for v in value]
+
+          def word_row(word):
+              return {
+                  "observation_id": word.observation_id,
+                  "text": word.text,
+                  "bbox": bbox(word.bbox),
+                  "physical_mm": _physical_mm(word.text),
+                  "is_zero": bool(_ZERO_RE.match(word.text)),
+              }
+
+          def segment_row(segment):
+              return {
+                  "observation_ids": list(segment.observation_ids),
+                  "observation_id": segment.observation_id,
+                  "source_primitive_ref": segment.source_primitive_ref,
+                  "start": point(segment.start),
+                  "end": point(segment.end),
+                  "length_pt": round(float(segment.length), 9),
+              }
+
+          reports = []
+          sibling_summary = []
+
+          for viewport in viewports:
+              if viewport.bounding_box is None:
+                  continue
+              selector = PhysicalScaleSelector(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  page_id=str(PAGE_NO),
+                  viewport_id=viewport.view_id,
+              )
+              native_words = producer._trusted_words(selector, published)
+              native_segments = producer._visible_segments(selector, published)
+              scoped_words = _scope_words(native_words, viewport.bounding_box)
+              scoped_segments = _scope_segments(native_segments, viewport.bounding_box)
+              bars = _bar_candidates(scoped_segments, scoped_words)
+              physical_words = [
+                  word_row(word) for word in scoped_words
+                  if _physical_mm(word.text) is not None
+              ]
+              zero_words = [
+                  word_row(word) for word in scoped_words
+                  if _ZERO_RE.match(word.text)
+              ]
+              ratio_words = [
+                  word_row(word) for word in scoped_words
+                  if re.search(r"\b\d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?\b", word.text)
+              ]
+
+              plausible = []
+              geometry_qualified = []
+              for baseline in scoped_segments:
+                  left_ticks = _tick_for_endpoint(
+                      baseline, baseline.start, scoped_segments
+                  )
+                  right_ticks = _tick_for_endpoint(
+                      baseline, baseline.end, scoped_segments
+                  )
+                  if not left_ticks or not right_ticks:
+                      continue
+                  left_words = _endpoint_words(
+                      baseline,
+                      baseline.start,
+                      max((tick.length for tick in left_ticks), default=0.0),
+                      scoped_words,
+                  )
+                  right_words = _endpoint_words(
+                      baseline,
+                      baseline.end,
+                      max((tick.length for tick in right_ticks), default=0.0),
+                      scoped_words,
+                  )
+                  left_sem = _endpoint_semantics(left_words)
+                  right_sem = _endpoint_semantics(right_words)
+                  row = {
+                      "baseline": segment_row(baseline),
+                      "left_tick_count": len(left_ticks),
+                      "right_tick_count": len(right_ticks),
+                      "left_ticks": [segment_row(tick) for tick in left_ticks],
+                      "right_ticks": [segment_row(tick) for tick in right_ticks],
+                      "left_words": [word_row(word) for word in left_words],
+                      "right_words": [word_row(word) for word in right_words],
+                      "left_semantics": {
+                          "has_zero": bool(left_sem[0]),
+                          "physical": [
+                              {"mm": float(value), "observation_id": observation_id}
+                              for value, observation_id in left_sem[1]
+                          ],
+                      },
+                      "right_semantics": {
+                          "has_zero": bool(right_sem[0]),
+                          "physical": [
+                              {"mm": float(value), "observation_id": observation_id}
+                              for value, observation_id in right_sem[1]
+                          ],
+                      },
+                  }
+                  plausible.append(row)
+                  if len(left_ticks) == 1 and len(right_ticks) == 1:
+                      geometry_qualified.append(row)
+
+              sibling_summary.append(
+                  {
+                      "view_id": viewport.view_id,
+                      "label": viewport.label,
+                      "status": viewport.status,
+                      "authoritative_derived": is_authoritative_derived_viewport(viewport),
+                      "bbox": bbox(viewport.bounding_box),
+                      "native_bar_candidate_count": len(bars),
+                      "physical_label_count": len(physical_words),
+                      "zero_label_count": len(zero_words),
+                      "ratio_text_count": len(ratio_words),
+                  }
+              )
+
+              if viewport.view_id not in TARGETS:
+                  continue
+
+              authority_result = producer.publish_scope(selector)
+              evidence = authority_result.evidence
+
+              reports.append(
+                  {
+                      "view_id": viewport.view_id,
+                      "label": viewport.label,
+                      "view_type": viewport.view_type,
+                      "status": viewport.status,
+                      "boundary_source": viewport.boundary_source,
+                      "authoritative_derived": is_authoritative_derived_viewport(viewport),
+                      "bbox": bbox(viewport.bounding_box),
+                      "provenance": viewport.provenance,
+                      "ownership": {
+                          "document_id": published.revision.document_id,
+                          "source_sha256": published.revision.source_sha256,
+                          "revision_id": published.revision.revision_id,
+                          "snapshot_id": published.snapshot.snapshot_id,
+                          "page_id": str(PAGE_NO),
+                          "selector_viewport_id": viewport.view_id,
+                      },
+                      "source_counts": {
+                          "scoped_visible_segments": len(scoped_segments),
+                          "scoped_trusted_words": len(scoped_words),
+                      },
+                      "physical_distance_labels": physical_words,
+                      "zero_labels": zero_words,
+                      "ratio_text_words": ratio_words,
+                      "ratio_values": list(_ratios(scoped_words)),
+                      "plausible_baselines_with_ticks_at_both_ends": plausible,
+                      "geometry_qualified_baselines_exactly_one_tick_each": geometry_qualified,
+                      "existing_bar_candidates": [
+                          {
+                              "source_span_pt": float(bar.span_pt),
+                              "physical_span_mm": float(bar.physical_span_mm),
+                              "points_per_mm": float(bar.points_per_mm),
+                              "segment_ids": list(bar.segment_ids),
+                              "text_ids": list(bar.text_ids),
+                          }
+                          for bar in bars
+                      ],
+                      "existing_authority_result": {
+                          "status": authority_result.status.value,
+                          "reason_codes": list(authority_result.reason_codes),
+                          "source_kind": None if evidence is None else evidence.source_kind,
+                          "source_span_pt": None if evidence is None else evidence.source_span_pt,
+                          "physical_span_mm": None if evidence is None else evidence.physical_span_mm,
+                          "points_per_mm": None if evidence is None else evidence.points_per_mm,
+                          "segment_ids": [] if evidence is None else list(evidence.source_segment_observation_ids),
+                          "text_ids": [] if evidence is None else list(evidence.source_text_observation_ids),
+                      },
+                  }
+              )
+
+          output = {
+              "source_sha256": got_sha,
+              "document_id": published.revision.document_id,
+              "revision_id": published.revision.revision_id,
+              "snapshot_id": published.snapshot.snapshot_id,
+              "decoded_pages": list(published.coverage.decoded_pages),
+              "targets": reports,
+              "page54_sibling_diagnostic": sibling_summary,
+          }
+          print("KSTVET_P54_NATIVE_SCALE_BAR_AUDIT=" + json.dumps(output, sort_keys=True, default=str))
+          doc.close()
+          PY
