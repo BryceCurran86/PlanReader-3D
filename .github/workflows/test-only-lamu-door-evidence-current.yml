@@ -63,11 +63,26 @@ jobs:
               except Exception as exc:
                   entry["error"]=type(exc).__name__
               raster.append(entry)
+          words=page.get_text("words") or []
+          cubic_neighborhoods=[]
+          cubics=iter_quarter_circle_cubics(page,41)
+          for cubic in cubics:
+              nearby=[
+                  {"text":w[4],"bbox":[w[0],w[1],w[2],w[3]]}
+                  for w in words
+                  if abs(((w[0]+w[2])/2)-cubic.x) <= 70
+                  and abs(((w[1]+w[3])/2)-cubic.y) <= 70
+              ]
+              cubic_neighborhoods.append({
+                  "cubic":cubic.__dict__,
+                  "nearby_words":nearby,
+              })
           result={
               "source_sha256":actual,
               "page_is_floor_plan":page_is_floor_plan(text),
               "floor_plan_lines":[ln for ln in text.splitlines() if "plan" in ln.lower() or "door" in ln.lower()],
-              "native_cubics":[x.__dict__ for x in iter_quarter_circle_cubics(page,41)],
+              "native_cubics":[x.__dict__ for x in cubics],
+              "cubic_neighborhoods":cubic_neighborhoods,
               "sole":getattr(extract_sole_plan_door_swing(doc,[40]),"__dict__",None),
               "interior":getattr(extract_interior_plan_door_swings(doc,[40]),"__dict__",None),
               "exterior":getattr(extract_exterior_plan_door_swings(doc,[40]),"__dict__",None),
