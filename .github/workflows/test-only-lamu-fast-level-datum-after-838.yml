@@ -1,0 +1,51 @@
+name: TEST-ONLY Lamu Fast Level Datum After 838
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lamu-fast:
+    if: startsWith(github.head_ref, 'diag/lamu-fast-level-datum-after-838')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13", cache: pip}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Probe page 41 level datum and wall
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          import fitz
+          from pb_level_datum_extraction import find_level_markers
+          from pb_dimension_graph_constraint_engine import resolve_wall_height
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
+
+          url="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          expected="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2"
+          p=Path("/tmp/lamu.pdf")
+          req=urllib.request.Request(url,headers={"User-Agent":"PlanReader-Lamu-fast-datum/1.0"})
+          with urllib.request.urlopen(req,timeout=120) as r:p.write_bytes(r.read())
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          if actual!=expected:raise SystemExit(actual)
+          doc=fitz.open(p); page=doc[40]; txt=page.get_text("text") or ""
+          markers=find_level_markers(txt,source_page=41,view_id="page41")
+          resolved=resolve_wall_height(markers)
+          ex=GenericPlanReaderExtractor()
+          preds=ex.extract_from_pdf(p,pages=[40],collect_item35_shadow=False)
+          focus={x.tag:x.to_dict() for x in preds if x.tag in {"perimeter_walling","internal_plaster","internal_paint","damp_proof_course","floor_screed"}}
+          print("LAMU_FAST_LEVEL_DATUM_AFTER_838="+json.dumps({
+              "sha":actual,
+              "markers":[m.__dict__ for m in markers],
+              "resolved":None if resolved is None else resolved.__dict__,
+              "focus":focus,
+              "status":ex.extraction_status,
+          },sort_keys=True,default=str),flush=True)
+          doc.close()
+          PY
