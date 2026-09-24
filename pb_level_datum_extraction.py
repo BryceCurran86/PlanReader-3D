@@ -68,6 +68,12 @@ _LEVEL_LABELS: Dict[str, Tuple[str, ...]] = {
 # must yield no marker, never a wrong one.
 _LEVEL_VALUE = r"([+\-]\d{1,3}(?:,\d{3})?)(?!\.\d)"
 
+# Reverse CAD annotations on some drawings use ungrouped four-digit
+# millimetre values (for example "+3000 ROOF LEVEL"). Keep this broader
+# spelling local to the reverse-only parser so the established label-first
+# grammar and its false-positive boundary remain unchanged.
+_REVERSE_LEVEL_VALUE = r"([+\-](?:\d{1,4}|\d{1,3},\d{3}))(?!\.\d)"
+
 
 def _parse_level_value_m(raw: str) -> float:
     """Convert a signed, comma-grouped millimetre level string to metres."""
@@ -118,7 +124,7 @@ def find_level_markers(
         for marker_type, label_patterns in _LEVEL_LABELS.items():
             for label_pat in label_patterns:
                 reverse = re.fullmatch(
-                    rf"{_LEVEL_VALUE}\s*:?\s*{label_pat}",
+                    rf"{_REVERSE_LEVEL_VALUE}\s*:?\s*{label_pat}",
                     candidate,
                     re.I,
                 )
