@@ -12,15 +12,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Download SHA-pinned headline sources
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, urllib.request
+          root=pathlib.Path("/tmp/canonical-sources"); root.mkdir(parents=True,exist_ok=True)
+          ids=[
+            "tenders_ke_kstvet_cbc_classroom",
+            "tenders_ke_murera_science_lab",
+            "tenders_ke_ghazi_science_lab",
+            "tenders_ke_lamu_ishakani_ecd_classrooms",
+            "tenders_ke_umma_hostels",
+          ]
+          for bid in ids:
+              b=pathlib.Path("benchmarks/public_tenders")/bid
+              dm=json.loads((b/"download_manifest.json").read_text())
+              doc=next(d for d in dm["documents"] if d["role"]=="architectural_drawings")
+              fn=doc["filename"]; out=root/fn
+              req=urllib.request.Request(dm["source_url"],headers={"User-Agent":"PlanReader-canonical-five/1.0"})
+              with urllib.request.urlopen(req,timeout=180) as r: out.write_bytes(r.read())
+              got=hashlib.sha256(out.read_bytes()).hexdigest()
+              if got != doc["sha256"]: raise SystemExit(f"{bid}: sha mismatch {got}")
+              print(bid,fn,got)
+          PY
+
       - name: Build exact production image
         run: docker build -t planreader-canonical .
 
       - name: Run five-project canonical benchmark
         run: |
           set -euo pipefail
-          docker run --rm \
-            --cpus=2.0 \
+          docker run --rm --cpus=2.0 \
+            -v /tmp/canonical-sources/1727358888238-bq-nd-drawing.pdf:/app/1727358888238-bq-nd-drawing.pdf:ro \
+            -v /tmp/canonical-sources/1785347143869-bqs-drawings.pdf:/app/1785347143869-bqs-drawings.pdf:ro \
+            -v /tmp/canonical-sources/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf:/app/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf:ro \
+            -v /tmp/canonical-sources/lamu-ishakani-ecd-classrooms-boq.pdf:/app/lamu-ishakani-ecd-classrooms-boq.pdf:ro \
+            -v /tmp/canonical-sources/umma-university-hostels-builders-work.pdf:/app/umma-university-hostels-builders-work.pdf:ro \
             planreader-canonical \
-            python scripts/diagnostic_canonical_five_after_763.py \
+            python pb_benchmark_accuracy_engine.py --all --require-local-sources --output-dir /tmp/results \
             | tee /tmp/canonical-five.txt
-          grep -q 'CANONICAL_FIVE_AFTER_763=' /tmp/canonical-five.txt
+          grep -q 'Official Headline Accuracy' /tmp/canonical-five.txt
