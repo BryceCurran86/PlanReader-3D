@@ -22,6 +22,7 @@ jobs:
         run: |
           python -m compileall -q pb_wall_finish_face_binding_authority.py tests/test_wall_finish_face_binding_authority_v1.py
           ruff check --select F821,F823 pb_wall_finish_face_binding_authority.py tests/test_wall_finish_face_binding_authority_v1.py
+          PYTHONPATH=. python scripts/item19b_synthetic_debug.py
           PYTHONPATH=. pytest -q tests/test_wall_finish_face_binding_authority_v1.py
       - name: Download verified KSTVET source
         run: |
