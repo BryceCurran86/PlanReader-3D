@@ -158,16 +158,21 @@ def test_competing_ocr_values_at_same_source_position_conflict_before_geometry()
     assert {candidate.value_mm for candidate in result.candidates} == {4100.0, 4700.0}
 
 
-def test_same_value_repeat_collapses_without_confidence_tie_break():
+def test_same_value_repeats_are_retained_without_confidence_tie_break():
     lines = [
         OCRLine("4100", 0.20, (90.0, 40.0, 110.0, 50.0)),
         OCRLine("4100", 0.99, (90.0, 40.0, 110.0, 50.0)),
     ]
     result = _run(lines=lines)
+    reversed_result = _run(lines=list(reversed(lines)))
 
     assert result.status is Status.CANDIDATE
-    assert len([c for c in result.candidates if c.status is Status.CANDIDATE]) == 1
-    assert _candidate(result).value_mm == 4100.0
+    assert result == reversed_result
+    found = [c for c in result.candidates if c.status is Status.CANDIDATE]
+    assert len(found) == 2
+    assert {c.value_mm for c in found} == {4100.0}
+    assert len({c.candidate_id for c in found}) == 1
+    assert {c.confidence for c in found} == {0.20, 0.99}
 
 
 def test_split_dimension_strokes_and_input_order_preserve_physical_candidate_id():
