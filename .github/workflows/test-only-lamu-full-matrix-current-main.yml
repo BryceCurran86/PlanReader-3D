@@ -28,6 +28,7 @@ jobs:
           import hashlib, json, urllib.request
           from pathlib import Path
           from pb_benchmark_accuracy_engine import BenchmarkAccuracyEngine
+          from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
 
           benchmark_id="tenders_ke_lamu_ishakani_ecd_classrooms"
           url="https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
@@ -62,4 +63,23 @@ jobs:
               "items":items,
           }
           print("LAMU_FULL_MATRIX="+json.dumps(out,sort_keys=True),flush=True)
+          extractor=GenericPlanReaderExtractor()
+          predictions=extractor.extract_from_pdf(source)
+          focus={}
+          for p in predictions:
+              if p.tag in {"perimeter_walling","damp_proof_course","internal_plaster","internal_paint","D1","chalkboard","floor_screed","roof_covering"}:
+                  focus[p.tag]={
+                      "quantity":p.quantity,
+                      "unit":p.unit,
+                      "source_page":p.source_page,
+                      "dimensions":p.dimensions,
+                      "confidence":p.confidence,
+                      "metadata":p.metadata,
+                  }
+          detail={
+              "focus_predictions":focus,
+              "extraction_status":extractor.extraction_status,
+              "physical_net_wall_live":getattr(extractor,"physical_net_wall_live",None),
+          }
+          print("LAMU_WALL_DETAIL="+json.dumps(detail,sort_keys=True,default=str),flush=True)
           PY
