@@ -105,6 +105,13 @@ def _binding_index(
     return unique, duplicates
 
 
+def _retained_candidates(
+    candidates: Sequence[FiguredSpanScaleCandidate],
+) -> tuple[FiguredSpanScaleCandidate, ...]:
+    by_id = {candidate.candidate_id: candidate for candidate in candidates}
+    return tuple(by_id[candidate_id] for candidate_id in sorted(by_id))
+
+
 def _physical_span_mm(observation: DimensionObservation) -> Optional[float]:
     if observation.authority != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value:
         return None
@@ -208,10 +215,23 @@ def resolve_figured_span_scale_shadow(
 
     binding_by_id, duplicate_binding_ids = _binding_index(bundle.bindings)
     if duplicate_binding_ids:
+        alternatives: list[FiguredSpanScaleCandidate] = []
+        for observation in bundle.observations:
+            if not isinstance(observation, DimensionObservation):
+                continue
+            if observation.dimension_id not in duplicate_binding_ids:
+                continue
+            for binding in bundle.bindings:
+                if binding.observation_id != observation.dimension_id:
+                    continue
+                candidate = _candidate(observation, binding, scope)
+                if candidate is not None:
+                    alternatives.append(candidate)
         return FiguredSpanScaleShadowResult(
             status=EvidenceResolutionStatus.CONFLICT,
             reason_codes=(FIGURED_SPAN_SCALE_SCOPE_CONFLICT,),
             scope=scope,
+            candidates=_retained_candidates(alternatives),
         )
 
     candidates: list[FiguredSpanScaleCandidate] = []
@@ -219,21 +239,22 @@ def resolve_figured_span_scale_shadow(
     for observation in bundle.observations:
         if not isinstance(observation, DimensionObservation):
             continue
+        binding = binding_by_id.get(observation.dimension_id)
+        candidate = None if binding is None else _candidate(observation, binding, scope)
         if observation.dimension_id in seen_ids:
+            if candidate is not None:
+                candidates.append(candidate)
             return FiguredSpanScaleShadowResult(
                 status=EvidenceResolutionStatus.CONFLICT,
                 reason_codes=(FIGURED_SPAN_SCALE_SCOPE_CONFLICT,),
                 scope=scope,
+                candidates=_retained_candidates(candidates),
             )
         seen_ids.add(observation.dimension_id)
-        binding = binding_by_id.get(observation.dimension_id)
-        if binding is None:
-            continue
-        candidate = _candidate(observation, binding, scope)
         if candidate is not None:
             candidates.append(candidate)
 
-    retained = tuple(sorted(candidates, key=lambda item: item.candidate_id))
+    retained = _retained_candidates(candidates)
     if not retained:
         return FiguredSpanScaleShadowResult(
             status=EvidenceResolutionStatus.ABSTAINED,
