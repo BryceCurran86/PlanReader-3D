@@ -1,0 +1,26 @@
+name: TEST-ONLY Canonical Five After Murera 848
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  canonical-five:
+    if: startsWith(github.head_ref, 'diag/canonical-five-after-murera-848')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build exact production image
+        run: docker build -t planreader-canonical .
+
+      - name: Run five-project canonical benchmark
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --cpus=2.0 \
+            planreader-canonical \
+            python scripts/diagnostic_canonical_five_after_763.py \
+            | tee /tmp/canonical-five.txt
+          grep -q 'CANONICAL_FIVE_AFTER_763=' /tmp/canonical-five.txt
