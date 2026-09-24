@@ -14,6 +14,7 @@ openai==1.109.1
 streamlit-drawable-canvas==0.9.3
 protobuf==7.35.1
 opencv-python-headless==4.14.0.94
+pytesseract==0.3.13
 reportlab==5.0.0
 shapely==2.1.2
 
@@ -31,6 +32,8 @@ winrt-Windows.Media==3.2.1; sys_platform == "win32"
 winrt-Windows.Media.Ocr==3.2.1; sys_platform == "win32"
 winrt-Windows.Storage.Streams==3.2.1; sys_platform == "win32"
 
+# The production Docker image installs the Tesseract OS binary; pytesseract
+# above is the Python bridge used by DrawingOCREngine on Linux/Render.
 # RapidOCRBackend (pb_portable_raster_ocr_authority.RapidOCRBackend) is
 # implemented and tested, but its dependencies -- rapidocr, onnxruntime,
 # and their own transitive deps -- are DELIBERATELY NOT listed here.

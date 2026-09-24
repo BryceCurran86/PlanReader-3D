@@ -282,8 +282,16 @@ class DrawingOCREngine:
     ) -> List[Dict[str, Any]]:
         """Render a page or sub-rect to high-res pixmap and run OCR."""
         try:
-            pix = page.get_pixmap(clip=clip_rect, dpi=dpi)
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            # OCR does not need full RGB page rasters. Render luminance only:
+            # this cuts the in-process pixel buffer to roughly one third, which
+            # matters on the 512 MB production container for large drawing sheets.
+            pix = page.get_pixmap(
+                clip=clip_rect,
+                dpi=dpi,
+                colorspace=fitz.csGRAY,
+                alpha=False,
+            )
+            img = Image.frombytes("L", [pix.width, pix.height], pix.samples)
             scale = 72.0 / dpi
             ocr_lines = self.recognize_pil_image(img)
 
