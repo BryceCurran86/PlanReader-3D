@@ -238,6 +238,27 @@ def _point_in_bbox(point: Sequence[float], bbox: Sequence[float]) -> bool:
     )
 
 
+def _point_in_bbox_source_roundoff(
+    point: Sequence[float],
+    bbox: Sequence[float],
+) -> bool:
+    """Allow only binary32-scale cross-API roundoff at text/leader attachment.
+
+    PyMuPDF text and vector geometry are surfaced through different native paths,
+    so mathematically identical source coordinates can differ by a few binary32
+    roundoff units after conversion. This helper is deliberately restricted to
+    the annotation-to-leader start test. It does not relax leader continuity,
+    terminator contact, or wall contact.
+    """
+    values = tuple(float(v) for v in (*point, *bbox))
+    magnitude = max(1.0, *(abs(value) for value in values))
+    tolerance = magnitude * (2.0 ** -21)  # four binary32 unit-roundoff steps
+    return (
+        float(bbox[0]) - tolerance <= float(point[0]) <= float(bbox[2]) + tolerance
+        and float(bbox[1]) - tolerance <= float(point[1]) <= float(bbox[3]) + tolerance
+    )
+
+
 def _segment_intersects_bbox(
     geometry: Sequence[float],
     bbox: Sequence[float],
@@ -451,7 +472,10 @@ def _leader_paths(
             by_endpoint.setdefault(_endpoint_key(point), []).append(index)
     starts = [
         index for index, line in enumerate(lines)
-        if any(_point_in_bbox(point, annotation_bbox) for point in _endpoints(line))
+        if any(
+            _point_in_bbox_source_roundoff(point, annotation_bbox)
+            for point in _endpoints(line)
+        )
     ]
     found = {}
     for start in starts:
