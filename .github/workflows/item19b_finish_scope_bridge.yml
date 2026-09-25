@@ -1,0 +1,70 @@
+name: Item19B Finish Scope Bridge
+
+on:
+  push:
+    branches: [gpt/item19b-finish-propagation-v1]
+
+jobs:
+  bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run bridge tests
+        run: |
+          PYTHONPATH=. pytest -q tests/test_wall_finish_wall_scope_bridge.py tests/test_wall_finish_face_binding_authority_v1.py
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Run real source bridge
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_wall_finish_face_binding_authority import WallFinishFaceBindingProducer
+          from pb_wall_finish_wall_scope_bridge import bridge_finish_binding_to_page_wall
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(producer_method="item19b-bridge-real",producer_version="1.0")
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-bridge",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          finish=WallFinishFaceBindingProducer.from_source_visibility_producer(source,page_ids=("54",))
+          rows=[]
+          for scope in finish.published_results():
+              for binding in scope.bindings:
+                  result=bridge_finish_binding_to_page_wall(
+                      source_visibility_producer=source,
+                      binding_record=binding,
+                  )
+                  rows.append({
+                      "binding_id":binding.binding_id,
+                      "trade":binding.trade_scope_id,
+                      "viewport_wall":binding.physical_wall_id,
+                      "wall_scope":binding.physical_wall_decision_scope_id,
+                      "source_face_segment_ids":list(binding.source_face_segment_ids),
+                      "bridge_status":result.status.value,
+                      "reasons":list(result.reason_codes),
+                      "page_wall":result.record.target_physical_wall_id if result.record else None,
+                      "page_members":list(result.record.target_member_wall_ids) if result.record else [],
+                      "shared":list(result.record.shared_source_primitive_ids) if result.record else [],
+                  })
+          print("ITEM19B_SCOPE_BRIDGES "+json.dumps(rows,sort_keys=True))
+          PY
