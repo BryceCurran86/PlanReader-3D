@@ -243,18 +243,17 @@ def test_authenticated_viewport_constructor_does_not_materialize_legacy_page_sco
 ) -> None:
     path = tmp_path / "viewport-only.pdf"
     _draw_plan(path)
-    _source, published, authority = _ingest(path)
+    source, published, authority = _ingest(path)
+    current = source.published_snapshot_for_revision(
+        published.revision.revision_id
+    )
 
     result = authority.resolve_scope(
         PhysicalWallCandidateSelector(
             document_id=published.revision.document_id,
             revision_id=published.revision.revision_id,
             source_sha256=published.revision.source_sha256,
-            snapshot_id=source_snapshot.snapshot.snapshot_id
-            if (source_snapshot := _source.published_snapshot_for_revision(
-                published.revision.revision_id
-            ))
-            else published.snapshot.snapshot_id,
+            snapshot_id=current.snapshot.snapshot_id,
             page_id="1",
             decision_scope_id="wall-source:page-1",
         )
