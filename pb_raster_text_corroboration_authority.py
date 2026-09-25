@@ -1,16 +1,49 @@
-"""Immutable-source raster corroboration for native PDF text.
+"""Producer-owned raster corroboration of native PDF words (shadow authority).
 
-This authority is deliberately narrower than PdfTextIntegrityAuthority. It never
-relaxes native PDF decoding checks. A native word can be corroborated only when
-its producer-owned receipt is otherwise clean and is blocked solely because the
-embedded font program cannot independently verify the ToUnicode glyph mapping.
+``PdfTextIntegrityAuthority`` cannot trust a native word whose font program does
+not independently confirm the decoded Unicode (for example CID-keyed CFF
+subsets: ``text_glyph_mapping_unverified``). This module supplies an
+*independent visual* proof for exactly those words, without weakening that
+boundary and without touching it.
 
-Positive path:
-native word -> exact producer-owned bbox -> immutable source-page render ->
-exact crop -> one OCR result -> normalized text agreement.
+The native word is a CLAIM, not authority. A word is corroborated only when
+the source itself, rendered twice at materially different scales, is read as
+that same text:
 
-No caller pixels, caller bbox, proximity matching, confidence threshold,
-semantic interpretation, or quantity publication participate here.
+    producer-owned native word observation
+      -> producer-owned PdfTextIntegrity receipt whose ONLY blocking reason is
+         ``text_glyph_mapping_unverified``
+      -> producer-owned word bbox
+      -> the exact region rendered from the immutable stored PDF bytes at
+         300 DPI and at 450 DPI (renderer clip; never a page crop)
+      -> NO padding, NO expansion into neighbouring source pixels and NO
+         alternative preprocessing: one deterministic raster pipeline only
+         (trying a tight crop, then a padded one, then keeping whichever
+         matches the claim would turn preprocessing selection into an
+         authority preference)
+      -> the production RapidOCR backend run separately on each rasterization
+      -> exactly one textual reading per view, identical across both views and
+         identical to the native claim (strict equality after NFC + outer
+         whitespace only; punctuation and every semantic character preserved).
+
+Anything else abstains: any other text-integrity reason (trace ambiguity,
+malformed CMap, hidden/clipped/occluded text, decode or glyph mismatch, ...),
+zero readings, more than one reading (competing or duplicate detections),
+malformed or out-of-bounds OCR geometry, disagreement between the views, or a
+reading that differs from the native claim. There is no nearest / first /
+highest-confidence / largest-box / edit-distance choice, no confidence
+threshold (OCR confidence is retained only as diagnostic provenance), and no
+vocabulary correction.
+
+The two views are two independently rendered raster scales read by the SAME OCR
+engine. They are not two independent OCR engines and are never described as
+such.
+
+The caller supplies only exact immutable lineage and the native observation
+address. Word text, bbox, pixels, OCR output, confidence, page parent, source
+partition and ToUnicode interpretation are all resolved internally; none can be
+passed in. Generic OCR evidence elsewhere stays CANDIDATE-only, and nothing here
+alters text-integrity trust, Item 19B, or any commercial quantity.
 """
 from __future__ import annotations
 
@@ -18,578 +51,475 @@ from dataclasses import dataclass
 import hashlib
 import io
 import math
+import unicodedata
 from types import MappingProxyType
 from typing import Mapping, Optional
-import unicodedata
 
 from PIL import Image
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
-from pb_pdf_text_integrity_authority import TEXT_GLYPH_MAPPING_UNVERIFIED
+from pb_pdf_text_integrity_authority import (
+    TEXT_GLYPH_MAPPING_UNVERIFIED,
+    PdfTextIntegrityAuthority,
+)
 from pb_portable_raster_ocr_authority import (
     MockOCRBackend,
-    NullOCRBackend,
     OCRLine,
     RapidOCRBackend,
     RasterOCRBackend,
-    TesseractOCRBackend,
-    WinOCRBackend,
 )
-from pb_source_observation_authority import ObservationSelector
+from pb_source_observation_authority import (
+    ObservationSelector,
+    ProducerIntegrityError,
+    SourceObservationAuthority,
+    SourceObservationProducer,
+)
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 RASTER_TEXT_CORROBORATION_SCHEMA_VERSION = "1.0.0"
+RASTER_TEXT_CORROBORATION_DPIS: tuple[int, ...] = (300, 450)
 
 RASTER_TEXT_CORROBORATED = "raster_text_corroborated"
-RASTER_TEXT_UNAVAILABLE = "raster_text_corroboration_unavailable"
-RASTER_TEXT_NATIVE_ALREADY_TRUSTED = "raster_text_native_already_trusted"
-RASTER_TEXT_NATIVE_PREREQUISITE_UNRESOLVED = "raster_text_native_prerequisite_unresolved"
-RASTER_TEXT_NATIVE_BLOCKER_NOT_GLYPH_ONLY = "raster_text_native_blocker_not_glyph_only"
-RASTER_TEXT_BACKEND_UNAVAILABLE = "raster_text_ocr_backend_unavailable"
-RASTER_TEXT_SOURCE_RENDER_UNAVAILABLE = "raster_text_source_render_unavailable"
-RASTER_TEXT_SOURCE_GEOMETRY_INVALID = "raster_text_source_geometry_invalid"
-RASTER_TEXT_OCR_EMPTY = "raster_text_ocr_empty"
-RASTER_TEXT_OCR_AMBIGUOUS = "raster_text_ocr_ambiguous"
-RASTER_TEXT_OCR_MISMATCH = "raster_text_ocr_mismatch"
-RASTER_TEXT_OCR_OUTPUT_INVALID = "raster_text_ocr_output_invalid"
-RASTER_TEXT_OCR_EXTRACTION_FAILED = "raster_text_ocr_extraction_failed"
-RASTER_TEXT_LINEAGE_MISMATCH = "raster_text_lineage_mismatch"
+RASTER_TEXT_SCOPE_UNAVAILABLE = "raster_text_scope_unavailable"
+RASTER_TEXT_SOURCE_LINEAGE_UNRESOLVED = "raster_text_source_lineage_unresolved"
+RASTER_TEXT_OBSERVATION_NOT_NATIVE_WORD = "raster_text_observation_not_native_word"
+RASTER_TEXT_RECEIPT_UNAVAILABLE = "raster_text_integrity_receipt_unavailable"
+RASTER_TEXT_INTEGRITY_CONFLICT = "raster_text_integrity_conflict"
+RASTER_TEXT_ALREADY_TRUSTED = "raster_text_not_required_already_trusted"
+RASTER_TEXT_INTEGRITY_NOT_GLYPH_ONLY = "raster_text_integrity_not_glyph_only"
+RASTER_TEXT_BBOX_INVALID = "raster_text_source_bbox_invalid"
+RASTER_TEXT_BACKEND_UNAVAILABLE = "raster_text_backend_unavailable"
+RASTER_TEXT_BACKEND_ERROR = "raster_text_backend_error"
+RASTER_TEXT_RENDER_FAILED = "raster_text_render_failed"
+RASTER_TEXT_PAGE_LINEAGE_MISMATCH = "raster_text_page_lineage_mismatch"
+RASTER_TEXT_NO_READING = "raster_text_no_reading"
+RASTER_TEXT_COMPETING_READINGS = "raster_text_competing_readings"
+RASTER_TEXT_OCR_GEOMETRY_INVALID = "raster_text_ocr_geometry_invalid"
+RASTER_TEXT_VIEW_DISAGREEMENT = "raster_text_view_disagreement"
+RASTER_TEXT_NATIVE_MISMATCH = "raster_text_native_claim_mismatch"
+RASTER_TEXT_RECORD_UNAVAILABLE = "raster_text_record_unavailable"
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
-_PRODUCTION_BACKEND_TYPES = (
-    NullOCRBackend,
-    TesseractOCRBackend,
-    WinOCRBackend,
-    RapidOCRBackend,
-)
-_Key = tuple[str, str, str, str, str]
 
-
-def _selector_key(selector: ObservationSelector) -> _Key:
-    return (
-        selector.document_id,
-        selector.revision_id,
-        selector.source_sha256,
-        selector.snapshot_id,
-        selector.observation_id,
-    )
-
-
-def _normalise_text(value: object) -> str:
-    text = unicodedata.normalize("NFKC", str(value or ""))
-    return " ".join(text.split()).casefold()
-
-
-def _box_within(
-    inner: tuple[float, float, float, float],
-    outer: tuple[float, float, float, float],
-) -> bool:
-    ix0, iy0, ix1, iy1 = inner
-    ox0, oy0, ox1, oy1 = outer
-    return (
-        all(math.isfinite(value) for value in inner)
-        and ix1 > ix0
-        and iy1 > iy0
-        and ix0 >= ox0
-        and iy0 >= oy0
-        and ix1 <= ox1
-        and iy1 <= oy1
-    )
-
-
-def _choose_environment_backend() -> RasterOCRBackend:
-    rapid = RapidOCRBackend()
-    if rapid.is_available():
-        return rapid
-    tesseract = TesseractOCRBackend()
-    if tesseract.is_available():
-        return tesseract
-    winocr = WinOCRBackend()
-    if winocr.is_available():
-        return winocr
-    return NullOCRBackend()
+# OCR geometry must lie inside the OCR image it was read from. A backend may
+# report a polygon a hair beyond the pixel grid because of sub-pixel rounding;
+# that rounding is the only slack, expressed in pixels, never a fraction of the
+# image and never tuned against any result.
+_OCR_GEOMETRY_ROUNDING_PX = 2.0
 
 
 @dataclass(frozen=True)
-class RasterTextCorroborationReceipt:
-    receipt_id: str
-    parent_observation_id: str
-    native_text_integrity_receipt_id: str
-    page_parent_observation_id: str
+class RasterTextCorroborationSelector:
+    """Consumer address of one native word. Carries lineage and identity only."""
+
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    snapshot_id: str
+    observation_id: str
+
+    def __post_init__(self) -> None:
+        for name in ("document_id", "revision_id", "source_sha256", "snapshot_id", "observation_id"):
+            if not str(getattr(self, name) or "").strip():
+                raise ValueError(f"{name} must be a non-empty string")
+
+    @property
+    def key(self) -> tuple[str, str, str, str, str]:
+        return (
+            self.document_id,
+            self.revision_id,
+            self.source_sha256,
+            self.snapshot_id,
+            self.observation_id,
+        )
+
+
+@dataclass(frozen=True)
+class RasterTextView:
+    """One independently rendered raster view of the exact word region."""
+
+    dpi: int
+    clip_pt: tuple[float, float, float, float]
+    image_size_px: tuple[int, int]
+    image_png_sha256: str
+    line_count: int
+    ocr_reading: Optional[str]
+    # Diagnostic provenance only. Never compared with a threshold, never used
+    # to choose between readings, never part of the record identity.
+    ocr_confidence: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class RasterTextCorroborationRecord:
+    record_id: str
     document_id: str
     revision_id: str
     source_sha256: str
     snapshot_id: str
     page_id: str
+    native_observation_id: str
+    text_integrity_receipt_id: str
+    native_text_integrity_reason_codes: tuple[str, ...]
+    source_bbox: tuple[float, float, float, float]
+    page_parent_observation_id: str
     source_partition_id: str
-    raw_text: str
-    geometry: tuple[float, float, float, float]
-    rendered_page_sha256: str
-    crop_bbox_pt: tuple[float, float, float, float]
-    crop_pixel_size: tuple[int, int]
+    render_dpis: tuple[int, ...]
     backend_name: str
     backend_version: str
-    dpi: int
-    ocr_text: str
-    ocr_bbox_px: tuple[float, float, float, float]
+    views: tuple[RasterTextView, ...]
+    corroborated_text: str
     schema_version: str = RASTER_TEXT_CORROBORATION_SCHEMA_VERSION
 
 
 @dataclass(frozen=True)
 class RasterTextCorroborationResult:
     status: EvidenceResolutionStatus
-    proposition: Optional[str]
-    trusted_text: Optional[str]
     reason_codes: tuple[str, ...]
-    receipt: Optional[RasterTextCorroborationReceipt] = None
+    corroborated_text: Optional[str] = None
+    record: Optional[RasterTextCorroborationRecord] = None
+    schema_version: str = RASTER_TEXT_CORROBORATION_SCHEMA_VERSION
 
 
-def _blocked(
-    status: EvidenceResolutionStatus,
-    reason: str,
+def _outcome(
+    status: EvidenceResolutionStatus, reason: str, *extra: str
 ) -> RasterTextCorroborationResult:
-    if status is EvidenceResolutionStatus.CORROBORATED:
-        status = EvidenceResolutionStatus.ABSTAINED
     return RasterTextCorroborationResult(
         status=status,
-        proposition=None,
-        trusted_text=None,
-        reason_codes=(reason,),
-        receipt=None,
+        reason_codes=tuple(dict.fromkeys([reason, *(str(r) for r in extra if str(r))])),
     )
 
 
+def _abstain(reason: str, *extra: str) -> RasterTextCorroborationResult:
+    return _outcome(EvidenceResolutionStatus.ABSTAINED, reason, *extra)
+
+
+def _conflict(reason: str, *extra: str) -> RasterTextCorroborationResult:
+    return _outcome(EvidenceResolutionStatus.CONFLICT, reason, *extra)
+
+
+def normalize_reading(text: Optional[str]) -> str:
+    """Deterministic Unicode normalization and outer whitespace only.
+
+    Punctuation, case, digits and internal characters are preserved exactly.
+    """
+
+    return unicodedata.normalize("NFC", str(text or "")).strip()
+
+
+def _geometry_valid(line: OCRLine, size_px: tuple[int, int]) -> bool:
+    try:
+        x0, y0, x1, y1 = (float(v) for v in line.bbox_px)
+    except (TypeError, ValueError):
+        return False
+    if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
+        return False
+    if not (x1 > x0 and y1 > y0):
+        return False
+    slack = _OCR_GEOMETRY_ROUNDING_PX
+    width, height = size_px
+    return x0 >= -slack and y0 >= -slack and x1 <= width + slack and y1 <= height + slack
+
+
 class RasterTextCorroborationAuthority:
-    """Read-only lookup over producer-published raster corroboration results."""
+    """Read-only lookup of producer-published corroboration outcomes."""
 
     def __init__(
         self,
-        results: Mapping[_Key, RasterTextCorroborationResult],
+        results: Mapping[tuple[str, str, str, str, str], RasterTextCorroborationResult],
         *,
         _seal: object = None,
     ) -> None:
         if _seal is not _AUTHORITY_SEAL:
-            raise TypeError("RasterTextCorroborationAuthority is producer-owned")
+            raise TypeError(
+                "RasterTextCorroborationAuthority must be obtained from "
+                "RasterTextCorroborationProducer.authority()"
+            )
         self._results = MappingProxyType(dict(results))
 
-    def resolve_text(
-        self,
-        selector: ObservationSelector,
-    ) -> RasterTextCorroborationResult:
-        if type(selector) is not ObservationSelector:
-            raise TypeError("selector must be ObservationSelector")
-        return self._results.get(
-            _selector_key(selector),
-            _blocked(EvidenceResolutionStatus.ABSTAINED, RASTER_TEXT_UNAVAILABLE),
-        )
+    def resolve(self, selector: RasterTextCorroborationSelector) -> RasterTextCorroborationResult:
+        if type(selector) is not RasterTextCorroborationSelector:
+            raise TypeError("selector must be RasterTextCorroborationSelector")
+        return self._results.get(selector.key, _abstain(RASTER_TEXT_RECORD_UNAVAILABLE))
 
 
 class RasterTextCorroborationProducer:
-    """Producer-owned immutable-source OCR corroboration for one native word."""
+    """Trusted writer of raster-text corroboration records.
+
+    Built only from a producer-owned ``SourceVisibilityProducer``; nothing the
+    caller can pass to ``publish`` influences pixels, bbox, claim or reading.
+    """
 
     def __init__(
         self,
-        *,
         source_visibility_producer: SourceVisibilityProducer,
         backend: RasterOCRBackend,
-        dpi: int,
-        allow_test_backend: bool,
+        *,
         _seal: object = None,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError(
-                "RasterTextCorroborationProducer must be obtained from create() "
-                "or create_for_tests()"
+                "RasterTextCorroborationProducer must be obtained from "
+                "from_source_visibility_producer()"
             )
-        if type(source_visibility_producer) is not SourceVisibilityProducer:
-            raise TypeError(
-                "source_visibility_producer must be an actual SourceVisibilityProducer"
-            )
-        if allow_test_backend:
-            if type(backend) is not MockOCRBackend:
-                raise TypeError("create_for_tests requires exact MockOCRBackend")
-        elif type(backend) not in _PRODUCTION_BACKEND_TYPES:
-            raise TypeError(
-                "production backend must be exact RapidOCRBackend, "
-                "TesseractOCRBackend, WinOCRBackend, or NullOCRBackend"
-            )
-        dpi_value = int(dpi)
-        if dpi_value <= 0:
-            raise ValueError("dpi must be a positive integer")
-
-        self._source_visibility_producer = source_visibility_producer
-        self._source_producer = source_visibility_producer._producer
-        self._native_text_authority = (
-            source_visibility_producer.text_integrity_authority()
-        )
+        self._source: SourceVisibilityProducer = source_visibility_producer
+        self._source_producer: SourceObservationProducer = source_visibility_producer._producer
+        self._source_authority: SourceObservationAuthority = self._source_producer.authority()
+        self._text_authority: PdfTextIntegrityAuthority = source_visibility_producer.text_integrity_authority()
         self._backend = backend
-        self._dpi = dpi_value
-        self._results: dict[_Key, RasterTextCorroborationResult] = {}
-        self._page_render_cache: dict[
-            tuple[str, str, str, str, int],
-            tuple[bytes, object, Image.Image],
-        ] = {}
+        self._results: dict[tuple[str, str, str, str, str], RasterTextCorroborationResult] = {}
 
     @classmethod
-    def create(
-        cls,
-        *,
-        source_visibility_producer: SourceVisibilityProducer,
-        backend: Optional[RasterOCRBackend] = None,
-        dpi: int = 300,
+    def from_source_visibility_producer(
+        cls, source_visibility_producer: SourceVisibilityProducer
     ) -> "RasterTextCorroborationProducer":
-        active = backend if backend is not None else _choose_environment_backend()
-        return cls(
-            source_visibility_producer=source_visibility_producer,
-            backend=active,
-            dpi=dpi,
-            allow_test_backend=False,
-            _seal=_PRODUCER_SEAL,
-        )
+        """Production entry: always the exact production RapidOCR backend."""
+
+        if type(source_visibility_producer) is not SourceVisibilityProducer:
+            raise TypeError("source_visibility_producer must be producer-owned")
+        return cls(source_visibility_producer, RapidOCRBackend(), _seal=_PRODUCER_SEAL)
 
     @classmethod
-    def create_for_tests(
+    def from_source_visibility_producer_for_tests(
         cls,
-        *,
         source_visibility_producer: SourceVisibilityProducer,
         backend: MockOCRBackend,
-        dpi: int = 300,
     ) -> "RasterTextCorroborationProducer":
-        return cls(
-            source_visibility_producer=source_visibility_producer,
-            backend=backend,
-            dpi=dpi,
-            allow_test_backend=True,
-            _seal=_PRODUCER_SEAL,
-        )
+        """Test-only entry; the exact MockOCRBackend type is the only alternative."""
+
+        if type(source_visibility_producer) is not SourceVisibilityProducer:
+            raise TypeError("source_visibility_producer must be producer-owned")
+        if type(backend) is not MockOCRBackend:
+            raise TypeError("from_source_visibility_producer_for_tests requires exact MockOCRBackend")
+        return cls(source_visibility_producer, backend, _seal=_PRODUCER_SEAL)
 
     def authority(self) -> RasterTextCorroborationAuthority:
-        return RasterTextCorroborationAuthority(
-            self._results,
-            _seal=_AUTHORITY_SEAL,
-        )
+        return RasterTextCorroborationAuthority(self._results, _seal=_AUTHORITY_SEAL)
 
     def _store(
-        self,
-        selector: ObservationSelector,
-        result: RasterTextCorroborationResult,
+        self, selector: RasterTextCorroborationSelector, result: RasterTextCorroborationResult
     ) -> RasterTextCorroborationResult:
-        self._results[_selector_key(selector)] = result
+        self._results[selector.key] = result
         return result
 
-    def _render_page(
-        self,
-        selector: ObservationSelector,
-        page_id: str,
-    ) -> tuple[bytes, object, Image.Image]:
-        key = (
-            selector.revision_id,
-            selector.source_sha256,
-            selector.snapshot_id,
-            str(page_id),
-            self._dpi,
-        )
-        cached = self._page_render_cache.get(key)
-        if cached is not None:
-            return cached
-        png_bytes, page_parent = self._source_producer.render_native_page_png(
+    # ------------------------------------------------------------------
+    def publish(self, selector: RasterTextCorroborationSelector) -> RasterTextCorroborationResult:
+        if type(selector) is not RasterTextCorroborationSelector:
+            raise TypeError("selector must be RasterTextCorroborationSelector")
+        return self._store(selector, self._evaluate(selector))
+
+    def _evaluate(self, selector: RasterTextCorroborationSelector) -> RasterTextCorroborationResult:
+        observation_selector = ObservationSelector(
             document_id=selector.document_id,
             revision_id=selector.revision_id,
             source_sha256=selector.source_sha256,
             snapshot_id=selector.snapshot_id,
-            page_id=key[3],
-            dpi=float(self._dpi),
+            observation_id=selector.observation_id,
         )
-        image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
-        value = (png_bytes, page_parent, image)
-        self._page_render_cache[key] = value
-        return value
 
-    def publish(
-        self,
-        selector: ObservationSelector,
-    ) -> RasterTextCorroborationResult:
-        if type(selector) is not ObservationSelector:
-            raise TypeError("selector must be ObservationSelector")
-
-        cached = self._results.get(_selector_key(selector))
-        if cached is not None:
-            return cached
-
-        published = self._source_visibility_producer.published_snapshot_for_revision(
-            selector.revision_id
-        )
-        if (
-            published is None
-            or published.revision.document_id != selector.document_id
-            or published.revision.revision_id != selector.revision_id
-            or published.revision.source_sha256 != selector.source_sha256
-            or published.snapshot.snapshot_id != selector.snapshot_id
-            or self._source_producer.current_revision_id(selector.document_id)
-            != selector.revision_id
-        ):
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    RASTER_TEXT_LINEAGE_MISMATCH,
-                ),
-            )
-
-        native = self._native_text_authority.resolve_text(selector)
-        receipt = native.receipt
-        if native.status is EvidenceResolutionStatus.CORROBORATED:
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    RASTER_TEXT_NATIVE_ALREADY_TRUSTED,
-                ),
-            )
-        if native.status is not EvidenceResolutionStatus.ABSTAINED or receipt is None:
-            return self._store(
-                selector,
-                _blocked(
-                    native.status,
-                    RASTER_TEXT_NATIVE_PREREQUISITE_UNRESOLVED,
-                ),
+        # 1. Exact lineage, resolved by the source authority itself.
+        source_result = self._source_authority.resolve(observation_selector)
+        observation = source_result.observation
+        if source_result.status != EvidenceResolutionStatus.CORROBORATED or observation is None:
+            return _outcome(
+                source_result.status
+                if source_result.status != EvidenceResolutionStatus.CORROBORATED
+                else EvidenceResolutionStatus.ABSTAINED,
+                RASTER_TEXT_SOURCE_LINEAGE_UNRESOLVED,
+                *source_result.reason_codes,
             )
         if (
-            tuple(receipt.reason_codes) != (TEXT_GLYPH_MAPPING_UNVERIFIED,)
-            or receipt.decode_status != "tounicode_glyph_unverified"
-            or receipt.visibility_status != "proven_visible"
+            observation.observation_kind != "native_pdf_word"
+            or observation.origin_kind != "native"
+            or observation.viewport_id is not None
         ):
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    RASTER_TEXT_NATIVE_BLOCKER_NOT_GLYPH_ONLY,
-                ),
-            )
+            return _abstain(RASTER_TEXT_OBSERVATION_NOT_NATIVE_WORD)
+
+        # 2. The word must have cleared every text-integrity condition except
+        #    the independent glyph mapping. Raster OCR never overrides another
+        #    failure.
+        text_result = self._text_authority.resolve_text(observation_selector)
+        receipt = text_result.receipt
+        if receipt is None:
+            return _abstain(RASTER_TEXT_RECEIPT_UNAVAILABLE, *text_result.reason_codes)
+        if text_result.status == EvidenceResolutionStatus.CONFLICT:
+            return _conflict(RASTER_TEXT_INTEGRITY_CONFLICT, *text_result.reason_codes)
+        if text_result.status == EvidenceResolutionStatus.CORROBORATED:
+            return _abstain(RASTER_TEXT_ALREADY_TRUSTED)
+        if (
+            text_result.status != EvidenceResolutionStatus.ABSTAINED
+            or receipt.trusted
+            or tuple(receipt.reason_codes) != (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+            or tuple(text_result.reason_codes) != tuple(receipt.reason_codes)
+        ):
+            return _abstain(RASTER_TEXT_INTEGRITY_NOT_GLYPH_ONLY, *receipt.reason_codes)
+
+        # 3. The producer-owned word bbox is the only raster target.
+        try:
+            bbox = tuple(float(v) for v in observation.geometry[:4])
+        except (TypeError, ValueError):
+            return _abstain(RASTER_TEXT_BBOX_INVALID)
+        if (
+            len(bbox) != 4
+            or not all(math.isfinite(v) for v in bbox)
+            or not (bbox[2] > bbox[0] and bbox[3] > bbox[1])
+            or tuple(observation.geometry) != tuple(receipt.geometry)
+        ):
+            return _abstain(RASTER_TEXT_BBOX_INVALID)
 
         if not self._backend.is_available():
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    RASTER_TEXT_BACKEND_UNAVAILABLE,
-                ),
-            )
+            return _abstain(RASTER_TEXT_BACKEND_UNAVAILABLE)
 
-        try:
-            geometry = tuple(float(value) for value in receipt.geometry)
-        except (TypeError, ValueError):
-            geometry = ()
-        if len(geometry) != 4:
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    RASTER_TEXT_SOURCE_GEOMETRY_INVALID,
-                ),
-            )
-        bbox = geometry  # type: ignore[assignment]
+        native_claim = normalize_reading(observation.raw_text)
+        if not native_claim:
+            return _abstain(RASTER_TEXT_NATIVE_MISMATCH, "native_claim_empty")
 
-        try:
-            png_bytes, page_parent, page_image = self._render_page(
-                selector,
-                receipt.page_id,
-            )
-        except (ValueError, RuntimeError, OSError):
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.CONFLICT,
-                    RASTER_TEXT_SOURCE_RENDER_UNAVAILABLE,
-                ),
-            )
-
-        if (
-            getattr(page_parent, "document_id", None) != receipt.document_id
-            or getattr(page_parent, "revision_id", None) != receipt.revision_id
-            or getattr(page_parent, "source_sha256", None) != receipt.source_sha256
-            or getattr(page_parent, "page_id", None) != receipt.page_id
-            or getattr(page_parent, "source_partition_id", None)
-            != receipt.source_partition_id
-        ):
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.CONFLICT,
-                    RASTER_TEXT_LINEAGE_MISMATCH,
-                ),
-            )
-
-        page_geometry = tuple(
-            float(value) for value in getattr(page_parent, "geometry", ())[:2]
-        )
-        if len(page_geometry) != 2:
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.CONFLICT,
-                    RASTER_TEXT_SOURCE_GEOMETRY_INVALID,
-                ),
-            )
-        page_bbox = (0.0, 0.0, page_geometry[0], page_geometry[1])
-        if not _box_within(bbox, page_bbox):
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    RASTER_TEXT_SOURCE_GEOMETRY_INVALID,
-                ),
-            )
-
-        pt_to_px = float(self._dpi) / 72.0
-        x0, y0, x1, y1 = bbox
-        crop_px = (
-            max(0, int(math.floor(x0 * pt_to_px))),
-            max(0, int(math.floor(y0 * pt_to_px))),
-            min(page_image.width, int(math.ceil(x1 * pt_to_px))),
-            min(page_image.height, int(math.ceil(y1 * pt_to_px))),
-        )
-        if crop_px[2] <= crop_px[0] or crop_px[3] <= crop_px[1]:
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    RASTER_TEXT_SOURCE_GEOMETRY_INVALID,
-                ),
-            )
-        crop = page_image.crop(crop_px)
-
-        try:
-            raw_lines = tuple(self._backend.extract_lines(crop, dpi=self._dpi))
-        except Exception:
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.CONFLICT,
-                    RASTER_TEXT_OCR_EXTRACTION_FAILED,
-                ),
-            )
-
-        valid_lines: list[OCRLine] = []
-        for line in raw_lines:
-            text = str(getattr(line, "text", "") or "").strip()
-            if not text:
-                continue
+        # 4. Two independent renderings of the exact word region.
+        views: list[RasterTextView] = []
+        parent_ids: set[tuple[str, str, str]] = set()
+        for dpi in RASTER_TEXT_CORROBORATION_DPIS:
             try:
-                lx0, ly0, lx1, ly1 = tuple(
-                    float(value) for value in getattr(line, "bbox_px", ())
+                png_bytes, page_parent = self._source_producer.render_native_page_png(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    page_id=observation.page_id,
+                    dpi=float(dpi),
+                    clip_pt=bbox,
                 )
-            except (TypeError, ValueError):
-                return self._store(
-                    selector,
-                    _blocked(
-                        EvidenceResolutionStatus.ABSTAINED,
-                        RASTER_TEXT_OCR_OUTPUT_INVALID,
-                    ),
-                )
-            line_bbox = (lx0, ly0, lx1, ly1)
-            if not _box_within(
-                line_bbox,
-                (0.0, 0.0, float(crop.width), float(crop.height)),
+            except (ValueError, ProducerIntegrityError) as exc:
+                return _abstain(RASTER_TEXT_RENDER_FAILED, str(exc).split(":")[0].strip())
+            if (
+                page_parent.page_id != observation.page_id
+                or page_parent.source_partition_id != observation.source_partition_id
+                or page_parent.document_id != observation.document_id
+                or page_parent.revision_id != observation.revision_id
+                or page_parent.source_sha256 != observation.source_sha256
             ):
-                return self._store(
-                    selector,
-                    _blocked(
-                        EvidenceResolutionStatus.ABSTAINED,
-                        RASTER_TEXT_OCR_OUTPUT_INVALID,
-                    ),
+                return _conflict(RASTER_TEXT_PAGE_LINEAGE_MISMATCH)
+            parent_ids.add(
+                (page_parent.observation_id, page_parent.source_partition_id, page_parent.page_id)
+            )
+            try:
+                cropped = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+            except Exception:
+                return _abstain(RASTER_TEXT_RENDER_FAILED, "render_png_undecodable")
+            try:
+                lines = tuple(self._backend.extract_lines(cropped, dpi=int(dpi)))
+            except Exception:
+                return _abstain(RASTER_TEXT_BACKEND_ERROR)
+
+            readable = [line for line in lines if normalize_reading(getattr(line, "text", ""))]
+            if any(not _geometry_valid(line, (cropped.width, cropped.height)) for line in readable):
+                return _abstain(RASTER_TEXT_OCR_GEOMETRY_INVALID)
+            reading: Optional[str] = None
+            confidence: Optional[float] = None
+            if len(readable) == 1:
+                reading = normalize_reading(readable[0].text)
+                confidence = readable[0].confidence
+            views.append(
+                RasterTextView(
+                    dpi=int(dpi),
+                    clip_pt=bbox,  # type: ignore[arg-type]
+                    image_size_px=(cropped.width, cropped.height),
+                    image_png_sha256=hashlib.sha256(png_bytes).hexdigest(),
+                    line_count=len(readable),
+                    ocr_reading=reading,
+                    ocr_confidence=confidence,
                 )
-            valid_lines.append(line)
-
-        if not valid_lines:
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    RASTER_TEXT_OCR_EMPTY,
-                ),
-            )
-        if len(valid_lines) != 1:
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    RASTER_TEXT_OCR_AMBIGUOUS,
-                ),
             )
 
-        line = valid_lines[0]
-        ocr_text = str(line.text or "").strip()
-        if _normalise_text(ocr_text) != _normalise_text(receipt.raw_text):
-            return self._store(
-                selector,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    RASTER_TEXT_OCR_MISMATCH,
-                ),
-            )
+        if len(parent_ids) != 1:
+            return _conflict(RASTER_TEXT_PAGE_LINEAGE_MISMATCH)
+        (parent_observation_id, partition_id, _page) = next(iter(parent_ids))
 
-        ocr_bbox = tuple(float(value) for value in line.bbox_px)
+        # 5. Strict per-view acceptance, then strict agreement.
+        if any(view.line_count == 0 for view in views):
+            return _abstain(RASTER_TEXT_NO_READING)
+        if any(view.line_count > 1 for view in views):
+            return _abstain(RASTER_TEXT_COMPETING_READINGS)
+        readings = [view.ocr_reading for view in views]
+        if len(set(readings)) != 1:
+            return _abstain(RASTER_TEXT_VIEW_DISAGREEMENT)
+        if readings[0] != native_claim:
+            return _abstain(RASTER_TEXT_NATIVE_MISMATCH)
+
         payload = {
-            "parent_observation_id": receipt.parent_observation_id,
-            "native_text_integrity_receipt_id": receipt.receipt_id,
-            "page_parent_observation_id": page_parent.observation_id,
-            "document_id": receipt.document_id,
-            "revision_id": receipt.revision_id,
-            "source_sha256": receipt.source_sha256,
+            "document_id": selector.document_id,
+            "revision_id": selector.revision_id,
+            "source_sha256": selector.source_sha256,
             "snapshot_id": selector.snapshot_id,
-            "page_id": receipt.page_id,
-            "source_partition_id": receipt.source_partition_id,
-            "raw_text": receipt.raw_text,
-            "geometry": bbox,
-            "rendered_page_sha256": hashlib.sha256(png_bytes).hexdigest(),
-            "crop_bbox_pt": bbox,
-            "crop_pixel_size": (int(crop.width), int(crop.height)),
+            "page_id": observation.page_id,
+            "native_observation_id": observation.observation_id,
+            "text_integrity_receipt_id": receipt.receipt_id,
+            "native_text_integrity_reason_codes": tuple(receipt.reason_codes),
+            "source_bbox": bbox,
+            "page_parent_observation_id": parent_observation_id,
+            "source_partition_id": partition_id,
+            "render_dpis": tuple(RASTER_TEXT_CORROBORATION_DPIS),
             "backend_name": self._backend.name,
             "backend_version": self._backend.version,
-            "dpi": self._dpi,
-            "ocr_text": ocr_text,
-            "ocr_bbox_px": ocr_bbox,
+            "views": tuple(
+                (v.dpi, v.image_size_px, v.image_png_sha256, v.ocr_reading)
+                for v in views
+            ),
+            "corroborated_text": native_claim,
         }
-        corroboration = RasterTextCorroborationReceipt(
-            receipt_id=stable_contract_id(
-                "raster_text_corroboration",
-                payload,
-                digest_chars=32,
-            ),
-            **payload,
+        record = RasterTextCorroborationRecord(
+            record_id=stable_contract_id("raster_text_corroboration", payload, digest_chars=32),
+            document_id=selector.document_id,
+            revision_id=selector.revision_id,
+            source_sha256=selector.source_sha256,
+            snapshot_id=selector.snapshot_id,
+            page_id=observation.page_id,
+            native_observation_id=observation.observation_id,
+            text_integrity_receipt_id=receipt.receipt_id,
+            native_text_integrity_reason_codes=tuple(receipt.reason_codes),
+            source_bbox=bbox,  # type: ignore[arg-type]
+            page_parent_observation_id=parent_observation_id,
+            source_partition_id=partition_id,
+            render_dpis=tuple(RASTER_TEXT_CORROBORATION_DPIS),
+            backend_name=self._backend.name,
+            backend_version=self._backend.version,
+            views=tuple(views),
+            corroborated_text=native_claim,
         )
-        return self._store(
-            selector,
-            RasterTextCorroborationResult(
-                status=EvidenceResolutionStatus.CORROBORATED,
-                proposition=RASTER_TEXT_CORROBORATED,
-                trusted_text=receipt.raw_text,
-                reason_codes=(RASTER_TEXT_CORROBORATED,),
-                receipt=corroboration,
-            ),
+        return RasterTextCorroborationResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=(RASTER_TEXT_CORROBORATED,),
+            corroborated_text=native_claim,
+            record=record,
         )
 
 
 __all__ = [
+    "RASTER_TEXT_ALREADY_TRUSTED",
+    "RASTER_TEXT_BACKEND_ERROR",
     "RASTER_TEXT_BACKEND_UNAVAILABLE",
+    "RASTER_TEXT_BBOX_INVALID",
+    "RASTER_TEXT_COMPETING_READINGS",
     "RASTER_TEXT_CORROBORATED",
+    "RASTER_TEXT_CORROBORATION_DPIS",
     "RASTER_TEXT_CORROBORATION_SCHEMA_VERSION",
-    "RASTER_TEXT_LINEAGE_MISMATCH",
-    "RASTER_TEXT_NATIVE_ALREADY_TRUSTED",
-    "RASTER_TEXT_NATIVE_BLOCKER_NOT_GLYPH_ONLY",
-    "RASTER_TEXT_NATIVE_PREREQUISITE_UNRESOLVED",
-    "RASTER_TEXT_OCR_AMBIGUOUS",
-    "RASTER_TEXT_OCR_EMPTY",
-    "RASTER_TEXT_OCR_EXTRACTION_FAILED",
-    "RASTER_TEXT_OCR_MISMATCH",
-    "RASTER_TEXT_OCR_OUTPUT_INVALID",
-    "RASTER_TEXT_SOURCE_GEOMETRY_INVALID",
-    "RASTER_TEXT_SOURCE_RENDER_UNAVAILABLE",
-    "RASTER_TEXT_UNAVAILABLE",
+    "RASTER_TEXT_INTEGRITY_CONFLICT",
+    "RASTER_TEXT_INTEGRITY_NOT_GLYPH_ONLY",
+    "RASTER_TEXT_NATIVE_MISMATCH",
+    "RASTER_TEXT_NO_READING",
+    "RASTER_TEXT_OBSERVATION_NOT_NATIVE_WORD",
+    "RASTER_TEXT_OCR_GEOMETRY_INVALID",
+    "RASTER_TEXT_PAGE_LINEAGE_MISMATCH",
+    "RASTER_TEXT_RECEIPT_UNAVAILABLE",
+    "RASTER_TEXT_RECORD_UNAVAILABLE",
+    "RASTER_TEXT_RENDER_FAILED",
+    "RASTER_TEXT_SCOPE_UNAVAILABLE",
+    "RASTER_TEXT_SOURCE_LINEAGE_UNRESOLVED",
+    "RASTER_TEXT_VIEW_DISAGREEMENT",
     "RasterTextCorroborationAuthority",
     "RasterTextCorroborationProducer",
-    "RasterTextCorroborationReceipt",
+    "RasterTextCorroborationRecord",
     "RasterTextCorroborationResult",
+    "RasterTextCorroborationSelector",
+    "RasterTextView",
+    "normalize_reading",
 ]

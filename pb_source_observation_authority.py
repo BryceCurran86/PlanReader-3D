@@ -32,6 +32,7 @@ OBSERVATION_UNAVAILABLE = "observation_unavailable"
 STALE_REVISION = "stale_revision"
 SOURCE_HASH_MISMATCH = "source_hash_mismatch"
 SNAPSHOT_MISMATCH = "snapshot_mismatch"
+INVALID_RENDER_CLIP = "invalid_render_clip"
 LINEAGE_UNAVAILABLE = "lineage_unavailable"
 PRODUCER_INTEGRITY_FAILURE = "producer_integrity_failure"
 
@@ -238,6 +239,33 @@ def _record_payload(record: SourceObservationRecord) -> dict[str, object]:
     }
 
 
+def _validated_clip_pt(
+    clip_pt: Optional[Sequence[float]],
+) -> Optional[tuple[float, float, float, float]]:
+    """Validate an optional render clip; reject (never clamp) anything invalid."""
+
+    if clip_pt is None:
+        return None
+    try:
+        values = tuple(clip_pt)
+    except TypeError as exc:
+        raise ValueError(f"{INVALID_RENDER_CLIP}: clip must be four numbers") from exc
+    if len(values) != 4:
+        raise ValueError(f"{INVALID_RENDER_CLIP}: clip must be four numbers")
+    numbers: list[float] = []
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{INVALID_RENDER_CLIP}: clip coordinates must be numeric")
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError(f"{INVALID_RENDER_CLIP}: clip coordinates must be finite")
+        numbers.append(number)
+    x0, y0, x1, y1 = numbers
+    if not (x1 > x0 and y1 > y0):
+        raise ValueError(f"{INVALID_RENDER_CLIP}: clip must have positive width and height")
+    return (x0, y0, x1, y1)
+
+
 class SourceObservationProducer:
     """Trusted writer. Ordinary consumers should receive only ``authority()``."""
 
@@ -265,8 +293,19 @@ class SourceObservationProducer:
         snapshot_id: str,
         page_id: str,
         dpi: float = 300.0,
+        clip_pt: Optional[Sequence[float]] = None,
     ) -> tuple[bytes, SourceObservationRecord]:
         """Render one page from the exact immutable PDF bytes this producer ingested.
+
+        ``clip_pt`` is optional. ``None`` renders the whole page exactly as
+        before. Otherwise it is a PDF page-space ``(x0, y0, x1, y1)`` region
+        (the coordinate space of ``page.rect`` and of native word geometry)
+        rendered with the PDF renderer's own clip -- the page is never rendered
+        whole and cropped afterwards. The clip must be four finite numbers with
+        positive width and height lying entirely inside the producer-owned page
+        rectangle; anything else is rejected with ``INVALID_RENDER_CLIP``,
+        never clamped. The clip is a rendering request, not an authority
+        claim: page-parent lineage and every lineage check are unchanged.
 
         This is the producer-owned raster boundary for downstream OCR. Callers
         address the page by immutable lineage only; they cannot supply page pixels,
@@ -286,6 +325,7 @@ class SourceObservationProducer:
         dpi_value = float(dpi)
         if not math.isfinite(dpi_value) or dpi_value <= 0.0:
             raise ValueError("dpi must be a positive finite number")
+        clip_rect = _validated_clip_pt(clip_pt)
 
         current = self._store.current_revision_by_document.get(document_id)
         if current is None:
@@ -363,7 +403,24 @@ class SourceObservationProducer:
                 raise ValueError(f"{SOURCE_UNAVAILABLE}: page {page_id} out of range")
             page = pdf.load_page(page_number - 1)
             scale = dpi_value / 72.0
-            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            if clip_rect is None:
+                pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            else:
+                page_rect = page.rect
+                if not (
+                    clip_rect[0] >= float(page_rect.x0)
+                    and clip_rect[1] >= float(page_rect.y0)
+                    and clip_rect[2] <= float(page_rect.x1)
+                    and clip_rect[3] <= float(page_rect.y1)
+                ):
+                    raise ValueError(
+                        f"{INVALID_RENDER_CLIP}: clip lies outside the page rectangle"
+                    )
+                pix = page.get_pixmap(
+                    matrix=fitz.Matrix(scale, scale),
+                    clip=fitz.Rect(*clip_rect),
+                    alpha=False,
+                )
             png_bytes = pix.tobytes("png")
         finally:
             pdf.close()
