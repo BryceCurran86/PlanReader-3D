@@ -104,7 +104,6 @@ class WallFinishFaceBindingRecord:
     page_id: str
     viewport_id: str
     decision_scope_id: str
-    physical_wall_decision_scope_id: str
     physical_wall_id: str
     physical_face_id: str
     physical_face_role: PhysicalFaceRole
@@ -121,6 +120,7 @@ class WallFinishFaceBindingRecord:
     decision_scope_complete: bool
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
+    physical_wall_decision_scope_id: str = ""
     schema_version: str = WALL_FINISH_FACE_BINDING_SCHEMA_VERSION
     _seal: object = None
 
