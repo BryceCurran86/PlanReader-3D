@@ -60,6 +60,28 @@ class TestStructuralSegmentFilter:
         assert keep is False
         assert "dimension_layer_excluded" in reasons
 
+    def test_explicit_grid_layer_is_excluded(self) -> None:
+        keep, reasons = is_structural_candidate_segment(
+            _seg("grid", 0, 0, 100, 0, layer="A-GRID")
+        )
+        assert keep is False
+        assert "structural_grid_layer_excluded" in reasons
+
+    def test_explicit_axis_layer_is_excluded(self) -> None:
+        keep, reasons = is_structural_candidate_segment(
+            _seg("axis", 0, 0, 100, 0, layer="S-AXIS-LINES")
+        )
+        assert keep is False
+        assert "structural_grid_layer_excluded" in reasons
+
+    def test_word_containing_grid_is_not_enough_without_grid_token(self) -> None:
+        # Avoid substring-based rejection of an unrelated custom layer name.
+        keep, reasons = is_structural_candidate_segment(
+            _seg("wall", 0, 0, 100, 0, layer="A-GRIDDED-WALL")
+        )
+        assert keep is True
+        assert "structural_grid_layer_excluded" not in reasons
+
     def test_trivial_dash_marker_is_not_excluded(self) -> None:
         # PyMuPDF reports "[] 0" (or empty) for an ordinary solid line.
         keep, reasons = is_structural_candidate_segment(_seg("s0", 0, 0, 10, 0, dashes="[] 0"))
