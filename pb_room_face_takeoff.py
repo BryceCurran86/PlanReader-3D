@@ -1193,6 +1193,12 @@ def extract_room_faces_from_page(
     )
 
 
+def _manual_floor_blocked(auto_guard: Any, manual_keys: set, location: Any) -> bool:
+    """Same location match the v1.2.19 guard and the v1.2.24/v1.2.26 floor producers use."""
+    key = auto_guard._normalise(location)
+    return bool(key and any(key == item or key in item or item in key for item in manual_keys))
+
+
 def room_row_to_auto_takeoff_row(auto: Any, row: Dict[str, Any]) -> Optional[Tuple[Any, ...]]:
     """Map a rooms_to_takeoff_rows() dict onto the canonical auto-geometry row.
 
@@ -1249,6 +1255,7 @@ def apply(app: Any) -> None:
     #   pb_context_floorarea_v1224
     try:
         import pb_auto_geometry_v1219 as auto
+        import pb_auto_geometry_guard_v1219 as auto_guard
         original_build = auto._build_unit_rows
 
         def _build_unit_rows_with_room_faces(
@@ -1258,6 +1265,10 @@ def apply(app: Any) -> None:
         ):
             # Run original builder (which may itself be wrapped by other modules)
             rows, summary = original_build(app_obj, workspace_id, pages)
+            # This wrapper runs outside the v1.2.19 manual-precedence guard, so
+            # it applies the same rule as the other late floor-row producers:
+            # a manually measured floor location suppresses the automatic row.
+            manual_keys = auto_guard._manual_floor_keys(app_obj, int(workspace_id))
 
             # Add room face rows for floor plan pages
             for page in pages:
@@ -1270,6 +1281,10 @@ def apply(app: Any) -> None:
                 except Exception:
                     continue  # don't break production if room face extraction fails
                 for row in room_rows:
+                    if row.get("row_role") == "floor_area" and _manual_floor_blocked(
+                        auto_guard, manual_keys, row.get("location")
+                    ):
+                        continue
                     auto_row = room_row_to_auto_takeoff_row(auto, row)
                     if auto_row is None:
                         continue
