@@ -1,6 +1,8 @@
 name: Item19B Wall Equivalence Grid Shadow
 
 on:
+  push:
+    branches: [gpt/item19b-wall-equivalence-grid-v1]
   pull_request:
     branches: [gpt/item19b-viewport-wall-authority]
 
