@@ -802,3 +802,111 @@ def test_source_metadata_controls_nonwall_exclusion_not_geometry(
     else:
         assert keep is False
         assert expected_reason in reasons
+
+
+def _strip_segment(
+    raw_id: str,
+    path_index: int,
+    first: tuple[float, float],
+    second: tuple[float, float],
+    *,
+    layer: str,
+    fill=None,
+) -> dict:
+    return {
+        "id": raw_id,
+        "kind": "line",
+        "x1": first[0],
+        "y1": first[1],
+        "x2": second[0],
+        "y2": second[1],
+        "path_index": path_index,
+        "item_index": 0,
+        "layer": layer,
+        "layer_present": bool(layer),
+        "fill": fill,
+        "fill_present": fill is not None,
+        "dashes": "[] 0",
+        "dashes_present": True,
+    }
+
+
+def test_filled_wall_strip_suppresses_only_proven_subordinate_geometry() -> None:
+    import pb_physical_wall_candidate_authority as module
+
+    segments = [
+        _strip_segment("face_a", 10, (0.0, 0.0), (0.0, 100.0), layer="Structural - Bearing", fill=(1.0, 1.0, 1.0)),
+        _strip_segment("end_top", 10, (0.0, 100.0), (8.0, 100.0), layer="Structural - Bearing", fill=(1.0, 1.0, 1.0)),
+        _strip_segment("face_b", 10, (8.0, 100.0), (8.0, 0.0), layer="Structural - Bearing", fill=(1.0, 1.0, 1.0)),
+        _strip_segment("end_bottom", 10, (8.0, 0.0), (0.0, 0.0), layer="Structural - Bearing", fill=(1.0, 1.0, 1.0)),
+        _strip_segment("grid_inside", 20, (4.0, 40.0), (4.0, 60.0), layer="Structural - Grid"),
+        _strip_segment("bearing_cross", 21, (0.0, 55.0), (8.0, 48.0), layer="Structural - Bearing"),
+        _strip_segment("grid_outside", 22, (30.0, 40.0), (30.0, 60.0), layer="A-GRID"),
+    ]
+
+    strips = module._proven_filled_wall_strips(segments)
+    assert len(strips) == 1
+    assert set(strips[0].face_raw_ids) == {"face_a", "face_b"}
+
+    filtered = module._filter_proven_wall_strip_geometry(segments, strips)
+    retained_ids = {str(segment["id"]) for segment in filtered}
+    assert {"face_a", "face_b", "grid_outside"} <= retained_ids
+    assert "grid_inside" not in retained_ids
+    assert "bearing_cross" not in retained_ids
+    assert "end_top" not in retained_ids
+    assert "end_bottom" not in retained_ids
+
+
+def test_grid_layer_alone_still_does_not_mint_negative_wall_authority() -> None:
+    import pb_physical_wall_candidate_authority as module
+
+    grid = _strip_segment(
+        "standalone_grid",
+        20,
+        (0.0, 0.0),
+        (0.0, 100.0),
+        layer="A-GRID",
+    )
+    assert module._proven_filled_wall_strips((grid,)) == ()
+    filtered = module._filter_proven_wall_strip_geometry((grid,), ())
+    assert [segment["id"] for segment in filtered] == ["standalone_grid"]
+
+
+def test_proven_wall_strip_can_reconcile_disjoint_face_fragments() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_physical_wall_identity import (
+        PhysicalEquivalenceClass,
+        PhysicalWallIdentity,
+        resolve_physical_wall_equivalence,
+    )
+
+    left = PhysicalWallIdentity(
+        wall_candidate_id="left_a",
+        viewport_id="view",
+        candidate_identity_id="id-left-a",
+        path_fingerprint=((0.0, 0.0), (0.0, 40.0)),
+        source_primitive_ids=("face_a",),
+        edge_ids=("edge-left-a",),
+        status=EvidenceResolutionStatus.CORROBORATED,
+    )
+    right = PhysicalWallIdentity(
+        wall_candidate_id="left_b",
+        viewport_id="view",
+        candidate_identity_id="id-left-b",
+        path_fingerprint=((0.0, 60.0), (0.0, 100.0)),
+        source_primitive_ids=("face_a",),
+        edge_ids=("edge-left-b",),
+        status=EvidenceResolutionStatus.CORROBORATED,
+    )
+    baseline = resolve_physical_wall_equivalence((left, right))
+    pair = baseline.pair_classifications[0]
+    assert pair[2] == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value
+
+    reconciled = module._apply_trusted_relation_overrides(
+        (left, right),
+        baseline,
+        {("left_a", "left_b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL},
+        allow_proven_same_over_distinct=True,
+    )
+    assert reconciled.equivalence_groups == (("left_a", "left_b"),)
+    assert reconciled.representative_wall_ids == ("left_a",)
