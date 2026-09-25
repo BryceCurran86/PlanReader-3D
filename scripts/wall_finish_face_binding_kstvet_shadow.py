@@ -530,6 +530,34 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
                         "wall_candidate_ids": sorted(
                             record.wall_candidate_id for record in matching
                         ),
+                        "wall_candidates": [
+                            {
+                                "wall_candidate_id": record.wall_candidate_id,
+                                "representation": record.wall_candidate.representation,
+                                "centerline_pts": [
+                                    [float(point[0]), float(point[1])]
+                                    for point in record.wall_candidate.centerline_pts
+                                ],
+                                "face_a_segment_ids": list(
+                                    record.wall_candidate.face_a_segment_ids
+                                ),
+                                "face_b_segment_ids": list(
+                                    record.wall_candidate.face_b_segment_ids or ()
+                                ),
+                                "source_primitive_ids": list(
+                                    record.physical_identity.source_primitive_ids
+                                ),
+                                "path_fingerprint": [
+                                    [float(point[0]), float(point[1])]
+                                    for point in (
+                                        record.physical_identity.path_fingerprint or ()
+                                    )
+                                ],
+                            }
+                            for record in sorted(
+                                matching, key=lambda item: item.wall_candidate_id
+                            )
+                        ],
                         "physical_wall_ids": sorted(
                             {
                                 str(
