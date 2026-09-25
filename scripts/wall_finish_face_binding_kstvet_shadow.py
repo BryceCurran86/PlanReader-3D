@@ -510,6 +510,14 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
         print("ITEM19B_PREFLIGHT " + json.dumps(preflight, sort_keys=True), flush=True)
     finally:
         pdf.close()
+    if not preflight.get("trusted_finish_blocks"):
+        print(
+            "ITEM19B_STAGE finish_producer_skipped_text_authority_pending",
+            flush=True,
+        )
+        faulthandler.cancel_dump_traceback_later()
+        return [], preflight
+
     print("ITEM19B_STAGE finish_producer_start", flush=True)
     producer = WallFinishFaceBindingProducer.from_source_visibility_producer(
         source,
