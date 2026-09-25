@@ -36,6 +36,43 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_wall_role_authority import WallRoleClassification
 
 
+def test_item19b_viewport_set_preserves_resolved_but_rejects_derived_when_siblings_overlap(
+    monkeypatch,
+) -> None:
+    resolved = SimpleNamespace(
+        view_id="resolved",
+        bounding_box=(0.0, 0.0, 100.0, 100.0),
+        status="resolved",
+    )
+    derived = SimpleNamespace(
+        view_id="derived",
+        bounding_box=(50.0, 0.0, 150.0, 100.0),
+        status="derived",
+    )
+    monkeypatch.setattr(
+        finish_binding_module,
+        "segment_page_viewports",
+        lambda page, *, page_number: [resolved, derived],
+    )
+    monkeypatch.setattr(
+        finish_binding_module,
+        "is_segment_page_viewports_product",
+        lambda viewport: True,
+    )
+    monkeypatch.setattr(
+        finish_binding_module,
+        "is_authoritative_derived_viewport",
+        lambda viewport: viewport is derived,
+    )
+    monkeypatch.setattr(
+        finish_binding_module,
+        "validate_non_overlapping_viewports",
+        lambda rows: False,
+    )
+
+    assert finish_binding_module._authoritative_viewports(object(), 1) == (resolved,)
+
+
 def _line(obs: str, raw: str, x1: float, y1: float, x2: float, y2: float) -> _Line:
     return _Line(obs, raw, (x1, y1, x2, y2))
 
