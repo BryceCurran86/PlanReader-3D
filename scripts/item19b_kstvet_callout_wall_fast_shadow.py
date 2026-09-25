@@ -382,6 +382,37 @@ def run(pdf_path: Path) -> dict:
                             )
                             for record in matching
                         },
+                        "owner_path_fingerprints": {
+                            record.wall_candidate_id: [
+                                [float(point[0]), float(point[1])]
+                                for point in (
+                                    record.physical_identity.path_fingerprint or ()
+                                )
+                            ]
+                            for record in matching
+                        },
+                        "owner_centerlines": {
+                            record.wall_candidate_id: [
+                                [float(point[0]), float(point[1])]
+                                for point in record.wall_candidate.centerline_pts
+                            ]
+                            for record in matching
+                        },
+                        "pair_classifications_touching_hit": [
+                            list(row)
+                            for row in (
+                                getattr(
+                                    scope.equivalence,
+                                    "pair_classifications",
+                                    (),
+                                )
+                                or ()
+                            )
+                            if row[0]
+                            in {record.wall_candidate_id for record in matching}
+                            and row[1]
+                            in {record.wall_candidate_id for record in matching}
+                        ],
                         "owner_details": {
                             record.wall_candidate_id: {
                                 "representation": record.wall_candidate.representation,
