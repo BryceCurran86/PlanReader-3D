@@ -1339,6 +1339,11 @@ def _apply_trusted_relation_overrides(
         elif classification == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value:
             distinct_links.append(pair)
 
+    distinct_neighbors: dict[str, set[str]] = {}
+    for left, right in distinct_links:
+        distinct_neighbors.setdefault(left, set()).add(right)
+        distinct_neighbors.setdefault(right, set()).add(left)
+
     # A proven SAME subgroup remains positive identity evidence even when one
     # of its members has unresolved relations to candidates outside that group.
     # This does not make the full candidate universe publishable: publication
@@ -1350,11 +1355,11 @@ def _apply_trusted_relation_overrides(
         for component in _union_find_groups(same_links, member_ids):
             if len(component) < 2:
                 continue
+            component_set = set(component)
             contradictory = any(
-                pair_map.get(tuple(sorted((left, right))))
-                == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value
-                for index, left in enumerate(component)
-                for right in component[index + 1 :]
+                neighbour in component_set
+                for wall_id in component
+                for neighbour in distinct_neighbors.get(wall_id, ())
             )
             if not contradictory:
                 positive_same_groups.append(tuple(sorted(component)))
@@ -1363,7 +1368,6 @@ def _apply_trusted_relation_overrides(
     components = _union_find_groups(related_links, member_ids) if member_ids else []
     ambiguous_edges = {frozenset(pair) for pair in ambiguous_links}
     same_edges = {frozenset(pair) for pair in same_links}
-    distinct_edges = {frozenset(pair) for pair in distinct_links}
     blockers: dict[str, list[str]] = {}
     ambiguous_walls: set[str] = set()
     same_groups: list[tuple[str, ...]] = []
@@ -1380,10 +1384,11 @@ def _apply_trusted_relation_overrides(
             for index, left in enumerate(component)
             for right in component[index + 1 :]
         )
+        component_set = set(component)
         has_distinct_conflict = has_same and any(
-            frozenset((left, right)) in distinct_edges
-            for index, left in enumerate(component)
-            for right in component[index + 1 :]
+            neighbour in component_set
+            for wall_id in component
+            for neighbour in distinct_neighbors.get(wall_id, ())
         )
         if has_distinct_conflict:
             ambiguous_walls.update(component)
