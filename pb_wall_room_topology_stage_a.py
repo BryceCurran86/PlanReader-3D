@@ -85,10 +85,6 @@ _DIMENSION_LAYER_KEYWORDS = ("dim", "dimension", "annotation", "note")
 # to later corroboration stages (see docs/planreader_wall_room_topology_spec.md
 # Section 12/W9-11) -- not silently claimed as solved here.
 _TEXT_FRAME_LAYER_KEYWORDS = ("text", "frame", "border", "leader", "callout", "label")
-# Positive source metadata only. A line is excluded as a structural grid axis
-# only when the immutable PDF itself tags its layer as grid/axis linework.
-# Geometry, length, spacing, nearest-wall distance, and text/OCR are never used.
-_GRID_LAYER_KEYWORDS = ("grid", "axis")
 
 
 def _angle_delta(a_deg: float, b_deg: float) -> float:
@@ -122,8 +118,6 @@ def is_structural_candidate_segment(segment: Dict[str, Any]) -> Tuple[bool, List
             reason_codes.append("dimension_layer_excluded")
         if any(keyword in layer for keyword in _TEXT_FRAME_LAYER_KEYWORDS):
             reason_codes.append("text_frame_layer_excluded")
-        if any(keyword in layer for keyword in _GRID_LAYER_KEYWORDS):
-            reason_codes.append("structural_grid_layer_excluded")
 
     return (len(reason_codes) == 0, reason_codes)
 
