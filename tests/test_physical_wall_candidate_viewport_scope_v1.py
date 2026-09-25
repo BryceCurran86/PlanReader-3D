@@ -1092,6 +1092,121 @@ def test_shared_native_bearing_face_fragments_prove_same_physical_wall() -> None
     }
 
 
+def test_shared_source_face_graph_edges_override_bent_assembled_centerline() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_physical_wall_identity import PhysicalEquivalenceClass
+    from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
+
+    segments = (_shared_face_segment("raw-face", 0.0, 0.0, 100.0, 0.0),)
+    left = _shared_face_record(
+        "wall-a",
+        path=((0.0, 0.0), (45.0, 0.0)),
+        raw_ids=("raw-face",),
+    )
+    right = _shared_face_record(
+        "wall-b",
+        # W4 may bend after the lineage-bearing face fragment at a junction.
+        path=((40.0, 0.0), (80.0, 0.0), (82.0, 4.0)),
+        raw_ids=("raw-face",),
+    )
+    graph = {
+        "edges": [
+            {
+                "id": "edge:wall-a",
+                "x1": 0.0, "y1": 0.0, "x2": 45.0, "y2": 0.0,
+                LINEAGE_KEY: {"source_primitive_ids": ["raw-face"]},
+            },
+            {
+                "id": "edge:wall-b",
+                "x1": 40.0, "y1": 0.0, "x2": 80.0, "y2": 0.0,
+                LINEAGE_KEY: {"source_primitive_ids": ["raw-face"]},
+            },
+        ]
+    }
+
+    assert module._producer_shared_source_face_relation_overrides(
+        segments=segments,
+        records=(left, right),
+        graph=graph,
+    ) == {
+        ("wall-a", "wall-b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+    }
+
+
+def test_shared_lineage_on_perpendicular_graph_edge_cannot_mint_same_wall() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
+
+    segments = (_shared_face_segment("raw-face", 0.0, 0.0, 100.0, 0.0),)
+    left = _shared_face_record(
+        "wall-a",
+        path=((0.0, 0.0), (45.0, 0.0)),
+        raw_ids=("raw-face",),
+    )
+    branch = _shared_face_record(
+        "wall-branch",
+        path=((40.0, -10.0), (40.0, 10.0)),
+        raw_ids=("raw-face",),
+    )
+    graph = {
+        "edges": [
+            {
+                "id": "edge:wall-a",
+                "x1": 0.0, "y1": 0.0, "x2": 45.0, "y2": 0.0,
+                LINEAGE_KEY: {"source_primitive_ids": ["raw-face"]},
+            },
+            {
+                "id": "edge:wall-branch",
+                "x1": 40.0, "y1": -10.0, "x2": 40.0, "y2": 10.0,
+                LINEAGE_KEY: {"source_primitive_ids": ["raw-face"]},
+            },
+        ]
+    }
+
+    assert module._producer_shared_source_face_relation_overrides(
+        segments=segments,
+        records=(left, branch),
+        graph=graph,
+    ) == {}
+
+
+def test_graph_edge_without_exact_shared_lineage_cannot_mint_same_wall() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
+
+    segments = (_shared_face_segment("raw-face", 0.0, 0.0, 100.0, 0.0),)
+    left = _shared_face_record(
+        "wall-a",
+        path=((0.0, 0.0), (45.0, 0.0)),
+        raw_ids=("raw-face",),
+    )
+    right = _shared_face_record(
+        "wall-b",
+        path=((40.0, 0.0), (80.0, 0.0)),
+        raw_ids=("raw-face",),
+    )
+    graph = {
+        "edges": [
+            {
+                "id": "edge:wall-a",
+                "x1": 0.0, "y1": 0.0, "x2": 45.0, "y2": 0.0,
+                LINEAGE_KEY: {"source_primitive_ids": ["raw-face"]},
+            },
+            {
+                "id": "edge:wall-b",
+                "x1": 40.0, "y1": 0.0, "x2": 80.0, "y2": 0.0,
+                LINEAGE_KEY: {"source_primitive_ids": ["other-face"]},
+            },
+        ]
+    }
+
+    assert module._producer_shared_source_face_relation_overrides(
+        segments=segments,
+        records=(left, right),
+        graph=graph,
+    ) == {}
+
+
 def test_nearby_parallel_independent_walls_do_not_share_face_authority() -> None:
     import pb_physical_wall_candidate_authority as module
 
