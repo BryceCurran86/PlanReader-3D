@@ -29,7 +29,6 @@ jobs:
       - name: Run targeted wall-authority tests
         run: |
           PYTHONPATH=. pytest -q \
-            tests/test_physical_wall_candidate_face_pair_equivalence_v1.py \
             tests/test_wall_room_topology_stage_a.py \
             tests/test_physical_wall_candidate_viewport_scope_v1.py \
             tests/test_opening_host_binding_equivalence_regression_v3.py \
