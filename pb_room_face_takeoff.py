@@ -1193,6 +1193,36 @@ def extract_room_faces_from_page(
     )
 
 
+def room_row_to_auto_takeoff_row(auto: Any, row: Dict[str, Any]) -> Optional[Tuple[Any, ...]]:
+    """Map a rooms_to_takeoff_rows() dict onto the canonical auto-geometry row.
+
+    Built with the auto-geometry module's own _takeoff_row() so the row always
+    carries its full column contract. The source_reference is placed under the
+    auto-geometry SOURCE_PREFIX because _replace_auto_rows() replaces rows by
+    that prefix; the room-face provenance is kept after it. A room without a
+    calibrated area has no quantity to publish and returns None rather than a
+    fabricated zero.
+    """
+    quantity = row.get("quantity")
+    if quantity is None:
+        return None
+    return auto._takeoff_row(
+        workspace_id=row.get("workspace_id"),
+        section=row.get("section"),
+        element=row.get("element"),
+        location=row.get("location"),
+        substrate=row.get("substrate"),
+        quantity=float(quantity),
+        status=row.get("quantity_status"),
+        source_page=str(row.get("source_page") or ""),
+        source_reference=f"{auto.SOURCE_PREFIX} · {row.get('source_reference')}",
+        confidence=row.get("confidence"),
+        notes=row.get("notes"),
+        row_role=row.get("row_role") or "",
+        unit=row["unit"],
+    )
+
+
 # ---------------------------------------------------------------------------
 # BLOCKER 3 — Production wiring
 # ---------------------------------------------------------------------------
@@ -1237,34 +1267,23 @@ def apply(app: Any) -> None:
                 try:
                     room_faces = extract_room_faces_from_page(app_obj, page)
                     room_rows = rooms_to_takeoff_rows(room_faces, workspace_id)
-                    for row in room_rows:
-                        rows.append((
-                            row.get("workspace_id"),
-                            row.get("section"),
-                            row.get("element"),
-                            row.get("location"),
-                            row.get("substrate"),
-                            row.get("unit"),
-                            row.get("quantity"),
-                            row.get("quantity_status"),
-                            row.get("source_page"),
-                            row.get("source_reference"),
-                            row.get("confidence"),
-                            row.get("notes"),
-                            row.get("row_role"),
-                        ))
-                        summary.append({
-                            "label": row.get("location"),
-                            "area_m2": row.get("quantity"),
-                            "confidence": row.get("confidence"),
-                            "source": row.get("source_reference"),
-                            "page_id": int(page.get("id") or 0),
-                            "page_label": str(page.get("page_label") or ""),
-                            "quantity_status": row.get("quantity_status"),
-                            "room_face": True,
-                        })
                 except Exception:
                     continue  # don't break production if room face extraction fails
+                for row in room_rows:
+                    auto_row = room_row_to_auto_takeoff_row(auto, row)
+                    if auto_row is None:
+                        continue
+                    rows.append(auto_row)
+                    summary.append({
+                        "label": row.get("location"),
+                        "area_m2": row.get("quantity"),
+                        "confidence": row.get("confidence"),
+                        "source": auto_row[auto.TAKEOFF_ROW_FIELDS.index("source_reference")],
+                        "page_id": int(page.get("id") or 0),
+                        "page_label": str(page.get("page_label") or ""),
+                        "quantity_status": row.get("quantity_status"),
+                        "room_face": True,
+                    })
 
             return rows, summary
 
