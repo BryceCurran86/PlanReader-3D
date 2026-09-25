@@ -43,6 +43,7 @@ jobs:
           sources = Path("benchmarks/sources")
           suite.mkdir(parents=True, exist_ok=True)
           sources.mkdir(parents=True, exist_ok=True)
+          shutil.copy2(source_base / "manifest.json", suite / "manifest.json")
 
           for benchmark_id in ids:
               src = source_base / benchmark_id
