@@ -1469,7 +1469,12 @@ class PhysicalWallCandidateProducer:
         *,
         page_ids: Optional[Sequence[str]] = None,
     ):
-        """Build legacy page scopes plus authenticated F.07 viewport scopes.
+        """Build authenticated F.07 viewport scopes only.
+
+        The legacy page-wide authority remains available through
+        from_source_visibility_producer(). Keeping this constructor viewport-only
+        avoids rebuilding the full page wall graph before resolving narrower
+        authenticated drawing universes.
 
         Callers may address source pages only. Viewport geometry, membership,
         completeness, source primitives and wall candidates are resolved from
@@ -1479,6 +1484,7 @@ class PhysicalWallCandidateProducer:
             source_visibility_producer,
             page_ids=page_ids,
             include_authenticated_viewports=True,
+            include_page_scopes=False,
         )
 
     @classmethod
@@ -1492,6 +1498,7 @@ class PhysicalWallCandidateProducer:
             source_visibility_producer,
             page_ids=page_ids,
             include_authenticated_viewports=False,
+            include_page_scopes=True,
         )
 
     @classmethod
@@ -1501,6 +1508,7 @@ class PhysicalWallCandidateProducer:
         *,
         page_ids: Optional[Sequence[str]],
         include_authenticated_viewports: bool,
+        include_page_scopes: bool,
     ):
         """Build wall scopes, optionally narrowed by source page address.
 
@@ -1587,21 +1595,22 @@ class PhysicalWallCandidateProducer:
             )
 
             for page_id in materialized_page_ids:
-                result = _build_scope_result(
-                    source_producer=source_visibility_producer,
-                    published=published,
-                    source_bytes=source_bytes,
-                    page_id=page_id,
-                )
-                key = _ScopeKey(
-                    document_id=result.document_id,
-                    revision_id=result.revision_id,
-                    source_sha256=result.source_sha256,
-                    snapshot_id=result.snapshot_id,
-                    page_id=result.page_id,
-                    decision_scope_id=result.decision_scope_id,
-                )
-                scopes[key] = result
+                if include_page_scopes:
+                    result = _build_scope_result(
+                        source_producer=source_visibility_producer,
+                        published=published,
+                        source_bytes=source_bytes,
+                        page_id=page_id,
+                    )
+                    key = _ScopeKey(
+                        document_id=result.document_id,
+                        revision_id=result.revision_id,
+                        source_sha256=result.source_sha256,
+                        snapshot_id=result.snapshot_id,
+                        page_id=result.page_id,
+                        decision_scope_id=result.decision_scope_id,
+                    )
+                    scopes[key] = result
 
                 if include_authenticated_viewports:
                     for viewport_result in _build_authenticated_viewport_scope_results(
