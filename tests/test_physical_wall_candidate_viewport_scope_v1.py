@@ -238,6 +238,31 @@ def _viewport_scope(path: Path):
     return source, published, authority, selector, scope
 
 
+def test_authenticated_viewport_constructor_does_not_materialize_legacy_page_scope(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "viewport-only.pdf"
+    _draw_plan(path)
+    _source, published, authority = _ingest(path)
+
+    result = authority.resolve_scope(
+        PhysicalWallCandidateSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=source_snapshot.snapshot.snapshot_id
+            if (source_snapshot := _source.published_snapshot_for_revision(
+                published.revision.revision_id
+            ))
+            else published.snapshot.snapshot_id,
+            page_id="1",
+            decision_scope_id="wall-source:page-1",
+        )
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE,)
+
+
 def test_valid_authenticated_viewport_materializes_complete_wall_scope(tmp_path: Path) -> None:
     path = tmp_path / "framed-two-room.pdf"
     _draw_plan(path)
