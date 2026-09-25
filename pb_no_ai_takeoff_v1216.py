@@ -23,6 +23,7 @@ from pb_takeoff_authority_v164 import (
     prepare_ai_takeoff_editor_save,
 )
 from pb_mapped_zone_geometry_authority import classify_mapped_zone_authority
+import pb_takeoff_row_contract as takeoff_contract
 
 SOURCE_PREFIX = "PB No-AI v1.2.16"
 
@@ -370,20 +371,19 @@ def save_schedule_batched(app: Any, workspace_id: int, rows: Iterable[dict[str, 
             )
             cleaned.append(full_row)
 
-        conn.execute("DELETE FROM takeoff_rows WHERE workspace_id=?", (workspace_id,))
         stamp = app.now_stamp()
         if len(provenance_columns) == len(_TAKEOFF_PROVENANCE_COLUMNS):
-            conn.executemany(
-                _TAKEOFF_INSERT_WITH_PROVENANCE_SQL,
-                (_takeoff_values_with_provenance(workspace_id, row, stamp) for row in cleaned),
-            )
+            fields, values_of = takeoff_contract.COMMERCIAL_PROVENANCE_FIELDS, _takeoff_values_with_provenance
         else:
-            conn.executemany(
-                _TAKEOFF_INSERT_SQL,
-                (_takeoff_values(workspace_id, row, stamp) for row in cleaned),
-            )
+            fields, values_of = takeoff_contract.COMMERCIAL_FIELDS, _takeoff_values
+        # Rows keep their ids: measurement lines and commercial sync events are keyed by them.
+        count = takeoff_contract.save_schedule(
+            conn, int(workspace_id),
+            ((row.get("id"), values_of(int(workspace_id), row, stamp)) for row in cleaned),
+            fields,
+        )
         conn.commit()
-        return len(cleaned)
+        return count
     except Exception:
         conn.rollback()
         raise
