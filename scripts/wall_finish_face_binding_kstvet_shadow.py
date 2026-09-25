@@ -32,6 +32,7 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_source_wall_topology_authority import build_source_wall_topology_authority
 from pb_viewport_segmentation import assign_bbox_to_viewport
+from pb_vector_geometry_v130 import extract_native_page
 from pb_wall_role_authority import WallRoleProducer, WallRoleSelector
 
 EXPECTED_SHA256 = "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
@@ -105,6 +106,12 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
         blocks = _trusted_finish_blocks(source, published, PAGE_ID)
         viewports = _authoritative_viewports(page, int(PAGE_ID))
         lines = _page_visible_lines(source, published, PAGE_ID)
+        native = extract_native_page(page)
+        native_segment_by_id = {
+            str(segment.get("id")): segment
+            for segment in tuple(native.get("segments") or ())
+            if str(segment.get("id") or "")
+        }
         raw_blocks: dict[int, list[tuple[int, str, tuple[float, float, float, float]]]] = {}
         for word in page.get_text("words") or ():
             if len(word) < 8:
@@ -492,6 +499,28 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
                         ),
                         "normalized_wall_ids": normalized_ids,
                         "wall_scope_complete": wall_scope.scope_complete,
+                        "wall_candidate_source_records": {
+                            record.wall_candidate_id: [
+                                {
+                                    "raw_id": raw_id,
+                                    "path_index": native_segment_by_id.get(raw_id, {}).get("path_index"),
+                                    "item_index": native_segment_by_id.get(raw_id, {}).get("item_index"),
+                                    "edge_index": native_segment_by_id.get(raw_id, {}).get("edge_index"),
+                                    "kind": native_segment_by_id.get(raw_id, {}).get("kind"),
+                                    "width": native_segment_by_id.get(raw_id, {}).get("width"),
+                                    "layer": native_segment_by_id.get(raw_id, {}).get("layer"),
+                                    "dashes": native_segment_by_id.get(raw_id, {}).get("dashes"),
+                                    "geometry": [
+                                        native_segment_by_id.get(raw_id, {}).get("x1"),
+                                        native_segment_by_id.get(raw_id, {}).get("y1"),
+                                        native_segment_by_id.get(raw_id, {}).get("x2"),
+                                        native_segment_by_id.get(raw_id, {}).get("y2"),
+                                    ],
+                                }
+                                for raw_id in record.physical_identity.source_primitive_ids
+                            ]
+                            for record in matching
+                        },
                     }
                 )
 
