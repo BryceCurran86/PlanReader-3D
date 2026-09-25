@@ -112,6 +112,7 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
             for segment in native_page.get("segments", ())
             if str(segment.get("id") or "")
         }
+        native_drawings = page.get_drawings() or []
         raw_blocks: dict[int, list[tuple[int, str, tuple[float, float, float, float]]]] = {}
         for word in page.get_text("words") or ():
             if len(word) < 8:
@@ -532,6 +533,31 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
                                 "path_index": native_segments_by_id[raw_id].get("path_index"),
                                 "item_index": native_segments_by_id[raw_id].get("item_index"),
                                 "edge_index": native_segments_by_id[raw_id].get("edge_index"),
+                                "drawing_item_kinds": [
+                                    str(item[0])
+                                    for item in (
+                                        native_drawings[
+                                            int(native_segments_by_id[raw_id].get("path_index"))
+                                        ].get("items", ())
+                                        if native_segments_by_id[raw_id].get("path_index") is not None
+                                        and 0 <= int(native_segments_by_id[raw_id].get("path_index")) < len(native_drawings)
+                                        else ()
+                                    )
+                                    if item
+                                ],
+                                "drawing_rect": (
+                                    list(
+                                        native_drawings[
+                                            int(native_segments_by_id[raw_id].get("path_index"))
+                                        ].get("rect")
+                                    )
+                                    if native_segments_by_id[raw_id].get("path_index") is not None
+                                    and 0 <= int(native_segments_by_id[raw_id].get("path_index")) < len(native_drawings)
+                                    and native_drawings[
+                                        int(native_segments_by_id[raw_id].get("path_index"))
+                                    ].get("rect") is not None
+                                    else None
+                                ),
                             }
                             for raw_id in raw_hits
                             if raw_id in native_segments_by_id
