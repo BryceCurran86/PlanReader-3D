@@ -1654,8 +1654,12 @@ class PhysicalWallCandidateAuthority:
                 page_id=selector.page_id,
                 decision_scope_id=selector.decision_scope_id,
             )
+            seal = selector._viewport_selector_seal
             if (
-                selector._viewport_selector_seal is not _VIEWPORT_SELECTOR_SEAL
+                not isinstance(seal, tuple)
+                or len(seal) != 2
+                or seal[0] is not _VIEWPORT_SELECTOR_SEAL
+                or seal[1] != expected_fingerprint
                 or selector._viewport_selector_fingerprint != expected_fingerprint
             ):
                 return _blocked(
@@ -1705,7 +1709,7 @@ class PhysicalWallCandidateAuthority:
             page_id=result.page_id,
             decision_scope_id=result.decision_scope_id,
             _viewport_selector_fingerprint=fingerprint,
-            _viewport_selector_seal=_VIEWPORT_SELECTOR_SEAL,
+            _viewport_selector_seal=(_VIEWPORT_SELECTOR_SEAL, fingerprint),
         )
 
     def selector_for_viewport(
