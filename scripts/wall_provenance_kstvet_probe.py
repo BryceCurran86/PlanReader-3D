@@ -85,71 +85,113 @@ def main(path: Path):
     native = extract_native_page(page)
     viewports = tuple(segment_page_viewports(page, page_number=PAGE))
     non_overlap = validate_non_overlapping_viewports(viewports)
-    floor = [
+    eligible = [
         v for v in viewports
         if v.bounding_box is not None
-        and str(v.view_type) == "floor_plan"
         and (
             v.status == ViewportSegmentationStatus.RESOLVED.value
             or (non_overlap and is_authoritative_derived_viewport(v))
         )
     ]
-    if len(floor) != 1:
-        raise SystemExit(f"expected one authoritative floor_plan viewport, got {len(floor)}")
-    viewport = floor[0]
-    segments = [dict(s) for s in native.get("segments") or () if _inside(s, viewport.bounding_box)]
-    graph = build_wall_graph_for_viewport(segments)
-    junctions, rels = classify_junctions(
-        graph,
-        document_id="diag:kstvet",
-        page_id=str(PAGE),
-        viewport_id=str(viewport.view_id),
-    )
-    walls, _ = assemble_wall_topology(graph, junctions, rels, viewport_id=str(viewport.view_id))
-    identities = collect_physical_wall_identities(walls, graph)
-    eq = resolve_physical_wall_equivalence(
-        tuple(identities[w.candidate_id] for w in walls if w.candidate_id in identities),
-        walls_by_id={w.candidate_id: w for w in walls},
-    )
-    by_raw = {str(s.get("id")): s for s in segments if s.get("id")}
-    out = {
-        "viewport": {
-            "id": viewport.view_id,
-            "label": viewport.label,
-            "bbox": list(viewport.bounding_box),
-            "status": viewport.status,
-        },
-        "wall_count": len(walls),
-        "equivalence_groups": [list(g) for g in eq.equivalence_groups],
-        "targets": {},
-    }
+
+    drawings = page.get_drawings() or []
+
+    def path_summary(path_index):
+        if path_index is None or not (0 <= int(path_index) < len(drawings)):
+            return None
+        drawing = drawings[int(path_index)]
+        items = []
+        for item in drawing.get("items") or ():
+            if not item:
+                continue
+            vals = []
+            for value in item[1:]:
+                if hasattr(value, "x") and hasattr(value, "y"):
+                    vals.append([float(value.x), float(value.y)])
+                elif all(hasattr(value, key) for key in ("x0", "y0", "x1", "y1")):
+                    vals.append([float(value.x0), float(value.y0), float(value.x1), float(value.y1)])
+                else:
+                    vals.append(str(value))
+            items.append([str(item[0]), *vals])
+        rect = drawing.get("rect")
+        return {
+            "path_index": int(path_index),
+            "layer": str(drawing.get("layer") or drawing.get("oc") or ""),
+            "type": drawing.get("type"),
+            "seqno": drawing.get("seqno"),
+            "width": drawing.get("width"),
+            "color": drawing.get("color"),
+            "fill": drawing.get("fill"),
+            "rect": None if rect is None else [float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)],
+            "items": items,
+        }
+
+    out = {"targets": {}}
     for name, (cx, cy) in TARGETS.items():
+        owners = [
+            v for v in eligible
+            if v.bounding_box[0] <= cx <= v.bounding_box[2]
+            and v.bounding_box[1] <= cy <= v.bounding_box[3]
+        ]
+        if len(owners) != 1:
+            out["targets"][name] = {"center": [cx, cy], "viewport_owner_count": len(owners)}
+            continue
+        viewport = owners[0]
+        segments = [dict(s) for s in native.get("segments") or () if _inside(s, viewport.bounding_box)]
+        graph = build_wall_graph_for_viewport(segments)
+        junctions, rels = classify_junctions(
+            graph,
+            document_id="diag:kstvet",
+            page_id=str(PAGE),
+            viewport_id=str(viewport.view_id),
+        )
+        walls, _ = assemble_wall_topology(graph, junctions, rels, viewport_id=str(viewport.view_id))
+        identities = collect_physical_wall_identities(walls, graph)
+        eq = resolve_physical_wall_equivalence(
+            tuple(identities[w.candidate_id] for w in walls if w.candidate_id in identities),
+            walls_by_id={w.candidate_id: w for w in walls},
+        )
+        by_raw = {str(s.get("id")): s for s in segments if s.get("id")}
         raw_hits = sorted(
             str(s["id"]) for s in segments
             if s.get("id") and _intersects_box(s, cx, cy, RADIUS)
         )
         raw_set = set(raw_hits)
         matches = []
+        touched_paths = set()
         for wall in sorted(walls, key=lambda w: w.candidate_id):
             identity = identities.get(wall.candidate_id)
-            if identity is None:
+            if identity is None or not (raw_set & set(identity.source_primitive_ids)):
                 continue
-            if not (raw_set & set(identity.source_primitive_ids)):
-                continue
+            prims = [_seg_meta(by_raw[rid]) for rid in identity.source_primitive_ids if rid in by_raw]
+            touched_paths.update(p.get("path_index") for p in prims if p.get("path_index") is not None)
             matches.append({
                 "wall_candidate_id": wall.candidate_id,
                 "centerline_pts": [list(p) for p in wall.centerline_pts],
                 "junction_types": [j.value for j in wall.junction_types],
                 "source_primitive_ids": list(identity.source_primitive_ids),
                 "path_fingerprint": [list(p) for p in (identity.path_fingerprint or ())],
-                "source_primitives": [
-                    _seg_meta(by_raw[rid]) for rid in identity.source_primitive_ids if rid in by_raw
-                ],
+                "source_primitives": prims,
             })
+        raw_meta = [_seg_meta(by_raw[rid]) for rid in raw_hits if rid in by_raw]
+        touched_paths.update(p.get("path_index") for p in raw_meta if p.get("path_index") is not None)
         out["targets"][name] = {
             "center": [cx, cy],
-            "raw_hits": [_seg_meta(by_raw[rid]) for rid in raw_hits if rid in by_raw],
+            "viewport": {
+                "id": viewport.view_id,
+                "label": viewport.label,
+                "view_type": viewport.view_type,
+                "bbox": list(viewport.bounding_box),
+                "status": viewport.status,
+            },
+            "wall_count": len(walls),
+            "equivalence_groups": [list(g) for g in eq.equivalence_groups],
+            "raw_hits": raw_meta,
             "matching_walls": matches,
+            "path_summaries": [
+                summary for summary in (path_summary(idx) for idx in sorted(touched_paths))
+                if summary is not None
+            ],
         }
     print("ITEM19B_WALL_PROVENANCE " + json.dumps(out, sort_keys=True))
 
