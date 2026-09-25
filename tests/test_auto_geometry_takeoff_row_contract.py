@@ -101,14 +101,20 @@ class _Workspace:
 @contextmanager
 def _workspace():
     saved = {name: getattr(auto, name) for name in _PATCHED}
+    saved_db_flag = getattr(app_mod, "_pb_local_db_initialized_v1215", None)
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp, \
             patch.object(app_mod, "DB_PATH", Path(tmp) / "planreader.db"):
+        setattr(app_mod, "_pb_local_db_initialized_v1215", False)
         app_mod.init_local_db()
         try:
             yield _Workspace(Path(tmp))
         finally:
             for name, fn in saved.items():
                 setattr(auto, name, fn)
+            if saved_db_flag is not None:
+                setattr(app_mod, "_pb_local_db_initialized_v1215", saved_db_flag)
+            else:
+                app_mod.__dict__.pop("_pb_local_db_initialized_v1215", None)
 
 
 def _apply_production_chain(app) -> None:
