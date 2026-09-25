@@ -76,22 +76,23 @@ jobs:
               )
           )
           for report in dashboard.get("headline_reports", []):
+              summary = report.get("summary") or {}
               print(
                   "GENERALISATION_PROJECT "
                   + json.dumps(
                       {
                           "benchmark_id": report.get("benchmark_id"),
                           "status": report.get("status"),
-                          "accepted": int(report.get("exact_matches", 0))
-                          + int(report.get("within_5_percent", 0)),
-                          "compared": report.get("total_items_compared"),
-                          "accuracy": report.get("overall_accuracy_percentage"),
-                          "strict_exact": report.get(
+                          "accepted": int(summary.get("exact_matches", 0))
+                          + int(summary.get("within_5_percent", 0)),
+                          "compared": summary.get("total_items_compared"),
+                          "accuracy": summary.get("overall_accuracy_percentage"),
+                          "strict_exact": summary.get(
                               "strict_exact_accuracy_percentage"
                           ),
-                          "gross_mismatches": report.get("gross_mismatches"),
-                          "missed_items": report.get("missed_items"),
-                          "hallucinated_items": report.get("hallucinated_items"),
+                          "gross_mismatches": summary.get("gross_mismatches"),
+                          "missed_items": summary.get("missed_items"),
+                          "hallucinated_items": summary.get("hallucinated_items"),
                       },
                       sort_keys=True,
                   )
