@@ -1,0 +1,97 @@
+name: Canonical Benchmark Temporary
+
+on:
+  push:
+    branches:
+      - diag/canonical-benchmark-20260925
+
+jobs:
+  canonical-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and verify registered benchmark sources
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, time, urllib.request
+
+          base = Path("benchmarks/public_tenders")
+          out = Path("benchmarks/sources")
+          out.mkdir(parents=True, exist_ok=True)
+          downloaded = {}
+
+          for manifest_path in sorted(base.glob("*/download_manifest.json")):
+              data = json.loads(manifest_path.read_text(encoding="utf-8"))
+              url = data.get("source_url")
+              docs = data.get("documents") or []
+              if not url or not docs:
+                  continue
+              targets = {}
+              for doc in docs:
+                  filename = str(doc.get("filename") or "").strip()
+                  sha = str(doc.get("sha256") or "").strip().lower()
+                  if filename:
+                      targets[filename] = sha
+              for filename, expected_sha in targets.items():
+                  target = out / filename
+                  key = (url, filename)
+                  if target.exists():
+                      actual = hashlib.sha256(target.read_bytes()).hexdigest()
+                      if not expected_sha or actual == expected_sha:
+                          print(f"REUSE {filename} {actual}")
+                          downloaded[key] = actual
+                          continue
+                      target.unlink()
+                  req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0 PlanReaderBenchmark/1.0"})
+                  last = None
+                  for attempt in range(3):
+                      try:
+                          with urllib.request.urlopen(req, timeout=120) as resp:
+                              payload = resp.read()
+                          target.write_bytes(payload)
+                          actual = hashlib.sha256(payload).hexdigest()
+                          if expected_sha and actual != expected_sha:
+                              raise RuntimeError(f"SHA mismatch for {filename}: {actual} != {expected_sha}")
+                          print(f"DOWNLOADED {filename} bytes={len(payload)} sha256={actual}")
+                          downloaded[key] = actual
+                          break
+                      except Exception as exc:
+                          last = exc
+                          if target.exists():
+                              target.unlink()
+                          if attempt < 2:
+                              time.sleep(5 * (attempt + 1))
+                  else:
+                      raise SystemExit(f"FAILED download {url} -> {filename}: {last}")
+
+          print(f"Verified source files: {len(downloaded)}")
+          PY
+
+      - name: Run canonical benchmark --all
+        run: |
+          mkdir -p benchmark_results
+          set -o pipefail
+          python pb_benchmark_accuracy_engine.py --all --require-local-sources 2>&1 | tee benchmark_results/canonical-run.log
+
+      - name: Upload canonical benchmark reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-benchmark-current-main
+          path: benchmark_results/
+          if-no-files-found: warn
