@@ -176,6 +176,14 @@ class _ScopeKey:
 
 
 @dataclass(frozen=True)
+class _ProvenFilledWallStrip:
+    path_index: int
+    face_raw_ids: tuple[str, str]
+    boundary_raw_ids: tuple[str, ...]
+    polygon: tuple[Point, ...]
+
+
+@dataclass(frozen=True)
 class _TrustedFaceBreak:
     first_raw_id: str
     second_raw_id: str
@@ -849,6 +857,252 @@ def _segment_matches(line: Line, first: Point, second: Point) -> bool:
     return direct or reverse
 
 
+
+def _line_length(line: Line) -> float:
+    return math.hypot(line[2] - line[0], line[3] - line[1])
+
+
+def _same_point(left: Point, right: Point) -> bool:
+    return (
+        abs(left[0] - right[0]) <= _COORD_TOL
+        and abs(left[1] - right[1]) <= _COORD_TOL
+    )
+
+
+def _closed_four_edge_cycle(
+    entries: Sequence[tuple[str, Line]],
+) -> Optional[tuple[tuple[str, ...], tuple[Point, ...]]]:
+    if len(entries) != 4:
+        return None
+    adjacency: dict[Point, list[tuple[str, Point]]] = {}
+    canonical_points: list[Point] = []
+
+    def canonical(point: Point) -> Point:
+        for existing in canonical_points:
+            if _same_point(existing, point):
+                return existing
+        canonical_points.append(point)
+        return point
+
+    for raw_id, line in entries:
+        start = canonical((line[0], line[1]))
+        end = canonical((line[2], line[3]))
+        if _same_point(start, end):
+            return None
+        adjacency.setdefault(start, []).append((raw_id, end))
+        adjacency.setdefault(end, []).append((raw_id, start))
+    if len(adjacency) != 4 or any(len(items) != 2 for items in adjacency.values()):
+        return None
+
+    first = min(adjacency)
+    ordered_ids: list[str] = []
+    ordered_points: list[Point] = [first]
+    current = first
+    previous_id: Optional[str] = None
+    for _ in range(4):
+        options = sorted(
+            (item for item in adjacency[current] if item[0] != previous_id),
+            key=lambda item: item[0],
+        )
+        if not options:
+            return None
+        raw_id, nxt = options[0]
+        if raw_id in ordered_ids:
+            if len(ordered_ids) == 3 and _same_point(nxt, first):
+                ordered_ids.append(raw_id)
+                ordered_points.append(first)
+                break
+            return None
+        ordered_ids.append(raw_id)
+        ordered_points.append(nxt)
+        previous_id = raw_id
+        current = nxt
+    if len(ordered_ids) != 4 or not _same_point(ordered_points[-1], first):
+        return None
+    if len(set(ordered_ids)) != 4:
+        return None
+    return tuple(ordered_ids), tuple(ordered_points[:-1])
+
+
+def _proven_filled_wall_strips(
+    segments: Sequence[Mapping[str, object]],
+) -> tuple[_ProvenFilledWallStrip, ...]:
+    """Prove wall strips from one immutable native filled drawing path.
+
+    This is intentionally stronger than parallel-line pairing. A strip exists
+    only when one source drawing path supplies exactly four line primitives,
+    every primitive carries the same explicit structural/bearing layer and
+    explicit fill, the primitives form one closed cycle, and exactly two
+    opposite sides are dominant parallel faces. No proximity, nearest/first
+    candidate, confidence score, text, OCR, or benchmark identity is used.
+    """
+    by_path: dict[int, list[Mapping[str, object]]] = {}
+    for segment in segments:
+        path_index = segment.get("path_index")
+        raw_id = str(segment.get("id") or "")
+        if path_index is None or not raw_id or str(segment.get("kind") or "") != "line":
+            continue
+        try:
+            path_key = int(path_index)
+        except (TypeError, ValueError):
+            continue
+        by_path.setdefault(path_key, []).append(segment)
+
+    strips: list[_ProvenFilledWallStrip] = []
+    for path_index, members in sorted(by_path.items()):
+        if len(members) != 4:
+            continue
+        layers = {
+            str(member.get("layer") or "").strip().lower()
+            for member in members
+            if bool(member.get("layer_present", str(member.get("layer") or "").strip()))
+        }
+        if len(layers) != 1:
+            continue
+        layer = next(iter(layers), "")
+        if "structural" not in layer or not any(token in layer for token in ("bearing", "wall")):
+            continue
+        if not all(
+            bool(member.get("fill_present", member.get("fill") is not None))
+            and member.get("fill") is not None
+            for member in members
+        ):
+            continue
+
+        entries = [
+            (str(member["id"]), _segment_geometry(member))
+            for member in members
+        ]
+        cycle = _closed_four_edge_cycle(entries)
+        if cycle is None:
+            continue
+        ordered_ids, polygon = cycle
+        line_by_id = {raw_id: line for raw_id, line in entries}
+        lengths = {raw_id: _line_length(line_by_id[raw_id]) for raw_id in ordered_ids}
+        ranked = sorted(ordered_ids, key=lambda raw_id: (-lengths[raw_id], raw_id))
+        face_ids = tuple(sorted(ranked[:2]))
+        connector_ids = tuple(ranked[2:])
+        if not _parallel(line_by_id[face_ids[0]], line_by_id[face_ids[1]]):
+            continue
+        if _collinear(line_by_id[face_ids[0]], line_by_id[face_ids[1]]):
+            continue
+        if min(lengths[raw_id] for raw_id in face_ids) <= (
+            3.0 * max(lengths[raw_id] for raw_id in connector_ids)
+        ):
+            continue
+        # The dominant sides must be opposite in the source cycle, not adjacent.
+        positions = sorted(ordered_ids.index(raw_id) for raw_id in face_ids)
+        if (positions[1] - positions[0]) != 2:
+            continue
+        strips.append(
+            _ProvenFilledWallStrip(
+                path_index=path_index,
+                face_raw_ids=face_ids,
+                boundary_raw_ids=tuple(sorted(ordered_ids)),
+                polygon=polygon,
+            )
+        )
+    return tuple(strips)
+
+
+def _point_in_convex_polygon(point: Point, polygon: Sequence[Point]) -> bool:
+    if len(polygon) < 3:
+        return False
+    signs: list[int] = []
+    for index, first in enumerate(polygon):
+        second = polygon[(index + 1) % len(polygon)]
+        value = _cross(
+            (second[0] - first[0], second[1] - first[1]),
+            (point[0] - first[0], point[1] - first[1]),
+        )
+        if abs(value) <= _COORD_TOL:
+            continue
+        signs.append(1 if value > 0.0 else -1)
+    return not signs or all(sign == signs[0] for sign in signs)
+
+
+def _segment_contained_by_strip(
+    segment: Mapping[str, object],
+    strip: _ProvenFilledWallStrip,
+) -> bool:
+    line = _segment_geometry(segment)
+    return _point_in_convex_polygon((line[0], line[1]), strip.polygon) and _point_in_convex_polygon(
+        (line[2], line[3]), strip.polygon
+    )
+
+
+def _filter_proven_wall_strip_geometry(
+    segments: Sequence[Mapping[str, object]],
+    strips: Sequence[_ProvenFilledWallStrip],
+) -> tuple[dict, ...]:
+    """Keep wall faces while suppressing proven subordinate strip geometry.
+
+    Source-path end closures and non-parallel cross-strip strokes belong to the
+    already-proven filled wall assembly and cannot independently mint walls.
+    A source-tagged grid axis is excluded only when its complete primitive is
+    geometrically contained by that same proven wall strip; the layer string by
+    itself remains non-authoritative, preserving fail-closed A-GRID behavior.
+    """
+    face_ids = {raw_id for strip in strips for raw_id in strip.face_raw_ids}
+    boundary_ids = {raw_id for strip in strips for raw_id in strip.boundary_raw_ids}
+    kept: list[dict] = []
+    for original in segments:
+        segment = dict(original)
+        raw_id = str(segment.get("id") or "")
+        if raw_id in face_ids:
+            kept.append(segment)
+            continue
+        if raw_id in boundary_ids:
+            continue
+
+        excluded = False
+        for strip in strips:
+            if not _segment_contained_by_strip(segment, strip):
+                continue
+            layer = str(segment.get("layer") or "").strip().lower()
+            if "grid" in layer or "axis" in layer:
+                excluded = True
+                break
+            line = _segment_geometry(segment)
+            face_line = next(
+                (
+                    _segment_geometry(candidate)
+                    for candidate in segments
+                    if str(candidate.get("id") or "") == strip.face_raw_ids[0]
+                ),
+                None,
+            )
+            if face_line is not None and not _parallel(line, face_line):
+                excluded = True
+                break
+        if not excluded:
+            kept.append(segment)
+    return tuple(kept)
+
+
+def _producer_wall_strip_relation_overrides(
+    *,
+    records: Sequence[PhysicalWallCandidateRecord],
+    strips: Sequence[_ProvenFilledWallStrip],
+) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
+    overrides: dict[tuple[str, str], PhysicalEquivalenceClass] = {}
+    for strip in strips:
+        face_ids = set(strip.face_raw_ids)
+        member_ids = sorted(
+            {
+                record.wall_candidate_id
+                for record in records
+                if face_ids & set(record.physical_identity.source_primitive_ids)
+            }
+        )
+        if len(member_ids) < 2:
+            continue
+        for index, left_id in enumerate(member_ids):
+            for right_id in member_ids[index + 1 :]:
+                overrides[(left_id, right_id)] = PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+    return overrides
+
+
 def _opening_raw_relation_sets(
     raw_lines: Mapping[str, Line],
 ) -> dict[tuple[str, str], set[PhysicalEquivalenceClass]]:
@@ -1049,6 +1303,8 @@ def _apply_trusted_relation_overrides(
     identities: Sequence[PhysicalWallIdentity],
     baseline: PhysicalWallEquivalenceResolution,
     overrides: Mapping[tuple[str, str], PhysicalEquivalenceClass],
+    *,
+    allow_proven_same_over_distinct: bool = False,
 ) -> PhysicalWallEquivalenceResolution:
     """Reconcile source-proven relations without changing generic classifier semantics."""
     usable = [identity for identity in identities if identity.usable]
@@ -1061,7 +1317,14 @@ def _apply_trusted_relation_overrides(
     }
     for pair, classification in overrides.items():
         current = pair_map.get(tuple(sorted(pair)))
-        if current == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value:
+        if (
+            current == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value
+            or (
+                allow_proven_same_over_distinct
+                and classification is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+                and current == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value
+            )
+        ):
             pair_map[tuple(sorted(pair))] = classification.value
 
     member_ids = [identity.wall_candidate_id for identity in usable]
@@ -1160,7 +1423,12 @@ def _assemble_scope_result(
     ambiguous_source_observation_ids: Sequence[str] = (),
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = selector.decision_scope_id
-    graph = build_wall_graph_for_viewport(tuple(segments))
+    proven_wall_strips = _proven_filled_wall_strips(tuple(segments))
+    graph_segments = _filter_proven_wall_strip_geometry(
+        tuple(segments),
+        proven_wall_strips,
+    )
+    graph = build_wall_graph_for_viewport(graph_segments)
     junctions, relationships = classify_junctions(
         graph,
         document_id=published.revision.document_id,
@@ -1195,6 +1463,16 @@ def _assemble_scope_result(
         tuple(ordered_identities),
         walls_by_id={wall.candidate_id: wall for wall in ordered_walls},
     )
+    strip_overrides = _producer_wall_strip_relation_overrides(
+        records=tuple(records),
+        strips=proven_wall_strips,
+    )
+    equivalence = _apply_trusted_relation_overrides(
+        tuple(ordered_identities),
+        baseline_equivalence,
+        strip_overrides,
+        allow_proven_same_over_distinct=True,
+    )
     trusted_overrides = _producer_opening_relation_overrides(
         source_producer=source_producer,
         published=published,
@@ -1203,7 +1481,7 @@ def _assemble_scope_result(
     )
     equivalence = _apply_trusted_relation_overrides(
         tuple(ordered_identities),
-        baseline_equivalence,
+        equivalence,
         trusted_overrides,
     )
 
