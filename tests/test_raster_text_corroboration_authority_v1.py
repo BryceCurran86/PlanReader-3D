@@ -260,7 +260,7 @@ def test_unavailable_backend_fails_closed() -> None:
     assert result.reason_codes == (RASTER_TEXT_BACKEND_UNAVAILABLE,)
 
 
-def test_immutable_source_tamper_blocks_render() -> None:
+def test_immutable_source_tamper_is_rejected_by_upstream_source_authority() -> None:
     source, published, selector, receipt = _source_with_word("finish")
     _force_glyph_only_block(source, selector, receipt)
     source._producer._store.source_bytes_by_revision[published.revision.revision_id] = (
@@ -270,7 +270,7 @@ def test_immutable_source_tamper_blocks_render() -> None:
     result = _producer(source, [_line("finish")]).publish(selector)
 
     assert result.status is EvidenceResolutionStatus.CONFLICT
-    assert result.reason_codes == (RASTER_TEXT_SOURCE_RENDER_UNAVAILABLE,)
+    assert result.reason_codes == (RASTER_TEXT_NATIVE_PREREQUISITE_UNRESOLVED,)
 
 
 def test_result_is_deterministic_and_authority_is_read_only() -> None:
