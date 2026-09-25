@@ -1,0 +1,80 @@
+name: Item19B Finish Binding Main Probe
+
+on:
+  push:
+    branches: [diag/item19b-finish-binding-main]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Probe finish bindings
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_wall_finish_face_binding_authority import WallFinishFaceBindingProducer
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(producer_method="item19b-finish-main-probe",producer_version="1.0")
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-finish",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          producer=WallFinishFaceBindingProducer.from_source_visibility_producer(source,page_ids=("54",))
+          rows=[]
+          for result in producer.published_results():
+              rows.append({
+                  "status":result.status.value,
+                  "reasons":list(result.reason_codes),
+                  "bindings":[{
+                      "binding_id":b.binding_id,
+                      "viewport_id":b.viewport_id,
+                      "finish_scope_id":b.decision_scope_id,
+                      "wall_scope_id":b.physical_wall_decision_scope_id,
+                      "physical_wall_id":b.physical_wall_id,
+                      "physical_face_id":b.physical_face_id,
+                      "physical_face_role":b.physical_face_role.value,
+                      "trade_scope_id":b.trade_scope_id,
+                      "finish_material":b.finish_material,
+                      "source_face_segment_ids":list(b.source_face_segment_ids),
+                      "wall_role":b.wall_role.value,
+                      "complete":b.decision_scope_complete,
+                  } for b in result.bindings],
+                  "scope_records":[{
+                      "scope_id":s.scope_id,
+                      "viewport_id":s.viewport_id,
+                      "trade_scope_id":s.trade_scope_id,
+                      "finish_material":s.finish_material,
+                      "target_face_ids":list(s.target_face_ids),
+                      "covered_face_ids":list(s.covered_face_ids),
+                      "binding_ids":list(s.binding_ids),
+                      "complete":s.decision_scope_complete,
+                      "scope_status":s.scope_status.value,
+                      "reasons":list(s.reason_codes),
+                  } for s in result.scope_records],
+              })
+          print("ITEM19B_FINISH_BINDINGS "+json.dumps(rows,sort_keys=True))
+          print("ITEM19B_FINISH_BINDING_COUNT",sum(len(r["bindings"]) for r in rows))
+          PY
