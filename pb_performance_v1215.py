@@ -53,6 +53,11 @@ _MODEL_MASS_INSERT_SQL = """INSERT INTO model_masses(
     source_reference,confidence,notes,created_at
 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
 
+_MODEL_MASS_UPDATE_SQL = """UPDATE model_masses SET
+    label=?,level_name=?,x=?,y=?,z=?,width=?,depth=?,height=?,finish=?,
+    source_reference=?,confidence=?,notes=?
+WHERE id=?"""
+
 
 def tune_sqlite_connection(conn: sqlite3.Connection) -> sqlite3.Connection:
     """Apply low-risk connection settings for the local PlanReader database."""
@@ -184,16 +189,27 @@ def replace_surface_rows_batched(
 
 
 def refresh_zone_masses_batched(app: Any, workspace_id: int) -> int:
-    """Rebuild Quick 3D zone masses in one transaction instead of N commits."""
+    """Rebuild Quick 3D zone masses in one transaction instead of N commits.
+
+    Each zone's mass is updated in place, keeping its id: openings, 3D surface
+    edits and editable-3D corrections are keyed by model_masses.id.
+    """
     zones = quick_v1213._calibrated_zones(app, workspace_id)
     conn = app.local_connect()
     try:
-        conn.execute(
-            "DELETE FROM model_masses WHERE workspace_id=? AND source_reference LIKE ?",
+        current: Dict[str, int] = {}
+        removed = []
+        for row in conn.execute(
+            "SELECT id,source_reference FROM model_masses WHERE workspace_id=? AND source_reference LIKE ? ORDER BY id",
             (workspace_id, quick_v1213.QUICK_SOURCE_PREFIX + "%"),
-        )
+        ).fetchall():
+            if str(row[1]) in current:
+                removed.append(int(row[0]))
+            else:
+                current[str(row[1])] = int(row[0])
         stamp = app.now_stamp()
         values = []
+        count = 0
         for zone in zones:
             pxpm = quick_v1213._num(zone.get("px_per_m"))
             if pxpm <= 0:
@@ -210,28 +226,36 @@ def refresh_zone_masses_batched(app: Any, workspace_id: int) -> int:
             notes = "Auto-built from calibrated PlanReader mapped zone."
             if original_source:
                 notes += f" Original source: {original_source}."
-            values.append(
-                (
-                    workspace_id,
-                    str(zone.get("name") or f"Zone {zone_id}"),
-                    "Ground",
-                    quick_v1213._num(zone.get("x_px")) / pxpm,
-                    quick_v1213._num(zone.get("y_px")) / pxpm,
-                    0.0,
-                    quick_v1213._num(zone.get("w_px")) / pxpm,
-                    quick_v1213._num(zone.get("h_px")) / pxpm,
-                    max(0.1, quick_v1213._num(zone.get("wall_height_m"), 2.7)),
-                    str(zone.get("finish_system") or zone.get("substrate") or ""),
-                    source,
-                    confidence,
-                    notes,
-                    stamp,
-                )
+            mass = (
+                workspace_id,
+                str(zone.get("name") or f"Zone {zone_id}"),
+                "Ground",
+                quick_v1213._num(zone.get("x_px")) / pxpm,
+                quick_v1213._num(zone.get("y_px")) / pxpm,
+                0.0,
+                quick_v1213._num(zone.get("w_px")) / pxpm,
+                quick_v1213._num(zone.get("h_px")) / pxpm,
+                max(0.1, quick_v1213._num(zone.get("wall_height_m"), 2.7)),
+                str(zone.get("finish_system") or zone.get("substrate") or ""),
+                source,
+                confidence,
+                notes,
+                stamp,
             )
+            mass_id = current.pop(source, None)
+            if mass_id is None:
+                values.append(mass)
+            else:
+                conn.execute(_MODEL_MASS_UPDATE_SQL, (*mass[1:-1], mass_id))
+            count += 1
+        # Masses of zones that are gone (or duplicated) are the only ones removed.
+        removed.extend(current.values())
+        for mass_id in removed:
+            conn.execute("DELETE FROM model_masses WHERE id=?", (mass_id,))
         if values:
             conn.executemany(_MODEL_MASS_INSERT_SQL, values)
         conn.commit()
-        return len(values)
+        return count
     except Exception:
         conn.rollback()
         raise
