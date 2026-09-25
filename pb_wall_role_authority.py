@@ -69,6 +69,7 @@ _RECORD_SEAL = object()
 
 _Key = Tuple[str, str, str, str, str, str, str]  # doc/rev/sha/snap/page/scope/wall_id
 _TopologyKey = Tuple[str, str, str, str, str, str]  # doc/rev/sha/snap/page/wall_id
+_ScopedTopologyKey = Tuple[str, str, str, str, str, str, str]  # doc/rev/sha/snap/page/scope/wall_id
 
 
 def _required(value: object, name: str) -> str:
@@ -189,6 +190,7 @@ class WallTopologyEvidence:
     physical_wall_id: str
     bounds_exterior: bool
     enclosed_space_count: int
+    decision_scope_id: str = ""
     enclosed_space_ids: Tuple[str, ...] = ()
     is_ambiguous: bool = False
     ambiguity_reason: Optional[str] = None
@@ -212,7 +214,7 @@ class WallTopologyAuthority:
 
     def __init__(
         self,
-        records: Mapping[_TopologyKey, WallTopologyEvidence],
+        records: Mapping[_ScopedTopologyKey, WallTopologyEvidence],
         *,
         _seal: object = None,
     ) -> None:
@@ -227,6 +229,7 @@ class WallTopologyAuthority:
             selector.source_sha256,
             selector.snapshot_id,
             selector.page_id,
+            selector.decision_scope_id,
             selector.physical_wall_id,
         )
         return self._records.get(key)
@@ -238,7 +241,7 @@ class WallTopologyProducer:
     def __init__(self, *, _seal: object = None) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError("WallTopologyProducer must be obtained via create()")
-        self._records: Dict[_TopologyKey, WallTopologyEvidence] = {}
+        self._records: Dict[_ScopedTopologyKey, WallTopologyEvidence] = {}
 
     @classmethod
     def create(cls) -> WallTopologyProducer:
@@ -635,6 +638,7 @@ class WallRoleProducer:
                     or topo.source_sha256 != selector.source_sha256
                     or topo.snapshot_id != selector.snapshot_id
                     or topo.page_id != selector.page_id
+                    or topo.decision_scope_id != selector.decision_scope_id
                 ):
                     stale_reasons.append(WALL_ROLE_STALE_EVIDENCE)
                     stale_reasons.append(WALL_ROLE_LINEAGE_MISMATCH)
