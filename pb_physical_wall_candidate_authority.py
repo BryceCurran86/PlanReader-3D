@@ -1662,6 +1662,7 @@ def _assemble_scope_result(
         tuple(ordered_identities),
         equivalence,
         shared_face_overrides,
+        allow_proven_same_over_distinct=True,
     )
     trusted_overrides = _producer_opening_relation_overrides(
         source_producer=source_producer,
