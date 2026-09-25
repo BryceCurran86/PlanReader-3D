@@ -282,6 +282,43 @@ def _endpoint_key(point: Sequence[float]) -> tuple[float, float]:
     return (float(point[0]), float(point[1]))
 
 
+def _line_fully_inside_bbox(line: _Line, bbox: Sequence[float]) -> bool:
+    return all(_point_in_bbox(point, bbox) for point in _endpoints(line))
+
+
+def _viewport_owned_lines(
+    lines: Sequence[_Line],
+    viewport,
+    viewports: Sequence[object],
+) -> tuple[_Line, ...]:
+    """Return lines with one exact authenticated viewport owner.
+
+    Leader evidence is annotation geometry, not wall geometry. It therefore
+    cannot be restricted to the physical-wall source-observation universe.
+    Ownership is nevertheless fail-closed: a line is admitted only when both
+    endpoints lie inside exactly one authenticated viewport and that owner is
+    the target viewport. No nearest-view assignment or bbox expansion occurs.
+    """
+    target_id = str(getattr(viewport, "view_id", "") or "")
+    if not target_id or getattr(viewport, "bounding_box", None) is None:
+        return ()
+
+    owned: list[_Line] = []
+    for line in lines:
+        owners = [
+            candidate
+            for candidate in viewports
+            if getattr(candidate, "bounding_box", None) is not None
+            and _line_fully_inside_bbox(line, candidate.bounding_box)
+        ]
+        if len(owners) != 1:
+            continue
+        if str(getattr(owners[0], "view_id", "") or "") != target_id:
+            continue
+        owned.append(line)
+    return tuple(sorted(owned, key=lambda item: item.raw_id))
+
+
 def _authoritative_viewports(page: fitz.Page, page_number: int):
     rows = tuple(segment_page_viewports(page, page_number=page_number))
     if any(not is_segment_page_viewports_product(viewport) for viewport in rows):
@@ -605,24 +642,33 @@ class WallFinishFaceBindingProducer:
                         wall_scope = wall_authority.resolve_scope(wall_selector)
                         if wall_scope.status is not EvidenceResolutionStatus.CORROBORATED:
                             continue
-                        owned_observation_ids = set(wall_scope.source_observation_ids)
-                        owned_lines = tuple(
+                        # Leader/callout geometry is not wall geometry. Discover
+                        # leader paths from all native lines with one exact
+                        # authenticated viewport owner, while retaining the
+                        # wall scope as the sole authority for wall targeting.
+                        leader_lines = _viewport_owned_lines(
+                            lines,
+                            viewport,
+                            viewports,
+                        )
+                        wall_observation_ids = set(wall_scope.source_observation_ids)
+                        wall_lines = tuple(
                             line for line in lines
-                            if line.observation_id in owned_observation_ids
+                            if line.observation_id in wall_observation_ids
                         )
                         terminators = tuple(
                             term for term in _filled_terminators(page, text_height)
                             if viewport.bounding_box[0] <= term.center[0] <= viewport.bounding_box[2]
                             and viewport.bounding_box[1] <= term.center[1] <= viewport.bounding_box[3]
                         )
-                        paths = _leader_paths(annotation_bbox, owned_lines, terminators)
+                        paths = _leader_paths(annotation_bbox, leader_lines, terminators)
                         if not paths:
                             continue
 
                         accepted: dict[tuple[str, str, str], WallFinishFaceBindingRecord] = {}
                         for leader_ids, terminator in paths:
                             target, source_segments, target_status = _target_from_terminator(
-                                terminator, owned_lines, wall_scope
+                                terminator, wall_lines, wall_scope
                             )
                             if (
                                 target_status is not EvidenceResolutionStatus.CORROBORATED
