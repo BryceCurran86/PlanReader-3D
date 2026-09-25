@@ -1219,8 +1219,18 @@ def _apply_trusted_relation_overrides(
     identities: Sequence[PhysicalWallIdentity],
     baseline: PhysicalWallEquivalenceResolution,
     overrides: Mapping[tuple[str, str], PhysicalEquivalenceClass],
+    *,
+    authoritative_same_pairs: Sequence[tuple[str, str]] = (),
 ) -> PhysicalWallEquivalenceResolution:
-    """Reconcile source-proven relations without changing generic classifier semantics."""
+    """Reconcile source-proven relations without weakening generic fail-closed rules.
+
+    Ordinary positive proofs may refine only AMBIGUOUS baseline relations.
+    authoritative_same_pairs is narrower: it is reserved for producer-owned
+    source-assembly proofs that demonstrate two W4 candidates are fragments/faces
+    of one exact physical wall assembly. Such a proof may supersede the generic
+    classifier's DISTINCT result for disjoint spans because the source assembly
+    proves their shared physical-wall identity.
+    """
     usable = [identity for identity in identities if identity.usable]
     if len(usable) != len(identities) or not overrides:
         return baseline
@@ -1229,10 +1239,21 @@ def _apply_trusted_relation_overrides(
         tuple(sorted((left, right))): classification
         for left, right, classification in baseline.pair_classifications
     }
+    authoritative_same = {
+        tuple(sorted(pair))
+        for pair in authoritative_same_pairs
+        if overrides.get(tuple(sorted(pair))) is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+    }
     for pair, classification in overrides.items():
-        current = pair_map.get(tuple(sorted(pair)))
+        normalized_pair = tuple(sorted(pair))
+        current = pair_map.get(normalized_pair)
         if current == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value:
-            pair_map[tuple(sorted(pair))] = classification.value
+            pair_map[normalized_pair] = classification.value
+        elif (
+            normalized_pair in authoritative_same
+            and classification is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+        ):
+            pair_map[normalized_pair] = classification.value
 
     member_ids = [identity.wall_candidate_id for identity in usable]
     same_links: list[tuple[str, str]] = []
@@ -1379,10 +1400,18 @@ def _assemble_scope_result(
         opening_overrides,
         face_pair_overrides,
     )
+    authoritative_face_same_pairs = tuple(
+        pair
+        for pair, classification in face_pair_overrides.items()
+        if classification is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+        and trusted_overrides.get(tuple(sorted(pair)))
+        is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+    )
     equivalence = _apply_trusted_relation_overrides(
         tuple(ordered_identities),
         baseline_equivalence,
         trusted_overrides,
+        authoritative_same_pairs=authoritative_face_same_pairs,
     )
 
     boundary_reasons: list[str] = list(pre_boundary_reasons)
