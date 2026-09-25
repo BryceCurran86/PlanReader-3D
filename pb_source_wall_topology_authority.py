@@ -301,6 +301,15 @@ def build_source_wall_topology_authority(
 
     records: dict[tuple[str, str, str, str, str, str], WallTopologyEvidence] = {}
     for scope in physical_wall_candidate_authority._scopes.values():
+        # Room/envelope topology is a plan-view proposition. Viewport-scoped
+        # elevation/section/detail geometry remains valid physical-wall
+        # evidence, but it must not mint EXTERNAL/INTERNAL roles by being
+        # interpreted as a planar room graph.
+        if (
+            getattr(scope, "scope_kind", "page") == "viewport"
+            and str(getattr(scope, "viewport_view_type", "") or "") != "floor_plan"
+        ):
+            continue
         records.update(_derive_scope_records(scope))
 
     authority = WallTopologyAuthority(records, _seal=_AUTHORITY_SEAL)
