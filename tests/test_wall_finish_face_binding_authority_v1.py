@@ -74,6 +74,11 @@ def _write_direct_finish_plan(
 ) -> None:
     doc = fitz.open()
     page = doc.new_page(width=300.0, height=200.0)
+    # Production Item 19B now consumes the exact authenticated F.07 viewport
+    # wall scope, so the synthetic E2E source includes a real producer-owned
+    # viewport rather than monkeypatching caller geometry.
+    page.draw_rect(fitz.Rect(20.0, 15.0, 280.0, 185.0), color=(0, 0, 0), width=1)
+    page.insert_text((120.0, 178.0), "GROUND FLOOR PLAN", fontsize=9)
     for first, second in (
         ((50.0, 50.0), (250.0, 50.0)),
         ((250.0, 50.0), (250.0, 150.0)),
@@ -124,9 +129,6 @@ def _write_direct_finish_plan(
 def _run_direct_finish_plan(
     path: Path,
     monkeypatch,
-    *,
-    viewport_id: str = "vp:test",
-    viewport_bbox=(0.0, 0.0, 300.0, 200.0),
 ):
     source = SourceVisibilityProducer(
         producer_method="item19b-e2e-test",
@@ -136,20 +138,6 @@ def _run_direct_finish_plan(
         document_id=f"test:{path.name}",
         source_bytes=path.read_bytes(),
         source_locator=str(path),
-    )
-    viewport = SimpleNamespace(
-        view_id=viewport_id,
-        bounding_box=viewport_bbox,
-    )
-    monkeypatch.setattr(
-        finish_binding_module,
-        "_authoritative_viewports",
-        lambda page, page_number: (viewport,),
-    )
-    monkeypatch.setattr(
-        finish_binding_module,
-        "assign_bbox_to_viewport",
-        lambda bbox, viewports, allow_derived=True: viewport,
     )
     return WallFinishFaceBindingProducer.from_source_visibility_producer(
         source,
@@ -215,25 +203,15 @@ def test_producer_end_to_end_binds_native_callout_to_exact_external_face(
     )
 
 
-def test_producer_end_to_end_viewport_expansion_preserves_binding_identity(
+def test_producer_end_to_end_authenticated_viewport_replay_preserves_binding_identity(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    path = tmp_path / "direct-finish-viewport-invariance.pdf"
+    path = tmp_path / "direct-finish-viewport-replay.pdf"
     _write_direct_finish_plan(path)
 
-    first = _run_direct_finish_plan(
-        path,
-        monkeypatch,
-        viewport_id="vp:base",
-        viewport_bbox=(0.0, 0.0, 300.0, 200.0),
-    )
-    second = _run_direct_finish_plan(
-        path,
-        monkeypatch,
-        viewport_id="vp:expanded",
-        viewport_bbox=(-25.0, -25.0, 325.0, 225.0),
-    )
+    first = _run_direct_finish_plan(path, monkeypatch)
+    second = _run_direct_finish_plan(path, monkeypatch)
 
     first_bindings = [
         record
@@ -250,7 +228,8 @@ def test_producer_end_to_end_viewport_expansion_preserves_binding_identity(
 
     assert len(first_bindings) == 1
     assert len(second_bindings) == 1
-    assert first_bindings[0].viewport_id != second_bindings[0].viewport_id
+    assert first_bindings[0].viewport_id == second_bindings[0].viewport_id
+    assert first_bindings[0].physical_wall_decision_scope_id == second_bindings[0].physical_wall_decision_scope_id
     assert first_bindings[0].physical_face_id == second_bindings[0].physical_face_id
     assert first_bindings[0].binding_id == second_bindings[0].binding_id
 
