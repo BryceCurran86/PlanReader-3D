@@ -56,6 +56,7 @@ from pb_viewport_segmentation import (
 )
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 from pb_wall_room_topology_junction_classifier import classify_junctions
+from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
 from pb_wall_room_topology_stage_a import (
     DEFAULT_GAP_SNAP_TOLERANCE_PT,
     build_wall_graph_for_viewport,
@@ -1310,10 +1311,95 @@ def _projected_path_interval(
     return (lower, upper)
 
 
+def _record_source_face_intervals_from_graph(
+    *,
+    record: PhysicalWallCandidateRecord,
+    raw_id: str,
+    source_line: Line,
+    graph: Mapping[str, object],
+) -> tuple[tuple[float, float], ...]:
+    """Project only graph edges explicitly descended from one native primitive.
+
+    W4 centerlines may legitimately bend at reconstructed junctions even when
+    one contributing edge is an exact fragment of a single immutable source
+    face. Physical SAME proof must therefore inspect the lineage-bearing edge
+    fragments themselves, not require every point of the assembled centerline
+    to remain collinear with that source primitive.
+    """
+    edges_by_id = {
+        str(edge.get("id")): edge
+        for edge in tuple(graph.get("edges") or ())
+        if isinstance(edge, Mapping) and edge.get("id") not in (None, "")
+    }
+    direction = _canonical_direction(source_line)
+    intervals: list[tuple[float, float]] = []
+    for edge_id in record.physical_identity.edge_ids:
+        edge = edges_by_id.get(str(edge_id))
+        if edge is None:
+            continue
+        lineage = edge.get(LINEAGE_KEY) or {}
+        source_ids = {
+            str(value)
+            for value in tuple(lineage.get("source_primitive_ids") or ())
+            if value not in (None, "")
+        }
+        if raw_id not in source_ids:
+            continue
+        try:
+            edge_line = (
+                float(edge["x1"]),
+                float(edge["y1"]),
+                float(edge["x2"]),
+                float(edge["y2"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        # Exact source ancestry is necessary but not sufficient: the edge must
+        # also lie on the native primitive. This rejects junction branches that
+        # inherited plural lineage at an intersection.
+        if not _collinear(edge_line, source_line):
+            continue
+        if abs(_cross(direction, (
+            edge_line[0] - source_line[0],
+            edge_line[1] - source_line[1],
+        ))) > _COORD_TOL:
+            continue
+        values = (
+            _projection((edge_line[0], edge_line[1]), direction),
+            _projection((edge_line[2], edge_line[3]), direction),
+        )
+        lower, upper = min(values), max(values)
+        if upper - lower > _COORD_TOL:
+            intervals.append((lower, upper))
+    return tuple(sorted(set(intervals)))
+
+
+def _interval_sets_overlap_or_snap(
+    left: Sequence[tuple[float, float]],
+    right: Sequence[tuple[float, float]],
+) -> bool:
+    for left_interval in left:
+        for right_interval in right:
+            overlap = min(left_interval[1], right_interval[1]) - max(
+                left_interval[0], right_interval[0]
+            )
+            if overlap > _COORD_TOL:
+                return True
+            gap = max(left_interval[0], right_interval[0]) - min(
+                left_interval[1], right_interval[1]
+            )
+            if gap < 0.0:
+                gap = 0.0
+            if gap <= DEFAULT_GAP_SNAP_TOLERANCE_PT:
+                return True
+    return False
+
+
 def _producer_shared_source_face_relation_overrides(
     *,
     segments: Sequence[Mapping[str, object]],
     records: Sequence[PhysicalWallCandidateRecord],
+    graph: Optional[Mapping[str, object]] = None,
 ) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
     """Prove duplicate W4 fragments descended from one exact native wall face.
 
@@ -1366,35 +1452,50 @@ def _producer_shared_source_face_relation_overrides(
             continue
 
         ordered = sorted(owners, key=lambda item: item.wall_candidate_id)
+        graph_intervals = {}
+        if graph is not None:
+            graph_intervals = {
+                record.wall_candidate_id: _record_source_face_intervals_from_graph(
+                    record=record,
+                    raw_id=raw_id,
+                    source_line=source_line,
+                    graph=graph,
+                )
+                for record in ordered
+            }
+
         for index, left in enumerate(ordered):
             left_path = tuple(left.physical_identity.path_fingerprint or ())
-            if not _path_is_collinear_with_source_line(left_path, source_line):
+            left_interval = None
+            if graph is None:
+                if not _path_is_collinear_with_source_line(left_path, source_line):
+                    continue
+                left_interval = _projected_path_interval(left_path, source_line)
+                if left_interval is None:
+                    continue
+            elif not graph_intervals.get(left.wall_candidate_id):
                 continue
-            left_interval = _projected_path_interval(left_path, source_line)
-            if left_interval is None:
-                continue
+
             for right in ordered[index + 1 :]:
-                right_path = tuple(right.physical_identity.path_fingerprint or ())
-                if not _path_is_collinear_with_source_line(right_path, source_line):
-                    continue
-                right_interval = _projected_path_interval(right_path, source_line)
-                if right_interval is None:
-                    continue
-                overlap = min(left_interval[1], right_interval[1]) - max(
-                    left_interval[0], right_interval[0]
-                )
-                if overlap <= _COORD_TOL:
-                    gap = max(
-                        left_interval[0],
-                        right_interval[0],
-                    ) - min(
-                        left_interval[1],
-                        right_interval[1],
-                    )
-                    if gap < 0.0:
-                        gap = 0.0
-                    if gap > DEFAULT_GAP_SNAP_TOLERANCE_PT:
+                if graph is None:
+                    right_path = tuple(right.physical_identity.path_fingerprint or ())
+                    if not _path_is_collinear_with_source_line(right_path, source_line):
                         continue
+                    right_interval = _projected_path_interval(right_path, source_line)
+                    if right_interval is None:
+                        continue
+                    if not _interval_sets_overlap_or_snap((left_interval,), (right_interval,)):
+                        continue
+                else:
+                    right_intervals = graph_intervals.get(right.wall_candidate_id, ())
+                    if not right_intervals:
+                        continue
+                    if not _interval_sets_overlap_or_snap(
+                        graph_intervals[left.wall_candidate_id],
+                        right_intervals,
+                    ):
+                        continue
+
                 pair = tuple(
                     sorted((left.wall_candidate_id, right.wall_candidate_id))
                 )
@@ -1657,6 +1758,7 @@ def _assemble_scope_result(
     shared_face_overrides = _producer_shared_source_face_relation_overrides(
         segments=graph_segments,
         records=tuple(records),
+        graph=graph,
     )
     equivalence = _apply_trusted_relation_overrides(
         tuple(ordered_identities),
