@@ -7,6 +7,7 @@ enter production wall authority.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import fitz
 import pytest
@@ -37,6 +38,50 @@ from pb_wall_room_topology_stage_a import is_structural_candidate_segment
 def _save(doc: fitz.Document, path: Path) -> None:
     doc.save(path)
     doc.close()
+
+
+def test_authoritative_derived_requires_whole_sibling_non_overlap_while_resolved_survives(
+    monkeypatch,
+) -> None:
+    import pb_physical_wall_candidate_authority as module
+
+    resolved = SimpleNamespace(
+        view_id="resolved",
+        bounding_box=(0.0, 0.0, 100.0, 100.0),
+        status=ViewportSegmentationStatus.RESOLVED.value,
+    )
+    derived = SimpleNamespace(
+        view_id="derived",
+        bounding_box=(50.0, 0.0, 150.0, 100.0),
+        status=ViewportSegmentationStatus.DERIVED.value,
+    )
+
+    monkeypatch.setattr(
+        module,
+        "_all_viewports",
+        lambda page, *, page_number: [resolved, derived],
+    )
+    monkeypatch.setattr(
+        module,
+        "is_segment_page_viewports_product",
+        lambda viewport: True,
+    )
+    monkeypatch.setattr(
+        module,
+        "is_authoritative_derived_viewport",
+        lambda viewport: viewport is derived,
+    )
+    monkeypatch.setattr(
+        module,
+        "validate_non_overlapping_viewports",
+        lambda rows: False,
+    )
+
+    authenticated = module._authenticated_viewports(object(), page_number=1)
+    assert authenticated is not None
+    rows, eligible = authenticated
+    assert rows == (resolved, derived)
+    assert eligible == (resolved,)
 
 
 def _draw_plan(
