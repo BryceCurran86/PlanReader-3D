@@ -10,7 +10,7 @@ _SOURCE = "eNrtPNt248aR7/yKPvBJRIwhSBonG0e2xocjUTO0NZKOxMnEK+vggESTxAgEaFwk0Yq+I
 
 exec(compile(zlib.decompress(base64.b64decode(_SOURCE)).decode("utf-8"), __file__, "exec"))
 
-_base_apply = apply
+_base_apply = globals().get("apply")
 
 
 def apply(app) -> None:
@@ -18,4 +18,5 @@ def apply(app) -> None:
     if getattr(app, "_pb_takeoff_v11_applied", False):
         return
     app._pb_takeoff_v11_applied = True
-    _base_apply(app)
+    if callable(_base_apply):
+        _base_apply(app)
