@@ -35,6 +35,7 @@ from pb_viewport_segmentation import (
     is_authoritative_derived_viewport,
     is_segment_page_viewports_product,
     segment_page_viewports,
+    validate_non_overlapping_viewports,
 )
 from pb_wall_role_authority import WallRoleClassification, WallRoleProducer, WallRoleSelector
 
@@ -282,13 +283,22 @@ def _endpoint_key(point: Sequence[float]) -> tuple[float, float]:
 
 
 def _authoritative_viewports(page: fitz.Page, page_number: int):
-    out = []
-    for viewport in segment_page_viewports(page, page_number=page_number):
-        if not is_segment_page_viewports_product(viewport):
-            continue
-        if viewport.status == ViewportSegmentationStatus.RESOLVED.value or is_authoritative_derived_viewport(viewport):
-            out.append(viewport)
-    return tuple(out)
+    rows = tuple(segment_page_viewports(page, page_number=page_number))
+    if any(not is_segment_page_viewports_product(viewport) for viewport in rows):
+        return ()
+    sibling_non_overlapping = validate_non_overlapping_viewports(rows)
+    return tuple(
+        viewport
+        for viewport in rows
+        if viewport.bounding_box is not None
+        and (
+            viewport.status == ViewportSegmentationStatus.RESOLVED.value
+            or (
+                sibling_non_overlapping
+                and is_authoritative_derived_viewport(viewport)
+            )
+        )
+    )
 
 
 def _trusted_finish_blocks(source: SourceVisibilityProducer, published, page_id: str):
