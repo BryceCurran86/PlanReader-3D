@@ -1039,13 +1039,19 @@ def _producer_double_line_relation_overrides(
     Raster segments are deliberately excluded: this proof is about immutable
     native vector face provenance, not inferred raster proximity.
     """
+    candidate_raw_ids = {
+        str(raw_id)
+        for record in records
+        for raw_id in record.physical_identity.source_primitive_ids
+        if str(raw_id)
+    }
     eligible_segments: list[dict] = []
     for source in segments:
         segment = dict(source)
         if segment.get("source_kind") == RASTER_PDF_VISIBLE_SEGMENT:
             continue
         raw_id = str(segment.get("id") or "").strip()
-        if not raw_id:
+        if not raw_id or raw_id not in candidate_raw_ids:
             continue
         structural, _reasons = is_structural_candidate_segment(segment)
         if not structural:
