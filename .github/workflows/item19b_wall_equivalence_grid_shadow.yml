@@ -26,6 +26,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-ci-v1228.txt
 
+      - name: Run targeted wall-authority tests
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_physical_wall_candidate_face_pair_equivalence_v1.py \
+            tests/test_wall_room_topology_stage_a.py \
+            tests/test_physical_wall_candidate_viewport_scope_v1.py
+
       - name: Download pinned KSTVET source
         run: |
           set -euo pipefail
