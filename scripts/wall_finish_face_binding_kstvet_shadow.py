@@ -32,6 +32,7 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_source_wall_topology_authority import build_source_wall_topology_authority
 from pb_viewport_segmentation import assign_bbox_to_viewport
+from pb_vector_geometry_v130 import extract_native_page
 from pb_wall_role_authority import WallRoleProducer, WallRoleSelector
 
 EXPECTED_SHA256 = "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
@@ -269,6 +270,12 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
             "native_visible_line_count": len(lines),
             "callout_preflight": [],
         }
+        native_page = extract_native_page(page)
+        native_segments_by_id = {
+            str(segment.get("id") or ""): dict(segment)
+            for segment in (native_page.get("segments") or ())
+            if str(segment.get("id") or "")
+        }
         wall_authority = PhysicalWallCandidateProducer.from_authenticated_viewports(
             source,
             page_ids=(PAGE_ID,),
@@ -475,6 +482,40 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
                         "terminator_id": term.primitive_id,
                         "terminator_bbox": list(term.bbox),
                         "raw_source_primitive_hits": raw_hits,
+                        "raw_source_primitive_provenance": [
+                            {
+                                "raw_id": raw_id,
+                                "path_index": native_segments_by_id.get(raw_id, {}).get("path_index"),
+                                "item_index": native_segments_by_id.get(raw_id, {}).get("item_index"),
+                                "kind": native_segments_by_id.get(raw_id, {}).get("kind"),
+                                "layer": native_segments_by_id.get(raw_id, {}).get("layer"),
+                                "width": native_segments_by_id.get(raw_id, {}).get("width"),
+                                "dashes": native_segments_by_id.get(raw_id, {}).get("dashes"),
+                                "geometry": [
+                                    native_segments_by_id.get(raw_id, {}).get("x1"),
+                                    native_segments_by_id.get(raw_id, {}).get("y1"),
+                                    native_segments_by_id.get(raw_id, {}).get("x2"),
+                                    native_segments_by_id.get(raw_id, {}).get("y2"),
+                                ],
+                            }
+                            for raw_id in raw_hits
+                        ],
+                        "wall_candidate_sources": [
+                            {
+                                "wall_candidate_id": record.wall_candidate_id,
+                                "source_primitive_ids": list(
+                                    record.physical_identity.source_primitive_ids
+                                ),
+                                "source_paths": sorted(
+                                    {
+                                        native_segments_by_id.get(raw_id, {}).get("path_index")
+                                        for raw_id in record.physical_identity.source_primitive_ids
+                                        if native_segments_by_id.get(raw_id, {}).get("path_index") is not None
+                                    }
+                                ),
+                            }
+                            for record in sorted(matching, key=lambda item: item.wall_candidate_id)
+                        ],
                         "wall_candidate_ids": sorted(
                             record.wall_candidate_id for record in matching
                         ),
