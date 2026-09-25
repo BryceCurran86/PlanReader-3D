@@ -1330,11 +1330,14 @@ def _apply_trusted_relation_overrides(
     member_ids = [identity.wall_candidate_id for identity in usable]
     same_links: list[tuple[str, str]] = []
     ambiguous_links: list[tuple[str, str]] = []
+    distinct_links: list[tuple[str, str]] = []
     for pair, classification in pair_map.items():
         if classification == PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value:
             same_links.append(pair)
         elif classification == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value:
             ambiguous_links.append(pair)
+        elif classification == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value:
+            distinct_links.append(pair)
 
     # A proven SAME subgroup remains positive identity evidence even when one
     # of its members has unresolved relations to candidates outside that group.
@@ -1360,6 +1363,7 @@ def _apply_trusted_relation_overrides(
     components = _union_find_groups(related_links, member_ids) if member_ids else []
     ambiguous_edges = {frozenset(pair) for pair in ambiguous_links}
     same_edges = {frozenset(pair) for pair in same_links}
+    distinct_edges = {frozenset(pair) for pair in distinct_links}
     blockers: dict[str, list[str]] = {}
     ambiguous_walls: set[str] = set()
     same_groups: list[tuple[str, ...]] = []
@@ -1376,6 +1380,18 @@ def _apply_trusted_relation_overrides(
             for index, left in enumerate(component)
             for right in component[index + 1 :]
         )
+        has_distinct_conflict = has_same and any(
+            frozenset((left, right)) in distinct_edges
+            for index, left in enumerate(component)
+            for right in component[index + 1 :]
+        )
+        if has_distinct_conflict:
+            ambiguous_walls.update(component)
+            for wall_id in component:
+                blockers.setdefault(wall_id, []).append(
+                    "conflicting_physical_wall_equivalence"
+                )
+            continue
         if has_ambiguous:
             ambiguous_walls.update(component)
             for wall_id in component:
