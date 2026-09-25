@@ -1274,6 +1274,126 @@ def _producer_opening_relation_overrides(
     }
 
 
+
+def _path_is_collinear_with_source_line(
+    path: Sequence[Point],
+    source_line: Line,
+) -> bool:
+    """Require every reconstructed path point to lie on one exact source line."""
+    if len(path) < 2:
+        return False
+    direction = _canonical_direction(source_line)
+    origin = (source_line[0], source_line[1])
+    for point in path:
+        offset = (float(point[0]) - origin[0], float(point[1]) - origin[1])
+        if abs(_cross(direction, offset)) > _COORD_TOL:
+            return False
+    return True
+
+
+def _projected_path_interval(
+    path: Sequence[Point],
+    source_line: Line,
+) -> Optional[tuple[float, float]]:
+    if len(path) < 2:
+        return None
+    direction = _canonical_direction(source_line)
+    values = [
+        _projection((float(point[0]), float(point[1])), direction)
+        for point in path
+    ]
+    lower, upper = min(values), max(values)
+    if upper - lower <= _COORD_TOL:
+        return None
+    return (lower, upper)
+
+
+def _producer_shared_source_face_relation_overrides(
+    *,
+    segments: Sequence[Mapping[str, object]],
+    records: Sequence[PhysicalWallCandidateRecord],
+) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
+    """Prove duplicate W4 fragments descended from one exact native wall face.
+
+    Comparison is narrowed by immutable source primitive id rather than spatial
+    proximity. SAME requires a shared native Structural/Bearing primitive, both
+    reconstructed paths lying collinearly on that exact source line, and real
+    longitudinal overlap. Nearby independent walls, perpendicular junction
+    branches, raster-only geometry and non-overlapping fragments abstain.
+    """
+    segment_by_id = {
+        str(segment.get("id") or ""): segment
+        for segment in segments
+        if str(segment.get("id") or "")
+    }
+    records_by_raw_id: dict[str, list[PhysicalWallCandidateRecord]] = {}
+    for record in records:
+        identity = record.physical_identity
+        if not identity.usable or identity.path_fingerprint is None:
+            continue
+        for raw_id in identity.source_primitive_ids:
+            records_by_raw_id.setdefault(str(raw_id), []).append(record)
+
+    relation_sets: dict[
+        tuple[str, str], set[PhysicalEquivalenceClass]
+    ] = {}
+    for raw_id, owners in sorted(records_by_raw_id.items()):
+        if len(owners) < 2:
+            continue
+        source = segment_by_id.get(raw_id)
+        if source is None:
+            continue
+        if source.get("source_kind") == RASTER_PDF_VISIBLE_SEGMENT:
+            continue
+        layer = str(source.get("layer") or "").strip().lower()
+        layer_tokens = set(re.findall(r"[a-z0-9]+", layer))
+        if not {"structural", "bearing"} <= layer_tokens:
+            continue
+        source_line = _line(
+            (
+                source.get("x1"),
+                source.get("y1"),
+                source.get("x2"),
+                source.get("y2"),
+            )
+        )
+        if source_line is None:
+            continue
+
+        ordered = sorted(owners, key=lambda item: item.wall_candidate_id)
+        for index, left in enumerate(ordered):
+            left_path = tuple(left.physical_identity.path_fingerprint or ())
+            if not _path_is_collinear_with_source_line(left_path, source_line):
+                continue
+            left_interval = _projected_path_interval(left_path, source_line)
+            if left_interval is None:
+                continue
+            for right in ordered[index + 1 :]:
+                right_path = tuple(right.physical_identity.path_fingerprint or ())
+                if not _path_is_collinear_with_source_line(right_path, source_line):
+                    continue
+                right_interval = _projected_path_interval(right_path, source_line)
+                if right_interval is None:
+                    continue
+                overlap = min(left_interval[1], right_interval[1]) - max(
+                    left_interval[0], right_interval[0]
+                )
+                if overlap <= _COORD_TOL:
+                    continue
+                pair = tuple(
+                    sorted((left.wall_candidate_id, right.wall_candidate_id))
+                )
+                relation_sets.setdefault(pair, set()).add(
+                    PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+                )
+
+    return {
+        pair: next(iter(classifications))
+        for pair, classifications in relation_sets.items()
+        if len(classifications) == 1
+    }
+
+
 def _union_find_groups(
     pairs: Sequence[tuple[str, str]], members: Sequence[str]
 ) -> list[list[str]]:
@@ -1518,6 +1638,15 @@ def _assemble_scope_result(
         baseline_equivalence,
         strip_overrides,
         allow_proven_same_over_distinct=True,
+    )
+    shared_face_overrides = _producer_shared_source_face_relation_overrides(
+        segments=graph_segments,
+        records=tuple(records),
+    )
+    equivalence = _apply_trusted_relation_overrides(
+        tuple(ordered_identities),
+        equivalence,
+        shared_face_overrides,
     )
     trusted_overrides = _producer_opening_relation_overrides(
         source_producer=source_producer,
