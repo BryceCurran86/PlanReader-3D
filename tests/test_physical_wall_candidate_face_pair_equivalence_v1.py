@@ -5,10 +5,15 @@ from types import SimpleNamespace
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateRecord,
+    _apply_trusted_relation_overrides,
     _merge_relation_overrides,
     _producer_closed_bearing_wall_strip_relation_overrides,
 )
-from pb_physical_wall_identity import PhysicalEquivalenceClass, PhysicalWallIdentity
+from pb_physical_wall_identity import (
+    PhysicalEquivalenceClass,
+    PhysicalWallEquivalenceResolution,
+    PhysicalWallIdentity,
+)
 from pb_source_visibility_authority import RASTER_PDF_VISIBLE_SEGMENT
 
 
@@ -165,3 +170,44 @@ def test_independent_positive_proofs_must_agree_before_merge() -> None:
     )
     assert pair not in merged
     assert merged[("wall-c", "wall-d")] is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+
+
+def test_authenticated_wall_assembly_can_supersede_fragment_distinctness_only_when_marked_authoritative() -> None:
+    identities = (
+        _record("wall-a", "face-a").physical_identity,
+        _record("wall-b", "face-b").physical_identity,
+    )
+    baseline = PhysicalWallEquivalenceResolution(
+        scope_viewport_id="viewport",
+        representative_wall_ids=("wall-a", "wall-b"),
+        abstained_wall_ids=(),
+        equivalence_groups=(),
+        ambiguous_wall_ids=(),
+        same_wall_ids=(),
+        pair_classifications=(
+            ("wall-a", "wall-b", PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value),
+        ),
+        blocking_reasons_by_wall_id={},
+    )
+    override = {
+        ("wall-a", "wall-b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
+    }
+
+    ordinary = _apply_trusted_relation_overrides(
+        identities,
+        baseline,
+        override,
+    )
+    assert ordinary.equivalence_groups == ()
+    assert ordinary.pair_classifications == baseline.pair_classifications
+
+    source_assembly = _apply_trusted_relation_overrides(
+        identities,
+        baseline,
+        override,
+        authoritative_same_pairs=(("wall-a", "wall-b"),),
+    )
+    assert source_assembly.equivalence_groups == (("wall-a", "wall-b"),)
+    assert source_assembly.pair_classifications == (
+        ("wall-a", "wall-b", PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value),
+    )
