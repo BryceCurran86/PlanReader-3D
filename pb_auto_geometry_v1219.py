@@ -619,24 +619,68 @@ def _cross_calibrate_elevations(app: Any, pages: Sequence[Dict[str, Any]], footp
 
 def _takeoff_row(*, workspace_id: int, section: str, element: str, location: str, substrate: str,
                  quantity: float, status: str, source_page: str, source_reference: str,
-                 confidence: str, notes: str, row_role: str = "") -> Tuple[Any, ...]:
+                 confidence: str, notes: str, row_role: str = "", unit: str = "m²") -> Tuple[Any, ...]:
     stamp = ""  # replaced by caller
     return (
-        workspace_id, section, element, location, substrate, "To be confirmed", round(max(0.0, quantity), 2), "m²",
+        workspace_id, section, element, location, substrate, "To be confirmed", round(max(0.0, quantity), 2), unit,
         status, source_page, source_reference, "INCLUSION" if row_role == "floor_area" else "PROVISIONAL",
         0, 0, 0, 0, confidence, notes, row_role, stamp, stamp,
     )
 
 
-_TAKEOFF_INSERT = """INSERT INTO takeoff_rows(
-    workspace_id,section,element,location,substrate,finish_system,quantity,unit,
-    quantity_status,source_page,source_reference,inclusion_status,coats,
-    coverage_m2_per_litre,productivity_m2_per_hour,rate_per_unit,confidence,notes,
-    row_role,created_at,updated_at
-) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
+# Canonical auto-geometry take-off row: one value per column below, in order.
+TAKEOFF_ROW_FIELDS = (
+    "workspace_id", "section", "element", "location", "substrate", "finish_system", "quantity", "unit",
+    "quantity_status", "source_page", "source_reference", "inclusion_status", "coats",
+    "coverage_m2_per_litre", "productivity_m2_per_hour", "rate_per_unit", "confidence", "notes",
+    "row_role", "created_at", "updated_at",
+)
+TAKEOFF_ROW_FIELD_COUNT = len(TAKEOFF_ROW_FIELDS)
+_SOURCE_REFERENCE_INDEX = TAKEOFF_ROW_FIELDS.index("source_reference")
+
+_TAKEOFF_INSERT = (
+    f"INSERT INTO takeoff_rows({','.join(TAKEOFF_ROW_FIELDS)}) "
+    f"VALUES({','.join('?' * TAKEOFF_ROW_FIELD_COUNT)})"
+)
+
+
+class TakeoffRowContractError(ValueError):
+    """An auto-geometry take-off row does not match the canonical row contract."""
+
+
+def _row_source_hint(row: Any) -> str:
+    """Best-effort provenance for an invalid row, for the error message only."""
+    if not isinstance(row, (tuple, list)):
+        return type(row).__name__
+    refs = [value for value in row if isinstance(value, str) and value.startswith("PB ")]
+    return refs[0] if refs else type(row).__name__
+
+
+def _validate_auto_rows(rows: Sequence[Any]) -> None:
+    """Reject rows that would not bind to _TAKEOFF_INSERT or leave the auto batch.
+
+    Every row must carry exactly TAKEOFF_ROW_FIELD_COUNT values and a
+    source_reference owned by SOURCE_PREFIX, because _replace_auto_rows only
+    deletes rows with that prefix: anything else would be duplicated on re-run.
+    """
+    for index, row in enumerate(rows):
+        if not isinstance(row, (tuple, list)) or len(row) != TAKEOFF_ROW_FIELD_COUNT:
+            length = len(row) if isinstance(row, (tuple, list)) else "n/a"
+            raise TakeoffRowContractError(
+                f"auto-geometry take-off row {index} has {length} values; expected "
+                f"{TAKEOFF_ROW_FIELD_COUNT} ({', '.join(TAKEOFF_ROW_FIELDS)}). "
+                f"Row source: {_row_source_hint(row)}. Build rows with _takeoff_row()."
+            )
+        reference = row[_SOURCE_REFERENCE_INDEX]
+        if not isinstance(reference, str) or not reference.startswith(SOURCE_PREFIX):
+            raise TakeoffRowContractError(
+                f"auto-geometry take-off row {index} source_reference {reference!r} does not "
+                f"start with {SOURCE_PREFIX!r}; it would not be replaced on re-run."
+            )
 
 
 def _replace_auto_rows(app: Any, workspace_id: int, rows: Sequence[Tuple[Any, ...]]) -> None:
+    _validate_auto_rows(rows)
     conn = app.local_connect()
     try:
         conn.execute("DELETE FROM takeoff_rows WHERE workspace_id=? AND source_reference LIKE ?", (workspace_id, SOURCE_PREFIX + "%"))
