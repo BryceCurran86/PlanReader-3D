@@ -39,6 +39,44 @@ EXPECTED_SHA256 = "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa
 PAGE_ID = "54"
 
 
+def _observation_details(
+    source: SourceVisibilityProducer,
+    published,
+    observation_ids,
+) -> list[dict]:
+    authority = source.authority()
+    rows = []
+    for observation_id in sorted(set(str(value) for value in observation_ids if str(value))):
+        result = authority.resolve_visible(
+            ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        observation = result.observation
+        rows.append(
+            {
+                "observation_id": observation_id,
+                "status": getattr(result.status, "value", str(result.status)),
+                "observation_kind": (
+                    None if observation is None else observation.observation_kind
+                ),
+                "source_primitive_ref": (
+                    None if observation is None else observation.source_primitive_ref
+                ),
+                "geometry": (
+                    None
+                    if observation is None
+                    else [float(value) for value in observation.geometry]
+                ),
+            }
+        )
+    return rows
+
+
 def run(pdf_path: Path) -> tuple[list[dict], dict]:
     faulthandler.dump_traceback_later(60, repeat=True)
     print("ITEM19B_STAGE read_source", flush=True)
@@ -316,7 +354,17 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
                     "reason_codes": list(wall_scope.reason_codes),
                     "owned_source_observation_count": len(wall_scope.source_observation_ids),
                     "boundary_source_observation_count": len(wall_scope.scope_boundary_observation_ids),
+                    "boundary_source_observations": _observation_details(
+                        source,
+                        published,
+                        wall_scope.scope_boundary_observation_ids,
+                    ),
                     "ambiguous_source_observation_count": len(wall_scope.ambiguous_source_observation_ids),
+                    "ambiguous_source_observations": _observation_details(
+                        source,
+                        published,
+                        wall_scope.ambiguous_source_observation_ids,
+                    ),
                     "topology_record_count": topology_count,
                     "resolved_role_counts": role_counts,
                     "abstained_role_reason_counts": role_reasons,
