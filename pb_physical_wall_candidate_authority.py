@@ -295,6 +295,38 @@ def _segment_lies_on_bbox_edge(segment: Mapping[str, object], bbox: Sequence[flo
     )
 
 
+def _segment_is_authenticated_vector_frame_edge(
+    segment: Mapping[str, object],
+    *,
+    viewport,
+) -> bool:
+    """Recognize only a whole edge of F.07's authenticated vector frame.
+
+    This is not a semantic wall exclusion. It is the exact producer-owned
+    boundary primitive already used to establish the RESOLVED viewport. A
+    partial line merely lying on that boundary remains ambiguous.
+    """
+    if (
+        viewport.bounding_box is None
+        or viewport.status != ViewportSegmentationStatus.RESOLVED.value
+        or str(viewport.boundary_source) != "vector_frame"
+    ):
+        return False
+    x1, y1, x2, y2 = _segment_geometry(segment)
+    xmin, ymin, xmax, ymax = (float(value) for value in viewport.bounding_box)
+    endpoints = {
+        (round(x1, 6), round(y1, 6)),
+        (round(x2, 6), round(y2, 6)),
+    }
+    frame_edges = (
+        {(round(xmin, 6), round(ymin, 6)), (round(xmax, 6), round(ymin, 6))},
+        {(round(xmax, 6), round(ymin, 6)), (round(xmax, 6), round(ymax, 6))},
+        {(round(xmax, 6), round(ymax, 6)), (round(xmin, 6), round(ymax, 6))},
+        {(round(xmin, 6), round(ymax, 6)), (round(xmin, 6), round(ymin, 6))},
+    )
+    return any(endpoints == edge for edge in frame_edges)
+
+
 def _blocked(selector: PhysicalWallCandidateSelector, reason: str) -> PhysicalWallCandidateScopeResult:
     return PhysicalWallCandidateScopeResult(
         status=EvidenceResolutionStatus.ABSTAINED,
@@ -1315,6 +1347,14 @@ def _build_authenticated_viewport_scope_results(
                 owned.append(scoped)
                 if observation_id:
                     owned_observation_ids.append(observation_id)
+                continue
+
+            if target_owned and _segment_is_authenticated_vector_frame_edge(
+                segment, viewport=viewport
+            ):
+                # Exact F.07 vector-frame boundary evidence is not drawing
+                # content. It is excluded by ownership provenance, not by
+                # proximity to text or a project-specific semantic rule.
                 continue
 
             if target_owned and (
