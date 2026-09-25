@@ -48,3 +48,22 @@ jobs:
       - name: Run focused page 54 Item19B callout wall shadow
         run: |
           PYTHONPATH=. python scripts/item19b_kstvet_callout_wall_fast_shadow.py /tmp/kstvet.pdf
+
+      - name: Download canonical five-project sources
+        run: |
+          set -euo pipefail
+          mkdir -p benchmarks/sources
+          curl -fL --retry 3 --retry-delay 2 'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' -o benchmarks/sources/1727358888238-bq-nd-drawing.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/1727358888238-bq-nd-drawing.pdf' | sha256sum -c -
+          curl -fL --retry 3 --retry-delay 2 'https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf' -o benchmarks/sources/1785347143869-bqs-drawings.pdf
+          echo '84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  benchmarks/sources/1785347143869-bqs-drawings.pdf' | sha256sum -c -
+          curl -fL --retry 3 --retry-delay 2 'https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf' -o benchmarks/sources/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf
+          echo 'c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f  benchmarks/sources/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf' | sha256sum -c -
+          curl -fL --retry 3 --retry-delay 2 'https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf' -o benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+          echo 'fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf' | sha256sum -c -
+          curl -fL --retry 3 --retry-delay 2 'https://umma.ac.ke/wp-content/uploads/2026/06/Builders-work.pdf' -o benchmarks/sources/umma-university-hostels-builders-work.pdf
+          echo 'f30711f69944e66ef993341180e35b49ccfcb36d6f402743284823ab588183af  benchmarks/sources/umma-university-hostels-builders-work.pdf' | sha256sum -c -
+
+      - name: Run canonical five-project generalisation gate
+        run: |
+          PYTHONPATH=. python pb_benchmark_accuracy_engine.py --all --require-local-sources
