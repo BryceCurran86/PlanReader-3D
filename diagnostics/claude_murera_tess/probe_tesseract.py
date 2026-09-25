@@ -25,9 +25,9 @@ PAGE_INDEX = int(sys.argv[2])
 OUT = sys.argv[3]
 PT_PER_PX = 72.0 / 300.0
 
-THRESHOLDS = (None, 200, 235, 245)
-REPAIRS = ("none", "close", "blur")
-SCALES = (2, 3)
+THRESHOLDS = (None, 235, 245)
+REPAIRS = ("none", "blur")
+SCALES = (3,)
 WHITELIST = "0123456789,."
 
 
@@ -88,10 +88,12 @@ def main() -> None:
     with ProcessPoolExecutor(max_workers=os.cpu_count() or 2) as pool:
         for chunk in pool.map(ocr_region, jobs, chunksize=4):
             results.extend(chunk)
+            texts = sorted({(r["rot"], r["text"]) for r in chunk if r["text"]})
+            print("REGION", chunk[0]["orient"], chunk[0]["bbox_pt"], texts, flush=True)
     print(f"[{time.time()-t0:.0f}s] region readings: {len(results)}", flush=True)
 
     sparse = []
-    for threshold, repair, rot in product((None, 235), ("none", "close"), (None, cv2.ROTATE_90_CLOCKWISE)):
+    for threshold, repair, rot in product((235,), ("none",), (None, cv2.ROTATE_90_CLOCKWISE)):
         base = gray if rot is None else cv2.rotate(gray, rot)
         img = prepare(base, threshold, repair, 1)
         data = pytesseract.image_to_data(
