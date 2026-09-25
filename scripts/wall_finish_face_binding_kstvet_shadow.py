@@ -412,6 +412,7 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
         # be inspected even while SourceExecutionCalloutAuthority remains owned
         # by another agent. Raw text never enters production binding authority.
         preflight["raw_callout_wall_hits"] = []
+        seen_raw_callout_wall_hits = set()
         for raw in target_sequence_callouts:
             annotation_bbox = tuple(float(value) for value in raw["bbox"])
             text_height = float(raw["text_height"])
@@ -474,6 +475,14 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
                         for record in matching
                     }
                 )
+                raw_hit_signature = (
+                    raw["text"],
+                    term.primitive_id,
+                    tuple(normalized_ids),
+                )
+                if raw_hit_signature in seen_raw_callout_wall_hits:
+                    continue
+                seen_raw_callout_wall_hits.add(raw_hit_signature)
                 preflight["raw_callout_wall_hits"].append(
                     {
                         "text": raw["text"],
@@ -590,7 +599,30 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
                     }
                 )
 
-        print("ITEM19B_PREFLIGHT " + json.dumps(preflight, sort_keys=True), flush=True)
+        compact_scopes = [
+            {
+                "viewport_id": row.get("viewport_id"),
+                "label": row.get("label"),
+                "view_type": row.get("view_type"),
+                "decision_scope_id": row.get("decision_scope_id"),
+                "wall_candidate_count": row.get("wall_candidate_count"),
+                "scope_complete": row.get("scope_complete"),
+                "reason_codes": row.get("reason_codes"),
+                "resolved_role_counts": row.get("resolved_role_counts"),
+            }
+            for row in preflight.get("viewport_wall_scopes", ())
+        ]
+        print(
+            "ITEM19B_CALLOUT_WALL_SUMMARY "
+            + json.dumps(
+                {
+                    "raw_callout_wall_hits": preflight.get("raw_callout_wall_hits", ()),
+                    "viewport_wall_scopes": compact_scopes,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
     finally:
         pdf.close()
     if not preflight.get("trusted_finish_blocks"):
