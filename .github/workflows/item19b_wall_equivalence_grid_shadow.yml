@@ -44,3 +44,7 @@ jobs:
       - name: Run fast page 54 wall-authority shadow
         run: |
           PYTHONPATH=. python scripts/item19b_kstvet_wall_authority_fast_shadow.py /tmp/kstvet.pdf
+
+      - name: Run full page 54 Item19B callout shadow
+        run: |
+          PYTHONPATH=. python scripts/wall_finish_face_binding_kstvet_shadow.py /tmp/kstvet.pdf
