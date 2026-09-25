@@ -37,6 +37,7 @@ consume.
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, Dict, List, Sequence, Tuple
 
 from pb_accuracy_v13_engines_v145 import split_segments_at_intersections
@@ -85,6 +86,19 @@ _DIMENSION_LAYER_KEYWORDS = ("dim", "dimension", "annotation", "note")
 # to later corroboration stages (see docs/planreader_wall_room_topology_spec.md
 # Section 12/W9-11) -- not silently claimed as solved here.
 _TEXT_FRAME_LAYER_KEYWORDS = ("text", "frame", "border", "leader", "callout", "label")
+# Positive source-metadata exclusion for structural grid axes.  These tokens
+# must be present in the PDF's own layer name; geometry, length, orientation,
+# or proximity alone never turns a solid line into a grid axis.
+_GRID_LAYER_TOKENS = {
+    "grid",
+    "grids",
+    "gridline",
+    "gridlines",
+    "axis",
+    "axes",
+    "datum",
+    "datums",
+}
 
 
 def _angle_delta(a_deg: float, b_deg: float) -> float:
@@ -118,6 +132,13 @@ def is_structural_candidate_segment(segment: Dict[str, Any]) -> Tuple[bool, List
             reason_codes.append("dimension_layer_excluded")
         if any(keyword in layer for keyword in _TEXT_FRAME_LAYER_KEYWORDS):
             reason_codes.append("text_frame_layer_excluded")
+        layer_tokens = {
+            token
+            for token in re.split(r"[^a-z0-9]+", layer)
+            if token
+        }
+        if layer_tokens & _GRID_LAYER_TOKENS:
+            reason_codes.append("structural_grid_layer_excluded")
 
     return (len(reason_codes) == 0, reason_codes)
 
