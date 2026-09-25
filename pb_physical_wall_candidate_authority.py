@@ -1316,7 +1316,7 @@ def _record_source_face_intervals_from_graph(
     record: PhysicalWallCandidateRecord,
     raw_id: str,
     source_line: Line,
-    graph: Mapping[str, object],
+    edges_by_id: Mapping[str, Mapping[str, object]],
 ) -> tuple[tuple[float, float], ...]:
     """Project only graph edges explicitly descended from one native primitive.
 
@@ -1326,11 +1326,6 @@ def _record_source_face_intervals_from_graph(
     fragments themselves, not require every point of the assembled centerline
     to remain collinear with that source primitive.
     """
-    edges_by_id = {
-        str(edge.get("id")): edge
-        for edge in tuple(graph.get("edges") or ())
-        if isinstance(edge, Mapping) and edge.get("id") not in (None, "")
-    }
     direction = _canonical_direction(source_line)
     intervals: list[tuple[float, float]] = []
     for edge_id in record.physical_identity.edge_ids:
@@ -1454,12 +1449,17 @@ def _producer_shared_source_face_relation_overrides(
         ordered = sorted(owners, key=lambda item: item.wall_candidate_id)
         graph_intervals = {}
         if graph is not None:
+            edges_by_id = {
+                str(edge.get("id")): edge
+                for edge in tuple(graph.get("edges") or ())
+                if isinstance(edge, Mapping) and edge.get("id") not in (None, "")
+            }
             graph_intervals = {
                 record.wall_candidate_id: _record_source_face_intervals_from_graph(
                     record=record,
                     raw_id=raw_id,
                     source_line=source_line,
-                    graph=graph,
+                    edges_by_id=edges_by_id,
                 )
                 for record in ordered
             }
