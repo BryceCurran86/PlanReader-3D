@@ -1423,6 +1423,14 @@ def _producer_shared_source_face_relation_overrides(
     relation_sets: dict[
         tuple[str, str], set[PhysicalEquivalenceClass]
     ] = {}
+    graph_edges_by_id: dict[str, Mapping[str, object]] = {}
+    if graph is not None:
+        graph_edges_by_id = {
+            str(edge.get("id")): edge
+            for edge in tuple(graph.get("edges") or ())
+            if isinstance(edge, Mapping) and edge.get("id") not in (None, "")
+        }
+
     for raw_id, owners in sorted(records_by_raw_id.items()):
         if len(owners) < 2:
             continue
@@ -1449,17 +1457,12 @@ def _producer_shared_source_face_relation_overrides(
         ordered = sorted(owners, key=lambda item: item.wall_candidate_id)
         graph_intervals = {}
         if graph is not None:
-            edges_by_id = {
-                str(edge.get("id")): edge
-                for edge in tuple(graph.get("edges") or ())
-                if isinstance(edge, Mapping) and edge.get("id") not in (None, "")
-            }
             graph_intervals = {
                 record.wall_candidate_id: _record_source_face_intervals_from_graph(
                     record=record,
                     raw_id=raw_id,
                     source_line=source_line,
-                    edges_by_id=edges_by_id,
+                    edges_by_id=graph_edges_by_id,
                 )
                 for record in ordered
             }
