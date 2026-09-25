@@ -37,6 +37,7 @@ consume.
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, Dict, List, Sequence, Tuple
 
 from pb_accuracy_v13_engines_v145 import split_segments_at_intersections
@@ -85,6 +86,10 @@ _DIMENSION_LAYER_KEYWORDS = ("dim", "dimension", "annotation", "note")
 # to later corroboration stages (see docs/planreader_wall_room_topology_spec.md
 # Section 12/W9-11) -- not silently claimed as solved here.
 _TEXT_FRAME_LAYER_KEYWORDS = ("text", "frame", "border", "leader", "callout", "label")
+# A bare "GRID" token is deliberately not enough to exclude a solid line.
+# Positive grid exclusion requires producer-captured source layer metadata that
+# explicitly names both the structural domain and grid role.
+_STRUCTURAL_GRID_LAYER_ROLES = {"grid", "grids", "gridline", "gridlines"}
 
 
 def _angle_delta(a_deg: float, b_deg: float) -> float:
@@ -118,6 +123,16 @@ def is_structural_candidate_segment(segment: Dict[str, Any]) -> Tuple[bool, List
             reason_codes.append("dimension_layer_excluded")
         if any(keyword in layer for keyword in _TEXT_FRAME_LAYER_KEYWORDS):
             reason_codes.append("text_frame_layer_excluded")
+        layer_tokens = {
+            token
+            for token in re.findall(r"[a-z0-9]+", layer)
+            if token
+        }
+        if (
+            "structural" in layer_tokens
+            and layer_tokens & _STRUCTURAL_GRID_LAYER_ROLES
+        ):
+            reason_codes.append("structural_grid_source_layer_excluded")
 
     return (len(reason_codes) == 0, reason_codes)
 
