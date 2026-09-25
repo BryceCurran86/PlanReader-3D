@@ -31,6 +31,7 @@ from pb_wall_finish_face_binding_authority import (
     _partial_scope,
     _semantic_face,
     _target_from_terminator,
+    _viewport_owned_lines,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_wall_role_authority import WallRoleClassification
@@ -80,6 +81,45 @@ def _line(obs: str, raw: str, x1: float, y1: float, x2: float, y2: float) -> _Li
 def _term(x: float, y: float, size: float = 2.0) -> _Terminator:
     box = (x - size, y - size, x + size, y + size)
     return _Terminator("term-1", box, (x, y))
+
+
+
+
+def test_viewport_owned_leader_lines_are_independent_of_wall_observations() -> None:
+    plan = SimpleNamespace(
+        view_id="plan",
+        bounding_box=(0.0, 0.0, 100.0, 100.0),
+    )
+    elevation = SimpleNamespace(
+        view_id="elevation",
+        bounding_box=(120.0, 0.0, 220.0, 100.0),
+    )
+    leader = _line("leader-obs", "leader-raw", 10.0, 10.0, 90.0, 10.0)
+    other = _line("other-obs", "other-raw", 130.0, 10.0, 200.0, 10.0)
+
+    assert _viewport_owned_lines(
+        (other, leader),
+        plan,
+        (plan, elevation),
+    ) == (leader,)
+
+
+def test_viewport_owned_leader_lines_abstain_on_competing_viewport_ownership() -> None:
+    first = SimpleNamespace(
+        view_id="first",
+        bounding_box=(0.0, 0.0, 100.0, 100.0),
+    )
+    second = SimpleNamespace(
+        view_id="second",
+        bounding_box=(50.0, 0.0, 150.0, 100.0),
+    )
+    ambiguous = _line("leader-obs", "leader-raw", 60.0, 10.0, 90.0, 10.0)
+
+    assert _viewport_owned_lines(
+        (ambiguous,),
+        first,
+        (first, second),
+    ) == ()
 
 
 def _transform_line(line: _Line, *, tx=0.0, ty=0.0, scale=1.0, quarter_turns=0) -> _Line:
@@ -396,6 +436,37 @@ def test_two_possible_physical_walls_abstain_as_ambiguous_ownership() -> None:
     assert status is EvidenceResolutionStatus.ABSTAINED
 
 
+def test_proven_same_wall_faces_collapse_to_one_terminator_owner() -> None:
+    lines = (
+        _line("w1", "raw-w1", 4.0, 0.0, 4.0, 20.0),
+        _line("w2", "raw-w2", 6.0, 0.0, 6.0, 20.0),
+    )
+    rec1 = SimpleNamespace(
+        wall_candidate_id="wall-1",
+        physical_identity=SimpleNamespace(source_primitive_ids=("raw-w1",)),
+    )
+    rec2 = SimpleNamespace(
+        wall_candidate_id="wall-2",
+        physical_identity=SimpleNamespace(source_primitive_ids=("raw-w2",)),
+    )
+    scope = SimpleNamespace(
+        records=(rec1, rec2),
+        equivalence=SimpleNamespace(
+            equivalence_groups=(("wall-1", "wall-2"),)
+        ),
+    )
+
+    target, source_segments, status = _target_from_terminator(
+        _term(5.0, 10.0),
+        lines,
+        scope,
+    )
+
+    assert target is rec1
+    assert status is EvidenceResolutionStatus.CORROBORATED
+    assert source_segments == ("raw-w1", "raw-w2")
+
+
 def test_positive_target_provenance_excludes_non_wall_terminator_hits() -> None:
     lines = (
         _line("leader", "raw-leader", 3.0, 10.0, 5.0, 10.0),
@@ -430,6 +501,15 @@ def test_no_terminator_abstains_from_connectivity() -> None:
 def test_page_wide_keyword_does_not_create_finish_semantics() -> None:
     assert _finish_semantics("PLASTER AND PAINT") == ()
     assert _finish_semantics("KEY TO FINISH EXTERNALLY") == ()
+
+
+def test_leader_endpoint_binary32_roundoff_from_text_bbox_still_binds() -> None:
+    annotation = (680.0, 8.0, 700.0, 12.0)
+    # Real PDF text/vector APIs can surface the same source coordinate a few
+    # binary32 roundoff units apart. This 0.00025pt gap is within that bound at
+    # page coordinate ~700 and must not sever an otherwise exact leader chain.
+    lines = (_line("roundoff", "raw", 700.00025, 10.0, 5.0, 10.0),)
+    assert _leader_paths(annotation, lines, (_term(5.0, 10.0),), 0.01)
 
 
 def test_leader_endpoint_merely_near_text_does_not_bind() -> None:

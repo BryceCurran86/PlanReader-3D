@@ -23,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import math
+import re
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
@@ -55,7 +56,9 @@ from pb_viewport_segmentation import (
 )
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 from pb_wall_room_topology_junction_classifier import classify_junctions
+from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
 from pb_wall_room_topology_stage_a import (
+    DEFAULT_GAP_SNAP_TOLERANCE_PT,
     build_wall_graph_for_viewport,
     is_structural_candidate_segment,
 )
@@ -1274,6 +1277,242 @@ def _producer_opening_relation_overrides(
     }
 
 
+
+def _path_is_collinear_with_source_line(
+    path: Sequence[Point],
+    source_line: Line,
+) -> bool:
+    """Require every reconstructed path point to lie on one exact source line."""
+    if len(path) < 2:
+        return False
+    direction = _canonical_direction(source_line)
+    origin = (source_line[0], source_line[1])
+    for point in path:
+        offset = (float(point[0]) - origin[0], float(point[1]) - origin[1])
+        if abs(_cross(direction, offset)) > _COORD_TOL:
+            return False
+    return True
+
+
+def _projected_path_interval(
+    path: Sequence[Point],
+    source_line: Line,
+) -> Optional[tuple[float, float]]:
+    if len(path) < 2:
+        return None
+    direction = _canonical_direction(source_line)
+    values = [
+        _projection((float(point[0]), float(point[1])), direction)
+        for point in path
+    ]
+    lower, upper = min(values), max(values)
+    if upper - lower <= _COORD_TOL:
+        return None
+    return (lower, upper)
+
+
+def _record_source_face_intervals_from_graph(
+    *,
+    record: PhysicalWallCandidateRecord,
+    raw_id: str,
+    source_line: Line,
+    edges_by_id: Mapping[str, Mapping[str, object]],
+) -> tuple[tuple[float, float], ...]:
+    """Project only graph edges explicitly descended from one native primitive.
+
+    W4 centerlines may legitimately bend at reconstructed junctions even when
+    one contributing edge is an exact fragment of a single immutable source
+    face. Physical SAME proof must therefore inspect the lineage-bearing edge
+    fragments themselves, not require every point of the assembled centerline
+    to remain collinear with that source primitive.
+    """
+    direction = _canonical_direction(source_line)
+    intervals: list[tuple[float, float]] = []
+    for edge_id in record.physical_identity.edge_ids:
+        edge = edges_by_id.get(str(edge_id))
+        if edge is None:
+            continue
+        lineage = edge.get(LINEAGE_KEY) or {}
+        source_ids = {
+            str(value)
+            for value in tuple(lineage.get("source_primitive_ids") or ())
+            if value not in (None, "")
+        }
+        if raw_id not in source_ids:
+            continue
+        try:
+            edge_line = (
+                float(edge["x1"]),
+                float(edge["y1"]),
+                float(edge["x2"]),
+                float(edge["y2"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        # Exact source ancestry is necessary but not sufficient: the edge must
+        # also lie on the native primitive. This rejects junction branches that
+        # inherited plural lineage at an intersection.
+        if not _collinear(edge_line, source_line):
+            continue
+        if abs(_cross(direction, (
+            edge_line[0] - source_line[0],
+            edge_line[1] - source_line[1],
+        ))) > _COORD_TOL:
+            continue
+        values = (
+            _projection((edge_line[0], edge_line[1]), direction),
+            _projection((edge_line[2], edge_line[3]), direction),
+        )
+        lower, upper = min(values), max(values)
+        if upper - lower > _COORD_TOL:
+            intervals.append((lower, upper))
+    return tuple(sorted(set(intervals)))
+
+
+def _interval_sets_overlap_or_snap(
+    left: Sequence[tuple[float, float]],
+    right: Sequence[tuple[float, float]],
+) -> bool:
+    for left_interval in left:
+        for right_interval in right:
+            overlap = min(left_interval[1], right_interval[1]) - max(
+                left_interval[0], right_interval[0]
+            )
+            if overlap > _COORD_TOL:
+                return True
+            gap = max(left_interval[0], right_interval[0]) - min(
+                left_interval[1], right_interval[1]
+            )
+            if gap < 0.0:
+                gap = 0.0
+            if gap <= DEFAULT_GAP_SNAP_TOLERANCE_PT:
+                return True
+    return False
+
+
+def _producer_shared_source_face_relation_overrides(
+    *,
+    segments: Sequence[Mapping[str, object]],
+    records: Sequence[PhysicalWallCandidateRecord],
+    graph: Optional[Mapping[str, object]] = None,
+) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
+    """Prove duplicate W4 fragments descended from one exact native wall face.
+
+    Comparison is narrowed by immutable source primitive id rather than spatial
+    proximity. SAME requires a shared native Structural/Bearing primitive, both
+    reconstructed paths lying collinearly on that exact source line, and either
+    real longitudinal overlap or a residual gap no larger than Stage A's existing
+    drafting/snap tolerance. The latter is valid only because the immutable native
+    source primitive itself is one continuous line across the gap. Nearby
+    independent walls, perpendicular junction branches, raster-only geometry and
+    larger disconnected fragments abstain.
+    """
+    segment_by_id = {
+        str(segment.get("id") or ""): segment
+        for segment in segments
+        if str(segment.get("id") or "")
+    }
+    records_by_raw_id: dict[str, list[PhysicalWallCandidateRecord]] = {}
+    for record in records:
+        identity = record.physical_identity
+        if not identity.usable or identity.path_fingerprint is None:
+            continue
+        for raw_id in identity.source_primitive_ids:
+            records_by_raw_id.setdefault(str(raw_id), []).append(record)
+
+    relation_sets: dict[
+        tuple[str, str], set[PhysicalEquivalenceClass]
+    ] = {}
+    graph_edges_by_id: dict[str, Mapping[str, object]] = {}
+    if graph is not None:
+        graph_edges_by_id = {
+            str(edge.get("id")): edge
+            for edge in tuple(graph.get("edges") or ())
+            if isinstance(edge, Mapping) and edge.get("id") not in (None, "")
+        }
+
+    for raw_id, owners in sorted(records_by_raw_id.items()):
+        if len(owners) < 2:
+            continue
+        source = segment_by_id.get(raw_id)
+        if source is None:
+            continue
+        if source.get("source_kind") == RASTER_PDF_VISIBLE_SEGMENT:
+            continue
+        layer = str(source.get("layer") or "").strip().lower()
+        layer_tokens = set(re.findall(r"[a-z0-9]+", layer))
+        if not {"structural", "bearing"} <= layer_tokens:
+            continue
+        source_line = _line(
+            (
+                source.get("x1"),
+                source.get("y1"),
+                source.get("x2"),
+                source.get("y2"),
+            )
+        )
+        if source_line is None:
+            continue
+
+        ordered = sorted(owners, key=lambda item: item.wall_candidate_id)
+        graph_intervals = {}
+        if graph is not None:
+            graph_intervals = {
+                record.wall_candidate_id: _record_source_face_intervals_from_graph(
+                    record=record,
+                    raw_id=raw_id,
+                    source_line=source_line,
+                    edges_by_id=graph_edges_by_id,
+                )
+                for record in ordered
+            }
+
+        for index, left in enumerate(ordered):
+            left_path = tuple(left.physical_identity.path_fingerprint or ())
+            left_interval = None
+            if graph is None:
+                if not _path_is_collinear_with_source_line(left_path, source_line):
+                    continue
+                left_interval = _projected_path_interval(left_path, source_line)
+                if left_interval is None:
+                    continue
+            elif not graph_intervals.get(left.wall_candidate_id):
+                continue
+
+            for right in ordered[index + 1 :]:
+                if graph is None:
+                    right_path = tuple(right.physical_identity.path_fingerprint or ())
+                    if not _path_is_collinear_with_source_line(right_path, source_line):
+                        continue
+                    right_interval = _projected_path_interval(right_path, source_line)
+                    if right_interval is None:
+                        continue
+                    if not _interval_sets_overlap_or_snap((left_interval,), (right_interval,)):
+                        continue
+                else:
+                    right_intervals = graph_intervals.get(right.wall_candidate_id, ())
+                    if not right_intervals:
+                        continue
+                    if not _interval_sets_overlap_or_snap(
+                        graph_intervals[left.wall_candidate_id],
+                        right_intervals,
+                    ):
+                        continue
+
+                pair = tuple(
+                    sorted((left.wall_candidate_id, right.wall_candidate_id))
+                )
+                relation_sets.setdefault(pair, set()).add(
+                    PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+                )
+
+    return {
+        pair: next(iter(classifications))
+        for pair, classifications in relation_sets.items()
+        if len(classifications) == 1
+    }
+
+
 def _union_find_groups(
     pairs: Sequence[tuple[str, str]], members: Sequence[str]
 ) -> list[list[str]]:
@@ -1330,11 +1569,39 @@ def _apply_trusted_relation_overrides(
     member_ids = [identity.wall_candidate_id for identity in usable]
     same_links: list[tuple[str, str]] = []
     ambiguous_links: list[tuple[str, str]] = []
+    distinct_links: list[tuple[str, str]] = []
     for pair, classification in pair_map.items():
         if classification == PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value:
             same_links.append(pair)
         elif classification == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value:
             ambiguous_links.append(pair)
+        elif classification == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value:
+            distinct_links.append(pair)
+
+    distinct_neighbors: dict[str, set[str]] = {}
+    for left, right in distinct_links:
+        distinct_neighbors.setdefault(left, set()).add(right)
+        distinct_neighbors.setdefault(right, set()).add(left)
+
+    # A proven SAME subgroup remains positive identity evidence even when one
+    # of its members has unresolved relations to candidates outside that group.
+    # This does not make the full candidate universe publishable: publication
+    # below still uses SAME + AMBIGUOUS components and therefore remains
+    # fail-closed. A positive DISTINCT relation inside the SAME-connected
+    # subgroup is contradictory and withholds that subgroup entirely.
+    positive_same_groups: list[tuple[str, ...]] = []
+    if same_links:
+        for component in _union_find_groups(same_links, member_ids):
+            if len(component) < 2:
+                continue
+            component_set = set(component)
+            contradictory = any(
+                neighbour in component_set
+                for wall_id in component
+                for neighbour in distinct_neighbors.get(wall_id, ())
+            )
+            if not contradictory:
+                positive_same_groups.append(tuple(sorted(component)))
 
     related_links = same_links + ambiguous_links
     components = _union_find_groups(related_links, member_ids) if member_ids else []
@@ -1356,6 +1623,19 @@ def _apply_trusted_relation_overrides(
             for index, left in enumerate(component)
             for right in component[index + 1 :]
         )
+        component_set = set(component)
+        has_distinct_conflict = has_same and any(
+            neighbour in component_set
+            for wall_id in component
+            for neighbour in distinct_neighbors.get(wall_id, ())
+        )
+        if has_distinct_conflict:
+            ambiguous_walls.update(component)
+            for wall_id in component:
+                blockers.setdefault(wall_id, []).append(
+                    "conflicting_physical_wall_equivalence"
+                )
+            continue
         if has_ambiguous:
             ambiguous_walls.update(component)
             for wall_id in component:
@@ -1382,6 +1662,11 @@ def _apply_trusted_relation_overrides(
     for wall_id in member_ids:
         if wall_id not in linked and wall_id not in blockers:
             representatives.append(wall_id)
+
+    # Retain producer-proven SAME subgroups for downstream identity
+    # normalization even when ambient ambiguity blocks global publication.
+    # Deterministic de-duplication preserves any already-publishable SAME group.
+    same_groups = list(dict.fromkeys((*same_groups, *positive_same_groups)))
 
     representatives = list(dict.fromkeys(representatives))
     abstained = [wall_id for wall_id in member_ids if wall_id in blockers]
@@ -1471,6 +1756,17 @@ def _assemble_scope_result(
         tuple(ordered_identities),
         baseline_equivalence,
         strip_overrides,
+        allow_proven_same_over_distinct=True,
+    )
+    shared_face_overrides = _producer_shared_source_face_relation_overrides(
+        segments=graph_segments,
+        records=tuple(records),
+        graph=graph,
+    )
+    equivalence = _apply_trusted_relation_overrides(
+        tuple(ordered_identities),
+        equivalence,
+        shared_face_overrides,
         allow_proven_same_over_distinct=True,
     )
     trusted_overrides = _producer_opening_relation_overrides(

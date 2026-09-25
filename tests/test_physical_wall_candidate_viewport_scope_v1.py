@@ -774,6 +774,7 @@ def test_page_local_scoped_decode_can_materialize_authenticated_viewport(tmp_pat
     "layer,expected_reason",
     [
         ("A-GRID", None),
+        ("Structural - Grid", "structural_grid_source_layer_excluded"),
         ("A-DIMENSION", "dimension_layer_excluded"),
         ("A-ANNOTATION", "dimension_layer_excluded"),
         ("A-LEADER", "text_frame_layer_excluded"),
@@ -910,3 +911,492 @@ def test_proven_wall_strip_can_reconcile_disjoint_face_fragments() -> None:
     )
     assert reconciled.equivalence_groups == (("left_a", "left_b"),)
     assert reconciled.representative_wall_ids == ("left_a",)
+
+
+
+def _equivalence_identity(wall_id: str):
+    from pb_physical_wall_identity import PhysicalWallIdentity
+
+    return PhysicalWallIdentity(
+        wall_candidate_id=wall_id,
+        viewport_id="view",
+        candidate_identity_id=f"identity:{wall_id}",
+        path_fingerprint=((0.0, 0.0), (10.0, 0.0)),
+        source_primitive_ids=(f"raw:{wall_id}",),
+        edge_ids=(f"edge:{wall_id}",),
+        status=EvidenceResolutionStatus.CORROBORATED,
+    )
+
+
+def test_positive_same_subgroup_survives_ambient_ambiguity_for_normalization() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_physical_wall_identity import (
+        PhysicalEquivalenceClass,
+        PhysicalWallEquivalenceResolution,
+    )
+
+    identities = tuple(
+        _equivalence_identity(wall_id)
+        for wall_id in ("wall-a", "wall-b", "wall-c")
+    )
+    baseline = PhysicalWallEquivalenceResolution(
+        scope_viewport_id="view",
+        representative_wall_ids=(),
+        abstained_wall_ids=("wall-a", "wall-b", "wall-c"),
+        equivalence_groups=(),
+        ambiguous_wall_ids=("wall-a", "wall-b", "wall-c"),
+        same_wall_ids=(),
+        pair_classifications=(
+            ("wall-a", "wall-b", PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value),
+            ("wall-a", "wall-c", PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value),
+            ("wall-b", "wall-c", PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value),
+        ),
+        blocking_reasons_by_wall_id={
+            wall_id: ("ambiguous_physical_wall_equivalence",)
+            for wall_id in ("wall-a", "wall-b", "wall-c")
+        },
+    )
+
+    resolved = module._apply_trusted_relation_overrides(
+        identities,
+        baseline,
+        {("wall-a", "wall-b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL},
+    )
+
+    assert resolved.equivalence_groups == (("wall-a", "wall-b"),)
+    assert resolved.same_wall_ids == ("wall-a", "wall-b")
+    # Ambient ambiguity still blocks global publication.
+    assert resolved.representative_wall_ids == ()
+    assert set(resolved.abstained_wall_ids) == {"wall-a", "wall-b", "wall-c"}
+
+
+def test_distinct_inside_same_connected_subgroup_withholds_equivalence_group() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_physical_wall_identity import (
+        PhysicalEquivalenceClass,
+        PhysicalWallEquivalenceResolution,
+    )
+
+    identities = tuple(
+        _equivalence_identity(wall_id)
+        for wall_id in ("wall-a", "wall-b", "wall-c")
+    )
+    baseline = PhysicalWallEquivalenceResolution(
+        scope_viewport_id="view",
+        representative_wall_ids=(),
+        abstained_wall_ids=("wall-a", "wall-b", "wall-c"),
+        equivalence_groups=(),
+        ambiguous_wall_ids=("wall-a", "wall-b", "wall-c"),
+        same_wall_ids=(),
+        pair_classifications=(
+            ("wall-a", "wall-b", PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value),
+            ("wall-a", "wall-c", PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value),
+            ("wall-b", "wall-c", PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value),
+        ),
+        blocking_reasons_by_wall_id={
+            wall_id: ("ambiguous_physical_wall_equivalence",)
+            for wall_id in ("wall-a", "wall-b", "wall-c")
+        },
+    )
+
+    resolved = module._apply_trusted_relation_overrides(
+        identities,
+        baseline,
+        {
+            ("wall-a", "wall-b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
+            ("wall-b", "wall-c"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
+        },
+        allow_proven_same_over_distinct=False,
+    )
+
+    assert resolved.equivalence_groups == ()
+    assert resolved.same_wall_ids == ()
+
+
+
+def _shared_face_record(
+    wall_id: str,
+    *,
+    path,
+    raw_ids,
+):
+    import pb_physical_wall_candidate_authority as module
+    from pb_physical_wall_identity import PhysicalWallIdentity
+
+    identity = PhysicalWallIdentity(
+        wall_candidate_id=wall_id,
+        viewport_id="view",
+        candidate_identity_id=f"identity:{wall_id}",
+        path_fingerprint=tuple(tuple(float(v) for v in point) for point in path),
+        source_primitive_ids=tuple(raw_ids),
+        edge_ids=(f"edge:{wall_id}",),
+        status=EvidenceResolutionStatus.CORROBORATED,
+    )
+    return module.PhysicalWallCandidateRecord(
+        wall_candidate_id=wall_id,
+        wall_candidate=SimpleNamespace(candidate_id=wall_id),
+        physical_identity=identity,
+    )
+
+
+def _shared_face_segment(
+    raw_id: str,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    *,
+    layer: str = "Structural - Bearing",
+    source_kind=None,
+):
+    row = {
+        "id": raw_id,
+        "kind": "line",
+        "x1": x1,
+        "y1": y1,
+        "x2": x2,
+        "y2": y2,
+        "layer": layer,
+        "dashes": "",
+        "width": 0.5,
+    }
+    if source_kind is not None:
+        row["source_kind"] = source_kind
+    return row
+
+
+def test_shared_native_bearing_face_fragments_prove_same_physical_wall() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_physical_wall_identity import PhysicalEquivalenceClass
+
+    segments = (_shared_face_segment("raw-face", 0.0, 0.0, 100.0, 0.0),)
+    records = (
+        _shared_face_record(
+            "wall-a",
+            path=((0.0, 0.0), (80.0, 0.0)),
+            raw_ids=("raw-face",),
+        ),
+        _shared_face_record(
+            "wall-b",
+            path=((20.0, 0.0), (100.0, 0.0)),
+            raw_ids=("raw-face",),
+        ),
+    )
+
+    result = module._producer_shared_source_face_relation_overrides(
+        segments=segments,
+        records=records,
+    )
+    assert result == {
+        ("wall-a", "wall-b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+    }
+
+
+def test_shared_source_face_graph_edges_override_bent_assembled_centerline() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_physical_wall_identity import PhysicalEquivalenceClass
+    from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
+
+    segments = (_shared_face_segment("raw-face", 0.0, 0.0, 100.0, 0.0),)
+    left = _shared_face_record(
+        "wall-a",
+        path=((0.0, 0.0), (45.0, 0.0)),
+        raw_ids=("raw-face",),
+    )
+    right = _shared_face_record(
+        "wall-b",
+        # W4 may bend after the lineage-bearing face fragment at a junction.
+        path=((40.0, 0.0), (80.0, 0.0), (82.0, 4.0)),
+        raw_ids=("raw-face",),
+    )
+    graph = {
+        "edges": [
+            {
+                "id": "edge:wall-a",
+                "x1": 0.0, "y1": 0.0, "x2": 45.0, "y2": 0.0,
+                LINEAGE_KEY: {"source_primitive_ids": ["raw-face"]},
+            },
+            {
+                "id": "edge:wall-b",
+                "x1": 40.0, "y1": 0.0, "x2": 80.0, "y2": 0.0,
+                LINEAGE_KEY: {"source_primitive_ids": ["raw-face"]},
+            },
+        ]
+    }
+
+    assert module._producer_shared_source_face_relation_overrides(
+        segments=segments,
+        records=(left, right),
+        graph=graph,
+    ) == {
+        ("wall-a", "wall-b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+    }
+
+
+def test_shared_lineage_on_perpendicular_graph_edge_cannot_mint_same_wall() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
+
+    segments = (_shared_face_segment("raw-face", 0.0, 0.0, 100.0, 0.0),)
+    left = _shared_face_record(
+        "wall-a",
+        path=((0.0, 0.0), (45.0, 0.0)),
+        raw_ids=("raw-face",),
+    )
+    branch = _shared_face_record(
+        "wall-branch",
+        path=((40.0, -10.0), (40.0, 10.0)),
+        raw_ids=("raw-face",),
+    )
+    graph = {
+        "edges": [
+            {
+                "id": "edge:wall-a",
+                "x1": 0.0, "y1": 0.0, "x2": 45.0, "y2": 0.0,
+                LINEAGE_KEY: {"source_primitive_ids": ["raw-face"]},
+            },
+            {
+                "id": "edge:wall-branch",
+                "x1": 40.0, "y1": -10.0, "x2": 40.0, "y2": 10.0,
+                LINEAGE_KEY: {"source_primitive_ids": ["raw-face"]},
+            },
+        ]
+    }
+
+    assert module._producer_shared_source_face_relation_overrides(
+        segments=segments,
+        records=(left, branch),
+        graph=graph,
+    ) == {}
+
+
+def test_graph_edge_without_exact_shared_lineage_cannot_mint_same_wall() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
+
+    segments = (_shared_face_segment("raw-face", 0.0, 0.0, 100.0, 0.0),)
+    left = _shared_face_record(
+        "wall-a",
+        path=((0.0, 0.0), (45.0, 0.0)),
+        raw_ids=("raw-face",),
+    )
+    right = _shared_face_record(
+        "wall-b",
+        path=((40.0, 0.0), (80.0, 0.0)),
+        raw_ids=("raw-face",),
+    )
+    graph = {
+        "edges": [
+            {
+                "id": "edge:wall-a",
+                "x1": 0.0, "y1": 0.0, "x2": 45.0, "y2": 0.0,
+                LINEAGE_KEY: {"source_primitive_ids": ["raw-face"]},
+            },
+            {
+                "id": "edge:wall-b",
+                "x1": 40.0, "y1": 0.0, "x2": 80.0, "y2": 0.0,
+                LINEAGE_KEY: {"source_primitive_ids": ["other-face"]},
+            },
+        ]
+    }
+
+    assert module._producer_shared_source_face_relation_overrides(
+        segments=segments,
+        records=(left, right),
+        graph=graph,
+    ) == {}
+
+
+def test_nearby_parallel_independent_walls_do_not_share_face_authority() -> None:
+    import pb_physical_wall_candidate_authority as module
+
+    segments = (
+        _shared_face_segment("raw-a", 0.0, 0.0, 100.0, 0.0),
+        _shared_face_segment("raw-b", 0.0, 5.0, 100.0, 5.0),
+    )
+    records = (
+        _shared_face_record(
+            "wall-a",
+            path=((0.0, 0.0), (100.0, 0.0)),
+            raw_ids=("raw-a",),
+        ),
+        _shared_face_record(
+            "wall-b",
+            path=((0.0, 5.0), (100.0, 5.0)),
+            raw_ids=("raw-b",),
+        ),
+    )
+
+    assert module._producer_shared_source_face_relation_overrides(
+        segments=segments,
+        records=records,
+    ) == {}
+
+
+def test_shared_source_primitive_perpendicular_junction_abstains() -> None:
+    import pb_physical_wall_candidate_authority as module
+
+    segments = (_shared_face_segment("raw-face", 0.0, 0.0, 100.0, 0.0),)
+    records = (
+        _shared_face_record(
+            "wall-horizontal",
+            path=((0.0, 0.0), (100.0, 0.0)),
+            raw_ids=("raw-face",),
+        ),
+        _shared_face_record(
+            "wall-vertical",
+            path=((50.0, -20.0), (50.0, 20.0)),
+            raw_ids=("raw-face",),
+        ),
+    )
+
+    assert module._producer_shared_source_face_relation_overrides(
+        segments=segments,
+        records=records,
+    ) == {}
+
+
+def test_shared_source_face_micro_gap_uses_existing_stage_a_tolerance() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_physical_wall_identity import PhysicalEquivalenceClass
+
+    segments = (_shared_face_segment("raw-face", 0.0, 0.0, 100.0, 0.0),)
+    records = (
+        _shared_face_record(
+            "wall-a",
+            path=((0.0, 0.0), (49.8, 0.0)),
+            raw_ids=("raw-face",),
+        ),
+        _shared_face_record(
+            "wall-b",
+            path=((50.2, 0.0), (100.0, 0.0)),
+            raw_ids=("raw-face",),
+        ),
+    )
+
+    assert module._producer_shared_source_face_relation_overrides(
+        segments=segments,
+        records=records,
+    ) == {
+        ("wall-a", "wall-b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+    }
+
+
+def test_shared_source_face_micro_gap_can_supersede_fragment_distinctness() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_physical_wall_identity import (
+        PhysicalEquivalenceClass,
+        resolve_physical_wall_equivalence,
+    )
+
+    segments = (_shared_face_segment("raw-face", 0.0, 0.0, 100.0, 0.0),)
+    records = (
+        _shared_face_record(
+            "wall-a",
+            path=((0.0, 0.0), (49.8, 0.0)),
+            raw_ids=("raw-face",),
+        ),
+        _shared_face_record(
+            "wall-b",
+            path=((50.2, 0.0), (100.0, 0.0)),
+            raw_ids=("raw-face",),
+        ),
+    )
+    identities = tuple(record.physical_identity for record in records)
+    baseline = resolve_physical_wall_equivalence(identities)
+    overrides = module._producer_shared_source_face_relation_overrides(
+        segments=segments,
+        records=records,
+    )
+    assert overrides == {
+        ("wall-a", "wall-b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+    }
+
+    reconciled = module._apply_trusted_relation_overrides(
+        identities,
+        baseline,
+        overrides,
+        allow_proven_same_over_distinct=True,
+    )
+    assert reconciled.equivalence_groups == (("wall-a", "wall-b"),)
+
+
+def test_shared_source_face_gap_beyond_stage_a_tolerance_abstains() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_wall_room_topology_stage_a import DEFAULT_GAP_SNAP_TOLERANCE_PT
+
+    gap = DEFAULT_GAP_SNAP_TOLERANCE_PT + 0.25
+    segments = (_shared_face_segment("raw-face", 0.0, 0.0, 100.0, 0.0),)
+    records = (
+        _shared_face_record(
+            "wall-a",
+            path=((0.0, 0.0), (50.0 - gap / 2.0, 0.0)),
+            raw_ids=("raw-face",),
+        ),
+        _shared_face_record(
+            "wall-b",
+            path=((50.0 + gap / 2.0, 0.0), (100.0, 0.0)),
+            raw_ids=("raw-face",),
+        ),
+    )
+
+    assert module._producer_shared_source_face_relation_overrides(
+        segments=segments,
+        records=records,
+    ) == {}
+
+
+def test_shared_source_face_non_overlapping_fragments_abstain() -> None:
+    import pb_physical_wall_candidate_authority as module
+
+    segments = (_shared_face_segment("raw-face", 0.0, 0.0, 100.0, 0.0),)
+    records = (
+        _shared_face_record(
+            "wall-a",
+            path=((0.0, 0.0), (40.0, 0.0)),
+            raw_ids=("raw-face",),
+        ),
+        _shared_face_record(
+            "wall-b",
+            path=((60.0, 0.0), (100.0, 0.0)),
+            raw_ids=("raw-face",),
+        ),
+    )
+
+    assert module._producer_shared_source_face_relation_overrides(
+        segments=segments,
+        records=records,
+    ) == {}
+
+
+def test_raster_shared_lineage_cannot_mint_shared_face_equivalence() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_source_visibility_authority import RASTER_PDF_VISIBLE_SEGMENT
+
+    segments = (
+        _shared_face_segment(
+            "raw-face",
+            0.0,
+            0.0,
+            100.0,
+            0.0,
+            source_kind=RASTER_PDF_VISIBLE_SEGMENT,
+        ),
+    )
+    records = (
+        _shared_face_record(
+            "wall-a",
+            path=((0.0, 0.0), (80.0, 0.0)),
+            raw_ids=("raw-face",),
+        ),
+        _shared_face_record(
+            "wall-b",
+            path=((20.0, 0.0), (100.0, 0.0)),
+            raw_ids=("raw-face",),
+        ),
+    )
+
+    assert module._producer_shared_source_face_relation_overrides(
+        segments=segments,
+        records=records,
+    ) == {}
