@@ -16,6 +16,7 @@ from pb_physical_wall_candidate_authority import (
     PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY,
     PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE,
     PHYSICAL_WALL_CANDIDATE_SOURCE_PRIMITIVE_OWNERSHIP_AMBIGUOUS,
+    PHYSICAL_WALL_CANDIDATE_VIEWPORT_AUTHORITY_INVALID,
     PhysicalWallCandidateProducer,
     PhysicalWallCandidateSelector,
 )
@@ -509,7 +510,9 @@ def test_manually_forged_viewport_scope_id_is_unavailable(tmp_path: Path) -> Non
         )
     )
     assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert result.reason_codes == (PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE,)
+    assert result.reason_codes == (
+        PHYSICAL_WALL_CANDIDATE_VIEWPORT_AUTHORITY_INVALID,
+    )
 
 
 def test_wall_role_does_not_fall_back_from_viewport_scope_to_page_scope(tmp_path: Path) -> None:
