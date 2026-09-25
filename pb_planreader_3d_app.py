@@ -6426,6 +6426,55 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                 st.rerun()
 
 
+def _mass_editor_id(value: Any) -> int | None:
+    """The model_masses id of a Building masses editor row; None for a new row."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return int(number) if math.isfinite(number) and number.is_integer() else None
+
+
+def save_building_masses(workspace_id: int, records: Iterable[dict[str, Any]]) -> None:
+    """Persist the Building masses editor, keeping each surviving mass's id.
+
+    Openings, 3D surface edits and editable-3D corrections are keyed by
+    model_masses.id, so edited rows are updated in place, new rows inserted and
+    only rows removed from the editor deleted, all in one transaction.
+    """
+    conn = local_connect()
+    try:
+        existing = {int(row["id"]) for row in conn.execute("SELECT id FROM model_masses WHERE workspace_id=?", (workspace_id,))}
+        kept: set[int] = set()
+        for row in records:
+            if not str(row.get("label") or "").strip():
+                continue
+            values = (row.get("label", ""), row.get("level_name", "Ground"), row.get("x", 0), row.get("y", 0), row.get("z", 0),
+                      row.get("width", 1), row.get("depth", 1), row.get("height", 2.7), row.get("finish", ""),
+                      row.get("source_reference", ""), row.get("confidence", "To review"), row.get("notes", ""))
+            mass_id = _mass_editor_id(row.get("id"))
+            if mass_id in existing and mass_id not in kept:
+                conn.execute(
+                    "UPDATE model_masses SET label=?,level_name=?,x=?,y=?,z=?,width=?,depth=?,height=?,finish=?,source_reference=?,confidence=?,notes=? WHERE id=?",
+                    (*values, mass_id),
+                )
+                kept.add(mass_id)
+            else:
+                conn.execute(
+                    """INSERT INTO model_masses(workspace_id,label,level_name,x,y,z,width,depth,height,finish,source_reference,confidence,notes,created_at)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (workspace_id, *values, now_stamp()),
+                )
+        for mass_id in existing - kept:
+            conn.execute("DELETE FROM model_masses WHERE id=?", (mass_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def model_3d_page(workspace:dict[str,Any], session_api_key: str = "", ai_provider: str = "OpenAI") -> None:
     hero(workspace)
     tabs=st.tabs(["Interactive model","Building masses","Doors & windows","Render / artist's impression","Model exports"])
@@ -6449,10 +6498,7 @@ def model_3d_page(workspace:dict[str,Any], session_api_key: str = "", ai_provide
         if masses.empty: masses=pd.DataFrame(columns=["id","label","level_name","x","y","z","width","depth","height","finish","source_reference","confidence","notes"])
         edited=st.data_editor(masses,use_container_width=True,hide_index=True,num_rows="dynamic",column_config={"id":st.column_config.NumberColumn(disabled=True),"confidence":st.column_config.SelectboxColumn(options=["Measured","Verified","Derived","Assumed","To review"])},height=500)
         if st.button("Save building masses",type="primary"):
-            lexecute("DELETE FROM model_masses WHERE workspace_id=?",(workspace["id"],))
-            for row in edited.to_dict("records"):
-                if not str(row.get("label") or "").strip(): continue
-                lexecute("""INSERT INTO model_masses(workspace_id,label,level_name,x,y,z,width,depth,height,finish,source_reference,confidence,notes,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(workspace["id"],row.get("label",""),row.get("level_name","Ground"),row.get("x",0),row.get("y",0),row.get("z",0),row.get("width",1),row.get("depth",1),row.get("height",2.7),row.get("finish",""),row.get("source_reference",""),row.get("confidence","To review"),row.get("notes",""),now_stamp()))
+            save_building_masses(workspace["id"],edited.to_dict("records"))
             st.success("Building masses saved.")
             st.rerun()
     with tabs[2]:
