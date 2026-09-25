@@ -92,6 +92,7 @@ PHYSICAL_WALL_CANDIDATE_SOURCE_PRIMITIVE_OWNERSHIP_AMBIGUOUS = (
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
+_VIEWPORT_SELECTOR_SEAL = object()
 _COORD_TOL = 1e-6
 _PARALLEL_REL_TOL = 1e-9
 Point = tuple[float, float]
@@ -111,7 +112,12 @@ _BOUNDARY_COORD_TOL = _COORD_TOL
 
 @dataclass(frozen=True)
 class PhysicalWallCandidateSelector:
-    """Consumer addressing only; never a caller-authored wall universe."""
+    """Consumer address.
+
+    Legacy page-scope selectors remain public for compatibility. Viewport
+    selectors are producer-sealed and can only be obtained from an authority
+    that already materialized the authenticated viewport scope.
+    """
 
     document_id: str
     revision_id: str
@@ -119,6 +125,8 @@ class PhysicalWallCandidateSelector:
     snapshot_id: str
     page_id: str
     decision_scope_id: str
+    _viewport_selector_fingerprint: str = ""
+    _viewport_selector_seal: object = None
 
 
 @dataclass(frozen=True)
@@ -180,6 +188,29 @@ class _TrustedFaceBreak:
 
 def _decision_scope_id(page_id: str) -> str:
     return f"wall-source:page-{str(page_id)}"
+
+
+def _viewport_selector_payload_fingerprint(
+    *,
+    document_id: str,
+    revision_id: str,
+    source_sha256: str,
+    snapshot_id: str,
+    page_id: str,
+    decision_scope_id: str,
+) -> str:
+    payload = "|".join(
+        (
+            PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION,
+            str(document_id),
+            str(revision_id),
+            str(source_sha256),
+            str(snapshot_id),
+            str(page_id),
+            str(decision_scope_id),
+        )
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _viewport_sibling_set_fingerprint(viewports: Sequence[object]) -> str:
@@ -1602,11 +1633,29 @@ class PhysicalWallCandidateAuthority:
             raise TypeError("selector must be PhysicalWallCandidateSelector")
 
         scope_id = str(selector.decision_scope_id)
-        if (
-            scope_id != _decision_scope_id(selector.page_id)
-            and not scope_id.startswith(f"wall-source:viewport:{selector.page_id}:")
-        ):
+        is_page_scope = scope_id == _decision_scope_id(selector.page_id)
+        is_viewport_scope = scope_id.startswith(
+            f"wall-source:viewport:{selector.page_id}:"
+        )
+        if not is_page_scope and not is_viewport_scope:
             return _blocked(selector, PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
+        if is_viewport_scope:
+            expected_fingerprint = _viewport_selector_payload_fingerprint(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                page_id=selector.page_id,
+                decision_scope_id=selector.decision_scope_id,
+            )
+            if (
+                selector._viewport_selector_seal is not _VIEWPORT_SELECTOR_SEAL
+                or selector._viewport_selector_fingerprint != expected_fingerprint
+            ):
+                return _blocked(
+                    selector,
+                    PHYSICAL_WALL_CANDIDATE_VIEWPORT_AUTHORITY_INVALID,
+                )
 
         key = _ScopeKey(
             document_id=str(selector.document_id),
@@ -1621,6 +1670,38 @@ class PhysicalWallCandidateAuthority:
             return _blocked(selector, PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
         return result
 
+    @staticmethod
+    def _selector_for_result(
+        result: PhysicalWallCandidateScopeResult,
+    ) -> PhysicalWallCandidateSelector:
+        if result.scope_kind != "viewport":
+            return PhysicalWallCandidateSelector(
+                document_id=result.document_id,
+                revision_id=result.revision_id,
+                source_sha256=result.source_sha256,
+                snapshot_id=result.snapshot_id,
+                page_id=result.page_id,
+                decision_scope_id=result.decision_scope_id,
+            )
+        fingerprint = _viewport_selector_payload_fingerprint(
+            document_id=result.document_id,
+            revision_id=result.revision_id,
+            source_sha256=result.source_sha256,
+            snapshot_id=result.snapshot_id,
+            page_id=result.page_id,
+            decision_scope_id=result.decision_scope_id,
+        )
+        return PhysicalWallCandidateSelector(
+            document_id=result.document_id,
+            revision_id=result.revision_id,
+            source_sha256=result.source_sha256,
+            snapshot_id=result.snapshot_id,
+            page_id=result.page_id,
+            decision_scope_id=result.decision_scope_id,
+            _viewport_selector_fingerprint=fingerprint,
+            _viewport_selector_seal=_VIEWPORT_SELECTOR_SEAL,
+        )
+
     def selector_for_viewport(
         self,
         *,
@@ -1631,7 +1712,7 @@ class PhysicalWallCandidateAuthority:
         page_id: str,
         viewport_id: str,
     ) -> Optional[PhysicalWallCandidateSelector]:
-        """Return an address only for a producer-materialized viewport scope."""
+        """Return a sealed address only for a materialized authenticated viewport."""
         matches = [
             result
             for result in self._scopes.values()
@@ -1645,15 +1726,31 @@ class PhysicalWallCandidateAuthority:
         ]
         if len(matches) != 1:
             return None
-        result = matches[0]
-        return PhysicalWallCandidateSelector(
-            document_id=result.document_id,
-            revision_id=result.revision_id,
-            source_sha256=result.source_sha256,
-            snapshot_id=result.snapshot_id,
-            page_id=result.page_id,
-            decision_scope_id=result.decision_scope_id,
+        return self._selector_for_result(matches[0])
+
+    def selector_for_decision_scope(
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        source_sha256: str,
+        snapshot_id: str,
+        page_id: str,
+        decision_scope_id: str,
+    ) -> Optional[PhysicalWallCandidateSelector]:
+        """Reissue a valid selector only for an exact producer-owned scope."""
+        key = _ScopeKey(
+            document_id=str(document_id),
+            revision_id=str(revision_id),
+            source_sha256=str(source_sha256),
+            snapshot_id=str(snapshot_id),
+            page_id=str(page_id),
+            decision_scope_id=str(decision_scope_id),
         )
+        result = self._scopes.get(key)
+        if result is None:
+            return None
+        return self._selector_for_result(result)
 
 
 __all__ = [
