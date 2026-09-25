@@ -1,0 +1,142 @@
+name: Wall Component Completeness Shadow
+
+on:
+  push:
+    branches: [gpt/wall-component-completeness-v1]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Focused tests
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_wall_component_completeness_authority_v1.py \
+            tests/test_physical_wall_candidate_viewport_scope_v1.py \
+            tests/test_source_wall_topology_authority_v1.py
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: KSTVET target-component shadow
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, time
+          from pathlib import Path
+          import fitz
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_wall_component_completeness_authority import (
+              WallComponentCompletenessProducer,
+              WallComponentCompletenessSelector,
+          )
+          from pb_viewport_segmentation import assign_bbox_to_viewport
+          from pb_wall_finish_face_binding_authority import (
+              _authoritative_viewports,
+              _filled_terminators,
+              _leader_paths,
+              _page_visible_lines,
+              _target_from_terminator,
+              _trusted_finish_blocks,
+              _viewport_owned_lines,
+          )
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="wall-component-real-shadow",
+              producer_version="1.0",
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-wall-component-shadow",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          start=time.perf_counter()
+          wall_authority=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          ).authority()
+          component_producer=WallComponentCompletenessProducer.from_authorities(
+              source_visibility_producer=source,
+              physical_wall_candidate_authority=wall_authority,
+          )
+          component_authority=component_producer.authority()
+          elapsed=time.perf_counter()-start
+
+          current=source.published_snapshot_for_revision(pub.revision.revision_id)
+          pdf=fitz.open(stream=payload,filetype="pdf")
+          page=pdf.load_page(53)
+          viewports=_authoritative_viewports(page,54)
+          lines=_page_visible_lines(source,current,"54")
+          rows=[]
+          for _,text,semantics,annotation_ids,annotation_bbox,text_height in _trusted_finish_blocks(source,current,"54"):
+              viewport=assign_bbox_to_viewport(annotation_bbox,viewports,allow_derived=True)
+              if viewport is None or viewport.bounding_box is None:
+                  continue
+              selector=wall_authority.selector_for_viewport(
+                  document_id=current.revision.document_id,
+                  revision_id=current.revision.revision_id,
+                  source_sha256=current.revision.source_sha256,
+                  snapshot_id=current.snapshot.snapshot_id,
+                  page_id="54",
+                  viewport_id=viewport.view_id,
+              )
+              if selector is None:
+                  continue
+              scope=wall_authority.resolve_scope(selector)
+              if scope.status.value!="corroborated":
+                  continue
+              leader_lines=_viewport_owned_lines(lines,viewport,viewports)
+              wall_obs=set(scope.source_observation_ids)
+              wall_lines=tuple(line for line in lines if line.observation_id in wall_obs)
+              terms=tuple(
+                  term for term in _filled_terminators(page,text_height)
+                  if viewport.bounding_box[0] <= term.center[0] <= viewport.bounding_box[2]
+                  and viewport.bounding_box[1] <= term.center[1] <= viewport.bounding_box[3]
+              )
+              for leader_ids,term in _leader_paths(annotation_bbox,leader_lines,terms):
+                  target,source_segments,status=_target_from_terminator(term,wall_lines,scope)
+                  if status.value!="corroborated" or target is None:
+                      continue
+                  comp_sel=WallComponentCompletenessSelector(
+                      document_id=scope.document_id,
+                      revision_id=scope.revision_id,
+                      source_sha256=scope.source_sha256,
+                      snapshot_id=scope.snapshot_id,
+                      page_id=scope.page_id,
+                      decision_scope_id=scope.decision_scope_id,
+                      physical_wall_id=target.wall_candidate_id,
+                  )
+                  comp=component_authority.resolve(comp_sel)
+                  for semantic in semantics:
+                      rows.append({
+                          "viewport":viewport.view_id,
+                          "view_type":viewport.view_type,
+                          "trade":semantic.trade_scope_id,
+                          "direction":semantic.direction,
+                          "wall":target.wall_candidate_id,
+                          "scope_complete":scope.scope_complete,
+                          "scope_reasons":list(scope.reason_codes),
+                          "component_status":comp.status.value,
+                          "component_reasons":list(comp.reason_codes),
+                          "component_walls":list(comp.record.component_wall_ids) if comp.record else [],
+                          "checked_withheld":list(comp.record.checked_withheld_observation_ids) if comp.record else [],
+                      })
+          pdf.close()
+          print("KSTVET_ITEM19B_COMPONENTS "+json.dumps(rows,sort_keys=True))
+          print("KSTVET_COMPONENT_ELAPSED_SEC",round(elapsed,3))
+          PY
