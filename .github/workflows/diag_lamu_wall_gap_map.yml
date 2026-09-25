@@ -1,0 +1,126 @@
+name: Lamu Wall Gap Mapping Probe
+
+on:
+  push:
+    branches: [diag/lamu-opening-gap-authority-probe]
+
+jobs:
+  map-gaps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download Lamu
+        run: |
+          mkdir -p benchmarks/sources
+          curl -fL --retry 3 --retry-delay 2 -A 'Mozilla/5.0' \
+            'https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf' \
+            -o benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+          echo 'fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf' | sha256sum -c -
+      - name: Map wall fills and source openings
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, statistics, fitz
+          from pathlib import Path
+          from pb_wall_fill_internal_partition_evidence import (
+              _is_wall_like_fill, _floor_plan_viewport_bbox,
+              _PERIMETER_PROXIMITY_THICKNESS_MULTIPLE,
+              resolve_dpc_all_walls_geometry,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_physical_opening_authority import PhysicalOpeningAuthority
+          from pb_migration_contracts import EvidenceResolutionStatus
+
+          path=Path("benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf")
+          payload=path.read_bytes()
+          doc=fitz.open(stream=payload,filetype="pdf")
+          page=doc[40]
+          geom=resolve_dpc_all_walls_geometry(page.get_drawings(),length_m=16.0,width_m=8.2,page=page,page_text=page.get_text())
+          scale=geom.scale_pt_per_m
+          print("TARGETS",json.dumps({
+              "scale":scale,
+              "transverse":[r.__dict__ for r in geom.transverse_runs],
+              "longitudinal":[r.__dict__ for r in geom.longitudinal_runs],
+          },sort_keys=True))
+
+          vbox=_floor_plan_viewport_bbox(page)
+          candidates=[d for d in page.get_drawings() if _is_wall_like_fill(d,page.rect)]
+          if vbox:
+              vx0,vy0,vx1,vy1=vbox
+              scoped=[]
+              for d in candidates:
+                  r=d["rect"]; cx=(r[0]+r[2])/2; cy=(r[1]+r[3])/2
+                  if vx0<=cx<=vx1 and vy0<=cy<=vy1: scoped.append(d)
+              if len(scoped)>=2: candidates=scoped
+          thicknesses=[min(d["rect"][2]-d["rect"][0],d["rect"][3]-d["rect"][1]) for d in candidates]
+          wt=statistics.median(thicknesses); margin=wt*_PERIMETER_PROXIMITY_THICKNESS_MULTIPLE
+          minx=min(d["rect"][0] for d in candidates); miny=min(d["rect"][1] for d in candidates)
+          maxx=max(d["rect"][2] for d in candidates); maxy=max(d["rect"][3] for d in candidates)
+          pixel_minor=min(16.0,8.2)*scale
+          if (maxx-minx)>=(maxy-miny):
+              ex0,ex1=minx,maxx; ey0,ey1=miny,miny+pixel_minor
+          else:
+              ey0,ey1=miny,maxy; ex0,ex1=minx,minx+pixel_minor
+          internal=[]
+          for d in candidates:
+              r=d["rect"]; w=r[2]-r[0]; h=r[3]-r[1]
+              on=((r[0]-ex0<=margin) or (ex1-r[2]<=margin)) if h>=w else ((r[1]-ey0<=margin) or (ey1-r[3]<=margin))
+              if not on: internal.append(d)
+          rows=[]
+          for d in internal:
+              r=d["rect"]; w=r[2]-r[0]; h=r[3]-r[1]
+              rows.append({"orientation":"V" if h>=w else "H","rect":[round(float(v),3) for v in r]})
+          print("INTERNAL_FILLS",json.dumps(rows,sort_keys=True))
+
+          prod=SourceVisibilityProducer(producer_method="lamu-gap-map",producer_version="1.0")
+          pub=prod.ingest_native_pdf_bytes(document_id="lamu-gap-map",source_bytes=payload,source_locator="sha256://fa53...",page_ids=("41",))
+          vis=prod.authority(); auth=PhysicalOpeningAuthority(vis)
+          opening_records={}
+          for oid in pub.visible_observation_ids:
+              sel=ObservationSelector(document_id=pub.revision.document_id,revision_id=pub.revision.revision_id,source_sha256=pub.revision.source_sha256,snapshot_id=pub.snapshot.snapshot_id,observation_id=oid)
+              res=auth.prove_existence(sel)
+              if res.status is EvidenceResolutionStatus.CORROBORATED and res.existence_record is not None:
+                  opening_records[res.existence_record.record_id]=res.existence_record
+
+          mapped=[]
+          for rec in opening_records.values():
+              geoms=[]
+              for oid in rec.source_observation_ids:
+                  rr=vis.resolve_visible(ObservationSelector(document_id=pub.revision.document_id,revision_id=pub.revision.revision_id,source_sha256=pub.revision.source_sha256,snapshot_id=pub.snapshot.snapshot_id,observation_id=oid))
+                  if rr.observation is not None and len(rr.observation.geometry)>=4:
+                      geoms.append(tuple(float(v) for v in rr.observation.geometry[:4]))
+              if not geoms: continue
+              xs=[v for g in geoms for v in (g[0],g[2])]; ys=[v for g in geoms for v in (g[1],g[3])]
+              bbox=[min(xs),min(ys),max(xs),max(ys)]
+              # Relevant to target longitudinal y~291.58 or transverse x~427.22.
+              rel_long=(bbox[1]-8<=291.58<=bbox[3]+8)
+              rel_trans=(bbox[0]-8<=427.22<=bbox[2]+8)
+              if rel_long or rel_trans:
+                  mapped.append({"record_id":rec.record_id,"bbox":[round(v,3) for v in bbox],"long":rel_long,"trans":rel_trans,"support":[[round(v,3) for v in g] for g in geoms]})
+          print("TARGET_OPENINGS",json.dumps(mapped,sort_keys=True))
+
+          # Print native visible line intervals close to the target wall axes.
+          native=[]
+          for oid in pub.visible_observation_ids:
+              rr=vis.resolve_visible(ObservationSelector(document_id=pub.revision.document_id,revision_id=pub.revision.revision_id,source_sha256=pub.revision.source_sha256,snapshot_id=pub.snapshot.snapshot_id,observation_id=oid))
+              o=rr.observation
+              if o is None or len(o.geometry)<4: continue
+              x1,y1,x2,y2=map(float,o.geometry[:4])
+              if abs(y1-y2)<=0.5 and abs(((y1+y2)/2)-291.58)<=6.5:
+                  native.append({"axis":"H","id":oid,"g":[round(x1,3),round(y1,3),round(x2,3),round(y2,3)]})
+              elif abs(x1-x2)<=0.5 and abs(((x1+x2)/2)-427.22)<=6.5:
+                  native.append({"axis":"V","id":oid,"g":[round(x1,3),round(y1,3),round(x2,3),round(y2,3)]})
+          print("TARGET_NATIVE_LINES",json.dumps(native,sort_keys=True))
+          doc.close()
+          PY
