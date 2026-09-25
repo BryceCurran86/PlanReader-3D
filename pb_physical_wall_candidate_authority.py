@@ -314,17 +314,31 @@ def _segment_is_authenticated_vector_frame_edge(
         return False
     x1, y1, x2, y2 = _segment_geometry(segment)
     xmin, ymin, xmax, ymax = (float(value) for value in viewport.bounding_box)
-    endpoints = {
-        (round(x1, 6), round(y1, 6)),
-        (round(x2, 6), round(y2, 6)),
-    }
+
+    def same_point(left: Point, right: Point) -> bool:
+        return (
+            abs(left[0] - right[0]) <= _BOUNDARY_COORD_TOL
+            and abs(left[1] - right[1]) <= _BOUNDARY_COORD_TOL
+        )
+
+    segment_ends = ((x1, y1), (x2, y2))
     frame_edges = (
-        {(round(xmin, 6), round(ymin, 6)), (round(xmax, 6), round(ymin, 6))},
-        {(round(xmax, 6), round(ymin, 6)), (round(xmax, 6), round(ymax, 6))},
-        {(round(xmax, 6), round(ymax, 6)), (round(xmin, 6), round(ymax, 6))},
-        {(round(xmin, 6), round(ymax, 6)), (round(xmin, 6), round(ymin, 6))},
+        ((xmin, ymin), (xmax, ymin)),
+        ((xmax, ymin), (xmax, ymax)),
+        ((xmax, ymax), (xmin, ymax)),
+        ((xmin, ymax), (xmin, ymin)),
     )
-    return any(endpoints == edge for edge in frame_edges)
+    return any(
+        (
+            same_point(segment_ends[0], edge[0])
+            and same_point(segment_ends[1], edge[1])
+        )
+        or (
+            same_point(segment_ends[0], edge[1])
+            and same_point(segment_ends[1], edge[0])
+        )
+        for edge in frame_edges
+    )
 
 
 def _blocked(selector: PhysicalWallCandidateSelector, reason: str) -> PhysicalWallCandidateScopeResult:
