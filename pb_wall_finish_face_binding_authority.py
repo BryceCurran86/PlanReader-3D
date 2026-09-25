@@ -38,7 +38,7 @@ from pb_viewport_segmentation import (
 )
 from pb_wall_role_authority import WallRoleClassification, WallRoleProducer, WallRoleSelector
 
-WALL_FINISH_FACE_BINDING_SCHEMA_VERSION = "1.0.0"
+WALL_FINISH_FACE_BINDING_SCHEMA_VERSION = "1.1.0"
 SOURCE_EVIDENCE_KIND_NATIVE_DIRECT_CALLOUT = "native_direct_finish_callout"
 
 FINISH_BINDING_RESOLVED = "wall_finish_face_binding_resolved"
@@ -104,6 +104,7 @@ class WallFinishFaceBindingRecord:
     page_id: str
     viewport_id: str
     decision_scope_id: str
+    physical_wall_decision_scope_id: str
     physical_wall_id: str
     physical_face_id: str
     physical_face_role: PhysicalFaceRole
@@ -549,7 +550,7 @@ class WallFinishFaceBindingProducer:
         if page_ids is not None and not selected:
             raise ValueError("page_ids must contain at least one source page")
 
-        wall_authority = PhysicalWallCandidateProducer.from_source_visibility_producer(
+        wall_authority = PhysicalWallCandidateProducer.from_authenticated_viewports(
             source_visibility_producer,
             page_ids=selected,
         ).authority()
@@ -572,16 +573,6 @@ class WallFinishFaceBindingProducer:
                     page_number = int(page_id)
                     if not 1 <= page_number <= doc.page_count:
                         continue
-                    wall_scope = wall_authority.resolve_scope(PhysicalWallCandidateSelector(
-                        document_id=published.revision.document_id,
-                        revision_id=published.revision.revision_id,
-                        source_sha256=published.revision.source_sha256,
-                        snapshot_id=published.snapshot.snapshot_id,
-                        page_id=page_id,
-                        decision_scope_id=f"wall-source:page-{page_id}",
-                    ))
-                    if wall_scope.status is not EvidenceResolutionStatus.CORROBORATED:
-                        continue
                     page = doc.load_page(page_number - 1)
                     viewports = _authoritative_viewports(page, page_number)
                     lines = _page_visible_lines(source_visibility_producer, published, page_id)
@@ -591,13 +582,23 @@ class WallFinishFaceBindingProducer:
                         viewport = assign_bbox_to_viewport(annotation_bbox, viewports, allow_derived=True)
                         if viewport is None or viewport.bounding_box is None:
                             continue
+                        wall_selector = wall_authority.selector_for_viewport(
+                            document_id=published.revision.document_id,
+                            revision_id=published.revision.revision_id,
+                            source_sha256=published.revision.source_sha256,
+                            snapshot_id=published.snapshot.snapshot_id,
+                            page_id=page_id,
+                            viewport_id=viewport.view_id,
+                        )
+                        if wall_selector is None:
+                            continue
+                        wall_scope = wall_authority.resolve_scope(wall_selector)
+                        if wall_scope.status is not EvidenceResolutionStatus.CORROBORATED:
+                            continue
+                        owned_observation_ids = set(wall_scope.source_observation_ids)
                         owned_lines = tuple(
                             line for line in lines
-                            if all(
-                                viewport.bounding_box[0] <= p[0] <= viewport.bounding_box[2]
-                                and viewport.bounding_box[1] <= p[1] <= viewport.bounding_box[3]
-                                for p in _endpoints(line)
-                            )
+                            if line.observation_id in owned_observation_ids
                         )
                         terminators = tuple(
                             term for term in _filled_terminators(page, text_height)
@@ -624,7 +625,7 @@ class WallFinishFaceBindingProducer:
                                 source_sha256=published.revision.source_sha256,
                                 snapshot_id=published.snapshot.snapshot_id,
                                 page_id=page_id,
-                                decision_scope_id=f"wall-source:page-{page_id}",
+                                decision_scope_id=wall_scope.decision_scope_id,
                                 physical_wall_id=target.wall_candidate_id,
                             ))
                             if role_result.status is not EvidenceResolutionStatus.CORROBORATED or role_result.record is None:
@@ -636,7 +637,7 @@ class WallFinishFaceBindingProducer:
                                 or role_record.source_sha256 != published.revision.source_sha256
                                 or role_record.snapshot_id != published.snapshot.snapshot_id
                                 or role_record.page_id != page_id
-                                or role_record.decision_scope_id != f"wall-source:page-{page_id}"
+                                or role_record.decision_scope_id != wall_scope.decision_scope_id
                                 or role_record.physical_wall_id != target.wall_candidate_id
                             ):
                                 continue
@@ -654,6 +655,7 @@ class WallFinishFaceBindingProducer:
                                     "source_sha256": published.revision.source_sha256,
                                     "snapshot_id": published.snapshot.snapshot_id,
                                     "page_id": page_id,
+                                    "physical_wall_decision_scope_id": wall_scope.decision_scope_id,
                                     "physical_wall_id": target.wall_candidate_id,
                                     "physical_face_role": face_role.value,
                                 }
@@ -674,6 +676,7 @@ class WallFinishFaceBindingProducer:
                                     snapshot_id=published.snapshot.snapshot_id,
                                     page_id=page_id, viewport_id=viewport.view_id,
                                     decision_scope_id=f"finish-callout:{viewport.view_id}",
+                                    physical_wall_decision_scope_id=wall_scope.decision_scope_id,
                                     physical_wall_id=target.wall_candidate_id,
                                     physical_face_id=face_id, physical_face_role=face_role,
                                     source_face_segment_ids=tuple(sorted(source_segments)),
