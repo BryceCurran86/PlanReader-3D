@@ -1,0 +1,101 @@
+name: Item19B Page54 Downstream Fast Probe
+
+on:
+  push:
+    branches: [diag/item19b-downstream-page54-fast]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Run page54 authority chain
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
+          from pb_live_opening_deduction_composition import compose_live_opening_deductions
+          from pb_live_gross_wall_geometry_composition import compose_live_gross_wall_geometry
+          from pb_live_net_wall_boolean_composition import compose_live_net_wall_boolean_union
+          from pb_live_whole_wall_role_composition import compose_live_whole_wall_roles
+          from pb_live_external_net_wall_publication import compose_live_external_net_wall_publication
+          from pb_wall_finish_face_binding_authority import WallFinishFaceBindingProducer
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(producer_method="item19b-page54-fast",producer_version="1.0")
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-page54",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          revision_id=pub.revision.revision_id
+          wall=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=revision_id,
+              page_ids=("54",),
+          )
+          print("CHAIN_WALL",json.dumps({
+              "status":wall.status.value,
+              "reasons":list(wall.reason_codes),
+              "scopes":[{"page":x.page_id,"status":x.status.value,"complete":x.scope_complete,"walls":len(x.wall_candidate_ids),"reasons":list(x.reason_codes)} for x in wall.wall_scopes],
+              "bindings":[{"opening":x.opening_identity_id,"status":x.status.value,"host":x.host_wall_id,"members":list(x.member_wall_candidate_ids),"reasons":list(x.reason_codes)} for x in wall.opening_bindings],
+              "frames":[{"opening":x.opening_identity_id,"status":x.status.value,"host":x.host_wall_id,"whole":list(x.whole_wall_candidate_ids),"reasons":list(x.reason_codes)} for x in wall.host_frames],
+              "universe":{p:{"status":r.status.value,"complete":bool(r.decision_scope_complete),"reasons":list(r.reason_codes),"count":len(r.record.accounted_member_ids) if r.record else 0} for p,r in wall.opening_universe_results.items()},
+          },sort_keys=True))
+          voids=compose_live_physical_opening_voids(source_visibility_producer=source,wall_opening_composition=wall)
+          print("CHAIN_VOIDS",json.dumps({
+              "status":voids.status.value,"reasons":list(voids.reason_codes),
+              "traces":[{"opening":x.opening_identity_id,"void":x.void_status.value,"width":x.width_status.value,"height":x.height_status.value,"vertical":x.vertical_status.value,"scale":x.scale_status.value,"reasons":list(x.void_reason_codes)} for x in voids.traces]
+          },sort_keys=True))
+          targets=("external_key_pointing","internal_plaster","internal_paint","perimeter_walling")
+          ded=compose_live_opening_deductions(source_visibility_producer=source,wall_opening_composition=wall,physical_void_composition=voids,target_scope_ids=targets)
+          print("CHAIN_DED",json.dumps({
+              "status":ded.status.value,"reasons":list(ded.reason_codes),
+              "traces":[{"opening":x.opening_identity_id,"target":x.target_scope_id,"status":x.deduction_status.value,"reasons":list(x.deduction_reason_codes)} for x in ded.traces]
+          },sort_keys=True))
+          gross=compose_live_gross_wall_geometry(source_visibility_producer=source,wall_opening_composition=wall,physical_void_composition=voids)
+          print("CHAIN_GROSS",json.dumps({
+              "status":gross.status.value,"reasons":list(gross.reason_codes),
+              "traces":[{"wall":x.physical_wall_id,"status":x.status.value,"reasons":list(x.reason_codes),"length":x.length_m,"height":x.height_m,"gross":x.gross_area_m2} for x in gross.traces]
+          },sort_keys=True))
+          roles=compose_live_whole_wall_roles(gross_wall_composition=gross)
+          print("CHAIN_ROLES",json.dumps({
+              "status":roles.status.value,"reasons":list(roles.reason_codes),
+              "traces":[{"wall":x.physical_wall_id,"status":x.status.value,"role":(x.role.value if x.role else None),"reasons":list(x.reason_codes)} for x in roles.traces]
+          },sort_keys=True))
+          net=compose_live_net_wall_boolean_union(wall_opening_composition=wall,physical_void_composition=voids,opening_deduction_composition=ded,gross_wall_composition=gross)
+          print("CHAIN_NET",json.dumps({
+              "status":net.status.value,"reasons":list(net.reason_codes),
+              "traces":[{"wall":x.physical_wall_id,"target":x.target_scope_id,"status":x.status.value,"reasons":list(x.reason_codes),"gross":x.gross_area_m2,"void":x.void_union_area_m2,"net":x.net_area_m2} for x in net.traces]
+          },sort_keys=True))
+          for target in ("external_key_pointing","perimeter_walling"):
+              p=compose_live_external_net_wall_publication(gross_wall_composition=gross,net_wall_composition=net,whole_wall_role_composition=roles,target_scope_id=target)
+              print("CHAIN_EXTERNAL",json.dumps({"target":target,"status":p.status.value,"reasons":list(p.reason_codes),"value":p.quantity_evidence.value if p.quantity_evidence else None,"walls":list(p.external_wall_ids)},sort_keys=True))
+          finish=WallFinishFaceBindingProducer.from_source_visibility_producer(source,page_ids=("54",))
+          print("CHAIN_FINISH",json.dumps([{
+              "status":r.status.value,"reasons":list(r.reason_codes),
+              "bindings":[{"wall":b.physical_wall_id,"face":b.physical_face_id,"role":b.physical_face_role.value,"trade":b.trade_scope_id,"material":b.finish_material,"wall_scope":b.physical_wall_decision_scope_id} for b in r.bindings],
+              "scopes":[{"trade":s.trade_scope_id,"material":s.finish_material,"covered":list(s.covered_face_ids),"targets":list(s.target_face_ids),"complete":s.decision_scope_complete,"status":s.scope_status.value} for s in r.scope_records]
+          } for r in finish.published_results()],sort_keys=True))
+          PY
