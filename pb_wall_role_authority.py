@@ -561,10 +561,10 @@ class WallRoleProducer:
             raise TypeError("selector must be WallRoleSelector")
 
         # 1. Verify the physical wall candidate exists in the authority and is corroborated
-        # Consume the exact producer-owned physical-wall scope addressed by
-        # the selector. Never silently fall back from a viewport scope to the
-        # page-wide wall universe.
-        cand_sel = PhysicalWallCandidateSelector(
+        # Reissue the exact producer-owned wall selector. Viewport selectors
+        # are sealed by PhysicalWallCandidateAuthority; never reconstruct one
+        # from caller strings and never fall back to page scope.
+        cand_sel = self._wall_authority.selector_for_decision_scope(
             document_id=selector.document_id,
             revision_id=selector.revision_id,
             source_sha256=selector.source_sha256,
@@ -572,6 +572,13 @@ class WallRoleProducer:
             page_id=selector.page_id,
             decision_scope_id=selector.decision_scope_id,
         )
+        if cand_sel is None:
+            return WallRoleResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                proposition=None,
+                reason_codes=(WALL_ROLE_WALL_UNRESOLVED,),
+                record=None,
+            )
         cand_result = self._wall_candidates.resolve_scope(cand_sel)
         if cand_result.status is not EvidenceResolutionStatus.CORROBORATED:
             return self._store(
