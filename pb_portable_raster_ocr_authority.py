@@ -302,11 +302,16 @@ class MockOCRBackend(RasterOCRBackend):
         is_ready: bool = True,
         version: str = "mock-1.0.0",
         fail_with: Optional[BaseException] = None,
+        responder: Optional[Any] = None,
     ) -> None:
         self._lines = tuple(canned_lines)
         self._is_ready = is_ready
         self._version = version
         self._fail_with = fail_with
+        # Optional test-only callable ``(image, dpi) -> lines`` for scripting
+        # readings that depend on the rendered view. Ignored when None, so the
+        # canned-lines behaviour is unchanged.
+        self._responder = responder
 
     @property
     def name(self) -> str:
@@ -324,6 +329,8 @@ class MockOCRBackend(RasterOCRBackend):
             raise RuntimeError("Mock OCR backend unavailable")
         if self._fail_with is not None:
             raise self._fail_with
+        if self._responder is not None:
+            return tuple(self._responder(image, dpi))
         return self._lines
 
 
