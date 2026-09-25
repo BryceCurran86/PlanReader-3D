@@ -548,6 +548,9 @@ def make_parse_takeoff_file(app):
 
 def apply(app) -> None:
     """Install v1.2 import behaviour on the already-patched PlanReader module."""
+    if getattr(app, "_pb_takeoff_v12_applied", False):
+        return
+    app._pb_takeoff_v12_applied = True
     app.PB_IMPORT_VERSION = PB_IMPORT_VERSION
     app._match_takeoff_header = _make_matcher(app)
     app.detect_takeoff_columns = make_detect_takeoff_columns(app)
