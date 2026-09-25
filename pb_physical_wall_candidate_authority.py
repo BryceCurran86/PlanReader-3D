@@ -44,7 +44,7 @@ from pb_source_visibility_authority import (
     SourceVisibilityProducer,
     classify_native_segment_visibility,
 )
-from pb_vector_geometry_v130 import extract_native_page
+from pb_vector_geometry_v130 import detect_wall_pairs, extract_native_page
 from pb_viewport_segmentation import (
     ViewportSegmentationStatus,
     is_authoritative_derived_viewport,
@@ -1020,6 +1020,97 @@ def _producer_opening_relation_overrides(
     }
 
 
+
+def _producer_double_line_relation_overrides(
+    *,
+    segments: Sequence[Mapping[str, object]],
+    records: Sequence[PhysicalWallCandidateRecord],
+) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
+    """Promote only uniquely proven native double-line faces to SAME wall.
+
+    detect_wall_pairs is existing producer-side geometric evidence that two
+    native source primitives are parallel, wall-width separated, and overlap
+    sufficiently to form a double-line wall representation. This adapter does
+    not rank competing pairs. A source face is usable only when it has exactly
+    one reciprocal partner in the complete scoped candidate set, and each raw
+    face maps bijectively to exactly one W4 wall candidate. Anything else
+    remains under the baseline fail-closed equivalence classifier.
+
+    Raster segments are deliberately excluded: this proof is about immutable
+    native vector face provenance, not inferred raster proximity.
+    """
+    eligible_segments: list[dict] = []
+    for source in segments:
+        segment = dict(source)
+        if segment.get("source_kind") == RASTER_PDF_VISIBLE_SEGMENT:
+            continue
+        raw_id = str(segment.get("id") or "").strip()
+        if not raw_id:
+            continue
+        structural, _reasons = is_structural_candidate_segment(segment)
+        if not structural:
+            continue
+        eligible_segments.append(segment)
+
+    pair_rows = detect_wall_pairs(eligible_segments, 0.0)
+    partners: dict[str, set[str]] = {}
+    normalized_rows: list[tuple[str, str]] = []
+    for row in pair_rows:
+        left = str(row.get("face_a") or "").strip()
+        right = str(row.get("face_b") or "").strip()
+        if not left or not right or left == right:
+            continue
+        pair = tuple(sorted((left, right)))
+        normalized_rows.append(pair)
+        partners.setdefault(left, set()).add(right)
+        partners.setdefault(right, set()).add(left)
+
+    raw_to_candidates: dict[str, list[str]] = {}
+    for record in records:
+        for raw_id in record.physical_identity.source_primitive_ids:
+            raw_to_candidates.setdefault(str(raw_id), []).append(
+                record.wall_candidate_id
+            )
+
+    candidate_pairs: dict[tuple[str, str], set[PhysicalEquivalenceClass]] = {}
+    for left, right in sorted(set(normalized_rows)):
+        if partners.get(left) != {right} or partners.get(right) != {left}:
+            continue
+        left_candidates = sorted(set(raw_to_candidates.get(left, ())))
+        right_candidates = sorted(set(raw_to_candidates.get(right, ())))
+        if len(left_candidates) != 1 or len(right_candidates) != 1:
+            continue
+        left_wall = left_candidates[0]
+        right_wall = right_candidates[0]
+        if left_wall == right_wall:
+            continue
+        pair = tuple(sorted((left_wall, right_wall)))
+        candidate_pairs.setdefault(pair, set()).add(
+            PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+        )
+
+    return {
+        pair: next(iter(classifications))
+        for pair, classifications in candidate_pairs.items()
+        if len(classifications) == 1
+    }
+
+
+def _merge_relation_overrides(
+    *sources: Mapping[tuple[str, str], PhysicalEquivalenceClass],
+) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
+    """Combine independent positive proofs without resolving disagreements."""
+    merged: dict[tuple[str, str], set[PhysicalEquivalenceClass]] = {}
+    for source in sources:
+        for pair, classification in source.items():
+            merged.setdefault(tuple(sorted(pair)), set()).add(classification)
+    return {
+        pair: next(iter(classifications))
+        for pair, classifications in merged.items()
+        if len(classifications) == 1
+    }
+
+
 def _union_find_groups(
     pairs: Sequence[tuple[str, str]], members: Sequence[str]
 ) -> list[list[str]]:
@@ -1195,11 +1286,19 @@ def _assemble_scope_result(
         tuple(ordered_identities),
         walls_by_id={wall.candidate_id: wall for wall in ordered_walls},
     )
-    trusted_overrides = _producer_opening_relation_overrides(
+    opening_overrides = _producer_opening_relation_overrides(
         source_producer=source_producer,
         published=published,
         page_id=page_id,
         records=tuple(records),
+    )
+    face_pair_overrides = _producer_double_line_relation_overrides(
+        segments=segments,
+        records=tuple(records),
+    )
+    trusted_overrides = _merge_relation_overrides(
+        opening_overrides,
+        face_pair_overrides,
     )
     equivalence = _apply_trusted_relation_overrides(
         tuple(ordered_identities),
