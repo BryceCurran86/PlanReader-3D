@@ -774,6 +774,7 @@ def test_page_local_scoped_decode_can_materialize_authenticated_viewport(tmp_pat
     "layer,expected_reason",
     [
         ("A-GRID", None),
+        ("Structural - Grid", "structural_grid_source_layer_excluded"),
         ("A-DIMENSION", "dimension_layer_excluded"),
         ("A-ANNOTATION", "dimension_layer_excluded"),
         ("A-LEADER", "text_frame_layer_excluded"),
@@ -910,3 +911,103 @@ def test_proven_wall_strip_can_reconcile_disjoint_face_fragments() -> None:
     )
     assert reconciled.equivalence_groups == (("left_a", "left_b"),)
     assert reconciled.representative_wall_ids == ("left_a",)
+
+
+
+def _equivalence_identity(wall_id: str):
+    from pb_physical_wall_identity import PhysicalWallIdentity
+
+    return PhysicalWallIdentity(
+        wall_candidate_id=wall_id,
+        viewport_id="view",
+        candidate_identity_id=f"identity:{wall_id}",
+        path_fingerprint=((0.0, 0.0), (10.0, 0.0)),
+        source_primitive_ids=(f"raw:{wall_id}",),
+        edge_ids=(f"edge:{wall_id}",),
+        status=EvidenceResolutionStatus.CORROBORATED,
+    )
+
+
+def test_positive_same_subgroup_survives_ambient_ambiguity_for_normalization() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_physical_wall_identity import (
+        PhysicalEquivalenceClass,
+        PhysicalWallEquivalenceResolution,
+    )
+
+    identities = tuple(
+        _equivalence_identity(wall_id)
+        for wall_id in ("wall-a", "wall-b", "wall-c")
+    )
+    baseline = PhysicalWallEquivalenceResolution(
+        scope_viewport_id="view",
+        representative_wall_ids=(),
+        abstained_wall_ids=("wall-a", "wall-b", "wall-c"),
+        equivalence_groups=(),
+        ambiguous_wall_ids=("wall-a", "wall-b", "wall-c"),
+        same_wall_ids=(),
+        pair_classifications=(
+            ("wall-a", "wall-b", PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value),
+            ("wall-a", "wall-c", PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value),
+            ("wall-b", "wall-c", PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value),
+        ),
+        blocking_reasons_by_wall_id={
+            wall_id: ("ambiguous_physical_wall_equivalence",)
+            for wall_id in ("wall-a", "wall-b", "wall-c")
+        },
+    )
+
+    resolved = module._apply_trusted_relation_overrides(
+        identities,
+        baseline,
+        {("wall-a", "wall-b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL},
+    )
+
+    assert resolved.equivalence_groups == (("wall-a", "wall-b"),)
+    assert resolved.same_wall_ids == ("wall-a", "wall-b")
+    # Ambient ambiguity still blocks global publication.
+    assert resolved.representative_wall_ids == ()
+    assert set(resolved.abstained_wall_ids) == {"wall-a", "wall-b", "wall-c"}
+
+
+def test_distinct_inside_same_connected_subgroup_withholds_equivalence_group() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_physical_wall_identity import (
+        PhysicalEquivalenceClass,
+        PhysicalWallEquivalenceResolution,
+    )
+
+    identities = tuple(
+        _equivalence_identity(wall_id)
+        for wall_id in ("wall-a", "wall-b", "wall-c")
+    )
+    baseline = PhysicalWallEquivalenceResolution(
+        scope_viewport_id="view",
+        representative_wall_ids=(),
+        abstained_wall_ids=("wall-a", "wall-b", "wall-c"),
+        equivalence_groups=(),
+        ambiguous_wall_ids=("wall-a", "wall-b", "wall-c"),
+        same_wall_ids=(),
+        pair_classifications=(
+            ("wall-a", "wall-b", PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value),
+            ("wall-a", "wall-c", PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value),
+            ("wall-b", "wall-c", PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value),
+        ),
+        blocking_reasons_by_wall_id={
+            wall_id: ("ambiguous_physical_wall_equivalence",)
+            for wall_id in ("wall-a", "wall-b", "wall-c")
+        },
+    )
+
+    resolved = module._apply_trusted_relation_overrides(
+        identities,
+        baseline,
+        {
+            ("wall-a", "wall-b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
+            ("wall-b", "wall-c"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
+        },
+        allow_proven_same_over_distinct=False,
+    )
+
+    assert resolved.equivalence_groups == ()
+    assert resolved.same_wall_ids == ()

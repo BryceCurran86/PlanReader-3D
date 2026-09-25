@@ -396,6 +396,37 @@ def test_two_possible_physical_walls_abstain_as_ambiguous_ownership() -> None:
     assert status is EvidenceResolutionStatus.ABSTAINED
 
 
+def test_proven_same_wall_faces_collapse_to_one_terminator_owner() -> None:
+    lines = (
+        _line("w1", "raw-w1", 4.0, 0.0, 4.0, 20.0),
+        _line("w2", "raw-w2", 6.0, 0.0, 6.0, 20.0),
+    )
+    rec1 = SimpleNamespace(
+        wall_candidate_id="wall-1",
+        physical_identity=SimpleNamespace(source_primitive_ids=("raw-w1",)),
+    )
+    rec2 = SimpleNamespace(
+        wall_candidate_id="wall-2",
+        physical_identity=SimpleNamespace(source_primitive_ids=("raw-w2",)),
+    )
+    scope = SimpleNamespace(
+        records=(rec1, rec2),
+        equivalence=SimpleNamespace(
+            equivalence_groups=(("wall-1", "wall-2"),)
+        ),
+    )
+
+    target, source_segments, status = _target_from_terminator(
+        _term(5.0, 10.0),
+        lines,
+        scope,
+    )
+
+    assert target is rec1
+    assert status is EvidenceResolutionStatus.CORROBORATED
+    assert source_segments == ("raw-w1", "raw-w2")
+
+
 def test_positive_target_provenance_excludes_non_wall_terminator_hits() -> None:
     lines = (
         _line("leader", "raw-leader", 3.0, 10.0, 5.0, 10.0),

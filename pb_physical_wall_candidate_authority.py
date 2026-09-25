@@ -1336,6 +1336,26 @@ def _apply_trusted_relation_overrides(
         elif classification == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value:
             ambiguous_links.append(pair)
 
+    # A proven SAME subgroup remains positive identity evidence even when one
+    # of its members has unresolved relations to candidates outside that group.
+    # This does not make the full candidate universe publishable: publication
+    # below still uses SAME + AMBIGUOUS components and therefore remains
+    # fail-closed. A positive DISTINCT relation inside the SAME-connected
+    # subgroup is contradictory and withholds that subgroup entirely.
+    positive_same_groups: list[tuple[str, ...]] = []
+    if same_links:
+        for component in _union_find_groups(same_links, member_ids):
+            if len(component) < 2:
+                continue
+            contradictory = any(
+                pair_map.get(tuple(sorted((left, right))))
+                == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value
+                for index, left in enumerate(component)
+                for right in component[index + 1 :]
+            )
+            if not contradictory:
+                positive_same_groups.append(tuple(sorted(component)))
+
     related_links = same_links + ambiguous_links
     components = _union_find_groups(related_links, member_ids) if member_ids else []
     ambiguous_edges = {frozenset(pair) for pair in ambiguous_links}
@@ -1382,6 +1402,11 @@ def _apply_trusted_relation_overrides(
     for wall_id in member_ids:
         if wall_id not in linked and wall_id not in blockers:
             representatives.append(wall_id)
+
+    # Retain producer-proven SAME subgroups for downstream identity
+    # normalization even when ambient ambiguity blocks global publication.
+    # Deterministic de-duplication preserves any already-publishable SAME group.
+    same_groups = list(dict.fromkeys((*same_groups, *positive_same_groups)))
 
     representatives = list(dict.fromkeys(representatives))
     abstained = [wall_id for wall_id in member_ids if wall_id in blockers]
