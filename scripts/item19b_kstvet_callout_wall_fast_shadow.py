@@ -215,14 +215,6 @@ def run(pdf_path: Path) -> dict:
         source_locator=f"sha256://{EXPECTED_SHA256}",
         page_ids=(PAGE_ID,),
     )
-    source.augment_with_raster_visible_segments(
-        published.revision.revision_id,
-        page_ids=(PAGE_ID,),
-    )
-    published = source.published_snapshot_for_revision(
-        published.revision.revision_id
-    )
-
     page_scope_id = _decision_scope_id(PAGE_ID)
     page_segments, _, page_width, page_height = _source_page_segments(
         source_producer=source,
