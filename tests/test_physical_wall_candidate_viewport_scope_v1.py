@@ -514,6 +514,45 @@ def test_complete_viewport_scope_produces_topology_and_wall_roles(tmp_path: Path
     assert WallRoleClassification.INTERNAL in roles
 
 
+def test_source_topology_retains_exact_viewport_decision_scope(tmp_path: Path) -> None:
+    path = tmp_path / "scoped-topology.pdf"
+    _draw_two_adjacent_viewports(path, partial_shared_line=False)
+    _source, published, authority = _ingest(path)
+
+    doc = fitz.open(path)
+    try:
+        viewports = [
+            viewport
+            for viewport in segment_page_viewports(doc[0], page_number=1)
+            if viewport.status == ViewportSegmentationStatus.RESOLVED.value
+        ]
+    finally:
+        doc.close()
+    assert len(viewports) == 2
+
+    selectors = []
+    for viewport in viewports:
+        selector = authority.selector_for_viewport(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            page_id="1",
+            viewport_id=viewport.view_id,
+        )
+        assert selector is not None
+        selectors.append(selector)
+
+    topology = build_source_wall_topology_authority(authority)
+    assert topology._records
+    scoped_keys = tuple(topology._records)
+    assert all(len(key) == 7 for key in scoped_keys)
+    stored_scope_ids = {key[5] for key in scoped_keys}
+    assert {selector.decision_scope_id for selector in selectors} <= stored_scope_ids
+    for key, evidence in topology._records.items():
+        assert evidence.decision_scope_id == key[5]
+
+
 def test_incomplete_viewport_scope_still_refuses_source_topology(tmp_path: Path) -> None:
     path = tmp_path / "incomplete-topology.pdf"
     _draw_plan(path, crossing=True)
