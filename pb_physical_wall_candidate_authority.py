@@ -254,17 +254,23 @@ def _authenticated_viewports(page: fitz.Page, *, page_number: int) -> Optional[t
     rows = tuple(all_viewports)
     if any(not is_segment_page_viewports_product(viewport) for viewport in rows):
         return None
+    # Preserve F.07's authority distinction exactly:
+    # - RESOLVED vector-frame ownership remains independently authoritative;
+    # - DERIVED ownership is authoritative only when the complete usable
+    #   sibling set is non-overlapping, matching the migration adapter gate.
+    sibling_non_overlapping = validate_non_overlapping_viewports(rows)
     eligible = tuple(
         viewport
         for viewport in rows
         if viewport.bounding_box is not None
         and (
             viewport.status == ViewportSegmentationStatus.RESOLVED.value
-            or is_authoritative_derived_viewport(viewport)
+            or (
+                sibling_non_overlapping
+                and is_authoritative_derived_viewport(viewport)
+            )
         )
     )
-    if eligible and not validate_non_overlapping_viewports(eligible):
-        return None
     return rows, eligible
 
 
