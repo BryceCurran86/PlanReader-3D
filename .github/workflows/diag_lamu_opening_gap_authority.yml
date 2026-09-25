@@ -1,0 +1,121 @@
+name: Lamu Opening Gap Authority Probe
+
+on:
+  push:
+    branches: [diag/lamu-opening-gap-authority-probe]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download Lamu source
+        run: |
+          mkdir -p benchmarks/sources
+          curl -fL --retry 3 --retry-delay 2 -A 'Mozilla/5.0' \
+            'https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf' \
+            -o benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf
+          echo 'fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf' | sha256sum -c -
+      - name: Probe source spans and physical openings
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import fitz
+
+          from pb_wall_fill_internal_partition_evidence import resolve_dpc_all_walls_geometry
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_physical_opening_authority import PhysicalOpeningAuthority
+          from pb_migration_contracts import EvidenceResolutionStatus
+
+          path = Path("benchmarks/sources/lamu-ishakani-ecd-classrooms-boq.pdf")
+          payload = path.read_bytes()
+          doc = fitz.open(stream=payload, filetype="pdf")
+          page = doc[40]
+          geom = resolve_dpc_all_walls_geometry(
+              page.get_drawings(),
+              length_m=16.0,
+              width_m=8.2,
+              page=page,
+              page_text=page.get_text(),
+          )
+          print("LAMU_DPC_GEOM", json.dumps({
+              "status": geom.status,
+              "reason": geom.reason,
+              "scale_pt_per_m": geom.scale_pt_per_m,
+              "wall_thickness_m": geom.wall_thickness_m,
+              "transverse": [r.__dict__ for r in geom.transverse_runs],
+              "longitudinal": [r.__dict__ for r in geom.longitudinal_runs],
+              "total_internal_length_m": geom.total_internal_length_m,
+          }, sort_keys=True))
+          doc.close()
+
+          producer = SourceVisibilityProducer(
+              producer_method="lamu-opening-gap-authority-probe",
+              producer_version="1.0.0",
+          )
+          published = producer.ingest_native_pdf_bytes(
+              document_id="lamu-gap-probe",
+              source_bytes=payload,
+              source_locator="sha256://fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2",
+              page_ids=("41",),
+          )
+          visibility = producer.authority()
+          opening = PhysicalOpeningAuthority(visibility)
+
+          records = {}
+          for oid in published.visible_observation_ids:
+              sel = ObservationSelector(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  observation_id=oid,
+              )
+              res = opening.prove_existence(sel)
+              rec = res.existence_record
+              if (
+                  res.status is EvidenceResolutionStatus.CORROBORATED
+                  and rec is not None
+              ):
+                  records[rec.record_id] = rec
+
+          print("LAMU_PHYSICAL_OPENING_COUNT", len(records))
+          for rid, rec in sorted(records.items()):
+              geoms = []
+              for oid in rec.source_observation_ids:
+                  rr = visibility.resolve_visible(
+                      ObservationSelector(
+                          document_id=published.revision.document_id,
+                          revision_id=published.revision.revision_id,
+                          source_sha256=published.revision.source_sha256,
+                          snapshot_id=published.snapshot.snapshot_id,
+                          observation_id=oid,
+                      )
+                  )
+                  if rr.observation is not None:
+                      geoms.append({
+                          "id": oid,
+                          "geometry": list(rr.observation.geometry),
+                          "kind": rr.observation.observation_kind,
+                          "primitive": rr.observation.source_primitive_ref,
+                      })
+              print("LAMU_PHYSICAL_OPENING", json.dumps({
+                  "record_id": rid,
+                  "pattern": rec.structural_pattern,
+                  "semantic_class": rec.semantic_class,
+                  "support": geoms,
+              }, sort_keys=True))
+          PY
