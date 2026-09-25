@@ -36,7 +36,7 @@ import requests
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 
-from pb_takeoff_row_contract import EDITABLE_FIELDS as TAKEOFF_EDITABLE_FIELDS
+from pb_takeoff_row_contract import EDITABLE_FIELDS as TAKEOFF_EDITABLE_FIELDS, TAKEOFF_UNITS
 from pb_commercial_export_preflight_v163 import (
     derive_export_preflight,
     verify_toctou_and_publish_jobhub,
@@ -235,7 +235,7 @@ FINISH_SYSTEMS = [
     "To be confirmed",
 ]
 
-UNIT_OPTIONS = ["m²", "lm", "No.", "item", "L", "allowance"]
+UNIT_OPTIONS = list(TAKEOFF_UNITS)
 STATUS_OPTIONS = ["Measured", "Provisional measured", "To measure", "Allowance", "Excluded", "Not applicable"]
 INCLUSION_OPTIONS = ["INCLUSION", "SEPARATE ITEM", "PROVISIONAL", "EXCLUSION", "CLARIFICATION"]
 

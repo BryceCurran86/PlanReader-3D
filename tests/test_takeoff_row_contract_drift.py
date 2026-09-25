@@ -52,6 +52,8 @@ class ContractDefinitionTests(unittest.TestCase):
 
         self.assertEqual(tuple(app.TAKEOFF_COLUMNS), contract.EDITABLE_FIELDS)
         self.assertIsInstance(app.TAKEOFF_COLUMNS, list)
+        self.assertEqual(tuple(app.UNIT_OPTIONS), contract.TAKEOFF_UNITS)
+        self.assertIsInstance(app.UNIT_OPTIONS, list)
 
     def test_live_schema_has_every_contract_column(self):
         import pb_planreader_3d_app as app
