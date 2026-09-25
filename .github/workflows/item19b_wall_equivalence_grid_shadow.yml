@@ -41,6 +41,6 @@ jobs:
             -o /tmp/kstvet.pdf
           echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
 
-      - name: Run page 54 wall-authority shadow
+      - name: Run fast page 54 wall-authority shadow
         run: |
-          PYTHONPATH=. python scripts/wall_finish_face_binding_kstvet_shadow.py /tmp/kstvet.pdf
+          PYTHONPATH=. python scripts/item19b_kstvet_wall_authority_fast_shadow.py /tmp/kstvet.pdf
