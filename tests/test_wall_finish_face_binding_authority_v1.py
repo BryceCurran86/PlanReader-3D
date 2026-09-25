@@ -31,6 +31,7 @@ from pb_wall_finish_face_binding_authority import (
     _partial_scope,
     _semantic_face,
     _target_from_terminator,
+    _viewport_owned_lines,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_wall_role_authority import WallRoleClassification
@@ -80,6 +81,45 @@ def _line(obs: str, raw: str, x1: float, y1: float, x2: float, y2: float) -> _Li
 def _term(x: float, y: float, size: float = 2.0) -> _Terminator:
     box = (x - size, y - size, x + size, y + size)
     return _Terminator("term-1", box, (x, y))
+
+
+
+
+def test_viewport_owned_leader_lines_are_independent_of_wall_observations() -> None:
+    plan = SimpleNamespace(
+        view_id="plan",
+        bounding_box=(0.0, 0.0, 100.0, 100.0),
+    )
+    elevation = SimpleNamespace(
+        view_id="elevation",
+        bounding_box=(120.0, 0.0, 220.0, 100.0),
+    )
+    leader = _line("leader-obs", "leader-raw", 10.0, 10.0, 90.0, 10.0)
+    other = _line("other-obs", "other-raw", 130.0, 10.0, 200.0, 10.0)
+
+    assert _viewport_owned_lines(
+        (other, leader),
+        plan,
+        (plan, elevation),
+    ) == (leader,)
+
+
+def test_viewport_owned_leader_lines_abstain_on_competing_viewport_ownership() -> None:
+    first = SimpleNamespace(
+        view_id="first",
+        bounding_box=(0.0, 0.0, 100.0, 100.0),
+    )
+    second = SimpleNamespace(
+        view_id="second",
+        bounding_box=(50.0, 0.0, 150.0, 100.0),
+    )
+    ambiguous = _line("leader-obs", "leader-raw", 60.0, 10.0, 90.0, 10.0)
+
+    assert _viewport_owned_lines(
+        (ambiguous,),
+        first,
+        (first, second),
+    ) == ()
 
 
 def _transform_line(line: _Line, *, tx=0.0, ty=0.0, scale=1.0, quarter_turns=0) -> _Line:
