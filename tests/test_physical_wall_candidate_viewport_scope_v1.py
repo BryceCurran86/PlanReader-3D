@@ -695,3 +695,58 @@ def test_viewport_selector_address_does_not_accept_caller_bbox(tmp_path: Path) -
             viewport_id=_viewport_id(path),
             bbox=(0.0, 0.0, 10.0, 10.0),
         )
+
+
+def test_page_local_scoped_decode_can_materialize_authenticated_viewport(tmp_path: Path) -> None:
+    path = tmp_path / "page-local-source.pdf"
+    # Two-page source: only page 1 is decoded, proving that unrelated page 2
+    # coverage is not required for a page-1 authenticated viewport scope.
+    doc = fitz.open()
+    page = doc.new_page(width=520, height=400)
+    frame = fitz.Rect(40, 30, 420, 330)
+    page.draw_rect(frame, color=(0, 0, 0), width=1)
+    page.insert_text((80, 310), "GROUND FLOOR PLAN", fontsize=11)
+    for first, second in (
+        ((90, 80), (330, 80)),
+        ((330, 80), (330, 230)),
+        ((330, 230), (90, 230)),
+        ((90, 230), (90, 80)),
+        ((210, 80), (210, 230)),
+    ):
+        page.draw_line(first, second, color=(0, 0, 0), width=1)
+    doc.new_page(width=300, height=200)
+    _save(doc, path)
+
+    source = SourceVisibilityProducer(
+        producer_method="viewport-page-local-coverage-test",
+        producer_version="1.0",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="test:page-local-coverage",
+        source_bytes=path.read_bytes(),
+        source_locator=str(path),
+        page_ids=("1",),
+    )
+    assert published.coverage.state == "partial"
+    assert published.coverage.decoded_pages == (1,)
+
+    authority = PhysicalWallCandidateProducer.from_authenticated_viewports(
+        source,
+        page_ids=("1",),
+    ).authority()
+    viewport_id = _viewport_id(path)
+    selector = authority.selector_for_viewport(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=source.published_snapshot_for_revision(
+            published.revision.revision_id
+        ).snapshot.snapshot_id,
+        page_id="1",
+        viewport_id=viewport_id,
+    )
+    assert selector is not None
+    scope = authority.resolve_scope(selector)
+    assert scope.status is EvidenceResolutionStatus.CORROBORATED
+    assert scope.scope_complete is True
+    assert scope.records
