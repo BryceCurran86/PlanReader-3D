@@ -773,7 +773,7 @@ def test_page_local_scoped_decode_can_materialize_authenticated_viewport(tmp_pat
 @pytest.mark.parametrize(
     "layer,expected_reason",
     [
-        ("A-GRID", "structural_grid_layer_excluded"),
+        ("A-GRID", None),
         ("A-DIMENSION", "dimension_layer_excluded"),
         ("A-ANNOTATION", "dimension_layer_excluded"),
         ("A-LEADER", "text_frame_layer_excluded"),
@@ -794,6 +794,9 @@ def test_source_metadata_controls_nonwall_exclusion_not_geometry(
         }
     )
     if expected_reason is None:
+        # "GRID" by name alone is not currently authoritative non-wall
+        # metadata. The wall authority must keep it rather than invent a
+        # semantic exclusion from its apparent purpose.
         assert keep is True
         assert reasons == []
     else:
