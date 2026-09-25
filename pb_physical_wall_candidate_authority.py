@@ -1258,16 +1258,20 @@ def _apply_trusted_relation_overrides(
     member_ids = [identity.wall_candidate_id for identity in usable]
     same_links: list[tuple[str, str]] = []
     ambiguous_links: list[tuple[str, str]] = []
+    distinct_links: list[tuple[str, str]] = []
     for pair, classification in pair_map.items():
         if classification == PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value:
             same_links.append(pair)
         elif classification == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value:
             ambiguous_links.append(pair)
+        elif classification == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value:
+            distinct_links.append(pair)
 
     related_links = same_links + ambiguous_links
     components = _union_find_groups(related_links, member_ids) if member_ids else []
     ambiguous_edges = {frozenset(pair) for pair in ambiguous_links}
     same_edges = {frozenset(pair) for pair in same_links}
+    distinct_edges = {frozenset(pair) for pair in distinct_links}
     blockers: dict[str, list[str]] = {}
     ambiguous_walls: set[str] = set()
     same_groups: list[tuple[str, ...]] = []
@@ -1291,6 +1295,18 @@ def _apply_trusted_relation_overrides(
                     "ambiguous_physical_wall_equivalence"
                 )
             continue
+        has_distinct_conflict = has_same and any(
+            frozenset((left, right)) in distinct_edges
+            for index, left in enumerate(component)
+            for right in component[index + 1 :]
+        )
+        if has_distinct_conflict:
+            ambiguous_walls.update(component)
+            for wall_id in component:
+                blockers.setdefault(wall_id, []).append(
+                    "conflicting_physical_wall_equivalence"
+                )
+            continue
         if has_same and len(component) > 1:
             group = tuple(sorted(component))
             same_groups.append(group)
@@ -1310,6 +1326,28 @@ def _apply_trusted_relation_overrides(
     for wall_id in member_ids:
         if wall_id not in linked and wall_id not in blockers:
             representatives.append(wall_id)
+
+    # Positive SAME subgroups are retained independently of outside ambiguity.
+    # This is evidence that the members are one physical wall, not a claim that
+    # the subgroup exhausts every possible candidate for that wall. A positive
+    # DISTINCT relation inside a SAME-connected subgroup is contradictory and
+    # suppresses that subgroup.
+    positive_same_groups: list[tuple[str, ...]] = []
+    if same_links:
+        for same_component in _union_find_groups(same_links, member_ids):
+            if len(same_component) < 2:
+                continue
+            if any(
+                frozenset((left, right)) in distinct_edges
+                for index, left in enumerate(same_component)
+                for right in same_component[index + 1 :]
+            ):
+                continue
+            positive_same_groups.append(tuple(sorted(same_component)))
+
+    same_groups = list(dict.fromkeys(
+        (*same_groups, *positive_same_groups)
+    ))
 
     representatives = list(dict.fromkeys(representatives))
     abstained = [wall_id for wall_id in member_ids if wall_id in blockers]

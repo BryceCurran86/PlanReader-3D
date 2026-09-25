@@ -5,10 +5,15 @@ from types import SimpleNamespace
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateRecord,
+    _apply_trusted_relation_overrides,
     _merge_relation_overrides,
     _producer_closed_bearing_wall_strip_relation_overrides,
 )
-from pb_physical_wall_identity import PhysicalEquivalenceClass, PhysicalWallIdentity
+from pb_physical_wall_identity import (
+    PhysicalEquivalenceClass,
+    PhysicalWallEquivalenceResolution,
+    PhysicalWallIdentity,
+)
 from pb_source_visibility_authority import RASTER_PDF_VISIBLE_SEGMENT
 
 
@@ -165,3 +170,84 @@ def test_independent_positive_proofs_must_agree_before_merge() -> None:
     )
     assert pair not in merged
     assert merged[("wall-c", "wall-d")] is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+
+
+
+def _identity(wall_id: str) -> PhysicalWallIdentity:
+    return _record(wall_id, f"raw-{wall_id}").physical_identity
+
+
+def _ambiguous_baseline(*wall_ids: str) -> PhysicalWallEquivalenceResolution:
+    pairs = []
+    for index, left in enumerate(wall_ids):
+        for right in wall_ids[index + 1 :]:
+            pairs.append(
+                (left, right, PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value)
+            )
+    return PhysicalWallEquivalenceResolution(
+        scope_viewport_id="viewport",
+        representative_wall_ids=(),
+        abstained_wall_ids=tuple(wall_ids),
+        equivalence_groups=(),
+        ambiguous_wall_ids=tuple(wall_ids),
+        same_wall_ids=(),
+        pair_classifications=tuple(pairs),
+        blocking_reasons_by_wall_id={
+            wall_id: ("ambiguous_physical_wall_equivalence",)
+            for wall_id in wall_ids
+        },
+    )
+
+
+def test_positive_same_subgroup_survives_ambiguity_to_outside_candidate() -> None:
+    identities = tuple(_identity(wall_id) for wall_id in ("wall-a", "wall-b", "wall-c"))
+    resolved = _apply_trusted_relation_overrides(
+        identities,
+        _ambiguous_baseline("wall-a", "wall-b", "wall-c"),
+        {("wall-a", "wall-b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL},
+    )
+
+    assert resolved.representative_wall_ids == ()
+    assert set(resolved.abstained_wall_ids) == {"wall-a", "wall-b", "wall-c"}
+    assert resolved.equivalence_groups == (("wall-a", "wall-b"),)
+    assert resolved.same_wall_ids == ("wall-a", "wall-b")
+
+
+def test_positive_distinct_inside_same_connected_subgroup_suppresses_group() -> None:
+    identities = tuple(_identity(wall_id) for wall_id in ("wall-a", "wall-b", "wall-c"))
+    baseline = PhysicalWallEquivalenceResolution(
+        scope_viewport_id="viewport",
+        representative_wall_ids=(),
+        abstained_wall_ids=("wall-a", "wall-b", "wall-c"),
+        equivalence_groups=(),
+        ambiguous_wall_ids=("wall-a", "wall-b", "wall-c"),
+        same_wall_ids=(),
+        pair_classifications=(
+            ("wall-a", "wall-b", "ambiguous_physical_equivalence"),
+            ("wall-a", "wall-c", "distinct_physical_walls"),
+            ("wall-b", "wall-c", "ambiguous_physical_equivalence"),
+        ),
+        blocking_reasons_by_wall_id={
+            wall_id: ("ambiguous_physical_wall_equivalence",)
+            for wall_id in ("wall-a", "wall-b", "wall-c")
+        },
+    )
+
+    resolved = _apply_trusted_relation_overrides(
+        identities,
+        baseline,
+        {
+            ("wall-a", "wall-b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
+            ("wall-b", "wall-c"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
+        },
+        authoritative_same_pairs=(("wall-a", "wall-b"), ("wall-b", "wall-c")),
+    )
+
+    assert resolved.equivalence_groups == ()
+    assert resolved.same_wall_ids == ()
+    assert resolved.representative_wall_ids == ()
+    assert set(resolved.abstained_wall_ids) == {"wall-a", "wall-b", "wall-c"}
+    assert all(
+        "conflicting_physical_wall_equivalence" in resolved.blockers_for(wall_id)
+        for wall_id in ("wall-a", "wall-b", "wall-c")
+    )
