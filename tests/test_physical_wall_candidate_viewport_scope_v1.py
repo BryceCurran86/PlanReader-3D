@@ -1167,6 +1167,45 @@ def test_shared_source_face_micro_gap_uses_existing_stage_a_tolerance() -> None:
     }
 
 
+def test_shared_source_face_micro_gap_can_supersede_fragment_distinctness() -> None:
+    import pb_physical_wall_candidate_authority as module
+    from pb_physical_wall_identity import (
+        PhysicalEquivalenceClass,
+        resolve_physical_wall_equivalence,
+    )
+
+    segments = (_shared_face_segment("raw-face", 0.0, 0.0, 100.0, 0.0),)
+    records = (
+        _shared_face_record(
+            "wall-a",
+            path=((0.0, 0.0), (49.8, 0.0)),
+            raw_ids=("raw-face",),
+        ),
+        _shared_face_record(
+            "wall-b",
+            path=((50.2, 0.0), (100.0, 0.0)),
+            raw_ids=("raw-face",),
+        ),
+    )
+    identities = tuple(record.physical_identity for record in records)
+    baseline = resolve_physical_wall_equivalence(identities)
+    overrides = module._producer_shared_source_face_relation_overrides(
+        segments=segments,
+        records=records,
+    )
+    assert overrides == {
+        ("wall-a", "wall-b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+    }
+
+    reconciled = module._apply_trusted_relation_overrides(
+        identities,
+        baseline,
+        overrides,
+        allow_proven_same_over_distinct=True,
+    )
+    assert reconciled.equivalence_groups == (("wall-a", "wall-b"),)
+
+
 def test_shared_source_face_gap_beyond_stage_a_tolerance_abstains() -> None:
     import pb_physical_wall_candidate_authority as module
     from pb_wall_room_topology_stage_a import DEFAULT_GAP_SNAP_TOLERANCE_PT
