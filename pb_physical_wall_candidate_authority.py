@@ -23,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import math
+import re
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
@@ -1021,23 +1022,86 @@ def _producer_opening_relation_overrides(
 
 
 
-def _producer_double_line_relation_overrides(
+def _closed_four_line_source_path(segments: Sequence[Mapping[str, object]]) -> bool:
+    """Prove that four exact source lines form one closed four-edge path."""
+    if len(segments) != 4:
+        return False
+
+    clusters: list[tuple[Point, int]] = []
+    adjacency: dict[int, set[int]] = {}
+
+    def cluster_index(point: Point) -> int:
+        for index, (existing, count) in enumerate(clusters):
+            if (
+                abs(existing[0] - point[0]) <= _COORD_TOL
+                and abs(existing[1] - point[1]) <= _COORD_TOL
+            ):
+                clusters[index] = (existing, count + 1)
+                return index
+        clusters.append((point, 1))
+        return len(clusters) - 1
+
+    for segment in segments:
+        try:
+            first = (float(segment["x1"]), float(segment["y1"]))
+            second = (float(segment["x2"]), float(segment["y2"]))
+        except (KeyError, TypeError, ValueError):
+            return False
+        if math.hypot(second[0] - first[0], second[1] - first[1]) <= _COORD_TOL:
+            return False
+        left = cluster_index(first)
+        right = cluster_index(second)
+        if left == right:
+            return False
+        adjacency.setdefault(left, set()).add(right)
+        adjacency.setdefault(right, set()).add(left)
+
+    if len(clusters) != 4 or any(count != 2 for _point, count in clusters):
+        return False
+    if any(len(adjacency.get(index, ())) != 2 for index in range(4)):
+        return False
+
+    seen = {0}
+    frontier = [0]
+    while frontier:
+        current = frontier.pop()
+        for neighbour in adjacency.get(current, ()):
+            if neighbour not in seen:
+                seen.add(neighbour)
+                frontier.append(neighbour)
+    return len(seen) == 4
+
+
+def _source_layer_is_structural_bearing(segment: Mapping[str, object]) -> bool:
+    layer = str(segment.get("layer") or "").strip().lower()
+    if not layer:
+        return False
+    tokens = set(re.findall(r"[a-z0-9]+", layer))
+    return {"structural", "bearing"} <= tokens
+
+
+def _producer_closed_bearing_wall_strip_relation_overrides(
     *,
     segments: Sequence[Mapping[str, object]],
     records: Sequence[PhysicalWallCandidateRecord],
 ) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
-    """Promote only uniquely proven native double-line faces to SAME wall.
+    """Prove one physical wall from one closed native bearing-wall strip.
 
-    detect_wall_pairs is existing producer-side geometric evidence that two
-    native source primitives are parallel, wall-width separated, and overlap
-    sufficiently to form a double-line wall representation. This adapter does
-    not rank competing pairs. A source face is usable only when it has exactly
-    one reciprocal partner in the complete scoped candidate set, and each raw
-    face maps bijectively to exactly one W4 wall candidate. Anything else
-    remains under the baseline fail-closed equivalence classifier.
+    This is intentionally stronger than global parallel-line matching. A
+    positive SAME relation requires all of the following source-owned facts:
 
-    Raster segments are deliberately excluded: this proof is about immutable
-    native vector face provenance, not inferred raster proximity.
+    * one native PDF drawing path contributes exactly four visible line items;
+    * those four exact lines form one closed four-edge path;
+    * every edge is explicitly source-layered as Structural/Bearing;
+    * the existing wall-pair geometry detector finds exactly one eligible face
+      pair *inside that same closed source path*; its confidence/order is never
+      consulted;
+    * each proven face is owned by at least one W4 wall candidate.
+
+    All W4 fragments owning either proven face are then members of one
+    physical-wall equivalence group. This deliberately handles intersection
+    splitting of a single native face without nearest/first/score selection.
+    Raster geometry and open or multiply-pairable paths abstain.
     """
     candidate_raw_ids = {
         str(raw_id)
@@ -1045,62 +1109,71 @@ def _producer_double_line_relation_overrides(
         for raw_id in record.physical_identity.source_primitive_ids
         if str(raw_id)
     }
-    eligible_segments: list[dict] = []
+    raw_to_candidates: dict[str, set[str]] = {}
+    for record in records:
+        for raw_id in record.physical_identity.source_primitive_ids:
+            raw_to_candidates.setdefault(str(raw_id), set()).add(
+                record.wall_candidate_id
+            )
+
+    by_path: dict[int, list[dict]] = {}
     for source in segments:
         segment = dict(source)
         if segment.get("source_kind") == RASTER_PDF_VISIBLE_SEGMENT:
             continue
         raw_id = str(segment.get("id") or "").strip()
-        if not raw_id or raw_id not in candidate_raw_ids:
+        path_index = segment.get("path_index")
+        if not raw_id or path_index is None:
             continue
-        structural, _reasons = is_structural_candidate_segment(segment)
-        if not structural:
+        try:
+            path_key = int(path_index)
+        except (TypeError, ValueError):
             continue
-        eligible_segments.append(segment)
-
-    pair_rows = detect_wall_pairs(eligible_segments, 0.0)
-    partners: dict[str, set[str]] = {}
-    normalized_rows: list[tuple[str, str]] = []
-    for row in pair_rows:
-        left = str(row.get("face_a") or "").strip()
-        right = str(row.get("face_b") or "").strip()
-        if not left or not right or left == right:
-            continue
-        pair = tuple(sorted((left, right)))
-        normalized_rows.append(pair)
-        partners.setdefault(left, set()).add(right)
-        partners.setdefault(right, set()).add(left)
-
-    raw_to_candidates: dict[str, list[str]] = {}
-    for record in records:
-        for raw_id in record.physical_identity.source_primitive_ids:
-            raw_to_candidates.setdefault(str(raw_id), []).append(
-                record.wall_candidate_id
-            )
+        by_path.setdefault(path_key, []).append(segment)
 
     candidate_pairs: dict[tuple[str, str], set[PhysicalEquivalenceClass]] = {}
-    for left, right in sorted(set(normalized_rows)):
-        if partners.get(left) != {right} or partners.get(right) != {left}:
+    for _path_index, path_segments in sorted(by_path.items()):
+        if not _closed_four_line_source_path(path_segments):
             continue
-        left_candidates = sorted(set(raw_to_candidates.get(left, ())))
-        right_candidates = sorted(set(raw_to_candidates.get(right, ())))
-        if len(left_candidates) != 1 or len(right_candidates) != 1:
+        if not all(_source_layer_is_structural_bearing(segment) for segment in path_segments):
             continue
-        left_wall = left_candidates[0]
-        right_wall = right_candidates[0]
-        if left_wall == right_wall:
+
+        path_raw_ids = {
+            str(segment.get("id") or "").strip()
+            for segment in path_segments
+        }
+        if not path_raw_ids & candidate_raw_ids:
             continue
-        pair = tuple(sorted((left_wall, right_wall)))
-        candidate_pairs.setdefault(pair, set()).add(
-            PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
-        )
+
+        face_pairs = {
+            tuple(sorted((str(row.get("face_a") or ""), str(row.get("face_b") or ""))))
+            for row in detect_wall_pairs(path_segments, 0.0)
+            if str(row.get("face_a") or "")
+            and str(row.get("face_b") or "")
+        }
+        if len(face_pairs) != 1:
+            continue
+        left_raw, right_raw = next(iter(face_pairs))
+        left_candidates = raw_to_candidates.get(left_raw, set())
+        right_candidates = raw_to_candidates.get(right_raw, set())
+        if not left_candidates or not right_candidates:
+            continue
+
+        group = sorted(left_candidates | right_candidates)
+        if len(group) < 2:
+            continue
+        for index, left_wall in enumerate(group):
+            for right_wall in group[index + 1 :]:
+                pair = tuple(sorted((left_wall, right_wall)))
+                candidate_pairs.setdefault(pair, set()).add(
+                    PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+                )
 
     return {
         pair: next(iter(classifications))
         for pair, classifications in candidate_pairs.items()
         if len(classifications) == 1
     }
-
 
 def _merge_relation_overrides(
     *sources: Mapping[tuple[str, str], PhysicalEquivalenceClass],
@@ -1298,7 +1371,7 @@ def _assemble_scope_result(
         page_id=page_id,
         records=tuple(records),
     )
-    face_pair_overrides = _producer_double_line_relation_overrides(
+    face_pair_overrides = _producer_closed_bearing_wall_strip_relation_overrides(
         segments=segments,
         records=tuple(records),
     )
