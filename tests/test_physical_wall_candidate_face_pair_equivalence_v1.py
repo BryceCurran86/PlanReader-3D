@@ -211,3 +211,59 @@ def test_authenticated_wall_assembly_can_supersede_fragment_distinctness_only_wh
     assert source_assembly.pair_classifications == (
         ("wall-a", "wall-b", PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value),
     )
+
+
+def _baseline_resolution(pair_rows):
+    wall_ids = sorted({wall_id for row in pair_rows for wall_id in row[:2]})
+    return PhysicalWallEquivalenceResolution(
+        scope_viewport_id="viewport",
+        representative_wall_ids=tuple(wall_ids),
+        abstained_wall_ids=(),
+        equivalence_groups=(),
+        ambiguous_wall_ids=(),
+        same_wall_ids=(),
+        pair_classifications=tuple(pair_rows),
+        blocking_reasons_by_wall_id={},
+    )
+
+
+def test_positive_same_subgroup_survives_ambient_ambiguity_for_normalization_only() -> None:
+    identities = tuple(
+        _record(wall_id, f"raw-{wall_id}").physical_identity
+        for wall_id in ("wall-a", "wall-b", "wall-c")
+    )
+    baseline = _baseline_resolution((
+        ("wall-a", "wall-b", PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value),
+        ("wall-a", "wall-c", PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value),
+        ("wall-b", "wall-c", PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value),
+    ))
+    result = _apply_trusted_relation_overrides(
+        identities,
+        baseline,
+        {("wall-a", "wall-b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL},
+    )
+    assert result.equivalence_groups == (("wall-a", "wall-b"),)
+    # Publication remains fail-closed because the SAME subgroup has unresolved
+    # relations to wall-c.
+    assert set(result.abstained_wall_ids) == {"wall-a", "wall-b", "wall-c"}
+
+
+def test_distinct_inside_same_connected_component_withholds_equivalence_group() -> None:
+    identities = tuple(
+        _record(wall_id, f"raw-{wall_id}").physical_identity
+        for wall_id in ("wall-a", "wall-b", "wall-c")
+    )
+    baseline = _baseline_resolution((
+        ("wall-a", "wall-b", PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value),
+        ("wall-b", "wall-c", PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value),
+        ("wall-a", "wall-c", PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value),
+    ))
+    result = _apply_trusted_relation_overrides(
+        identities,
+        baseline,
+        {
+            ("wall-a", "wall-b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
+            ("wall-b", "wall-c"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
+        },
+    )
+    assert result.equivalence_groups == ()
