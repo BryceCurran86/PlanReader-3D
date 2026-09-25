@@ -1,0 +1,214 @@
+name: Item19B KSTVET Downstream Chain Probe
+
+on:
+  push:
+    branches: [diag/item19b-899-downstream-chain]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Run downstream authority probe
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
+          from pb_live_opening_deduction_composition import compose_live_opening_deductions
+          from pb_live_gross_wall_geometry_composition import compose_live_gross_wall_geometry
+          from pb_live_net_wall_boolean_composition import compose_live_net_wall_boolean_union
+          from pb_live_whole_wall_role_composition import compose_live_whole_wall_roles
+          from pb_live_external_net_wall_publication import compose_live_external_net_wall_publication
+          from pb_wall_finish_face_binding_authority import WallFinishFaceBindingProducer
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-downstream-probe",
+              producer_version="1.0",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-downstream",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+          )
+          revision_id=published.revision.revision_id
+          pages=("54",)
+
+          wall_opening=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=revision_id,
+              page_ids=pages,
+          )
+          print("WALL_OPENING", json.dumps({
+              "status":wall_opening.status.value,
+              "reasons":list(wall_opening.reason_codes),
+              "wall_scopes":[{
+                  "page":t.page_id,"status":t.status.value,"complete":t.scope_complete,
+                  "reasons":list(t.reason_codes),"walls":len(t.wall_candidate_ids)
+              } for t in wall_opening.wall_scopes],
+              "bindings":[{
+                  "opening":t.opening_identity_id,"page":t.page_id,"status":t.status.value,
+                  "reasons":list(t.reason_codes),"host":t.host_wall_id,
+                  "members":list(t.member_wall_candidate_ids)
+              } for t in wall_opening.opening_bindings],
+              "frames":[{
+                  "opening":t.opening_identity_id,"status":t.status.value,
+                  "reasons":list(t.reason_codes),"host":t.host_wall_id,
+                  "whole":list(t.whole_wall_candidate_ids)
+              } for t in wall_opening.host_frames],
+              "universe": {
+                  p: {
+                      "status": r.status.value,
+                      "complete": bool(r.decision_scope_complete),
+                      "reasons": list(r.reason_codes),
+                      "members": list(r.record.accounted_member_ids) if r.record else []
+                  } for p,r in wall_opening.opening_universe_results.items()
+              }
+          }, sort_keys=True))
+
+          voids=compose_live_physical_opening_voids(
+              source_visibility_producer=source,
+              wall_opening_composition=wall_opening,
+          )
+          print("PHYSICAL_VOIDS", json.dumps({
+              "status":voids.status.value,
+              "reasons":list(voids.reason_codes),
+              "traces":[{
+                  "opening":t.opening_identity_id,"page":t.page_id,
+                  "width":t.width_status.value,"height":t.height_status.value,
+                  "vertical":t.vertical_status.value,"scale":t.scale_status.value,
+                  "void":t.void_status.value,
+                  "void_reasons":list(t.void_reason_codes),
+                  "void_record":t.void_record_id
+              } for t in voids.traces]
+          }, sort_keys=True))
+
+          targets=("external_key_pointing","internal_plaster","internal_paint")
+          deductions=compose_live_opening_deductions(
+              source_visibility_producer=source,
+              wall_opening_composition=wall_opening,
+              physical_void_composition=voids,
+              target_scope_ids=targets,
+          )
+          print("DEDUCTIONS", json.dumps({
+              "status":deductions.status.value,
+              "reasons":list(deductions.reason_codes),
+              "traces":[{
+                  "opening":t.opening_identity_id,"page":t.page_id,"target":t.target_scope_id,
+                  "target_status":t.target_status.value,
+                  "rule_status":t.rule_status.value,
+                  "applicability_status":t.applicability_status.value,
+                  "deduction_status":t.deduction_status.value,
+                  "deduction_reasons":list(t.deduction_reason_codes),
+                  "deduction_record":t.deduction_record_id
+              } for t in deductions.traces]
+          }, sort_keys=True))
+
+          gross=compose_live_gross_wall_geometry(
+              source_visibility_producer=source,
+              wall_opening_composition=wall_opening,
+              physical_void_composition=voids,
+          )
+          print("GROSS", json.dumps({
+              "status":gross.status.value,
+              "reasons":list(gross.reason_codes),
+              "traces":[{
+                  "wall":t.physical_wall_id,"page":t.page_id,"status":t.status.value,
+                  "reasons":list(t.reason_codes),"record":t.record_id,
+                  "length_m":t.length_m,"height_m":t.height_m,"gross_area_m2":t.gross_area_m2
+              } for t in gross.traces]
+          }, sort_keys=True))
+
+          roles=compose_live_whole_wall_roles(gross_wall_composition=gross)
+          print("WHOLE_WALL_ROLES", json.dumps({
+              "status":roles.status.value,
+              "reasons":list(roles.reason_codes),
+              "traces":[{
+                  "wall":t.physical_wall_id,"page":t.page_id,"status":t.status.value,
+                  "reasons":list(t.reason_codes),"role":str(t.role.value if t.role else None),
+                  "record":t.record_id
+              } for t in roles.traces]
+          }, sort_keys=True))
+
+          net=compose_live_net_wall_boolean_union(
+              wall_opening_composition=wall_opening,
+              physical_void_composition=voids,
+              opening_deduction_composition=deductions,
+              gross_wall_composition=gross,
+          )
+          print("NET", json.dumps({
+              "status":net.status.value,
+              "reasons":list(net.reason_codes),
+              "traces":[{
+                  "wall":t.physical_wall_id,"page":t.page_id,"target":t.target_scope_id,
+                  "status":t.status.value,"reasons":list(t.reason_codes),
+                  "record":t.record_id,"gross":t.gross_area_m2,
+                  "void":t.void_union_area_m2,"net":t.net_area_m2
+              } for t in net.traces]
+          }, sort_keys=True))
+
+          for target in targets:
+              pub=compose_live_external_net_wall_publication(
+                  gross_wall_composition=gross,
+                  net_wall_composition=net,
+                  whole_wall_role_composition=roles,
+                  target_scope_id=target,
+              )
+              print("EXTERNAL_NET_PUBLICATION", json.dumps({
+                  "target":target,"status":pub.status.value,
+                  "reasons":list(pub.reason_codes),
+                  "value":pub.quantity_evidence.value if pub.quantity_evidence else None,
+                  "walls":list(pub.external_wall_ids)
+              }, sort_keys=True))
+
+          finish=WallFinishFaceBindingProducer.from_source_visibility_producer(
+              source,page_ids=pages
+          )
+          print("FINISH_BINDINGS", json.dumps([
+              {
+                  "status":r.status.value,
+                  "reasons":list(r.reason_codes),
+                  "bindings":[{
+                      "binding_id":b.binding_id,
+                      "wall":b.physical_wall_id,
+                      "wall_scope":b.physical_wall_decision_scope_id,
+                      "face":b.physical_face_id,
+                      "face_role":b.physical_face_role.value,
+                      "trade":b.trade_scope_id,
+                      "material":b.finish_material,
+                      "source_face_segments":list(b.source_face_segment_ids),
+                      "complete":b.decision_scope_complete
+                  } for b in r.bindings],
+                  "scopes":[{
+                      "trade":s.trade_scope_id,
+                      "material":s.finish_material,
+                      "covered":list(s.covered_face_ids),
+                      "targets":list(s.target_face_ids),
+                      "complete":s.decision_scope_complete,
+                      "status":s.scope_status.value
+                  } for s in r.scope_records]
+              } for r in finish.published_results()
+          ], sort_keys=True))
+          PY
