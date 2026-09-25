@@ -411,6 +411,7 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
         # be inspected even while SourceExecutionCalloutAuthority remains owned
         # by another agent. Raw text never enters production binding authority.
         preflight["raw_callout_wall_hits"] = []
+        seen_raw_wall_hits = set()
         for raw in target_sequence_callouts:
             annotation_bbox = tuple(float(value) for value in raw["bbox"])
             text_height = float(raw["text_height"])
@@ -473,6 +474,14 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
                         for record in matching
                     }
                 )
+                raw_hit_signature = (
+                    raw["text"],
+                    term.primitive_id,
+                    tuple(normalized_ids),
+                )
+                if raw_hit_signature in seen_raw_wall_hits:
+                    continue
+                seen_raw_wall_hits.add(raw_hit_signature)
                 preflight["raw_callout_wall_hits"].append(
                     {
                         "text": raw["text"],
