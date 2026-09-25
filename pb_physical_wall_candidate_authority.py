@@ -57,6 +57,7 @@ from pb_viewport_segmentation import (
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 from pb_wall_room_topology_junction_classifier import classify_junctions
 from pb_wall_room_topology_stage_a import (
+    DEFAULT_GAP_SNAP_TOLERANCE_PT,
     build_wall_graph_for_viewport,
     is_structural_candidate_segment,
 )
@@ -1318,9 +1319,12 @@ def _producer_shared_source_face_relation_overrides(
 
     Comparison is narrowed by immutable source primitive id rather than spatial
     proximity. SAME requires a shared native Structural/Bearing primitive, both
-    reconstructed paths lying collinearly on that exact source line, and real
-    longitudinal overlap. Nearby independent walls, perpendicular junction
-    branches, raster-only geometry and non-overlapping fragments abstain.
+    reconstructed paths lying collinearly on that exact source line, and either
+    real longitudinal overlap or a residual gap no larger than Stage A's existing
+    drafting/snap tolerance. The latter is valid only because the immutable native
+    source primitive itself is one continuous line across the gap. Nearby
+    independent walls, perpendicular junction branches, raster-only geometry and
+    larger disconnected fragments abstain.
     """
     segment_by_id = {
         str(segment.get("id") or ""): segment
@@ -1380,7 +1384,17 @@ def _producer_shared_source_face_relation_overrides(
                     left_interval[0], right_interval[0]
                 )
                 if overlap <= _COORD_TOL:
-                    continue
+                    gap = max(
+                        left_interval[0],
+                        right_interval[0],
+                    ) - min(
+                        left_interval[1],
+                        right_interval[1],
+                    )
+                    if gap < 0.0:
+                        gap = 0.0
+                    if gap > DEFAULT_GAP_SNAP_TOLERANCE_PT:
+                        continue
                 pair = tuple(
                     sorted((left.wall_candidate_id, right.wall_candidate_id))
                 )
