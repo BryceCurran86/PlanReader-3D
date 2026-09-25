@@ -27,7 +27,6 @@ from pb_wall_finish_face_binding_authority import (
 )
 from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateProducer,
-    PhysicalWallCandidateSelector,
 )
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -286,20 +285,9 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
             physical_wall_candidate_authority=wall_authority
         )
 
-        page_scope = wall_authority.resolve_scope(
-            PhysicalWallCandidateSelector(
-                document_id=published.revision.document_id,
-                revision_id=published.revision.revision_id,
-                source_sha256=published.revision.source_sha256,
-                snapshot_id=published.snapshot.snapshot_id,
-                page_id=PAGE_ID,
-                decision_scope_id=f"wall-source:page-{PAGE_ID}",
-            )
-        )
         preflight["page_wall_scope"] = {
-            "wall_candidate_count": len(page_scope.records),
-            "scope_complete": page_scope.scope_complete,
-            "reason_codes": list(page_scope.reason_codes),
+            "materialized": False,
+            "reason": "viewport_only_authority_avoids_full_page_wall_graph",
         }
         preflight["viewport_wall_scopes"] = []
         for viewport in viewports:
