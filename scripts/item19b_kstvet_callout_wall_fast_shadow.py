@@ -42,6 +42,7 @@ from pb_wall_finish_face_binding_authority import (
     _leader_paths,
     _page_visible_lines,
     _segment_intersects_bbox as _geometry_intersects_bbox,
+    _viewport_owned_lines,
 )
 from pb_wall_room_topology_stage_a import is_structural_candidate_segment
 
@@ -277,21 +278,13 @@ def run(pdf_path: Path) -> dict:
                     viewport=viewport,
                 )
             scope = scope_by_viewport[viewport.view_id]
-            # Annotation leader evidence is intentionally not part of the wall
-            # source-observation universe. Discover leader paths from all native
-            # visible lines geometrically owned by this authenticated viewport;
-            # physical-wall ownership below still comes only from wall_scope.
-            owned_lines = tuple(
-                line
-                for line in visible_lines
-                if all(
-                    viewport.bounding_box[0] <= point[0] <= viewport.bounding_box[2]
-                    and viewport.bounding_box[1] <= point[1] <= viewport.bounding_box[3]
-                    for point in (
-                        (line.geometry[0], line.geometry[1]),
-                        (line.geometry[2], line.geometry[3]),
-                    )
-                )
+            # Use the same exact, fail-closed viewport ownership rule as the
+            # production finish binder. Wall targeting below remains confined
+            # to producer-owned physical-wall records.
+            owned_lines = _viewport_owned_lines(
+                visible_lines,
+                viewport,
+                eligible,
             )
             terms = tuple(
                 term
