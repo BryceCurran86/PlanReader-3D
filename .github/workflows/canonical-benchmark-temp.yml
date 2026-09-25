@@ -24,51 +24,63 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-ci-v1228.txt
 
-      - name: Download and verify registered benchmark sources
+      - name: Prepare canonical five-project suite and verify sources
         run: |
           python - <<'PY'
           from pathlib import Path
-          import hashlib, json, time, urllib.request
+          import hashlib, json, shutil, time, urllib.request
 
-          base = Path("benchmarks/public_tenders")
-          out = Path("benchmarks/sources")
-          out.mkdir(parents=True, exist_ok=True)
-          downloaded = {}
+          ids = [
+              "tenders_ke_kstvet_cbc_classroom",
+              "tenders_ke_murera_science_lab",
+              "tenders_ke_ghazi_science_lab",
+              "tenders_ke_lamu_ishakani_ecd_classrooms",
+              "tenders_ke_umma_hostels",
+          ]
 
-          for manifest_path in sorted(base.glob("*/download_manifest.json")):
-              data = json.loads(manifest_path.read_text(encoding="utf-8"))
-              url = data.get("source_url")
-              docs = data.get("documents") or []
-              if not url or not docs:
-                  continue
-              targets = {}
-              for doc in docs:
+          source_base = Path("benchmarks/public_tenders")
+          suite = Path("/tmp/planreader-canonical-five")
+          sources = Path("benchmarks/sources")
+          suite.mkdir(parents=True, exist_ok=True)
+          sources.mkdir(parents=True, exist_ok=True)
+
+          for benchmark_id in ids:
+              src = source_base / benchmark_id
+              dst = suite / benchmark_id
+              if dst.exists():
+                  shutil.rmtree(dst)
+              shutil.copytree(src, dst)
+
+              manifest = json.loads((src / "download_manifest.json").read_text(encoding="utf-8"))
+              url = manifest["source_url"]
+              unique = {}
+              for doc in manifest.get("documents", []):
                   filename = str(doc.get("filename") or "").strip()
                   sha = str(doc.get("sha256") or "").strip().lower()
                   if filename:
-                      targets[filename] = sha
-              for filename, expected_sha in targets.items():
-                  target = out / filename
-                  key = (url, filename)
-                  if target.exists():
-                      actual = hashlib.sha256(target.read_bytes()).hexdigest()
-                      if not expected_sha or actual == expected_sha:
-                          print(f"REUSE {filename} {actual}")
-                          downloaded[key] = actual
-                          continue
-                      target.unlink()
-                  req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0 PlanReaderBenchmark/1.0"})
+                      unique[filename] = sha
+
+              for filename, expected_sha in unique.items():
+                  target = sources / filename
+                  req = urllib.request.Request(
+                      url,
+                      headers={"User-Agent":"Mozilla/5.0 PlanReaderBenchmark/1.0"},
+                  )
                   last = None
                   for attempt in range(3):
                       try:
-                          with urllib.request.urlopen(req, timeout=120) as resp:
+                          with urllib.request.urlopen(req, timeout=180) as resp:
                               payload = resp.read()
-                          target.write_bytes(payload)
                           actual = hashlib.sha256(payload).hexdigest()
                           if expected_sha and actual != expected_sha:
-                              raise RuntimeError(f"SHA mismatch for {filename}: {actual} != {expected_sha}")
-                          print(f"DOWNLOADED {filename} bytes={len(payload)} sha256={actual}")
-                          downloaded[key] = actual
+                              raise RuntimeError(
+                                  f"SHA mismatch for {filename}: {actual} != {expected_sha}"
+                              )
+                          target.write_bytes(payload)
+                          print(
+                              f"VERIFIED {benchmark_id} {filename} "
+                              f"bytes={len(payload)} sha256={actual}"
+                          )
                           break
                       except Exception as exc:
                           last = exc
@@ -77,21 +89,27 @@ jobs:
                           if attempt < 2:
                               time.sleep(5 * (attempt + 1))
                   else:
-                      raise SystemExit(f"FAILED download {url} -> {filename}: {last}")
-
-          print(f"Verified source files: {len(downloaded)}")
+                      raise SystemExit(
+                          f"FAILED {benchmark_id}: {url} -> {filename}: {last}"
+                      )
           PY
 
-      - name: Run canonical benchmark --all
+      - name: Run canonical five-project benchmark --all
         run: |
-          mkdir -p benchmark_results
+          rm -rf benchmark_results/canonical-five-current
+          mkdir -p benchmark_results/canonical-five-current
           set -o pipefail
-          python pb_benchmark_accuracy_engine.py --all --require-local-sources 2>&1 | tee benchmark_results/canonical-run.log
+          python pb_benchmark_accuracy_engine.py \
+            --all \
+            --require-local-sources \
+            --benchmarks-dir /tmp/planreader-canonical-five \
+            --output-dir benchmark_results/canonical-five-current \
+            2>&1 | tee benchmark_results/canonical-five-current/canonical-run.log
 
       - name: Upload canonical benchmark reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: canonical-benchmark-current-main
-          path: benchmark_results/
+          name: canonical-five-current-main
+          path: benchmark_results/canonical-five-current/
           if-no-files-found: warn
