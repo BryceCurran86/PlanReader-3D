@@ -503,6 +503,15 @@ def test_page_wide_keyword_does_not_create_finish_semantics() -> None:
     assert _finish_semantics("KEY TO FINISH EXTERNALLY") == ()
 
 
+def test_leader_endpoint_binary32_roundoff_from_text_bbox_still_binds() -> None:
+    annotation = (680.0, 8.0, 700.0, 12.0)
+    # Real PDF text/vector APIs can surface the same source coordinate a few
+    # binary32 roundoff units apart. This 0.00025pt gap is within that bound at
+    # page coordinate ~700 and must not sever an otherwise exact leader chain.
+    lines = (_line("roundoff", "raw", 700.00025, 10.0, 5.0, 10.0),)
+    assert _leader_paths(annotation, lines, (_term(5.0, 10.0),), 0.01)
+
+
 def test_leader_endpoint_merely_near_text_does_not_bind() -> None:
     annotation = (20.0, 8.0, 30.0, 12.0)
     # The 0.005pt gap is smaller than the legacy epsilon but is still a gap.
