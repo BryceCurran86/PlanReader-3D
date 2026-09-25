@@ -564,7 +564,7 @@ class WallRoleProducer:
         # Reissue the exact producer-owned wall selector. Viewport selectors
         # are sealed by PhysicalWallCandidateAuthority; never reconstruct one
         # from caller strings and never fall back to page scope.
-        cand_sel = self._wall_authority.selector_for_decision_scope(
+        cand_sel = self._wall_candidates.selector_for_decision_scope(
             document_id=selector.document_id,
             revision_id=selector.revision_id,
             source_sha256=selector.source_sha256,
