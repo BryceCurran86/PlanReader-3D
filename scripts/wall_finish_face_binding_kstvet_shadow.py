@@ -59,6 +59,7 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
         document_id="kstvet-item19b-shadow",
         source_bytes=payload,
         source_locator=f"sha256://{EXPECTED_SHA256}",
+        page_ids=(PAGE_ID,),
     )
     print("ITEM19B_STAGE ingest_page54_done", flush=True)
     pdf = __import__("fitz").open(stream=payload, filetype="pdf")
