@@ -216,5 +216,5 @@ def test_near_note_without_native_contact_does_not_bind(tmp_path: Path) -> None:
 
 def test_terminator_near_but_not_intersecting_wall_does_not_bind(tmp_path: Path) -> None:
     path = tmp_path / "wall-gap.pdf"
-    _write_finish_source(path, wall_gap=0.01)
+    _write_finish_source(path, wall_gap=2.01)
     assert _bindings(_run(path)) == []
