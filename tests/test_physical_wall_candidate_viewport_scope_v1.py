@@ -540,41 +540,35 @@ def test_complete_viewport_scope_produces_topology_and_wall_roles(tmp_path: Path
 
 def test_source_topology_retains_exact_viewport_decision_scope(tmp_path: Path) -> None:
     path = tmp_path / "scoped-topology.pdf"
-    _draw_two_adjacent_viewports(path, partial_shared_line=False)
-    _source, published, authority = _ingest(path)
-
-    doc = fitz.open(path)
-    try:
-        viewports = [
-            viewport
-            for viewport in segment_page_viewports(doc[0], page_number=1)
-            if viewport.status == ViewportSegmentationStatus.RESOLVED.value
-        ]
-    finally:
-        doc.close()
-    assert len(viewports) == 2
-
-    selectors = []
-    for viewport in viewports:
-        selector = authority.selector_for_viewport(
-            document_id=published.revision.document_id,
-            revision_id=published.revision.revision_id,
-            source_sha256=published.revision.source_sha256,
-            snapshot_id=published.snapshot.snapshot_id,
-            page_id="1",
-            viewport_id=viewport.view_id,
-        )
-        assert selector is not None
-        selectors.append(selector)
+    _draw_plan(path)
+    _source, published, authority, selector, scope = _viewport_scope(path)
+    assert scope.scope_complete is True
 
     topology = build_source_wall_topology_authority(authority)
     assert topology._records
     scoped_keys = tuple(topology._records)
     assert all(len(key) == 7 for key in scoped_keys)
-    stored_scope_ids = {key[5] for key in scoped_keys}
-    assert {selector.decision_scope_id for selector in selectors} <= stored_scope_ids
+    assert {key[5] for key in scoped_keys} == {selector.decision_scope_id}
     for key, evidence in topology._records.items():
         assert evidence.decision_scope_id == key[5]
+
+    owned_wall_id = next(iter(topology._records))[6]
+    exact = WallRoleSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=scope.snapshot_id,
+        page_id="1",
+        decision_scope_id=selector.decision_scope_id,
+        physical_wall_id=owned_wall_id,
+    )
+    assert topology.get_evidence(exact) is not None
+
+    wrong_scope = replace(
+        exact,
+        decision_scope_id="wall-source:viewport:1:other:deadbeef",
+    )
+    assert topology.get_evidence(wrong_scope) is None
 
 
 def test_incomplete_viewport_scope_still_refuses_source_topology(tmp_path: Path) -> None:
