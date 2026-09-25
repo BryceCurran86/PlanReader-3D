@@ -282,7 +282,9 @@ def test_compound_verandah_all_walls_dpc_includes_longitudinal_and_transverse_in
     page.draw_rect(fitz.Rect(x0, y0, x1, y0 + thickness_pt), color=None, fill=(0, 0, 0))
     page.draw_rect(fitz.Rect(x0, y0, x0 + thickness_pt, y_classroom_bottom), color=None, fill=(0, 0, 0))
     page.draw_rect(fitz.Rect(x1 - thickness_pt, y0, x1, y_classroom_bottom), color=None, fill=(0, 0, 0))
-    page.draw_rect(fitz.Rect(mid_x - thickness_pt / 2.0, y0, mid_x + thickness_pt / 2.0, y_classroom_bottom), color=None, fill=(0, 0, 0))
+    # Full-depth transverse continuation is physically drawn in the positive
+    # fixture; its 8.2m quantity must come from these source endpoints.
+    page.draw_rect(fitz.Rect(mid_x - thickness_pt / 2.0, y0, mid_x + thickness_pt / 2.0, y1), color=None, fill=(0, 0, 0))
     # Longitudinal separating wall between classroom and verandah (physically drawn with openings):
     page.draw_rect(fitz.Rect(x0, y_classroom_bottom - thickness_pt, mid_x - 10.0, y_classroom_bottom), color=None, fill=(0, 0, 0))
     page.draw_rect(fitz.Rect(mid_x + 10.0, y_classroom_bottom - thickness_pt, x1, y_classroom_bottom), color=None, fill=(0, 0, 0))

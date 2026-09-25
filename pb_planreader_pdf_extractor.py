@@ -1871,7 +1871,7 @@ class GenericPlanReaderExtractor:
                             if is_compound_verandah:
                                 dpc_description = (
                                     f"Bituminous damp proof course ({dpc_envelope_base_m:.1f}m external perimeter + "
-                                    f"{internal_partition_dpc_length_m:.1f}m compound internal walls [{length_m:.1f}m longitudinal + {width_m:.1f}m transverse], "
+                                    f"{internal_partition_dpc_length_m:.1f}m source-evidenced compound internal wall runs, "
                                     "per drawing's own \"under all walls\" note)"
                                 )
                             else:

@@ -417,8 +417,19 @@ def resolve_dpc_all_walls_geometry(
     if has_verandah and longitudinal_groups:
         for g in longitudinal_groups:
             cy = statistics.median([(x["rect"][1] + x["rect"][3]) / 2.0 for x in g])
-            seg_len_pt = sum(x["rect"][2] - x["rect"][0] for x in g)
+            intervals = sorted(
+                (float(x["rect"][0]), float(x["rect"][2])) for x in g
+            )
+            seg_len_pt = sum(end - start for start, end in intervals)
             seg_len_m = round(seg_len_pt / scale_pt_per_m, 3)
+            # Quantity authority comes from this run's own source endpoints.
+            # Interior gaps may represent openings and split one physical wall
+            # into several fill fragments, but they cannot extend the run
+            # beyond the outermost source-evidenced endpoints.
+            source_span_pt = max(end for _start, end in intervals) - min(
+                start for start, _end in intervals
+            )
+            source_span_m = round(source_span_pt / scale_pt_per_m, 3)
             dist_from_edge_pt = min(abs(cy - env_min_y), abs(env_max_y - cy))
             dist_from_edge_m = dist_from_edge_pt / scale_pt_per_m
             if 1.0 <= dist_from_edge_m <= 3.5:
@@ -427,7 +438,7 @@ def resolve_dpc_all_walls_geometry(
                     center_coord_pt=round(cy, 2),
                     segment_count=len(g),
                     total_segment_length_m=seg_len_m,
-                    grid_length_m=round(length_m, 2),
+                    grid_length_m=source_span_m,
                 ))
 
     # A compound verandah layout requires BOTH verandah text evidence
@@ -437,19 +448,24 @@ def resolve_dpc_all_walls_geometry(
     transverse_runs = []
     for g in transverse_groups:
         cx = statistics.median([(x["rect"][0] + x["rect"][2]) / 2.0 for x in g])
-        seg_len_pt = sum(x["rect"][3] - x["rect"][1] for x in g)
+        intervals = sorted(
+            (float(x["rect"][1]), float(x["rect"][3])) for x in g
+        )
+        seg_len_pt = sum(end - start for start, end in intervals)
         seg_len_m = round(seg_len_pt / scale_pt_per_m, 3)
-        # If building is compound with verandah, transverse wall spans envelope depth:
-        if is_compound_verandah and 1.0 <= (real_minor - seg_len_m) <= 3.5:
-            grid_len_m = width_m
-        else:
-            grid_len_m = seg_len_m
+        # Same source-span rule for transverse walls: a partial wall remains
+        # partial unless its own source geometry reaches farther.  The outer
+        # footprint width/depth is never substituted as wall-run quantity.
+        source_span_pt = max(end for _start, end in intervals) - min(
+            start for start, _end in intervals
+        )
+        source_span_m = round(source_span_pt / scale_pt_per_m, 3)
         transverse_runs.append(EvidencedWallRun(
             orientation="transverse",
             center_coord_pt=round(cx, 2),
             segment_count=len(g),
             total_segment_length_m=seg_len_m,
-            grid_length_m=round(grid_len_m, 2),
+            grid_length_m=source_span_m,
         ))
 
     total_internal = sum(r.grid_length_m for r in transverse_runs) + sum(r.grid_length_m for r in longitudinal_runs)
