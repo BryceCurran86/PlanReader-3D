@@ -1264,13 +1264,33 @@ def _apply_trusted_relation_overrides(
         elif classification == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value:
             ambiguous_links.append(pair)
 
+    # Positive physical equivalence is not invalidated merely because either
+    # member has unresolved relations to other candidates. Build proven SAME
+    # subgroups from SAME links alone. Publication still uses SAME ∪ AMBIGUOUS
+    # below and therefore remains fail-closed.
+    positive_same_groups: list[tuple[str, ...]] = []
+    if same_links:
+        for component in _union_find_groups(same_links, member_ids):
+            if len(component) < 2:
+                continue
+            # Transitive SAME is withheld if any pair inside the component is
+            # positively DISTINCT. That is contradictory evidence, not a group.
+            contradictory = any(
+                pair_map.get(tuple(sorted((left, right))))
+                == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value
+                for index, left in enumerate(component)
+                for right in component[index + 1 :]
+            )
+            if not contradictory:
+                positive_same_groups.append(tuple(sorted(component)))
+
     related_links = same_links + ambiguous_links
     components = _union_find_groups(related_links, member_ids) if member_ids else []
     ambiguous_edges = {frozenset(pair) for pair in ambiguous_links}
     same_edges = {frozenset(pair) for pair in same_links}
     blockers: dict[str, list[str]] = {}
     ambiguous_walls: set[str] = set()
-    same_groups: list[tuple[str, ...]] = []
+    publication_same_groups: list[tuple[str, ...]] = []
     representatives: list[str] = []
 
     for component in components:
@@ -1293,7 +1313,7 @@ def _apply_trusted_relation_overrides(
             continue
         if has_same and len(component) > 1:
             group = tuple(sorted(component))
-            same_groups.append(group)
+            publication_same_groups.append(group)
             representative = sorted(group)[0]
             representatives.append(representative)
             for wall_id in group:
@@ -1317,10 +1337,10 @@ def _apply_trusted_relation_overrides(
         scope_viewport_id=baseline.scope_viewport_id,
         representative_wall_ids=tuple(representatives),
         abstained_wall_ids=tuple(dict.fromkeys(abstained)),
-        equivalence_groups=tuple(same_groups),
+        equivalence_groups=tuple(positive_same_groups),
         ambiguous_wall_ids=tuple(sorted(ambiguous_walls)),
         same_wall_ids=tuple(
-            sorted({wall_id for group in same_groups for wall_id in group})
+            sorted({wall_id for group in positive_same_groups for wall_id in group})
         ),
         pair_classifications=tuple(
             sorted((left, right, classification) for (left, right), classification in pair_map.items())
