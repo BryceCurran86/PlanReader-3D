@@ -27,13 +27,11 @@ from pb_wall_finish_face_binding_authority import (
 )
 from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateProducer,
-    _source_page_segments,
 )
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_source_wall_topology_authority import build_source_wall_topology_authority
 from pb_viewport_segmentation import assign_bbox_to_viewport
-from pb_vector_geometry_v130 import extract_native_page
 from pb_wall_role_authority import WallRoleProducer, WallRoleSelector
 
 EXPECTED_SHA256 = "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
@@ -107,12 +105,6 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
         blocks = _trusted_finish_blocks(source, published, PAGE_ID)
         viewports = _authoritative_viewports(page, int(PAGE_ID))
         lines = _page_visible_lines(source, published, PAGE_ID)
-        native = extract_native_page(page)
-        native_segment_by_id = {
-            str(segment.get("id")): segment
-            for segment in tuple(native.get("segments") or ())
-            if str(segment.get("id") or "")
-        }
         raw_blocks: dict[int, list[tuple[int, str, tuple[float, float, float, float]]]] = {}
         for word in page.get_text("words") or ():
             if len(word) < 8:
@@ -277,37 +269,6 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
             "native_visible_line_count": len(lines),
             "callout_preflight": [],
         }
-        source_bytes = source._producer._store.source_bytes_by_revision[
-            published.revision.revision_id
-        ]
-        raw_source_segments, _, _, _ = _source_page_segments(
-            source_producer=source,
-            published=published,
-            source_bytes=source_bytes,
-            page_id=PAGE_ID,
-            decision_scope_id=f"wall-source:page-{PAGE_ID}",
-        )
-        raw_segment_metadata = {
-            str(segment.get("id") or ""): {
-                "path_index": segment.get("path_index"),
-                "item_index": segment.get("item_index"),
-                "kind": segment.get("kind"),
-                "layer": segment.get("layer"),
-                "dashes": segment.get("dashes"),
-                "width": segment.get("width"),
-                "stroke": segment.get("stroke"),
-                "fill": segment.get("fill"),
-                "geometry": [
-                    float(segment["x1"]),
-                    float(segment["y1"]),
-                    float(segment["x2"]),
-                    float(segment["y2"]),
-                ],
-            }
-            for segment in raw_source_segments
-            if str(segment.get("id") or "")
-        }
-
         wall_authority = PhysicalWallCandidateProducer.from_authenticated_viewports(
             source,
             page_ids=(PAGE_ID,),
@@ -443,7 +404,6 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
         # be inspected even while SourceExecutionCalloutAuthority remains owned
         # by another agent. Raw text never enters production binding authority.
         preflight["raw_callout_wall_hits"] = []
-        seen_raw_wall_hits = set()
         for raw in target_sequence_callouts:
             annotation_bbox = tuple(float(value) for value in raw["bbox"])
             text_height = float(raw["text_height"])
@@ -506,14 +466,6 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
                         for record in matching
                     }
                 )
-                raw_hit_signature = (
-                    raw["text"],
-                    term.primitive_id,
-                    tuple(normalized_ids),
-                )
-                if raw_hit_signature in seen_raw_wall_hits:
-                    continue
-                seen_raw_wall_hits.add(raw_hit_signature)
                 preflight["raw_callout_wall_hits"].append(
                     {
                         "text": raw["text"],
@@ -523,41 +475,9 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
                         "terminator_id": term.primitive_id,
                         "terminator_bbox": list(term.bbox),
                         "raw_source_primitive_hits": raw_hits,
-                        "raw_source_primitive_metadata": {
-                            raw_id: raw_segment_metadata.get(raw_id)
-                            for raw_id in raw_hits
-                        },
                         "wall_candidate_ids": sorted(
                             record.wall_candidate_id for record in matching
                         ),
-                        "wall_candidates": [
-                            {
-                                "wall_candidate_id": record.wall_candidate_id,
-                                "representation": record.wall_candidate.representation,
-                                "centerline_pts": [
-                                    [float(point[0]), float(point[1])]
-                                    for point in record.wall_candidate.centerline_pts
-                                ],
-                                "face_a_segment_ids": list(
-                                    record.wall_candidate.face_a_segment_ids
-                                ),
-                                "face_b_segment_ids": list(
-                                    record.wall_candidate.face_b_segment_ids or ()
-                                ),
-                                "source_primitive_ids": list(
-                                    record.physical_identity.source_primitive_ids
-                                ),
-                                "path_fingerprint": [
-                                    [float(point[0]), float(point[1])]
-                                    for point in (
-                                        record.physical_identity.path_fingerprint or ()
-                                    )
-                                ],
-                            }
-                            for record in sorted(
-                                matching, key=lambda item: item.wall_candidate_id
-                            )
-                        ],
                         "physical_wall_ids": sorted(
                             {
                                 str(
@@ -572,28 +492,6 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
                         ),
                         "normalized_wall_ids": normalized_ids,
                         "wall_scope_complete": wall_scope.scope_complete,
-                        "wall_candidate_source_records": {
-                            record.wall_candidate_id: [
-                                {
-                                    "raw_id": raw_id,
-                                    "path_index": native_segment_by_id.get(raw_id, {}).get("path_index"),
-                                    "item_index": native_segment_by_id.get(raw_id, {}).get("item_index"),
-                                    "edge_index": native_segment_by_id.get(raw_id, {}).get("edge_index"),
-                                    "kind": native_segment_by_id.get(raw_id, {}).get("kind"),
-                                    "width": native_segment_by_id.get(raw_id, {}).get("width"),
-                                    "layer": native_segment_by_id.get(raw_id, {}).get("layer"),
-                                    "dashes": native_segment_by_id.get(raw_id, {}).get("dashes"),
-                                    "geometry": [
-                                        native_segment_by_id.get(raw_id, {}).get("x1"),
-                                        native_segment_by_id.get(raw_id, {}).get("y1"),
-                                        native_segment_by_id.get(raw_id, {}).get("x2"),
-                                        native_segment_by_id.get(raw_id, {}).get("y2"),
-                                    ],
-                                }
-                                for raw_id in record.physical_identity.source_primitive_ids
-                            ]
-                            for record in matching
-                        },
                     }
                 )
 
