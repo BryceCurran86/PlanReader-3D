@@ -1,0 +1,127 @@
+name: KSTVET Item19B Boundary Authority Probe
+
+on:
+  push:
+    branches: [diag/kstvet-item19b-boundary-authority]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Probe boundary authority
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, hashlib, fitz
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateProducer,
+              _authenticated_viewports,
+              _source_page_segments,
+              _decision_scope_id,
+              _segment_fully_inside_bbox,
+              _segment_intersects_bbox,
+              _segment_lies_on_bbox_edge,
+              _segment_is_authenticated_vector_frame_edge,
+          )
+          from pb_wall_room_topology_stage_a import is_structural_candidate_segment
+          from pb_vector_geometry_v130 import extract_native_page
+
+          payload=Path('/tmp/kstvet.pdf').read_bytes()
+          source=SourceVisibilityProducer(producer_method='kstvet-boundary-probe',producer_version='1.0')
+          pub=source.ingest_native_pdf_bytes(
+              document_id='kstvet-boundary-probe',
+              source_bytes=payload,
+              source_locator='sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc',
+              page_ids=('54',),
+          )
+          producer=PhysicalWallCandidateProducer.from_authenticated_viewports(source,page_ids=('54',))
+          auth=producer.authority()
+
+          pdf=fitz.open(stream=payload,filetype='pdf')
+          page=pdf[53]
+          av=_authenticated_viewports(page,page_number=54)
+          assert av is not None
+          all_vps, eligible=av
+          print('VIEWPORTS',json.dumps([
+              {'id':v.view_id,'label':v.label,'type':v.view_type,'status':v.status,'source':v.boundary_source,'bbox':list(v.bounding_box) if v.bounding_box else None}
+              for v in all_vps
+          ],sort_keys=True))
+          native=extract_native_page(page)
+          byraw={str(s.get('id')):s for s in native.get('segments',()) if str(s.get('id') or '')}
+          page_segments,_,pw,ph=_source_page_segments(
+              source_producer=source,published=pub,source_bytes=payload,page_id='54',decision_scope_id=_decision_scope_id('54')
+          )
+
+          for v in eligible:
+              sel=auth.selector_for_viewport(
+                  document_id=pub.revision.document_id,
+                  revision_id=pub.revision.revision_id,
+                  source_sha256=pub.revision.source_sha256,
+                  snapshot_id=pub.snapshot.snapshot_id,
+                  page_id='54',
+                  viewport_id=v.view_id,
+              )
+              assert sel is not None
+              res=auth.resolve_scope(sel)
+              if str(v.view_type)!='floor_plan':
+                  continue
+              print('FLOOR_SCOPE',json.dumps({
+                  'viewport_id':v.view_id,'label':v.label,'bbox':list(v.bounding_box),
+                  'scope_complete':res.scope_complete,'reason_codes':list(res.reason_codes),
+                  'candidate_count':len(res.records),
+                  'boundary_observation_ids':list(res.scope_boundary_observation_ids),
+                  'ambiguous_observation_ids':list(res.ambiguous_source_observation_ids),
+                  'equivalence_groups':[list(g) for g in (res.equivalence.equivalence_groups if res.equivalence else ())],
+              },sort_keys=True))
+
+              target_boundary=set(res.scope_boundary_observation_ids)
+              target_amb=set(res.ambiguous_source_observation_ids)
+              rows=[]
+              for seg in page_segments:
+                  oid=str(seg.get('source_observation_id') or '')
+                  if oid not in target_boundary and oid not in target_amb:
+                      continue
+                  owners=[
+                      o for o in eligible
+                      if o.bounding_box is not None and _segment_fully_inside_bbox(seg,o.bounding_box)
+                  ]
+                  structural,reasons=is_structural_candidate_segment(seg)
+                  raw_id=str(seg.get('id') or '')
+                  n=byraw.get(raw_id,{})
+                  rows.append({
+                      'oid':oid,'kind':'boundary' if oid in target_boundary else 'ambiguous',
+                      'raw_id':raw_id,
+                      'geometry':[seg.get('x1'),seg.get('y1'),seg.get('x2'),seg.get('y2')],
+                      'layer':seg.get('layer'),'width':seg.get('width'),'dashes':seg.get('dashes'),
+                      'path_index':seg.get('path_index'),'item_index':seg.get('item_index'),
+                      'structural':structural,'exclude_reasons':reasons,
+                      'owners':[{'id':o.view_id,'label':o.label,'type':o.view_type,'status':o.status} for o in owners],
+                      'lies_on_target_edge':_segment_lies_on_bbox_edge(seg,v.bounding_box),
+                      'target_frame_edge':_segment_is_authenticated_vector_frame_edge(seg,viewport=v),
+                      'intersects_target':_segment_intersects_bbox(seg,v.bounding_box),
+                      'native_rect':list(n.get('rect')) if n.get('rect') is not None else None,
+                  })
+              print('FLOOR_BOUNDARY_ROWS',json.dumps(rows,sort_keys=True))
+
+          pdf.close()
+          PY
