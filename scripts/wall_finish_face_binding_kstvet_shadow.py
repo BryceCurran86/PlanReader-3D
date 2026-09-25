@@ -27,6 +27,7 @@ from pb_wall_finish_face_binding_authority import (
 )
 from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateProducer,
+    _source_page_segments,
 )
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -276,6 +277,37 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
             "native_visible_line_count": len(lines),
             "callout_preflight": [],
         }
+        source_bytes = source._producer._store.source_bytes_by_revision[
+            published.revision.revision_id
+        ]
+        raw_source_segments, _, _, _ = _source_page_segments(
+            source_producer=source,
+            published=published,
+            source_bytes=source_bytes,
+            page_id=PAGE_ID,
+            decision_scope_id=f"wall-source:page-{PAGE_ID}",
+        )
+        raw_segment_metadata = {
+            str(segment.get("id") or ""): {
+                "path_index": segment.get("path_index"),
+                "item_index": segment.get("item_index"),
+                "kind": segment.get("kind"),
+                "layer": segment.get("layer"),
+                "dashes": segment.get("dashes"),
+                "width": segment.get("width"),
+                "stroke": segment.get("stroke"),
+                "fill": segment.get("fill"),
+                "geometry": [
+                    float(segment["x1"]),
+                    float(segment["y1"]),
+                    float(segment["x2"]),
+                    float(segment["y2"]),
+                ],
+            }
+            for segment in raw_source_segments
+            if str(segment.get("id") or "")
+        }
+
         wall_authority = PhysicalWallCandidateProducer.from_authenticated_viewports(
             source,
             page_ids=(PAGE_ID,),
@@ -491,6 +523,10 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
                         "terminator_id": term.primitive_id,
                         "terminator_bbox": list(term.bbox),
                         "raw_source_primitive_hits": raw_hits,
+                        "raw_source_primitive_metadata": {
+                            raw_id: raw_segment_metadata.get(raw_id)
+                            for raw_id in raw_hits
+                        },
                         "wall_candidate_ids": sorted(
                             record.wall_candidate_id for record in matching
                         ),
