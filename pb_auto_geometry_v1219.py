@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -666,7 +667,37 @@ def _validate_auto_rows(rows: Sequence[Any]) -> None:
             )
 
 
-def _replace_auto_rows(app: Any, workspace_id: int, rows: Sequence[Tuple[Any, ...]]) -> None:
+class _TransactionApp:
+    """``app`` with lquery/lexecute bound to one open connection, never committing.
+
+    The envelope and report writers take an app; handing them this proxy puts
+    their statements in the same transaction as the take-off rows.
+    """
+
+    def __init__(self, app: Any, conn: Any) -> None:
+        self._app = app
+        self._conn = conn
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._app, name)
+
+    def lquery(self, sql: str, params: Sequence[Any] = ()) -> List[Dict[str, Any]]:
+        cursor = self._conn.execute(sql, tuple(params))
+        columns = [item[0] for item in cursor.description or ()]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def lexecute(self, sql: str, params: Sequence[Any] = ()) -> int:
+        return int(self._conn.execute(sql, tuple(params)).lastrowid or 0)
+
+
+@contextmanager
+def _auto_publication(app: Any, workspace_id: int, rows: Sequence[Tuple[Any, ...]]):
+    """Replace the automatic take-off rows; yield an app writing in the same transaction.
+
+    The rows and everything written through the yielded app commit together or
+    not at all, so a failed envelope/report write cannot leave new take-off rows
+    beside a stale 3D mass and report.
+    """
     _validate_auto_rows(rows)
     conn = app.local_connect()
     try:
@@ -674,12 +705,18 @@ def _replace_auto_rows(app: Any, workspace_id: int, rows: Sequence[Tuple[Any, ..
         stamp = app.now_stamp()
         values = [tuple(list(row[:-2]) + [stamp, stamp]) for row in rows]
         conn.executemany(_TAKEOFF_INSERT, values)
+        yield _TransactionApp(app, conn)
         conn.commit()
     except Exception:
         conn.rollback()
         raise
     finally:
         conn.close()
+
+
+def _replace_auto_rows(app: Any, workspace_id: int, rows: Sequence[Tuple[Any, ...]]) -> None:
+    with _auto_publication(app, workspace_id, rows):
+        pass
 
 
 def _setting_get(app: Any, workspace_id: int) -> Dict[str, Any]:
@@ -886,14 +923,15 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
         )
     unit_rows, units = _build_unit_rows(app, int(workspace_id), [dict(p) for p in pages])
     facade_rows, facades = _build_facade_rows(app, int(workspace_id), [dict(p) for p in pages])
-    _replace_auto_rows(app, int(workspace_id), unit_rows + facade_rows)
-    mass_id = _refresh_auto_model(app, int(workspace_id), footprint, facades)
-    report = {
-        "version": VERSION, "analysed_at": app.now_stamp(), "selected_pages": len(pages),
-        "calibrations": calibrations, "footprint": footprint, "units": units, "facades": facades,
-        "auto_takeoff_rows": len(unit_rows) + len(facade_rows), "model_mass_id": mass_id,
-    }
-    _setting_set(app, int(workspace_id), report)
+    # Rows, envelope and report are one publication: all commit or none do.
+    with _auto_publication(app, int(workspace_id), unit_rows + facade_rows) as publication:
+        mass_id = _refresh_auto_model(publication, int(workspace_id), footprint, facades)
+        report = {
+            "version": VERSION, "analysed_at": app.now_stamp(), "selected_pages": len(pages),
+            "calibrations": calibrations, "footprint": footprint, "units": units, "facades": facades,
+            "auto_takeoff_rows": len(unit_rows) + len(facade_rows), "model_mass_id": mass_id,
+        }
+        _setting_set(publication, int(workspace_id), report)
     return report
 
 
