@@ -236,6 +236,13 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
             source,
             page_ids=(PAGE_ID,),
         ).authority()
+        # Raster-visible augmentation advances the immutable source snapshot.
+        # Refresh lineage before issuing any wall/topology selectors; retaining
+        # the pre-augmentation snapshot would make valid viewport scopes appear
+        # unavailable in this diagnostic.
+        published = source.published_snapshot_for_revision(
+            published.revision.revision_id
+        )
         topology_authority = build_source_wall_topology_authority(wall_authority)
         role_producer = WallRoleProducer.from_source_topology(
             physical_wall_candidate_authority=wall_authority
