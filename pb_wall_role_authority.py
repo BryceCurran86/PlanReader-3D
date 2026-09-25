@@ -573,12 +573,7 @@ class WallRoleProducer:
             decision_scope_id=selector.decision_scope_id,
         )
         if cand_sel is None:
-            return WallRoleResult(
-                status=EvidenceResolutionStatus.ABSTAINED,
-                proposition=None,
-                reason_codes=(WALL_ROLE_WALL_UNRESOLVED,),
-                record=None,
-            )
+            return _abstained(WALL_ROLE_WALL_UNRESOLVED)
         cand_result = self._wall_candidates.resolve_scope(cand_sel)
         if cand_result.status is not EvidenceResolutionStatus.CORROBORATED:
             return self._store(
