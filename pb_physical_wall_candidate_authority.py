@@ -1328,10 +1328,13 @@ def _build_authenticated_viewport_scope_results(
     page_id: str,
 ) -> tuple[PhysicalWallCandidateScopeResult, ...]:
     page_number = int(page_id)
+    # A viewport scope is page-local authority. A scoped native ingestion still
+    # hashes the complete immutable PDF and inventories the document, while
+    # fully decoding the addressed page. Do not require unrelated pages to be
+    # decoded before proving this page's authenticated viewport universe.
     if (
-        published.coverage.state != "complete"
-        or published.coverage.failed_pages
-        or page_number not in published.coverage.decoded_pages
+        page_number not in published.coverage.decoded_pages
+        or page_number in published.coverage.failed_pages
     ):
         return ()
 
