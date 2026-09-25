@@ -382,6 +382,29 @@ def run(pdf_path: Path) -> dict:
                             )
                             for record in matching
                         },
+                        "owner_details": {
+                            record.wall_candidate_id: {
+                                "representation": record.wall_candidate.representation,
+                                "centerline_pts": [
+                                    [float(point[0]), float(point[1])]
+                                    for point in record.wall_candidate.centerline_pts
+                                ],
+                                "face_a_segment_ids": list(
+                                    record.wall_candidate.face_a_segment_ids
+                                ),
+                                "face_b_segment_ids": list(
+                                    record.wall_candidate.face_b_segment_ids or ()
+                                ),
+                                "path_fingerprint": [
+                                    [float(point[0]), float(point[1])]
+                                    for point in (
+                                        record.physical_identity.path_fingerprint or ()
+                                    )
+                                ],
+                                "comparison_mode": record.physical_identity.comparison_mode,
+                            }
+                            for record in matching
+                        },
                     }
                 )
             if emitted_for_callout == 0:
@@ -389,13 +412,43 @@ def run(pdf_path: Path) -> dict:
                     {
                         "target": callout["target"],
                         "text": callout["text"],
+                        "callout_bbox": list(callout["bbox"]),
+                        "text_height": callout["text_height"],
                         "viewport_id": viewport.view_id,
                         "viewport_label": viewport.label,
+                        "viewport_bbox": list(viewport.bounding_box),
                         "status": "no_leader_path",
                         "wall_candidate_count": len(scope.records),
                         "scope_complete": scope.scope_complete,
                         "scope_reason_codes": list(scope.reason_codes),
                         "normalized_owner_count": 0,
+                        "viewport_owned_line_count": len(owned_lines),
+                        "terminator_count": len(terms),
+                        "terminators": [
+                            {
+                                "primitive_id": term.primitive_id,
+                                "bbox": list(term.bbox),
+                                "center": list(term.center),
+                            }
+                            for term in terms
+                        ],
+                        "near_callout_lines": [
+                            {
+                                "observation_id": line.observation_id,
+                                "raw_id": line.raw_id,
+                                "geometry": list(line.geometry),
+                            }
+                            for line in owned_lines
+                            if _geometry_intersects_bbox(
+                                line.geometry,
+                                (
+                                    callout["bbox"][0] - 40.0,
+                                    callout["bbox"][1] - 40.0,
+                                    callout["bbox"][2] + 40.0,
+                                    callout["bbox"][3] + 40.0,
+                                ),
+                            )
+                        ],
                     }
                 )
 
