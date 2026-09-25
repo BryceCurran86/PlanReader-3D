@@ -1,0 +1,30 @@
+name: Item19B KSTVET Wall Provenance Probe
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: item19b-kstvet-wall-provenance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  wall-provenance:
+    if: github.event.pull_request.number == 898
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install minimal dependency
+        run: pip install PyMuPDF
+      - name: Download pinned KSTVET source
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Probe wall provenance
+        run: PYTHONPATH=. python scripts/wall_provenance_kstvet_probe.py /tmp/kstvet.pdf

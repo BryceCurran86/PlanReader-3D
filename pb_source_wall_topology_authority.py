@@ -91,6 +91,7 @@ def _ambiguous_record(scope, wall_id: str, reason: str) -> WallTopologyEvidence:
         "source_sha256": scope.source_sha256,
         "snapshot_id": scope.snapshot_id,
         "page_id": scope.page_id,
+        "decision_scope_id": scope.decision_scope_id,
         "physical_wall_id": wall_id,
         "reason": reason,
     }
@@ -103,6 +104,7 @@ def _ambiguous_record(scope, wall_id: str, reason: str) -> WallTopologyEvidence:
         page_id=scope.page_id,
         physical_wall_id=wall_id,
         bounds_exterior=False,
+        decision_scope_id=scope.decision_scope_id,
         enclosed_space_count=0,
         enclosed_space_ids=(),
         is_ambiguous=True,
@@ -110,7 +112,7 @@ def _ambiguous_record(scope, wall_id: str, reason: str) -> WallTopologyEvidence:
     )
 
 
-def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str], WallTopologyEvidence]:
+def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str, str], WallTopologyEvidence]:
     records = tuple(scope.records or ())
     if (
         scope.status is not EvidenceResolutionStatus.CORROBORATED
@@ -144,7 +146,7 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str], Wa
 
     if duplicate_edges:
         return {
-            (scope.document_id, scope.revision_id, scope.source_sha256, scope.snapshot_id, scope.page_id, wall_id):
+            (scope.document_id, scope.revision_id, scope.source_sha256, scope.snapshot_id, scope.page_id, scope.decision_scope_id, wall_id):
                 _ambiguous_record(scope, wall_id, "duplicate_wall_edge_ownership")
             for wall_id in wall_ids
         }
@@ -179,6 +181,7 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str], Wa
                 "source_sha256": scope.source_sha256,
                 "snapshot_id": scope.snapshot_id,
                 "page_id": scope.page_id,
+                "decision_scope_id": scope.decision_scope_id,
                 "polygon": polygon,
             },
             digest_chars=32,
@@ -189,7 +192,7 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str], Wa
 
     if invalid_boundary or not faces:
         return {
-            (scope.document_id, scope.revision_id, scope.source_sha256, scope.snapshot_id, scope.page_id, wall_id):
+            (scope.document_id, scope.revision_id, scope.source_sha256, scope.snapshot_id, scope.page_id, scope.decision_scope_id, wall_id):
                 _ambiguous_record(scope, wall_id, "room_face_boundary_unresolved")
             for wall_id in wall_ids
         }
@@ -201,7 +204,7 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str], Wa
         for area in face_areas.values()
     ):
         return {
-            (scope.document_id, scope.revision_id, scope.source_sha256, scope.snapshot_id, scope.page_id, wall_id):
+            (scope.document_id, scope.revision_id, scope.source_sha256, scope.snapshot_id, scope.page_id, scope.decision_scope_id, wall_id):
                 _ambiguous_record(scope, wall_id, "tiny_or_degenerate_room_face")
             for wall_id in wall_ids
         }
@@ -235,7 +238,7 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str], Wa
     for wall_id in wall_ids:
         component_walls[find(wall_id)].add(wall_id)
 
-    results: dict[tuple[str, str, str, str, str, str], WallTopologyEvidence] = {}
+    results: dict[tuple[str, str, str, str, str, str, str], WallTopologyEvidence] = {}
     for component in component_walls.values():
         component_faces = set().union(*(wall_faces[wall_id] for wall_id in component))
         has_two_sided_wall = any(len(wall_faces[wall_id]) == 2 for wall_id in component)
@@ -257,6 +260,7 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str], Wa
                 "source_sha256": scope.source_sha256,
                 "snapshot_id": scope.snapshot_id,
                 "page_id": scope.page_id,
+                "decision_scope_id": scope.decision_scope_id,
                 "physical_wall_id": wall_id,
                 "face_ids": face_ids,
                 "ambiguous": ambiguous,
@@ -270,6 +274,7 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str], Wa
                 page_id=scope.page_id,
                 physical_wall_id=wall_id,
                 bounds_exterior=(count == 1 and not ambiguous),
+                decision_scope_id=scope.decision_scope_id,
                 enclosed_space_count=count,
                 enclosed_space_ids=face_ids,
                 is_ambiguous=ambiguous,
@@ -282,6 +287,7 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str], Wa
                     scope.source_sha256,
                     scope.snapshot_id,
                     scope.page_id,
+                    scope.decision_scope_id,
                     wall_id,
                 )
             ] = evidence
@@ -299,8 +305,17 @@ def build_source_wall_topology_authority(
             "physical_wall_candidate_authority must be producer-owned PhysicalWallCandidateAuthority"
         )
 
-    records: dict[tuple[str, str, str, str, str, str], WallTopologyEvidence] = {}
+    records: dict[tuple[str, str, str, str, str, str, str], WallTopologyEvidence] = {}
     for scope in physical_wall_candidate_authority._scopes.values():
+        # Room/envelope topology is a plan-view proposition. Viewport-scoped
+        # elevation/section/detail geometry remains valid physical-wall
+        # evidence, but it must not mint EXTERNAL/INTERNAL roles by being
+        # interpreted as a planar room graph.
+        if (
+            getattr(scope, "scope_kind", "page") == "viewport"
+            and str(getattr(scope, "viewport_view_type", "") or "") != "floor_plan"
+        ):
+            continue
         records.update(_derive_scope_records(scope))
 
     authority = WallTopologyAuthority(records, _seal=_AUTHORITY_SEAL)

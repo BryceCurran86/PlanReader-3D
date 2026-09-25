@@ -35,10 +35,11 @@ from pb_viewport_segmentation import (
     is_authoritative_derived_viewport,
     is_segment_page_viewports_product,
     segment_page_viewports,
+    validate_non_overlapping_viewports,
 )
 from pb_wall_role_authority import WallRoleClassification, WallRoleProducer, WallRoleSelector
 
-WALL_FINISH_FACE_BINDING_SCHEMA_VERSION = "1.0.0"
+WALL_FINISH_FACE_BINDING_SCHEMA_VERSION = "1.1.0"
 SOURCE_EVIDENCE_KIND_NATIVE_DIRECT_CALLOUT = "native_direct_finish_callout"
 
 FINISH_BINDING_RESOLVED = "wall_finish_face_binding_resolved"
@@ -120,6 +121,7 @@ class WallFinishFaceBindingRecord:
     decision_scope_complete: bool
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
+    physical_wall_decision_scope_id: str = ""
     schema_version: str = WALL_FINISH_FACE_BINDING_SCHEMA_VERSION
     _seal: object = None
 
@@ -281,13 +283,22 @@ def _endpoint_key(point: Sequence[float]) -> tuple[float, float]:
 
 
 def _authoritative_viewports(page: fitz.Page, page_number: int):
-    out = []
-    for viewport in segment_page_viewports(page, page_number=page_number):
-        if not is_segment_page_viewports_product(viewport):
-            continue
-        if viewport.status == ViewportSegmentationStatus.RESOLVED.value or is_authoritative_derived_viewport(viewport):
-            out.append(viewport)
-    return tuple(out)
+    rows = tuple(segment_page_viewports(page, page_number=page_number))
+    if any(not is_segment_page_viewports_product(viewport) for viewport in rows):
+        return ()
+    sibling_non_overlapping = validate_non_overlapping_viewports(rows)
+    return tuple(
+        viewport
+        for viewport in rows
+        if viewport.bounding_box is not None
+        and (
+            viewport.status == ViewportSegmentationStatus.RESOLVED.value
+            or (
+                sibling_non_overlapping
+                and is_authoritative_derived_viewport(viewport)
+            )
+        )
+    )
 
 
 def _trusted_finish_blocks(source: SourceVisibilityProducer, published, page_id: str):
@@ -549,7 +560,7 @@ class WallFinishFaceBindingProducer:
         if page_ids is not None and not selected:
             raise ValueError("page_ids must contain at least one source page")
 
-        wall_authority = PhysicalWallCandidateProducer.from_source_visibility_producer(
+        wall_authority = PhysicalWallCandidateProducer.from_authenticated_viewports(
             source_visibility_producer,
             page_ids=selected,
         ).authority()
@@ -572,16 +583,6 @@ class WallFinishFaceBindingProducer:
                     page_number = int(page_id)
                     if not 1 <= page_number <= doc.page_count:
                         continue
-                    wall_scope = wall_authority.resolve_scope(PhysicalWallCandidateSelector(
-                        document_id=published.revision.document_id,
-                        revision_id=published.revision.revision_id,
-                        source_sha256=published.revision.source_sha256,
-                        snapshot_id=published.snapshot.snapshot_id,
-                        page_id=page_id,
-                        decision_scope_id=f"wall-source:page-{page_id}",
-                    ))
-                    if wall_scope.status is not EvidenceResolutionStatus.CORROBORATED:
-                        continue
                     page = doc.load_page(page_number - 1)
                     viewports = _authoritative_viewports(page, page_number)
                     lines = _page_visible_lines(source_visibility_producer, published, page_id)
@@ -591,13 +592,23 @@ class WallFinishFaceBindingProducer:
                         viewport = assign_bbox_to_viewport(annotation_bbox, viewports, allow_derived=True)
                         if viewport is None or viewport.bounding_box is None:
                             continue
+                        wall_selector = wall_authority.selector_for_viewport(
+                            document_id=published.revision.document_id,
+                            revision_id=published.revision.revision_id,
+                            source_sha256=published.revision.source_sha256,
+                            snapshot_id=published.snapshot.snapshot_id,
+                            page_id=page_id,
+                            viewport_id=viewport.view_id,
+                        )
+                        if wall_selector is None:
+                            continue
+                        wall_scope = wall_authority.resolve_scope(wall_selector)
+                        if wall_scope.status is not EvidenceResolutionStatus.CORROBORATED:
+                            continue
+                        owned_observation_ids = set(wall_scope.source_observation_ids)
                         owned_lines = tuple(
                             line for line in lines
-                            if all(
-                                viewport.bounding_box[0] <= p[0] <= viewport.bounding_box[2]
-                                and viewport.bounding_box[1] <= p[1] <= viewport.bounding_box[3]
-                                for p in _endpoints(line)
-                            )
+                            if line.observation_id in owned_observation_ids
                         )
                         terminators = tuple(
                             term for term in _filled_terminators(page, text_height)
@@ -624,7 +635,7 @@ class WallFinishFaceBindingProducer:
                                 source_sha256=published.revision.source_sha256,
                                 snapshot_id=published.snapshot.snapshot_id,
                                 page_id=page_id,
-                                decision_scope_id=f"wall-source:page-{page_id}",
+                                decision_scope_id=wall_scope.decision_scope_id,
                                 physical_wall_id=target.wall_candidate_id,
                             ))
                             if role_result.status is not EvidenceResolutionStatus.CORROBORATED or role_result.record is None:
@@ -636,7 +647,7 @@ class WallFinishFaceBindingProducer:
                                 or role_record.source_sha256 != published.revision.source_sha256
                                 or role_record.snapshot_id != published.snapshot.snapshot_id
                                 or role_record.page_id != page_id
-                                or role_record.decision_scope_id != f"wall-source:page-{page_id}"
+                                or role_record.decision_scope_id != wall_scope.decision_scope_id
                                 or role_record.physical_wall_id != target.wall_candidate_id
                             ):
                                 continue
@@ -654,6 +665,7 @@ class WallFinishFaceBindingProducer:
                                     "source_sha256": published.revision.source_sha256,
                                     "snapshot_id": published.snapshot.snapshot_id,
                                     "page_id": page_id,
+                                    "physical_wall_decision_scope_id": wall_scope.decision_scope_id,
                                     "physical_wall_id": target.wall_candidate_id,
                                     "physical_face_role": face_role.value,
                                 }
@@ -674,6 +686,7 @@ class WallFinishFaceBindingProducer:
                                     snapshot_id=published.snapshot.snapshot_id,
                                     page_id=page_id, viewport_id=viewport.view_id,
                                     decision_scope_id=f"finish-callout:{viewport.view_id}",
+                                    physical_wall_decision_scope_id=wall_scope.decision_scope_id,
                                     physical_wall_id=target.wall_candidate_id,
                                     physical_face_id=face_id, physical_face_role=face_role,
                                     source_face_segment_ids=tuple(sorted(source_segments)),

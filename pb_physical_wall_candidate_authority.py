@@ -45,14 +45,24 @@ from pb_source_visibility_authority import (
     classify_native_segment_visibility,
 )
 from pb_vector_geometry_v130 import extract_native_page
-from pb_viewport_segmentation import ViewportSegmentationStatus, segment_page_viewports
+from pb_viewport_segmentation import (
+    ViewportSegmentationStatus,
+    is_authoritative_derived_viewport,
+    is_segment_page_viewports_product,
+    segmented_viewport_producer_fingerprint,
+    segment_page_viewports,
+    validate_non_overlapping_viewports,
+)
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 from pb_wall_room_topology_junction_classifier import classify_junctions
-from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
+from pb_wall_room_topology_stage_a import (
+    build_wall_graph_for_viewport,
+    is_structural_candidate_segment,
+)
 from pb_wall_room_topology_wall_assembly import assemble_wall_topology
 
 
-PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION = "1.1.0"
+PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION = "1.2.0"
 PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED = "physical_wall_candidate_scope_resolved"
 PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE = "physical_wall_candidate_scope_unavailable"
 PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE = (
@@ -70,9 +80,19 @@ PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY = (
 PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED = (
     "physical_wall_candidate_scope_bounds_unresolved"
 )
+PHYSICAL_WALL_CANDIDATE_VIEWPORT_AUTHORITY_INVALID = (
+    "physical_wall_candidate_viewport_authority_invalid"
+)
+PHYSICAL_WALL_CANDIDATE_VIEWPORT_LINEAGE_MISMATCH = (
+    "physical_wall_candidate_viewport_lineage_mismatch"
+)
+PHYSICAL_WALL_CANDIDATE_SOURCE_PRIMITIVE_OWNERSHIP_AMBIGUOUS = (
+    "physical_wall_candidate_source_primitive_ownership_ambiguous"
+)
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
+_VIEWPORT_SELECTOR_SEAL = object()
 _COORD_TOL = 1e-6
 _PARALLEL_REL_TOL = 1e-9
 Point = tuple[float, float]
@@ -92,7 +112,12 @@ _BOUNDARY_COORD_TOL = _COORD_TOL
 
 @dataclass(frozen=True)
 class PhysicalWallCandidateSelector:
-    """Consumer addressing only; never a caller-authored wall universe."""
+    """Consumer address.
+
+    Legacy page-scope selectors remain public for compatibility. Viewport
+    selectors are producer-sealed and can only be obtained from an authority
+    that already materialized the authenticated viewport scope.
+    """
 
     document_id: str
     revision_id: str
@@ -100,6 +125,8 @@ class PhysicalWallCandidateSelector:
     snapshot_id: str
     page_id: str
     decision_scope_id: str
+    _viewport_selector_fingerprint: str = ""
+    _viewport_selector_seal: object = None
 
 
 @dataclass(frozen=True)
@@ -125,6 +152,16 @@ class PhysicalWallCandidateScopeResult:
     reason_codes: tuple[str, ...]
     equivalence: Optional[PhysicalWallEquivalenceResolution] = None
     proposition: Optional[str] = None
+    scope_kind: str = "page"
+    viewport_id: Optional[str] = None
+    viewport_bbox: Optional[tuple[float, float, float, float]] = None
+    viewport_view_type: Optional[str] = None
+    viewport_status: Optional[str] = None
+    viewport_boundary_source: Optional[str] = None
+    viewport_producer_fingerprint: Optional[str] = None
+    viewport_sibling_set_fingerprint: Optional[str] = None
+    scope_boundary_observation_ids: tuple[str, ...] = ()
+    ambiguous_source_observation_ids: tuple[str, ...] = ()
     schema_version: str = PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION
 
 
@@ -136,6 +173,14 @@ class _ScopeKey:
     snapshot_id: str
     page_id: str
     decision_scope_id: str
+
+
+@dataclass(frozen=True)
+class _ProvenFilledWallStrip:
+    path_index: int
+    face_raw_ids: tuple[str, str]
+    boundary_raw_ids: tuple[str, ...]
+    polygon: tuple[Point, ...]
 
 
 @dataclass(frozen=True)
@@ -151,6 +196,194 @@ class _TrustedFaceBreak:
 
 def _decision_scope_id(page_id: str) -> str:
     return f"wall-source:page-{str(page_id)}"
+
+
+def _viewport_selector_payload_fingerprint(
+    *,
+    document_id: str,
+    revision_id: str,
+    source_sha256: str,
+    snapshot_id: str,
+    page_id: str,
+    decision_scope_id: str,
+) -> str:
+    payload = "|".join(
+        (
+            PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION,
+            str(document_id),
+            str(revision_id),
+            str(source_sha256),
+            str(snapshot_id),
+            str(page_id),
+            str(decision_scope_id),
+        )
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _viewport_sibling_set_fingerprint(viewports: Sequence[object]) -> str:
+    rows = []
+    for viewport in sorted(viewports, key=lambda item: str(getattr(item, "view_id", ""))):
+        rows.append(
+            f"{getattr(viewport, 'view_id', '')}:"
+            f"{segmented_viewport_producer_fingerprint(viewport)}"
+        )
+    return hashlib.sha256("|".join(rows).encode("utf-8")).hexdigest()
+
+
+def _viewport_decision_scope_id(
+    *,
+    published,
+    page_id: str,
+    viewport,
+    sibling_set_fingerprint: str,
+) -> str:
+    payload = "|".join(
+        (
+            PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION,
+            str(published.revision.document_id),
+            str(published.revision.revision_id),
+            str(published.revision.source_sha256),
+            str(published.snapshot.snapshot_id),
+            str(page_id),
+            str(viewport.view_id),
+            segmented_viewport_producer_fingerprint(viewport),
+            str(sibling_set_fingerprint),
+        )
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+    return f"wall-source:viewport:{page_id}:{viewport.view_id}:{digest}"
+
+
+def _authenticated_viewports(page: fitz.Page, *, page_number: int) -> Optional[tuple[tuple, tuple]]:
+    all_viewports = _all_viewports(page, page_number=page_number)
+    if all_viewports is None:
+        return None
+    rows = tuple(all_viewports)
+    if any(not is_segment_page_viewports_product(viewport) for viewport in rows):
+        return None
+    # Preserve F.07's authority distinction exactly:
+    # - RESOLVED vector-frame ownership remains independently authoritative;
+    # - DERIVED ownership is authoritative only when the complete usable
+    #   sibling set is non-overlapping, matching the migration adapter gate.
+    sibling_non_overlapping = validate_non_overlapping_viewports(rows)
+    eligible = tuple(
+        viewport
+        for viewport in rows
+        if viewport.bounding_box is not None
+        and (
+            viewport.status == ViewportSegmentationStatus.RESOLVED.value
+            or (
+                sibling_non_overlapping
+                and is_authoritative_derived_viewport(viewport)
+            )
+        )
+    )
+    return rows, eligible
+
+
+def _segment_geometry(segment: Mapping[str, object]) -> Line:
+    return (
+        float(segment["x1"]),
+        float(segment["y1"]),
+        float(segment["x2"]),
+        float(segment["y2"]),
+    )
+
+
+def _segment_fully_inside_bbox(segment: Mapping[str, object], bbox: Sequence[float]) -> bool:
+    x1, y1, x2, y2 = _segment_geometry(segment)
+    return _inside_rect((x1, y1), x0=float(bbox[0]), y0=float(bbox[1]), x1=float(bbox[2]), y1=float(bbox[3])) and _inside_rect(
+        (x2, y2), x0=float(bbox[0]), y0=float(bbox[1]), x1=float(bbox[2]), y1=float(bbox[3])
+    )
+
+
+def _segment_intersects_bbox(segment: Mapping[str, object], bbox: Sequence[float]) -> bool:
+    x1, y1, x2, y2 = _segment_geometry(segment)
+    xmin, ymin, xmax, ymax = (float(value) for value in bbox)
+    if _inside_rect((x1, y1), x0=xmin, y0=ymin, x1=xmax, y1=ymax) or _inside_rect(
+        (x2, y2), x0=xmin, y0=ymin, x1=xmax, y1=ymax
+    ):
+        return True
+    dx, dy = x2 - x1, y2 - y1
+    lower, upper = 0.0, 1.0
+    for p, q in (
+        (-dx, x1 - xmin),
+        (dx, xmax - x1),
+        (-dy, y1 - ymin),
+        (dy, ymax - y1),
+    ):
+        if p == 0.0:
+            if q < 0.0:
+                return False
+            continue
+        ratio = q / p
+        if p < 0.0:
+            if ratio > upper:
+                return False
+            lower = max(lower, ratio)
+        else:
+            if ratio < lower:
+                return False
+            upper = min(upper, ratio)
+    return lower <= upper
+
+
+def _segment_lies_on_bbox_edge(segment: Mapping[str, object], bbox: Sequence[float]) -> bool:
+    x1, y1, x2, y2 = _segment_geometry(segment)
+    xmin, ymin, xmax, ymax = (float(value) for value in bbox)
+    return (
+        (abs(x1 - xmin) <= _BOUNDARY_COORD_TOL and abs(x2 - xmin) <= _BOUNDARY_COORD_TOL)
+        or (abs(x1 - xmax) <= _BOUNDARY_COORD_TOL and abs(x2 - xmax) <= _BOUNDARY_COORD_TOL)
+        or (abs(y1 - ymin) <= _BOUNDARY_COORD_TOL and abs(y2 - ymin) <= _BOUNDARY_COORD_TOL)
+        or (abs(y1 - ymax) <= _BOUNDARY_COORD_TOL and abs(y2 - ymax) <= _BOUNDARY_COORD_TOL)
+    )
+
+
+def _segment_is_authenticated_vector_frame_edge(
+    segment: Mapping[str, object],
+    *,
+    viewport,
+) -> bool:
+    """Recognize only a whole edge of F.07's authenticated vector frame.
+
+    This is not a semantic wall exclusion. It is the exact producer-owned
+    boundary primitive already used to establish the RESOLVED viewport. A
+    partial line merely lying on that boundary remains ambiguous.
+    """
+    if (
+        viewport.bounding_box is None
+        or viewport.status != ViewportSegmentationStatus.RESOLVED.value
+        or str(viewport.boundary_source) != "vector_frame"
+    ):
+        return False
+    x1, y1, x2, y2 = _segment_geometry(segment)
+    xmin, ymin, xmax, ymax = (float(value) for value in viewport.bounding_box)
+
+    def same_point(left: Point, right: Point) -> bool:
+        return (
+            abs(left[0] - right[0]) <= _BOUNDARY_COORD_TOL
+            and abs(left[1] - right[1]) <= _BOUNDARY_COORD_TOL
+        )
+
+    segment_ends = ((x1, y1), (x2, y2))
+    frame_edges = (
+        ((xmin, ymin), (xmax, ymin)),
+        ((xmax, ymin), (xmax, ymax)),
+        ((xmax, ymax), (xmin, ymax)),
+        ((xmin, ymax), (xmin, ymin)),
+    )
+    return any(
+        (
+            same_point(segment_ends[0], edge[0])
+            and same_point(segment_ends[1], edge[1])
+        )
+        or (
+            same_point(segment_ends[0], edge[1])
+            and same_point(segment_ends[1], edge[0])
+        )
+        for edge in frame_edges
+    )
 
 
 def _blocked(selector: PhysicalWallCandidateSelector, reason: str) -> PhysicalWallCandidateScopeResult:
@@ -465,6 +698,34 @@ def _scope_boundary_reason(
     return None
 
 
+def _viewport_scope_boundary_reason(
+    wall: WallCandidate,
+    *,
+    bbox: Sequence[float],
+    page_width: float,
+    page_height: float,
+) -> Optional[str]:
+    dangling = _dangling_ends(wall)
+    for point in dangling:
+        if _on_rect_boundary(
+            point,
+            x0=0.0,
+            y0=0.0,
+            x1=page_width,
+            y1=page_height,
+        ):
+            return PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_PAGE_BOUNDARY
+        if _on_rect_boundary(
+            point,
+            x0=float(bbox[0]),
+            y0=float(bbox[1]),
+            x1=float(bbox[2]),
+            y1=float(bbox[3]),
+        ):
+            return PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY
+    return None
+
+
 def _line(values: Sequence[float]) -> Optional[Line]:
     if len(values) != 4:
         return None
@@ -594,6 +855,252 @@ def _segment_matches(line: Line, first: Point, second: Point) -> bool:
         and abs(end[1] - first[1]) <= _COORD_TOL
     )
     return direct or reverse
+
+
+
+def _line_length(line: Line) -> float:
+    return math.hypot(line[2] - line[0], line[3] - line[1])
+
+
+def _same_point(left: Point, right: Point) -> bool:
+    return (
+        abs(left[0] - right[0]) <= _COORD_TOL
+        and abs(left[1] - right[1]) <= _COORD_TOL
+    )
+
+
+def _closed_four_edge_cycle(
+    entries: Sequence[tuple[str, Line]],
+) -> Optional[tuple[tuple[str, ...], tuple[Point, ...]]]:
+    if len(entries) != 4:
+        return None
+    adjacency: dict[Point, list[tuple[str, Point]]] = {}
+    canonical_points: list[Point] = []
+
+    def canonical(point: Point) -> Point:
+        for existing in canonical_points:
+            if _same_point(existing, point):
+                return existing
+        canonical_points.append(point)
+        return point
+
+    for raw_id, line in entries:
+        start = canonical((line[0], line[1]))
+        end = canonical((line[2], line[3]))
+        if _same_point(start, end):
+            return None
+        adjacency.setdefault(start, []).append((raw_id, end))
+        adjacency.setdefault(end, []).append((raw_id, start))
+    if len(adjacency) != 4 or any(len(items) != 2 for items in adjacency.values()):
+        return None
+
+    first = min(adjacency)
+    ordered_ids: list[str] = []
+    ordered_points: list[Point] = [first]
+    current = first
+    previous_id: Optional[str] = None
+    for _ in range(4):
+        options = sorted(
+            (item for item in adjacency[current] if item[0] != previous_id),
+            key=lambda item: item[0],
+        )
+        if not options:
+            return None
+        raw_id, nxt = options[0]
+        if raw_id in ordered_ids:
+            if len(ordered_ids) == 3 and _same_point(nxt, first):
+                ordered_ids.append(raw_id)
+                ordered_points.append(first)
+                break
+            return None
+        ordered_ids.append(raw_id)
+        ordered_points.append(nxt)
+        previous_id = raw_id
+        current = nxt
+    if len(ordered_ids) != 4 or not _same_point(ordered_points[-1], first):
+        return None
+    if len(set(ordered_ids)) != 4:
+        return None
+    return tuple(ordered_ids), tuple(ordered_points[:-1])
+
+
+def _proven_filled_wall_strips(
+    segments: Sequence[Mapping[str, object]],
+) -> tuple[_ProvenFilledWallStrip, ...]:
+    """Prove wall strips from one immutable native filled drawing path.
+
+    This is intentionally stronger than parallel-line pairing. A strip exists
+    only when one source drawing path supplies exactly four line primitives,
+    every primitive carries the same explicit structural/bearing layer and
+    explicit fill, the primitives form one closed cycle, and exactly two
+    opposite sides are dominant parallel faces. No proximity, nearest/first
+    candidate, confidence score, text, OCR, or benchmark identity is used.
+    """
+    by_path: dict[int, list[Mapping[str, object]]] = {}
+    for segment in segments:
+        path_index = segment.get("path_index")
+        raw_id = str(segment.get("id") or "")
+        if path_index is None or not raw_id or str(segment.get("kind") or "") != "line":
+            continue
+        try:
+            path_key = int(path_index)
+        except (TypeError, ValueError):
+            continue
+        by_path.setdefault(path_key, []).append(segment)
+
+    strips: list[_ProvenFilledWallStrip] = []
+    for path_index, members in sorted(by_path.items()):
+        if len(members) != 4:
+            continue
+        layers = {
+            str(member.get("layer") or "").strip().lower()
+            for member in members
+            if bool(member.get("layer_present", str(member.get("layer") or "").strip()))
+        }
+        if len(layers) != 1:
+            continue
+        layer = next(iter(layers), "")
+        if "structural" not in layer or not any(token in layer for token in ("bearing", "wall")):
+            continue
+        if not all(
+            bool(member.get("fill_present", member.get("fill") is not None))
+            and member.get("fill") is not None
+            for member in members
+        ):
+            continue
+
+        entries = [
+            (str(member["id"]), _segment_geometry(member))
+            for member in members
+        ]
+        cycle = _closed_four_edge_cycle(entries)
+        if cycle is None:
+            continue
+        ordered_ids, polygon = cycle
+        line_by_id = {raw_id: line for raw_id, line in entries}
+        lengths = {raw_id: _line_length(line_by_id[raw_id]) for raw_id in ordered_ids}
+        ranked = sorted(ordered_ids, key=lambda raw_id: (-lengths[raw_id], raw_id))
+        face_ids = tuple(sorted(ranked[:2]))
+        connector_ids = tuple(ranked[2:])
+        if not _parallel(line_by_id[face_ids[0]], line_by_id[face_ids[1]]):
+            continue
+        if _collinear(line_by_id[face_ids[0]], line_by_id[face_ids[1]]):
+            continue
+        if min(lengths[raw_id] for raw_id in face_ids) <= (
+            3.0 * max(lengths[raw_id] for raw_id in connector_ids)
+        ):
+            continue
+        # The dominant sides must be opposite in the source cycle, not adjacent.
+        positions = sorted(ordered_ids.index(raw_id) for raw_id in face_ids)
+        if (positions[1] - positions[0]) != 2:
+            continue
+        strips.append(
+            _ProvenFilledWallStrip(
+                path_index=path_index,
+                face_raw_ids=face_ids,
+                boundary_raw_ids=tuple(sorted(ordered_ids)),
+                polygon=polygon,
+            )
+        )
+    return tuple(strips)
+
+
+def _point_in_convex_polygon(point: Point, polygon: Sequence[Point]) -> bool:
+    if len(polygon) < 3:
+        return False
+    signs: list[int] = []
+    for index, first in enumerate(polygon):
+        second = polygon[(index + 1) % len(polygon)]
+        value = _cross(
+            (second[0] - first[0], second[1] - first[1]),
+            (point[0] - first[0], point[1] - first[1]),
+        )
+        if abs(value) <= _COORD_TOL:
+            continue
+        signs.append(1 if value > 0.0 else -1)
+    return not signs or all(sign == signs[0] for sign in signs)
+
+
+def _segment_contained_by_strip(
+    segment: Mapping[str, object],
+    strip: _ProvenFilledWallStrip,
+) -> bool:
+    line = _segment_geometry(segment)
+    return _point_in_convex_polygon((line[0], line[1]), strip.polygon) and _point_in_convex_polygon(
+        (line[2], line[3]), strip.polygon
+    )
+
+
+def _filter_proven_wall_strip_geometry(
+    segments: Sequence[Mapping[str, object]],
+    strips: Sequence[_ProvenFilledWallStrip],
+) -> tuple[dict, ...]:
+    """Keep wall faces while suppressing proven subordinate strip geometry.
+
+    Source-path end closures and non-parallel cross-strip strokes belong to the
+    already-proven filled wall assembly and cannot independently mint walls.
+    A source-tagged grid axis is excluded only when its complete primitive is
+    geometrically contained by that same proven wall strip; the layer string by
+    itself remains non-authoritative, preserving fail-closed A-GRID behavior.
+    """
+    face_ids = {raw_id for strip in strips for raw_id in strip.face_raw_ids}
+    boundary_ids = {raw_id for strip in strips for raw_id in strip.boundary_raw_ids}
+    kept: list[dict] = []
+    for original in segments:
+        segment = dict(original)
+        raw_id = str(segment.get("id") or "")
+        if raw_id in face_ids:
+            kept.append(segment)
+            continue
+        if raw_id in boundary_ids:
+            continue
+
+        excluded = False
+        for strip in strips:
+            if not _segment_contained_by_strip(segment, strip):
+                continue
+            layer = str(segment.get("layer") or "").strip().lower()
+            if "grid" in layer or "axis" in layer:
+                excluded = True
+                break
+            line = _segment_geometry(segment)
+            face_line = next(
+                (
+                    _segment_geometry(candidate)
+                    for candidate in segments
+                    if str(candidate.get("id") or "") == strip.face_raw_ids[0]
+                ),
+                None,
+            )
+            if face_line is not None and not _parallel(line, face_line):
+                excluded = True
+                break
+        if not excluded:
+            kept.append(segment)
+    return tuple(kept)
+
+
+def _producer_wall_strip_relation_overrides(
+    *,
+    records: Sequence[PhysicalWallCandidateRecord],
+    strips: Sequence[_ProvenFilledWallStrip],
+) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
+    overrides: dict[tuple[str, str], PhysicalEquivalenceClass] = {}
+    for strip in strips:
+        face_ids = set(strip.face_raw_ids)
+        member_ids = sorted(
+            {
+                record.wall_candidate_id
+                for record in records
+                if face_ids & set(record.physical_identity.source_primitive_ids)
+            }
+        )
+        if len(member_ids) < 2:
+            continue
+        for index, left_id in enumerate(member_ids):
+            for right_id in member_ids[index + 1 :]:
+                overrides[(left_id, right_id)] = PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+    return overrides
 
 
 def _opening_raw_relation_sets(
@@ -796,6 +1303,8 @@ def _apply_trusted_relation_overrides(
     identities: Sequence[PhysicalWallIdentity],
     baseline: PhysicalWallEquivalenceResolution,
     overrides: Mapping[tuple[str, str], PhysicalEquivalenceClass],
+    *,
+    allow_proven_same_over_distinct: bool = False,
 ) -> PhysicalWallEquivalenceResolution:
     """Reconcile source-proven relations without changing generic classifier semantics."""
     usable = [identity for identity in identities if identity.usable]
@@ -808,7 +1317,14 @@ def _apply_trusted_relation_overrides(
     }
     for pair, classification in overrides.items():
         current = pair_map.get(tuple(sorted(pair)))
-        if current == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value:
+        if (
+            current == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value
+            or (
+                allow_proven_same_over_distinct
+                and classification is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+                and current == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value
+            )
+        ):
             pair_map[tuple(sorted(pair))] = classification.value
 
     member_ids = [identity.wall_candidate_id for identity in usable]
@@ -889,40 +1405,30 @@ def _apply_trusted_relation_overrides(
     )
 
 
-def _build_scope_result(
+def _assemble_scope_result(
     *,
     source_producer: SourceVisibilityProducer,
     published,
-    source_bytes: bytes,
     page_id: str,
+    selector: PhysicalWallCandidateSelector,
+    segments: Sequence[dict],
+    source_observation_ids: Sequence[str],
+    page_width: float,
+    page_height: float,
+    source_bytes: bytes,
+    viewport=None,
+    sibling_set_fingerprint: Optional[str] = None,
+    pre_boundary_reasons: Sequence[str] = (),
+    scope_boundary_observation_ids: Sequence[str] = (),
+    ambiguous_source_observation_ids: Sequence[str] = (),
 ) -> PhysicalWallCandidateScopeResult:
-    scope_id = _decision_scope_id(page_id)
-    selector = PhysicalWallCandidateSelector(
-        document_id=published.revision.document_id,
-        revision_id=published.revision.revision_id,
-        source_sha256=published.revision.source_sha256,
-        snapshot_id=published.snapshot.snapshot_id,
-        page_id=page_id,
-        decision_scope_id=scope_id,
+    scope_id = selector.decision_scope_id
+    proven_wall_strips = _proven_filled_wall_strips(tuple(segments))
+    graph_segments = _filter_proven_wall_strip_geometry(
+        tuple(segments),
+        proven_wall_strips,
     )
-
-    page_number = int(page_id)
-    if (
-        published.coverage.state != "complete"
-        or published.coverage.failed_pages
-        or page_number not in published.coverage.decoded_pages
-    ):
-        return _blocked(selector, PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
-
-    segments, source_observation_ids, page_width, page_height = _source_page_segments(
-        source_producer=source_producer,
-        published=published,
-        source_bytes=source_bytes,
-        page_id=page_id,
-        decision_scope_id=scope_id,
-    )
-
-    graph = build_wall_graph_for_viewport(segments)
+    graph = build_wall_graph_for_viewport(graph_segments)
     junctions, relationships = classify_junctions(
         graph,
         document_id=published.revision.document_id,
@@ -957,6 +1463,16 @@ def _build_scope_result(
         tuple(ordered_identities),
         walls_by_id={wall.candidate_id: wall for wall in ordered_walls},
     )
+    strip_overrides = _producer_wall_strip_relation_overrides(
+        records=tuple(records),
+        strips=proven_wall_strips,
+    )
+    equivalence = _apply_trusted_relation_overrides(
+        tuple(ordered_identities),
+        baseline_equivalence,
+        strip_overrides,
+        allow_proven_same_over_distinct=True,
+    )
     trusted_overrides = _producer_opening_relation_overrides(
         source_producer=source_producer,
         published=published,
@@ -965,22 +1481,30 @@ def _build_scope_result(
     )
     equivalence = _apply_trusted_relation_overrides(
         tuple(ordered_identities),
-        baseline_equivalence,
+        equivalence,
         trusted_overrides,
     )
 
-    boundary_reasons: list[str] = []
+    boundary_reasons: list[str] = list(pre_boundary_reasons)
     boundary_pdf = fitz.open(stream=source_bytes, filetype="pdf")
     try:
-        boundary_page = boundary_pdf.load_page(page_number - 1)
+        boundary_page = boundary_pdf.load_page(int(page_id) - 1)
         for wall in ordered_walls:
-            reason = _scope_boundary_reason(
-                wall,
-                page=boundary_page,
-                page_number=page_number,
-                page_width=page_width,
-                page_height=page_height,
-            )
+            if viewport is None:
+                reason = _scope_boundary_reason(
+                    wall,
+                    page=boundary_page,
+                    page_number=int(page_id),
+                    page_width=page_width,
+                    page_height=page_height,
+                )
+            else:
+                reason = _viewport_scope_boundary_reason(
+                    wall,
+                    bbox=viewport.bounding_box,
+                    page_width=page_width,
+                    page_height=page_height,
+                )
             if reason is not None:
                 boundary_reasons.append(reason)
     finally:
@@ -992,12 +1516,16 @@ def _build_scope_result(
         if cropped
         else (PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,)
     )
-
+    viewport_bbox = (
+        None
+        if viewport is None or viewport.bounding_box is None
+        else tuple(float(value) for value in viewport.bounding_box)
+    )
     return PhysicalWallCandidateScopeResult(
         status=EvidenceResolutionStatus.CORROBORATED,
         scope_complete=not cropped,
         records=tuple(records),
-        source_observation_ids=source_observation_ids,
+        source_observation_ids=tuple(sorted(dict.fromkeys(source_observation_ids))),
         document_id=published.revision.document_id,
         revision_id=published.revision.revision_id,
         source_sha256=published.revision.source_sha256,
@@ -1007,7 +1535,198 @@ def _build_scope_result(
         reason_codes=reason_codes,
         equivalence=equivalence,
         proposition=PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,
+        scope_kind="page" if viewport is None else "viewport",
+        viewport_id=None if viewport is None else str(viewport.view_id),
+        viewport_bbox=viewport_bbox,
+        viewport_view_type=None if viewport is None else str(viewport.view_type),
+        viewport_status=None if viewport is None else str(viewport.status),
+        viewport_boundary_source=None if viewport is None else str(viewport.boundary_source),
+        viewport_producer_fingerprint=(
+            None if viewport is None else segmented_viewport_producer_fingerprint(viewport)
+        ),
+        viewport_sibling_set_fingerprint=sibling_set_fingerprint,
+        scope_boundary_observation_ids=tuple(
+            sorted(dict.fromkeys(scope_boundary_observation_ids))
+        ),
+        ambiguous_source_observation_ids=tuple(
+            sorted(dict.fromkeys(ambiguous_source_observation_ids))
+        ),
     )
+
+
+def _build_scope_result(
+    *,
+    source_producer: SourceVisibilityProducer,
+    published,
+    source_bytes: bytes,
+    page_id: str,
+) -> PhysicalWallCandidateScopeResult:
+    scope_id = _decision_scope_id(page_id)
+    selector = PhysicalWallCandidateSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id=page_id,
+        decision_scope_id=scope_id,
+    )
+    page_number = int(page_id)
+    if (
+        published.coverage.state != "complete"
+        or published.coverage.failed_pages
+        or page_number not in published.coverage.decoded_pages
+    ):
+        return _blocked(selector, PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
+
+    segments, source_observation_ids, page_width, page_height = _source_page_segments(
+        source_producer=source_producer,
+        published=published,
+        source_bytes=source_bytes,
+        page_id=page_id,
+        decision_scope_id=scope_id,
+    )
+    return _assemble_scope_result(
+        source_producer=source_producer,
+        published=published,
+        page_id=page_id,
+        selector=selector,
+        segments=segments,
+        source_observation_ids=source_observation_ids,
+        page_width=page_width,
+        page_height=page_height,
+        source_bytes=source_bytes,
+    )
+
+
+def _build_authenticated_viewport_scope_results(
+    *,
+    source_producer: SourceVisibilityProducer,
+    published,
+    source_bytes: bytes,
+    page_id: str,
+) -> tuple[PhysicalWallCandidateScopeResult, ...]:
+    page_number = int(page_id)
+    # A viewport scope is page-local authority. A scoped native ingestion still
+    # hashes the complete immutable PDF and inventories the document, while
+    # fully decoding the addressed page. Do not require unrelated pages to be
+    # decoded before proving this page's authenticated viewport universe.
+    if (
+        page_number not in published.coverage.decoded_pages
+        or page_number in published.coverage.failed_pages
+    ):
+        return ()
+
+    page_scope_id = _decision_scope_id(page_id)
+    page_segments, _page_observation_ids, page_width, page_height = _source_page_segments(
+        source_producer=source_producer,
+        published=published,
+        source_bytes=source_bytes,
+        page_id=page_id,
+        decision_scope_id=page_scope_id,
+    )
+    pdf = fitz.open(stream=source_bytes, filetype="pdf")
+    try:
+        page = pdf.load_page(page_number - 1)
+        authenticated = _authenticated_viewports(page, page_number=page_number)
+    finally:
+        pdf.close()
+    if authenticated is None:
+        return ()
+    all_viewports, eligible = authenticated
+    if not eligible:
+        return ()
+    sibling_fingerprint = _viewport_sibling_set_fingerprint(all_viewports)
+
+    results: list[PhysicalWallCandidateScopeResult] = []
+    for viewport in eligible:
+        assert viewport.bounding_box is not None
+        scope_id = _viewport_decision_scope_id(
+            published=published,
+            page_id=page_id,
+            viewport=viewport,
+            sibling_set_fingerprint=sibling_fingerprint,
+        )
+        selector = PhysicalWallCandidateSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            page_id=page_id,
+            decision_scope_id=scope_id,
+        )
+        owned: list[dict] = []
+        owned_observation_ids: list[str] = []
+        boundary_observation_ids: list[str] = []
+        ambiguous_observation_ids: list[str] = []
+        pre_boundary_reasons: list[str] = []
+
+        for segment in page_segments:
+            observation_id = str(segment.get("source_observation_id") or "")
+            owners = [
+                other
+                for other in eligible
+                if other.bounding_box is not None
+                and _segment_fully_inside_bbox(segment, other.bounding_box)
+            ]
+            target_owned = any(other.view_id == viewport.view_id for other in owners)
+            structural, _exclude_reasons = is_structural_candidate_segment(segment)
+
+            if target_owned and len(owners) == 1 and not _segment_lies_on_bbox_edge(
+                segment, viewport.bounding_box
+            ):
+                scoped = dict(segment)
+                scoped["viewport_id"] = scope_id
+                owned.append(scoped)
+                if observation_id:
+                    owned_observation_ids.append(observation_id)
+                continue
+
+            if target_owned and _segment_is_authenticated_vector_frame_edge(
+                segment, viewport=viewport
+            ):
+                # Exact F.07 vector-frame boundary evidence is not drawing
+                # content. It is excluded by ownership provenance, not by
+                # proximity to text or a project-specific semantic rule.
+                continue
+
+            if target_owned and (
+                len(owners) > 1
+                or _segment_lies_on_bbox_edge(segment, viewport.bounding_box)
+            ):
+                if structural:
+                    pre_boundary_reasons.append(
+                        PHYSICAL_WALL_CANDIDATE_SOURCE_PRIMITIVE_OWNERSHIP_AMBIGUOUS
+                    )
+                    if observation_id:
+                        ambiguous_observation_ids.append(observation_id)
+                continue
+
+            if _segment_intersects_bbox(segment, viewport.bounding_box) and structural:
+                pre_boundary_reasons.append(
+                    PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY
+                )
+                if observation_id:
+                    boundary_observation_ids.append(observation_id)
+
+        results.append(
+            _assemble_scope_result(
+                source_producer=source_producer,
+                published=published,
+                page_id=page_id,
+                selector=selector,
+                segments=owned,
+                source_observation_ids=owned_observation_ids,
+                page_width=page_width,
+                page_height=page_height,
+                source_bytes=source_bytes,
+                viewport=viewport,
+                sibling_set_fingerprint=sibling_fingerprint,
+                pre_boundary_reasons=pre_boundary_reasons,
+                scope_boundary_observation_ids=boundary_observation_ids,
+                ambiguous_source_observation_ids=ambiguous_observation_ids,
+            )
+        )
+    return tuple(results)
 
 
 class PhysicalWallCandidateProducer:
@@ -1022,11 +1741,52 @@ class PhysicalWallCandidateProducer:
         self._scopes = MappingProxyType(dict(scopes))
 
     @classmethod
+    def from_authenticated_viewports(
+        cls,
+        source_visibility_producer,
+        *,
+        page_ids: Optional[Sequence[str]] = None,
+    ):
+        """Build authenticated F.07 viewport scopes only.
+
+        The legacy page-wide authority remains available through
+        from_source_visibility_producer(). Keeping this constructor viewport-only
+        avoids rebuilding the full page wall graph before resolving narrower
+        authenticated drawing universes.
+
+        Callers may address source pages only. Viewport geometry, membership,
+        completeness, source primitives and wall candidates are resolved from
+        the immutable source by this producer.
+        """
+        return cls._from_source_visibility_producer(
+            source_visibility_producer,
+            page_ids=page_ids,
+            include_authenticated_viewports=True,
+            include_page_scopes=False,
+        )
+
+    @classmethod
     def from_source_visibility_producer(
         cls,
         source_visibility_producer,
         *,
         page_ids: Optional[Sequence[str]] = None,
+    ):
+        return cls._from_source_visibility_producer(
+            source_visibility_producer,
+            page_ids=page_ids,
+            include_authenticated_viewports=False,
+            include_page_scopes=True,
+        )
+
+    @classmethod
+    def _from_source_visibility_producer(
+        cls,
+        source_visibility_producer,
+        *,
+        page_ids: Optional[Sequence[str]],
+        include_authenticated_viewports: bool,
+        include_page_scopes: bool,
     ):
         """Build wall scopes, optionally narrowed by source page address.
 
@@ -1113,21 +1873,39 @@ class PhysicalWallCandidateProducer:
             )
 
             for page_id in materialized_page_ids:
-                result = _build_scope_result(
-                    source_producer=source_visibility_producer,
-                    published=published,
-                    source_bytes=source_bytes,
-                    page_id=page_id,
-                )
-                key = _ScopeKey(
-                    document_id=result.document_id,
-                    revision_id=result.revision_id,
-                    source_sha256=result.source_sha256,
-                    snapshot_id=result.snapshot_id,
-                    page_id=result.page_id,
-                    decision_scope_id=result.decision_scope_id,
-                )
-                scopes[key] = result
+                if include_page_scopes:
+                    result = _build_scope_result(
+                        source_producer=source_visibility_producer,
+                        published=published,
+                        source_bytes=source_bytes,
+                        page_id=page_id,
+                    )
+                    key = _ScopeKey(
+                        document_id=result.document_id,
+                        revision_id=result.revision_id,
+                        source_sha256=result.source_sha256,
+                        snapshot_id=result.snapshot_id,
+                        page_id=result.page_id,
+                        decision_scope_id=result.decision_scope_id,
+                    )
+                    scopes[key] = result
+
+                if include_authenticated_viewports:
+                    for viewport_result in _build_authenticated_viewport_scope_results(
+                        source_producer=source_visibility_producer,
+                        published=published,
+                        source_bytes=source_bytes,
+                        page_id=page_id,
+                    ):
+                        viewport_key = _ScopeKey(
+                            document_id=viewport_result.document_id,
+                            revision_id=viewport_result.revision_id,
+                            source_sha256=viewport_result.source_sha256,
+                            snapshot_id=viewport_result.snapshot_id,
+                            page_id=viewport_result.page_id,
+                            decision_scope_id=viewport_result.decision_scope_id,
+                        )
+                        scopes[viewport_key] = viewport_result
 
         return cls(scopes, _seal=_PRODUCER_SEAL)
 
@@ -1150,8 +1928,34 @@ class PhysicalWallCandidateAuthority:
         if not isinstance(selector, PhysicalWallCandidateSelector):
             raise TypeError("selector must be PhysicalWallCandidateSelector")
 
-        if selector.decision_scope_id != _decision_scope_id(selector.page_id):
+        scope_id = str(selector.decision_scope_id)
+        is_page_scope = scope_id == _decision_scope_id(selector.page_id)
+        is_viewport_scope = scope_id.startswith(
+            f"wall-source:viewport:{selector.page_id}:"
+        )
+        if not is_page_scope and not is_viewport_scope:
             return _blocked(selector, PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
+        if is_viewport_scope:
+            expected_fingerprint = _viewport_selector_payload_fingerprint(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                page_id=selector.page_id,
+                decision_scope_id=selector.decision_scope_id,
+            )
+            seal = selector._viewport_selector_seal
+            if (
+                not isinstance(seal, tuple)
+                or len(seal) != 2
+                or seal[0] is not _VIEWPORT_SELECTOR_SEAL
+                or seal[1] != expected_fingerprint
+                or selector._viewport_selector_fingerprint != expected_fingerprint
+            ):
+                return _blocked(
+                    selector,
+                    PHYSICAL_WALL_CANDIDATE_VIEWPORT_AUTHORITY_INVALID,
+                )
 
         key = _ScopeKey(
             document_id=str(selector.document_id),
@@ -1166,6 +1970,88 @@ class PhysicalWallCandidateAuthority:
             return _blocked(selector, PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
         return result
 
+    @staticmethod
+    def _selector_for_result(
+        result: PhysicalWallCandidateScopeResult,
+    ) -> PhysicalWallCandidateSelector:
+        if result.scope_kind != "viewport":
+            return PhysicalWallCandidateSelector(
+                document_id=result.document_id,
+                revision_id=result.revision_id,
+                source_sha256=result.source_sha256,
+                snapshot_id=result.snapshot_id,
+                page_id=result.page_id,
+                decision_scope_id=result.decision_scope_id,
+            )
+        fingerprint = _viewport_selector_payload_fingerprint(
+            document_id=result.document_id,
+            revision_id=result.revision_id,
+            source_sha256=result.source_sha256,
+            snapshot_id=result.snapshot_id,
+            page_id=result.page_id,
+            decision_scope_id=result.decision_scope_id,
+        )
+        return PhysicalWallCandidateSelector(
+            document_id=result.document_id,
+            revision_id=result.revision_id,
+            source_sha256=result.source_sha256,
+            snapshot_id=result.snapshot_id,
+            page_id=result.page_id,
+            decision_scope_id=result.decision_scope_id,
+            _viewport_selector_fingerprint=fingerprint,
+            _viewport_selector_seal=(_VIEWPORT_SELECTOR_SEAL, fingerprint),
+        )
+
+    def selector_for_viewport(
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        source_sha256: str,
+        snapshot_id: str,
+        page_id: str,
+        viewport_id: str,
+    ) -> Optional[PhysicalWallCandidateSelector]:
+        """Return a sealed address only for a materialized authenticated viewport."""
+        matches = [
+            result
+            for result in self._scopes.values()
+            if result.scope_kind == "viewport"
+            and result.document_id == str(document_id)
+            and result.revision_id == str(revision_id)
+            and result.source_sha256 == str(source_sha256)
+            and result.snapshot_id == str(snapshot_id)
+            and result.page_id == str(page_id)
+            and result.viewport_id == str(viewport_id)
+        ]
+        if len(matches) != 1:
+            return None
+        return self._selector_for_result(matches[0])
+
+    def selector_for_decision_scope(
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        source_sha256: str,
+        snapshot_id: str,
+        page_id: str,
+        decision_scope_id: str,
+    ) -> Optional[PhysicalWallCandidateSelector]:
+        """Reissue a valid selector only for an exact producer-owned scope."""
+        key = _ScopeKey(
+            document_id=str(document_id),
+            revision_id=str(revision_id),
+            source_sha256=str(source_sha256),
+            snapshot_id=str(snapshot_id),
+            page_id=str(page_id),
+            decision_scope_id=str(decision_scope_id),
+        )
+        result = self._scopes.get(key)
+        if result is None:
+            return None
+        return self._selector_for_result(result)
+
 
 __all__ = [
     "PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION",
@@ -1174,6 +2060,9 @@ __all__ = [
     "PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY",
     "PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED",
     "PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE",
+    "PHYSICAL_WALL_CANDIDATE_SOURCE_PRIMITIVE_OWNERSHIP_AMBIGUOUS",
+    "PHYSICAL_WALL_CANDIDATE_VIEWPORT_AUTHORITY_INVALID",
+    "PHYSICAL_WALL_CANDIDATE_VIEWPORT_LINEAGE_MISMATCH",
     "PhysicalWallCandidateAuthority",
     "PhysicalWallCandidateProducer",
     "PhysicalWallCandidateRecord",
