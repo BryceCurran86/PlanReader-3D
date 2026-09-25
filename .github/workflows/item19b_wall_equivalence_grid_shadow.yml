@@ -66,3 +66,34 @@ jobs:
       - name: Run canonical five-project generalisation gate
         run: |
           PYTHONPATH=. python pb_benchmark_accuracy_engine.py --all --require-local-sources
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          dashboard = json.loads(
+              Path("benchmark_results/headline_accuracy_dashboard.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          for report in dashboard.get("headline_reports", []):
+              print(
+                  "GENERALISATION_PROJECT "
+                  + json.dumps(
+                      {
+                          "benchmark_id": report.get("benchmark_id"),
+                          "status": report.get("status"),
+                          "accepted": int(report.get("exact_matches", 0))
+                          + int(report.get("within_5_percent", 0)),
+                          "compared": report.get("total_items_compared"),
+                          "accuracy": report.get("overall_accuracy_percentage"),
+                          "strict_exact": report.get(
+                              "strict_exact_accuracy_percentage"
+                          ),
+                          "gross_mismatches": report.get("gross_mismatches"),
+                          "missed_items": report.get("missed_items"),
+                          "hallucinated_items": report.get("hallucinated_items"),
+                      },
+                      sort_keys=True,
+                  )
+              )
+          PY
