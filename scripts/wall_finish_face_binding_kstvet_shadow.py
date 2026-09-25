@@ -29,6 +29,7 @@ from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateProducer,
     PhysicalWallCandidateSelector,
 )
+from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_source_wall_topology_authority import build_source_wall_topology_authority
 from pb_viewport_segmentation import assign_bbox_to_viewport
@@ -58,7 +59,6 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
         document_id="kstvet-item19b-shadow",
         source_bytes=payload,
         source_locator=f"sha256://{EXPECTED_SHA256}",
-        page_ids=(PAGE_ID,),
     )
     print("ITEM19B_STAGE ingest_page54_done", flush=True)
     pdf = __import__("fitz").open(stream=payload, filetype="pdf")
@@ -112,7 +112,96 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
                     }
                 )
 
+        text_authority = source.text_integrity_authority()
+        target_sequence_ranges = {
+            "external_e02": (10061, 10065),
+            "internal_ground_plan": (10070, 10078),
+        }
+        target_sequence_callouts = []
+        for target_name, (seq_start, seq_end) in target_sequence_ranges.items():
+            words = []
+            for observation_id in published.text_observation_ids:
+                resolved = text_authority.resolve_text(
+                    ObservationSelector(
+                        document_id=published.revision.document_id,
+                        revision_id=published.revision.revision_id,
+                        source_sha256=published.revision.source_sha256,
+                        snapshot_id=published.snapshot.snapshot_id,
+                        observation_id=observation_id,
+                    )
+                )
+                receipt = resolved.receipt
+                if (
+                    receipt is None
+                    or receipt.page_id != PAGE_ID
+                    or receipt.sequence_number is None
+                    or not seq_start <= int(receipt.sequence_number) <= seq_end
+                ):
+                    continue
+                words.append(
+                    (
+                        int(receipt.sequence_number),
+                        -1 if receipt.block_no is None else int(receipt.block_no),
+                        -1 if receipt.line_no is None else int(receipt.line_no),
+                        -1 if receipt.word_no is None else int(receipt.word_no),
+                        observation_id,
+                        receipt,
+                        resolved,
+                    )
+                )
+            words.sort(key=lambda item: item[:5])
+            if not words:
+                continue
+            boxes = [tuple(float(v) for v in item[5].geometry) for item in words]
+            text = " ".join(str(item[5].raw_text or "") for item in words)
+            bbox = (
+                min(box[0] for box in boxes),
+                min(box[1] for box in boxes),
+                max(box[2] for box in boxes),
+                max(box[3] for box in boxes),
+            )
+            heights = sorted(max(0.1, box[3] - box[1]) for box in boxes)
+            target_sequence_callouts.append(
+                {
+                    "target": target_name,
+                    "sequence_range": [seq_start, seq_end],
+                    "text": text,
+                    "bbox": list(bbox),
+                    "text_height": heights[len(heights) // 2],
+                    "semantics": [
+                        {
+                            "trade_scope_id": semantic.trade_scope_id,
+                            "finish_material": semantic.finish_material,
+                            "direction": semantic.direction,
+                        }
+                        for semantic in _finish_semantics(text)
+                    ],
+                    "word_count": len(words),
+                    "all_native_text_corroborated": all(
+                        item[6].status.value == "corroborated"
+                        for item in words
+                    ),
+                    "words": [
+                        {
+                            "observation_id": item[4],
+                            "receipt_id": item[5].receipt_id,
+                            "sequence_number": item[5].sequence_number,
+                            "trace_sequence_numbers": list(item[5].trace_sequence_numbers),
+                            "block_no": item[5].block_no,
+                            "line_no": item[5].line_no,
+                            "word_no": item[5].word_no,
+                            "raw_text": item[5].raw_text,
+                            "status": item[6].status.value,
+                            "reason_codes": list(item[6].reason_codes),
+                        }
+                        for item in words
+                    ],
+                    "authority": "diagnostic_sequence_range_only_not_callout_authority",
+                }
+            )
+
         preflight = {
+            "target_sequence_callouts_diagnostic": target_sequence_callouts,
             "raw_semantic_finish_blocks_diagnostic": raw_semantic_finish_blocks,
             "trusted_finish_blocks": [
                 {
@@ -271,7 +360,7 @@ def run(pdf_path: Path) -> tuple[list[dict], dict]:
         # be inspected even while SourceExecutionCalloutAuthority remains owned
         # by another agent. Raw text never enters production binding authority.
         preflight["raw_callout_wall_hits"] = []
-        for raw in raw_semantic_finish_blocks:
+        for raw in target_sequence_callouts:
             annotation_bbox = tuple(float(value) for value in raw["bbox"])
             text_height = float(raw["text_height"])
             viewport = assign_bbox_to_viewport(
