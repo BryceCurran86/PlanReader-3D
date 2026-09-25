@@ -1,0 +1,36 @@
+name: TEST-ONLY Claude Murera Tesseract dimension probe
+
+# Research only (never merge): Tesseract recovery of raster dimension text on
+# SHA-pinned Murera page 228. No production code, benchmark, gold or scorer.
+on:
+  push:
+    branches: ['diag/claude-murera-tess-**']
+
+jobs:
+  tess-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Tesseract and minimal Python deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+          tesseract --version
+          python -m pip install --upgrade pip
+          pip install PyMuPDF==1.28.0 numpy==2.3.5 opencv-python-headless==4.14.0.94 Pillow==12.3.0 pytesseract==0.3.13
+      - name: Download SHA-pinned Murera source
+        run: |
+          set -euo pipefail
+          curl -sSL -A "PlanReader-Murera-tess-probe/1.0" -o /tmp/murera.pdf https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf
+          echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  /tmp/murera.pdf" | sha256sum -c -
+      - name: Run probe on page 228
+        working-directory: diagnostics/claude_murera_tess
+        run: python probe_tesseract.py /tmp/murera.pdf 227 /tmp/tess_probe_p228.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tess-probe-p228
+          path: /tmp/tess_probe_p228.json
