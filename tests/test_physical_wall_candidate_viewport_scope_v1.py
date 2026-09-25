@@ -6,6 +6,7 @@ enter production wall authority.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -583,6 +584,62 @@ def test_wall_role_does_not_fall_back_from_viewport_scope_to_page_scope(tmp_path
     )
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.record is None
+
+
+def test_valid_viewport_selector_cannot_be_retargeted_with_recomputed_public_fingerprint(
+    tmp_path: Path,
+) -> None:
+    import pb_physical_wall_candidate_authority as module
+
+    path = tmp_path / "selector-retarget.pdf"
+    _draw_two_adjacent_viewports(path, partial_shared_line=False)
+    _source, published, authority = _ingest(path)
+
+    doc = fitz.open(path)
+    try:
+        viewports = [
+            viewport
+            for viewport in segment_page_viewports(doc[0], page_number=1)
+            if viewport.status == ViewportSegmentationStatus.RESOLVED.value
+        ]
+    finally:
+        doc.close()
+    assert len(viewports) == 2
+
+    selectors = []
+    for viewport in viewports:
+        selector = authority.selector_for_viewport(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            page_id="1",
+            viewport_id=viewport.view_id,
+        )
+        assert selector is not None
+        selectors.append(selector)
+
+    original, target = selectors
+    retargeted = replace(
+        original,
+        decision_scope_id=target.decision_scope_id,
+    )
+    recomputed = replace(
+        retargeted,
+        _viewport_selector_fingerprint=module._viewport_selector_payload_fingerprint(
+            document_id=retargeted.document_id,
+            revision_id=retargeted.revision_id,
+            source_sha256=retargeted.source_sha256,
+            snapshot_id=retargeted.snapshot_id,
+            page_id=retargeted.page_id,
+            decision_scope_id=retargeted.decision_scope_id,
+        ),
+    )
+    result = authority.resolve_scope(recomputed)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (
+        module.PHYSICAL_WALL_CANDIDATE_VIEWPORT_AUTHORITY_INVALID,
+    )
 
 
 def test_viewport_selector_address_does_not_accept_caller_bbox(tmp_path: Path) -> None:
