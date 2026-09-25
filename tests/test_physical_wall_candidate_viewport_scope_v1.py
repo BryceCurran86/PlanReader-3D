@@ -510,3 +510,44 @@ def test_manually_forged_viewport_scope_id_is_unavailable(tmp_path: Path) -> Non
     )
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.reason_codes == (PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE,)
+
+
+def test_wall_role_does_not_fall_back_from_viewport_scope_to_page_scope(tmp_path: Path) -> None:
+    path = tmp_path / "no-page-fallback.pdf"
+    _draw_plan(path)
+    _source, published, authority, selector, scope = _viewport_scope(path)
+    assert scope.records
+
+    role_producer = WallRoleProducer.from_source_topology(
+        physical_wall_candidate_authority=authority
+    )
+    record = scope.records[0]
+    result = role_producer.publish(
+        WallRoleSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            page_id="1",
+            decision_scope_id=selector.decision_scope_id + ":forged",
+            physical_wall_id=record.wall_candidate_id,
+        )
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+
+
+def test_viewport_selector_address_does_not_accept_caller_bbox(tmp_path: Path) -> None:
+    path = tmp_path / "selector-no-bbox.pdf"
+    _draw_plan(path)
+    _source, published, authority = _ingest(path)
+    with pytest.raises(TypeError):
+        authority.selector_for_viewport(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            page_id="1",
+            viewport_id=_viewport_id(path),
+            bbox=(0.0, 0.0, 10.0, 10.0),
+        )
