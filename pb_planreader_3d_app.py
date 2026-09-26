@@ -674,6 +674,8 @@ def _ensure_database_indexes(conn: sqlite3.Connection) -> None:
     """Create foreign key and lookup performance indexes idempotently after schema migrations."""
     indexes = [
         ("idx_pages_ws", "pages(workspace_id)"),
+        # Per-document page lookups (processing, rendering, selection) and the documents FK.
+        ("idx_pages_document_page", "pages(document_id, page_no)"),
         ("idx_takeoff_ws", "takeoff_rows(workspace_id)"),
         ("idx_register_ws", "register_items(workspace_id)"),
         ("idx_measurement_ws", "measurement_lines(workspace_id)"),
