@@ -188,8 +188,9 @@ def test_end_to_end_publishes_exact_callout_wall_before_face_role(tmp_path: Path
     assert len(bindings) == 1
     binding = bindings[0]
     assert binding.status is EvidenceResolutionStatus.CORROBORATED
-    assert "wall" in binding.trusted_annotation_text.lower()
-    assert "finish" in binding.trusted_annotation_text.lower()
+    assert binding.annotation_block_id
+    assert binding.annotation_observation_ids
+    assert binding.annotation_sequence_numbers == tuple(sorted(binding.annotation_sequence_numbers))
     assert binding.physical_wall_id in binding.equivalence_group_wall_ids
     assert binding.source_wall_primitive_ids
 

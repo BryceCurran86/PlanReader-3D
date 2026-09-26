@@ -56,6 +56,7 @@ jobs:
           # these counters.
           import fitz
           import pb_wall_finish_face_binding_authority as f
+          import pb_wall_finish_callout_wall_authority as cw
           from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
           from pb_migration_contracts import EvidenceResolutionStatus
           published=source.published_snapshot_for_revision(next(iter(source._published_by_revision)))
@@ -67,15 +68,13 @@ jobs:
           viewports=f._authoritative_viewports(page,54)
           page_lines=f._page_visible_lines(source,published,"54")
           stage=[]
-          for block_id,text,semantics,annotation_ids,annotation_bbox,text_height in f._trusted_finish_blocks(
+          for block_id,annotation_ids,sequence_numbers,annotation_bbox,text_height in cw._source_annotation_blocks(
               source,published,"54"
           ):
               row={
                   "block_id":block_id,
-                  "text":text,
-                  "semantics":[
-                      [x.trade_scope_id,x.finish_material,x.direction] for x in semantics
-                  ],
+                  "annotation_ids":list(annotation_ids),
+                  "sequence_numbers":list(sequence_numbers),
                   "viewport":None,"wall_scope":None,"leader_paths":0,
                   "terminators":0,"local_safe":[],"targets":[],
               }
@@ -143,7 +142,8 @@ jobs:
               for b in result.bindings:
                   rows.append({
                       "viewport":b.viewport_id,
-                      "trusted_annotation_text":b.trusted_annotation_text,
+                      "annotation_block_id":b.annotation_block_id,
+                      "annotation_sequence_numbers":list(b.annotation_sequence_numbers),
                       "physical_wall_id":b.physical_wall_id,
                       "raw_owner_wall_ids":list(b.raw_owner_wall_ids),
                       "equivalence_group_wall_ids":list(b.equivalence_group_wall_ids),
@@ -154,6 +154,8 @@ jobs:
           print("ITEM19B_CALLOUT_WALL_BINDING_COUNT",len(rows))
           print("ITEM19B_CALLOUT_WALL_ELAPSED_SEC",round(elapsed,3))
           assert len(rows) >= 2
-          assert any("key" in r["trusted_annotation_text"].lower() for r in rows)
-          assert any("plaster" in r["trusted_annotation_text"].lower() and "paint" in r["trusted_annotation_text"].lower() for r in rows)
+          assert all(r["annotation_block_id"] for r in rows)
+          assert all(r["annotation_sequence_numbers"] for r in rows)
+          assert all(len(r["raw_owner_wall_ids"]) >= 1 for r in rows)
+          assert all(len(r["equivalence_group_wall_ids"]) >= 1 for r in rows)
           PY
