@@ -1,0 +1,27 @@
+name: Opening Local Host Shadow
+
+on:
+  push:
+    branches: [gpt/opening-local-host-v1]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Focused tests
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_opening_local_host_binding_authority.py \
+            tests/test_opening_host_binding_remote_ambiguity_regression_v3.py \
+            tests/test_opening_host_binding_review_hardening_v3.py \
+            tests/test_opening_host_binding_equivalence_regression_v3.py
