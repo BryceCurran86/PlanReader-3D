@@ -1,0 +1,91 @@
+name: Item19B Component Topology Diagnostic
+
+on:
+  push:
+    branches: [diag/item19b-component-topology]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Probe existing topology behind global completeness gate
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from dataclasses import replace
+          from pathlib import Path
+          from collections import Counter
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_source_wall_topology_authority import _derive_scope_records
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-component-topology-diag",
+              producer_version="1.0",
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-component-topology",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          auth=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          ).authority()
+          rows=[]
+          for scope in auth._scopes.values():
+              if scope.page_id!="54" or scope.scope_kind!="viewport":
+                  continue
+              if scope.viewport_view_type!="floor_plan":
+                  continue
+              forced=replace(scope,scope_complete=True)
+              derived=_derive_scope_records(forced)
+              roles=[]
+              for key,e in derived.items():
+                  roles.append({
+                      "wall":e.physical_wall_id,
+                      "external":e.bounds_exterior,
+                      "spaces":e.enclosed_space_count,
+                      "ambiguous":e.is_ambiguous,
+                      "reason":e.ambiguity_reason,
+                  })
+              eq=scope.equivalence
+              groups=[list(g) for g in (eq.equivalence_groups if eq else ())]
+              rows.append({
+                  "viewport":scope.viewport_id,
+                  "scope_complete":scope.scope_complete,
+                  "scope_reasons":list(scope.reason_codes),
+                  "wall_count":len(scope.records),
+                  "boundary_obs_count":len(scope.scope_boundary_observation_ids),
+                  "ambiguous_obs_count":len(scope.ambiguous_source_observation_ids),
+                  "equivalence_group_count":len(groups),
+                  "equivalence_groups":groups,
+                  "derived_count":len(derived),
+                  "role_counts":dict(Counter(
+                      "ambiguous" if r["ambiguous"] else ("external" if r["external"] else "internal")
+                      for r in roles
+                  )),
+                  "reason_counts":dict(Counter(r["reason"] or "resolved" for r in roles)),
+                  "roles":roles,
+              })
+          print("COMPONENT_TOPOLOGY_FORCED_DIAG "+json.dumps(rows,sort_keys=True))
+          PY
