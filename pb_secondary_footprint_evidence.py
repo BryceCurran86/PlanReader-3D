@@ -38,6 +38,7 @@ from pb_figured_dimension_evidence import (
 )
 from pb_viewport_segmentation import (
     SegmentedViewport,
+    ViewportBoundarySource,
     ViewportSegmentationStatus,
     segment_page_viewports,
 )
@@ -109,6 +110,15 @@ def _eligible_plan_viewports(
         if v.status in allowed
         and v.view_type == DrawingViewType.FLOOR_PLAN.value
         and v.bounding_box is not None
+        # A TITLE_PARTITION bbox is an ownership partition, not a physical
+        # wall boundary. Secondary-footprint depth logic uses the viewport
+        # edge itself to decide which figured dimension is orthogonal to the
+        # adjoining building edge, so synthetic title partitions must never
+        # supply that geometry. RESOLVED vector-frame viewports remain valid.
+        and not (
+            v.status == ViewportSegmentationStatus.DERIVED.value
+            and v.boundary_source == ViewportBoundarySource.TITLE_PARTITION.value
+        )
     ]
 
 
