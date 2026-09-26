@@ -10,6 +10,8 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_wall_finish_callout_wall_authority import (
     WallFinishCalloutWallProducer,
+    _compose_execution_annotation_blocks,
+    _execution_words_are_neighbors,
     _local_owner_universe_safe,
     _target_provenance,
 )
@@ -218,3 +220,43 @@ def test_terminator_near_but_not_intersecting_wall_does_not_bind(tmp_path: Path)
     path = tmp_path / "wall-gap.pdf"
     _write_finish_source(path, wall_gap=2.01)
     assert _bindings(_run(path)) == []
+
+
+def _word_row(start: int, end: int, obs: str, box):
+    return (start, end, obs, tuple(float(v) for v in box))
+
+
+def test_execution_composer_groups_coherent_multiline_source_run() -> None:
+    rows = (
+        _word_row(100, 100, "a", (10, 10, 30, 20)),
+        _word_row(101, 101, "b", (33, 10, 50, 20)),
+        _word_row(102, 102, "c", (10, 21, 42, 31)),
+        _word_row(103, 103, "d", (45, 21, 60, 31)),
+    )
+    groups = _compose_execution_annotation_blocks(rows)
+    assert len(groups) == 1
+    assert tuple(row[2] for row in groups[0]) == ("a", "b", "c", "d")
+
+
+def test_execution_composer_splits_spatially_distant_adjacent_sequences() -> None:
+    rows = (
+        _word_row(100, 100, "a", (10, 10, 30, 20)),
+        _word_row(101, 101, "b", (200, 10, 220, 20)),
+    )
+    groups = _compose_execution_annotation_blocks(rows)
+    assert len(groups) == 2
+
+
+def test_execution_composer_splits_nonconsecutive_source_execution() -> None:
+    rows = (
+        _word_row(100, 100, "a", (10, 10, 30, 20)),
+        _word_row(103, 103, "b", (33, 10, 50, 20)),
+    )
+    groups = _compose_execution_annotation_blocks(rows)
+    assert len(groups) == 2
+
+
+def test_execution_neighbor_accepts_trace_overlap_without_parser_block_metadata() -> None:
+    left = _word_row(100, 101, "a", (10, 10, 30, 20))
+    right = _word_row(101, 101, "b", (33, 10, 50, 20))
+    assert _execution_words_are_neighbors(left, right)
