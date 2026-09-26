@@ -997,7 +997,18 @@ class GenericPlanReaderExtractor:
                     doc[p_idx], page_num=p_idx + 1
                 )
                 if spatial_evidence is not None:
-                    global_verandah_width = spatial_evidence.width_m
+                    # A DERIVED title-partition viewport may corroborate a
+                    # secondary-space depth, but its page-partition bbox is not
+                    # a physical floor-plan boundary. Do not let such evidence
+                    # redefine live slab/floor geometry. Only a RESOLVED
+                    # physical floor-plan viewport may promote the depth into
+                    # the compound footprint used for floor/slab quantities.
+                    from pb_viewport_segmentation import ViewportSegmentationStatus
+                    if (
+                        spatial_evidence.view_status
+                        == ViewportSegmentationStatus.RESOLVED.value
+                    ):
+                        global_verandah_width = spatial_evidence.width_m
 
             if global_verandah_width is None:
                 vm = re.search(r"(\d+(?:[,.]\d+)?)\s*(?:m|mm)?\s*wide\s*veranda", norm_pg)
