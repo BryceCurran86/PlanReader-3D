@@ -134,15 +134,132 @@ def _blocked(reason: str) -> WallFinishCalloutWallScopeResult:
     )
 
 
-def _source_annotation_blocks(source: SourceVisibilityProducer, published, page_id: str):
-    """Group producer-owned native word geometry without trusting its text.
+def _sequence_interval(receipt) -> Optional[tuple[int, int]]:
+    values = tuple(
+        int(value)
+        for value in (
+            tuple(getattr(receipt, "trace_sequence_numbers", ()) or ())
+            or (
+                ()
+                if getattr(receipt, "sequence_number", None) is None
+                else (int(receipt.sequence_number),)
+            )
+        )
+    )
+    if not values:
+        return None
+    return (min(values), max(values))
 
-    block_no is used only as producer extraction grouping metadata. Word
-    ordering inside the block is source execution sequence_number; block/line/
-    word indices are never used to manufacture semantic text authority.
+
+def _execution_words_are_neighbors(left, right) -> bool:
+    """Positive source-execution + geometry proof that two words share a note.
+
+    Source execution must overlap/touch. Geometry must independently prove
+    either same-line adjacency or an immediately neighboring text line.
+    This deliberately does not inspect text content or PyMuPDF block metadata.
+    """
+    l_start, l_end, _l_obs, l_box = left
+    r_start, r_end, _r_obs, r_box = right
+    if r_start > l_end + 1 or l_start > r_end + 1:
+        return False
+
+    lx0, ly0, lx1, ly1 = l_box
+    rx0, ry0, rx1, ry1 = r_box
+    lh = max(0.1, ly1 - ly0)
+    rh = max(0.1, ry1 - ry0)
+    scale = max(lh, rh)
+
+    y_overlap = max(0.0, min(ly1, ry1) - max(ly0, ry0))
+    same_line = y_overlap >= 0.5 * min(lh, rh)
+    x_gap = max(0.0, max(lx0, rx0) - min(lx1, rx1))
+    if same_line:
+        return x_gap <= 2.5 * scale
+
+    y_gap = max(0.0, max(ly0, ry0) - min(ly1, ry1))
+    x_overlap = max(0.0, min(lx1, rx1) - max(lx0, rx0))
+    left_edge_delta = abs(lx0 - rx0)
+    return (
+        y_gap <= 0.75 * scale
+        and (x_overlap > 0.0 or left_edge_delta <= 2.0 * scale)
+    )
+
+
+def _compose_execution_annotation_blocks(rows):
+    """Connected components of source-execution words with coherent layout."""
+    ordered = tuple(
+        sorted(
+            rows,
+            key=lambda row: (
+                row[0],
+                row[1],
+                round(row[3][1], 6),
+                round(row[3][0], 6),
+                row[2],
+            ),
+        )
+    )
+    if not ordered:
+        return ()
+
+    parent = list(range(len(ordered)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left_index: int, right_index: int) -> None:
+        left_root, right_root = find(left_index), find(right_index)
+        if left_root != right_root:
+            parent[max(left_root, right_root)] = min(left_root, right_root)
+
+    for left_index, left in enumerate(ordered):
+        for right_index in range(left_index + 1, len(ordered)):
+            right = ordered[right_index]
+            if right[0] > left[1] + 1:
+                break
+            if _execution_words_are_neighbors(left, right):
+                union(left_index, right_index)
+
+    groups: dict[int, list[tuple]] = {}
+    for index, row in enumerate(ordered):
+        groups.setdefault(find(index), []).append(row)
+
+    result = []
+    for rows_in_group in groups.values():
+        rows_in_group.sort(
+            key=lambda row: (
+                row[0],
+                row[1],
+                round(row[3][1], 6),
+                round(row[3][0], 6),
+                row[2],
+            )
+        )
+        result.append(tuple(rows_in_group))
+    return tuple(
+        sorted(
+            result,
+            key=lambda group: (
+                group[0][0],
+                group[0][1],
+                group[0][2],
+            ),
+        )
+    )
+
+
+def _source_annotation_blocks(source: SourceVisibilityProducer, published, page_id: str):
+    """Compose annotation geometry from producer-owned source execution.
+
+    PyMuPDF block/line/word indices are intentionally ignored. They are
+    optional parser metadata and cannot define authority. Words are grouped by
+    source execution continuity plus independently coherent source geometry.
     """
     authority = source.text_integrity_authority()
-    groups: dict[tuple[str, int], list[tuple[int, str, tuple[float, ...]]]] = {}
+    by_partition: dict[str, list[tuple[int, int, str, tuple[float, ...]]]] = {}
+
     for observation_id in published.text_observation_ids:
         result = authority.resolve_text(ObservationSelector(
             document_id=published.revision.document_id,
@@ -155,45 +272,60 @@ def _source_annotation_blocks(source: SourceVisibilityProducer, published, page_
         if (
             receipt is None
             or receipt.page_id != page_id
-            or receipt.block_no is None
-            or receipt.sequence_number is None
             or len(receipt.geometry) != 4
         ):
             continue
-        groups.setdefault(
-            (str(receipt.source_partition_id), int(receipt.block_no)), []
-        ).append((
-            int(receipt.sequence_number),
+        interval = _sequence_interval(receipt)
+        if interval is None:
+            continue
+        by_partition.setdefault(str(receipt.source_partition_id), []).append((
+            interval[0],
+            interval[1],
             observation_id,
-            tuple(float(v) for v in receipt.geometry),
+            tuple(float(value) for value in receipt.geometry),
         ))
 
     out = []
-    for (partition_id, block_no), values in sorted(groups.items()):
-        ordered = sorted(values, key=lambda row: (row[0], row[1]))
-        geometries = [row[2] for row in ordered]
-        bbox = _bbox_union(geometries)
-        heights = [max(0.1, g[3] - g[1]) for g in geometries]
-        payload = {
-            "document_id": published.revision.document_id,
-            "revision_id": published.revision.revision_id,
-            "source_sha256": published.revision.source_sha256,
-            "snapshot_id": published.snapshot.snapshot_id,
-            "page_id": page_id,
-            "source_partition_id": partition_id,
-            "block_no": block_no,
-            "observation_ids": tuple(row[1] for row in ordered),
-            "sequence_numbers": tuple(row[0] for row in ordered),
-            "bbox": tuple(round(float(v), 6) for v in bbox),
-        }
-        out.append((
-            stable_contract_id("source_annotation_block", payload, digest_chars=32),
-            tuple(row[1] for row in ordered),
-            tuple(row[0] for row in ordered),
-            bbox,
-            statistics.median(heights),
-        ))
-    return tuple(out)
+    for partition_id, rows in sorted(by_partition.items()):
+        for component in _compose_execution_annotation_blocks(rows):
+            geometries = [row[3] for row in component]
+            bbox = _bbox_union(geometries)
+            heights = [max(0.1, geometry[3] - geometry[1]) for geometry in geometries]
+            sequence_numbers = tuple(
+                sorted({seq for row in component for seq in range(row[0], row[1] + 1)})
+            )
+            observation_ids = tuple(row[2] for row in component)
+            payload = {
+                "document_id": published.revision.document_id,
+                "revision_id": published.revision.revision_id,
+                "source_sha256": published.revision.source_sha256,
+                "snapshot_id": published.snapshot.snapshot_id,
+                "page_id": page_id,
+                "source_partition_id": partition_id,
+                "observation_ids": observation_ids,
+                "sequence_numbers": sequence_numbers,
+                "bbox": tuple(round(float(value), 6) for value in bbox),
+            }
+            out.append((
+                stable_contract_id(
+                    "source_execution_annotation_block",
+                    payload,
+                    digest_chars=32,
+                ),
+                observation_ids,
+                sequence_numbers,
+                bbox,
+                statistics.median(heights),
+            ))
+    return tuple(
+        sorted(
+            out,
+            key=lambda row: (
+                row[2][0] if row[2] else -1,
+                row[0],
+            ),
+        )
+    )
 
 
 def _line_index_by_observation(page_lines):
