@@ -32,6 +32,8 @@ try:
 except Exception:  # pragma: no cover - production dependency exists
     cv2 = None
 
+import pb_takeoff_row_contract as takeoff_contract
+
 try:
     import pb_3d_surface_editor_v1212 as surface_v1212
 except Exception:  # pragma: no cover
@@ -628,24 +630,12 @@ def _takeoff_row(*, workspace_id: int, section: str, element: str, location: str
     )
 
 
-# Canonical auto-geometry take-off row: one value per column below, in order.
-TAKEOFF_ROW_FIELDS = (
-    "workspace_id", "section", "element", "location", "substrate", "finish_system", "quantity", "unit",
-    "quantity_status", "source_page", "source_reference", "inclusion_status", "coats",
-    "coverage_m2_per_litre", "productivity_m2_per_hour", "rate_per_unit", "confidence", "notes",
-    "row_role", "created_at", "updated_at",
-)
+# Canonical auto-geometry take-off row: the core takeoff_rows layout.
+TAKEOFF_ROW_FIELDS = takeoff_contract.CORE_FIELDS
 TAKEOFF_ROW_FIELD_COUNT = len(TAKEOFF_ROW_FIELDS)
 _SOURCE_REFERENCE_INDEX = TAKEOFF_ROW_FIELDS.index("source_reference")
-
-_TAKEOFF_INSERT = (
-    f"INSERT INTO takeoff_rows({','.join(TAKEOFF_ROW_FIELDS)}) "
-    f"VALUES({','.join('?' * TAKEOFF_ROW_FIELD_COUNT)})"
-)
-
-
-class TakeoffRowContractError(ValueError):
-    """An auto-geometry take-off row does not match the canonical row contract."""
+_TAKEOFF_INSERT = takeoff_contract.insert_sql(TAKEOFF_ROW_FIELDS)
+TakeoffRowContractError = takeoff_contract.TakeoffRowContractError
 
 
 def _row_source_hint(row: Any) -> str:
@@ -664,13 +654,10 @@ def _validate_auto_rows(rows: Sequence[Any]) -> None:
     deletes rows with that prefix: anything else would be duplicated on re-run.
     """
     for index, row in enumerate(rows):
-        if not isinstance(row, (tuple, list)) or len(row) != TAKEOFF_ROW_FIELD_COUNT:
-            length = len(row) if isinstance(row, (tuple, list)) else "n/a"
-            raise TakeoffRowContractError(
-                f"auto-geometry take-off row {index} has {length} values; expected "
-                f"{TAKEOFF_ROW_FIELD_COUNT} ({', '.join(TAKEOFF_ROW_FIELDS)}). "
-                f"Row source: {_row_source_hint(row)}. Build rows with _takeoff_row()."
-            )
+        takeoff_contract.validate_values(
+            row, TAKEOFF_ROW_FIELDS, index=index,
+            source=f"{_row_source_hint(row)} (build rows with _takeoff_row())",
+        )
         reference = row[_SOURCE_REFERENCE_INDEX]
         if not isinstance(reference, str) or not reference.startswith(SOURCE_PREFIX):
             raise TakeoffRowContractError(

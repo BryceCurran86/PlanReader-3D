@@ -36,6 +36,7 @@ import requests
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 
+from pb_takeoff_row_contract import EDITABLE_FIELDS as TAKEOFF_EDITABLE_FIELDS
 from pb_commercial_export_preflight_v163 import (
     derive_export_preflight,
     verify_toctou_and_publish_jobhub,
@@ -167,25 +168,8 @@ else:
 DEFAULT_AI_PROVIDER = os.environ.get("AI_PROVIDER", "OpenAI")
 AI_PROVIDERS = ["OpenAI", "Google Gemini"]
 
-TAKEOFF_COLUMNS = [
-    "section",
-    "element",
-    "location",
-    "substrate",
-    "finish_system",
-    "quantity",
-    "unit",
-    "quantity_status",
-    "source_page",
-    "source_reference",
-    "inclusion_status",
-    "coats",
-    "coverage_m2_per_litre",
-    "productivity_m2_per_hour",
-    "rate_per_unit",
-    "confidence",
-    "notes",
-]
+# The editable take-off columns, defined once in pb_takeoff_row_contract.
+TAKEOFF_COLUMNS = list(TAKEOFF_EDITABLE_FIELDS)
 
 REGISTER_NAMES = [
     "source_basis",
