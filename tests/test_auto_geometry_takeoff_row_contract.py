@@ -218,7 +218,7 @@ class TakeoffRowContractTests(unittest.TestCase):
             source_reference=f"{room_face.SOURCE_PREFIX} · A101 · page:1", confidence="Derived", notes="n",
         ))
         with self.assertRaises(auto.TakeoffRowContractError) as caught:
-            auto._validate_auto_rows([tuple(row)])
+            auto._validate_auto_rows([tuple(row)], 1)
         self.assertIn("would not be replaced on re-run", str(caught.exception))
 
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 import bisect
 import json
 import math
+import numbers
 import re
 from contextlib import contextmanager
 from pathlib import Path
@@ -628,6 +629,11 @@ def _cross_calibrate_elevations(app: Any, pages: Sequence[Dict[str, Any]], footp
 def _takeoff_row(*, workspace_id: int, section: str, element: str, location: str, substrate: str,
                  quantity: float, status: str, source_page: str, source_reference: str,
                  confidence: str, notes: str, row_role: str = "", unit: str = "m²") -> Tuple[Any, ...]:
+    # Checked before rounding, which would turn NaN into a plausible 0.0 m².
+    if not _is_finite_number(quantity):
+        raise takeoff_contract.TakeoffRowContractError(
+            f"auto-geometry take-off quantity {quantity!r} for {source_reference!r} is not a finite number."
+        )
     stamp = ""  # replaced by caller
     return (
         workspace_id, section, element, location, substrate, "To be confirmed", round(max(0.0, quantity), 2), unit,
@@ -639,7 +645,6 @@ def _takeoff_row(*, workspace_id: int, section: str, element: str, location: str
 # Canonical auto-geometry take-off row: the core takeoff_rows layout.
 TAKEOFF_ROW_FIELDS = takeoff_contract.CORE_FIELDS
 TAKEOFF_ROW_FIELD_COUNT = len(TAKEOFF_ROW_FIELDS)
-_SOURCE_REFERENCE_INDEX = TAKEOFF_ROW_FIELDS.index("source_reference")
 _TAKEOFF_INSERT = takeoff_contract.insert_sql(TAKEOFF_ROW_FIELDS)
 TakeoffRowContractError = takeoff_contract.TakeoffRowContractError
 
@@ -652,23 +657,62 @@ def _row_source_hint(row: Any) -> str:
     return refs[0] if refs else type(row).__name__
 
 
-def _validate_auto_rows(rows: Sequence[Any]) -> None:
-    """Reject rows that would not bind to _TAKEOFF_INSERT or leave the auto batch.
+def _is_finite_number(value: Any) -> bool:
+    return isinstance(value, numbers.Real) and not isinstance(value, bool) and math.isfinite(value)
 
-    Every row must carry exactly TAKEOFF_ROW_FIELD_COUNT values and a
-    source_reference owned by SOURCE_PREFIX, because _replace_auto_rows only
-    deletes rows with that prefix: anything else would be duplicated on re-run.
+
+# What an automatic row may carry: the roles _takeoff_row() assigns, text in
+# every text column (required ones non-empty), and finite non-negative numbers.
+AUTO_ROW_ROLES = ("", "floor_area")
+_AUTO_REQUIRED_TEXT = ("section", "element", "location", "substrate", "unit", "quantity_status",
+                       "source_reference", "inclusion_status", "confidence")
+_AUTO_OPTIONAL_TEXT = ("finish_system", "source_page", "notes", "row_role")
+_AUTO_NUMBERS = ("quantity", "coats", "coverage_m2_per_litre", "productivity_m2_per_hour", "rate_per_unit")
+
+
+def _auto_row_problem(row: Dict[str, Any], workspace_id: int) -> Optional[str]:
+    """Why a named automatic row must not be published, or None."""
+    owner = row["workspace_id"]
+    if isinstance(owner, bool) or not isinstance(owner, int) or owner != workspace_id:
+        return f"workspace_id {owner!r} is not the workspace being published ({workspace_id})"
+    for name in _AUTO_REQUIRED_TEXT + _AUTO_OPTIONAL_TEXT:
+        value = row[name]
+        if not isinstance(value, str) or (name in _AUTO_REQUIRED_TEXT and not value.strip()):
+            return f"{name} {value!r} is not {'non-empty ' if name in _AUTO_REQUIRED_TEXT else ''}text"
+    for name in _AUTO_NUMBERS:
+        if not _is_finite_number(row[name]) or row[name] < 0:
+            return f"{name} {row[name]!r} is not a finite, non-negative number"
+    if row["unit"] not in takeoff_contract.TAKEOFF_UNITS:
+        return f"unit {row['unit']!r} is not one of {takeoff_contract.TAKEOFF_UNITS}"
+    if row["row_role"] not in AUTO_ROW_ROLES:
+        return f"row_role {row['row_role']!r} is not an automatic role {AUTO_ROW_ROLES}"
+    inclusion = "INCLUSION" if row["row_role"] == "floor_area" else "PROVISIONAL"
+    if row["inclusion_status"] != inclusion:
+        return f"inclusion_status {row['inclusion_status']!r} is not {inclusion!r} for row_role {row['row_role']!r}"
+    if not row["source_reference"].startswith(SOURCE_PREFIX):
+        return (f"source_reference {row['source_reference']!r} does not start with {SOURCE_PREFIX!r}; "
+                "it would not be replaced on re-run")
+    return None
+
+
+def _validate_auto_rows(rows: Sequence[Any], workspace_id: int) -> None:
+    """Reject, before anything is deleted, every row that is not a well-formed automatic row of this workspace.
+
+    Each row must bind to _TAKEOFF_INSERT (TAKEOFF_ROW_FIELD_COUNT values) and pass
+    _auto_row_problem(): it belongs to the workspace being replaced, its
+    source_reference is owned by SOURCE_PREFIX (the only prefix
+    _auto_publication() deletes, so anything else would be duplicated on
+    re-run), and no field is missing, mistyped or non-finite.
     """
     for index, row in enumerate(rows):
-        takeoff_contract.validate_values(
+        values = takeoff_contract.validate_values(
             row, TAKEOFF_ROW_FIELDS, index=index,
             source=f"{_row_source_hint(row)} (build rows with _takeoff_row())",
         )
-        reference = row[_SOURCE_REFERENCE_INDEX]
-        if not isinstance(reference, str) or not reference.startswith(SOURCE_PREFIX):
+        problem = _auto_row_problem(dict(zip(TAKEOFF_ROW_FIELDS, values)), workspace_id)
+        if problem:
             raise TakeoffRowContractError(
-                f"auto-geometry take-off row {index} source_reference {reference!r} does not "
-                f"start with {SOURCE_PREFIX!r}; it would not be replaced on re-run."
+                f"auto-geometry take-off row {index} ({_row_source_hint(row)}): {problem}."
             )
 
 
@@ -703,7 +747,7 @@ def _auto_publication(app: Any, workspace_id: int, rows: Sequence[Tuple[Any, ...
     not at all, so a failed envelope/report write cannot leave new take-off rows
     beside a stale 3D mass and report.
     """
-    _validate_auto_rows(rows)
+    _validate_auto_rows(rows, int(workspace_id))
     conn = app.local_connect()
     try:
         conn.execute("DELETE FROM takeoff_rows WHERE workspace_id=? AND source_reference LIKE ?", (workspace_id, SOURCE_PREFIX + "%"))
