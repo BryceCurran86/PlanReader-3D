@@ -77,3 +77,47 @@ class TestUnresolvedWhenOneSidedEvidence:
         res = resolve_wall_height(markers, scope_id=None)
         assert res.status == ConstraintStatus.UNRESOLVED.value
         assert res.clear_height_m is None
+
+
+class TestStrictReverseAndWrappedAnnotations:
+    def test_reverse_four_digit_level_pair_resolves_height(self) -> None:
+        markers = find_level_markers(
+            "+3000 ROOF LEVEL\n+0000 GROUND FLOOR LEVEL",
+            source_page=1,
+        )
+        by_type = {marker.marker_type: marker for marker in markers}
+        assert by_type["roof"].level_m == 3.0
+        assert by_type["ground"].level_m == 0.0
+        result = resolve_wall_height(markers, scope_id=None)
+        assert result.status == ConstraintStatus.FULLY_CONSTRAINED.value
+        assert result.clear_height_m == 3.0
+
+    def test_wrapped_reverse_level_pair_resolves_height(self) -> None:
+        markers = find_level_markers(
+            "+3000 ROOF\nLEVEL\n+0000 GROUND\nFLOOR LEVEL",
+            source_page=1,
+        )
+        by_type = {marker.marker_type: marker for marker in markers}
+        assert by_type["roof"].level_m == 3.0
+        assert by_type["ground"].level_m == 0.0
+        result = resolve_wall_height(markers, scope_id=None)
+        assert result.status == ConstraintStatus.FULLY_CONSTRAINED.value
+        assert result.clear_height_m == 3.0
+
+    def test_unrelated_standalone_value_before_next_line_label_is_rejected(self) -> None:
+        assert find_level_markers(
+            "+3000\nROOF LEVEL\n+0000\nGROUND FLOOR LEVEL",
+            source_page=1,
+        ) == []
+
+    def test_wrapped_reverse_with_extra_numbers_fails_closed(self) -> None:
+        assert find_level_markers(
+            "2400 +3000 ROOF\nLEVEL 1200",
+            source_page=1,
+        ) == []
+
+    def test_unsigned_wrapped_reverse_annotation_is_rejected(self) -> None:
+        assert find_level_markers(
+            "3000 ROOF\nLEVEL\n0000 GROUND\nFLOOR LEVEL",
+            source_page=1,
+        ) == []
