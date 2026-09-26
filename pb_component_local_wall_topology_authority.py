@@ -360,20 +360,11 @@ def _component_is_locally_complete(
     component: tuple[str, ...],
     records_by_owner: dict[str, list[object]],
     edges_by_owner: dict[str, set[Edge]],
-    ambiguous_ids: set[str],
     members_by_owner: dict[str, set[str]],
     withheld_edges: tuple[tuple[str, Edge], ...],
     withheld_replay_complete: bool,
     page_size: tuple[float, float],
 ) -> bool:
-    source_candidate_ids = {
-        wall_id
-        for owner in component
-        for wall_id in members_by_owner[owner]
-    }
-    if source_candidate_ids & ambiguous_ids:
-        return False
-
     if scope.scope_complete:
         return True
 
@@ -498,7 +489,6 @@ def _derive_scope(
             component=component,
             records_by_owner=records_by_owner,
             edges_by_owner=edges_by_owner,
-            ambiguous_ids=ambiguous_ids,
             members_by_owner=members_by_owner,
             withheld_edges=withheld_edges,
             withheld_replay_complete=replay_complete,
