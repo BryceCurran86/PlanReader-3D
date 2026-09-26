@@ -4171,6 +4171,32 @@ def parse_takeoff_file(upload: Any, mapping: dict[int, str] | None = None,
     return pd.DataFrame(rows, columns=TAKEOFF_COLUMNS + ["row_role"]), warnings
 
 
+def import_takeoff_rows(workspace_id: int, records: Iterable[dict[str, Any]]) -> int:
+    """Append imported file rows to the take-off in one transaction: all or nothing,
+    so a failed import can be retried without duplicating the rows that got in."""
+    pending = []
+    for row in records:
+        if not any(str(row.get(c) or "").strip() for c in ["section", "element", "location", "source_reference"]):
+            continue
+        if not to_float(row.get("rate_per_unit")):
+            row["rate_per_unit"] = default_rate_for(row.get("substrate"), row.get("element"), row.get("finish_system"), row.get("unit"))
+        row_role = str(row.get("row_role") or "").strip()
+        if row_role not in {"", "floor_area"}:
+            row_role = ""
+        values = [row.get(col, "") for col in TAKEOFF_COLUMNS]
+        pending.append((workspace_id, *values, row_role, now_stamp(), now_stamp()))
+    conn = local_connect()
+    try:
+        conn.executemany("""INSERT INTO takeoff_rows(workspace_id,section,element,location,substrate,finish_system,quantity,unit,quantity_status,source_page,source_reference,inclusion_status,coats,coverage_m2_per_litre,productivity_m2_per_hour,rate_per_unit,confidence,notes,row_role,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", pending)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return len(pending)
+
+
 def takeoff_import_panel(workspace_id: int, widget_key: str = "takeoff_import") -> None:
     """Render the take-off file import UI (header row picker, column mapping, preview, import)."""
     with st.expander("Import a take-off from an Excel or CSV file"):
@@ -4217,18 +4243,7 @@ def takeoff_import_panel(workspace_id: int, widget_key: str = "takeoff_import") 
             st.warning(warning)
         st.dataframe(parsed_takeoff, use_container_width=True, hide_index=True)
         if st.button(f"Import {len(parsed_takeoff)} rows into the take-off schedule", type="primary", key=f"{widget_key}_button"):
-            imported = 0
-            for row in parsed_takeoff.to_dict("records"):
-                if not any(str(row.get(c) or "").strip() for c in ["section", "element", "location", "source_reference"]):
-                    continue
-                if not to_float(row.get("rate_per_unit")):
-                    row["rate_per_unit"] = default_rate_for(row.get("substrate"), row.get("element"), row.get("finish_system"), row.get("unit"))
-                row_role = str(row.get("row_role") or "").strip()
-                if row_role not in {"", "floor_area"}:
-                    row_role = ""
-                values = [row.get(col, "") for col in TAKEOFF_COLUMNS]
-                lexecute("""INSERT INTO takeoff_rows(workspace_id,section,element,location,substrate,finish_system,quantity,unit,quantity_status,source_page,source_reference,inclusion_status,coats,coverage_m2_per_litre,productivity_m2_per_hour,rate_per_unit,confidence,notes,row_role,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (workspace_id, *values, row_role, now_stamp(), now_stamp()))
-                imported += 1
+            imported = import_takeoff_rows(workspace_id, parsed_takeoff.to_dict("records"))
             st.success(f"Imported {imported} take-off rows. Open the Take-off schedule tab to review them.")
             for k in (f"{widget_key}_file", f"{widget_key}_sig", f"{widget_key}_map", f"{widget_key}_editor", f"{widget_key}_header_row"):
                 st.session_state.pop(k, None)
