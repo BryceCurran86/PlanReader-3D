@@ -19,6 +19,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from PIL import Image, ImageDraw
 
 import pb_3d_surface_editor_v1212 as surface
+import pb_auto_geometry_v1219 as auto
 import pb_memory_stability_v1220 as memory
 import pb_no_ai_takeoff_v1216 as noai
 import pb_premier_takeoff_v1225 as premier
@@ -542,6 +543,17 @@ def apply(app: Any) -> None:
         cleanup_merged_inputs(app_obj, int(workspace_id))
         return result
     surface._replace_rows = _surface_replace
+
+    # Automatic geometry republishes every row it owns, merged inputs included.
+    # Clean them up whatever the later stages of the run do: the commercial
+    # refresh that also cleans them records its own failures and carries on.
+    base_analyse = auto.analyse_workspace
+    def _analyse(app_obj: Any, workspace_id: int):
+        try:
+            return base_analyse(app_obj, int(workspace_id))
+        finally:
+            cleanup_merged_inputs(app_obj, int(workspace_id))
+    auto.analyse_workspace = _analyse
 
     app.merge_takeoff_rows_v1226 = lambda workspace_id, row_ids, final: merge_rows(app, int(workspace_id), row_ids, final)
     app.takeoff_row_provenance_v1226 = lambda workspace_id, row: provenance_for_row(app, int(workspace_id), dict(row))
