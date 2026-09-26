@@ -59,9 +59,7 @@ jobs:
           for result in producer.published_results():
               for b in result.bindings:
                   rows.append({
-                      "trade":b.trade_scope_id,
-                      "material":b.finish_material,
-                      "direction":b.semantic_direction,
+                      "trusted_annotation_text":b.trusted_annotation_text,
                       "viewport":b.viewport_id,
                       "wall_scope":b.physical_wall_decision_scope_id,
                       "wall":b.physical_wall_id,
