@@ -51,6 +51,88 @@ jobs:
               source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
               page_ids=("54",),
           )
+          # Trace the exact producer stages before constructing the shadow
+          # authority. This is diagnostic-only; no production decision consumes
+          # these counters.
+          import fitz
+          import pb_wall_finish_face_binding_authority as f
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_migration_contracts import EvidenceResolutionStatus
+          published=source.published_snapshot_for_revision(next(iter(source._published_by_revision)))
+          wall_auth=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          ).authority()
+          doc=fitz.open(stream=payload,filetype="pdf")
+          page=doc.load_page(53)
+          viewports=f._authoritative_viewports(page,54)
+          page_lines=f._page_visible_lines(source,published,"54")
+          stage=[]
+          for block_id,text,semantics,annotation_ids,annotation_bbox,text_height in f._trusted_finish_blocks(
+              source,published,"54"
+          ):
+              row={
+                  "block_id":block_id,
+                  "text":text,
+                  "semantics":[
+                      [x.trade_scope_id,x.finish_material,x.direction] for x in semantics
+                  ],
+                  "viewport":None,"wall_scope":None,"leader_paths":0,
+                  "terminators":0,"local_safe":[],"targets":[],
+              }
+              viewport=f.assign_bbox_to_viewport(annotation_bbox,viewports,allow_derived=True)
+              if viewport is None or viewport.bounding_box is None:
+                  row["viewport"]="UNRESOLVED"
+                  stage.append(row); continue
+              row["viewport"]=viewport.view_id
+              selector=wall_auth.selector_for_viewport(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  page_id="54",viewport_id=viewport.view_id,
+              )
+              if selector is None:
+                  row["wall_scope"]="NO_SELECTOR"
+                  stage.append(row); continue
+              scope=wall_auth.resolve_scope(selector)
+              row["wall_scope"]={
+                  "status":scope.status.value,
+                  "complete":scope.scope_complete,
+                  "records":len(scope.records),
+                  "boundary":len(scope.scope_boundary_observation_ids),
+                  "ambiguous":len(scope.ambiguous_source_observation_ids),
+                  "reasons":list(scope.reason_codes),
+              }
+              if scope.status is not EvidenceResolutionStatus.CORROBORATED:
+                  stage.append(row); continue
+              leader_lines=f._viewport_owned_lines(page_lines,viewport,viewports)
+              obs=set(scope.source_observation_ids)
+              wall_lines=tuple(x for x in page_lines if x.observation_id in obs)
+              terms=tuple(
+                  t for t in f._filled_terminators(page,text_height)
+                  if viewport.bounding_box[0] <= t.center[0] <= viewport.bounding_box[2]
+                  and viewport.bounding_box[1] <= t.center[1] <= viewport.bounding_box[3]
+              )
+              row["terminators"]=len(terms)
+              paths=f._leader_paths(annotation_bbox,leader_lines,terms)
+              row["leader_paths"]=len(paths)
+              for leader_ids,term in paths:
+                  from pb_wall_finish_callout_wall_authority import _local_owner_universe_safe
+                  safe=_local_owner_universe_safe(
+                      terminator=term,page_lines=page_lines,wall_scope=scope
+                  )
+                  row["local_safe"].append([term.primitive_id,safe])
+                  target,segments,status=f._target_from_terminator(term,wall_lines,scope)
+                  row["targets"].append({
+                      "terminator":term.primitive_id,
+                      "status":status.value,
+                      "wall":None if target is None else target.wall_candidate_id,
+                      "segments":list(segments),
+                  })
+              stage.append(row)
+          doc.close()
+          print("ITEM19B_CALLOUT_STAGE_TRACE "+json.dumps(stage,sort_keys=True))
+
           start=time.perf_counter()
           producer=WallFinishCalloutWallProducer.from_source_visibility_producer(
               source,page_ids=("54",)
