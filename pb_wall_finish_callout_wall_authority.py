@@ -32,18 +32,25 @@ from typing import Mapping, Optional, Sequence
 import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_pdf_text_integrity_authority import TEXT_GLYPH_MAPPING_UNVERIFIED
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+from pb_raster_text_corroboration_authority import (
+    RasterTextCorroborationProducer,
+    RasterTextCorroborationSelector,
+)
+from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_viewport_segmentation import assign_bbox_to_viewport
 from pb_wall_finish_face_binding_authority import (
     SOURCE_EVIDENCE_KIND_NATIVE_DIRECT_CALLOUT,
+    _bbox_union,
+    _finish_semantics,
     _authoritative_viewports,
     _filled_terminators,
     _leader_paths,
     _page_visible_lines,
     _segment_intersects_bbox,
     _target_from_terminator,
-    _trusted_finish_blocks,
     _viewport_owned_lines,
 )
 
@@ -197,6 +204,107 @@ def _local_owner_universe_safe(*, terminator, page_lines, wall_scope) -> bool:
     return True
 
 
+def _trusted_finish_blocks_with_raster(
+    source: SourceVisibilityProducer,
+    published,
+    page_id: str,
+):
+    """Compose trusted finish blocks from native trust + #897 raster proof.
+
+    Raster corroboration is attempted only when the producer-owned text
+    integrity receipt has exactly one blocker:
+    TEXT_GLYPH_MAPPING_UNVERIFIED.  The native claim remains only a claim; the
+    word enters the trusted block only when the existing raster authority
+    independently corroborates that exact claim at both required render scales.
+
+    Block/line/word addresses come from the source receipt and are used only to
+    reconstruct immutable source execution order.  OCR does not choose the
+    block, wall, leader, terminator, trade, material, or target.
+    """
+    integrity = source.text_integrity_authority()
+    raster = RasterTextCorroborationProducer.from_source_visibility_producer(source)
+    blocks: dict[int, list[tuple[int, str, str, tuple[float, ...]]]] = {}
+
+    for observation_id in published.text_observation_ids:
+        selector = ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=observation_id,
+        )
+        result = integrity.resolve_text(selector)
+        receipt = result.receipt
+        if (
+            receipt is None
+            or receipt.page_id != page_id
+            or receipt.block_no is None
+            or receipt.line_no is None
+            or receipt.word_no is None
+        ):
+            continue
+
+        trusted_text = None
+        if result.status is EvidenceResolutionStatus.CORROBORATED:
+            trusted_text = str(result.trusted_text or "")
+        elif (
+            result.status is EvidenceResolutionStatus.ABSTAINED
+            and tuple(receipt.reason_codes) == (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+            and tuple(result.reason_codes) == tuple(receipt.reason_codes)
+        ):
+            raster_result = raster.publish(
+                RasterTextCorroborationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    observation_id=observation_id,
+                )
+            )
+            if raster_result.status is EvidenceResolutionStatus.CORROBORATED:
+                trusted_text = str(raster_result.corroborated_text or "")
+
+        if not trusted_text:
+            continue
+
+        blocks.setdefault(int(receipt.block_no), []).append(
+            (
+                int(receipt.line_no) * 10000 + int(receipt.word_no),
+                observation_id,
+                trusted_text,
+                tuple(receipt.geometry),
+            )
+        )
+
+    out = []
+    for block_no, values in sorted(blocks.items()):
+        ordered = sorted(values, key=lambda item: (item[0], item[1]))
+        text = " ".join(item[2] for item in ordered)
+        semantics = _finish_semantics(text)
+        if not semantics:
+            continue
+        geometries = [item[3] for item in ordered]
+        heights = [max(0.1, item[3][3] - item[3][1]) for item in ordered]
+        heights.sort()
+        mid = len(heights) // 2
+        median_height = (
+            heights[mid]
+            if len(heights) % 2
+            else (heights[mid - 1] + heights[mid]) / 2.0
+        )
+        out.append(
+            (
+                block_no,
+                text,
+                semantics,
+                tuple(item[1] for item in ordered),
+                _bbox_union(geometries),
+                median_height,
+            )
+        )
+    return tuple(out)
+
+
 def _target_provenance(*, terminator, wall_lines, wall_scope, target):
     raw_hits = {
         line.raw_id
@@ -343,7 +451,7 @@ class WallFinishCalloutWallProducer:
                         annotation_ids,
                         annotation_bbox,
                         text_height,
-                    ) in _trusted_finish_blocks(
+                    ) in _trusted_finish_blocks_with_raster(
                         source_visibility_producer,
                         published,
                         page_id,
