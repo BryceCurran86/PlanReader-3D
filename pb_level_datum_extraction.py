@@ -52,7 +52,7 @@ _LEVEL_LABELS: Dict[str, Tuple[str, ...]] = {
     "floor": (r"floor\s*level",),
     # "ground floor" is excluded when followed by "plan" -- "GROUND FLOOR
     # PLAN" is a view title (like "ROOF PLAN"), not a level datum.
-    "ground": (r"ground\s*level", r"ground\s*floor(?!\s*plan\b)"),
+    "ground": (r"ground\s*level", r"ground\s*floor(?:\s*level)?(?!\s*plan\b)"),
 }
 
 # The sign is mandatory, not optional (F.23A): a level datum is always
