@@ -88,6 +88,26 @@ class InternalPartitionEvidence:
     segment_lengths_m: Tuple[float, ...] = ()
 
 
+@dataclass(frozen=True)
+class EvidencedWallRun:
+    orientation: str  # "transverse" | "longitudinal"
+    center_coord_pt: float
+    segment_count: int
+    total_segment_length_m: float
+    grid_length_m: float
+
+
+@dataclass(frozen=True)
+class DpcAllWallsGeometryEvidence:
+    status: str  # "found" | "abstained"
+    reason: str
+    scale_pt_per_m: Optional[float] = None
+    wall_thickness_m: Optional[float] = None
+    transverse_runs: Tuple[EvidencedWallRun, ...] = ()
+    longitudinal_runs: Tuple[EvidencedWallRun, ...] = ()
+    total_internal_length_m: float = 0.0
+
+
 def _is_wall_like_fill(d: dict, page_rect: Optional[Any] = None) -> bool:
     fill = d.get("fill")
     if not fill or any(c > _MAX_FILL_RGB_FOR_BLACK for c in fill[:3]):
@@ -250,4 +270,212 @@ def resolve_internal_partition_length_m(
         scale_pt_per_m=scale_pt_per_m,
         total_length_m=round(sum(segment_lengths_m), 3),
         segment_lengths_m=segment_lengths_m,
+    )
+
+
+def resolve_dpc_all_walls_geometry(
+    drawings: Sequence[dict],
+    *,
+    length_m: float,
+    width_m: float,
+    page: Optional[Any] = None,
+    page_text: str = "",
+) -> DpcAllWallsGeometryEvidence:
+    """Derive every added DPC wall run strictly from actual source wall geometry.
+
+    Deduplicates collinear wall fills into physical wall runs (transverse and
+    longitudinal). Fails closed if the longitudinal or transverse run is
+    absent or ambiguous, never inventing wall runs merely from dimension text.
+    """
+    viewport_bbox = _floor_plan_viewport_bbox(page) if page is not None else None
+    page_rect = getattr(page, "rect", None) if page is not None else None
+    candidates = [d for d in drawings if _is_wall_like_fill(d, page_rect)]
+    if viewport_bbox is not None:
+        vx0, vy0, vx1, vy1 = viewport_bbox
+        scoped = []
+        for d in candidates:
+            x0, y0, x1, y1 = d["rect"]
+            cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+            if vx0 <= cx <= vx1 and vy0 <= cy <= vy1:
+                scoped.append(d)
+        if len(scoped) >= 2:
+            candidates = scoped
+
+    if len(candidates) < 2:
+        return DpcAllWallsGeometryEvidence(
+            status="abstained",
+            reason=f"only {len(candidates)} wall-like solid fill(s) found, need >= 2",
+        )
+
+    thicknesses = [min(d["rect"][2] - d["rect"][0], d["rect"][3] - d["rect"][1]) for d in candidates]
+    median_thickness = statistics.median(thicknesses)
+    consistent = [
+        t for t in thicknesses
+        if median_thickness > 0 and abs(t - median_thickness) / median_thickness <= _MAX_THICKNESS_RELATIVE_SPREAD
+    ]
+    if len(consistent) < 2:
+        return DpcAllWallsGeometryEvidence(
+            status="abstained",
+            reason="wall-like fills do not share a consistent thickness scale",
+        )
+    wall_thickness_pt = statistics.median(consistent)
+
+    min_x = min(d["rect"][0] for d in candidates)
+    min_y = min(d["rect"][1] for d in candidates)
+    max_x = max(d["rect"][2] for d in candidates)
+    max_y = max(d["rect"][3] for d in candidates)
+    bbox_w, bbox_h = max_x - min_x, max_y - min_y
+    if bbox_w <= 0 or bbox_h <= 0:
+        return DpcAllWallsGeometryEvidence(status="abstained", reason="degenerate bounding box")
+
+    real_major = max(length_m, width_m)
+    real_minor = min(length_m, width_m)
+    pixel_major = max(bbox_w, bbox_h)
+    if real_major <= 0 or real_minor <= 0:
+        return DpcAllWallsGeometryEvidence(status="abstained", reason="non-positive dimensions")
+    scale_pt_per_m = pixel_major / real_major
+
+    implied_thickness_m = wall_thickness_pt / scale_pt_per_m
+    lo, hi = _PLAUSIBLE_WALL_THICKNESS_RANGE_M
+    if not (lo <= implied_thickness_m <= hi):
+        return DpcAllWallsGeometryEvidence(
+            status="abstained",
+            reason=f"implied thickness {implied_thickness_m:.3f}m outside plausible range {lo}-{hi}m",
+        )
+
+    # Determine building envelope coordinate bounds
+    pixel_minor = real_minor * scale_pt_per_m
+    is_x_major = bbox_w >= bbox_h
+
+    if is_x_major:
+        env_min_x, env_max_x = min_x, max_x
+        env_min_y = min_y
+        env_max_y = min_y + pixel_minor
+    else:
+        env_min_y, env_max_y = min_y, max_y
+        env_min_x = min_x
+        env_max_x = min_x + pixel_minor
+
+    margin = wall_thickness_pt * _PERIMETER_PROXIMITY_THICKNESS_MULTIPLE
+
+    # Classify each candidate fill as perimeter vs internal
+    internal_fills = []
+    for d in candidates:
+        x0, y0, x1, y1 = d["rect"]
+        w, h = x1 - x0, y1 - y0
+        if h >= w:  # vertical
+            on_perim = (x0 - env_min_x <= margin) or (env_max_x - x1 <= margin)
+        else:  # horizontal
+            on_perim = (y0 - env_min_y <= margin) or (env_max_y - y1 <= margin)
+        if not on_perim:
+            internal_fills.append(d)
+
+    if not internal_fills:
+        return DpcAllWallsGeometryEvidence(
+            status="abstained",
+            reason="no wall-like fill sits strictly inside the derived envelope",
+            scale_pt_per_m=scale_pt_per_m,
+            wall_thickness_m=round(implied_thickness_m, 4),
+        )
+
+    vert_fills = [d for d in internal_fills if (d["rect"][3] - d["rect"][1]) >= (d["rect"][2] - d["rect"][0])]
+    horiz_fills = [d for d in internal_fills if (d["rect"][2] - d["rect"][0]) > (d["rect"][3] - d["rect"][1])]
+
+    # Group vertical fills by x-center (collinear merging)
+    transverse_groups: List[List[dict]] = []
+    for d in sorted(vert_fills, key=lambda x: (x["rect"][0] + x["rect"][2]) / 2.0):
+        cx = (d["rect"][0] + d["rect"][2]) / 2.0
+        placed = False
+        for g in transverse_groups:
+            gcx = statistics.median([(x["rect"][0] + x["rect"][2]) / 2.0 for x in g])
+            if abs(cx - gcx) <= margin:
+                g.append(d)
+                placed = True
+                break
+        if not placed:
+            transverse_groups.append([d])
+
+    # Group horizontal fills by y-center (collinear merging)
+    longitudinal_groups: List[List[dict]] = []
+    for d in sorted(horiz_fills, key=lambda x: (x["rect"][1] + x["rect"][3]) / 2.0):
+        cy = (d["rect"][1] + d["rect"][3]) / 2.0
+        placed = False
+        for g in longitudinal_groups:
+            gcy = statistics.median([(x["rect"][1] + x["rect"][3]) / 2.0 for x in g])
+            if abs(cy - gcy) <= margin:
+                g.append(d)
+                placed = True
+                break
+        if not placed:
+            longitudinal_groups.append([d])
+
+    has_verandah = any(k in page_text.lower() for k in ("verandah", "veranda"))
+
+    # Longitudinal internal walls: only counted when verified in source geometry
+    # AND positioned at a plausible verandah separating wall boundary (1.0m to 3.5m from envelope edge)
+    longitudinal_runs = []
+    if has_verandah and longitudinal_groups:
+        for g in longitudinal_groups:
+            cy = statistics.median([(x["rect"][1] + x["rect"][3]) / 2.0 for x in g])
+            intervals = sorted(
+                (float(x["rect"][0]), float(x["rect"][2])) for x in g
+            )
+            seg_len_pt = sum(end - start for start, end in intervals)
+            seg_len_m = round(seg_len_pt / scale_pt_per_m, 3)
+            # Quantity authority comes from this run's own source endpoints.
+            # Interior gaps may represent openings and split one physical wall
+            # into several fill fragments, but they cannot extend the run
+            # beyond the outermost source-evidenced endpoints.
+            source_span_pt = max(end for _start, end in intervals) - min(
+                start for start, _end in intervals
+            )
+            source_span_m = round(source_span_pt / scale_pt_per_m, 3)
+            dist_from_edge_pt = min(abs(cy - env_min_y), abs(env_max_y - cy))
+            dist_from_edge_m = dist_from_edge_pt / scale_pt_per_m
+            if 1.0 <= dist_from_edge_m <= 3.5:
+                longitudinal_runs.append(EvidencedWallRun(
+                    orientation="longitudinal",
+                    center_coord_pt=round(cy, 2),
+                    segment_count=len(g),
+                    total_segment_length_m=seg_len_m,
+                    grid_length_m=source_span_m,
+                ))
+
+    # A compound verandah layout requires BOTH verandah text evidence
+    # AND at least one physically evidenced longitudinal separating wall run:
+    is_compound_verandah = has_verandah and len(longitudinal_runs) > 0
+
+    transverse_runs = []
+    for g in transverse_groups:
+        cx = statistics.median([(x["rect"][0] + x["rect"][2]) / 2.0 for x in g])
+        intervals = sorted(
+            (float(x["rect"][1]), float(x["rect"][3])) for x in g
+        )
+        seg_len_pt = sum(end - start for start, end in intervals)
+        seg_len_m = round(seg_len_pt / scale_pt_per_m, 3)
+        # Same source-span rule for transverse walls: a partial wall remains
+        # partial unless its own source geometry reaches farther.  The outer
+        # footprint width/depth is never substituted as wall-run quantity.
+        source_span_pt = max(end for _start, end in intervals) - min(
+            start for start, _end in intervals
+        )
+        source_span_m = round(source_span_pt / scale_pt_per_m, 3)
+        transverse_runs.append(EvidencedWallRun(
+            orientation="transverse",
+            center_coord_pt=round(cx, 2),
+            segment_count=len(g),
+            total_segment_length_m=seg_len_m,
+            grid_length_m=source_span_m,
+        ))
+
+    total_internal = sum(r.grid_length_m for r in transverse_runs) + sum(r.grid_length_m for r in longitudinal_runs)
+
+    return DpcAllWallsGeometryEvidence(
+        status="found",
+        reason=f"Found {len(transverse_runs)} transverse run(s) and {len(longitudinal_runs)} longitudinal run(s)",
+        scale_pt_per_m=round(scale_pt_per_m, 3),
+        wall_thickness_m=round(implied_thickness_m, 4),
+        transverse_runs=tuple(transverse_runs),
+        longitudinal_runs=tuple(longitudinal_runs),
+        total_internal_length_m=round(total_internal, 2),
     )
