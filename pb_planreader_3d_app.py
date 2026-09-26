@@ -745,40 +745,90 @@ def _ensure_pages_columns(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE pages ADD COLUMN {name} {ddl}")
 
 
-def lquery(sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
+_DB_SESSION = threading.local()
+
+
+@contextmanager
+def db_session():
+    """Reuse one SQLite connection for lquery/ldf/lexecute/lexecutemany in this block, on this thread.
+
+    Opening a connection costs far more than a typical query (WAL mapping and
+    schema load on first use) and one Streamlit rerun makes hundreds of helper
+    calls. Each helper keeps its own transaction semantics: reads never leave a
+    transaction open and every write still commits (or rolls back) on its own.
+    Code that manages its own transaction keeps using local_connect(), which
+    always returns a fresh connection. Nested blocks share the outer connection;
+    other threads never see it.
+    """
+    if getattr(_DB_SESSION, "conn", None) is not None:
+        yield
+        return
     conn = local_connect()
+    _DB_SESSION.conn, _DB_SESSION.path = conn, DB_PATH
+    try:
+        yield
+    finally:
+        _DB_SESSION.conn = None
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+
+def _helper_connection() -> tuple[sqlite3.Connection, bool]:
+    """(connection, owned): this thread's session connection for DB_PATH, else a new one to close."""
+    conn = getattr(_DB_SESSION, "conn", None)
+    if conn is not None and _DB_SESSION.path == DB_PATH:
+        return conn, False
+    return local_connect(), True
+
+
+def lquery(sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
+    conn, owned = _helper_connection()
     try:
         rows = conn.execute(sql, tuple(params)).fetchall()
         return [dict(r) for r in rows]
     finally:
-        conn.close()
+        if owned:
+            conn.close()
 
 
 def ldf(sql: str, params: Sequence[Any] = ()) -> pd.DataFrame:
-    conn = local_connect()
+    conn, owned = _helper_connection()
     try:
         return pd.read_sql_query(sql, conn, params=tuple(params))
     finally:
-        conn.close()
+        if owned:
+            conn.close()
 
 
 def lexecute(sql: str, params: Sequence[Any] = ()) -> int:
-    conn = local_connect()
+    conn, owned = _helper_connection()
     try:
         cur = conn.execute(sql, tuple(params))
         conn.commit()
         return int(cur.lastrowid or 0)
+    except BaseException:
+        if not owned:
+            conn.rollback()
+        raise
     finally:
-        conn.close()
+        if owned:
+            conn.close()
 
 
 def lexecutemany(sql: str, rows: Iterable[Sequence[Any]]) -> None:
-    conn = local_connect()
+    conn, owned = _helper_connection()
     try:
         conn.executemany(sql, list(rows))
         conn.commit()
+    except BaseException:
+        if not owned:
+            conn.rollback()
+        raise
     finally:
-        conn.close()
+        if owned:
+            conn.close()
 
 
 def workspace_path(workspace_id: int) -> Path:
@@ -7357,6 +7407,12 @@ def clear_workspace_session_state_if_changed(active_ws_id: int | None) -> None:
 
 
 def main() -> None:
+    # One connection serves every helper query of the rerun (see db_session).
+    with db_session():
+        _main_rerun()
+
+
+def _main_rerun() -> None:
     st.set_page_config(page_title=APP_NAME,page_icon="🏗️",layout="wide")
     app_css()
     init_local_db()
