@@ -1,0 +1,83 @@
+name: Item19B Topology Counterfactual
+
+on:
+  push:
+    branches: [diag/item19b-topology-counterfactual]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Probe topology
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from dataclasses import replace
+          import json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_source_wall_topology_authority import _derive_scope_records
+
+          target_raw={"d4763i0","d4772i0","d5179i1","d5179i3","d5214i0","d5215i0"}
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(producer_method="item19b-topology-counterfactual",producer_version="1")
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-topology",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          auth=PhysicalWallCandidateProducer.from_authenticated_viewports(source,page_ids=("54",)).authority()
+          sel=auth.selector_for_viewport(
+              document_id=pub.revision.document_id,
+              revision_id=pub.revision.revision_id,
+              source_sha256=pub.revision.source_sha256,
+              snapshot_id=pub.snapshot.snapshot_id,
+              page_id="54",
+              viewport_id="view_p54_4",
+          )
+          assert sel is not None
+          scope=auth.resolve_scope(sel)
+          owners=[
+              r.wall_candidate_id for r in scope.records
+              if target_raw & set(r.physical_identity.source_primitive_ids)
+          ]
+          groups=[
+              list(g) for g in (scope.equivalence.equivalence_groups if scope.equivalence else ())
+              if set(g)&set(owners)
+          ]
+          forced=replace(scope,scope_complete=True)
+          records=_derive_scope_records(forced)
+          bywall={key[-1]:value for key,value in records.items()}
+          target_evidence={}
+          for wall_id in sorted(set(owners)|{w for g in groups for w in g}):
+              e=bywall.get(wall_id)
+              target_evidence[wall_id]=None if e is None else {
+                  "exterior":e.bounds_exterior,
+                  "spaces":e.enclosed_space_count,
+                  "ambiguous":e.is_ambiguous,
+                  "reason":e.ambiguity_reason,
+              }
+          print("TARGET_OWNERS "+json.dumps(sorted(owners)))
+          print("TARGET_EQUIVALENCE_GROUPS "+json.dumps(groups,sort_keys=True))
+          print("FORCED_TOPOLOGY_RECORD_COUNT",len(records))
+          print("TARGET_FORCED_TOPOLOGY "+json.dumps(target_evidence,sort_keys=True))
+          PY
