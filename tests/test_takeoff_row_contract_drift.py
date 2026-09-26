@@ -122,7 +122,9 @@ class ProducerDriftTests(unittest.TestCase):
                 columns = [c.strip() for c in match.group(1).replace("\n", " ").split(",") if c.strip()]
                 line = text[:match.start()].count("\n") + 1
                 self.assertIsNotNone(contract.layout_of(columns), f"{path.name}:{line} drifted: {columns}")
-        self.assertGreaterEqual(seen, 20)
+        # Sanity floor that the scan still finds the literal statements; writers
+        # moved onto the contract's generated SQL (insert_sql/save_schedule) drop out.
+        self.assertGreaterEqual(seen, 15)
 
     def test_inline_insert_tuples_match_their_statement(self):
         import pb_planreader_3d_app as app

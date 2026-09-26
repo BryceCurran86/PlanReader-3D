@@ -12,11 +12,13 @@ built from the same ordered field groups:
 
 Producers that build positional rows away from their SQL (for example the
 automatic-geometry batch fed by several wrappers) must use these layouts so
-a row can never drift from the statement that binds it.
+a row can never drift from the statement that binds it. Editors that save a
+whole schedule use save_schedule(), which keeps each surviving row's id.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+import math
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 EDITABLE_FIELDS: Tuple[str, ...] = (
     "section", "element", "location", "substrate", "finish_system", "quantity", "unit",
@@ -87,3 +89,58 @@ def values_from_mapping(row: Mapping[str, Any], fields: Sequence[str] = CORE_FIE
 def mapping_from_values(values: Any, fields: Sequence[str] = CORE_FIELDS) -> Dict[str, Any]:
     """Reconstruct a named row from positional values of a canonical layout."""
     return dict(zip(fields, validate_values(values, fields)))
+
+
+_KEPT_ON_UPDATE = ("workspace_id", "created_at")
+
+
+def update_sql(fields: Sequence[str] = CORE_FIELDS) -> str:
+    """UPDATE of one workspace row from a canonical layout; workspace_id and created_at are kept."""
+    if layout_of(fields) is None:
+        raise TakeoffRowContractError(f"not a canonical takeoff_rows layout: {tuple(fields)!r}")
+    assigned = ",".join(f"{name}=?" for name in fields if name not in _KEPT_ON_UPDATE)
+    return f"UPDATE takeoff_rows SET {assigned} WHERE id=? AND workspace_id=?"
+
+
+def row_id_of(value: Any) -> Optional[int]:
+    """The takeoff_rows id an edited row carries; None for a new row (None, NaN, blank)."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return int(number) if math.isfinite(number) and number.is_integer() else None
+
+
+def save_schedule(conn: Any, workspace_id: int, rows: Iterable[Tuple[Any, Sequence[Any]]],
+                  fields: Sequence[str] = CORE_FIELDS) -> int:
+    """Make ``workspace_id``'s take-off schedule exactly ``rows``, keeping row identity. Does not commit.
+
+    ``rows`` are ``(row_id, values)`` pairs, ``values`` in the ``fields`` layout.
+    A row carrying the id of one of this workspace's rows updates it in place
+    (id and created_at kept), so measurement lines, commercial sync events and
+    anything else keyed by takeoff_rows.id stay attached. Other rows - new, a
+    repeated id, another workspace's id - are inserted; rows not carried are
+    deleted.
+    """
+    insert, update = insert_sql(fields), update_sql(fields)
+    owner = fields.index("workspace_id")
+    existing = {int(row[0]) for row in conn.execute("SELECT id FROM takeoff_rows WHERE workspace_id=?", (workspace_id,))}
+    kept: set = set()
+    count = 0
+    for index, (row_id, values) in enumerate(rows):
+        values = validate_values(values, fields, index=index, source="take-off schedule save")
+        if values[owner] != workspace_id:
+            raise TakeoffRowContractError(
+                f"take-off row {index} belongs to workspace {values[owner]!r}, not {workspace_id!r}."
+            )
+        row_id = row_id_of(row_id)
+        if row_id in existing and row_id not in kept:
+            named = dict(zip(fields, values))
+            conn.execute(update, (*(named[name] for name in fields if name not in _KEPT_ON_UPDATE), row_id, workspace_id))
+            kept.add(row_id)
+        else:
+            conn.execute(insert, values)
+        count += 1
+    for row_id in existing - kept:
+        conn.execute("DELETE FROM takeoff_rows WHERE id=? AND workspace_id=?", (row_id, workspace_id))
+    return count

@@ -36,7 +36,12 @@ import requests
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 
-from pb_takeoff_row_contract import EDITABLE_FIELDS as TAKEOFF_EDITABLE_FIELDS, TAKEOFF_UNITS
+from pb_takeoff_row_contract import (
+    COMMERCIAL_PROVENANCE_FIELDS as TAKEOFF_PROVENANCE_FIELDS,
+    EDITABLE_FIELDS as TAKEOFF_EDITABLE_FIELDS,
+    TAKEOFF_UNITS,
+    save_schedule as save_takeoff_schedule,
+)
 from pb_commercial_export_preflight_v163 import (
     derive_export_preflight,
     verify_toctou_and_publish_jobhub,
@@ -5988,7 +5993,7 @@ def subscription_takeoff_page(workspace: dict[str, Any], session_api_key: str, a
             gate_confirmed=st.checkbox("I will calibrate the affected page scales before using these quantities",key=f"scale_gate_{int(workspace['id'])}")
         c1,c2=st.columns(2)
         if c1.button("Save take-off schedule",type="primary",disabled=not gate_confirmed,use_container_width=True):
-            lexecute("DELETE FROM takeoff_rows WHERE workspace_id=?",(workspace["id"],))
+            schedule=[]
             for row in edited.to_dict("records"):
                 if not any(str(row.get(c) or "").strip() for c in ["section","element","location","source_reference"]):
                     continue
@@ -6028,15 +6033,7 @@ def subscription_takeoff_page(workspace: dict[str, Any], session_api_key: str, a
                         authority[AUTHORITY_REVIEWED_BY_FIELD] = ""
                         authority[AUTHORITY_REVIEWED_AT_FIELD] = ""
                         authority[AUTHORITY_FINGERPRINT_FIELD] = ""
-                lexecute("""INSERT INTO takeoff_rows(
-                    workspace_id,section,element,location,substrate,finish_system,quantity,unit,
-                    quantity_status,source_page,source_reference,inclusion_status,coats,
-                    coverage_m2_per_litre,productivity_m2_per_hour,rate_per_unit,confidence,notes,
-                    row_role,commercial_authority_status,commercial_authority_source,
-                    commercial_authority_reviewed_by,commercial_authority_reviewed_at,
-                    commercial_authority_fingerprint,ai_baseline_quantity,
-                    pre_map_quantity,pre_map_quantity_status,origin,created_at,updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                schedule.append((row.get("id"), (
                     workspace["id"], *values, row_role,
                     authority[AUTHORITY_STATUS_FIELD], authority[AUTHORITY_SOURCE_FIELD],
                     authority[AUTHORITY_REVIEWED_BY_FIELD], authority[AUTHORITY_REVIEWED_AT_FIELD],
@@ -6044,7 +6041,17 @@ def subscription_takeoff_page(workspace: dict[str, Any], session_api_key: str, a
                     merged_row.get("ai_baseline_quantity"), merged_row.get("pre_map_quantity"),
                     merged_row.get("pre_map_quantity_status"), merged_row.get("origin", ""),
                     now_stamp(), now_stamp()
-                ))
+                )))
+            conn=local_connect()
+            try:
+                # Rows keep their ids: measurement lines and commercial sync events are keyed by them.
+                save_takeoff_schedule(conn,int(workspace["id"]),schedule,TAKEOFF_PROVENANCE_FIELDS)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
             st.success("Take-off schedule saved.")
             st.rerun()
         if c2.button("Apply default rates to all rows",use_container_width=True):
