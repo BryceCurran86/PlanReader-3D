@@ -1374,10 +1374,25 @@ def collect_workspace_3d_evidence(app: Any, workspace_id: int) -> Dict[str, Any]
                     })
         snapshot["pages"] = valid_pages
 
+        # build_registered_walls_v139 is expensive (elevation heights, room faces)
+        # and steps 4, 5 and 7 need the same walls: build them once per
+        # collection, and give later steps the same walls or the same error.
+        walls_once: Dict[str, Any] = {}
+
+        def registered_walls():
+            if not walls_once:
+                try:
+                    walls_once["walls"] = app.build_registered_walls_v139(wid)
+                except Exception as exc:
+                    walls_once["error"] = exc
+            if "error" in walls_once:
+                raise walls_once["error"]
+            return walls_once["walls"]
+
         # 4. Fetch registered walls from v139 producer
         if hasattr(app, "build_registered_walls_v139") and callable(app.build_registered_walls_v139):
             try:
-                reg_walls = app.build_registered_walls_v139(wid)
+                reg_walls = registered_walls()
                 snapshot["registered_walls"] = [registered_wall_to_canonical_input(w) for w in reg_walls]
             except Exception as e:
                 snapshot["diagnostics_log"].append({"type": "v139_wall_error", "msg": str(e)})
@@ -1385,7 +1400,7 @@ def collect_workspace_3d_evidence(app: Any, workspace_id: int) -> Dict[str, Any]
         # 5. SECTION E & F: Fetch takeoff rows using correct app.registered_wall_takeoff_rows_v139(reg_walls) signature!
         if hasattr(app, "registered_wall_takeoff_rows_v139") and callable(app.registered_wall_takeoff_rows_v139):
             try:
-                reg_wall_objs = app.build_registered_walls_v139(wid) if hasattr(app, "build_registered_walls_v139") else []
+                reg_wall_objs = registered_walls() if hasattr(app, "build_registered_walls_v139") else []
                 v139_takeoff = app.registered_wall_takeoff_rows_v139(reg_wall_objs)
                 for r in v139_takeoff:
                     if isinstance(r, dict):
@@ -1458,7 +1473,7 @@ def collect_workspace_3d_evidence(app: Any, workspace_id: int) -> Dict[str, Any]
             roof_caps_res = None
             if hasattr(app, "roof_caps_v140") and callable(app.roof_caps_v140):
                 prisms_walls = [registered_wall_to_canonical_input(w) for w in
-                                (app.build_registered_walls_v139(wid)
+                                (registered_walls()
                                  if hasattr(app, "build_registered_walls_v139") else [])]
                 roof_caps_res = app.roof_caps_v140(wid, prisms_walls)
 
