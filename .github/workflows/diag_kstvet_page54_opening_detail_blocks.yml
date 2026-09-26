@@ -1,0 +1,57 @@
+name: KSTVET Page54 Opening Detail Blocks Audit
+
+on:
+  push:
+    branches: [diag/kstvet-opening-schedule-source-audit]
+
+jobs:
+  detail-blocks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Dump opening detail blocks
+        run: |
+          python - <<'PY'
+          import json, fitz
+          doc=fitz.open("/tmp/kstvet.pdf")
+          page=doc[53]
+          words=page.get_text("words") or []
+          groups={}
+          for w in words:
+              if len(w)<8: continue
+              x0,y0,x1,y1,text,block,line,word=w[:8]
+              if 120 <= int(block) <= 150:
+                  groups.setdefault((int(block),int(line)),[]).append(
+                      (int(word),str(text),float(x0),float(y0),float(x1),float(y1))
+                  )
+          blocks={}
+          for (block,line), vals in sorted(groups.items()):
+              vals=sorted(vals)
+              blocks.setdefault(block,[]).append({
+                  "line":line,
+                  "text":" ".join(v[1] for v in vals),
+                  "bbox":[
+                      round(min(v[2] for v in vals),2),
+                      round(min(v[3] for v in vals),2),
+                      round(max(v[4] for v in vals),2),
+                      round(max(v[5] for v in vals),2),
+                  ],
+              })
+          print("KSTVET_P54_DETAIL_BLOCKS "+json.dumps(blocks,sort_keys=True))
+          doc.close()
+          PY
