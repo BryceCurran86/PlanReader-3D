@@ -2238,6 +2238,16 @@ def index_document_pages(document_id: int) -> tuple[int, str]:
     return count, "Indexed"
 
 
+@contextmanager
+def document_batch():
+    """Process several documents as one batch.
+
+    Later modules replace this so that workspace-wide analysis runs once when
+    the batch ends instead of after every document.
+    """
+    yield
+
+
 def process_document(
     document_id: int,
     force: bool = False,
@@ -5799,19 +5809,21 @@ def project_documents_page(workspace: dict[str, Any], bridge: JobHubBridge | Non
                     progress.progress(min(done[0] / grand_total, 1.0))
                     status.caption(f"{doc_label}: rendering page {page_no}")
 
-                for i, label in enumerate(selected):
-                    estimated = page_by_doc.get(options[label]) or 1
-                    try:
-                        count, msg = process_document(
-                            options[label],
-                            force=force,
-                            progress_cb=lambda c, t, p, l=label: _render_progress(c, t, p, l),
-                        )
-                        messages.append(f"{label}: {count} page(s) — {msg}")
-                    except Exception as exc:
-                        messages.append(f"{label}: ERROR — {exc}")
-                        done[0] += estimated
-                        progress.progress(min(done[0] / grand_total, 1.0))
+                with document_batch():
+                    for i, label in enumerate(selected):
+                        estimated = page_by_doc.get(options[label]) or 1
+                        try:
+                            count, msg = process_document(
+                                options[label],
+                                force=force,
+                                progress_cb=lambda c, t, p, l=label: _render_progress(c, t, p, l),
+                            )
+                            messages.append(f"{label}: {count} page(s) — {msg}")
+                        except Exception as exc:
+                            messages.append(f"{label}: ERROR — {exc}")
+                            done[0] += estimated
+                            progress.progress(min(done[0] / grand_total, 1.0))
+                    status.caption("Cross-referencing the processed drawings…")
                 progress.progress(1.0)
                 status.empty()
                 st.session_state["pb_process_messages"] = messages

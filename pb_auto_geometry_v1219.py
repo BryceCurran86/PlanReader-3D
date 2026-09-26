@@ -20,6 +20,7 @@ No commercial rates, coating systems, coats or productivity are invented here.
 from __future__ import annotations
 
 import bisect
+import contextvars
 import json
 import math
 import numbers
@@ -984,6 +985,45 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
     return report
 
 
+# Inside document_batch, processing a document records its workspace here
+# instead of analysing the whole workspace; the batch analyses it once.
+_BATCH_WORKSPACES: "contextvars.ContextVar[Optional[Dict[int, None]]]" = contextvars.ContextVar(
+    "pb_auto_geometry_document_batch", default=None)
+
+
+@contextmanager
+def document_batch(app: Any):
+    """Process several documents, then analyse each touched workspace once.
+
+    Every processed document used to trigger a whole-workspace analysis, so a
+    batch of documents re-analysed every earlier document again. The batch
+    ends as the last per-document analysis did: analysis, then a drawing
+    register sync (the per-document flow synced it after each analysis).
+    """
+    if _BATCH_WORKSPACES.get() is not None:  # nested: the outer batch analyses
+        yield
+        return
+    owed: Dict[int, None] = {}
+    token = _BATCH_WORKSPACES.set(owed)
+    try:
+        yield
+    finally:
+        _BATCH_WORKSPACES.reset(token)
+        sync_register = getattr(app, "sync_drawing_register_v1225", None)
+        for workspace_id in owed:
+            # As after a single document, an optional heuristic that cannot
+            # interpret one sheet must not fail the rendering that preceded it.
+            try:
+                analyse_workspace(app, workspace_id)
+            except Exception:
+                pass
+            if callable(sync_register):
+                try:
+                    sync_register(workspace_id)
+                except Exception:
+                    pass
+
+
 def auto_geometry_panel(app: Any, workspace: Dict[str, Any]) -> None:
     workspace_id = int(workspace["id"])
     report = _setting_get(app, workspace_id)
@@ -1053,7 +1093,11 @@ def apply(app: Any) -> None:
         try:
             docs = app.lquery("SELECT workspace_id FROM documents WHERE id=?", (int(document_id),))
             if docs:
-                analyse_workspace(app, int(docs[0]["workspace_id"]))
+                batch = _BATCH_WORKSPACES.get()
+                if batch is None:
+                    analyse_workspace(app, int(docs[0]["workspace_id"]))
+                else:
+                    batch[int(docs[0]["workspace_id"])] = None
         except Exception:
             # Rendering a drawing must not fail because an optional automatic
             # measurement heuristic could not interpret one unusual sheet.
@@ -1062,6 +1106,7 @@ def apply(app: Any) -> None:
 
     app.index_document_pages = _auto_index_document_pages
     app.process_document = _auto_process_document
+    app.document_batch = lambda: document_batch(app)
     app.auto_select_document_pages = lambda document_id: auto_select_document_pages(app, int(document_id))
     app.run_auto_geometry = lambda workspace_id: analyse_workspace(app, int(workspace_id))
     app.page_takeoff_relevance = page_relevance
