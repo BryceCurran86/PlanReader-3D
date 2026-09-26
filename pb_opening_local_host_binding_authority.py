@@ -25,7 +25,6 @@ from typing import Optional
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_opening_host_binding_authority import (
-    HOST_BINDING_RESOLVED,
     OpeningHostBindingRecord,
     _opening_geometry,
     _resolve_host_bands,
