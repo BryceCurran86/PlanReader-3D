@@ -236,14 +236,17 @@ def _topology_components(topology_records):
         if a != b:
             parent[max(a, b)] = min(a, b)
 
-    faces = {
-        wall_id: set(tuple(by_wall[wall_id].enclosed_space_ids or ()))
-        for wall_id in walls
-    }
-    for index, left in enumerate(walls):
-        for right in walls[index + 1 :]:
-            if faces[left] & faces[right]:
-                union(left, right)
+    face_owners: dict[str, list[str]] = {}
+    for wall_id in walls:
+        for face_id in tuple(by_wall[wall_id].enclosed_space_ids or ()):
+            face_owners.setdefault(str(face_id), []).append(wall_id)
+    for owners in face_owners.values():
+        ordered = sorted(set(owners))
+        if len(ordered) < 2:
+            continue
+        anchor = ordered[0]
+        for wall_id in ordered[1:]:
+            union(anchor, wall_id)
 
     components: dict[str, list[str]] = {}
     for wall_id in walls:
@@ -399,6 +402,10 @@ def build_component_local_source_wall_topology_authority(
         finally:
             pdf.close()
 
+        candidate_by_wall = {
+            key[-1]: (key, evidence)
+            for key, evidence in candidate_records.items()
+        }
         for component in _topology_components(candidate_records):
             member_ids, member_records = _component_member_records(
                 component,
@@ -414,9 +421,10 @@ def build_component_local_source_wall_topology_authority(
             ):
                 continue
 
-            component_set = set(component)
-            for key, evidence in candidate_records.items():
-                if key[-1] in component_set:
+            for wall_id in component:
+                candidate = candidate_by_wall.get(wall_id)
+                if candidate is not None:
+                    key, evidence = candidate
                     output_records[key] = evidence
 
             checked_ids = tuple(
