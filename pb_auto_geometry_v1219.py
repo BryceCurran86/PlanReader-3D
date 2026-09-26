@@ -19,6 +19,7 @@ No commercial rates, coating systems, coats or productivity are invented here.
 """
 from __future__ import annotations
 
+import bisect
 import json
 import math
 import re
@@ -204,9 +205,13 @@ def choose_dimension_calibration(candidates: Sequence[Dict[str, Any]], expected_
     valid = [dict(c) for c in candidates if 5.0 <= _num(c.get("px_per_m")) <= 5000.0]
     if not valid:
         return None
+    # Consensus = candidates within 7%; they all lie inside a slightly wider sorted
+    # window, and the original test is applied inside it (same counts, not O(n²)).
+    ordered = sorted(_num(c.get("px_per_m")) for c in valid)
     for candidate in valid:
         pxpm = _num(candidate.get("px_per_m"))
-        consensus = sum(1 for other in valid if abs(_num(other.get("px_per_m")) - pxpm) / max(pxpm, 1e-9) <= 0.07)
+        window = ordered[bisect.bisect_left(ordered, pxpm * 0.9299):bisect.bisect_right(ordered, pxpm * 1.0701)]
+        consensus = sum(1 for other in window if abs(other - pxpm) / max(pxpm, 1e-9) <= 0.07)
         candidate["consensus"] = consensus
         candidate["rank"] = _num(candidate.get("score")) + min(consensus, 4) * 2.0
         if expected_px_per_m > 0:
