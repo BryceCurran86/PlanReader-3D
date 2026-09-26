@@ -1,0 +1,87 @@
+name: KSTVET Opening Mark and Drawing Evidence Audit
+
+on:
+  push:
+    branches: [diag/kstvet-opening-schedule-source-audit]
+
+jobs:
+  audit-opening-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Audit drawing evidence
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, re, fitz
+          from pb_plan_opening_instance_marks import extract_plan_instance_opening_totals
+
+          doc=fitz.open("/tmp/kstvet.pdf")
+          pages=[]
+          mark_re=re.compile(r'\b(?:W|D)[- ]?\d{1,2}\b',re.I)
+          keywords=("WINDOW","DOOR","SCHEDULE","ELEVATION","GROUND FLOOR PLAN")
+          for pno in range(doc.page_count):
+              page=doc[pno]
+              text=page.get_text("text") or ""
+              words=page.get_text("words") or []
+              marks=[]
+              for w in words:
+                  if len(w)<5: continue
+                  t=str(w[4]).strip()
+                  if mark_re.search(t):
+                      marks.append({
+                          "text":t,
+                          "bbox":[round(float(v),2) for v in w[:4]],
+                          "block":int(w[5]) if len(w)>5 else None,
+                          "line":int(w[6]) if len(w)>6 else None,
+                          "word":int(w[7]) if len(w)>7 else None,
+                      })
+              if marks or any(k in text.upper() for k in keywords):
+                  pages.append({
+                      "page":pno+1,
+                      "marks":marks[:120],
+                      "keyword_lines":[
+                          line.strip() for line in text.splitlines()
+                          if any(k in line.upper() for k in keywords)
+                      ][:120],
+                  })
+          print("KSTVET_OPENING_MARK_PAGES "+json.dumps(pages,sort_keys=True))
+
+          # Diagnostic only: existing plan-mark detector over drawing-heavy pages.
+          candidates=list(range(max(0,doc.page_count-20),doc.page_count))
+          try:
+              totals=extract_plan_instance_opening_totals(doc,candidates)
+          except Exception as exc:
+              print("KSTVET_PLAN_MARK_TOTALS_ERROR",type(exc).__name__,str(exc))
+              totals=None
+          if totals is None:
+              print("KSTVET_PLAN_MARK_TOTALS null")
+          else:
+              print("KSTVET_PLAN_MARK_TOTALS "+json.dumps({
+                  "window_count":totals.window_count,
+                  "door_count":totals.door_count,
+                  "window_types":list(totals.window_types),
+                  "door_types":list(totals.door_types),
+                  "source_page":totals.source_page,
+                  "evidence_text":totals.evidence_text,
+                  "door_geometry_count":totals.door_geometry_count,
+                  "door_geometry_evidence":totals.door_geometry_evidence,
+              },sort_keys=True))
+          doc.close()
+          PY
