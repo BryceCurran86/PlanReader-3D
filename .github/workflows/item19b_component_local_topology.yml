@@ -1,0 +1,146 @@
+name: Item19B Component Local Topology
+
+on:
+  push:
+    branches: [gpt/item19b-component-topology-v1]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Focused tests
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_component_local_wall_topology_authority.py \
+            tests/test_physical_wall_candidate_viewport_scope_v1.py \
+            tests/test_physical_wall_candidate_authority_scope_v1.py \
+            tests/test_wall_role_authority_v1.py
+
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+
+      - name: Real KSTVET page54 component-local topology shadow
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from pb_component_local_wall_topology_authority import (
+              build_component_local_source_wall_topology_authority,
+              component_local_topology_proofs,
+          )
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_wall_role_authority import (
+              WallRoleProducer,
+              WallRoleSelector,
+          )
+
+          target_raw={"d4763i0","d4772i0","d5179i1","d5179i3","d5214i0","d5215i0"}
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-component-local-topology-real",
+              producer_version="1.0",
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-component-local-topology",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          walls=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          ).authority()
+          selector=walls.selector_for_viewport(
+              document_id=pub.revision.document_id,
+              revision_id=pub.revision.revision_id,
+              source_sha256=pub.revision.source_sha256,
+              snapshot_id=pub.snapshot.snapshot_id,
+              page_id="54",
+              viewport_id="view_p54_4",
+          )
+          assert selector is not None
+          scope=walls.resolve_scope(selector)
+          owners={
+              rec.wall_candidate_id
+              for rec in scope.records
+              if target_raw & set(rec.physical_identity.source_primitive_ids)
+          }
+          groups=[
+              tuple(g)
+              for g in (scope.equivalence.equivalence_groups if scope.equivalence else ())
+              if owners & set(g)
+          ]
+          representatives=set(
+              scope.equivalence.representative_wall_ids
+              if scope.equivalence else ()
+          )
+          target_reps=sorted({
+              rep
+              for group in groups
+              for rep in set(group)&representatives
+          } | (owners & representatives))
+
+          topology=build_component_local_source_wall_topology_authority(
+              source_visibility_producer=source,
+              physical_wall_candidate_authority=walls,
+          )
+          role_producer=WallRoleProducer.from_authorities(
+              physical_wall_candidate_authority=walls,
+              wall_topology_authority=topology,
+          )
+          rows=[]
+          for wall_id in target_reps:
+              result=role_producer.publish(WallRoleSelector(
+                  document_id=pub.revision.document_id,
+                  revision_id=pub.revision.revision_id,
+                  source_sha256=pub.revision.source_sha256,
+                  snapshot_id=pub.snapshot.snapshot_id,
+                  page_id="54",
+                  decision_scope_id=selector.decision_scope_id,
+                  physical_wall_id=wall_id,
+              ))
+              rows.append({
+                  "wall":wall_id,
+                  "status":result.status.value,
+                  "role":result.record.role.value if result.record else None,
+                  "reasons":list(result.reason_codes),
+                  "evidence":list(result.record.corroborating_evidence_ids) if result.record else [],
+              })
+          proofs=[
+              {
+                  "component":proof.component_id,
+                  "representatives":list(proof.representative_wall_ids),
+                  "members":list(proof.member_wall_ids),
+                  "checked_boundary_count":len(proof.checked_withheld_observation_ids),
+              }
+              for proof in component_local_topology_proofs(topology)
+          ]
+          print("ITEM19B_COMPONENT_SCOPE "+json.dumps({
+              "complete":scope.scope_complete,
+              "reasons":list(scope.reason_codes),
+              "owners":sorted(owners),
+              "groups":[list(g) for g in groups],
+              "target_reps":target_reps,
+          },sort_keys=True))
+          print("ITEM19B_COMPONENT_ROLE "+json.dumps(rows,sort_keys=True))
+          print("ITEM19B_COMPONENT_PROOFS "+json.dumps(proofs,sort_keys=True))
+          PY
