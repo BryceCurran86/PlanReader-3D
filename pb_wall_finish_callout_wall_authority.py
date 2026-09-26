@@ -37,9 +37,11 @@ from pb_viewport_segmentation import assign_bbox_to_viewport
 from pb_wall_finish_face_binding_authority import (
     _authoritative_viewports,
     _bbox_union,
+    _endpoints,
     _filled_terminators,
     _leader_paths,
     _page_visible_lines,
+    _point_in_bbox_source_roundoff,
     _segment_intersects_bbox,
     _target_from_terminator,
     _viewport_owned_lines,
@@ -194,16 +196,41 @@ def _source_annotation_blocks(source: SourceVisibilityProducer, published, page_
     return tuple(out)
 
 
-def _local_owner_universe_safe(*, terminator, page_lines, wall_scope) -> bool:
+def _line_index_by_observation(page_lines):
+    out: dict[str, list[object]] = {}
+    for line in page_lines:
+        out.setdefault(str(line.observation_id), []).append(line)
+    return out
+
+
+def _annotation_has_native_leader_contact(annotation_bbox, leader_lines) -> bool:
+    return any(
+        any(
+            _point_in_bbox_source_roundoff(point, annotation_bbox)
+            for point in _endpoints(line)
+        )
+        for line in leader_lines
+    )
+
+
+def _local_owner_universe_safe(
+    *,
+    terminator,
+    page_lines,
+    wall_scope,
+    page_line_index=None,
+) -> bool:
     questionable = tuple(dict.fromkeys((
         *tuple(getattr(wall_scope, "scope_boundary_observation_ids", ()) or ()),
         *tuple(getattr(wall_scope, "ambiguous_source_observation_ids", ()) or ()),
     )))
     if not questionable:
         return True
-    by_observation: dict[str, list[object]] = {}
-    for line in page_lines:
-        by_observation.setdefault(str(line.observation_id), []).append(line)
+    by_observation = (
+        page_line_index
+        if page_line_index is not None
+        else _line_index_by_observation(page_lines)
+    )
     for observation_id in questionable:
         candidates = by_observation.get(str(observation_id))
         if not candidates:
@@ -296,6 +323,8 @@ class WallFinishCalloutWallProducer:
                     page = doc.load_page(page_number - 1)
                     viewports = _authoritative_viewports(page, page_number)
                     page_lines = _page_visible_lines(source_visibility_producer, published, page_id)
+                    page_line_index = _line_index_by_observation(page_lines)
+                    viewport_context = {}
 
                     for block_id, annotation_ids, sequence_numbers, annotation_bbox, text_height in _source_annotation_blocks(
                         source_visibility_producer, published, page_id
@@ -303,23 +332,42 @@ class WallFinishCalloutWallProducer:
                         viewport = assign_bbox_to_viewport(annotation_bbox, viewports, allow_derived=True)
                         if viewport is None or viewport.bounding_box is None:
                             continue
-                        wall_selector = wall_authority.selector_for_viewport(
-                            document_id=published.revision.document_id,
-                            revision_id=published.revision.revision_id,
-                            source_sha256=published.revision.source_sha256,
-                            snapshot_id=published.snapshot.snapshot_id,
-                            page_id=page_id,
-                            viewport_id=viewport.view_id,
-                        )
-                        if wall_selector is None:
-                            continue
-                        wall_scope = wall_authority.resolve_scope(wall_selector)
-                        if wall_scope.status is not EvidenceResolutionStatus.CORROBORATED:
+
+                        context = viewport_context.get(viewport.view_id)
+                        if context is None:
+                            wall_selector = wall_authority.selector_for_viewport(
+                                document_id=published.revision.document_id,
+                                revision_id=published.revision.revision_id,
+                                source_sha256=published.revision.source_sha256,
+                                snapshot_id=published.snapshot.snapshot_id,
+                                page_id=page_id,
+                                viewport_id=viewport.view_id,
+                            )
+                            if wall_selector is None:
+                                viewport_context[viewport.view_id] = False
+                                continue
+                            wall_scope = wall_authority.resolve_scope(wall_selector)
+                            if wall_scope.status is not EvidenceResolutionStatus.CORROBORATED:
+                                viewport_context[viewport.view_id] = False
+                                continue
+                            leader_lines = _viewport_owned_lines(page_lines, viewport, viewports)
+                            wall_obs = set(wall_scope.source_observation_ids)
+                            wall_lines = tuple(
+                                line for line in page_lines
+                                if line.observation_id in wall_obs
+                            )
+                            context = (wall_scope, leader_lines, wall_lines)
+                            viewport_context[viewport.view_id] = context
+                        elif context is False:
                             continue
 
-                        leader_lines = _viewport_owned_lines(page_lines, viewport, viewports)
-                        wall_obs = set(wall_scope.source_observation_ids)
-                        wall_lines = tuple(line for line in page_lines if line.observation_id in wall_obs)
+                        wall_scope, leader_lines, wall_lines = context
+                        if not _annotation_has_native_leader_contact(
+                            annotation_bbox,
+                            leader_lines,
+                        ):
+                            continue
+
                         terms = tuple(
                             term for term in _filled_terminators(page, text_height)
                             if viewport.bounding_box[0] <= term.center[0] <= viewport.bounding_box[2]
@@ -332,7 +380,10 @@ class WallFinishCalloutWallProducer:
                         accepted: dict[tuple[str, str], WallFinishCalloutWallBindingRecord] = {}
                         for leader_ids, terminator in paths:
                             if not _local_owner_universe_safe(
-                                terminator=terminator, page_lines=page_lines, wall_scope=wall_scope
+                                terminator=terminator,
+                                page_lines=page_lines,
+                                wall_scope=wall_scope,
+                                page_line_index=page_line_index,
                             ):
                                 continue
                             target, source_segments, target_status = _target_from_terminator(
