@@ -188,8 +188,17 @@ def test_unrelated_viewport_crop_does_not_poison_closed_component(tmp_path: Path
         if result.status is EvidenceResolutionStatus.CORROBORATED
         and result.record is not None
     }
-    assert WallRoleClassification.INTERNAL in roles
-    assert WallRoleClassification.EXTERNAL in roles
+    diagnostics = [
+        (
+            wall_id,
+            result.status.value,
+            tuple(result.reason_codes),
+            None if result.record is None else result.record.role.value,
+        )
+        for wall_id, result in results
+    ]
+    assert WallRoleClassification.INTERNAL in roles, diagnostics
+    assert WallRoleClassification.EXTERNAL in roles, diagnostics
 
     proofs = component_local_topology_proofs(topology)
     assert proofs
