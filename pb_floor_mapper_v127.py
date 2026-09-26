@@ -131,30 +131,41 @@ def _synthetic_calibration(existing_px_per_m: float, width_px: float) -> Dict[st
 
 
 def _replace_generated_rows(app: Any, workspace_id: int, page_id: int, rows: List[Dict[str, Any]]) -> None:
+    """Replace this page's generated rows in one transaction: all or nothing."""
     prefix = f"{SOURCE_PREFIX} · page:{int(page_id)} ·"
-    app.lexecute(
-        "DELETE FROM takeoff_rows WHERE workspace_id=? AND source_reference LIKE ?",
-        (workspace_id, prefix + "%"),
-    )
     sql = """INSERT INTO takeoff_rows(
         workspace_id,section,element,location,substrate,finish_system,quantity,unit,
         quantity_status,source_page,source_reference,inclusion_status,coats,
         coverage_m2_per_litre,productivity_m2_per_hour,rate_per_unit,confidence,
         notes,row_role,created_at,updated_at
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
-    for row in rows:
-        app.lexecute(
-            sql,
-            (
-                workspace_id,
-                row["section"], row["element"], row["location"], row["substrate"],
-                row["finish_system"], row["quantity"], row["unit"], row["quantity_status"],
-                row["source_page"], row["source_reference"], row["inclusion_status"],
-                row["coats"], row["coverage_m2_per_litre"], row["productivity_m2_per_hour"],
-                row["rate_per_unit"], row["confidence"], row["notes"], row["row_role"],
-                app.now_stamp(), app.now_stamp(),
-            ),
+    stamp = app.now_stamp()
+    # Built before anything is deleted, so a malformed row fails with the page intact.
+    values = [
+        (
+            workspace_id,
+            row["section"], row["element"], row["location"], row["substrate"],
+            row["finish_system"], row["quantity"], row["unit"], row["quantity_status"],
+            row["source_page"], row["source_reference"], row["inclusion_status"],
+            row["coats"], row["coverage_m2_per_litre"], row["productivity_m2_per_hour"],
+            row["rate_per_unit"], row["confidence"], row["notes"], row["row_role"],
+            stamp, stamp,
         )
+        for row in rows
+    ]
+    conn = app.local_connect()
+    try:
+        conn.execute(
+            "DELETE FROM takeoff_rows WHERE workspace_id=? AND source_reference LIKE ?",
+            (workspace_id, prefix + "%"),
+        )
+        conn.executemany(sql, values)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def floor_mapper_panel(app: Any, workspace: Dict[str, Any]) -> None:
