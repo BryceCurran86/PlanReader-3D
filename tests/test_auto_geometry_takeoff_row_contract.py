@@ -22,8 +22,10 @@ import fitz
 
 import pb_auto_geometry_guard_v1219 as guard
 import pb_auto_geometry_v1219 as auto
+from pb_bim_viewer import generate_bim_viewer_html, project_to_viewer_payload
 import pb_context_floorarea_v1224 as context_floorarea
 import pb_planreader_3d_app as app_mod
+from pb_production_3d_adapter import planreader_workspace_to_canonical
 import pb_room_face_takeoff as room_face
 import pb_selected_evidence_floor_v1226 as selected_evidence
 import pb_unit_floor_area_gate_v1221 as unit_gate
@@ -99,14 +101,20 @@ class _Workspace:
 @contextmanager
 def _workspace():
     saved = {name: getattr(auto, name) for name in _PATCHED}
+    saved_db_flag = getattr(app_mod, "_pb_local_db_initialized_v1215", None)
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp, \
             patch.object(app_mod, "DB_PATH", Path(tmp) / "planreader.db"):
+        setattr(app_mod, "_pb_local_db_initialized_v1215", False)
         app_mod.init_local_db()
         try:
             yield _Workspace(Path(tmp))
         finally:
             for name, fn in saved.items():
                 setattr(auto, name, fn)
+            if saved_db_flag is not None:
+                setattr(app_mod, "_pb_local_db_initialized_v1215", saved_db_flag)
+            else:
+                app_mod.__dict__.pop("_pb_local_db_initialized_v1215", None)
 
 
 def _apply_production_chain(app) -> None:
@@ -210,7 +218,7 @@ class TakeoffRowContractTests(unittest.TestCase):
             source_reference=f"{room_face.SOURCE_PREFIX} · A101 · page:1", confidence="Derived", notes="n",
         ))
         with self.assertRaises(auto.TakeoffRowContractError) as caught:
-            auto._validate_auto_rows([tuple(row)])
+            auto._validate_auto_rows([tuple(row)], 1)
         self.assertIn("would not be replaced on re-run", str(caught.exception))
 
 
@@ -336,6 +344,9 @@ class RealDocumentWorkflowTests(unittest.TestCase):
                 rows = app_mod.lquery("SELECT * FROM takeoff_rows WHERE workspace_id=? ORDER BY id", (workspace_id,))
                 review = app_mod.dataframe_for_takeoff(workspace_id)
                 masses = app_mod.lquery("SELECT * FROM model_masses WHERE workspace_id=?", (workspace_id,))
+                ws_result = planreader_workspace_to_canonical(app, workspace_id)
+                viewer_payload = project_to_viewer_payload(ws_result.project)
+                viewer_html = generate_bim_viewer_html(viewer_payload)
 
                 app.process_document(document_id, force=True)
                 rows_again = app_mod.lquery("SELECT * FROM takeoff_rows WHERE workspace_id=?", (workspace_id,))
@@ -361,6 +372,69 @@ class RealDocumentWorkflowTests(unittest.TestCase):
         self.assertEqual(report["model_mass_id"], masses[0]["id"])
         self.assertEqual(len(rows_again), len(rows), "re-processing must replace, not duplicate")
         self.assertEqual(len(masses_again), 1)
+        self.assertIsNotNone(ws_result.project)
+        self.assertGreaterEqual(len(ws_result.project.buildings), 1)
+        self.assertIn("levels", viewer_payload)
+        self.assertEqual(viewer_payload["project_name"], f"Workspace #{workspace_id} Canonical BIM Model")
+        self.assertIn("THREE", viewer_html)
+        self.assertGreater(len(viewer_html), 5000)
+
+    def test_persisted_failed_workspace_recovers_cleanly_on_reprocess(self):
+        """A workspace created during an abort/crash cleanly recovers on re-process."""
+        import pb_no_ai_takeoff_v1216 as noai
+
+        missing = object()
+        saved_panel = noai.no_ai_takeoff_panel
+        saved_flag = getattr(noai, "_pb_auto_geometry_panel_v1219", missing)
+        with _workspace() as ws, patch.object(app_mod, "WORKSPACE_DIR", ws.root / "workspaces"):
+            try:
+                pdf = ws.root / "recovery_plan.pdf"
+                _write_plan(pdf, None)
+                app = ws.app
+                app.index_document_pages = app_mod.index_document_pages
+                app.process_document = app_mod.process_document
+                auto.apply(app)
+                _apply_production_chain(app)
+
+                workspace_id = app_mod.create_standalone_workspace("PB-RECOVER", "Recovery test", "b", "")
+                document_id = app_mod.lexecute(
+                    """INSERT INTO documents(workspace_id,file_name,mime_type,path,page_count,extracted_text,uploaded_at)
+                       VALUES(?,?,?,?,?,?,?)""",
+                    (workspace_id, pdf.name, "application/pdf", str(pdf), 0, "", app_mod.now_stamp()),
+                )
+                app.index_document_pages(document_id)
+
+                # Prior manual takeoff row exists
+                app_mod.lexecute(
+                    """INSERT INTO takeoff_rows(workspace_id,section,element,location,substrate,quantity,unit,
+                           quantity_status,source_reference,row_role,created_at,updated_at)
+                       VALUES(?,'Internal','Feature wall','Meeting Room','Timber',15.0,'m²','Measured',
+                              'Manual Entry · estimator','wall_finish','x','x')""",
+                    (workspace_id,),
+                )
+                self.assertEqual(len(app_mod.lquery("SELECT * FROM model_masses WHERE workspace_id=?", (workspace_id,))), 0)
+
+                # Re-process under fixed runtime
+                count, message = app.process_document(document_id, force=True)
+                rows = app_mod.lquery("SELECT * FROM takeoff_rows WHERE workspace_id=? ORDER BY id", (workspace_id,))
+                manual_rows = [r for r in rows if "Manual Entry" in (r["source_reference"] or "")]
+                auto_rows = [r for r in rows if auto.SOURCE_PREFIX in (r["source_reference"] or "")]
+                masses = app_mod.lquery("SELECT * FROM model_masses WHERE workspace_id=?", (workspace_id,))
+                ws_result = planreader_workspace_to_canonical(app, workspace_id)
+                viewer_html = generate_bim_viewer_html(project_to_viewer_payload(ws_result.project))
+            finally:
+                noai.no_ai_takeoff_panel = saved_panel
+                if saved_flag is missing:
+                    noai.__dict__.pop("_pb_auto_geometry_panel_v1219", None)
+                else:
+                    noai._pb_auto_geometry_panel_v1219 = saved_flag
+
+        self.assertEqual(count, 1, message)
+        self.assertEqual(len(manual_rows), 1, "Pre-existing manual takeoff rows must survive re-processing")
+        self.assertEqual(manual_rows[0]["quantity"], 15.0)
+        self.assertGreaterEqual(len(auto_rows), 2, "Automatic geometry rows must be generated")
+        self.assertEqual(len(masses), 1, "3D model mass must be created on recovery")
+        self.assertIn("THREE", viewer_html)
 
 
 if __name__ == "__main__":

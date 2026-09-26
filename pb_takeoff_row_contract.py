@@ -34,6 +34,9 @@ PROVENANCE_FIELDS: Tuple[str, ...] = (
 )
 AUDIT_FIELDS: Tuple[str, ...] = ("created_at", "updated_at")
 
+# The estimator's take-off units (the editor's options and the QA's valid set).
+TAKEOFF_UNITS: Tuple[str, ...] = ("m²", "lm", "No.", "item", "L", "allowance")
+
 CORE_FIELDS: Tuple[str, ...] = ("workspace_id", *EDITABLE_FIELDS, "row_role", *AUDIT_FIELDS)
 COMMERCIAL_FIELDS: Tuple[str, ...] = CORE_FIELDS[:-2] + COMMERCIAL_AUTHORITY_FIELDS + AUDIT_FIELDS
 COMMERCIAL_PROVENANCE_FIELDS: Tuple[str, ...] = COMMERCIAL_FIELDS[:-2] + PROVENANCE_FIELDS + AUDIT_FIELDS

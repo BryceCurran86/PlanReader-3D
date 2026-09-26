@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -121,7 +122,55 @@ def _point_segment_distance(
     return math.hypot(px - cx, py - cy)
 
 
-def _witness_count(base_line: Tuple[float, float, float, float], lines: Sequence[Tuple[float, float, float, float]]) -> int:
+class _LineIndex:
+    """Uniform grid over line bounding boxes, for the calibration searches below.
+
+    ``near()`` returns, in their original order, every line whose bounding box
+    meets the query box. Every line the unchanged distance tests can accept is
+    among them, so a search over ``near()`` gives exactly the full-scan result.
+    Lines spanning very many cells, or with non-finite coordinates, are
+    returned by every query.
+    """
+
+    _CELL = 48.0
+    _MAX_CELLS = 256
+
+    def __init__(self, lines: Sequence[Tuple[float, float, float, float]]) -> None:
+        self.lines = list(lines)
+        self.cells: Dict[Tuple[int, int], List[int]] = defaultdict(list)
+        self.always: List[int] = []
+        for index, (x1, y1, x2, y2) in enumerate(self.lines):
+            if not all(math.isfinite(v) for v in (x1, y1, x2, y2)):
+                self.always.append(index)
+                continue
+            gx0, gx1 = self._cell(min(x1, x2)), self._cell(max(x1, x2))
+            gy0, gy1 = self._cell(min(y1, y2)), self._cell(max(y1, y2))
+            if (gx1 - gx0 + 1) * (gy1 - gy0 + 1) > self._MAX_CELLS:
+                self.always.append(index)
+                continue
+            for gx in range(gx0, gx1 + 1):
+                for gy in range(gy0, gy1 + 1):
+                    self.cells[(gx, gy)].append(index)
+
+    def _cell(self, value: float) -> int:
+        return int(math.floor(value / self._CELL))
+
+    def near(self, x0: float, y0: float, x1: float, y1: float) -> List[Tuple[float, float, float, float]]:
+        found = set(self.always)
+        for gx in range(self._cell(x0), self._cell(x1) + 1):
+            for gy in range(self._cell(y0), self._cell(y1) + 1):
+                found.update(self.cells.get((gx, gy), ()))
+        return [self.lines[index] for index in sorted(found)]
+
+
+def _witness_count(
+    base_line: Tuple[float, float, float, float],
+    lines: Sequence[Tuple[float, float, float, float]],
+    memo: Optional[Dict[Tuple[float, float, float, float], int]] = None,
+    index: Optional[_LineIndex] = None,
+) -> int:
+    if memo is not None and base_line in memo:
+        return memo[base_line]
     x1, y1, x2, y2 = base_line
     horizontal = abs(x2 - x1) >= abs(y2 - y1)
     length = math.hypot(x2 - x1, y2 - y1)
@@ -129,9 +178,15 @@ def _witness_count(base_line: Tuple[float, float, float, float], lines: Sequence
     endpoints = [(x1, y1), (x2, y2)]
     hits = 0
     for endpoint in endpoints:
+        ex, ey = endpoint
         found = False
-        for ax, ay, bx, by in lines:
+        nearby = index.near(ex - tolerance, ey - tolerance, ex + tolerance, ey + tolerance) if index is not None else lines
+        for ax, ay, bx, by in nearby:
             if (ax, ay, bx, by) == base_line:
+                continue
+            if min(ax, bx) > ex + tolerance or max(ax, bx) < ex - tolerance:
+                continue
+            if min(ay, by) > ey + tolerance or max(ay, by) < ey - tolerance:
                 continue
             candidate_len = math.hypot(bx - ax, by - ay)
             if not (2.0 <= candidate_len <= max(80.0, length * 0.30)):
@@ -148,6 +203,8 @@ def _witness_count(base_line: Tuple[float, float, float, float], lines: Sequence
                 break
         if found:
             hits += 1
+    if memo is not None:
+        memo[base_line] = hits
     return hits
 
 
@@ -183,6 +240,8 @@ def detect_dimension_calibration(app: Any, page: Dict[str, Any], base_reader) ->
         pass
     zoom = max(0.05, _num(page.get("render_zoom"), 1.0))
     candidates: List[Dict[str, Any]] = []
+    witness_memo: Dict[Tuple[float, float, float, float], int] = {}
+    line_index = _LineIndex(lines)
     for word in words:
         if len(word) < 5:
             continue
@@ -193,18 +252,24 @@ def detect_dimension_calibration(app: Any, page: Dict[str, Any], base_reader) ->
         box = [float(v) for v in word[:4]]
         cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
         explicit_unit = bool(re.search(r"(?:mm|m)\s*$", token, re.I))
-        for base_line in lines:
+        bx0, by0, bx1, by1 = box
+        max_dist = max(24.0, (by1 - by0) * 4.5)
+        for base_line in line_index.near(bx0 - max_dist, by0 - max_dist, bx1 + max_dist, by1 + max_dist):
             x1, y1, x2, y2 = base_line
+            if min(x1, x2) > bx1 + max_dist or max(x1, x2) < bx0 - max_dist:
+                continue
+            if min(y1, y2) > by1 + max_dist or max(y1, y2) < by0 - max_dist:
+                continue
             length_pt = math.hypot(x2 - x1, y2 - y1)
             if not (8.0 <= length_pt <= 1800.0):
                 continue
             distance = auto._line_distance_to_box(x1, y1, x2, y2, box)
-            if distance > max(24.0, (box[3] - box[1]) * 4.5):
+            if distance > max_dist:
                 continue
             pxpm = length_pt * zoom / real_m
             if not (5.0 <= pxpm <= 5000.0):
                 continue
-            witnesses = _witness_count(base_line, lines)
+            witnesses = _witness_count(base_line, lines, memo=witness_memo, index=line_index)
             score = max(0.0, 7.0 - distance / 5.0) + witnesses * 3.0 + (2.0 if explicit_unit else 0.0)
             if expected > 0:
                 rel = abs(pxpm - expected) / expected

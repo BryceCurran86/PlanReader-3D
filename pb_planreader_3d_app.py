@@ -39,6 +39,7 @@ from PIL import Image, ImageDraw, ImageFont
 from pb_takeoff_row_contract import (
     COMMERCIAL_PROVENANCE_FIELDS as TAKEOFF_PROVENANCE_FIELDS,
     EDITABLE_FIELDS as TAKEOFF_EDITABLE_FIELDS,
+    TAKEOFF_UNITS,
     save_schedule as save_takeoff_schedule,
 )
 from pb_commercial_export_preflight_v163 import (
@@ -239,7 +240,7 @@ FINISH_SYSTEMS = [
     "To be confirmed",
 ]
 
-UNIT_OPTIONS = ["m²", "lm", "No.", "item", "L", "allowance"]
+UNIT_OPTIONS = list(TAKEOFF_UNITS)
 STATUS_OPTIONS = ["Measured", "Provisional measured", "To measure", "Allowance", "Excluded", "Not applicable"]
 INCLUSION_OPTIONS = ["INCLUSION", "SEPARATE ITEM", "PROVISIONAL", "EXCLUSION", "CLARIFICATION"]
 
@@ -678,6 +679,8 @@ def _ensure_database_indexes(conn: sqlite3.Connection) -> None:
     """Create foreign key and lookup performance indexes idempotently after schema migrations."""
     indexes = [
         ("idx_pages_ws", "pages(workspace_id)"),
+        # Per-document page lookups (processing, rendering, selection) and the documents FK.
+        ("idx_pages_document_page", "pages(document_id, page_no)"),
         ("idx_takeoff_ws", "takeoff_rows(workspace_id)"),
         ("idx_register_ws", "register_items(workspace_id)"),
         ("idx_measurement_ws", "measurement_lines(workspace_id)"),
@@ -747,40 +750,90 @@ def _ensure_pages_columns(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE pages ADD COLUMN {name} {ddl}")
 
 
-def lquery(sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
+_DB_SESSION = threading.local()
+
+
+@contextmanager
+def db_session():
+    """Reuse one SQLite connection for lquery/ldf/lexecute/lexecutemany in this block, on this thread.
+
+    Opening a connection costs far more than a typical query (WAL mapping and
+    schema load on first use) and one Streamlit rerun makes hundreds of helper
+    calls. Each helper keeps its own transaction semantics: reads never leave a
+    transaction open and every write still commits (or rolls back) on its own.
+    Code that manages its own transaction keeps using local_connect(), which
+    always returns a fresh connection. Nested blocks share the outer connection;
+    other threads never see it.
+    """
+    if getattr(_DB_SESSION, "conn", None) is not None:
+        yield
+        return
     conn = local_connect()
+    _DB_SESSION.conn, _DB_SESSION.path = conn, DB_PATH
+    try:
+        yield
+    finally:
+        _DB_SESSION.conn = None
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+
+
+def _helper_connection() -> tuple[sqlite3.Connection, bool]:
+    """(connection, owned): this thread's session connection for DB_PATH, else a new one to close."""
+    conn = getattr(_DB_SESSION, "conn", None)
+    if conn is not None and _DB_SESSION.path == DB_PATH:
+        return conn, False
+    return local_connect(), True
+
+
+def lquery(sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
+    conn, owned = _helper_connection()
     try:
         rows = conn.execute(sql, tuple(params)).fetchall()
         return [dict(r) for r in rows]
     finally:
-        conn.close()
+        if owned:
+            conn.close()
 
 
 def ldf(sql: str, params: Sequence[Any] = ()) -> pd.DataFrame:
-    conn = local_connect()
+    conn, owned = _helper_connection()
     try:
         return pd.read_sql_query(sql, conn, params=tuple(params))
     finally:
-        conn.close()
+        if owned:
+            conn.close()
 
 
 def lexecute(sql: str, params: Sequence[Any] = ()) -> int:
-    conn = local_connect()
+    conn, owned = _helper_connection()
     try:
         cur = conn.execute(sql, tuple(params))
         conn.commit()
         return int(cur.lastrowid or 0)
+    except BaseException:
+        if not owned:
+            conn.rollback()
+        raise
     finally:
-        conn.close()
+        if owned:
+            conn.close()
 
 
 def lexecutemany(sql: str, rows: Iterable[Sequence[Any]]) -> None:
-    conn = local_connect()
+    conn, owned = _helper_connection()
     try:
         conn.executemany(sql, list(rows))
         conn.commit()
+    except BaseException:
+        if not owned:
+            conn.rollback()
+        raise
     finally:
-        conn.close()
+        if owned:
+            conn.close()
 
 
 def workspace_path(workspace_id: int) -> Path:
@@ -4159,6 +4212,32 @@ def parse_takeoff_file(upload: Any, mapping: dict[int, str] | None = None,
     return pd.DataFrame(rows, columns=TAKEOFF_COLUMNS + ["row_role"]), warnings
 
 
+def import_takeoff_rows(workspace_id: int, records: Iterable[dict[str, Any]]) -> int:
+    """Append imported file rows to the take-off in one transaction: all or nothing,
+    so a failed import can be retried without duplicating the rows that got in."""
+    pending = []
+    for row in records:
+        if not any(str(row.get(c) or "").strip() for c in ["section", "element", "location", "source_reference"]):
+            continue
+        if not to_float(row.get("rate_per_unit")):
+            row["rate_per_unit"] = default_rate_for(row.get("substrate"), row.get("element"), row.get("finish_system"), row.get("unit"))
+        row_role = str(row.get("row_role") or "").strip()
+        if row_role not in {"", "floor_area"}:
+            row_role = ""
+        values = [row.get(col, "") for col in TAKEOFF_COLUMNS]
+        pending.append((workspace_id, *values, row_role, now_stamp(), now_stamp()))
+    conn = local_connect()
+    try:
+        conn.executemany("""INSERT INTO takeoff_rows(workspace_id,section,element,location,substrate,finish_system,quantity,unit,quantity_status,source_page,source_reference,inclusion_status,coats,coverage_m2_per_litre,productivity_m2_per_hour,rate_per_unit,confidence,notes,row_role,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", pending)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return len(pending)
+
+
 def takeoff_import_panel(workspace_id: int, widget_key: str = "takeoff_import") -> None:
     """Render the take-off file import UI (header row picker, column mapping, preview, import)."""
     with st.expander("Import a take-off from an Excel or CSV file"):
@@ -4205,18 +4284,7 @@ def takeoff_import_panel(workspace_id: int, widget_key: str = "takeoff_import") 
             st.warning(warning)
         st.dataframe(parsed_takeoff, use_container_width=True, hide_index=True)
         if st.button(f"Import {len(parsed_takeoff)} rows into the take-off schedule", type="primary", key=f"{widget_key}_button"):
-            imported = 0
-            for row in parsed_takeoff.to_dict("records"):
-                if not any(str(row.get(c) or "").strip() for c in ["section", "element", "location", "source_reference"]):
-                    continue
-                if not to_float(row.get("rate_per_unit")):
-                    row["rate_per_unit"] = default_rate_for(row.get("substrate"), row.get("element"), row.get("finish_system"), row.get("unit"))
-                row_role = str(row.get("row_role") or "").strip()
-                if row_role not in {"", "floor_area"}:
-                    row_role = ""
-                values = [row.get(col, "") for col in TAKEOFF_COLUMNS]
-                lexecute("""INSERT INTO takeoff_rows(workspace_id,section,element,location,substrate,finish_system,quantity,unit,quantity_status,source_page,source_reference,inclusion_status,coats,coverage_m2_per_litre,productivity_m2_per_hour,rate_per_unit,confidence,notes,row_role,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (workspace_id, *values, row_role, now_stamp(), now_stamp()))
-                imported += 1
+            imported = import_takeoff_rows(workspace_id, parsed_takeoff.to_dict("records"))
             st.success(f"Imported {imported} take-off rows. Open the Take-off schedule tab to review them.")
             for k in (f"{widget_key}_file", f"{widget_key}_sig", f"{widget_key}_map", f"{widget_key}_editor", f"{widget_key}_header_row"):
                 st.session_state.pop(k, None)
@@ -6416,6 +6484,55 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                 st.rerun()
 
 
+def _mass_editor_id(value: Any) -> int | None:
+    """The model_masses id of a Building masses editor row; None for a new row."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return int(number) if math.isfinite(number) and number.is_integer() else None
+
+
+def save_building_masses(workspace_id: int, records: Iterable[dict[str, Any]]) -> None:
+    """Persist the Building masses editor, keeping each surviving mass's id.
+
+    Openings, 3D surface edits and editable-3D corrections are keyed by
+    model_masses.id, so edited rows are updated in place, new rows inserted and
+    only rows removed from the editor deleted, all in one transaction.
+    """
+    conn = local_connect()
+    try:
+        existing = {int(row["id"]) for row in conn.execute("SELECT id FROM model_masses WHERE workspace_id=?", (workspace_id,))}
+        kept: set[int] = set()
+        for row in records:
+            if not str(row.get("label") or "").strip():
+                continue
+            values = (row.get("label", ""), row.get("level_name", "Ground"), row.get("x", 0), row.get("y", 0), row.get("z", 0),
+                      row.get("width", 1), row.get("depth", 1), row.get("height", 2.7), row.get("finish", ""),
+                      row.get("source_reference", ""), row.get("confidence", "To review"), row.get("notes", ""))
+            mass_id = _mass_editor_id(row.get("id"))
+            if mass_id in existing and mass_id not in kept:
+                conn.execute(
+                    "UPDATE model_masses SET label=?,level_name=?,x=?,y=?,z=?,width=?,depth=?,height=?,finish=?,source_reference=?,confidence=?,notes=? WHERE id=?",
+                    (*values, mass_id),
+                )
+                kept.add(mass_id)
+            else:
+                conn.execute(
+                    """INSERT INTO model_masses(workspace_id,label,level_name,x,y,z,width,depth,height,finish,source_reference,confidence,notes,created_at)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (workspace_id, *values, now_stamp()),
+                )
+        for mass_id in existing - kept:
+            conn.execute("DELETE FROM model_masses WHERE id=?", (mass_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def model_3d_page(workspace:dict[str,Any], session_api_key: str = "", ai_provider: str = "OpenAI") -> None:
     hero(workspace)
     tabs=st.tabs(["Interactive model","Building masses","Doors & windows","Render / artist's impression","Model exports"])
@@ -6439,10 +6556,7 @@ def model_3d_page(workspace:dict[str,Any], session_api_key: str = "", ai_provide
         if masses.empty: masses=pd.DataFrame(columns=["id","label","level_name","x","y","z","width","depth","height","finish","source_reference","confidence","notes"])
         edited=st.data_editor(masses,use_container_width=True,hide_index=True,num_rows="dynamic",column_config={"id":st.column_config.NumberColumn(disabled=True),"confidence":st.column_config.SelectboxColumn(options=["Measured","Verified","Derived","Assumed","To review"])},height=500)
         if st.button("Save building masses",type="primary"):
-            lexecute("DELETE FROM model_masses WHERE workspace_id=?",(workspace["id"],))
-            for row in edited.to_dict("records"):
-                if not str(row.get("label") or "").strip(): continue
-                lexecute("""INSERT INTO model_masses(workspace_id,label,level_name,x,y,z,width,depth,height,finish,source_reference,confidence,notes,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(workspace["id"],row.get("label",""),row.get("level_name","Ground"),row.get("x",0),row.get("y",0),row.get("z",0),row.get("width",1),row.get("depth",1),row.get("height",2.7),row.get("finish",""),row.get("source_reference",""),row.get("confidence","To review"),row.get("notes",""),now_stamp()))
+            save_building_masses(workspace["id"],edited.to_dict("records"))
             st.success("Building masses saved.")
             st.rerun()
     with tabs[2]:
@@ -7300,6 +7414,12 @@ def clear_workspace_session_state_if_changed(active_ws_id: int | None) -> None:
 
 
 def main() -> None:
+    # One connection serves every helper query of the rerun (see db_session).
+    with db_session():
+        _main_rerun()
+
+
+def _main_rerun() -> None:
     st.set_page_config(page_title=APP_NAME,page_icon="🏗️",layout="wide")
     app_css()
     init_local_db()

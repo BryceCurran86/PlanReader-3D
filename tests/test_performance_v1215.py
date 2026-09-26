@@ -244,6 +244,7 @@ class PerformanceV1215Tests(unittest.TestCase):
             conn = sqlite3.connect(db)
             conn.execute(
                 """CREATE TABLE model_masses(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                     workspace_id INTEGER,label TEXT,level_name TEXT,x REAL,y REAL,z REAL,
                     width REAL,depth REAL,height REAL,finish TEXT,source_reference TEXT,
                     confidence TEXT,notes TEXT,created_at TEXT
