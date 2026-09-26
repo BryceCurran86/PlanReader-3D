@@ -1811,23 +1811,45 @@ class GenericPlanReaderExtractor:
                         # asserted for the specific case this page's own note
                         # describes.
                         page_dpc_scoped_to_all_walls = self._has_dpc_all_walls_scope(page_text)
+                        is_compound_verandah = False
+                        transverse_runs_count = 0
+                        longitudinal_runs_count = 0
                         if page_dpc_scoped_to_all_walls:
                             try:
                                 from pb_wall_fill_internal_partition_evidence import (
+                                    resolve_dpc_all_walls_geometry,
                                     resolve_internal_partition_length_m,
                                 )
 
-                                _partition_evidence = resolve_internal_partition_length_m(
-                                    page.get_drawings(), length_m=length_m, width_m=width_m, page=page
+                                _dpc_geom = resolve_dpc_all_walls_geometry(
+                                    page.get_drawings(),
+                                    length_m=length_m,
+                                    width_m=width_m,
+                                    page=page,
+                                    page_text=page_text,
                                 )
-                                if (
-                                    _partition_evidence.status == "found"
-                                    and _partition_evidence.total_length_m > 0
-                                ):
-                                    internal_partition_dpc_length_m = _partition_evidence.total_length_m
+                                if _dpc_geom.status == "found" and _dpc_geom.total_internal_length_m > 0:
+                                    internal_partition_dpc_length_m = _dpc_geom.total_internal_length_m
                                     dpc_length_m = round(
                                         dpc_envelope_base_m + internal_partition_dpc_length_m, 2
                                     )
+                                    is_compound_verandah = len(_dpc_geom.longitudinal_runs) > 0
+                                    transverse_runs_count = len(_dpc_geom.transverse_runs)
+                                    longitudinal_runs_count = len(_dpc_geom.longitudinal_runs)
+                                else:
+                                    _partition_evidence = resolve_internal_partition_length_m(
+                                        page.get_drawings(), length_m=length_m, width_m=width_m, page=page
+                                    )
+                                    if (
+                                        _partition_evidence.status == "found"
+                                        and _partition_evidence.total_length_m > 0
+                                    ):
+                                        internal_partition_dpc_length_m = _partition_evidence.total_length_m
+                                        dpc_length_m = round(
+                                            dpc_envelope_base_m + internal_partition_dpc_length_m, 2
+                                        )
+                                        transverse_runs_count = len(_partition_evidence.segment_lengths_m)
+                                        longitudinal_runs_count = 0
                             except Exception:
                                 internal_partition_dpc_length_m = None
                                 dpc_length_m = dpc_envelope_base_m
@@ -1839,12 +1861,25 @@ class GenericPlanReaderExtractor:
                         dpc_meta["dpc_envelope_base_m"] = dpc_envelope_base_m
                         if internal_partition_dpc_length_m is not None:
                             dpc_meta["internal_partition_length_m"] = internal_partition_dpc_length_m
-                            dpc_meta["dpc_scope"] = "external_perimeter_plus_evidenced_internal_partitions"
-                            dpc_description = (
-                                f"Bituminous damp proof course ({dpc_envelope_base_m:.1f}m external perimeter + "
-                                f"{internal_partition_dpc_length_m:.1f}m evidenced internal partition, "
-                                "per drawing's own \"under all walls\" note)"
+                            dpc_meta["transverse_runs_count"] = transverse_runs_count
+                            dpc_meta["longitudinal_runs_count"] = longitudinal_runs_count
+                            dpc_meta["dpc_scope"] = (
+                                "external_perimeter_plus_compound_internal_walls"
+                                if is_compound_verandah
+                                else "external_perimeter_plus_evidenced_internal_partitions"
                             )
+                            if is_compound_verandah:
+                                dpc_description = (
+                                    f"Bituminous damp proof course ({dpc_envelope_base_m:.1f}m external perimeter + "
+                                    f"{internal_partition_dpc_length_m:.1f}m source-evidenced compound internal wall runs, "
+                                    "per drawing's own \"under all walls\" note)"
+                                )
+                            else:
+                                dpc_description = (
+                                    f"Bituminous damp proof course ({dpc_envelope_base_m:.1f}m external perimeter + "
+                                    f"{internal_partition_dpc_length_m:.1f}m evidenced internal partition, "
+                                    "per drawing's own \"under all walls\" note)"
+                                )
                         else:
                             dpc_description = f"Bituminous damp proof course ({dpc_qty:.1f}m perimeter)"
                         if self._should_replace_slab_bound_quantity(
