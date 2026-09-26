@@ -94,18 +94,24 @@ def _authority(path: Path):
     return source, published, walls, selector, scope
 
 
-def _role_results(published, walls, selector, topology, scope):
+def _role_results(
+    published,
+    walls,
+    selector,
+    topology,
+    scope,
+    *,
+    publication_only: bool = False,
+):
     producer = WallRoleProducer.from_authorities(
         physical_wall_candidate_authority=walls,
         wall_topology_authority=topology,
     )
-    reps = (
-        tuple(scope.equivalence.representative_wall_ids)
-        if scope.equivalence is not None
-        else tuple(record.wall_candidate_id for record in scope.records)
-    )
+    wall_ids = tuple(record.wall_candidate_id for record in scope.records)
+    if publication_only and scope.equivalence is not None:
+        wall_ids = tuple(scope.equivalence.representative_wall_ids)
     results = []
-    for wall_id in reps:
+    for wall_id in wall_ids:
         result = producer.publish(
             WallRoleSelector(
                 document_id=published.revision.document_id,
@@ -128,11 +134,26 @@ def test_unrelated_viewport_crop_does_not_poison_closed_component(tmp_path: Path
     assert scope.status is EvidenceResolutionStatus.CORROBORATED
     assert scope.scope_complete is False
 
+    groups = _publication_groups(scope)
+    assert groups, {
+        "representatives": tuple(
+            scope.equivalence.representative_wall_ids
+            if scope.equivalence is not None else ()
+        ),
+        "ambiguous": tuple(
+            scope.equivalence.ambiguous_wall_ids
+            if scope.equivalence is not None else ()
+        ),
+        "record_count": len(scope.records),
+    }
+
     topology = build_component_local_source_wall_topology_authority(
         source_visibility_producer=source,
         physical_wall_candidate_authority=walls,
     )
-    results = _role_results(published, walls, selector, topology, scope)
+    results = _role_results(
+        published, walls, selector, topology, scope, publication_only=True
+    )
     roles = {
         result.record.role
         for _wall_id, result in results
@@ -178,7 +199,9 @@ def test_complete_scope_preserves_existing_source_topology_roles(tmp_path: Path)
         source_visibility_producer=source,
         physical_wall_candidate_authority=walls,
     )
-    results = _role_results(published, walls, selector, topology, scope)
+    results = _role_results(
+        published, walls, selector, topology, scope, publication_only=False
+    )
     roles = {
         result.record.role
         for _wall_id, result in results
