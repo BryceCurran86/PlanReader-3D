@@ -1,0 +1,133 @@
+name: Component Local Wall Topology Shadow
+
+on:
+  push:
+    branches: [gpt/component-local-wall-topology-v1]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Focused topology tests
+        run: |
+          PYTHONPATH=. pytest -q             tests/test_component_local_wall_topology_authority_v1.py             tests/test_source_wall_topology_authority_v1.py             tests/test_physical_wall_candidate_viewport_scope_v1.py             tests/test_p2_w4_stable_wall_identity.py
+
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2             'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf'             -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+
+      - name: Real KSTVET page54 local topology shadow
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, time
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_component_local_wall_topology_authority import (
+              build_component_local_source_wall_topology_authority,
+          )
+          from pb_wall_role_authority import WallRoleProducer, WallRoleSelector
+          from pb_migration_contracts import EvidenceResolutionStatus
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="kstvet-component-local-topology-shadow",
+              producer_version="1.0",
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-component-local-topology",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          start=time.perf_counter()
+          wall_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          )
+          wall_authority=wall_producer.authority()
+          topology=build_component_local_source_wall_topology_authority(
+              source_visibility_producer=source,
+              physical_wall_candidate_authority=wall_authority,
+          )
+          roles=WallRoleProducer.from_authorities(
+              physical_wall_candidate_authority=wall_authority,
+              wall_topology_authority=topology,
+          )
+
+          current=source.published_snapshot_for_revision(pub.revision.revision_id)
+          rows=[]
+          for scope in wall_authority._scopes.values():
+              if scope.page_id!="54" or scope.viewport_view_type!="floor_plan":
+                  continue
+              for record in scope.records:
+                  selector=WallRoleSelector(
+                      document_id=scope.document_id,
+                      revision_id=scope.revision_id,
+                      source_sha256=scope.source_sha256,
+                      snapshot_id=scope.snapshot_id,
+                      page_id=scope.page_id,
+                      decision_scope_id=scope.decision_scope_id,
+                      physical_wall_id=record.wall_candidate_id,
+                  )
+                  result=roles.publish(selector)
+                  rows.append({
+                      "viewport":scope.viewport_id,
+                      "wall":record.wall_candidate_id,
+                      "scope_complete":scope.scope_complete,
+                      "role_status":result.status.value,
+                      "role":None if result.record is None else result.record.role.value,
+                      "role_reasons":list(result.reason_codes),
+                      "equivalence_group":next(
+                          (
+                              list(group)
+                              for group in (scope.equivalence.equivalence_groups if scope.equivalence else ())
+                              if record.wall_candidate_id in group
+                          ),
+                          [],
+                      ),
+                  })
+          proofs=[
+              {
+                  "proof":proof.proof_id,
+                  "page":proof.page_id,
+                  "scope":proof.decision_scope_id,
+                  "walls":list(proof.component_wall_ids),
+                  "members":list(proof.source_candidate_wall_ids),
+                  "withheld_checked":len(proof.withheld_observation_ids_checked),
+                  "groups":[list(g) for g in proof.equivalence_groups_used],
+                  "global_complete":proof.scope_was_globally_complete,
+              }
+              for proof in getattr(topology,"_component_local_topology_proofs").values()
+          ]
+          print("KSTVET_COMPONENT_LOCAL_ROLES "+json.dumps(rows,sort_keys=True))
+          print("KSTVET_COMPONENT_LOCAL_PROOFS "+json.dumps(proofs,sort_keys=True))
+          print("KSTVET_COMPONENT_LOCAL_ELAPSED_SEC",round(time.perf_counter()-start,3))
+
+          # Positive real-source gate: the ground-floor-plan viewport must
+          # produce at least one authoritative INTERNAL wall from an otherwise
+          # globally incomplete scope. The exact Item19B target join is tested
+          # in the next stacked shadow.
+          internal=[
+              row for row in rows
+              if row["viewport"]=="view_p54_4"
+              and row["role_status"]=="corroborated"
+              and row["role"]=="internal"
+              and row["scope_complete"] is False
+          ]
+          assert internal, rows
+          PY
