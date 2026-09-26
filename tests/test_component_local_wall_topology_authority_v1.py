@@ -164,6 +164,20 @@ def test_unrelated_viewport_crop_does_not_poison_isolated_two_room_component(
     topology, results = _roles(
         source, published, authority, selector, scope
     )
+    print("DEBUG_SCOPE", {
+        "complete": scope.scope_complete,
+        "records": [r.wall_candidate_id for r in scope.records],
+        "equivalence": None if scope.equivalence is None else {
+            "groups": scope.equivalence.equivalence_groups,
+            "ambiguous": scope.equivalence.ambiguous_wall_ids,
+        },
+        "topology_records": list(topology._records),
+        "proofs": list(getattr(topology, "_component_local_topology_proofs")),
+        "results": [
+            (result.status.value, result.reason_codes, None if result.record is None else result.record.role.value)
+            for result in results
+        ],
+    })
     resolved = [
         result.record
         for result in results
@@ -211,6 +225,19 @@ def test_complete_scope_keeps_external_internal_role_structure(
     _topology, results = _roles(
         source, published, authority, selector, scope
     )
+    print("DEBUG_COMPLETE", {
+        "records": [r.wall_candidate_id for r in scope.records],
+        "equivalence": None if scope.equivalence is None else {
+            "groups": scope.equivalence.equivalence_groups,
+            "ambiguous": scope.equivalence.ambiguous_wall_ids,
+        },
+        "topology_records": list(_topology._records),
+        "proofs": list(getattr(_topology, "_component_local_topology_proofs")),
+        "results": [
+            (result.status.value, result.reason_codes, None if result.record is None else result.record.role.value)
+            for result in results
+        ],
+    })
     resolved = [
         result.record
         for result in results
