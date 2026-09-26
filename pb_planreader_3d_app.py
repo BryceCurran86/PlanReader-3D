@@ -3425,10 +3425,18 @@ def workspace_setting(workspace_id: int, key: str, default: Any = None) -> Any:
 
 
 def set_workspace_setting(workspace_id: int, key: str, value: Any) -> None:
+    text = str(value if value is not None else "")
+    # Read paths (opening the 3D model, elevation registration, height evidence)
+    # re-save derived settings on every rerun, almost always unchanged. A save
+    # is a write transaction: it waits up to busy_timeout behind any other
+    # writer and commits nothing new, so skip it when the stored text matches.
+    stored = lquery("SELECT value FROM workspace_settings WHERE workspace_id=? AND key=?", (workspace_id, key))
+    if stored and stored[0]["value"] == text:
+        return
     lexecute(
         """INSERT INTO workspace_settings(workspace_id,key,value,updated_at) VALUES(?,?,?,?)
            ON CONFLICT(workspace_id,key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
-        (workspace_id, key, str(value if value is not None else ""), now_stamp()),
+        (workspace_id, key, text, now_stamp()),
     )
 
 
