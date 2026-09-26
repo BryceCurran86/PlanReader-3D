@@ -1,0 +1,73 @@
+name: KSTVET Opening Schedule Source Audit
+
+on:
+  push:
+    branches: [diag/kstvet-opening-schedule-source-audit]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Audit native schedule parsing
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, re, fitz
+          from pb_opening_schedule_v171 import parse_schedule_page
+
+          doc=fitz.open("/tmp/kstvet.pdf")
+          parsed=[]
+          dimension_pages=[]
+          for pno in range(doc.page_count):
+              page=doc[pno]
+              text=page.get_text("text") or ""
+              if any(token in text for token in ("3000", "2900", "2100", "1200")):
+                  dimension_pages.append({
+                      "page":pno+1,
+                      "snippets":[
+                          line.strip() for line in text.splitlines()
+                          if any(token in line for token in ("3000","2900","2100","1200"))
+                      ][:80],
+                  })
+              try:
+                  entries=parse_schedule_page(page,page_no=pno+1)
+              except Exception as exc:
+                  print("PARSE_ERROR",pno+1,type(exc).__name__,str(exc))
+                  entries=[]
+              if entries:
+                  parsed.append({
+                      "page":pno+1,
+                      "entries":[{
+                          "mark":e.type_mark,
+                          "width":e.width_mm,
+                          "height":e.height_mm,
+                          "count":e.count,
+                          "count_explicit":e.count_explicit,
+                          "source":e.parse_source,
+                          "basis":e.dimension_basis,
+                          "desc":e.description,
+                          "bbox":list(e.bbox),
+                      } for e in entries]
+                  })
+          print("KSTVET_SCHEDULE_ENTRIES "+json.dumps(parsed,sort_keys=True))
+          print("KSTVET_DIMENSION_PAGES "+json.dumps(dimension_pages,sort_keys=True))
+          print("KSTVET_SCHEDULE_PAGE_COUNT",len(parsed))
+          doc.close()
+          PY
