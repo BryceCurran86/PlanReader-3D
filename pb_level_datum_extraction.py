@@ -66,13 +66,13 @@ _LEVEL_LABELS: Dict[str, Tuple[str, ...]] = {
 # "+3.325") outright rather than silently mis-parsing its leading digits
 # (e.g. capturing just "+3") -- a format this module does not recognize
 # must yield no marker, never a wrong one.
-_LEVEL_VALUE = r"([+\-]\d{1,3}(?:,\d{3})?)(?!\.\d)"
+_LEVEL_VALUE = r"([+\-]\d{1,3}(?:,\d{3})?)(?!\d)(?!\.\d)"
 
 # Reverse CAD annotations on some drawings use ungrouped four-digit
 # millimetre values (for example "+3000 ROOF LEVEL"). Keep this broader
 # spelling local to the reverse-only parser so the established label-first
 # grammar and its false-positive boundary remain unchanged.
-_REVERSE_LEVEL_VALUE = r"([+\-](?:\d{1,4}|\d{1,3},\d{3}))(?!\.\d)"
+_REVERSE_LEVEL_VALUE = r"([+\-](?:\d{1,4}|\d{1,3},\d{3}))(?!\d)(?!\.\d)"
 
 
 def _parse_level_value_m(raw: str) -> float:
