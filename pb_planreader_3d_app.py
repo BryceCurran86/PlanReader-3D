@@ -3286,9 +3286,26 @@ def apply_render_to_model(workspace_id: int, data: dict[str, Any], mode: str = "
 
 
 def import_ai_result(workspace_id: int, data: dict[str, Any]) -> dict[str, int]:
+    """Import an AI draft in one transaction: the summary, every take-off row,
+    register item, mass and opening, or nothing (a draft value SQLite cannot
+    store, such as a nested object from an unschematised provider, fails the
+    whole import instead of leaving part of it)."""
+    conn = local_connect()
+    try:
+        counts = _import_ai_result(workspace_id, data, lambda sql, params: int(conn.execute(sql, tuple(params)).lastrowid or 0))
+        conn.commit()
+        return counts
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _import_ai_result(workspace_id: int, data: dict[str, Any], execute: Callable[[str, Sequence[Any]], int]) -> dict[str, int]:
     counts = {"takeoff": 0, "registers": 0, "masses": 0, "openings": 0}
     if data.get("executive_summary"):
-        lexecute("UPDATE workspaces SET executive_summary=?,drawing_issue=?,updated_at=? WHERE id=?", (str(data.get("executive_summary")), str(data.get("drawing_issue") or ""), now_stamp(), workspace_id))
+        execute("UPDATE workspaces SET executive_summary=?,drawing_issue=?,updated_at=? WHERE id=?", (str(data.get("executive_summary")), str(data.get("drawing_issue") or ""), now_stamp(), workspace_id))
     for row in data.get("takeoff_rows", []):
         row = dict(row)
         if not to_float(row.get("rate_per_unit")):
@@ -3300,7 +3317,7 @@ def import_ai_result(workspace_id: int, data: dict[str, Any]) -> dict[str, int]:
             row_role = ""
         row["row_role"] = row_role
         values = [row.get(col, "") for col in TAKEOFF_COLUMNS]
-        lexecute(
+        execute(
             """
             INSERT INTO takeoff_rows(workspace_id,section,element,location,substrate,finish_system,quantity,unit,quantity_status,source_page,source_reference,inclusion_status,coats,coverage_m2_per_litre,productivity_m2_per_hour,rate_per_unit,confidence,notes,row_role,created_at,updated_at)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -3312,7 +3329,7 @@ def import_ai_result(workspace_id: int, data: dict[str, Any]) -> dict[str, int]:
         register_name = str(row.get("register_name") or "clarifications").lower().replace(" ", "_")
         if register_name not in REGISTER_NAMES:
             register_name = "clarifications"
-        lexecute(
+        execute(
             """INSERT INTO register_items(workspace_id,register_name,item_no,title,detail,priority,source_reference,status,created_at)
                VALUES(?,?,?,?,?,?,?,?,?)""",
             (
@@ -3330,7 +3347,7 @@ def import_ai_result(workspace_id: int, data: dict[str, Any]) -> dict[str, int]:
         counts["registers"] += 1
     mass_label_to_id: dict[str, int] = {}
     for row in data.get("model_masses", []):
-        mass_id = lexecute(
+        mass_id = execute(
             """INSERT INTO model_masses(workspace_id,label,level_name,x,y,z,width,depth,height,finish,source_reference,confidence,notes,created_at)
                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
@@ -3346,7 +3363,7 @@ def import_ai_result(workspace_id: int, data: dict[str, Any]) -> dict[str, int]:
         counts["masses"] += 1
     for row in data.get("model_openings", []):
         mass_id = mass_label_to_id.get(str(row.get("mass_label") or "").lower())
-        lexecute(
+        execute(
             """INSERT INTO model_openings(workspace_id,mass_id,label,opening_type,face,offset_x,offset_z,width,height,count,notes,source_reference,created_at)
                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
@@ -3357,7 +3374,7 @@ def import_ai_result(workspace_id: int, data: dict[str, Any]) -> dict[str, int]:
         )
         counts["openings"] += 1
     for unknown in data.get("unknowns", []):
-        lexecute(
+        execute(
             """INSERT INTO register_items(workspace_id,register_name,item_no,title,detail,priority,source_reference,status,created_at)
                VALUES(?,?,?,?,?,?,?,?,?)""",
             (workspace_id, "clarifications", "", "AI review unknown", str(unknown), "High", "AI plan review", "Open", now_stamp()),
