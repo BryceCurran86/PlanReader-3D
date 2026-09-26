@@ -6,7 +6,7 @@ finish-scope completeness, opening deductions, net wall, or quantity
 publication.
 
 Positive path:
-trusted native finish annotation
+trusted or #897-raster-corroborated finish annotation
 -> endpoint-connected native leader
 -> filled native terminator
 -> locally complete terminator owner universe
@@ -44,7 +44,6 @@ from pb_viewport_segmentation import assign_bbox_to_viewport
 from pb_wall_finish_face_binding_authority import (
     SOURCE_EVIDENCE_KIND_NATIVE_DIRECT_CALLOUT,
     _bbox_union,
-    _finish_semantics,
     _authoritative_viewports,
     _filled_terminators,
     _leader_paths,
@@ -122,9 +121,7 @@ class WallFinishCalloutWallBindingRecord:
     equivalence_group_wall_ids: tuple[str, ...]
     equivalence_pair_classifications: tuple[tuple[str, str, str], ...]
     source_wall_primitive_ids: tuple[str, ...]
-    trade_scope_id: str
-    finish_material: str
-    semantic_direction: str
+    trusted_annotation_text: str
     annotation_observation_ids: tuple[str, ...]
     leader_path_ids: tuple[str, ...]
     terminator_primitive_ids: tuple[str, ...]
@@ -204,27 +201,44 @@ def _local_owner_universe_safe(*, terminator, page_lines, wall_scope) -> bool:
     return True
 
 
-def _trusted_finish_blocks_with_raster(
+def _finish_callout_candidate_claim(text: str) -> bool:
+    """Candidate generation only; never positive semantic authority.
+
+    Raw native text may be used to decide which source blocks are worth
+    independently corroborating.  A wrong claim can therefore only create
+    extra work or a false negative; it cannot create a positive binding.
+    """
+    value = " ".join(str(text or "").lower().split())
+    return (
+        ("wall" in value or "walling" in value)
+        and "finish" in value
+        and any(token in value for token in ("key", "plaster", "paint"))
+    )
+
+
+def _trusted_finish_callout_blocks_with_raster(
     source: SourceVisibilityProducer,
     published,
     page_id: str,
 ):
-    """Compose trusted finish blocks from native trust + #897 raster proof.
+    """Return source blocks whose *trusted* words prove a wall-finish callout.
 
-    Raster corroboration is attempted only when the producer-owned text
-    integrity receipt has exactly one blocker:
-    TEXT_GLYPH_MAPPING_UNVERIFIED.  The native claim remains only a claim; the
-    word enters the trusted block only when the existing raster authority
-    independently corroborates that exact claim at both required render scales.
+    Stage 1 groups producer-owned native receipts and uses the raw claim only
+    for conservative candidate generation.  Stage 2 independently trusts each
+    word through native PdfTextIntegrity or the already-approved #897 raster
+    corroboration authority.  Stage 3 reconstructs the block only from those
+    trusted words.  The final block must itself still contain generic wall +
+    finish semantics; uncorroborated words never contribute to that decision.
 
-    Block/line/word addresses come from the source receipt and are used only to
-    reconstruct immutable source execution order.  OCR does not choose the
-    block, wall, leader, terminator, trade, material, or target.
+    This wall-binding layer intentionally does not require or publish the
+    external/internal face direction.  That proposition remains downstream.
     """
     integrity = source.text_integrity_authority()
-    raster = RasterTextCorroborationProducer.from_source_visibility_producer(source)
-    blocks: dict[int, list[tuple[int, str, str, tuple[float, ...]]]] = {}
 
+    receipts_by_block: dict[
+        int,
+        list[tuple[int, str, object, object]],
+    ] = {}
     for observation_id in published.text_observation_ids:
         selector = ObservationSelector(
             document_id=published.revision.document_id,
@@ -243,49 +257,74 @@ def _trusted_finish_blocks_with_raster(
             or receipt.word_no is None
         ):
             continue
-
-        trusted_text = None
-        if result.status is EvidenceResolutionStatus.CORROBORATED:
-            trusted_text = str(result.trusted_text or "")
-        elif (
-            result.status is EvidenceResolutionStatus.ABSTAINED
-            and tuple(receipt.reason_codes) == (TEXT_GLYPH_MAPPING_UNVERIFIED,)
-            and tuple(result.reason_codes) == tuple(receipt.reason_codes)
-        ):
-            raster_result = raster.publish(
-                RasterTextCorroborationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=published.snapshot.snapshot_id,
-                    observation_id=observation_id,
-                )
-            )
-            if raster_result.status is EvidenceResolutionStatus.CORROBORATED:
-                trusted_text = str(raster_result.corroborated_text or "")
-
-        if not trusted_text:
-            continue
-
-        blocks.setdefault(int(receipt.block_no), []).append(
+        receipts_by_block.setdefault(int(receipt.block_no), []).append(
             (
                 int(receipt.line_no) * 10000 + int(receipt.word_no),
                 observation_id,
-                trusted_text,
-                tuple(receipt.geometry),
+                receipt,
+                result,
             )
         )
 
+    candidate_blocks = {
+        block_no
+        for block_no, values in receipts_by_block.items()
+        if _finish_callout_candidate_claim(
+            " ".join(
+                str(item[2].raw_text or "")
+                for item in sorted(values, key=lambda item: (item[0], item[1]))
+            )
+        )
+    }
+    if not candidate_blocks:
+        return ()
+
+    raster = RasterTextCorroborationProducer.from_source_visibility_producer(source)
     out = []
-    for block_no, values in sorted(blocks.items()):
-        ordered = sorted(values, key=lambda item: (item[0], item[1]))
-        text = " ".join(item[2] for item in ordered)
-        semantics = _finish_semantics(text)
-        if not semantics:
+    for block_no in sorted(candidate_blocks):
+        values = sorted(
+            receipts_by_block[block_no],
+            key=lambda item: (item[0], item[1]),
+        )
+        trusted: list[tuple[int, str, str, tuple[float, ...]]] = []
+        for order, observation_id, receipt, result in values:
+            trusted_text = None
+            if result.status is EvidenceResolutionStatus.CORROBORATED:
+                trusted_text = str(result.trusted_text or "")
+            elif (
+                result.status is EvidenceResolutionStatus.ABSTAINED
+                and tuple(receipt.reason_codes) == (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+                and tuple(result.reason_codes) == tuple(receipt.reason_codes)
+            ):
+                raster_result = raster.publish(
+                    RasterTextCorroborationSelector(
+                        document_id=published.revision.document_id,
+                        revision_id=published.revision.revision_id,
+                        source_sha256=published.revision.source_sha256,
+                        snapshot_id=published.snapshot.snapshot_id,
+                        observation_id=observation_id,
+                    )
+                )
+                if raster_result.status is EvidenceResolutionStatus.CORROBORATED:
+                    trusted_text = str(raster_result.corroborated_text or "")
+            if trusted_text:
+                trusted.append(
+                    (
+                        order,
+                        observation_id,
+                        trusted_text,
+                        tuple(receipt.geometry),
+                    )
+                )
+
+        if not trusted:
             continue
-        geometries = [item[3] for item in ordered]
-        heights = [max(0.1, item[3][3] - item[3][1]) for item in ordered]
-        heights.sort()
+        text = " ".join(item[2] for item in trusted)
+        if not _finish_callout_candidate_claim(text):
+            continue
+
+        geometries = [item[3] for item in trusted]
+        heights = sorted(max(0.1, geometry[3] - geometry[1]) for geometry in geometries)
         mid = len(heights) // 2
         median_height = (
             heights[mid]
@@ -296,8 +335,7 @@ def _trusted_finish_blocks_with_raster(
             (
                 block_no,
                 text,
-                semantics,
-                tuple(item[1] for item in ordered),
+                tuple(item[1] for item in trusted),
                 _bbox_union(geometries),
                 median_height,
             )
@@ -446,12 +484,11 @@ class WallFinishCalloutWallProducer:
 
                     for (
                         _block_id,
-                        _text,
-                        semantics,
+                        trusted_annotation_text,
                         annotation_ids,
                         annotation_bbox,
                         text_height,
-                    ) in _trusted_finish_blocks_with_raster(
+                    ) in _trusted_finish_callout_blocks_with_raster(
                         source_visibility_producer,
                         published,
                         page_id,
@@ -507,7 +544,7 @@ class WallFinishCalloutWallProducer:
                             continue
 
                         accepted: dict[
-                            tuple[str, str, str, str],
+                            tuple[str, tuple[str, ...]],
                             WallFinishCalloutWallBindingRecord,
                         ] = {}
                         for leader_ids, terminator in paths:
@@ -545,101 +582,94 @@ class WallFinishCalloutWallProducer:
                             if not raw_owner_ids:
                                 continue
 
-                            for semantic in semantics:
-                                payload = {
-                                    "document_id": published.revision.document_id,
-                                    "revision_id": published.revision.revision_id,
-                                    "source_sha256": published.revision.source_sha256,
-                                    "snapshot_id": published.snapshot.snapshot_id,
-                                    "page_id": page_id,
-                                    "viewport_id": viewport.view_id,
-                                    "physical_wall_decision_scope_id": (
-                                        wall_scope.decision_scope_id
-                                    ),
-                                    "physical_wall_id": target.wall_candidate_id,
-                                    "raw_owner_wall_ids": raw_owner_ids,
-                                    "equivalence_group_wall_ids": equivalence_group,
-                                    "source_wall_primitive_ids": tuple(
-                                        sorted(source_segments)
-                                    ),
-                                    "trade_scope_id": semantic.trade_scope_id,
-                                    "finish_material": semantic.finish_material,
-                                    "semantic_direction": semantic.direction,
-                                    "annotation_observation_ids": tuple(
-                                        annotation_ids
-                                    ),
-                                    "leader_path_ids": tuple(leader_ids),
-                                    "terminator_primitive_ids": (
+                            payload = {
+                                "document_id": published.revision.document_id,
+                                "revision_id": published.revision.revision_id,
+                                "source_sha256": published.revision.source_sha256,
+                                "snapshot_id": published.snapshot.snapshot_id,
+                                "page_id": page_id,
+                                "viewport_id": viewport.view_id,
+                                "physical_wall_decision_scope_id": (
+                                    wall_scope.decision_scope_id
+                                ),
+                                "physical_wall_id": target.wall_candidate_id,
+                                "raw_owner_wall_ids": raw_owner_ids,
+                                "equivalence_group_wall_ids": equivalence_group,
+                                "source_wall_primitive_ids": tuple(
+                                    sorted(source_segments)
+                                ),
+                                "trusted_annotation_text": trusted_annotation_text,
+                                "annotation_observation_ids": tuple(
+                                    annotation_ids
+                                ),
+                                "leader_path_ids": tuple(leader_ids),
+                                "terminator_primitive_ids": (
+                                    terminator.primitive_id,
+                                ),
+                            }
+                            binding_id = stable_contract_id(
+                                "wall_finish_callout_wall_binding",
+                                payload,
+                                digest_chars=32,
+                            )
+                            evidence_ids = tuple(
+                                dict.fromkeys(
+                                    (
+                                        *annotation_ids,
+                                        *leader_ids,
                                         terminator.primitive_id,
-                                    ),
-                                }
-                                binding_id = stable_contract_id(
-                                    "wall_finish_callout_wall_binding",
-                                    payload,
-                                    digest_chars=32,
-                                )
-                                evidence_ids = tuple(
-                                    dict.fromkeys(
-                                        (
-                                            *annotation_ids,
-                                            *leader_ids,
-                                            terminator.primitive_id,
-                                            *tuple(sorted(source_segments)),
-                                        )
+                                        *tuple(sorted(source_segments)),
                                     )
                                 )
-                                record = WallFinishCalloutWallBindingRecord(
-                                    binding_id=binding_id,
-                                    document_id=published.revision.document_id,
-                                    revision_id=published.revision.revision_id,
-                                    source_sha256=published.revision.source_sha256,
-                                    snapshot_id=published.snapshot.snapshot_id,
-                                    page_id=page_id,
-                                    viewport_id=viewport.view_id,
-                                    decision_scope_id=(
-                                        f"finish-callout-wall:{viewport.view_id}"
-                                    ),
-                                    physical_wall_decision_scope_id=(
-                                        wall_scope.decision_scope_id
-                                    ),
-                                    physical_wall_id=target.wall_candidate_id,
-                                    raw_owner_wall_ids=raw_owner_ids,
-                                    equivalence_group_wall_ids=equivalence_group,
-                                    equivalence_pair_classifications=(
-                                        pair_classifications
-                                    ),
-                                    source_wall_primitive_ids=tuple(
-                                        sorted(source_segments)
-                                    ),
-                                    trade_scope_id=semantic.trade_scope_id,
-                                    finish_material=semantic.finish_material,
-                                    semantic_direction=semantic.direction,
-                                    annotation_observation_ids=tuple(
-                                        annotation_ids
-                                    ),
-                                    leader_path_ids=tuple(leader_ids),
-                                    terminator_primitive_ids=(
-                                        terminator.primitive_id,
-                                    ),
-                                    source_evidence_ids=evidence_ids,
-                                    source_evidence_kind=(
-                                        SOURCE_EVIDENCE_KIND_NATIVE_DIRECT_CALLOUT
-                                    ),
-                                    status=EvidenceResolutionStatus.CORROBORATED,
-                                    reason_codes=(
-                                        FINISH_CALLOUT_WALL_BINDING_RESOLVED,
-                                    ),
-                                    _seal=_RECORD_SEAL,
-                                )
-                                signature = (
-                                    record.physical_wall_id,
-                                    record.trade_scope_id,
-                                    record.finish_material,
-                                    record.semantic_direction,
-                                )
-                                prior = accepted.get(signature)
-                                if prior is None or record.binding_id < prior.binding_id:
-                                    accepted[signature] = record
+                            )
+                            record = WallFinishCalloutWallBindingRecord(
+                                binding_id=binding_id,
+                                document_id=published.revision.document_id,
+                                revision_id=published.revision.revision_id,
+                                source_sha256=published.revision.source_sha256,
+                                snapshot_id=published.snapshot.snapshot_id,
+                                page_id=page_id,
+                                viewport_id=viewport.view_id,
+                                decision_scope_id=(
+                                    f"finish-callout-wall:{viewport.view_id}"
+                                ),
+                                physical_wall_decision_scope_id=(
+                                    wall_scope.decision_scope_id
+                                ),
+                                physical_wall_id=target.wall_candidate_id,
+                                raw_owner_wall_ids=raw_owner_ids,
+                                equivalence_group_wall_ids=equivalence_group,
+                                equivalence_pair_classifications=(
+                                    pair_classifications
+                                ),
+                                source_wall_primitive_ids=tuple(
+                                    sorted(source_segments)
+                                ),
+                                trusted_annotation_text=trusted_annotation_text,
+                                annotation_observation_ids=tuple(
+                                    annotation_ids
+                                ),
+                                leader_path_ids=tuple(leader_ids),
+                                terminator_primitive_ids=(
+                                    terminator.primitive_id,
+                                ),
+                                source_evidence_ids=evidence_ids,
+                                source_evidence_kind=(
+                                    SOURCE_EVIDENCE_KIND_NATIVE_DIRECT_CALLOUT
+                                ),
+                                status=EvidenceResolutionStatus.CORROBORATED,
+                                reason_codes=(
+                                    FINISH_CALLOUT_WALL_BINDING_RESOLVED,
+                                ),
+                                _seal=_RECORD_SEAL,
+                            )
+                            signature = (
+                                record.physical_wall_id,
+                                tuple(record.annotation_observation_ids),
+                            )
+                            prior = accepted.get(signature)
+                            if prior is None or record.binding_id < prior.binding_id:
+                                accepted[signature] = record
 
                         bindings = tuple(
                             sorted(
