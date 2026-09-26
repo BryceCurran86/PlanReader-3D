@@ -163,6 +163,147 @@ def _blocked(reason: str) -> WallFinishCalloutWallScopeResult:
     )
 
 
+def _candidate_finish_blocks_with_raster_corroboration(
+    source: SourceVisibilityProducer,
+    published,
+    page_id: str,
+):
+    """Return trusted finish blocks, corroborating only glyph-only candidate words.
+
+    Native raw text is used only to discover a *candidate block*. It never
+    becomes trusted output. Once a block has finish semantics, every word in
+    that block must independently resolve either through PdfTextIntegrity or
+    through the existing producer-owned RasterTextCorroborationAuthority.
+    """
+    text_authority = source.text_integrity_authority()
+    raw_blocks: dict[
+        int,
+        list[
+            tuple[
+                int,
+                str,
+                str,
+                tuple[float, ...],
+                object,
+            ]
+        ],
+    ] = {}
+
+    for observation_id in published.text_observation_ids:
+        selector = ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=observation_id,
+        )
+        result = text_authority.resolve_text(selector)
+        receipt = result.receipt
+        if (
+            receipt is None
+            or receipt.page_id != page_id
+            or receipt.block_no is None
+            or receipt.line_no is None
+            or receipt.word_no is None
+        ):
+            continue
+        raw_blocks.setdefault(int(receipt.block_no), []).append(
+            (
+                int(receipt.line_no) * 10000 + int(receipt.word_no),
+                observation_id,
+                str(receipt.raw_text or ""),
+                tuple(receipt.geometry),
+                result,
+            )
+        )
+
+    candidate_blocks = []
+    for block_no, values in sorted(raw_blocks.items()):
+        ordered = sorted(values, key=lambda item: (item[0], item[1]))
+        raw_claim = " ".join(item[2] for item in ordered)
+        semantics = _finish_semantics(raw_claim)
+        if semantics:
+            candidate_blocks.append((block_no, ordered, semantics))
+
+    if not candidate_blocks:
+        return ()
+
+    raster_producer = None
+    out = []
+    for block_no, ordered, semantics in candidate_blocks:
+        trusted_words = []
+        block_ok = True
+        for _order, observation_id, _raw_claim, geometry, integrity in ordered:
+            receipt = integrity.receipt
+            if (
+                integrity.status is EvidenceResolutionStatus.CORROBORATED
+                and receipt is not None
+                and receipt.trusted
+            ):
+                trusted = str(integrity.trusted_text or "")
+            elif (
+                receipt is not None
+                and integrity.status is EvidenceResolutionStatus.ABSTAINED
+                and tuple(receipt.reason_codes) == (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+                and tuple(integrity.reason_codes) == tuple(receipt.reason_codes)
+            ):
+                if raster_producer is None:
+                    raster_producer = (
+                        RasterTextCorroborationProducer.from_source_visibility_producer(
+                            source
+                        )
+                    )
+                corroborated = raster_producer.publish(
+                    RasterTextCorroborationSelector(
+                        document_id=published.revision.document_id,
+                        revision_id=published.revision.revision_id,
+                        source_sha256=published.revision.source_sha256,
+                        snapshot_id=published.snapshot.snapshot_id,
+                        observation_id=observation_id,
+                    )
+                )
+                if (
+                    corroborated.status is not EvidenceResolutionStatus.CORROBORATED
+                    or corroborated.record is None
+                    or not str(corroborated.corroborated_text or "")
+                ):
+                    block_ok = False
+                    break
+                trusted = str(corroborated.corroborated_text)
+            else:
+                block_ok = False
+                break
+
+            trusted_words.append(
+                (observation_id, trusted, tuple(geometry))
+            )
+
+        if not block_ok or len(trusted_words) != len(ordered):
+            continue
+
+        trusted_text = " ".join(word[1] for word in trusted_words)
+        trusted_semantics = _finish_semantics(trusted_text)
+        if trusted_semantics != semantics:
+            # The candidate claim and the independently trusted composition
+            # must carry exactly the same finish proposition.
+            continue
+
+        geometries = [word[2] for word in trusted_words]
+        out.append(
+            (
+                block_no,
+                trusted_text,
+                trusted_semantics,
+                tuple(word[0] for word in trusted_words),
+                _bbox_union(geometries),
+                __import__("statistics").median(
+                    max(0.1, geom[3] - geom[1]) for geom in geometries
+                ),
+            )
+        )
+    return tuple(out)
+
+
 def _local_owner_universe_safe(*, terminator, page_lines, wall_scope) -> bool:
     """Prove that no source primitive omitted by viewport ownership hits target.
 
