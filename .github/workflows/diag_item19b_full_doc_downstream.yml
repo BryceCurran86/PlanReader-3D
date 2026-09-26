@@ -1,0 +1,167 @@
+name: Item19B Full Document Downstream Probe
+
+on:
+  push:
+    branches: [diag/item19b-full-doc-downstream-main]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Full document ingestion then page54 chain
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json,time
+          from pathlib import Path
+          from collections import Counter
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
+          from pb_live_opening_deduction_composition import compose_live_opening_deductions
+          from pb_live_gross_wall_geometry_composition import compose_live_gross_wall_geometry
+          from pb_live_net_wall_boolean_composition import compose_live_net_wall_boolean_union
+          from pb_live_whole_wall_role_composition import compose_live_whole_wall_roles
+          from pb_live_external_net_wall_publication import compose_live_external_net_wall_publication
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-full-doc-downstream",
+              producer_version="1.0",
+          )
+          t=time.perf_counter()
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-full-doc",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+          )
+          print("INGEST_SEC",round(time.perf_counter()-t,3))
+          wall=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=pub.revision.revision_id,
+              page_ids=("54",),
+          )
+          print("FULL_CHAIN_WALL "+json.dumps({
+              "status":wall.status.value,
+              "reasons":list(wall.reason_codes),
+              "scopes":[{
+                  "page":s.page_id,"status":s.status.value,"complete":s.scope_complete,
+                  "count":len(s.wall_candidate_ids),"reasons":list(s.reason_codes)
+              } for s in wall.wall_scopes],
+              "binding_status_counts":dict(Counter(x.status.value for x in wall.opening_bindings)),
+              "binding_reason_counts":dict(Counter(r for x in wall.opening_bindings for r in x.reason_codes)),
+              "bound_hosts":[{
+                  "opening":x.opening_identity_id,"host":x.host_wall_id,
+                  "members":list(x.member_wall_candidate_ids)
+              } for x in wall.opening_bindings if x.host_wall_id],
+              "frame_status_counts":dict(Counter(x.status.value for x in wall.host_frames)),
+              "universe":{p:{
+                  "status":r.status.value,
+                  "complete":bool(r.decision_scope_complete),
+                  "reasons":list(r.reason_codes),
+                  "count":len(r.record.accounted_member_ids) if r.record else 0,
+              } for p,r in wall.opening_universe_results.items()},
+          },sort_keys=True))
+
+          voids=compose_live_physical_opening_voids(
+              source_visibility_producer=source,
+              wall_opening_composition=wall,
+          )
+          print("FULL_CHAIN_VOIDS "+json.dumps({
+              "status":voids.status.value,
+              "reasons":list(voids.reason_codes),
+              "trace_count":len(voids.traces),
+              "void_status_counts":dict(Counter(x.void_status.value for x in voids.traces)),
+              "void_reason_counts":dict(Counter(r for x in voids.traces for r in x.void_reason_codes)),
+          },sort_keys=True))
+
+          targets=("external_key_pointing","internal_plaster","internal_paint","perimeter_walling")
+          ded=compose_live_opening_deductions(
+              source_visibility_producer=source,
+              wall_opening_composition=wall,
+              physical_void_composition=voids,
+              target_scope_ids=targets,
+          )
+          print("FULL_CHAIN_DED "+json.dumps({
+              "status":ded.status.value,
+              "reasons":list(ded.reason_codes),
+              "trace_count":len(ded.traces),
+              "status_counts":dict(Counter(x.deduction_status.value for x in ded.traces)),
+              "reason_counts":dict(Counter(r for x in ded.traces for r in x.deduction_reason_codes)),
+          },sort_keys=True))
+
+          gross=compose_live_gross_wall_geometry(
+              source_visibility_producer=source,
+              wall_opening_composition=wall,
+              physical_void_composition=voids,
+          )
+          print("FULL_CHAIN_GROSS "+json.dumps({
+              "status":gross.status.value,
+              "reasons":list(gross.reason_codes),
+              "trace_count":len(gross.traces),
+              "status_counts":dict(Counter(x.status.value for x in gross.traces)),
+              "reason_counts":dict(Counter(r for x in gross.traces for r in x.reason_codes)),
+              "resolved":[{
+                  "wall":x.physical_wall_id,"length":x.length_m,
+                  "height":x.height_m,"gross":x.gross_area_m2
+              } for x in gross.traces if x.gross_area_m2 is not None],
+          },sort_keys=True))
+
+          roles=compose_live_whole_wall_roles(gross_wall_composition=gross)
+          print("FULL_CHAIN_ROLES "+json.dumps({
+              "status":roles.status.value,
+              "reasons":list(roles.reason_codes),
+              "trace_count":len(roles.traces),
+              "status_counts":dict(Counter(x.status.value for x in roles.traces)),
+              "role_counts":dict(Counter((x.role.value if x.role else "none") for x in roles.traces)),
+          },sort_keys=True))
+
+          net=compose_live_net_wall_boolean_union(
+              wall_opening_composition=wall,
+              physical_void_composition=voids,
+              opening_deduction_composition=ded,
+              gross_wall_composition=gross,
+          )
+          print("FULL_CHAIN_NET "+json.dumps({
+              "status":net.status.value,
+              "reasons":list(net.reason_codes),
+              "trace_count":len(net.traces),
+              "status_counts":dict(Counter(x.status.value for x in net.traces)),
+              "reason_counts":dict(Counter(r for x in net.traces for r in x.reason_codes)),
+              "resolved":[{
+                  "wall":x.physical_wall_id,"target":x.target_scope_id,
+                  "gross":x.gross_area_m2,"void":x.void_union_area_m2,"net":x.net_area_m2
+              } for x in net.traces if x.net_area_m2 is not None],
+          },sort_keys=True))
+
+          for target in ("external_key_pointing","perimeter_walling"):
+              out=compose_live_external_net_wall_publication(
+                  gross_wall_composition=gross,
+                  net_wall_composition=net,
+                  whole_wall_role_composition=roles,
+                  target_scope_id=target,
+              )
+              print("FULL_CHAIN_EXTERNAL "+json.dumps({
+                  "target":target,"status":out.status.value,
+                  "reasons":list(out.reason_codes),
+                  "value":out.quantity_evidence.value if out.quantity_evidence else None,
+                  "walls":list(out.external_wall_ids),
+              },sort_keys=True))
+          PY
