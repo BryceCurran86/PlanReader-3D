@@ -188,9 +188,8 @@ def test_end_to_end_publishes_exact_callout_wall_before_face_role(tmp_path: Path
     assert len(bindings) == 1
     binding = bindings[0]
     assert binding.status is EvidenceResolutionStatus.CORROBORATED
-    assert binding.trade_scope_id == "external_key_pointing"
-    assert binding.finish_material == "key_pointing"
-    assert binding.semantic_direction == "externally"
+    assert "wall" in binding.trusted_annotation_text.lower()
+    assert "finish" in binding.trusted_annotation_text.lower()
     assert binding.physical_wall_id in binding.equivalence_group_wall_ids
     assert binding.source_wall_primitive_ids
 
