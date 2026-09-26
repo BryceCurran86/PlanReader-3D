@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,7 +12,9 @@ from pb_component_local_wall_topology_authority import (
     component_local_topology_proofs,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
+import pb_physical_wall_candidate_authority as wall_module
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+from pb_physical_wall_identity import PhysicalWallEquivalenceResolution
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_viewport_segmentation import ViewportSegmentationStatus, segment_page_viewports
 from pb_wall_role_authority import (
@@ -94,6 +97,38 @@ def _authority(path: Path):
     return source, published, walls, selector, scope
 
 
+def _test_independent_wall_publication(walls, scope):
+    """Test-only upstream state: all source-derived walls publish independently.
+
+    This isolates component-local topology from the stricter physical-wall
+    equivalence classifier. No production authority consumes this helper.
+    """
+    wall_ids = tuple(sorted(record.wall_candidate_id for record in scope.records))
+    equivalence = PhysicalWallEquivalenceResolution(
+        scope_viewport_id=str(scope.viewport_id or scope.decision_scope_id),
+        representative_wall_ids=wall_ids,
+        abstained_wall_ids=(),
+        equivalence_groups=(),
+        ambiguous_wall_ids=(),
+        same_wall_ids=(),
+        pair_classifications=(),
+        blocking_reasons_by_wall_id={},
+    )
+    changed = replace(scope, equivalence=equivalence)
+    scopes = dict(walls._scopes)
+    target_key = next(
+        key
+        for key, value in scopes.items()
+        if value.decision_scope_id == scope.decision_scope_id
+    )
+    scopes[target_key] = changed
+    authority = wall_module.PhysicalWallCandidateAuthority(
+        scopes,
+        _seal=wall_module._AUTHORITY_SEAL,
+    )
+    return authority, changed
+
+
 def _role_results(
     published,
     walls,
@@ -134,17 +169,10 @@ def test_unrelated_viewport_crop_does_not_poison_closed_component(tmp_path: Path
     assert scope.status is EvidenceResolutionStatus.CORROBORATED
     assert scope.scope_complete is False
 
+    walls, scope = _test_independent_wall_publication(walls, scope)
     groups = _publication_groups(scope)
-    assert groups, {
-        "representatives": tuple(
-            scope.equivalence.representative_wall_ids
-            if scope.equivalence is not None else ()
-        ),
-        "ambiguous": tuple(
-            scope.equivalence.ambiguous_wall_ids
-            if scope.equivalence is not None else ()
-        ),
-        "record_count": len(scope.records),
+    assert set(groups) == {
+        record.wall_candidate_id for record in scope.records
     }
 
     topology = build_component_local_source_wall_topology_authority(
@@ -178,11 +206,14 @@ def test_boundary_primitive_touching_component_keeps_topology_fail_closed(
     assert scope.status is EvidenceResolutionStatus.CORROBORATED
     assert scope.scope_complete is False
 
+    walls, scope = _test_independent_wall_publication(walls, scope)
     topology = build_component_local_source_wall_topology_authority(
         source_visibility_producer=source,
         physical_wall_candidate_authority=walls,
     )
-    results = _role_results(published, walls, selector, topology, scope)
+    results = _role_results(
+        published, walls, selector, topology, scope, publication_only=True
+    )
     assert all(
         result.status is not EvidenceResolutionStatus.CORROBORATED
         for _wall_id, result in results
