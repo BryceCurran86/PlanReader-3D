@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from collections.abc import Iterable, Sequence
 from pathlib import Path
@@ -29,7 +30,67 @@ def norm(v: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", clean(v).lower()).strip()
 
 
+# Legacy spellings are normalised in place. Rows can arrive with them after
+# startup (imports, AI drafts), so every schema() call still normalises them.
+_LEGACY_M2 = "LOWER(TRIM(COALESCE(unit,''))) IN ('m2','sqm','sq m')"
+_LEGACY_LM = "LOWER(TRIM(COALESCE(unit,''))) IN ('m','lin m','lineal m','linear m')"
+_LEGACY_FLOOR = """LOWER(TRIM(COALESCE(section,'')))='internal'
+                   AND LOWER(TRIM(COALESCE(element,'')))='floor plan'
+                   AND LOWER(COALESCE(location,'')) LIKE '%floor area%'
+                   AND LOWER(COALESCE(notes,'')) LIKE '%auto-detected%'"""
+_NORMALISATIONS = (
+    ("UPDATE takeoff_rows SET unit='m²' WHERE " + _LEGACY_M2, _LEGACY_M2),
+    ("UPDATE takeoff_rows SET unit='lm' WHERE " + _LEGACY_LM, _LEGACY_LM),
+    ("""UPDATE takeoff_rows SET element='Floor area',row_role='floor_area',rate_per_unit=0,
+        coats=0,coverage_m2_per_litre=0,productivity_m2_per_hour=0 WHERE """ + _LEGACY_FLOOR, _LEGACY_FLOOR),
+)
+# Expression indexes on the same expressions, so the legacy checks are lookups, not table scans.
+_LEGACY_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_takeoff_unit_normalised ON takeoff_rows(LOWER(TRIM(COALESCE(unit,''))))",
+    "CREATE INDEX IF NOT EXISTS idx_takeoff_element_normalised ON takeoff_rows(LOWER(TRIM(COALESCE(element,''))))",
+)
+# Databases whose structure schema() already migrated in this process: (path, device, inode, schema_version).
+_STRUCTURE_READY: set = set()
+
+
+def _structure_key(app: Any) -> tuple | None:
+    path = getattr(app, "DB_PATH", None)
+    if path is None or not os.path.exists(path):
+        return None
+    stat = os.stat(path)  # device and inode identify the file (ctime moves on every write on Linux)
+    version = app.lquery("PRAGMA schema_version")[0]["schema_version"]
+    return str(path), stat.st_dev, stat.st_ino, int(version)
+
+
 def schema(app: Any) -> None:
+    """Migrate take-off, page and measurement columns, and normalise legacy take-off rows.
+
+    Called on every review, QA and mapper path. Once a database's structure is
+    migrated (keyed by file and schema_version) a call only looks for legacy
+    rows through the expression indexes and writes nothing unless it finds
+    some: read paths no longer scan the whole table or take the write lock,
+    which made them wait behind any other session's write.
+    """
+    key = _structure_key(app)
+    if key is not None and key in _STRUCTURE_READY:
+        pending = [update for update, where in _NORMALISATIONS
+                   if app.lquery(f"SELECT 1 FROM takeoff_rows WHERE {where} LIMIT 1")]
+        if pending:
+            conn = app.local_connect()
+            try:
+                for update in pending:
+                    conn.execute(update)
+                conn.commit()
+            finally:
+                conn.close()
+        return
+    _migrate(app)
+    key = _structure_key(app)
+    if key is not None:
+        _STRUCTURE_READY.add(key)
+
+
+def _migrate(app: Any) -> None:
     conn = app.local_connect()
     try:
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -62,14 +123,10 @@ def schema(app: Any) -> None:
             }.items():
                 if name not in cols:
                     conn.execute(f"ALTER TABLE takeoff_rows ADD COLUMN {name} {ddl}")
-            conn.execute("UPDATE takeoff_rows SET unit='m²' WHERE LOWER(TRIM(COALESCE(unit,''))) IN ('m2','sqm','sq m')")
-            conn.execute("UPDATE takeoff_rows SET unit='lm' WHERE LOWER(TRIM(COALESCE(unit,''))) IN ('m','lin m','lineal m','linear m')")
-            conn.execute("""UPDATE takeoff_rows SET element='Floor area',row_role='floor_area',rate_per_unit=0,
-                           coats=0,coverage_m2_per_litre=0,productivity_m2_per_hour=0
-                           WHERE LOWER(TRIM(COALESCE(section,'')))='internal'
-                           AND LOWER(TRIM(COALESCE(element,'')))='floor plan'
-                           AND LOWER(COALESCE(location,'')) LIKE '%floor area%'
-                           AND LOWER(COALESCE(notes,'')) LIKE '%auto-detected%'""")
+            for index in _LEGACY_INDEXES:
+                conn.execute(index)
+            for update, _where in _NORMALISATIONS:
+                conn.execute(update)
         if "pages" in tables:
             if hasattr(app, "_ensure_pages_columns"):
                 app._ensure_pages_columns(conn)
