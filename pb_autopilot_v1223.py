@@ -484,6 +484,14 @@ def _surface_code(items: Sequence[Dict[str, Any]]) -> str:
         return "OTHER"
 
 
+def _orphaned_auto_surface(surface_id: Any, override: Any, live_mass_ids: set) -> bool:
+    """True for automatic face metadata keyed to a mass that no longer exists."""
+    parts = str(surface_id).split(":")
+    if len(parts) != 3 or parts[0] != "mass" or not parts[1].isdigit() or int(parts[1]) in live_mass_ids:
+        return False
+    return isinstance(override, dict) and str(override.get("notes") or "").startswith(("[AUTO", AUTO_NOTE_PREFIX))
+
+
 def build_autopilot_model(app: Any, workspace_id: int, report: Dict[str, Any], state: Dict[str, Any], refs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     footprint = report.get("footprint") or {}
     width = _num(footprint.get("width_m")); depth = _num(footprint.get("depth_m"))
@@ -519,15 +527,22 @@ def build_autopilot_model(app: Any, workspace_id: int, report: Dict[str, Any], s
     conn = app.local_connect()
     mass_ids: List[int] = []
     try:
-        old = conn.execute("SELECT id FROM model_masses WHERE workspace_id=? AND source_reference LIKE ?", (int(workspace_id), MODEL_SOURCE_PREFIX + "%")).fetchall()
-        for row in old:
-            conn.execute("DELETE FROM model_openings WHERE mass_id=?", (int(row[0]),))
-        conn.execute("DELETE FROM model_masses WHERE workspace_id=? AND source_reference LIKE ?", (int(workspace_id), MODEL_SOURCE_PREFIX + "%"))
+        # Openings, 3D surface edits and editable-3D corrections are keyed by mass id,
+        # so a re-run updates this model's masses in place (one per level) instead of
+        # re-inserting them under new AUTOINCREMENT ids.
+        current: Dict[str, int] = {}
+        removed: List[int] = []
+        for row in conn.execute(
+            "SELECT id,source_reference FROM model_masses WHERE workspace_id=? AND source_reference LIKE ? ORDER BY id",
+            (int(workspace_id), MODEL_SOURCE_PREFIX + "%"),
+        ).fetchall():
+            if str(row[1]) in current:
+                removed.append(int(row[0]))
+            else:
+                current[str(row[1])] = int(row[0])
         # Remove only the legacy automatic envelope after the richer replacement is ready.
         legacy = conn.execute("SELECT id FROM model_masses WHERE workspace_id=? AND source_reference LIKE ?", (int(workspace_id), auto.MODEL_SOURCE_PREFIX + "%")).fetchall()
-        for row in legacy:
-            conn.execute("DELETE FROM model_openings WHERE mass_id=?", (int(row[0]),))
-        conn.execute("DELETE FROM model_masses WHERE workspace_id=? AND source_reference LIKE ?", (int(workspace_id), auto.MODEL_SOURCE_PREFIX + "%"))
+        removed.extend(int(row[0]) for row in legacy)
 
         artist_palette = [str(col.get("hex") or "") for ref in refs for col in (ref.get("palette") or []) if col.get("hex")]
         palette = []
@@ -539,13 +554,27 @@ def build_autopilot_model(app: Any, workspace_id: int, report: Dict[str, Any], s
             finish = f"Artist reference {colour}" if colour else "External envelope"
             source = f"{MODEL_SOURCE_PREFIX}{level['name']}"
             notes = f"{AUTO_NOTE_PREFIX} Geometry from calibrated floor-plan footprint; height basis: {height_basis}. Artist impression contributes visual reference only."
-            cur = conn.execute(
-                """INSERT INTO model_masses(workspace_id,label,level_name,x,y,z,width,depth,height,finish,source_reference,confidence,notes,created_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (int(workspace_id), f"Automatic {level['name']}", level["name"], 0.0, 0.0, idx * storey_height,
-                 width, depth, storey_height, finish, source, "Derived", notes, app.now_stamp()),
-            )
-            mass_ids.append(int(cur.lastrowid))
+            values = (f"Automatic {level['name']}", level["name"], 0.0, 0.0, idx * storey_height,
+                      width, depth, storey_height, finish, source, "Derived", notes)
+            mass_id = current.pop(source, None)
+            if mass_id is None:
+                cur = conn.execute(
+                    """INSERT INTO model_masses(workspace_id,label,level_name,x,y,z,width,depth,height,finish,source_reference,confidence,notes,created_at)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (int(workspace_id), *values, app.now_stamp()),
+                )
+                mass_id = int(cur.lastrowid)
+            else:
+                conn.execute(
+                    "UPDATE model_masses SET label=?,level_name=?,x=?,y=?,z=?,width=?,depth=?,height=?,finish=?,source_reference=?,confidence=?,notes=? WHERE id=?",
+                    (*values, mass_id),
+                )
+            mass_ids.append(mass_id)
+        # Levels no longer detected go, with the duplicates and the legacy envelope.
+        removed.extend(current.values())
+        for mass_id in removed:
+            conn.execute("DELETE FROM model_openings WHERE mass_id=?", (mass_id,))
+            conn.execute("DELETE FROM model_masses WHERE id=?", (mass_id,))
         conn.commit()
     except Exception:
         conn.rollback(); raise
@@ -556,6 +585,10 @@ def build_autopilot_model(app: Any, workspace_id: int, report: Dict[str, Any], s
     raw = app.lquery("SELECT value FROM workspace_settings WHERE workspace_id=? AND key=?", (int(workspace_id), "3d_surface_editor_v1212"))
     surface_state = _json_load(raw[0].get("value") if raw else "{}", {})
     overrides = dict(surface_state.get("surfaces") or {}) if isinstance(surface_state, dict) else {}
+    # Automatic face metadata of masses that no longer exist is dropped so re-runs
+    # cannot accumulate it; estimator-edited surfaces are never deleted.
+    live = {int(row["id"]) for row in app.lquery("SELECT id FROM model_masses WHERE workspace_id=?", (int(workspace_id),))}
+    overrides = {key: value for key, value in overrides.items() if not _orphaned_auto_surface(key, value, live)}
     for mass_id in mass_ids:
         for face in ("front", "rear", "left", "right"):
             surface_id = f"mass:{mass_id}:{face}"
