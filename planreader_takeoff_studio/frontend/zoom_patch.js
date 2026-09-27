@@ -34,7 +34,10 @@
 
   function updateReadout() {
     const readout = document.getElementById("pbZoomReadout");
-    if (readout) readout.textContent = Math.round(zoom * 100) + "%";
+    const label = Math.round(zoom * 100) + "%";
+    // Replacing even identical text queues another childList mutation. This
+    // function also runs inside our observer, so only write changed labels.
+    if (readout && readout.textContent !== label) readout.textContent = label;
   }
 
   function applyZoom() {
