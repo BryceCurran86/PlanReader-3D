@@ -10,13 +10,17 @@ from pb_opening_detail_definition_authority import (
 )
 
 
-def _word(obs: str, text: str, seq: int, x: float = 0.0) -> _Word:
+def _word(obs: str, text: str, seq: int, x: float | None = None) -> _Word:
+    # Synthetic words preserve source-execution order spatially unless a test
+    # supplies an explicit coordinate. Real detail authority requires both
+    # execution adjacency and same-row geometric adjacency.
+    x0 = float(seq * 12 if x is None else x)
     return _Word(
         observation_id=obs,
         receipt_id=f"receipt-{obs}",
         source_partition_id="partition",
         raw_text=text,
-        geometry=(x, 0.0, x + 10.0, 10.0),
+        geometry=(x0, 0.0, x0 + 10.0, 10.0),
         sequence_start=seq,
         sequence_end=seq,
     )
