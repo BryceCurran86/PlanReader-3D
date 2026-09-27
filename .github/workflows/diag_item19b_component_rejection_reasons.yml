@@ -1,0 +1,94 @@
+name: Item19B Component Rejection Reasons
+
+on:
+  push:
+    branches: [diag/item19b-component-rejection-reasons]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Print completeness decisions
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_wall_component_completeness_authority import WallComponentCompletenessProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-component-rejection-probe",
+              producer_version="1.0",
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-component-rejection",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+
+          wall_auth=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          ).authority()
+          for scope in wall_auth._scopes.values():
+              if str(scope.viewport_view_type or "")!="floor_plan":
+                  continue
+              print("FLOOR_SCOPE",json.dumps({
+                  "viewport":scope.viewport_id,
+                  "complete":scope.scope_complete,
+                  "reasons":list(scope.reason_codes),
+                  "boundary_obs":list(scope.scope_boundary_observation_ids),
+                  "ambiguous_obs":list(scope.ambiguous_source_observation_ids),
+                  "records":[{
+                      "wall":r.wall_candidate_id,
+                      "pts":[list(p) for p in r.wall_candidate.centerline_pts],
+                      "source":list(r.physical_identity.source_primitive_ids),
+                  } for r in scope.records],
+                  "equivalence":{
+                      "reps":list(scope.equivalence.representative_wall_ids) if scope.equivalence else [],
+                      "abstained":list(scope.equivalence.abstained_wall_ids) if scope.equivalence else [],
+                      "ambiguous":list(scope.equivalence.ambiguous_wall_ids) if scope.equivalence else [],
+                      "same_groups":[list(g) for g in scope.equivalence.equivalence_groups] if scope.equivalence else [],
+                  }
+              },sort_keys=True))
+
+          producer=WallComponentCompletenessProducer.from_source_visibility_producer(
+              source,page_ids=("54",)
+          )
+          rows=[]
+          for result in producer.published_results():
+              rows.append({
+                  "status":result.status.value,
+                  "reasons":list(result.reason_codes),
+                  "record":None if result.record is None else {
+                      "component":result.record.component_id,
+                      "members":list(result.record.member_wall_ids),
+                      "source_primitives":list(result.record.member_source_primitive_ids),
+                      "same_groups":[list(g) for g in result.record.positive_equivalence_groups],
+                      "checked_withheld":list(result.record.checked_withheld_observation_ids),
+                      "scope_complete":result.record.source_scope_complete,
+                      "scope_reasons":list(result.record.source_scope_reason_codes),
+                  }
+              })
+          print("COMPONENT_COMPLETENESS "+json.dumps(rows,sort_keys=True))
+          PY
