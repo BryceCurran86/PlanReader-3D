@@ -1,0 +1,185 @@
+name: Item19B Target Wall Only Fast Probe
+
+on:
+  push:
+    branches: [diag/item19b-target-wall-only-fast]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Trace target wall geometry only
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_wall_component_completeness_authority import (
+              _component_sets,
+              _raw_path_family,
+              _wall_lines,
+              _segments_intersect,
+              _collinear_snap_continuation,
+              _parallel_overlap_and_separation,
+              _positive_same_separations,
+              _withheld_affects_component,
+          )
+
+          target_raw={
+              "d4763i0","d4772i0","d5179i1","d5179i3","d5214i0","d5215i0"
+          }
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-target-wall-only-fast",
+              producer_version="1.0",
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-target-wall-only-fast",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          walls=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          ).authority()
+
+          matches=[]
+          for scope in walls._scopes.values():
+              if str(scope.viewport_id or "")!="view_p54_4":
+                  continue
+              for rec in scope.records:
+                  raw=set(rec.physical_identity.source_primitive_ids)
+                  if raw & target_raw:
+                      matches.append((scope,rec))
+          assert matches, "no wall candidate owns the already-proven Item19B source primitives"
+          scope=matches[0][0]
+          candidate_ids={rec.wall_candidate_id for _scope,rec in matches}
+          all_components=_component_sets(scope.records,scope.equivalence)
+          components=[
+              group for group in all_components
+              if candidate_ids & set(group)
+          ]
+          assert len(components)==1, components
+          members=components[0]
+          by_id={r.wall_candidate_id:r for r in scope.records}
+          records=tuple(by_id[x] for x in members)
+          same_separations=_positive_same_separations(by_id,scope.equivalence)
+
+          visibility=source.authority()
+          withheld_ids=tuple(sorted(
+              set(scope.scope_boundary_observation_ids)
+              | set(scope.ambiguous_source_observation_ids)
+          ))
+          component_raw=sorted({
+              str(raw)
+              for record in records
+              for raw in record.physical_identity.source_primitive_ids
+          })
+          component_families=sorted({
+              fam for raw in component_raw
+              if (fam:=_raw_path_family(raw)) is not None
+          })
+
+          same_family=[]
+          all_relevant=[]
+          for oid in withheld_ids:
+              result=visibility.resolve_visible(ObservationSelector(
+                  document_id=scope.document_id,
+                  revision_id=scope.revision_id,
+                  source_sha256=scope.source_sha256,
+                  snapshot_id=scope.snapshot_id,
+                  observation_id=oid,
+              ))
+              obs=result.observation
+              if result.status is not EvidenceResolutionStatus.CORROBORATED or obs is None:
+                  continue
+              geom=tuple(float(v) for v in obs.geometry)
+              if len(geom)!=4:
+                  continue
+              raw=str(obs.source_primitive_ref or "")
+              fam=_raw_path_family(raw)
+              relations=[]
+              for rec in records:
+                  for line in _wall_lines(rec):
+                      rel=_parallel_overlap_and_separation(line,geom)
+                      relations.append({
+                          "wall":rec.wall_candidate_id,
+                          "line":list(line),
+                          "intersects":_segments_intersect(line,geom),
+                          "snap_continuation":_collinear_snap_continuation(line,geom),
+                          "parallel_overlap_separation":list(rel) if rel is not None else None,
+                      })
+              row={
+                  "observation_id":oid,
+                  "raw":raw,
+                  "family":fam,
+                  "geometry":list(geom),
+                  "reason":_withheld_affects_component(
+                      withheld_line=geom,
+                      withheld_raw_id=raw,
+                      component_records=records,
+                      known_same_separations=same_separations,
+                  ),
+                  "relations":relations,
+              }
+              if row["reason"] is not None:
+                  all_relevant.append(row)
+              if fam in component_families:
+                  same_family.append(row)
+
+          eq_groups=[
+              list(g) for g in tuple(scope.equivalence.equivalence_groups or ())
+              if set(g) & set(members)
+          ]
+          representatives=[
+              x for x in tuple(scope.equivalence.representative_wall_ids or ())
+              if x in set(members)
+          ]
+          member_rows=[]
+          for rec in records:
+              wc=rec.wall_candidate
+              member_rows.append({
+                  "wall":rec.wall_candidate_id,
+                  "centerline":[list(p) for p in wc.centerline_pts],
+                  "end_node_ids":list(wc.end_node_ids),
+                  "junction_types":[j.value for j in wc.junction_types],
+                  "source_primitives":list(rec.physical_identity.source_primitive_ids),
+              })
+
+          print("ITEM19B_WALL_ONLY_TARGET "+json.dumps({
+              "matching_wall_ids":sorted(candidate_ids),
+              "component_members":list(members),
+              "component_size":len(members),
+              "component_raw_ids":component_raw,
+              "component_path_families":component_families,
+              "equivalence_groups":eq_groups,
+              "component_representatives":representatives,
+              "positive_same_separations":list(same_separations),
+              "member_rows":member_rows,
+              "withheld_same_family":same_family,
+              "withheld_affecting_component":all_relevant,
+          },sort_keys=True))
+          PY
