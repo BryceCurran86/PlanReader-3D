@@ -1,0 +1,98 @@
+name: Item19B Component Local Topology
+
+on:
+  push:
+    branches: [gpt/item19b-component-local-topology-v1]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Focused tests
+        run: |
+          PYTHONPATH=. pytest -q             tests/test_source_wall_topology_component_local_v1.py             tests/test_physical_wall_candidate_viewport_scope_v1.py             tests/test_physical_wall_candidate_authority_scope_v1.py
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2             'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf'             -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Real KSTVET plan topology shadow
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_source_wall_topology_authority import build_source_wall_topology_authority
+          from pb_wall_role_authority import WallRoleProducer, WallRoleSelector
+          from pb_migration_contracts import EvidenceResolutionStatus
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-component-topology-shadow",
+              producer_version="1.0",
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-component-topology",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          walls=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          ).authority()
+          topo=build_source_wall_topology_authority(walls)
+          roles=WallRoleProducer.from_source_topology(
+              physical_wall_candidate_authority=walls
+          )
+          rows=[]
+          for scope in walls._scopes.values():
+              if str(scope.viewport_view_type or "") != "floor_plan":
+                  continue
+              for rec in scope.records:
+                  result=roles.publish(WallRoleSelector(
+                      document_id=scope.document_id,
+                      revision_id=scope.revision_id,
+                      source_sha256=scope.source_sha256,
+                      snapshot_id=scope.snapshot_id,
+                      page_id=scope.page_id,
+                      decision_scope_id=scope.decision_scope_id,
+                      physical_wall_id=rec.wall_candidate_id,
+                  ))
+                  rows.append({
+                      "viewport":scope.viewport_id,
+                      "scope_complete":scope.scope_complete,
+                      "scope_reasons":list(scope.reason_codes),
+                      "wall":rec.wall_candidate_id,
+                      "role_status":result.status.value,
+                      "role":(
+                          result.record.role.value
+                          if result.record is not None
+                          else None
+                      ),
+                      "role_reason":(
+                          result.record.ambiguity_reason
+                          if result.record is not None
+                          else None
+                      ),
+                  })
+          positives=[r for r in rows if r["role_status"]=="corroborated"]
+          print("ITEM19B_COMPONENT_TOPOLOGY_POSITIVES "+json.dumps(positives,sort_keys=True))
+          print("ITEM19B_COMPONENT_TOPOLOGY_POSITIVE_COUNT",len(positives))
+          print("ITEM19B_COMPONENT_TOPOLOGY_ROLE_COUNTS "+json.dumps({
+              role:sum(1 for r in positives if r["role"]==role)
+              for role in ("external","internal")
+          },sort_keys=True))
+          PY
