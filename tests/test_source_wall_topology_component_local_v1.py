@@ -20,10 +20,15 @@ def _record(wall_id: str, first, second):
 
 
 def _two_room_records(*, left_x: float = 50.0):
+    # Mirror the wall-assembly producer contract: junctions split the outer
+    # run at T-intersections, so each top/bottom segment has exact endpoints
+    # at the divider rather than leaving the divider to cross a monolithic edge.
     return (
-        _record("top", (left_x, 50.0), (250.0, 50.0)),
+        _record("top-left", (left_x, 50.0), (150.0, 50.0)),
+        _record("top-right", (150.0, 50.0), (250.0, 50.0)),
         _record("right", (250.0, 50.0), (250.0, 250.0)),
-        _record("bottom", (250.0, 250.0), (left_x, 250.0)),
+        _record("bottom-right", (250.0, 250.0), (150.0, 250.0)),
+        _record("bottom-left", (150.0, 250.0), (left_x, 250.0)),
         _record("left", (left_x, 250.0), (left_x, 50.0)),
         _record("divider", (150.0, 50.0), (150.0, 250.0)),
     )
@@ -100,7 +105,7 @@ def test_unrelated_cropped_geometry_does_not_poison_closed_local_component() -> 
     )
     result = _derive_scope_records(scope)
 
-    assert len(result) == 5
+    assert len(result) == 7
     divider = next(
         evidence
         for key, evidence in result.items()
@@ -139,9 +144,12 @@ def test_component_touching_viewport_boundary_remains_incomplete() -> None:
 
 def test_positive_same_group_uses_one_physical_wall_representative() -> None:
     base = list(_two_room_records())
-    duplicate = _record("top-duplicate", (50.0, 50.0), (250.0, 50.0))
+    duplicate = _record("top-left-duplicate", (50.0, 50.0), (150.0, 50.0))
     records = tuple(base + [duplicate])
-    equivalence = _equivalence(records, group=("top", "top-duplicate"))
+    equivalence = _equivalence(
+        records,
+        group=("top-left", "top-left-duplicate"),
+    )
     scope = _scope(
         records,
         withheld=(_withheld("far", (400.0, 0.0, 400.0, 500.0)),),
@@ -149,10 +157,10 @@ def test_positive_same_group_uses_one_physical_wall_representative() -> None:
     )
 
     result = _derive_scope_records(scope)
-    assert len(result) == 5
+    assert len(result) == 7
     wall_ids = {key[-1] for key in result}
-    assert "top" in wall_ids
-    assert "top-duplicate" not in wall_ids
+    assert "top-left" in wall_ids
+    assert "top-left-duplicate" not in wall_ids
 
 
 def test_incomplete_viewport_without_withheld_geometry_provenance_stays_closed() -> None:
