@@ -59,6 +59,43 @@ def _edge(first: Iterable[float], second: Iterable[float]) -> Edge:
     return (a, b) if a <= b else (b, a)
 
 
+def _point_on_edge(point: Point, edge: Edge, tol: float = 1e-6) -> bool:
+    (ax, ay), (bx, by) = edge
+    px, py = point
+    cross = (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+    scale = max(1.0, abs(bx - ax), abs(by - ay))
+    if abs(cross) > tol * scale:
+        return False
+    return (
+        min(ax, bx) - tol <= px <= max(ax, bx) + tol
+        and min(ay, by) - tol <= py <= max(ay, by) + tol
+    )
+
+
+def _face_edge_owner(
+    face_edge: Edge,
+    edge_owner: dict[Edge, str],
+) -> str | None:
+    """Map an intersection-split face edge to exactly one source wall owner.
+
+    extract_planar_faces() splits source segments at junctions before returning
+    face polygons.  A returned polygon edge can therefore be a strict
+    subsegment of one authenticated wall edge.  Exact equality is preferred;
+    otherwise both subsegment endpoints must lie on one and only one source
+    wall edge.  Multiple physical owners remain ambiguous.
+    """
+    exact = edge_owner.get(face_edge)
+    if exact is not None:
+        return exact
+    owners = {
+        owner
+        for source_edge, owner in edge_owner.items()
+        if _point_on_edge(face_edge[0], source_edge)
+        and _point_on_edge(face_edge[1], source_edge)
+    }
+    return next(iter(owners)) if len(owners) == 1 else None
+
+
 def _polygon_area(points: tuple[Point, ...]) -> float:
     total = 0.0
     for index, (x1, y1) in enumerate(points):
@@ -172,7 +209,7 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str, str
         mapped: list[str] = []
         for index, first in enumerate(polygon):
             second = polygon[(index + 1) % len(polygon)]
-            owner = edge_owner.get(_edge(first, second))
+            owner = _face_edge_owner(_edge(first, second), edge_owner)
             if owner is None:
                 invalid_boundary = True
                 break
