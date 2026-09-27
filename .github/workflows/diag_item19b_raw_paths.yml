@@ -1,0 +1,83 @@
+name: Item19B Raw Path Families
+
+on:
+  push:
+    branches: [diag/item19b-raw-path-families]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Inspect raw target path families
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, fitz
+          from pb_vector_geometry_v130 import extract_native_page
+          from pb_physical_wall_candidate_authority import (
+              _authenticated_viewports,_segment_fully_inside_bbox,
+              _segment_intersects_bbox,_segment_lies_on_bbox_edge,
+              _proven_filled_wall_strips,
+          )
+          from pb_wall_room_topology_stage_a import is_structural_candidate_segment
+
+          doc=fitz.open("/tmp/kstvet.pdf")
+          page=doc.load_page(53)
+          native=extract_native_page(page)
+          targets={4763,4772,5179,5214,5215}
+          segments=[s for s in (native.get("segments") or ()) if int(s.get("path_index",-1)) in targets]
+          auth=_authenticated_viewports(page,page_number=54)
+          assert auth is not None
+          allv,eligible=auth
+          rows=[]
+          for s in segments:
+              structural,reasons=is_structural_candidate_segment(s)
+              owners=[
+                  v.view_id for v in eligible
+                  if v.bounding_box is not None and _segment_fully_inside_bbox(s,v.bounding_box)
+              ]
+              intersects=[
+                  v.view_id for v in eligible
+                  if v.bounding_box is not None and _segment_intersects_bbox(s,v.bounding_box)
+              ]
+              edges=[
+                  v.view_id for v in eligible
+                  if v.bounding_box is not None and _segment_lies_on_bbox_edge(s,v.bounding_box)
+              ]
+              rows.append({
+                  "id":s.get("id"),"path_index":s.get("path_index"),"item_index":s.get("item_index"),
+                  "kind":s.get("kind"),"geometry":[s.get("x1"),s.get("y1"),s.get("x2"),s.get("y2")],
+                  "layer":s.get("layer"),"layer_present":s.get("layer_present"),
+                  "fill":s.get("fill"),"fill_present":s.get("fill_present"),
+                  "stroke":s.get("stroke"),"width":s.get("width"),"dashes":s.get("dashes"),
+                  "structural":structural,"exclude_reasons":list(reasons),
+                  "owners":owners,"intersects":intersects,"on_edges":edges,
+              })
+          strips=_proven_filled_wall_strips(native.get("segments") or ())
+          strip_rows=[{
+              "path":st.path_index,"faces":list(st.face_raw_ids),
+              "boundaries":list(st.boundary_raw_ids),"polygon":[list(p) for p in st.polygon]
+          } for st in strips if st.path_index in targets]
+          print("TARGET_PATH_VIEWPORTS "+json.dumps([
+              {"id":v.view_id,"type":v.view_type,"label":v.label,"bbox":list(v.bounding_box) if v.bounding_box else None}
+              for v in eligible
+          ],sort_keys=True))
+          print("TARGET_PATH_SEGMENTS "+json.dumps(rows,sort_keys=True))
+          print("TARGET_PATH_STRIPS "+json.dumps(strip_rows,sort_keys=True))
+          doc.close()
+          PY
