@@ -1,8 +1,8 @@
-name: Item19B Component Authority Main
+name: Item19B Component Authority Integrated Main
 
 on:
   push:
-    branches: [gpt/item19b-component-authority-main]
+    branches: [diag/pr935-current-main-item19b-role]
 
 jobs:
   validate:
