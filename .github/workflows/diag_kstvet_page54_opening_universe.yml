@@ -58,10 +58,12 @@ jobs:
               "status":sem_result.status.value,
               "reasons":list(sem_result.reason_codes),
               "representatives":list(rec.representative_observation_ids) if rec else [],
-              "members":{
-                  k:list(v)
-                  for k,v in (rec.member_observation_ids_by_identity.items() if rec else [])
-              },
+              "physical_opening_record_ids":list(rec.physical_opening_record_ids) if rec else [],
+              "support_observation_ids":list(rec.opening_support_observation_ids) if rec else [],
+              "residual_visible_observation_ids":list(rec.residual_visible_observation_ids) if rec else [],
+              "conflict_observation_ids":list(rec.conflict_observation_ids) if rec else [],
+              "structural_complete":bool(rec.structural_enumeration_complete) if rec else False,
+              "physical_universe_complete":bool(rec.physical_opening_universe_complete) if rec else False,
           },sort_keys=True))
 
           complete=build_semantic_opening_inventory_completeness(
