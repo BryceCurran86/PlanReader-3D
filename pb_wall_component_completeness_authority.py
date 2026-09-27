@@ -31,6 +31,7 @@ from typing import Mapping, Optional, Sequence
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_wall_candidate_authority import (
     PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY,
+    PhysicalWallCandidateAuthority,
     PhysicalWallCandidateProducer,
     _viewport_scope_boundary_reason,
 )
@@ -418,6 +419,25 @@ class WallComponentCompletenessProducer:
             source_visibility_producer,
             page_ids=page_ids,
         ).authority()
+        return cls.from_authorities(
+            source_visibility_producer=source_visibility_producer,
+            physical_wall_candidate_authority=wall_authority,
+        )
+
+    @classmethod
+    def from_authorities(
+        cls,
+        *,
+        source_visibility_producer: SourceVisibilityProducer,
+        physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
+    ) -> "WallComponentCompletenessProducer":
+        if type(source_visibility_producer) is not SourceVisibilityProducer:
+            raise TypeError("source_visibility_producer must be producer-owned")
+        if type(physical_wall_candidate_authority) is not PhysicalWallCandidateAuthority:
+            raise TypeError(
+                "physical_wall_candidate_authority must be producer-owned"
+            )
+        wall_authority = physical_wall_candidate_authority
         visibility = source_visibility_producer.authority()
         results: dict[tuple[str, ...], WallComponentCompletenessResult] = {}
 
