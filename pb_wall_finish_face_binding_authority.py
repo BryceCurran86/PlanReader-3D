@@ -625,8 +625,18 @@ class WallFinishFaceBindingProducer:
             source_visibility_producer,
             page_ids=selected,
         ).authority()
+        from pb_wall_component_completeness_authority import (
+            WallComponentCompletenessProducer,
+        )
+        component_completeness = (
+            WallComponentCompletenessProducer.from_source_visibility_producer(
+                source_visibility_producer,
+                page_ids=selected,
+            ).authority()
+        )
         role_producer = WallRoleProducer.from_source_topology(
-            physical_wall_candidate_authority=wall_authority
+            physical_wall_candidate_authority=wall_authority,
+            component_completeness_authority=component_completeness,
         )
         results: dict[tuple[str, ...], WallFinishFaceBindingScopeResult] = {}
         store = source_visibility_producer._producer._store

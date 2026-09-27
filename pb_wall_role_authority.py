@@ -194,6 +194,7 @@ class WallTopologyEvidence:
     enclosed_space_ids: Tuple[str, ...] = ()
     is_ambiguous: bool = False
     ambiguity_reason: Optional[str] = None
+    corroborating_evidence_ids: Tuple[str, ...] = ()
     schema_version: str = WALL_ROLE_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -517,6 +518,7 @@ class WallRoleProducer:
         cls,
         *,
         physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
+        component_completeness_authority=None,
     ) -> "WallRoleProducer":
         """Build Item26 role authority from producer-owned multi-room topology."""
 
@@ -525,7 +527,8 @@ class WallRoleProducer:
         )
 
         topology_authority = build_source_wall_topology_authority(
-            physical_wall_candidate_authority
+            physical_wall_candidate_authority,
+            component_completeness_authority=component_completeness_authority,
         )
         return cls(
             physical_wall_candidate_authority,

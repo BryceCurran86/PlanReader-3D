@@ -20,11 +20,16 @@ identity, benchmark value, or caller role hint participates in the proof.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Iterable
+from dataclasses import replace
+from typing import Iterable, Optional
 
 from pb_accuracy_v13_engines_v145 import extract_planar_faces
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateAuthority
+from pb_wall_component_completeness_authority import (
+    WallComponentCompletenessAuthority,
+    WallComponentCompletenessSelector,
+)
 from pb_wall_role_authority import (
     WallTopologyAuthority,
     WallTopologyEvidence,
@@ -84,7 +89,13 @@ def _wall_edges(record) -> tuple[Edge, ...]:
     return tuple(result)
 
 
-def _ambiguous_record(scope, wall_id: str, reason: str) -> WallTopologyEvidence:
+def _ambiguous_record(
+    scope,
+    wall_id: str,
+    reason: str,
+    *,
+    corroborating_evidence_ids: tuple[str, ...] = (),
+) -> WallTopologyEvidence:
     payload = {
         "document_id": scope.document_id,
         "revision_id": scope.revision_id,
@@ -109,10 +120,15 @@ def _ambiguous_record(scope, wall_id: str, reason: str) -> WallTopologyEvidence:
         enclosed_space_ids=(),
         is_ambiguous=True,
         ambiguity_reason=reason,
+        corroborating_evidence_ids=corroborating_evidence_ids,
     )
 
 
-def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str, str], WallTopologyEvidence]:
+def _derive_complete_scope_records(
+    scope,
+    *,
+    corroborating_evidence_ids: tuple[str, ...] = (),
+) -> dict[tuple[str, str, str, str, str, str, str], WallTopologyEvidence]:
     records = tuple(scope.records or ())
     if (
         scope.status is not EvidenceResolutionStatus.CORROBORATED
@@ -147,7 +163,12 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str, str
     if duplicate_edges:
         return {
             (scope.document_id, scope.revision_id, scope.source_sha256, scope.snapshot_id, scope.page_id, scope.decision_scope_id, wall_id):
-                _ambiguous_record(scope, wall_id, "duplicate_wall_edge_ownership")
+                _ambiguous_record(
+                    scope,
+                    wall_id,
+                    "duplicate_wall_edge_ownership",
+                    corroborating_evidence_ids=corroborating_evidence_ids,
+                )
             for wall_id in wall_ids
         }
 
@@ -193,7 +214,12 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str, str
     if invalid_boundary or not faces:
         return {
             (scope.document_id, scope.revision_id, scope.source_sha256, scope.snapshot_id, scope.page_id, scope.decision_scope_id, wall_id):
-                _ambiguous_record(scope, wall_id, "room_face_boundary_unresolved")
+                _ambiguous_record(
+                    scope,
+                    wall_id,
+                    "room_face_boundary_unresolved",
+                    corroborating_evidence_ids=corroborating_evidence_ids,
+                )
             for wall_id in wall_ids
         }
 
@@ -205,7 +231,12 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str, str
     ):
         return {
             (scope.document_id, scope.revision_id, scope.source_sha256, scope.snapshot_id, scope.page_id, scope.decision_scope_id, wall_id):
-                _ambiguous_record(scope, wall_id, "tiny_or_degenerate_room_face")
+                _ambiguous_record(
+                    scope,
+                    wall_id,
+                    "tiny_or_degenerate_room_face",
+                    corroborating_evidence_ids=corroborating_evidence_ids,
+                )
             for wall_id in wall_ids
         }
 
@@ -264,6 +295,7 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str, str
                 "physical_wall_id": wall_id,
                 "face_ids": face_ids,
                 "ambiguous": ambiguous,
+                "corroborating_evidence_ids": corroborating_evidence_ids,
             }
             evidence = WallTopologyEvidence(
                 evidence_id=stable_contract_id("source_wall_topology", payload, digest_chars=32),
@@ -279,6 +311,7 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str, str
                 enclosed_space_ids=face_ids,
                 is_ambiguous=ambiguous,
                 ambiguity_reason=reason,
+                corroborating_evidence_ids=corroborating_evidence_ids,
             )
             results[
                 (
@@ -295,14 +328,126 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str, str
     return results
 
 
+
+def _component_topology_records(scope, member_wall_ids: tuple[str, ...]):
+    by_id = {str(record.wall_candidate_id): record for record in tuple(scope.records or ())}
+    member_set = set(member_wall_ids)
+    if not member_set <= set(by_id):
+        return ()
+
+    equivalence = getattr(scope, "equivalence", None)
+    same_groups = tuple(getattr(equivalence, "equivalence_groups", ()) or ())
+    grouped_member: dict[str, str] = {}
+    for group in same_groups:
+        group_members = tuple(sorted(str(wall_id) for wall_id in group if str(wall_id) in member_set))
+        if not group_members:
+            continue
+        representative = group_members[0]
+        for wall_id in group_members:
+            grouped_member[wall_id] = representative
+
+    abstained = set(tuple(getattr(equivalence, "abstained_wall_ids", ()) or ()))
+    selected_ids: set[str] = set()
+    for wall_id in sorted(member_set):
+        if wall_id in grouped_member:
+            if grouped_member[wall_id] == wall_id:
+                selected_ids.add(wall_id)
+            continue
+        if wall_id in abstained:
+            # No positive physical-wall identity authorizes this member for
+            # local topology. Keep the component fail-closed.
+            return ()
+        selected_ids.add(wall_id)
+
+    return tuple(by_id[wall_id] for wall_id in sorted(selected_ids))
+
+
+def _derive_component_local_records(scope, component_completeness_authority):
+    if (
+        component_completeness_authority is None
+        or scope.status is not EvidenceResolutionStatus.CORROBORATED
+        or scope.scope_complete
+        or getattr(scope, "scope_kind", "page") != "viewport"
+        or str(getattr(scope, "viewport_view_type", "") or "") != "floor_plan"
+    ):
+        return {}
+
+    unique_components = {}
+    for wall_record in tuple(scope.records or ()):
+        selector = WallComponentCompletenessSelector(
+            document_id=scope.document_id,
+            revision_id=scope.revision_id,
+            source_sha256=scope.source_sha256,
+            snapshot_id=scope.snapshot_id,
+            page_id=scope.page_id,
+            decision_scope_id=scope.decision_scope_id,
+            physical_wall_id=str(wall_record.wall_candidate_id),
+        )
+        result = component_completeness_authority.resolve(selector)
+        record = result.record
+        if (
+            result.status is EvidenceResolutionStatus.CORROBORATED
+            and record is not None
+            and record.document_id == scope.document_id
+            and record.revision_id == scope.revision_id
+            and record.source_sha256 == scope.source_sha256
+            and record.snapshot_id == scope.snapshot_id
+            and record.page_id == scope.page_id
+            and record.decision_scope_id == scope.decision_scope_id
+        ):
+            unique_components[record.record_id] = record
+
+    results = {}
+    for record_id, component_record in sorted(unique_components.items()):
+        component_records = _component_topology_records(
+            scope,
+            tuple(component_record.member_wall_ids),
+        )
+        if not component_records:
+            continue
+        local_scope = replace(
+            scope,
+            scope_complete=True,
+            records=component_records,
+            equivalence=None,
+        )
+        results.update(
+            _derive_complete_scope_records(
+                local_scope,
+                corroborating_evidence_ids=(record_id,),
+            )
+        )
+    return results
+
+
+def _derive_scope_records(scope, component_completeness_authority=None):
+    if getattr(scope, "scope_complete", False):
+        return _derive_complete_scope_records(scope)
+    return _derive_component_local_records(
+        scope,
+        component_completeness_authority,
+    )
+
+
 def build_source_wall_topology_authority(
     physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
+    *,
+    component_completeness_authority: Optional[WallComponentCompletenessAuthority] = None,
 ) -> WallTopologyAuthority:
     """Derive sealed wall topology evidence from producer-owned wall scopes only."""
 
     if type(physical_wall_candidate_authority) is not PhysicalWallCandidateAuthority:
         raise TypeError(
             "physical_wall_candidate_authority must be producer-owned PhysicalWallCandidateAuthority"
+        )
+
+    if (
+        component_completeness_authority is not None
+        and type(component_completeness_authority) is not WallComponentCompletenessAuthority
+    ):
+        raise TypeError(
+            "component_completeness_authority must be producer-owned "
+            "WallComponentCompletenessAuthority"
         )
 
     records: dict[tuple[str, str, str, str, str, str, str], WallTopologyEvidence] = {}
@@ -316,7 +461,12 @@ def build_source_wall_topology_authority(
             and str(getattr(scope, "viewport_view_type", "") or "") != "floor_plan"
         ):
             continue
-        records.update(_derive_scope_records(scope))
+        records.update(
+            _derive_scope_records(
+                scope,
+                component_completeness_authority,
+            )
+        )
 
     authority = WallTopologyAuthority(records, _seal=_AUTHORITY_SEAL)
     object.__setattr__(
