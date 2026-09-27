@@ -197,6 +197,22 @@ def classify_page(text: str, file_name: str, page_no: int) -> Tuple[str, str]:
     return page_type, code or f"Page {int(page_no)}"
 
 
+def _authoritative_page_label(current: Any, page_no: int, sheet_number: Any) -> str:
+    """Fill only neutral page labels from positive title-block sheet-number evidence.
+
+    Existing non-neutral labels may already be referenced by take-off rows, mapper
+    state, or 3D evidence, so automatic processing must not silently rename them.
+    New or neutral labels (Page N or blank) may adopt the page-title authority's
+    explicitly bound sheet number. If no such evidence exists, fail closed to the
+    neutral page identifier.
+    """
+    existing = _norm(current)
+    neutral = not existing or bool(re.fullmatch(r"page\s+\d+", existing, re.I))
+    if not neutral:
+        return existing
+    strong = title_authority.normalise_sheet_number(str(sheet_number or ""))
+    return strong or existing or f"Page {int(page_no)}"
+
 def _sheet_title(title_text: Any, drawing_no: str, page_type: str) -> str:
     lines = [_norm(line) for line in str(title_text or "").splitlines() if _norm(line)]
     reject = ("project", "client", "drawing no", "sheet no", "scale", "revision", "rev ", "date", "drawn", "checked", "copyright")
@@ -291,28 +307,35 @@ def repair_document_registration(app: Any, document_id: int) -> Dict[str, Any]:
                     pass
             full_text = str(title.get("full_text") or page.get("extracted_text") or "")
             page_type, confidence, evidence = weighted_page_type(full_text, str(doc.get("file_name") or ""), title.get("text"))
-            drawing_no = str(title.get("drawing_no") or _candidate_code(title.get("text")) or "")
-            if not drawing_no:
-                current = str(page.get("page_label") or "")
-                drawing_no = current if current and not current.lower().startswith("page ") else f"Page {page_no}"
+            current_label = str(page.get("page_label") or "")
+            drawing_no = _authoritative_page_label(current_label, page_no, "")
             scale = str(page.get("scale_text") or "")
             if not scale and title.get("scale"):
                 scale = str(title["scale"])
+            # Do not write a weak drawing-number guess into page_label here. The
+            # document-level title authority resolves explicit sheet-number evidence
+            # below, after sibling title-block layout evidence is available.
             app.lexecute(
-                "UPDATE pages SET page_label=?,page_type=?,scale_text=? WHERE id=?",
-                (drawing_no, page_type, scale, int(page["id"])),
+                "UPDATE pages SET page_type=?,scale_text=? WHERE id=?",
+                (page_type, scale, int(page["id"])),
             )
             meta = {
                 "version": VERSION, "confidence": int(confidence), "evidence": evidence,
-                "drawing_no": drawing_no, "revision": str(title.get("revision") or ""), "detected_scale": str(title.get("scale") or ""),
+                "drawing_no": drawing_no, "legacy_drawing_no_candidate": str(title.get("drawing_no") or _candidate_code(title.get("text")) or ""),
+                "revision": str(title.get("revision") or ""), "detected_scale": str(title.get("scale") or ""),
             }
             pending.append((page, meta, analysis, page_type))
         # The drawing title comes from the page-title authority, resolved across
         # the document's sheets; it fails closed instead of guessing.
         for (page, meta, _analysis, page_type), result in zip(pending, title_authority.resolve_document([item[2] for item in pending])):
             meta.update(result.meta())
+            page_no = int(page.get("page_no") or 0)
+            final_label = _authoritative_page_label(page.get("page_label"), page_no, result.sheet_number)
+            if final_label != _norm(page.get("page_label")):
+                app.lexecute("UPDATE pages SET page_label=? WHERE id=?", (final_label, int(page["id"])))
+            meta["drawing_no"] = final_label
             app.set_workspace_setting(int(doc["workspace_id"]), _meta_key(int(page["id"])), json.dumps(meta, separators=(",", ":")))
-            updated.append({"page_id": int(page["id"]), "page_no": int(page.get("page_no") or 0), "label": meta["drawing_no"],
+            updated.append({"page_id": int(page["id"]), "page_no": page_no, "label": final_label,
                             "title": result.title, "type": page_type, "confidence": meta["confidence"]})
     finally:
         if pdf is not None:
