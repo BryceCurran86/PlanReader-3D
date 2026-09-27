@@ -96,12 +96,26 @@ jobs:
               (r["family"],r["subtype"],r["material"],r["width"],r["height"])
               for r in rows
           }
-          # Only independently corroborated definitions may publish.  On this
-          # pinned source the 3,000x900 detail has authoritative dimensions;
-          # 2,900 and 1,000x2,100 currently retain competing/disagreeing raster
-          # reads and therefore must stay absent rather than being forced green.
+          # Publish only semantic definitions with at least one independently
+          # authorised source occurrence.  This pinned source contains
+          # authoritative 3,000x900 and 2,900x900 steel-casement details.
+          # Repeated detail drawings share semantic_identity and are NOT counts.
+          # The 1,000x2,100 door dimensions remain unresolved and must stay absent.
           assert ("window","casement","steel",3000,900) in source_defs
-          assert ("window","casement","steel",2900,900) not in source_defs
+          assert ("window","casement","steel",2900,900) in source_defs
           assert ("door","batten","timber",1000,2100) not in source_defs
           assert all(r["basis"]=="detail_unspecified" for r in rows)
+
+          semantic_defs={
+              (r["family"],r["subtype"],r["material"],r["width"],r["height"],r["semantic_identity"])
+              for r in rows
+          }
+          assert len({
+              identity for family,subtype,material,width,height,identity in semantic_defs
+              if (family,subtype,material,width,height)==("window","casement","steel",3000,900)
+          }) == 1
+          assert len({
+              identity for family,subtype,material,width,height,identity in semantic_defs
+              if (family,subtype,material,width,height)==("window","casement","steel",2900,900)
+          }) == 1
           PY
