@@ -1,0 +1,160 @@
+name: Item19B Source Execution Callout
+
+on:
+  push:
+    branches: [gpt/item19b-source-execution-callout-v1]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+          # Shadow-only real-source validation of the already-approved
+          # RasterTextCorroborationAuthority backend. Do NOT promote this
+          # dependency to production requirements from this workflow.
+          pip install rapidocr
+
+      - name: Focused authority tests
+        run: |
+          PYTHONPATH=. pytest -q             tests/test_source_execution_callout_authority_v1.py             tests/test_raster_text_corroboration_authority_v1.py             tests/test_pdf_text_integrity_source_state_v1.py
+
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2             'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf'             -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+
+      - name: Real KSTVET page54 source-execution callout shadow
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, time
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_execution_callout_authority import SourceExecutionCalloutProducer
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-source-execution-callout-real",
+              producer_version="1.0",
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-source-execution-callout",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          # Diagnostic-only cluster trace. It does not feed authority.
+          from pb_source_execution_callout_authority import (
+              _Word,_execution_clusters,_receipt_interval,_semantic_candidate,_word_tokens
+          )
+          from pb_source_observation_authority import ObservationSelector
+          words=[]
+          text_auth=source.text_integrity_authority()
+          for observation_id in pub.text_observation_ids:
+              result=text_auth.resolve_text(ObservationSelector(
+                  document_id=pub.revision.document_id,
+                  revision_id=pub.revision.revision_id,
+                  source_sha256=pub.revision.source_sha256,
+                  snapshot_id=pub.snapshot.snapshot_id,
+                  observation_id=observation_id,
+              ))
+              receipt=result.receipt
+              if receipt is None or receipt.page_id!="54":
+                  continue
+              interval=_receipt_interval(receipt)
+              if interval is None:
+                  continue
+              g=tuple(float(v) for v in receipt.geometry)
+              words.append(_Word(
+                  observation_id=observation_id,
+                  receipt_id=receipt.receipt_id,
+                  source_partition_id=receipt.source_partition_id,
+                  raw_text=receipt.raw_text,
+                  geometry=g,
+                  sequence_start=interval[0],
+                  sequence_end=interval[1],
+              ))
+          cluster_rows=[]
+          keywords={"wall","walling","plaster","paint","key","internally","externally","finish"}
+          for cluster in _execution_clusters(words):
+              toks=[t for w in cluster for t in _word_tokens(w.raw_text)]
+              if not any(
+                  token in keywords or token.startswith("wall")
+                  or token.startswith("internal") or token.startswith("external")
+                  for token in toks
+              ):
+                  continue
+              cluster_rows.append({
+                  "partition":cluster[0].source_partition_id,
+                  "span":[min(w.sequence_start for w in cluster),max(w.sequence_end for w in cluster)],
+                  "count":len(cluster),
+                  "words":[
+                      [w.raw_text,w.sequence_start,w.sequence_end,list(w.geometry)]
+                      for w in cluster
+                  ],
+                  "candidate":_semantic_candidate(cluster) is not None,
+              })
+          print("ITEM19B_EXECUTION_CLUSTERS "+json.dumps(cluster_rows,sort_keys=True))
+
+          start=time.perf_counter()
+          producer=SourceExecutionCalloutProducer.from_source_visibility_producer(
+              source,page_ids=("54",)
+          )
+          elapsed=time.perf_counter()-start
+          rows=[]
+          for result in producer.published_results():
+              for record in result.records:
+                  rows.append({
+                      "page":record.page_id,
+                      "partition":record.source_partition_id,
+                      "sequence":[record.sequence_start,record.sequence_end],
+                      "bbox":list(record.source_bbox),
+                      "semantics":[
+                          {
+                              "trade":semantic.trade_scope_id,
+                              "material":semantic.finish_material,
+                              "direction":semantic.direction,
+                              "required":list(semantic.required_categories),
+                          }
+                          for semantic in record.semantics
+                      ],
+                      "evidence":[
+                          {
+                              "observation":word.observation_id,
+                              "text":word.trusted_text,
+                              "authority":word.authority_kind,
+                              "record":word.authority_record_id,
+                              "sequence":[word.sequence_start,word.sequence_end],
+                          }
+                          for word in record.word_evidence
+                      ],
+                  })
+          print("ITEM19B_SOURCE_EXECUTION_CALLOUTS "+json.dumps(rows,sort_keys=True))
+          print("ITEM19B_SOURCE_EXECUTION_ELAPSED_SEC",round(elapsed,3))
+          target_internal=[
+              row for row in rows if row["sequence"] == [10070,10078]
+          ]
+          target_external=[
+              row for row in rows if row["sequence"] == [10061,10065]
+          ]
+          assert len(target_internal) == 1, target_internal
+          assert {
+              semantic["trade"]
+              for semantic in target_internal[0]["semantics"]
+          } == {"internal_plaster","internal_paint"}
+          # #897 proved this exact external execution's direction word
+          # (seq 10064/10065) has 300/450 disagreement. Other external notes
+          # may independently corroborate; this one must remain absent.
+          assert target_external == []
+          PY
