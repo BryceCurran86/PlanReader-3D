@@ -184,3 +184,14 @@ def test_positive_same_separation_is_derived_from_upstream_equivalence_only() ->
     values=_positive_same_separations(by_id,eq)
     assert values == (5.0,)
     assert 40.0 not in values
+
+
+def test_source_visibility_prefix_preserves_native_path_family_identity() -> None:
+    record=_record("wall",(0,0),(20,0),raw_id="d10i0")
+    reason=_withheld_affects_component(
+        withheld_line=(100,100,120,100),
+        withheld_raw_id="visible:segment:d10i7",
+        component_records=(record,),
+        known_same_separations=(),
+    )
+    assert reason == WALL_COMPONENT_WITHHELD_SOURCE_PATH_RELATED

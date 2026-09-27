@@ -265,7 +265,12 @@ def _collinear_snap_continuation(left: Line, right: Line) -> bool:
 
 
 def _raw_path_family(raw_id: str) -> Optional[str]:
-    match = _RAW_PATH_RE.match(str(raw_id or ""))
+    value = str(raw_id or "")
+    for prefix in ("visible:segment:", "segment:"):
+        if value.startswith(prefix):
+            value = value[len(prefix):]
+            break
+    match = _RAW_PATH_RE.match(value)
     return None if match is None else match.group("path")
 
 
