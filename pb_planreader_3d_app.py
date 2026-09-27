@@ -6391,7 +6391,7 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
         pixel_distance=c2.number_input("Measured pixel distance",min_value=1.0,value=float((page.get("px_per_m") or 100)*known_m),step=1.0)
         if st.button("Save page calibration",type="primary"):
             pxpm=pixel_distance/known_m
-            lexecute("UPDATE pages SET px_per_m=? WHERE id=?",(pxpm,page["id"]))
+            lexecute("UPDATE pages SET scale_method='manual_calibration',scale_verified=1,px_per_m=? WHERE id=?",(pxpm,page["id"]))
             st.success(f"Saved {pxpm:.2f} pixels per metre.")
             st.rerun()
         st.caption("Use a known dimension line from the drawing. Accurate scale calibration is essential before treating mapped areas as measured.")
