@@ -1,0 +1,132 @@
+name: KSTVET Opening Conflict Shapes
+
+on:
+  push:
+    branches: [diag/kstvet-opening-conflict-shapes]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2             'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf'             -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Profile ambiguous physical-opening candidates
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_semantic_opening_enumeration_authority import SemanticOpeningEnumerationProducer
+          from pb_physical_opening_authority import PhysicalOpeningAuthority
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(producer_method="kstvet-opening-conflict-shapes",producer_version="1")
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-opening-conflict-shapes",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          sem=SemanticOpeningEnumerationProducer.from_source_visibility_producer(source)
+          sem_result=sem.publish_page_scope(
+              revision_id=pub.revision.revision_id,
+              decision_scope_id="diag:opening-conflicts",
+              page_ids=("54",),
+          )
+          rec=sem_result.record
+          assert rec is not None
+          visibility=source.authority()
+          physical=PhysicalOpeningAuthority(visibility)
+
+          rows=[]
+          shape_counts=Counter()
+          for oid in rec.representative_observation_ids:
+              sel=ObservationSelector(
+                  document_id=pub.revision.document_id,
+                  revision_id=pub.revision.revision_id,
+                  source_sha256=pub.revision.source_sha256,
+                  snapshot_id=pub.snapshot.snapshot_id,
+                  observation_id=oid,
+              )
+              disp=physical.classify_disposition(sel)
+              if disp.status.value!="conflict":
+                  continue
+              src=visibility.resolve_visible(sel)
+              seed=src.observation
+              assert seed is not None
+              records,failures=physical._visible_snapshot_records(src)
+              assert not failures
+              candidates=physical._visible_candidates_for(seed,records)
+              containing=[
+                  c for c in candidates if oid in c.source_observation_ids
+              ]
+              obs_by_id={r.observation_id:r for r in records}
+              candidate_rows=[]
+              for c in containing:
+                  support=[]
+                  for sid in c.source_observation_ids:
+                      r=obs_by_id[sid]
+                      support.append({
+                          "obs":sid,
+                          "raw":(
+                              r.derivation_parent_ids[0]
+                              if len(r.derivation_parent_ids)==1 else None
+                          ),
+                          "geometry":list(r.geometry),
+                          "layer":r.layer,
+                          "kind":r.observation_kind,
+                      })
+                  candidate_rows.append({
+                      "id":c.candidate_id,
+                      "pattern":c.structural_pattern,
+                      "support_ids":list(c.source_observation_ids),
+                      "root_ids":list(c.source_lineage_root_ids),
+                      "support":support,
+                  })
+              patterns=tuple(sorted(c.structural_pattern for c in containing))
+              sizes=tuple(sorted(len(c.source_observation_ids) for c in containing))
+              overlaps=[]
+              for i,a in enumerate(containing):
+                  A=set(a.source_observation_ids)
+                  for b in containing[i+1:]:
+                      B=set(b.source_observation_ids)
+                      overlaps.append({
+                          "a":a.candidate_id,
+                          "b":b.candidate_id,
+                          "intersection":len(A&B),
+                          "a_size":len(A),
+                          "b_size":len(B),
+                          "a_subset_b":A<B,
+                          "b_subset_a":B<A,
+                          "same_roots":set(a.source_lineage_root_ids)==set(b.source_lineage_root_ids),
+                          "root_intersection":len(set(a.source_lineage_root_ids)&set(b.source_lineage_root_ids)),
+                      })
+              key=(patterns,sizes,tuple(sorted(o["intersection"] for o in overlaps)))
+              shape_counts[str(key)]+=1
+              rows.append({
+                  "representative":oid,
+                  "candidate_count":len(containing),
+                  "patterns":list(patterns),
+                  "candidates":candidate_rows,
+                  "overlaps":overlaps,
+              })
+          print("OPENING_CONFLICT_SHAPE_COUNTS "+json.dumps(shape_counts,sort_keys=True))
+          print("OPENING_CONFLICT_ROWS "+json.dumps(rows,sort_keys=True))
+          PY
