@@ -88,15 +88,16 @@ def _equivalence(records, *, same=()):
     )
 
 
-def test_endpoint_connected_walls_form_one_component() -> None:
+def test_coordinate_equal_endpoints_without_positive_junction_stay_separate() -> None:
     records=(
         _record("a",(0,0),(10,0),raw_id="d1i0"),
         _record("b",(10,0),(10,10),raw_id="d2i0"),
         _record("remote",(100,0),(110,0),raw_id="d3i0"),
     )
+    # _record() deliberately mints independent ENDPOINT node ids. Coordinate
+    # equality alone is not wall-connectivity authority.
     groups=_component_sets(records,_equivalence(records))
-    assert ("a","b") in groups
-    assert ("remote",) in groups
+    assert groups == (("a",),("b",),("remote",))
 
 
 def test_positive_same_group_unions_offset_face_representations() -> None:
