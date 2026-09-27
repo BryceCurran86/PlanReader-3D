@@ -15,6 +15,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pb_auto_geometry_v1219 as auto
 import pb_memory_stability_v1220 as memory
+import pb_page_title_authority as title_authority
 
 VERSION = "1.2.25"
 SETTING_PREFIX = "page_registration_v1225_"
@@ -230,7 +231,7 @@ def sync_drawing_register(app: Any, workspace_id: int) -> int:
             meta = json.loads(str(meta_raw or "{}"))
         except Exception:
             meta = {}
-        title = str(meta.get("title") or page.get("page_label") or "")
+        title = title_authority.display_title(meta, int(page.get("page_no") or 0), str(page.get("page_label") or ""))
         detail = str(page.get("page_type") or "Other")
         if meta.get("title"):
             detail = f"{detail} · {meta['title']}"
@@ -268,6 +269,7 @@ def repair_document_registration(app: Any, document_id: int) -> Dict[str, Any]:
     rows = app.lquery("SELECT * FROM pages WHERE document_id=? ORDER BY page_no,id", (int(document_id),))
     by_no = {int(row.get("page_no") or 0): dict(row) for row in rows}
     updated: List[Dict[str, Any]] = []
+    pending: List[Tuple[Dict[str, Any], Dict[str, Any], Any, str]] = []
     pdf = None
     if path.is_file() and path.suffix.lower() == ".pdf" and getattr(app, "fitz", None) is not None:
         try:
@@ -279,9 +281,12 @@ def repair_document_registration(app: Any, document_id: int) -> Dict[str, Any]:
             if str(app.workspace_setting(int(doc["workspace_id"]), _manual_key(int(page["id"])), "")) == "1":
                 continue
             title = {"text": "", "drawing_no": "", "scale": "", "revision": "", "full_text": str(page.get("extracted_text") or "")}
+            analysis = title_authority.PageAnalysis(page_no=page_no, width=0.0, height=0.0, source="none")
             if pdf is not None and 1 <= page_no <= len(pdf):
                 try:
-                    title = title_block_evidence(pdf.load_page(page_no - 1))
+                    pdf_page = pdf.load_page(page_no - 1)
+                    title = title_block_evidence(pdf_page)
+                    analysis = title_authority.analyse_page(pdf_page, page_no)
                 except Exception:
                     pass
             full_text = str(title.get("full_text") or page.get("extracted_text") or "")
@@ -290,7 +295,6 @@ def repair_document_registration(app: Any, document_id: int) -> Dict[str, Any]:
             if not drawing_no:
                 current = str(page.get("page_label") or "")
                 drawing_no = current if current and not current.lower().startswith("page ") else f"Page {page_no}"
-            sheet_title = _sheet_title(title.get("text"), drawing_no, page_type)
             scale = str(page.get("scale_text") or "")
             if not scale and title.get("scale"):
                 scale = str(title["scale"])
@@ -299,11 +303,17 @@ def repair_document_registration(app: Any, document_id: int) -> Dict[str, Any]:
                 (drawing_no, page_type, scale, int(page["id"])),
             )
             meta = {
-                "version": VERSION, "title": sheet_title, "confidence": int(confidence), "evidence": evidence,
+                "version": VERSION, "confidence": int(confidence), "evidence": evidence,
                 "drawing_no": drawing_no, "revision": str(title.get("revision") or ""), "detected_scale": str(title.get("scale") or ""),
             }
+            pending.append((page, meta, analysis, page_type))
+        # The drawing title comes from the page-title authority, resolved across
+        # the document's sheets; it fails closed instead of guessing.
+        for (page, meta, _analysis, page_type), result in zip(pending, title_authority.resolve_document([item[2] for item in pending])):
+            meta.update(result.meta())
             app.set_workspace_setting(int(doc["workspace_id"]), _meta_key(int(page["id"])), json.dumps(meta, separators=(",", ":")))
-            updated.append({"page_id": int(page["id"]), "page_no": page_no, "label": drawing_no, "title": sheet_title, "type": page_type, "confidence": confidence})
+            updated.append({"page_id": int(page["id"]), "page_no": int(page.get("page_no") or 0), "label": meta["drawing_no"],
+                            "title": result.title, "type": page_type, "confidence": meta["confidence"]})
     finally:
         if pdf is not None:
             try:
@@ -340,6 +350,7 @@ def drawing_register_page(app: Any, workspace: Dict[str, Any]) -> None:
         app.st.info("Upload/process documents first."); return
     metadata = _meta_for_pages(app, workspace_id, pages)
     pages["drawing_title"] = [metadata.get(int(pid), {}).get("title", "") for pid in pages["id"]]
+    pages["sheet_number"] = [metadata.get(int(pid), {}).get("sheet_number", "") for pid in pages["id"]]
     pages["confidence"] = [metadata.get(int(pid), {}).get("confidence", "") for pid in pages["id"]]
     pages["manual"] = [str(app.workspace_setting(workspace_id, _manual_key(int(pid)), "")) == "1" for pid in pages["id"]]
     c1, c2, c3, c4 = app.st.columns(4)
@@ -361,12 +372,13 @@ def drawing_register_page(app: Any, workspace: Dict[str, Any]) -> None:
     register_page = int(app.st.number_input("Register page", min_value=1, max_value=page_count, value=1, step=1, key=f"reg_pg_v1225_{workspace_id}_{mode}"))
     start = (register_page - 1) * page_size
     visible = filtered.iloc[start:start + page_size].copy()
-    editable = visible[["id", "file_name", "page_no", "page_label", "drawing_title", "page_type", "scale_text", "confidence", "selected"]].copy()
+    editable = visible[["id", "file_name", "page_no", "page_label", "sheet_number", "drawing_title", "page_type", "scale_text", "confidence", "selected"]].copy()
     edited = app.st.data_editor(
         editable, hide_index=True, use_container_width=True, num_rows="fixed",
         column_config={
             "id": app.st.column_config.NumberColumn(disabled=True), "file_name": app.st.column_config.TextColumn(disabled=True),
             "page_no": app.st.column_config.NumberColumn(disabled=True), "confidence": app.st.column_config.NumberColumn(disabled=True),
+            "sheet_number": app.st.column_config.TextColumn("sheet no. (title block)", disabled=True),
             "page_type": app.st.column_config.SelectboxColumn(options=app.PAGE_TYPES), "selected": app.st.column_config.CheckboxColumn(),
         }, key=f"reg_editor_v1225_{workspace_id}_{mode}_{register_page}",
     )
@@ -380,7 +392,8 @@ def drawing_register_page(app: Any, workspace: Dict[str, Any]) -> None:
             if title_changed or identity_changed:
                 app.set_workspace_setting(workspace_id, _manual_key(pid), "1")
                 meta = metadata.get(pid, {})
-                meta.update({"title": str(row.get("drawing_title") or ""), "manual": True, "confidence": 100})
+                meta.update({"title": str(row.get("drawing_title") or ""), "manual": True, "confidence": 100,
+                             "title_source": "manual", "title_reason": "entered by the estimator"})
                 app.set_workspace_setting(workspace_id, _meta_key(pid), json.dumps(meta, separators=(",", ":")))
         sync_drawing_register(app, workspace_id)
         app.st.success("Register saved. Manual drawing number/type edits are protected from automatic reclassification."); app.st.rerun()
