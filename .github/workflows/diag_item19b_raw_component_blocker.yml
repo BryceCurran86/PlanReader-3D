@@ -1,0 +1,91 @@
+name: Item19B Raw Component Path Blocker
+
+on:
+  push:
+    branches: [diag/item19b-raw-component-path-blocker]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download
+        run: |
+          curl -fL --retry 3 --retry-delay 2 'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' -o /tmp/kstvet.pdf
+      - name: Raw endpoint component blocker
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json,fitz
+          from collections import defaultdict,deque
+          from pb_vector_geometry_v130 import extract_native_page
+          from pb_physical_wall_candidate_authority import (
+              _authenticated_viewports,_segment_fully_inside_bbox,
+              _segment_intersects_bbox,_segment_lies_on_bbox_edge,
+          )
+          from pb_wall_room_topology_stage_a import is_structural_candidate_segment
+
+          target={"d4763i0","d4772i0","d5179i1","d5179i3","d5214i0","d5215i0"}
+          doc=fitz.open("/tmp/kstvet.pdf"); page=doc.load_page(53)
+          segs=[s for s in (extract_native_page(page).get("segments") or ()) if is_structural_candidate_segment(s)[0]]
+          by_id={str(s["id"]):s for s in segs}
+          auth=_authenticated_viewports(page,page_number=54); assert auth is not None
+          _all,eligible=auth
+          floor=next(v for v in eligible if str(v.view_type)=="floor_plan")
+          bbox=floor.bounding_box; assert bbox is not None
+
+          def pt(x,y): return (round(float(x),6),round(float(y),6))
+          endpoints=defaultdict(list)
+          for s in segs:
+              endpoints[pt(s["x1"],s["y1"])].append(str(s["id"]))
+              endpoints[pt(s["x2"],s["y2"])].append(str(s["id"]))
+
+          q=deque([x for x in target if x in by_id])
+          seen=set(q)
+          while q:
+              sid=q.popleft(); s=by_id[sid]
+              for p in (pt(s["x1"],s["y1"]),pt(s["x2"],s["y2"])):
+                  for other in endpoints[p]:
+                      if other not in seen:
+                          seen.add(other); q.append(other)
+
+          component=[by_id[x] for x in sorted(seen)]
+          families={int(s.get("path_index",-1)) for s in component}
+          withheld=[]
+          for s in segs:
+              owners=[
+                  v.view_id for v in eligible
+                  if v.bounding_box is not None and _segment_fully_inside_bbox(s,v.bounding_box)
+              ]
+              target_owned=floor.view_id in owners
+              owned_unique=target_owned and len(owners)==1 and not _segment_lies_on_bbox_edge(s,bbox)
+              if owned_unique:
+                  continue
+              if _segment_intersects_bbox(s,bbox) and int(s.get("path_index",-1)) in families:
+                  withheld.append({
+                      "id":s["id"],"path":s.get("path_index"),"item":s.get("item_index"),
+                      "geometry":[s["x1"],s["y1"],s["x2"],s["y2"]],
+                      "owners":owners,"on_edge":_segment_lies_on_bbox_edge(s,bbox),
+                      "fill":s.get("fill"),"fill_present":s.get("fill_present"),
+                      "layer":s.get("layer"),
+                  })
+
+          print("RAW_COMPONENT "+json.dumps({
+              "target_present":sorted(set(target)&set(by_id)),
+              "component_count":len(component),
+              "component_ids":[s["id"] for s in component],
+              "families":sorted(families),
+              "withheld_same_family":withheld,
+          },sort_keys=True))
+          doc.close()
+          PY
