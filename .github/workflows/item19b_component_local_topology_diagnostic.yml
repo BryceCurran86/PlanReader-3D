@@ -1,0 +1,144 @@
+name: Item19B Component Local Topology Diagnostic
+
+on:
+  push:
+    branches: [gpt/item19b-component-local-topology-v1]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Trace local topology blockers
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_source_wall_topology_authority import (
+              _topology_representative_records,
+              _connected_record_components,
+              _bbox_union,
+              _record_bbox,
+              _record_touches_viewport_boundary,
+              _line_intersects_bbox,
+              _derive_complete_scope_records,
+          )
+          from dataclasses import replace
+          from pb_physical_wall_candidate_authority import PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-component-topology-diagnostic",
+              producer_version="1.0",
+          )
+          source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-component-topology-diagnostic",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          walls=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          ).authority()
+
+          out=[]
+          for scope in walls._scopes.values():
+              if str(scope.viewport_view_type or "") != "floor_plan":
+                  continue
+              selected,rejected=_topology_representative_records(scope)
+              same_ids=set(tuple(getattr(scope.equivalence,"same_wall_ids",()) or ()))
+              components=_connected_record_components(selected)
+              component_rows=[]
+              for component in components:
+                  bbox=_bbox_union(component)
+                  boundary=[r.wall_candidate_id for r in component if _record_touches_viewport_boundary(r,scope.viewport_bbox)]
+                  withheld_hits=[]
+                  if bbox is not None:
+                      for e in tuple(scope.withheld_structural_segments or ()):
+                          if _line_intersects_bbox(e.geometry,bbox):
+                              withheld_hits.append({
+                                  "observation_id":e.observation_id,
+                                  "raw_id":e.raw_id,
+                                  "geometry":list(e.geometry),
+                                  "layer":e.layer,
+                                  "reason":e.reason_code,
+                              })
+                  rejected_overlap=[]
+                  if bbox is not None:
+                      for r in rejected:
+                          if r.wall_candidate_id in same_ids:
+                              continue
+                          box=_record_bbox(r)
+                          if box is None:
+                              continue
+                          if not (
+                              box[2] < bbox[0] or box[0] > bbox[2]
+                              or box[3] < bbox[1] or box[1] > bbox[3]
+                          ):
+                              rejected_overlap.append({
+                                  "wall":r.wall_candidate_id,
+                                  "bbox":list(box),
+                              })
+                  local_result={}
+                  if bbox is not None and not boundary and not withheld_hits and not rejected_overlap:
+                      local_scope=replace(
+                          scope,
+                          scope_complete=True,
+                          records=component,
+                          equivalence=None,
+                          reason_codes=(PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,),
+                          scope_boundary_observation_ids=(),
+                          ambiguous_source_observation_ids=(),
+                          withheld_structural_segments=(),
+                      )
+                      raw=_derive_complete_scope_records(local_scope)
+                      local_result={
+                          key[-1]:{
+                              "ambiguous":e.is_ambiguous,
+                              "reason":e.ambiguity_reason,
+                              "faces":e.enclosed_space_count,
+                              "external":e.bounds_exterior,
+                          }
+                          for key,e in raw.items()
+                      }
+                  component_rows.append({
+                      "walls":[r.wall_candidate_id for r in component],
+                      "bbox":list(bbox) if bbox else None,
+                      "boundary_walls":boundary,
+                      "withheld_hits":withheld_hits,
+                      "rejected_overlap":rejected_overlap,
+                      "local_topology":local_result,
+                  })
+              out.append({
+                  "viewport":scope.viewport_id,
+                  "scope_complete":scope.scope_complete,
+                  "reasons":list(scope.reason_codes),
+                  "record_count":len(scope.records),
+                  "representative_count":len(selected),
+                  "rejected_count":len(rejected),
+                  "same_wall_count":len(same_ids),
+                  "withheld_count":len(scope.withheld_structural_segments or ()),
+                  "components":component_rows,
+              })
+          print("ITEM19B_COMPONENT_DIAGNOSTIC "+json.dumps(out,sort_keys=True))
+          PY
