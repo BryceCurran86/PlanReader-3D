@@ -167,3 +167,65 @@ def test_incomplete_viewport_without_withheld_geometry_provenance_stays_closed()
     records = _two_room_records()
     scope = _scope(records, withheld=())
     assert _derive_scope_records(scope) == {}
+
+
+def test_positive_same_group_survives_global_representative_abstention() -> None:
+    records = (
+        _record("wall-a", (50.0, 50.0), (250.0, 50.0)),
+        _record("wall-b", (50.0, 50.0), (250.0, 50.0)),
+        _record("ambiguous-singleton", (300.0, 50.0), (350.0, 50.0)),
+    )
+    equivalence = SimpleNamespace(
+        representative_wall_ids=(),
+        abstained_wall_ids=tuple(r.wall_candidate_id for r in records),
+        ambiguous_wall_ids=tuple(r.wall_candidate_id for r in records),
+        same_wall_ids=("wall-a", "wall-b"),
+        equivalence_groups=(("wall-a", "wall-b"),),
+    )
+    scope = _scope(
+        records,
+        withheld=(_withheld("far", (400.0, 0.0, 400.0, 500.0)),),
+        equivalence=equivalence,
+    )
+
+    from pb_source_wall_topology_authority import _topology_representative_records
+
+    selected, rejected = _topology_representative_records(scope)
+    assert [r.wall_candidate_id for r in selected] == ["wall-a"]
+    assert {r.wall_candidate_id for r in rejected} == {
+        "wall-b",
+        "ambiguous-singleton",
+    }
+
+
+def test_overlapping_positive_same_groups_fail_closed() -> None:
+    records = (
+        _record("wall-a", (50.0, 50.0), (250.0, 50.0)),
+        _record("wall-b", (50.0, 50.0), (250.0, 50.0)),
+        _record("wall-c", (50.0, 50.0), (250.0, 50.0)),
+    )
+    equivalence = SimpleNamespace(
+        representative_wall_ids=(),
+        abstained_wall_ids=(),
+        ambiguous_wall_ids=(),
+        same_wall_ids=("wall-a", "wall-b", "wall-c"),
+        equivalence_groups=(
+            ("wall-a", "wall-b"),
+            ("wall-b", "wall-c"),
+        ),
+    )
+    scope = _scope(
+        records,
+        withheld=(_withheld("far", (400.0, 0.0, 400.0, 500.0)),),
+        equivalence=equivalence,
+    )
+
+    from pb_source_wall_topology_authority import _topology_representative_records
+
+    selected, rejected = _topology_representative_records(scope)
+    assert selected == ()
+    assert {r.wall_candidate_id for r in rejected} == {
+        "wall-a",
+        "wall-b",
+        "wall-c",
+    }

@@ -399,22 +399,46 @@ def _record_touches_viewport_boundary(record, viewport_bbox) -> bool:
 
 
 def _topology_representative_records(scope):
+    """Select only producer-proven physical-wall representatives.
+
+    Global equivalence publication may abstain an entire SAME∪AMBIGUOUS
+    component.  That must not erase a smaller positive SAME proof that is still
+    useful for component-local topology.  Preserve those positive SAME groups,
+    but never promote an ambiguous singleton merely because no representative
+    was published globally.
+
+    Overlapping SAME groups are themselves inconsistent provenance and result
+    in no selection.
+    """
     records = tuple(scope.records or ())
     equivalence = getattr(scope, "equivalence", None)
     if equivalence is None:
         return records, ()
 
     representatives = set(tuple(equivalence.representative_wall_ids or ()))
-    if not representatives:
+
+    seen_group_members: set[str] = set()
+    positive_group_representatives: set[str] = set()
+    for group in tuple(equivalence.equivalence_groups or ()):
+        members = tuple(sorted({str(wall_id) for wall_id in group if str(wall_id)}))
+        if len(members) < 2:
+            continue
+        if seen_group_members & set(members):
+            return (), records
+        seen_group_members.update(members)
+        positive_group_representatives.add(members[0])
+
+    selected_ids = representatives | positive_group_representatives
+    if not selected_ids:
         return (), records
 
     selected = tuple(
         record for record in records
-        if record.wall_candidate_id in representatives
+        if record.wall_candidate_id in selected_ids
     )
     rejected = tuple(
         record for record in records
-        if record.wall_candidate_id not in representatives
+        if record.wall_candidate_id not in selected_ids
     )
     return selected, rejected
 
