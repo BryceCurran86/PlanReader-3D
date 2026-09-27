@@ -1,0 +1,56 @@
+name: Item19B Raw Neighborhood
+
+on:
+  push:
+    branches: [diag/item19b-raw-neighborhood]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download
+        run: |
+          curl -fL --retry 3 --retry-delay 2 'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' -o /tmp/kstvet.pdf
+      - name: Inspect structural paths near target
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json,fitz
+          from collections import defaultdict
+          from pb_vector_geometry_v130 import extract_native_page
+          from pb_wall_room_topology_stage_a import is_structural_candidate_segment
+          doc=fitz.open("/tmp/kstvet.pdf"); page=doc.load_page(53)
+          native=extract_native_page(page)
+          # Deliberately generous source neighborhood around the producer-owned
+          # internal wall provenance; diagnostic only.
+          box=(240.0,360.0,300.0,750.0)
+          groups=defaultdict(list)
+          def hit(s):
+              x1,y1,x2,y2=map(float,(s["x1"],s["y1"],s["x2"],s["y2"]))
+              xmin,ymin,xmax,ymax=box
+              return not (max(x1,x2)<xmin or min(x1,x2)>xmax or max(y1,y2)<ymin or min(y1,y2)>ymax)
+          for s in native.get("segments") or ():
+              structural,_=is_structural_candidate_segment(s)
+              layer=str(s.get("layer") or "")
+              if structural and hit(s) and ("Structural" in layer or "Bearing" in layer):
+                  groups[int(s.get("path_index",-1))].append({
+                    "id":s.get("id"),"item":s.get("item_index"),
+                    "geometry":[s.get("x1"),s.get("y1"),s.get("x2"),s.get("y2")],
+                    "layer":layer,"fill":s.get("fill"),"fill_present":s.get("fill_present"),
+                    "stroke":s.get("stroke"),"width":s.get("width"),"dashes":s.get("dashes"),
+                  })
+          rows=[{"path":k,"count":len(v),"items":v} for k,v in sorted(groups.items())]
+          print("TARGET_NEIGHBOR_PATHS "+json.dumps(rows,sort_keys=True))
+          doc.close()
+          PY
