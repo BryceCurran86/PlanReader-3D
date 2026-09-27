@@ -1,0 +1,68 @@
+name: Item19B d5179 Source Path
+
+on:
+  push:
+    branches: [diag/item19b-d5179-source-path]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install minimum PDF deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pymupdf
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Inspect native path d5179
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json,fitz
+          from pb_vector_geometry_v130 import extract_native_page
+          from pb_viewport_segmentation import segment_page_viewports
+
+          doc=fitz.open("/tmp/kstvet.pdf")
+          page=doc[53]
+          native=extract_native_page(page)
+          rows=[]
+          for seg in native.get("segments") or ():
+              if int(seg.get("path_index") or -1)==5179:
+                  rows.append({
+                      k:seg.get(k) for k in (
+                          "id","path_index","item_index","kind",
+                          "x1","y1","x2","y2","layer","fill","stroke",
+                          "width","dashes","fill_present","layer_present"
+                      )
+                  })
+          views=segment_page_viewports(page,page_number=54)
+          ownership=[]
+          for row in rows:
+              p1=(float(row["x1"]),float(row["y1"]))
+              p2=(float(row["x2"]),float(row["y2"]))
+              owners=[]
+              for v in views:
+                  if v.bounding_box is None: continue
+                  x0,y0,x1,y1=map(float,v.bounding_box)
+                  inside=lambda p: x0<=p[0]<=x1 and y0<=p[1]<=y1
+                  if inside(p1) and inside(p2):
+                      owners.append({
+                          "id":v.view_id,"label":v.label,"type":v.view_type,
+                          "status":v.status,"bbox":list(v.bounding_box)
+                      })
+              ownership.append({"id":row["id"],"owners":owners})
+          print("D5179_SEGMENTS "+json.dumps(rows,sort_keys=True))
+          print("D5179_OWNERSHIP "+json.dumps(ownership,sort_keys=True))
+          doc.close()
+          PY
