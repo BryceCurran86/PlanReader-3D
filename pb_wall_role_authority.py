@@ -61,6 +61,8 @@ WALL_ROLE_THICKNESS_ONLY_REJECTED = "wall_role_thickness_only_classification_rej
 WALL_ROLE_PERIMETER_ONLY_REJECTED = "wall_role_largest_perimeter_classification_rejected"
 WALL_ROLE_TOPOLOGY_WRONG_WALL = "wall_role_topology_wrong_wall"
 WALL_ROLE_CONFLICT = "wall_role_conflict"
+WALL_ROLE_MIXED_INTERVAL_PROFILE = "wall_role_mixed_interval_profile"
+WALL_ROLE_INTERVAL_INCIDENCE_UNRESOLVED = "wall_role_interval_incidence_unresolved"
 WALL_ROLE_SOURCE_EVIDENCE_UNAVAILABLE = "wall_role_source_evidence_unavailable"
 
 _PRODUCER_SEAL = object()
@@ -178,6 +180,26 @@ def _conflict(reason: str, *extras: str) -> WallRoleResult:
 
 
 @dataclass(frozen=True)
+class WallTopologyIntervalIncidence:
+    """One atomic physical-wall interval and its oriented bounded-face incidence.
+
+    The interval direction follows the producer-owned WallCandidate centerline.
+    LEFT/RIGHT are therefore geometric sides of that exact directed interval,
+    never caller labels. Reversing a centerline swaps left/right ids but must
+    preserve the scalar role.
+    """
+
+    evidence_id: str
+    start_pt: Tuple[float, float]
+    end_pt: Tuple[float, float]
+    left_space_ids: Tuple[str, ...]
+    right_space_ids: Tuple[str, ...]
+    role: WallRoleClassification
+    is_ambiguous: bool = False
+    ambiguity_reason: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class WallTopologyEvidence:
     """Producer-owned topology evidence linking a physical wall to room/envelope topology."""
 
@@ -194,6 +216,7 @@ class WallTopologyEvidence:
     enclosed_space_ids: Tuple[str, ...] = ()
     is_ambiguous: bool = False
     ambiguity_reason: Optional[str] = None
+    interval_incidence: Tuple[WallTopologyIntervalIncidence, ...] = ()
     schema_version: str = WALL_ROLE_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -649,7 +672,53 @@ class WallRoleProducer:
                     if topo.ambiguity_reason:
                         ambiguous_reasons.append(topo.ambiguity_reason)
                 else:
-                    if topo.bounds_exterior and topo.enclosed_space_count == 1:
+                    # Source-derived topology v2 may carry interval-specific
+                    # oriented incidence. Prefer that exact proof over legacy
+                    # whole-wall room cardinality. A scalar role is available
+                    # only when EVERY required interval resolves and agrees.
+                    if topo.interval_incidence:
+                        interval_roles = []
+                        interval_blocked = False
+                        for interval in topo.interval_incidence:
+                            if (
+                                interval.is_ambiguous
+                                or interval.role
+                                not in (
+                                    WallRoleClassification.EXTERNAL,
+                                    WallRoleClassification.INTERNAL,
+                                )
+                            ):
+                                interval_blocked = True
+                                if interval.ambiguity_reason:
+                                    ambiguous_reasons.append(
+                                        interval.ambiguity_reason
+                                    )
+                        if interval_blocked:
+                            ambiguous_reasons.append(
+                                WALL_ROLE_INTERVAL_INCIDENCE_UNRESOLVED
+                            )
+                        else:
+                            interval_roles = [
+                                interval.role
+                                for interval in topo.interval_incidence
+                            ]
+                            unique_roles = set(interval_roles)
+                            if len(unique_roles) == 1:
+                                resolved_role = interval_roles[0]
+                                propositions.append(
+                                    (resolved_role, topo.evidence_id)
+                                )
+                                corroborating_ids.append(topo.evidence_id)
+                            else:
+                                ambiguous_reasons.extend(
+                                    (
+                                        WALL_ROLE_AMBIGUOUS,
+                                        WALL_ROLE_MIXED_INTERVAL_PROFILE,
+                                    )
+                                )
+                    elif topo.bounds_exterior and topo.enclosed_space_count == 1:
+                        # Backward-compatible fallback for older producer-owned
+                        # topology records that predate interval incidence.
                         propositions.append((WallRoleClassification.EXTERNAL, topo.evidence_id))
                         corroborating_ids.append(topo.evidence_id)
                     elif not topo.bounds_exterior and topo.enclosed_space_count == 2:
@@ -802,5 +871,6 @@ __all__ = [
     "WallRoleSelector",
     "WallTopologyAuthority",
     "WallTopologyEvidence",
+    "WallTopologyIntervalIncidence",
     "WallTopologyProducer",
 ]
