@@ -83,8 +83,8 @@ def test_lamu_titled_plan_resolves_only_when_native_quad_owns_the_title() -> Non
     doc.close()
 
 
-def test_murera_ghazi_umma_have_no_resolved_floor_plan_without_title_evidence() -> None:
-    for pdf in (_require(_MURERA), _require(_GHAZI), _require(_UMMA)):
+def test_murera_umma_have_no_resolved_floor_plan_without_title_evidence() -> None:
+    for pdf in (_require(_MURERA), _require(_UMMA)):
         doc = fitz.open(str(pdf))
         floor_titles = []
         resolved = []
@@ -98,6 +98,33 @@ def test_murera_ghazi_umma_have_no_resolved_floor_plan_without_title_evidence() 
         assert floor_titles == []
         assert resolved == []
         doc.close()
+
+
+def test_ghazi_native_floor_layout_title_is_evidence_not_viewport_authority() -> None:
+    """Sheet 167 carries a native bold `PLAN : FLOOR LAYOUT` title under a
+    genuine gridded floor plan. The generic floor-layout title grammar admits
+    it as detection evidence, but its one-axis title partition stays
+    diagnostic DERIVED, so no authoritative floor-plan viewport resolves.
+    """
+    doc = fitz.open(str(_require(_GHAZI)))
+    floor_titles = []
+    resolved = []
+    for index in range(len(doc)):
+        page = doc[index]
+        floor_titles.extend(
+            (index + 1, anchor.text) for anchor in extract_view_title_anchors(page)
+            if anchor.view_type == DrawingViewType.FLOOR_PLAN.value
+        )
+        resolved.extend(authoritative_floor_plan_viewports(page, page_number=index + 1))
+    assert floor_titles == [(167, "PLAN : FLOOR LAYOUT")]
+    assert resolved == []
+    plans = _floor_plans(segment_page_viewports(doc[166], page_number=167))
+    assert len(plans) == 1
+    assert plans[0].label.upper() == "PLAN : FLOOR LAYOUT"
+    assert plans[0].status == ViewportSegmentationStatus.DERIVED.value
+    assert plans[0].boundary_source == ViewportBoundarySource.TITLE_PARTITION.value
+    assert not is_authoritative_derived_viewport(plans[0])
+    doc.close()
 
 
 def test_lamu_resolved_shadow_does_not_enter_live_predictions() -> None:
