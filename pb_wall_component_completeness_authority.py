@@ -33,6 +33,9 @@ from pb_physical_wall_candidate_authority import (
     PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY,
     PhysicalWallCandidateAuthority,
     PhysicalWallCandidateProducer,
+    _decision_scope_id,
+    _proven_filled_wall_strips,
+    _source_page_segments,
     _viewport_scope_boundary_reason,
 )
 from pb_physical_wall_identity import PhysicalEquivalenceClass
@@ -265,14 +268,55 @@ def _collinear_snap_continuation(left: Line, right: Line) -> bool:
     return 0.0 <= gap <= DEFAULT_GAP_SNAP_TOLERANCE_PT
 
 
-def _raw_path_family(raw_id: str) -> Optional[str]:
+def _raw_primitive_id(raw_id: str) -> str:
     value = str(raw_id or "")
     for prefix in ("visible:segment:", "segment:"):
         if value.startswith(prefix):
-            value = value[len(prefix):]
-            break
+            return value[len(prefix):]
+    return value
+
+
+def _raw_path_family(raw_id: str) -> Optional[str]:
+    value = _raw_primitive_id(raw_id)
     match = _RAW_PATH_RE.match(value)
     return None if match is None else match.group("path")
+
+
+def _proven_strip_closure_exemptions(
+    *,
+    component_records,
+    proven_wall_strips,
+) -> frozenset[str]:
+    """Return exact source closure primitives already proved subordinate.
+
+    A four-edge filled structural/bearing source path is a wall-strip proof.
+    When BOTH dominant face primitives of that strip are already owned by this
+    component, the strip's two short closure edges cannot be a missing wall
+    continuation.  They are producer-proven subordinate geometry of the same
+    wall assembly.
+
+    One face alone is insufficient.  Arbitrary siblings from the same native
+    path are never exempted.
+    """
+    component_raw_ids = {
+        _raw_primitive_id(str(raw_id))
+        for record in component_records
+        for raw_id in record.physical_identity.source_primitive_ids
+    }
+    exempt: set[str] = set()
+    for strip in tuple(proven_wall_strips or ()):
+        faces = {
+            _raw_primitive_id(str(raw_id))
+            for raw_id in tuple(strip.face_raw_ids or ())
+        }
+        if len(faces) != 2 or not faces <= component_raw_ids:
+            continue
+        boundaries = {
+            _raw_primitive_id(str(raw_id))
+            for raw_id in tuple(strip.boundary_raw_ids or ())
+        }
+        exempt.update(boundaries - faces)
+    return frozenset(exempt)
 
 
 def _component_sets(records, equivalence) -> tuple[tuple[str, ...], ...]:
@@ -349,7 +393,14 @@ def _withheld_affects_component(
     withheld_raw_id: str,
     component_records,
     known_same_separations: Sequence[float],
+    proven_subordinate_raw_ids: Sequence[str] = (),
 ) -> Optional[str]:
+    normalized_withheld_raw_id = _raw_primitive_id(withheld_raw_id)
+    if normalized_withheld_raw_id in {
+        _raw_primitive_id(raw_id) for raw_id in proven_subordinate_raw_ids
+    }:
+        return None
+
     component_lines = tuple(
         line
         for record in component_records
@@ -466,6 +517,28 @@ class WallComponentCompletenessProducer:
             records_by_id = {
                 str(record.wall_candidate_id): record for record in scope.records
             }
+
+            source_bytes = (
+                source_visibility_producer._producer._store.source_bytes_by_revision.get(
+                    scope.revision_id
+                )
+            )
+            if source_bytes is None:
+                continue
+            try:
+                page_segments, _page_observation_ids, _page_width, _page_height = (
+                    _source_page_segments(
+                        source_producer=source_visibility_producer,
+                        published=published,
+                        source_bytes=source_bytes,
+                        page_id=scope.page_id,
+                        decision_scope_id=_decision_scope_id(scope.page_id),
+                    )
+                )
+            except RuntimeError:
+                continue
+            proven_wall_strips = _proven_filled_wall_strips(page_segments)
+
             components = _component_sets(scope.records, scope.equivalence)
             same_separations = _positive_same_separations(
                 records_by_id,
@@ -538,12 +611,17 @@ class WallComponentCompletenessProducer:
                             break
 
                 if blocked_reason is None:
+                    subordinate_closures = _proven_strip_closure_exemptions(
+                        component_records=component_records,
+                        proven_wall_strips=proven_wall_strips,
+                    )
                     for _obs_id, raw_id, line in withheld:
                         blocked_reason = _withheld_affects_component(
                             withheld_line=line,
                             withheld_raw_id=raw_id,
                             component_records=component_records,
                             known_same_separations=same_separations,
+                            proven_subordinate_raw_ids=subordinate_closures,
                         )
                         if blocked_reason is not None:
                             break

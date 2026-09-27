@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from pb_geometry_takeoff_model import MeasurementAuthorityType
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateRecord
@@ -14,6 +16,7 @@ from pb_wall_component_completeness_authority import (
     WALL_COMPONENT_WITHHELD_SOURCE_PATH_RELATED,
     _component_sets,
     _positive_same_separations,
+    _proven_strip_closure_exemptions,
     _withheld_affects_component,
 )
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
@@ -184,3 +187,65 @@ def test_positive_same_separation_is_derived_from_upstream_equivalence_only() ->
     values=_positive_same_separations(by_id,eq)
     assert values == (5.0,)
     assert 40.0 not in values
+
+
+
+def test_proven_filled_strip_closure_is_not_a_missing_wall_continuation() -> None:
+    face_a=_record("face-a",(0,0),(20,0),raw_id="d100i1")
+    face_b=_record("face-b",(0,5),(20,5),raw_id="d100i3")
+    strip=SimpleNamespace(
+        face_raw_ids=("d100i1","d100i3"),
+        boundary_raw_ids=("d100i0","d100i1","d100i2","d100i3"),
+    )
+    exempt=_proven_strip_closure_exemptions(
+        component_records=(face_a,face_b),
+        proven_wall_strips=(strip,),
+    )
+    assert exempt == frozenset({"d100i0","d100i2"})
+    assert _withheld_affects_component(
+        withheld_line=(0,0,0,5),
+        withheld_raw_id="visible:segment:d100i0",
+        component_records=(face_a,face_b),
+        known_same_separations=(5.0,),
+        proven_subordinate_raw_ids=exempt,
+    ) is None
+
+
+def test_filled_strip_closure_not_exempt_when_only_one_face_is_owned() -> None:
+    face_a=_record("face-a",(0,0),(20,0),raw_id="d100i1")
+    strip=SimpleNamespace(
+        face_raw_ids=("d100i1","d100i3"),
+        boundary_raw_ids=("d100i0","d100i1","d100i2","d100i3"),
+    )
+    exempt=_proven_strip_closure_exemptions(
+        component_records=(face_a,),
+        proven_wall_strips=(strip,),
+    )
+    assert exempt == frozenset()
+    assert _withheld_affects_component(
+        withheld_line=(0,0,0,5),
+        withheld_raw_id="visible:segment:d100i0",
+        component_records=(face_a,),
+        known_same_separations=(),
+        proven_subordinate_raw_ids=exempt,
+    ) == WALL_COMPONENT_WITHHELD_SOURCE_PATH_RELATED
+
+
+def test_arbitrary_same_path_sibling_remains_blocking_even_with_strip_closures() -> None:
+    face_a=_record("face-a",(0,0),(20,0),raw_id="d100i1")
+    face_b=_record("face-b",(0,5),(20,5),raw_id="d100i3")
+    strip=SimpleNamespace(
+        face_raw_ids=("d100i1","d100i3"),
+        boundary_raw_ids=("d100i0","d100i1","d100i2","d100i3"),
+    )
+    exempt=_proven_strip_closure_exemptions(
+        component_records=(face_a,face_b),
+        proven_wall_strips=(strip,),
+    )
+    assert _withheld_affects_component(
+        withheld_line=(100,100,120,100),
+        withheld_raw_id="visible:segment:d100i7",
+        component_records=(face_a,face_b),
+        known_same_separations=(5.0,),
+        proven_subordinate_raw_ids=exempt,
+    ) == WALL_COMPONENT_WITHHELD_SOURCE_PATH_RELATED
