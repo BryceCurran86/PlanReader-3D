@@ -21,6 +21,31 @@ _SCOPE_PATTERNS = (
     re.compile(r"\bstage\s*[-:]?\s*([a-z0-9]+)\b", re.I),
 )
 
+_SCOPE_ROMAN_RE = re.compile(
+    r"^(?:M{0,3})(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})$",
+    re.I,
+)
+
+
+def _is_scope_designator(token: str) -> bool:
+    """Return True only for compact block/building/tower/stage identifiers.
+
+    Auto-detection must not turn prose such as "Building Regulations" into a
+    project scope group. Named groups can still be added explicitly in the UI.
+    """
+    value = str(token or "").strip()
+    if not value:
+        return False
+    if value.isdigit():
+        return len(value) <= 4
+    if len(value) == 1 and value.isalpha():
+        return True
+    if len(value) <= 8 and value.isalnum() and any(ch.isdigit() for ch in value) and any(ch.isalpha() for ch in value):
+        return True
+    if value.isalpha() and len(value) <= 8 and _SCOPE_ROMAN_RE.fullmatch(value):
+        return True
+    return False
+
 
 def normalise_group(raw: str) -> str:
     text = re.sub(r"\s+", " ", str(raw or "").strip())
@@ -37,6 +62,8 @@ def groups_from_text(value: Any) -> List[str]:
     for pattern in _SCOPE_PATTERNS:
         prefix = pattern.pattern.split("\\s")[0].replace("\\b", "").title()
         for match in pattern.finditer(text):
+            if not _is_scope_designator(match.group(1)):
+                continue
             # Recover human prefix from matched text rather than regex internals.
             matched = match.group(0)
             group = normalise_group(matched)
