@@ -26,6 +26,11 @@ from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_portable_raster_ocr_authority import MockOCRBackend
+from pb_raster_text_corroboration_authority import (
+    RasterTextCorroborationProducer,
+    RasterTextCorroborationSelector,
+)
 from pb_source_execution_callout_authority import _Word, _execution_clusters, _receipt_interval
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -85,6 +90,8 @@ class OpeningDetailWordEvidence:
     observation_id: str
     receipt_id: str
     trusted_text: str
+    authority_kind: str
+    authority_record_id: str
     sequence_start: int
     sequence_end: int
     geometry: tuple[float, float, float, float]
@@ -301,10 +308,21 @@ class OpeningDetailDefinitionAuthority:
 
 
 class OpeningDetailDefinitionProducer:
-    def __init__(self, source: SourceVisibilityProducer, *, _seal=None):
+    def __init__(
+        self,
+        source: SourceVisibilityProducer,
+        raster_producer: RasterTextCorroborationProducer,
+        *,
+        _seal=None,
+    ):
         if _seal is not _PRODUCER_SEAL:
             raise TypeError("use from_source_visibility_producer()")
+        if type(source) is not SourceVisibilityProducer:
+            raise TypeError("source must be an actual SourceVisibilityProducer")
+        if type(raster_producer) is not RasterTextCorroborationProducer:
+            raise TypeError("raster_producer must be producer-owned")
         self._source = source
+        self._raster = raster_producer
         self._results = {}
 
     @classmethod
@@ -316,13 +334,68 @@ class OpeningDetailDefinitionProducer:
     ):
         if type(source) is not SourceVisibilityProducer:
             raise TypeError("source must be an actual SourceVisibilityProducer")
-        producer = cls(source, _seal=_PRODUCER_SEAL)
+        producer = cls(
+            source,
+            RasterTextCorroborationProducer.from_source_visibility_producer(source),
+            _seal=_PRODUCER_SEAL,
+        )
+        producer._build(page_ids=page_ids)
+        return producer
+
+    @classmethod
+    def from_source_visibility_producer_for_tests(
+        cls,
+        source: SourceVisibilityProducer,
+        backend: MockOCRBackend,
+        *,
+        page_ids: Optional[Sequence[str]] = None,
+    ):
+        if type(source) is not SourceVisibilityProducer:
+            raise TypeError("source must be an actual SourceVisibilityProducer")
+        if type(backend) is not MockOCRBackend:
+            raise TypeError("backend must be exact MockOCRBackend")
+        producer = cls(
+            source,
+            RasterTextCorroborationProducer.from_source_visibility_producer_for_tests(
+                source,
+                backend,
+            ),
+            _seal=_PRODUCER_SEAL,
+        )
         producer._build(page_ids=page_ids)
         return producer
 
     def _trusted_word(self, published, word: _Word) -> Optional[OpeningDetailWordEvidence]:
-        result = self._source.text_integrity_authority().resolve_text(
-            ObservationSelector(
+        selector = ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=word.observation_id,
+        )
+        native = self._source.text_integrity_authority().resolve_text(selector)
+        if (
+            native.status is EvidenceResolutionStatus.CORROBORATED
+            and native.receipt is not None
+            and native.trusted_text
+            and _norm(native.trusted_text) == _norm(word.raw_text)
+        ):
+            return OpeningDetailWordEvidence(
+                observation_id=word.observation_id,
+                receipt_id=native.receipt.receipt_id,
+                trusted_text=str(native.trusted_text),
+                authority_kind="native_text_integrity",
+                authority_record_id=native.receipt.receipt_id,
+                sequence_start=word.sequence_start,
+                sequence_end=word.sequence_end,
+                geometry=word.geometry,
+            )
+
+        # Reuse the already-reviewed glyph-only corroboration authority.  It
+        # independently decides whether this observation is eligible for
+        # raster corroboration; ordinary callers cannot relax that gate.
+        raster = self._raster.publish(
+            RasterTextCorroborationSelector(
                 document_id=published.revision.document_id,
                 revision_id=published.revision.revision_id,
                 source_sha256=published.revision.source_sha256,
@@ -331,23 +404,22 @@ class OpeningDetailDefinitionProducer:
             )
         )
         if (
-            result.status is not EvidenceResolutionStatus.CORROBORATED
-            or result.receipt is None
-            or not result.trusted_text
+            raster.status is EvidenceResolutionStatus.CORROBORATED
+            and raster.record is not None
+            and raster.corroborated_text
+            and _norm(raster.corroborated_text) == _norm(word.raw_text)
         ):
-            return None
-        # The trusted proposition must equal the candidate source token after
-        # normalization; raw candidate text never self-certifies.
-        if _norm(result.trusted_text) != _norm(word.raw_text):
-            return None
-        return OpeningDetailWordEvidence(
-            observation_id=word.observation_id,
-            receipt_id=result.receipt.receipt_id,
-            trusted_text=str(result.trusted_text),
-            sequence_start=word.sequence_start,
-            sequence_end=word.sequence_end,
-            geometry=word.geometry,
-        )
+            return OpeningDetailWordEvidence(
+                observation_id=word.observation_id,
+                receipt_id=word.receipt_id,
+                trusted_text=str(raster.corroborated_text),
+                authority_kind="raster_text_corroboration",
+                authority_record_id=raster.record.record_id,
+                sequence_start=word.sequence_start,
+                sequence_end=word.sequence_end,
+                geometry=word.geometry,
+            )
+        return None
 
     def _build(self, *, page_ids: Optional[Sequence[str]]) -> None:
         selected = None if page_ids is None else {

@@ -4,6 +4,7 @@ from pb_source_execution_callout_authority import _Word
 from pb_opening_detail_definition_authority import (
     _candidate,
     _dimension_candidates,
+    _norm,
 )
 
 
@@ -154,3 +155,12 @@ def test_duplicate_identical_detail_definitions_are_semantically_equal_not_insta
         key:right[key]
         for key in ("family","subtype","material","width_mm","height_mm")
     }
+
+
+def test_text_claim_normalization_keeps_raster_corroboration_exact() -> None:
+    # Raster corroboration may normalize punctuation/case only; it may not
+    # reinterpret the native source token into a different dimension/family.
+    assert _norm("2,900mm") == _norm("2,900MM")
+    assert _norm("windows.") == _norm("WINDOWS")
+    assert _norm("2,900mm") != _norm("3,000mm")
+    assert _norm("windows") != _norm("doors")

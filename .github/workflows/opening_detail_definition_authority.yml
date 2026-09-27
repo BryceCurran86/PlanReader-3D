@@ -18,9 +18,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-ci-v1228.txt
+          # Shadow-only validation of the already-approved raster text
+          # corroboration backend. Do not add RapidOCR to production requirements.
+          pip install rapidocr
       - name: Focused tests
         run: |
-          PYTHONPATH=. pytest -q             tests/test_opening_detail_definition_authority_v1.py             tests/test_source_execution_callout_authority_v1.py             tests/test_opening_schedule_v171.py
+          PYTHONPATH=. pytest -q             tests/test_opening_detail_definition_authority_v1.py             tests/test_source_execution_callout_authority_v1.py             tests/test_raster_text_corroboration_authority_v1.py             tests/test_opening_schedule_v171.py
       - name: Download pinned KSTVET
         run: |
           curl -fL --retry 3 --retry-delay 2             'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf'             -o /tmp/kstvet.pdf
@@ -65,6 +68,15 @@ jobs:
                       "sequence":[rec.sequence_start,rec.sequence_end],
                       "bbox":list(rec.source_bbox),
                       "required":list(rec.required_observation_ids),
+                      "evidence":[
+                          {
+                              "observation":e.observation_id,
+                              "authority":e.authority_kind,
+                              "authority_record":e.authority_record_id,
+                              "text":e.trusted_text,
+                          }
+                          for e in rec.word_evidence
+                      ],
                   })
           print("OPENING_DETAIL_DEFINITIONS "+json.dumps(rows,sort_keys=True))
           identities={}
