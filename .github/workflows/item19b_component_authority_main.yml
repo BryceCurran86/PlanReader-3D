@@ -169,6 +169,88 @@ jobs:
           assert len({(b.physical_wall_decision_scope_id,b.physical_wall_id) for b in bindings})==1
 
           target=bindings[0]
+
+          # Diagnose the exact producer-owned withheld primitives that block
+          # this target component. This is diagnostic-only; production
+          # completeness rules remain unchanged.
+          from pb_source_observation_authority import ObservationSelector
+          from pb_wall_component_completeness_authority import (
+              _component_sets,
+              _component_withheld_context,
+              _observation_line,
+              _raw_path_family,
+              _withheld_affects_component,
+          )
+
+          target_scope=next(
+              scope for scope in walls._scopes.values()
+              if scope.decision_scope_id==target.physical_wall_decision_scope_id
+          )
+          component_members=next(
+              members
+              for members in _component_sets(
+                  target_scope.records,
+                  target_scope.equivalence,
+              )
+              if target.physical_wall_id in members
+          )
+          records_by_id={
+              r.wall_candidate_id:r for r in target_scope.records
+          }
+          target_component=tuple(
+              records_by_id[wall_id] for wall_id in component_members
+          )
+          target_context=_component_withheld_context(
+              component_records=target_component,
+              known_same_separations=(),
+              proven_subordinate_raw_ids=(),
+          )
+          visibility=source.authority()
+          blocker_rows=[]
+          withheld_ids=tuple(sorted(
+              set(target_scope.scope_boundary_observation_ids)
+              | set(target_scope.ambiguous_source_observation_ids)
+          ))
+          for observation_id in withheld_ids:
+              replay=visibility.resolve_visible(ObservationSelector(
+                  document_id=target_scope.document_id,
+                  revision_id=target_scope.revision_id,
+                  source_sha256=target_scope.source_sha256,
+                  snapshot_id=target_scope.snapshot_id,
+                  observation_id=observation_id,
+              ))
+              observation=replay.observation
+              if observation is None:
+                  continue
+              line=_observation_line(observation)
+              if line is None:
+                  continue
+              raw_id=str(getattr(observation,"source_primitive_ref","") or "")
+              reason=_withheld_affects_component(
+                  withheld_line=line,
+                  withheld_raw_id=raw_id,
+                  context=target_context,
+              )
+              if reason is not None:
+                  blocker_rows.append({
+                      "observation_id":observation_id,
+                      "raw_id":raw_id,
+                      "path_family":_raw_path_family(raw_id),
+                      "geometry":[round(float(v),3) for v in line],
+                      "reason":reason,
+                  })
+          print("ITEM19B_INTERNAL_TARGET_COMPONENT "+json.dumps({
+              "target_wall":target.physical_wall_id,
+              "member_wall_ids":list(component_members),
+              "member_source_primitive_ids":sorted({
+                  str(raw_id)
+                  for rec in target_component
+                  for raw_id in rec.physical_identity.source_primitive_ids
+              }),
+              "source_path_families":sorted(target_context.source_path_families),
+              "blockers":blocker_rows,
+          },sort_keys=True))
+
           role=roles.publish(WallRoleSelector(
               document_id=target.document_id,
               revision_id=target.revision_id,
