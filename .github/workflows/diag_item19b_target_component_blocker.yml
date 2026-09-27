@@ -1,0 +1,186 @@
+name: Item19B Target Component Blocker
+
+on:
+  push:
+    branches: [diag/item19b-target-component-blocker]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+          pip install rapidocr
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Diagnose exact internal target component
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateProducer,
+              _source_page_segments,
+              _decision_scope_id,
+              _proven_filled_wall_strips,
+          )
+          from pb_wall_component_completeness_authority import (
+              _component_sets,
+              _positive_same_separations,
+              _proven_strip_closure_exemptions,
+              _withheld_affects_component,
+              _observation_line,
+          )
+          from pb_wall_finish_callout_wall_authority import WallFinishCalloutWallProducer
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-target-component-blocker",
+              producer_version="1.0",
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-target-component-blocker",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+
+          walls=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          ).authority()
+          callout=WallFinishCalloutWallProducer.from_source_visibility_producer(
+              source,page_ids=("54",)
+          )
+          bindings=[
+              b
+              for result in callout.published_results()
+              for b in result.bindings
+              if b.source_execution_sequence_start==10070
+              and b.source_execution_sequence_end==10078
+              and b.trade_scope_id=="internal_plaster"
+          ]
+          assert len(bindings)==1, bindings
+          target=bindings[0]
+          print("TARGET "+json.dumps({
+              "scope":target.physical_wall_decision_scope_id,
+              "wall":target.physical_wall_id,
+              "group":list(target.equivalence_group_wall_ids),
+              "raw_owners":list(target.raw_owner_wall_ids),
+              "source_wall_primitives":list(target.source_wall_primitive_ids),
+          },sort_keys=True))
+
+          scope=next(
+              s for s in walls._scopes.values()
+              if s.decision_scope_id==target.physical_wall_decision_scope_id
+          )
+          records_by_id={r.wall_candidate_id:r for r in scope.records}
+          components=_component_sets(scope.records,scope.equivalence)
+          members=next(group for group in components if target.physical_wall_id in group)
+          component_records=tuple(records_by_id[x] for x in members)
+
+          source_bytes=source._producer._store.source_bytes_by_revision[scope.revision_id]
+          page_segments,_,_,_=_source_page_segments(
+              source_producer=source,
+              published=pub,
+              source_bytes=source_bytes,
+              page_id=scope.page_id,
+              decision_scope_id=_decision_scope_id(scope.page_id),
+          )
+          strips=_proven_filled_wall_strips(page_segments)
+          exemptions=_proven_strip_closure_exemptions(
+              component_records=component_records,
+              proven_wall_strips=strips,
+          )
+          same_sep=_positive_same_separations(records_by_id,scope.equivalence)
+
+          visibility=source.authority()
+          withheld_ids=tuple(sorted(
+              set(scope.scope_boundary_observation_ids)
+              | set(scope.ambiguous_source_observation_ids)
+          ))
+          blockers=[]
+          replay=[]
+          for obs_id in withheld_ids:
+              resolved=visibility.resolve_visible(ObservationSelector(
+                  document_id=scope.document_id,
+                  revision_id=scope.revision_id,
+                  source_sha256=scope.source_sha256,
+                  snapshot_id=scope.snapshot_id,
+                  observation_id=obs_id,
+              ))
+              obs=resolved.observation
+              if obs is None:
+                  replay.append({"observation":obs_id,"status":"missing"})
+                  continue
+              line=_observation_line(obs)
+              raw=str(getattr(obs,"source_primitive_ref","") or "")
+              reason=None
+              if line is not None:
+                  reason=_withheld_affects_component(
+                      withheld_line=line,
+                      withheld_raw_id=raw,
+                      component_records=component_records,
+                      known_same_separations=same_sep,
+                      proven_subordinate_raw_ids=exemptions,
+                  )
+              row={
+                  "observation":obs_id,
+                  "raw":raw,
+                  "geometry":list(line) if line is not None else None,
+                  "reason":reason,
+                  "exempt":raw.split("visible:segment:")[-1] in {
+                      str(x).split("visible:segment:")[-1] for x in exemptions
+                  },
+              }
+              replay.append(row)
+              if reason:
+                  blockers.append(row)
+
+          group_rows=[]
+          for group in tuple(scope.equivalence.equivalence_groups or ()):
+              if set(group) & set(members):
+                  group_rows.append(list(group))
+
+          component_sources={
+              r.wall_candidate_id:list(r.physical_identity.source_primitive_ids)
+              for r in component_records
+          }
+          relevant_strips=[]
+          comp_raw={raw for values in component_sources.values() for raw in values}
+          for strip in strips:
+              if comp_raw & set(strip.face_raw_ids):
+                  relevant_strips.append({
+                      "path_index":strip.path_index,
+                      "face_raw_ids":list(strip.face_raw_ids),
+                      "boundary_raw_ids":list(strip.boundary_raw_ids),
+                      "polygon":[list(p) for p in strip.polygon],
+                      "owns_both_faces":set(strip.face_raw_ids) <= comp_raw,
+                  })
+
+          print("TARGET_COMPONENT "+json.dumps({
+              "members":list(members),
+              "member_sources":component_sources,
+              "positive_groups":group_rows,
+              "same_separations":list(same_sep),
+              "strip_closure_exemptions":sorted(exemptions),
+              "relevant_strips":relevant_strips,
+              "blockers":blockers,
+          },sort_keys=True))
+          PY
