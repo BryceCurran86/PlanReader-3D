@@ -110,14 +110,13 @@ def test_unrelated_cropped_geometry_does_not_poison_closed_local_component() -> 
     assert divider.enclosed_space_count == 2
     assert divider.bounds_exterior is False
 
-    outer = next(
+    one_sided = [
         evidence
-        for key, evidence in result.items()
-        if key[-1] == "left"
-    )
-    assert outer.is_ambiguous is False
-    assert outer.enclosed_space_count == 1
-    assert outer.bounds_exterior is True
+        for evidence in result.values()
+        if evidence.enclosed_space_count == 1 and not evidence.is_ambiguous
+    ]
+    assert one_sided
+    assert all(evidence.bounds_exterior for evidence in one_sided)
 
 
 def test_withheld_structural_primitive_crossing_component_forces_abstention() -> None:

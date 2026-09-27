@@ -363,7 +363,10 @@ def _record_touches_viewport_boundary(record, viewport_bbox) -> bool:
     if viewport_bbox is None:
         return True
     xmin, ymin, xmax, ymax = (float(value) for value in viewport_bbox)
-    for x, y in tuple(getattr(record.wall_candidate, "centerline_pts", ()) or ()):
+    points = tuple(getattr(record.wall_candidate, "centerline_pts", ()) or ())
+    if len(points) < 2:
+        return True
+    for x, y in points:
         if (
             abs(float(x) - xmin) <= 1e-6
             or abs(float(x) - xmax) <= 1e-6
@@ -371,6 +374,27 @@ def _record_touches_viewport_boundary(record, viewport_bbox) -> bool:
             or abs(float(y) - ymax) <= 1e-6
         ):
             return True
+    # A multi-segment candidate can cross a viewport edge between stored
+    # vertices. Check every exact segment, not only its endpoints.
+    for first, second in zip(points, points[1:]):
+        if _line_intersects_bbox(
+            (
+                float(first[0]),
+                float(first[1]),
+                float(second[0]),
+                float(second[1]),
+            ),
+            (xmin, ymin, xmax, ymax),
+        ):
+            # Intersection with the bbox is normal for interior geometry.
+            # Only reject when the segment also reaches outside the viewport.
+            if not (
+                xmin <= float(first[0]) <= xmax
+                and ymin <= float(first[1]) <= ymax
+                and xmin <= float(second[0]) <= xmax
+                and ymin <= float(second[1]) <= ymax
+            ):
+                return True
     return False
 
 
