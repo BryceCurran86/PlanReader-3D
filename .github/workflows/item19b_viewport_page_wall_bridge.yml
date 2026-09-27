@@ -1,0 +1,129 @@
+name: Item19B Viewport Page Wall Bridge
+
+on:
+  push:
+    branches: [gpt/item19b-viewport-page-wall-bridge-v1]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+          pip install rapidocr
+      - name: Focused bridge tests
+        run: |
+          PYTHONPATH=. pytest -q             tests/test_wall_scope_identity_bridge_authority.py             tests/test_wall_finish_callout_wall_authority_v1.py             tests/test_physical_wall_candidate_authority_scope_v1.py
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2             'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf'             -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Full-source exact wall identity bridge
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json,time
+          from pathlib import Path
+
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_wall_finish_callout_wall_authority import WallFinishCalloutWallProducer
+          from pb_wall_scope_identity_bridge_authority import (
+              WallScopeIdentityBridgeProducer,
+          )
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-viewport-page-wall-bridge-real",
+              producer_version="1.0",
+          )
+          t0=time.perf_counter()
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-viewport-page-bridge",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+          )
+          t1=time.perf_counter()
+          callout=WallFinishCalloutWallProducer.from_source_visibility_producer(
+              source,page_ids=("54",)
+          )
+          t2=time.perf_counter()
+          page_walls=PhysicalWallCandidateProducer.from_source_visibility_producer(
+              source,page_ids=("54",)
+          ).authority()
+          t3=time.perf_counter()
+          bridge=WallScopeIdentityBridgeProducer.from_authorities(
+              callout_wall_producer=callout,
+              page_wall_authority=page_walls,
+          )
+          t4=time.perf_counter()
+
+          rows=[]
+          for result in bridge.published_results():
+              rec=result.record
+              rows.append({
+                  "status":result.status.value,
+                  "reasons":list(result.reason_codes),
+                  "binding":rec.source_binding_id if rec else None,
+                  "source_viewport":rec.source_viewport_id if rec else None,
+                  "source_wall":rec.source_physical_wall_id if rec else None,
+                  "page_scope":rec.target_page_scope_id if rec else None,
+                  "page_wall":rec.target_physical_wall_id if rec else None,
+                  "page_group":list(rec.target_equivalence_group_wall_ids) if rec else [],
+                  "raw_page_owners":list(rec.raw_target_owner_wall_ids) if rec else [],
+                  "source_primitives":list(rec.source_wall_primitive_ids) if rec else [],
+              })
+          print("ITEM19B_VIEWPORT_PAGE_BRIDGES "+json.dumps(rows,sort_keys=True))
+
+          internal_bindings=[
+              b
+              for result in callout.published_results()
+              for b in result.bindings
+              if b.source_execution_sequence_start==10070
+              and b.source_execution_sequence_end==10078
+              and b.trade_scope_id in {"internal_plaster","internal_paint"}
+          ]
+          assert {b.trade_scope_id for b in internal_bindings} == {
+              "internal_plaster","internal_paint"
+          }, internal_bindings
+          by_binding={
+              result.record.source_binding_id: result
+              for result in bridge.published_results()
+              if result.record is not None
+          }
+          target_results=[by_binding.get(b.binding_id) for b in internal_bindings]
+          assert all(result is not None for result in target_results), target_results
+          assert all(
+              result.status is EvidenceResolutionStatus.CORROBORATED
+              for result in target_results
+          ), target_results
+          page_targets={
+              (
+                  result.record.target_page_scope_id,
+                  result.record.target_physical_wall_id,
+              )
+              for result in target_results
+          }
+          assert len(page_targets)==1, page_targets
+          print("ITEM19B_INTERNAL_PAGE_WALL "+json.dumps({
+              "target":list(next(iter(page_targets))),
+              "source_primitives":list(target_results[0].record.source_wall_primitive_ids),
+              "page_group":list(target_results[0].record.target_equivalence_group_wall_ids),
+          },sort_keys=True))
+          print("ITEM19B_VIEWPORT_PAGE_BRIDGE_TIMING "+json.dumps({
+              "full_ingest_sec":round(t1-t0,3),
+              "callout_wall_sec":round(t2-t1,3),
+              "page_wall_sec":round(t3-t2,3),
+              "bridge_sec":round(t4-t3,3),
+          },sort_keys=True))
+          PY
