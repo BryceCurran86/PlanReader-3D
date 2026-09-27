@@ -1,0 +1,64 @@
+name: Item19B Target Native Path Probe
+
+on:
+  push:
+    branches: [gpt/item19b-component-authority-main]
+
+jobs:
+  native-paths:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install PyMuPDF
+        run: pip install PyMuPDF
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Print target drawing paths
+        run: |
+          python - <<'PY'
+          import json, fitz
+          TARGET={4763,4772,5179,5214,5215}
+          doc=fitz.open("/tmp/kstvet.pdf")
+          page=doc[53]
+          drawings=page.get_drawings()
+          rows=[]
+          for di in sorted(TARGET):
+              d=drawings[di]
+              item_rows=[]
+              for ii,item in enumerate(d.get("items",())):
+                  kind=item[0] if item else None
+                  vals=[]
+                  for value in item[1:]:
+                      if hasattr(value,"x") and hasattr(value,"y"):
+                          vals.append([round(float(value.x),3),round(float(value.y),3)])
+                      elif isinstance(value,(int,float)):
+                          vals.append(round(float(value),3))
+                      else:
+                          vals.append(str(value))
+                  item_rows.append({
+                      "raw_id":f"d{di}i{ii}",
+                      "kind":kind,
+                      "values":vals,
+                  })
+              rect=d["rect"]
+              rows.append({
+                  "drawing_index":di,
+                  "rect":[round(float(rect.x0),3),round(float(rect.y0),3),round(float(rect.x1),3),round(float(rect.y1),3)],
+                  "layer":d.get("layer"),
+                  "type":d.get("type"),
+                  "fill":d.get("fill"),
+                  "color":d.get("color"),
+                  "width":d.get("width"),
+                  "closePath":d.get("closePath"),
+                  "items":item_rows,
+              })
+          print("ITEM19B_NATIVE_PATHS "+json.dumps(rows,sort_keys=True))
+          PY
