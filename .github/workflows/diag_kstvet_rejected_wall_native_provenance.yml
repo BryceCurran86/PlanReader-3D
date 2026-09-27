@@ -1,0 +1,59 @@
+name: KSTVET Rejected Wall Native Provenance
+
+on:
+  push:
+    branches: [diag/kstvet-rejected-wall-native-provenance]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install minimal
+        run: pip install PyMuPDF==1.28.0
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Print rejected primitive metadata
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, fitz
+          from pb_vector_geometry_v130 import extract_native_page
+
+          wanted=set(["d3909i3","d4771i0","d4773i0","d4777i0","d4781i0","d4785i0","d4787i0","d4789i0","d4793i0","d4797i0","d47i1","d47i2","d47i4","d47i6","d47i9","d4801i0","d4805i0","d4809i0","d4812i0","d4850i0","d4854i0","d4858i0","d4859i0","d4863i0","d4923i0","d4931i0","d4939i0","d4947i0","d4955i0","d4963i0","d4980i0","d4981i0","d4982i0","d4999i0","d5042i3","d5043i1","d5055i0","d5059i0","d5072i0","d5085i0","d5135i0","d5135i2","d5136i0","d5137i0","d5137i2","d5138i0","d5147i0","d5148i0","d5149i0","d5150i0","d5217i0","d5217i2","d5223i1","d5223i3","d5224i0","d5232i1","d5246i0","d5248i0","d5351i1","d5366i0","d5376i0","d5482i0","d5482i2","d5484i0","d5486i0","d5488i0","d5488i2","d5489i0","d5492i0","d5494i1","d5496i0","d5499i0","d5501i0","d5505i3","d5507i0","d5510i1","d5512i0","d5515i0","d5547i0","d5549i0","d5553i0","d5553i1","d5554i0","d5558i0","d5573i1","d5575i0","d5576i1","d5578i0","d5587i3","d5588i0","d5591i0","d5594i0","d5596i3","d5597i0","d5601i0","d5603i0","d5606i1","d5606i3","d5607i0","d5609i0","d5611i0","d5613i0","d8163i0","d8164i0","d9137i0","d9604i0","d9628i0","d9630i0","d9636i0","d9661i0"])
+          doc=fitz.open("/tmp/kstvet.pdf")
+          native=extract_native_page(doc[53])
+          rows=[]
+          for seg in native.get("segments") or ():
+              rid=str(seg.get("id") or "")
+              if rid not in wanted:
+                  continue
+              rows.append({
+                  "id":rid,
+                  "layer":seg.get("layer"),
+                  "geometry":[seg.get("x1"),seg.get("y1"),seg.get("x2"),seg.get("y2")],
+                  "width":seg.get("width"),
+                  "dashes":seg.get("dashes"),
+                  "stroke":seg.get("stroke"),
+                  "fill":seg.get("fill"),
+                  "path_index":seg.get("path_index"),
+                  "item_index":seg.get("item_index"),
+                  "closed":seg.get("closed"),
+                  "source_kind":seg.get("source_kind"),
+              })
+          print("REJECTED_NATIVE_METADATA "+json.dumps(sorted(rows,key=lambda r:r["id"]),sort_keys=True))
+          print("REJECTED_NATIVE_FOUND",len(rows))
+          print("REJECTED_NATIVE_MISSING",json.dumps(sorted(wanted-{r["id"] for r in rows})))
+          from collections import Counter
+          print("REJECTED_NATIVE_LAYERS "+json.dumps(Counter(str(r["layer"]) for r in rows),sort_keys=True))
+          print("REJECTED_NATIVE_PATHS "+json.dumps(Counter(str(r["path_index"]) for r in rows),sort_keys=True))
+          PY
