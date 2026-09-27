@@ -44,4 +44,26 @@ jobs:
           ]
           print("SCHEDULE_INTERESTING_ROWS "+json.dumps(interesting,sort_keys=True))
           print("SCHEDULE_ENTRY_COUNT",len(entries))
+
+          detail_rows=[
+              {"text":row.get("text",""),"bbox":list(row.get("bbox",(0,0,0,0)))}
+              for row in rows
+              if 180.0 <= float(row.get("bbox",(0,0,0,0))[1]) <= 390.0
+          ]
+          print("DETAIL_REGION_ROWS "+json.dumps(detail_rows,sort_keys=True))
+
+          detail_words=[]
+          for word in words:
+              if len(word) < 5:
+                  continue
+              x0,y0,x1,y1=map(float,word[:4])
+              if 180.0 <= y0 <= 390.0:
+                  detail_words.append({
+                      "text":str(word[4]),
+                      "bbox":[x0,y0,x1,y1],
+                      "block":int(word[5]) if len(word)>5 else None,
+                      "line":int(word[6]) if len(word)>6 else None,
+                      "word":int(word[7]) if len(word)>7 else None,
+                  })
+          print("DETAIL_REGION_WORDS "+json.dumps(detail_words,sort_keys=True))
           PY
