@@ -419,10 +419,17 @@ def _connected_record_components(records):
             parent[max(a, b)] = min(a, b)
 
     ids = tuple(sorted(parent))
-    for index, left in enumerate(ids):
-        for right in ids[index + 1:]:
-            if endpoints[left] & endpoints[right]:
-                union(left, right)
+    endpoint_owners = defaultdict(list)
+    for wall_id in ids:
+        for endpoint in endpoints[wall_id]:
+            endpoint_owners[endpoint].append(wall_id)
+    for wall_ids in endpoint_owners.values():
+        if len(wall_ids) < 2:
+            continue
+        anchor = min(wall_ids)
+        for wall_id in wall_ids:
+            if wall_id != anchor:
+                union(anchor, wall_id)
 
     grouped = defaultdict(list)
     by_id = {record.wall_candidate_id: record for record in records}
