@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Iterable
 
 from pb_accuracy_v13_engines_v145 import extract_planar_faces
@@ -79,6 +80,19 @@ def _canonical_polygon(points: Iterable[Iterable[float]]) -> tuple[Point, ...]:
 
 
 def _wall_edges(record) -> tuple[Edge, ...]:
+    grouped_members = tuple(
+        getattr(record, "_topology_member_records", ()) or ()
+    )
+    if grouped_members:
+        result = []
+        seen = set()
+        for member in grouped_members:
+            for edge in _wall_edges(member):
+                if edge not in seen:
+                    seen.add(edge)
+                    result.append(edge)
+        return tuple(result)
+
     points = tuple(getattr(record.wall_candidate, "centerline_pts", ()) or ())
     if len(points) < 2:
         return ()
@@ -339,11 +353,11 @@ def _line_intersects_bbox(
 
 
 def _record_bbox(record) -> tuple[float, float, float, float] | None:
-    points = tuple(getattr(record.wall_candidate, "centerline_pts", ()) or ())
-    if len(points) < 2:
+    edges = _wall_edges(record)
+    if not edges:
         return None
-    xs = [float(point[0]) for point in points]
-    ys = [float(point[1]) for point in points]
+    xs = [float(point[0]) for edge in edges for point in edge]
+    ys = [float(point[1]) for edge in edges for point in edge]
     return (min(xs), min(ys), max(xs), max(ys))
 
 
@@ -363,95 +377,122 @@ def _record_touches_viewport_boundary(record, viewport_bbox) -> bool:
     if viewport_bbox is None:
         return True
     xmin, ymin, xmax, ymax = (float(value) for value in viewport_bbox)
-    points = tuple(getattr(record.wall_candidate, "centerline_pts", ()) or ())
-    if len(points) < 2:
+    edges = _wall_edges(record)
+    if not edges:
         return True
-    for x, y in points:
-        if (
-            abs(float(x) - xmin) <= 1e-6
-            or abs(float(x) - xmax) <= 1e-6
-            or abs(float(y) - ymin) <= 1e-6
-            or abs(float(y) - ymax) <= 1e-6
-        ):
-            return True
-    # A multi-segment candidate can cross a viewport edge between stored
-    # vertices. Check every exact segment, not only its endpoints.
-    for first, second in zip(points, points[1:]):
-        if _line_intersects_bbox(
-            (
-                float(first[0]),
-                float(first[1]),
-                float(second[0]),
-                float(second[1]),
-            ),
-            (xmin, ymin, xmax, ymax),
-        ):
-            # Intersection with the bbox is normal for interior geometry.
-            # Only reject when the segment also reaches outside the viewport.
-            if not (
-                xmin <= float(first[0]) <= xmax
-                and ymin <= float(first[1]) <= ymax
-                and xmin <= float(second[0]) <= xmax
-                and ymin <= float(second[1]) <= ymax
+    for first, second in edges:
+        for x, y in (first, second):
+            if (
+                abs(float(x) - xmin) <= 1e-6
+                or abs(float(x) - xmax) <= 1e-6
+                or abs(float(y) - ymin) <= 1e-6
+                or abs(float(y) - ymax) <= 1e-6
             ):
                 return True
+        if not (
+            xmin <= float(first[0]) <= xmax
+            and ymin <= float(first[1]) <= ymax
+            and xmin <= float(second[0]) <= xmax
+            and ymin <= float(second[1]) <= ymax
+        ):
+            return True
     return False
 
 
-def _topology_representative_records(scope):
-    """Select only producer-proven physical-wall representatives.
 
-    Global equivalence publication may abstain an entire SAME∪AMBIGUOUS
-    component.  That must not erase a smaller positive SAME proof that is still
-    useful for component-local topology.  Preserve those positive SAME groups,
-    but never promote an ambiguous singleton merely because no representative
-    was published globally.
+def _topology_physical_records(scope):
+    """Collapse only producer-proven SAME groups to one topology owner.
 
-    Overlapping SAME groups are themselves inconsistent provenance and result
-    in no selection.
+    The physical wall keeps one canonical wall id, but its topology geometry is
+    the union of every source-backed member record in the positive SAME group.
+    This prevents equivalent faces / split fragments from double-counting while
+    preserving all source edges needed to close the wall network.
+
+    Any wall not covered by a positive SAME group is eligible only when the
+    equivalence authority itself published it as a representative. Ambiguous
+    non-group candidates remain rejected and can still block overlapping local
+    topology.
     """
     records = tuple(scope.records or ())
     equivalence = getattr(scope, "equivalence", None)
     if equivalence is None:
         return records, ()
 
+    by_id = {record.wall_candidate_id: record for record in records}
     representatives = set(tuple(equivalence.representative_wall_ids or ()))
 
-    seen_group_members: set[str] = set()
-    positive_group_representatives: set[str] = set()
-    for group in tuple(equivalence.equivalence_groups or ()):
-        members = tuple(sorted({str(wall_id) for wall_id in group if str(wall_id)}))
+    member_to_group: dict[str, tuple[str, ...]] = {}
+    physical_records = []
+    consumed_members: set[str] = set()
+
+    for raw_group in tuple(equivalence.equivalence_groups or ()):
+        members = tuple(
+            sorted({str(wall_id) for wall_id in raw_group if str(wall_id)})
+        )
         if len(members) < 2:
             continue
-        if seen_group_members & set(members):
+        if any(member not in by_id for member in members):
             return (), records
-        seen_group_members.update(members)
-        positive_group_representatives.add(members[0])
+        if any(member in member_to_group for member in members):
+            # Overlapping positive groups are contradictory identity evidence.
+            return (), records
+        for member in members:
+            member_to_group[member] = members
 
-    selected_ids = representatives | positive_group_representatives
-    if not selected_ids:
+        published_reps = tuple(sorted(set(members) & representatives))
+        if len(published_reps) > 1:
+            return (), records
+        owner_id = published_reps[0] if published_reps else members[0]
+        owner_record = by_id[owner_id]
+        member_records = tuple(by_id[member] for member in members)
+        physical_records.append(
+            SimpleNamespace(
+                wall_candidate_id=owner_id,
+                wall_candidate=owner_record.wall_candidate,
+                physical_identity=owner_record.physical_identity,
+                _topology_member_records=member_records,
+                _topology_member_ids=members,
+            )
+        )
+        consumed_members.update(members)
+
+    for wall_id in sorted(representatives):
+        if wall_id in consumed_members:
+            continue
+        record = by_id.get(wall_id)
+        if record is None:
+            return (), records
+        physical_records.append(
+            SimpleNamespace(
+                wall_candidate_id=wall_id,
+                wall_candidate=record.wall_candidate,
+                physical_identity=record.physical_identity,
+                _topology_member_records=(record,),
+                _topology_member_ids=(wall_id,),
+            )
+        )
+        consumed_members.add(wall_id)
+
+    if not physical_records:
         return (), records
 
-    selected = tuple(
-        record for record in records
-        if record.wall_candidate_id in selected_ids
-    )
     rejected = tuple(
         record for record in records
-        if record.wall_candidate_id not in selected_ids
+        if record.wall_candidate_id not in consumed_members
     )
-    return selected, rejected
+    return (
+        tuple(sorted(physical_records, key=lambda record: record.wall_candidate_id)),
+        rejected,
+    )
 
 
 def _connected_record_components(records):
     records = tuple(records)
     endpoints = {}
     for record in records:
-        points = tuple(getattr(record.wall_candidate, "centerline_pts", ()) or ())
         endpoints[record.wall_candidate_id] = {
-            _point(points[0]),
-            _point(points[-1]),
-        } if len(points) >= 2 else set()
+            point for edge in _wall_edges(record) for point in edge
+        }
 
     parent = {record.wall_candidate_id: record.wall_candidate_id for record in records}
 
@@ -508,7 +549,7 @@ def _derive_incomplete_viewport_component_records(scope):
     if set(tuple(scope.reason_codes or ())) - allowed_reasons:
         return {}
 
-    selected, rejected = _topology_representative_records(scope)
+    selected, rejected = _topology_physical_records(scope)
     if not selected:
         return {}
 
