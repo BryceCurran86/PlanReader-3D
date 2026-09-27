@@ -1,0 +1,116 @@
+name: Item19B #941 Page Owner Groups
+
+on:
+  push:
+    branches: [diag/item19b-941-page-owner-groups]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2             'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf'             -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Trace exact page wall owner groups
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json,time
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateProducer, PhysicalWallCandidateSelector
+          )
+          from pb_wall_scope_identity_bridge_authority import (
+              _resolve_exact_target_group, _group_for_owner
+          )
+
+          TARGET=("d4763i0","d4772i0","d5179i1","d5179i3","d5214i0","d5215i0")
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(producer_method="diag-941-page-owner-groups",producer_version="1")
+          t0=time.perf_counter()
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-diag-941-page-owner-groups",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+          )
+          t1=time.perf_counter()
+          walls=PhysicalWallCandidateProducer.from_source_visibility_producer(
+              source,page_ids=("54",)
+          ).authority()
+          t2=time.perf_counter()
+          scope=walls.resolve_scope(PhysicalWallCandidateSelector(
+              document_id=pub.revision.document_id,
+              revision_id=pub.revision.revision_id,
+              source_sha256=pub.revision.source_sha256,
+              snapshot_id=pub.snapshot.snapshot_id,
+              page_id="54",
+              decision_scope_id="wall-source:page-54",
+          ))
+          byraw={raw:[] for raw in TARGET}
+          byid={r.wall_candidate_id:r for r in scope.records}
+          for rec in scope.records:
+              ids=set(rec.physical_identity.source_primitive_ids)
+              for raw in TARGET:
+                  if raw in ids:
+                      byraw[raw].append(rec.wall_candidate_id)
+          owners=sorted({w for vals in byraw.values() for w in vals})
+          rows=[]
+          for wall_id in owners:
+              rec=byid[wall_id]
+              group=_group_for_owner(scope.equivalence,wall_id)
+              rows.append({
+                  "wall":wall_id,
+                  "group":list(group),
+                  "source_primitives":list(rec.physical_identity.source_primitive_ids),
+                  "candidate_identity":rec.physical_identity.candidate_identity_id,
+                  "centerline":[list(p) for p in rec.wall_candidate.centerline_pts],
+                  "representation":rec.wall_candidate.representation,
+                  "face_a":list(rec.wall_candidate.face_a_segment_ids),
+                  "face_b":list(rec.wall_candidate.face_b_segment_ids or ()),
+                  "end_nodes":list(rec.wall_candidate.end_node_ids),
+                  "junctions":[j.value for j in rec.wall_candidate.junction_types],
+                  "blocking":list(
+                      (scope.equivalence.blocking_reasons_by_wall_id or {}).get(wall_id,())
+                  ) if scope.equivalence else [],
+              })
+          pair_rows=[]
+          owner_set=set(owners)
+          if scope.equivalence:
+              pair_rows=[
+                  list(row)
+                  for row in scope.equivalence.pair_classifications
+                  if row[0] in owner_set and row[1] in owner_set
+              ]
+          resolution=_resolve_exact_target_group(
+              page_scope=scope,source_primitive_ids=TARGET
+          )
+          print("PAGE_OWNER_GROUPS "+json.dumps({
+              "scope_status":scope.status.value,
+              "scope_complete":scope.scope_complete,
+              "scope_reasons":list(scope.reason_codes),
+              "raw_owners":byraw,
+              "owners":rows,
+              "owner_pairs":pair_rows,
+              "resolution":(
+                  [list(resolution[0]),list(resolution[1]),list(resolution[2])]
+                  if resolution is not None else None
+              ),
+              "timing":{
+                  "full_ingest":round(t1-t0,3),
+                  "page_walls":round(t2-t1,3),
+              },
+          },sort_keys=True))
+          PY
