@@ -17,6 +17,7 @@ from pb_wall_component_completeness_authority import (
     _component_sets,
     _positive_same_separations,
     _proven_strip_closure_exemptions,
+    _component_withheld_context,
     _withheld_affects_component,
 )
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
@@ -249,3 +250,36 @@ def test_arbitrary_same_path_sibling_remains_blocking_even_with_strip_closures()
         known_same_separations=(5.0,),
         proven_subordinate_raw_ids=exempt,
     ) == WALL_COMPONENT_WITHHELD_SOURCE_PATH_RELATED
+
+
+def test_precomputed_withheld_context_preserves_decisions() -> None:
+    component = (_record("wall-a", ((0.0, 0.0), (10.0, 0.0)), raw_ids=("d100i0",)),)
+    closures = ("d100i1",)
+    same = (2.0,)
+    context = _component_withheld_context(
+        component_records=component,
+        known_same_separations=same,
+        proven_subordinate_raw_ids=closures,
+    )
+
+    cases = (
+        ((0.0, 0.0, 0.0, 10.0), "d200i0"),
+        ((0.0, 2.0, 10.0, 2.0), "d300i0"),
+        ((20.0, 20.0, 30.0, 20.0), "d100i9"),
+        ((50.0, 50.0, 60.0, 50.0), "d400i0"),
+        ((0.0, 0.0, 1.0, 0.0), "d100i1"),
+    )
+    for line, raw_id in cases:
+        uncached = _withheld_affects_component(
+            withheld_line=line,
+            withheld_raw_id=raw_id,
+            component_records=component,
+            known_same_separations=same,
+            proven_subordinate_raw_ids=closures,
+        )
+        cached = _withheld_affects_component(
+            withheld_line=line,
+            withheld_raw_id=raw_id,
+            context=context,
+        )
+        assert cached == uncached

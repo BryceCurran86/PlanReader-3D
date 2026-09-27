@@ -387,46 +387,83 @@ def _positive_same_separations(records_by_id, equivalence) -> tuple[float, ...]:
     return tuple(sorted(values))
 
 
-def _withheld_affects_component(
+@dataclass(frozen=True)
+class _ComponentWithheldContext:
+    lines: tuple[Line, ...]
+    source_path_families: frozenset[str]
+    subordinate_raw_ids: frozenset[str]
+    demonstrated_same_separation_max: Optional[float]
+
+
+def _component_withheld_context(
     *,
-    withheld_line: Line,
-    withheld_raw_id: str,
     component_records,
     known_same_separations: Sequence[float],
     proven_subordinate_raw_ids: Sequence[str] = (),
-) -> Optional[str]:
-    normalized_withheld_raw_id = _raw_primitive_id(withheld_raw_id)
-    if normalized_withheld_raw_id in {
-        _raw_primitive_id(raw_id) for raw_id in proven_subordinate_raw_ids
-    }:
-        return None
-
-    component_lines = tuple(
+) -> _ComponentWithheldContext:
+    lines = tuple(
         line
         for record in component_records
         for line in _wall_lines(record)
     )
-    component_raw_ids = {
-        str(raw_id)
+    source_path_families = frozenset(
+        family
         for record in component_records
         for raw_id in record.physical_identity.source_primitive_ids
-    }
+        if (family := _raw_path_family(str(raw_id))) is not None
+    )
+    subordinate_raw_ids = frozenset(
+        _raw_primitive_id(str(raw_id))
+        for raw_id in proven_subordinate_raw_ids
+    )
+    return _ComponentWithheldContext(
+        lines=lines,
+        source_path_families=source_path_families,
+        subordinate_raw_ids=subordinate_raw_ids,
+        demonstrated_same_separation_max=(
+            max(known_same_separations)
+            if known_same_separations
+            else None
+        ),
+    )
+
+
+def _withheld_affects_component(
+    *,
+    withheld_line: Line,
+    withheld_raw_id: str,
+    component_records=(),
+    known_same_separations: Sequence[float] = (),
+    proven_subordinate_raw_ids: Sequence[str] = (),
+    context: Optional[_ComponentWithheldContext] = None,
+) -> Optional[str]:
+    if context is None:
+        context = _component_withheld_context(
+            component_records=component_records,
+            known_same_separations=known_same_separations,
+            proven_subordinate_raw_ids=proven_subordinate_raw_ids,
+        )
+
+    normalized_withheld_raw_id = _raw_primitive_id(withheld_raw_id)
+    if normalized_withheld_raw_id in context.subordinate_raw_ids:
+        return None
+
     withheld_family = _raw_path_family(withheld_raw_id)
-    if withheld_family is not None and any(
-        _raw_path_family(raw_id) == withheld_family
-        for raw_id in component_raw_ids
+    if (
+        withheld_family is not None
+        and withheld_family in context.source_path_families
     ):
         return WALL_COMPONENT_WITHHELD_SOURCE_PATH_RELATED
 
-    for line in component_lines:
+    for line in context.lines:
         if _segments_intersect(line, withheld_line) or _collinear_snap_continuation(
             line, withheld_line
         ):
             return WALL_COMPONENT_WITHHELD_SOURCE_CONTACT
 
-    if known_same_separations:
-        demonstrated_max = max(known_same_separations)
-        for line in component_lines:
+    demonstrated_max = context.demonstrated_same_separation_max
+    if demonstrated_max is not None:
+        for line in context.lines:
             relation = _parallel_overlap_and_separation(line, withheld_line)
             if relation is None:
                 continue
@@ -615,13 +652,16 @@ class WallComponentCompletenessProducer:
                         component_records=component_records,
                         proven_wall_strips=proven_wall_strips,
                     )
+                    withheld_context = _component_withheld_context(
+                        component_records=component_records,
+                        known_same_separations=same_separations,
+                        proven_subordinate_raw_ids=subordinate_closures,
+                    )
                     for _obs_id, raw_id, line in withheld:
                         blocked_reason = _withheld_affects_component(
                             withheld_line=line,
                             withheld_raw_id=raw_id,
-                            component_records=component_records,
-                            known_same_separations=same_separations,
-                            proven_subordinate_raw_ids=subordinate_closures,
+                            context=withheld_context,
                         )
                         if blocked_reason is not None:
                             break
