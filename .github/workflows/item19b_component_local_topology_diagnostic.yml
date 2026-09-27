@@ -67,6 +67,9 @@ jobs:
                   continue
               selected,rejected=_topology_representative_records(scope)
               same_ids=set(tuple(getattr(scope.equivalence,"same_wall_ids",()) or ()))
+              pair_rows=tuple(getattr(scope.equivalence,"pair_classifications",()) or ())
+              blockers=dict(getattr(scope.equivalence,"blocking_reasons_by_wall_id",{}) or {})
+              by_id={r.wall_candidate_id:r for r in scope.records}
               components=_connected_record_components(selected)
               component_rows=[]
               for component in components:
@@ -95,9 +98,27 @@ jobs:
                               box[2] < bbox[0] or box[0] > bbox[2]
                               or box[3] < bbox[1] or box[1] > bbox[3]
                           ):
+                              rel=[
+                                  list(row) for row in pair_rows
+                                  if r.wall_candidate_id in row[:2]
+                                  and any(c.wall_candidate_id in row[:2] for c in component)
+                              ]
+                              primitive_ids=list(
+                                  getattr(r.physical_identity,"source_primitive_ids",()) or ()
+                              )
+                              shared={}
+                              for c in component:
+                                  cids=set(getattr(c.physical_identity,"source_primitive_ids",()) or ())
+                                  overlap=sorted(set(primitive_ids)&cids)
+                                  if overlap:
+                                      shared[c.wall_candidate_id]=overlap
                               rejected_overlap.append({
                                   "wall":r.wall_candidate_id,
                                   "bbox":list(box),
+                                  "blocking_reasons":list(blockers.get(r.wall_candidate_id,())),
+                                  "relations_to_component":rel,
+                                  "source_primitives":primitive_ids,
+                                  "shared_source_primitives":shared,
                               })
                   local_result={}
                   if bbox is not None and not boundary and not withheld_hits and not rejected_overlap:
