@@ -1,0 +1,146 @@
+name: Item19B Target Junction Connectivity Probe
+
+on:
+  push:
+    branches: [diag/item19b-target-junction-connectivity]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+          pip install rapidocr
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Trace target wall network connectivity
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_wall_finish_callout_wall_authority import WallFinishCalloutWallProducer
+          from pb_wall_component_completeness_authority import _component_sets
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-target-junction-connectivity",
+              producer_version="1.0",
+          )
+          source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-target-junction-connectivity",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          walls=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          ).authority()
+          callouts=WallFinishCalloutWallProducer.from_source_visibility_producer(
+              source,page_ids=("54",)
+          )
+          bindings=[
+              b for result in callouts.published_results()
+              for b in result.bindings
+              if b.source_execution_sequence_start==10070
+              and b.source_execution_sequence_end==10078
+              and b.trade_scope_id=="internal_plaster"
+          ]
+          assert len(bindings)==1, bindings
+          target=bindings[0]
+          scope=next(
+              s for s in walls._scopes.values()
+              if s.decision_scope_id==target.physical_wall_decision_scope_id
+          )
+          by_id={r.wall_candidate_id:r for r in scope.records}
+          components=_component_sets(scope.records,scope.equivalence)
+          component=next(group for group in components if target.physical_wall_id in group)
+          group=set(target.equivalence_group_wall_ids)
+
+          node_to_walls={}
+          endpoint_to_walls={}
+          for rec in scope.records:
+              wc=rec.wall_candidate
+              for node in tuple(wc.end_node_ids or ()):
+                  node_to_walls.setdefault(str(node),[]).append(rec.wall_candidate_id)
+              pts=tuple(wc.centerline_pts or ())
+              if pts:
+                  for p in (pts[0],pts[-1]):
+                      key=(round(float(p[0]),6),round(float(p[1]),6))
+                      endpoint_to_walls.setdefault(key,[]).append(rec.wall_candidate_id)
+
+          target_rows=[]
+          neighbor_ids=set()
+          for wall_id in sorted(group):
+              rec=by_id.get(wall_id)
+              if rec is None:
+                  continue
+              wc=rec.wall_candidate
+              shared_nodes={}
+              for node in wc.end_node_ids:
+                  shared=[x for x in node_to_walls.get(str(node),[]) if x!=wall_id]
+                  shared_nodes[str(node)]=sorted(shared)
+                  neighbor_ids.update(shared)
+              pts=tuple(wc.centerline_pts or ())
+              shared_endpoints={}
+              if pts:
+                  for p in (pts[0],pts[-1]):
+                      key=(round(float(p[0]),6),round(float(p[1]),6))
+                      shared=[x for x in endpoint_to_walls.get(key,[]) if x!=wall_id]
+                      shared_endpoints[str(key)]=sorted(shared)
+                      neighbor_ids.update(shared)
+              target_rows.append({
+                  "wall":wall_id,
+                  "centerline":[list(p) for p in wc.centerline_pts],
+                  "end_node_ids":list(wc.end_node_ids),
+                  "junction_types":[x.value for x in wc.junction_types],
+                  "source_primitives":list(rec.physical_identity.source_primitive_ids),
+                  "shared_nodes":shared_nodes,
+                  "shared_endpoints":shared_endpoints,
+              })
+
+          neighbors=[]
+          for wall_id in sorted(neighbor_ids-group):
+              rec=by_id.get(wall_id)
+              if rec is None:
+                  continue
+              wc=rec.wall_candidate
+              neighbors.append({
+                  "wall":wall_id,
+                  "centerline":[list(p) for p in wc.centerline_pts],
+                  "end_node_ids":list(wc.end_node_ids),
+                  "junction_types":[x.value for x in wc.junction_types],
+                  "source_primitives":list(rec.physical_identity.source_primitive_ids),
+                  "in_component":wall_id in component,
+                  "equivalence_group":[
+                      list(g) for g in tuple(scope.equivalence.equivalence_groups or ())
+                      if wall_id in g
+                  ],
+              })
+
+          print("ITEM19B_TARGET_CONNECTIVITY "+json.dumps({
+              "target_wall":target.physical_wall_id,
+              "equivalence_group":sorted(group),
+              "component_members":list(component),
+              "target_rows":target_rows,
+              "neighbor_walls":neighbors,
+              "component_size":len(component),
+              "neighbor_count":len(neighbors),
+          },sort_keys=True))
+          PY
