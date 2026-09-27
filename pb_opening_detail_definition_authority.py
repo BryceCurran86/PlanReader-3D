@@ -174,13 +174,43 @@ def _number_mm(value: str) -> Optional[int]:
     return None
 
 
+def _same_line_dimension_pair(first: _Word, second: _Word) -> bool:
+    first_value = _number_mm(first.raw_text)
+    second_value = _number_mm(second.raw_text)
+    if first_value is None or second_value is None:
+        return False
+    if second.sequence_start < first.sequence_end:
+        return False
+    if second.sequence_start - first.sequence_end > 2:
+        return False
+
+    fx0, fy0, fx1, fy1 = first.geometry
+    sx0, sy0, sx1, sy1 = second.geometry
+    first_h = max(0.0, fy1 - fy0)
+    second_h = max(0.0, sy1 - sy0)
+    if first_h <= 0.0 or second_h <= 0.0:
+        return False
+    overlap_y = min(fy1, sy1) - max(fy0, sy0)
+    if overlap_y < 0.8 * min(first_h, second_h):
+        return False
+    # Source execution and geometry both establish left-to-right adjacency.
+    if sx0 < fx1:
+        return False
+    gap = sx0 - fx1
+    if gap > 1.5 * max(first_h, second_h):
+        return False
+    return True
+
+
 def _dimension_candidates(words: Sequence[_Word]):
     ordered = sorted(
         words,
         key=lambda w: (w.sequence_start, w.sequence_end, w.observation_id),
     )
     out = []
-    # Combined single-word form, if present.
+
+    # Combined single-word form, if present. The entire token must later be
+    # independently authorised by text-integrity/raster authority.
     for word in ordered:
         raw = str(word.raw_text or "").strip()
         m = _COMBINED_DIM.fullmatch(raw.replace("×", "x"))
@@ -191,28 +221,37 @@ def _dimension_candidates(words: Sequence[_Word]):
                 and _MIN_DIMENSION_MM <= b <= _MAX_DIMENSION_MM
             ):
                 out.append((a, b, (word,)))
-    # Three-token form: 2900mm | x | 900mm.
-    for i in range(len(ordered) - 2):
-        first, mid, second = ordered[i : i + 3]
-        if str(mid.raw_text or "").strip().lower() not in {"x", "×"}:
+
+    # Drawing-detail layout form: exactly two plausible dimension tokens on the
+    # same source row, adjacent in execution and geometry. A separate raw "x"
+    # glyph may exist between them, but it is deliberately not authority: if
+    # glyph mapping cannot verify that tiny delimiter, the two independently
+    # authorised dimensions plus their source layout still prove the pair.
+    numeric = [
+        word for word in ordered
+        if _number_mm(word.raw_text) is not None
+    ]
+    for first, second in zip(numeric, numeric[1:]):
+        if not _same_line_dimension_pair(first, second):
             continue
-        a, b = _number_mm(first.raw_text), _number_mm(second.raw_text)
-        if a is None or b is None:
-            continue
-        if first.sequence_end + 1 < mid.sequence_start:
-            continue
-        if mid.sequence_end + 1 < second.sequence_start:
-            continue
-        out.append((a, b, (first, mid, second)))
-    # De-duplicate the same exact source word set only.
-    seen = set()
-    deduped = []
+        a = _number_mm(first.raw_text)
+        b = _number_mm(second.raw_text)
+        assert a is not None and b is not None
+        out.append((a, b, (first, second)))
+
+    # De-duplicate the same semantic dimension proposition. Prefer the source
+    # form with fewer required observations when combined and layout forms
+    # happen to express the same pair.
+    by_pair = {}
     for a, b, members in out:
-        key = (a, b, tuple(w.observation_id for w in members))
-        if key not in seen:
-            seen.add(key)
-            deduped.append((a, b, members))
-    return tuple(deduped)
+        key = (a, b)
+        prior = by_pair.get(key)
+        if prior is None or len(members) < len(prior):
+            by_pair[key] = members
+    return tuple(
+        (a, b, by_pair[(a, b)])
+        for a, b in sorted(by_pair)
+    )
 
 
 def _token_words(words: Sequence[_Word], accepted: set[str]) -> tuple[_Word, ...]:

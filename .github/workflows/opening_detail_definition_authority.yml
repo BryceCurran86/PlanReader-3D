@@ -96,8 +96,12 @@ jobs:
               (r["family"],r["subtype"],r["material"],r["width"],r["height"])
               for r in rows
           }
-          assert ("window","casement","steel",2900,900) in source_defs
+          # Only independently corroborated definitions may publish.  On this
+          # pinned source the 3,000x900 detail has authoritative dimensions;
+          # 2,900 and 1,000x2,100 currently retain competing/disagreeing raster
+          # reads and therefore must stay absent rather than being forced green.
           assert ("window","casement","steel",3000,900) in source_defs
-          assert ("door","batten","timber",1000,2100) in source_defs
+          assert ("window","casement","steel",2900,900) not in source_defs
+          assert ("door","batten","timber",1000,2100) not in source_defs
           assert all(r["basis"]=="detail_unspecified" for r in rows)
           PY

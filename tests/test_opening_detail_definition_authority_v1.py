@@ -6,6 +6,7 @@ from pb_opening_detail_definition_authority import (
     _claim_norm,
     _dimension_candidates,
     _norm,
+    _same_line_dimension_pair,
 )
 
 
@@ -165,3 +166,80 @@ def test_text_claim_normalization_keeps_raster_corroboration_exact() -> None:
     assert _claim_norm("windows.") == _claim_norm("WINDOWS")
     assert _claim_norm("2,900mm") != _claim_norm("3,000mm")
     assert _claim_norm("windows") != _claim_norm("doors")
+
+
+def test_same_row_adjacent_dimensions_form_detail_pair_without_trusting_x_glyph() -> None:
+    first = _Word(
+        observation_id="w",
+        receipt_id="rw",
+        source_partition_id="partition",
+        raw_text="3,000mm",
+        geometry=(0.0, 0.0, 37.0, 10.0),
+        sequence_start=100,
+        sequence_end=104,
+    )
+    raw_x = _Word(
+        observation_id="x",
+        receipt_id="rx",
+        source_partition_id="partition",
+        raw_text="x",
+        geometry=(39.0, 0.0, 43.0, 10.0),
+        sequence_start=104,
+        sequence_end=104,
+    )
+    second = _Word(
+        observation_id="h",
+        receipt_id="rh",
+        source_partition_id="partition",
+        raw_text="900mm",
+        geometry=(45.0, 0.0, 75.0, 10.0),
+        sequence_start=105,
+        sequence_end=106,
+    )
+    dims = _dimension_candidates((first, raw_x, second))
+    assert dims == ((3000, 900, (first, second)),)
+
+
+def test_numeric_tokens_on_different_rows_do_not_form_dimension_pair() -> None:
+    first = _Word(
+        observation_id="w",
+        receipt_id="rw",
+        source_partition_id="partition",
+        raw_text="3,000mm",
+        geometry=(0.0, 0.0, 37.0, 10.0),
+        sequence_start=1,
+        sequence_end=4,
+    )
+    second = _Word(
+        observation_id="h",
+        receipt_id="rh",
+        source_partition_id="partition",
+        raw_text="900mm",
+        geometry=(45.0, 20.0, 75.0, 30.0),
+        sequence_start=5,
+        sequence_end=6,
+    )
+    assert _same_line_dimension_pair(first, second) is False
+    assert _dimension_candidates((first, second)) == ()
+
+
+def test_far_apart_same_row_dimensions_do_not_form_detail_pair() -> None:
+    first = _Word(
+        observation_id="w",
+        receipt_id="rw",
+        source_partition_id="partition",
+        raw_text="3,000mm",
+        geometry=(0.0, 0.0, 37.0, 10.0),
+        sequence_start=1,
+        sequence_end=4,
+    )
+    second = _Word(
+        observation_id="h",
+        receipt_id="rh",
+        source_partition_id="partition",
+        raw_text="900mm",
+        geometry=(100.0, 0.0, 130.0, 10.0),
+        sequence_start=5,
+        sequence_end=6,
+    )
+    assert _same_line_dimension_pair(first, second) is False
