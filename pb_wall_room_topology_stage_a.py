@@ -90,6 +90,10 @@ _TEXT_FRAME_LAYER_KEYWORDS = ("text", "frame", "border", "leader", "callout", "l
 # "GRID" name is deliberately insufficient: only a layer that states both the
 # structural domain and a grid role is excluded here.
 _STRUCTURAL_GRID_LAYER_ROLES = {"grid", "grids", "gridline", "gridlines"}
+_EXPLICIT_NON_WALL_LAYER_TOKEN_SETS = (
+    frozenset({"marker", "section"}),
+    frozenset({"shell", "roof"}),
+)
 
 
 def _angle_delta(a_deg: float, b_deg: float) -> float:
@@ -131,6 +135,11 @@ def is_structural_candidate_segment(segment: Dict[str, Any]) -> Tuple[bool, List
             and layer_tokens & _STRUCTURAL_GRID_LAYER_ROLES
         ):
             reason_codes.append("structural_grid_source_layer_excluded")
+        if any(
+            required_tokens <= layer_tokens
+            for required_tokens in _EXPLICIT_NON_WALL_LAYER_TOKEN_SETS
+        ):
+            reason_codes.append("explicit_non_wall_source_layer_excluded")
 
     return (len(reason_codes) == 0, reason_codes)
 
