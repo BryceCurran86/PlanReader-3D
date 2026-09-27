@@ -1,0 +1,129 @@
+name: Item19B Internal Wall Role Fast V2
+
+on:
+  push:
+    branches: [diag/item19b-internal-wall-role-fast-v2]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Probe exact internal Item19B wall role
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, time
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_wall_component_completeness_authority import (
+              WallComponentCompletenessProducer,
+              WallComponentCompletenessSelector,
+          )
+          from pb_wall_role_authority import WallRoleProducer, WallRoleSelector
+
+          TARGET="wall_3f748e9fcfe858500f3d"
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-internal-wall-role-fast-v2",
+              producer_version="1.0",
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-internal-role-fast",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          t0=time.perf_counter()
+          wall_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          )
+          walls=wall_producer.authority()
+          target_scope=None
+          for scope in walls._scopes.values():
+              if str(scope.viewport_view_type or "")!="floor_plan":
+                  continue
+              if any(r.wall_candidate_id==TARGET for r in scope.records):
+                  target_scope=scope
+                  break
+          print("TARGET_SCOPE",json.dumps(
+              None if target_scope is None else {
+                "viewport":target_scope.viewport_id,
+                "decision_scope":target_scope.decision_scope_id,
+                "complete":target_scope.scope_complete,
+                "reasons":list(target_scope.reason_codes),
+                "records":len(target_scope.records),
+                "equivalence_group":next(
+                    (list(g) for g in target_scope.equivalence.equivalence_groups if TARGET in g),
+                    [],
+                ) if target_scope.equivalence else [],
+              },sort_keys=True
+          ))
+          if target_scope is None:
+              raise SystemExit("target wall not found")
+
+          cp=WallComponentCompletenessProducer.from_source_visibility_producer(
+              source,page_ids=("54",)
+          )
+          ca=cp.authority()
+          cres=ca.resolve(WallComponentCompletenessSelector(
+              document_id=target_scope.document_id,
+              revision_id=target_scope.revision_id,
+              source_sha256=target_scope.source_sha256,
+              snapshot_id=target_scope.snapshot_id,
+              page_id=target_scope.page_id,
+              decision_scope_id=target_scope.decision_scope_id,
+              physical_wall_id=TARGET,
+          ))
+          print("TARGET_COMPONENT",json.dumps({
+              "status":cres.status.value,
+              "reasons":list(cres.reason_codes),
+              "record":None if cres.record is None else {
+                  "id":cres.record.record_id,
+                  "component":cres.record.component_id,
+                  "members":list(cres.record.member_wall_ids),
+                  "source_ids":list(cres.record.member_source_primitive_ids),
+                  "positive_groups":[list(g) for g in cres.record.positive_equivalence_groups],
+                  "checked_withheld":len(cres.record.checked_withheld_observation_ids),
+                  "source_scope_complete":cres.record.source_scope_complete,
+                  "source_scope_reasons":list(cres.record.source_scope_reason_codes),
+              }
+          },sort_keys=True))
+
+          roles=WallRoleProducer.from_source_topology(
+              physical_wall_candidate_authority=walls,
+              component_completeness_authority=ca,
+          )
+          rr=roles.publish(WallRoleSelector(
+              document_id=target_scope.document_id,
+              revision_id=target_scope.revision_id,
+              source_sha256=target_scope.source_sha256,
+              snapshot_id=target_scope.snapshot_id,
+              page_id=target_scope.page_id,
+              decision_scope_id=target_scope.decision_scope_id,
+              physical_wall_id=TARGET,
+          ))
+          print("TARGET_ROLE",json.dumps({
+              "status":rr.status.value,
+              "reasons":list(rr.reason_codes),
+              "role":rr.record.role.value if rr.record else None,
+              "record":rr.record.record_id if rr.record else None,
+              "evidence":list(rr.record.corroborating_evidence_ids) if rr.record else [],
+          },sort_keys=True))
+          print("TARGET_ROLE_ELAPSED_SEC",round(time.perf_counter()-t0,3))
+          PY
