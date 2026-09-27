@@ -429,6 +429,9 @@ def test_index_time_registration_writes_the_authority_title(tmp_path):
     assert meta[0]["title"] == "GROUND FLOOR PLAN" and meta[0]["title_source"] == "label"
     assert meta[0]["sheet_number"] == "A-201"
     assert meta[1]["title"] == "" and meta[1]["title_reason"]
+    labels = [r["page_label"] for r in app.lquery("SELECT page_label FROM pages ORDER BY id")]
+    assert labels == ["A-201", "A-202"]
+    assert [meta[0]["drawing_no"], meta[1]["drawing_no"]] == labels
     register = {r["source_reference"]: r["title"] for r in app.lquery("SELECT * FROM register_items")}
     assert register == {"plans.pdf p1": "GROUND FLOOR PLAN", "plans.pdf p2": "A-202"}
 
@@ -446,7 +449,31 @@ def test_post_processing_enhancement_writes_the_authority_title(tmp_path):
     second = json.loads(app.workspace_setting(1, registration._meta_key(2)))
     assert first["title"] == "GROUND FLOOR PLAN" and first["title_authority"] == authority.AUTHORITY
     assert second["title"] == "" and second["sheet_number"] == "A-202"
+    labels = [r["page_label"] for r in app.lquery("SELECT page_label FROM pages ORDER BY id")]
+    assert labels == ["A-201", "A-202"]
+    assert [first["drawing_no"], second["drawing_no"]] == labels
 
+
+def test_established_non_neutral_page_label_is_not_silently_renamed(tmp_path):
+    import pb_page_registration_v1225 as registration
+
+    app = _app(tmp_path, _plans_pdf(tmp_path))
+    app.lexecute("UPDATE pages SET page_label=? WHERE id=?", ("BS5255", 1))
+    registration.repair_document_registration(app, 1)
+
+    row = app.lquery("SELECT page_label FROM pages WHERE id=?", (1,))[0]
+    meta = json.loads(app.workspace_setting(1, registration._meta_key(1)))
+    assert row["page_label"] == "BS5255"
+    assert meta["sheet_number"] == "A-201"
+    assert meta["drawing_no"] == "BS5255"
+
+
+def test_neutral_label_fails_closed_without_sheet_number():
+    import pb_page_registration_v1225 as registration
+
+    assert registration._authoritative_page_label("", 8, "") == "Page 8"
+    assert registration._authoritative_page_label("Page 8", 8, "") == "Page 8"
+    assert registration._authoritative_page_label("Page 8", 8, "MC / 231 / 02-01E") == "MC/231/02-01E"
 
 def test_manual_register_titles_are_never_overwritten(tmp_path):
     import pb_page_registration_v1225 as registration
