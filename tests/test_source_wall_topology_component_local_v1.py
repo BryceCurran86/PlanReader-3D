@@ -193,7 +193,6 @@ def test_positive_same_group_survives_global_representative_abstention() -> None
     selected, rejected = _topology_representative_records(scope)
     assert [r.wall_candidate_id for r in selected] == ["wall-a"]
     assert {r.wall_candidate_id for r in rejected} == {
-        "wall-b",
         "ambiguous-singleton",
     }
 
@@ -229,3 +228,41 @@ def test_overlapping_positive_same_groups_fail_closed() -> None:
         "wall-b",
         "wall-c",
     }
+
+
+
+def test_split_fragments_in_positive_same_group_retain_all_topology_edges() -> None:
+    # The top-left physical wall is emitted as two source-backed fragments.
+    # The room graph closes only if the positive SAME group keeps both edges
+    # while publishing one physical-wall identity.
+    records = (
+        _record("top-left-a", (50.0, 50.0), (100.0, 50.0)),
+        _record("top-left-b", (100.0, 50.0), (150.0, 50.0)),
+        _record("top-right", (150.0, 50.0), (250.0, 50.0)),
+        _record("right", (250.0, 50.0), (250.0, 250.0)),
+        _record("bottom-right", (250.0, 250.0), (150.0, 250.0)),
+        _record("bottom-left", (150.0, 250.0), (50.0, 250.0)),
+        _record("left", (50.0, 250.0), (50.0, 50.0)),
+        _record("divider", (150.0, 50.0), (150.0, 250.0)),
+    )
+    equivalence = _equivalence(
+        records,
+        group=("top-left-a", "top-left-b"),
+    )
+    scope = _scope(
+        records,
+        withheld=(_withheld("far", (400.0, 0.0, 400.0, 500.0)),),
+        equivalence=equivalence,
+    )
+
+    result = _derive_scope_records(scope)
+    assert len(result) == 7
+    wall_ids = {key[-1] for key in result}
+    assert "top-left-a" in wall_ids
+    assert "top-left-b" not in wall_ids
+    divider = next(
+        evidence for key, evidence in result.items()
+        if key[-1] == "divider"
+    )
+    assert divider.is_ambiguous is False
+    assert divider.enclosed_space_count == 2
