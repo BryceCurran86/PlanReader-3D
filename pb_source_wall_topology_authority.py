@@ -487,13 +487,16 @@ def build_source_wall_topology_authority(
 
     records: dict[tuple[str, str, str, str, str, str, str], WallTopologyEvidence] = {}
     for scope in physical_wall_candidate_authority._scopes.values():
-        # Room/envelope topology is a plan-view proposition. Viewport-scoped
-        # elevation/section/detail geometry remains valid physical-wall
-        # evidence, but it must not mint EXTERNAL/INTERNAL roles by being
-        # interpreted as a planar room graph.
+        # Room/envelope topology is a semantic FLOOR_PLAN proposition.
+        # A legacy page-wide wall scope authenticates geometry but carries no
+        # source-owned drawing-type proof, so it cannot mint INTERNAL/EXTERNAL
+        # roles. Likewise elevation/section/detail/schedule viewports remain
+        # valid physical-wall evidence but cannot be interpreted as room
+        # topology. A future whole-page FLOOR_PLAN authority may add an
+        # independently typed scope; until then fail closed here.
         if (
-            getattr(scope, "scope_kind", "page") == "viewport"
-            and str(getattr(scope, "viewport_view_type", "") or "") != "floor_plan"
+            getattr(scope, "scope_kind", "page") != "viewport"
+            or str(getattr(scope, "viewport_view_type", "") or "") != "floor_plan"
         ):
             continue
         records.update(_derive_scope_records(scope))

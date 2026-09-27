@@ -21,7 +21,9 @@ from pb_wall_role_authority import (
 
 def _write_plan(path: Path, *, with_partition: bool) -> None:
     doc = fitz.open()
-    page = doc.new_page(width=300, height=200)
+    page = doc.new_page(width=420, height=320)
+    page.draw_rect(fitz.Rect(20.0, 20.0, 380.0, 280.0), color=(0, 0, 0), width=1)
+    page.insert_text((80.0, 265.0), "GROUND FLOOR PLAN", fontsize=11)
     lines = [
         ((50.0, 50.0), (250.0, 50.0)),
         ((250.0, 50.0), (250.0, 150.0)),
@@ -51,21 +53,20 @@ def _source_wall_scope(path: Path):
         document_id=f"test:{path.name}",
         source_bytes=payload,
         source_locator=str(path),
+        page_ids=("1",),
     )
-    producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
+    producer = PhysicalWallCandidateProducer.from_authenticated_viewports(
         source,
         page_ids=("1",),
     )
     authority = producer.authority()
-    selector = PhysicalWallCandidateSelector(
-        document_id=published.revision.document_id,
-        revision_id=published.revision.revision_id,
-        source_sha256=published.revision.source_sha256,
-        snapshot_id=published.snapshot.snapshot_id,
-        page_id="1",
-        decision_scope_id="wall-source:page-1",
-    )
-    scope = authority.resolve_scope(selector)
+    scopes = [
+        scope
+        for scope in authority._scopes.values()
+        if str(scope.viewport_view_type or "") == "floor_plan"
+    ]
+    assert len(scopes) == 1, scopes
+    scope = scopes[0]
     assert scope.status is EvidenceResolutionStatus.CORROBORATED
     assert scope.scope_complete is True
     assert scope.records
@@ -83,8 +84,8 @@ def _role_results(published, wall_authority, scope):
                 revision_id=published.revision.revision_id,
                 source_sha256=published.revision.source_sha256,
                 snapshot_id=published.snapshot.snapshot_id,
-                page_id="1",
-                decision_scope_id="wall-source:page-1",
+                page_id=scope.page_id,
+                decision_scope_id=scope.decision_scope_id,
                 physical_wall_id=record.wall_candidate_id,
             )
         )
