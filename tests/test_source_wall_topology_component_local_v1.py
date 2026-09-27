@@ -266,3 +266,92 @@ def test_split_fragments_in_positive_same_group_retain_all_topology_edges() -> N
     )
     assert divider.is_ambiguous is False
     assert divider.enclosed_space_count == 2
+
+
+def _node_record(
+    wall_id: str,
+    first,
+    second,
+    *,
+    node_ids=("n1", "n2"),
+    junction_types=("l_corner", "l_corner"),
+):
+    return SimpleNamespace(
+        wall_candidate_id=wall_id,
+        wall_candidate=SimpleNamespace(
+            centerline_pts=(first, second),
+            end_node_ids=node_ids,
+            junction_types=junction_types,
+        ),
+    )
+
+
+def test_component_connectivity_uses_exact_trusted_producer_junction_node() -> None:
+    from pb_source_wall_topology_authority import _connected_record_components
+
+    first = _node_record(
+        "a",
+        (0.0, 0.0),
+        (10.0, 0.0),
+        node_ids=("a-start", "shared"),
+        junction_types=("endpoint", "t_junction"),
+    )
+    second = _node_record(
+        "b",
+        (10.2, 0.0),
+        (10.2, 8.0),
+        node_ids=("shared", "b-end"),
+        junction_types=("t_junction", "endpoint"),
+    )
+    components = _connected_record_components((first, second))
+    assert [[record.wall_candidate_id for record in component] for component in components] == [
+        ["a", "b"]
+    ]
+
+
+def test_near_endpoints_without_shared_producer_node_do_not_connect() -> None:
+    from pb_source_wall_topology_authority import _connected_record_components
+
+    first = _node_record(
+        "a",
+        (0.0, 0.0),
+        (10.0, 0.0),
+        node_ids=("a-start", "a-end"),
+        junction_types=("endpoint", "endpoint"),
+    )
+    second = _node_record(
+        "b",
+        (10.0, 0.0),
+        (10.0, 8.0),
+        node_ids=("b-start", "b-end"),
+        junction_types=("endpoint", "endpoint"),
+    )
+    components = _connected_record_components((first, second))
+    assert [[record.wall_candidate_id for record in component] for component in components] == [
+        ["a"],
+        ["b"],
+    ]
+
+
+def test_shared_unresolved_node_does_not_create_component_connectivity() -> None:
+    from pb_source_wall_topology_authority import _connected_record_components
+
+    first = _node_record(
+        "a",
+        (0.0, 0.0),
+        (10.0, 0.0),
+        node_ids=("a-start", "shared"),
+        junction_types=("endpoint", "unresolved"),
+    )
+    second = _node_record(
+        "b",
+        (10.0, 0.0),
+        (10.0, 8.0),
+        node_ids=("shared", "b-end"),
+        junction_types=("unresolved", "endpoint"),
+    )
+    components = _connected_record_components((first, second))
+    assert [[record.wall_candidate_id for record in component] for component in components] == [
+        ["a"],
+        ["b"],
+    ]

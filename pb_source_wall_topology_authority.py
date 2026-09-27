@@ -32,6 +32,7 @@ from pb_physical_wall_candidate_authority import (
     PHYSICAL_WALL_CANDIDATE_SOURCE_PRIMITIVE_OWNERSHIP_AMBIGUOUS,
     PhysicalWallCandidateAuthority,
 )
+from pb_wall_room_topology_contracts import JunctionType
 from pb_wall_role_authority import (
     WallTopologyAuthority,
     WallTopologyEvidence,
@@ -491,13 +492,69 @@ def _topology_representative_records(scope):
     return _topology_physical_records(scope)
 
 
+_TRUSTED_COMPONENT_JUNCTION_TYPES = frozenset(
+    {
+        JunctionType.COLLINEAR_CONTINUATION,
+        JunctionType.L_CORNER,
+        JunctionType.T_JUNCTION,
+        JunctionType.X_CROSSING,
+        JunctionType.MULTI_WAY,
+    }
+)
+
+
+def _topology_member_records(record):
+    return tuple(
+        getattr(record, "_topology_member_records", None)
+        or (record,)
+    )
+
+
+def _trusted_component_node_ids(record) -> set[str]:
+    """Return exact producer junction nodes safe for physical connectivity.
+
+    WallCandidate.end_node_ids and junction_types are minted by W3/W4 from the
+    source graph.  An exact shared node is used only when the endpoint's
+    junction class itself is a positive wall-connectivity proposition.
+    ENDPOINT, AMBIGUOUS, NEAR_JUNCTION_REVIEW, UNRESOLVED and
+    REJECTED_NON_WALL_CROSSING are deliberately excluded.
+    """
+    result: set[str] = set()
+    for member in _topology_member_records(record):
+        wall = member.wall_candidate
+        node_ids = tuple(getattr(wall, "end_node_ids", ()) or ())
+        junction_types = tuple(getattr(wall, "junction_types", ()) or ())
+        if len(node_ids) != 2 or len(junction_types) != 2:
+            continue
+        for node_id, junction_type in zip(node_ids, junction_types):
+            try:
+                kind = (
+                    junction_type
+                    if isinstance(junction_type, JunctionType)
+                    else JunctionType(str(junction_type))
+                )
+            except ValueError:
+                continue
+            if kind in _TRUSTED_COMPONENT_JUNCTION_TYPES and str(node_id):
+                result.add(str(node_id))
+    return result
+
+
 def _connected_record_components(records):
     records = tuple(records)
     endpoints = {}
+    trusted_nodes = {}
+    has_junction_metadata = {}
     for record in records:
         endpoints[record.wall_candidate_id] = {
             point for edge in _wall_edges(record) for point in edge
         }
+        trusted_nodes[record.wall_candidate_id] = _trusted_component_node_ids(record)
+        has_junction_metadata[record.wall_candidate_id] = any(
+            len(tuple(getattr(member.wall_candidate, "end_node_ids", ()) or ())) == 2
+            and len(tuple(getattr(member.wall_candidate, "junction_types", ()) or ())) == 2
+            for member in _topology_member_records(record)
+        )
 
     parent = {record.wall_candidate_id: record.wall_candidate_id for record in records}
 
@@ -513,8 +570,29 @@ def _connected_record_components(records):
             parent[max(a, b)] = min(a, b)
 
     ids = tuple(sorted(parent))
+
+    # Primary path: exact producer-owned node identity plus positive W3
+    # junction classification.  Indexed by node => O(n) membership work.
+    node_owners = defaultdict(list)
+    for wall_id in ids:
+        for node_id in trusted_nodes[wall_id]:
+            node_owners[node_id].append(wall_id)
+    for wall_ids in node_owners.values():
+        if len(wall_ids) < 2:
+            continue
+        anchor = min(wall_ids)
+        for wall_id in wall_ids:
+            if wall_id != anchor:
+                union(anchor, wall_id)
+
+    # Compatibility fallback only for synthetic/legacy records that predate
+    # producer junction metadata.  Real W4 wall candidates carry node/junction
+    # fields and therefore never gain connectivity from coordinate equality
+    # alone.
     endpoint_owners = defaultdict(list)
     for wall_id in ids:
+        if has_junction_metadata[wall_id]:
+            continue
         for endpoint in endpoints[wall_id]:
             endpoint_owners[endpoint].append(wall_id)
     for wall_ids in endpoint_owners.values():
