@@ -250,7 +250,7 @@ def floor_mapper_panel(app: Any, workspace: Dict[str, Any]) -> None:
             return
         app.set_workspace_setting(workspace_id, _state_key(int(page["id"])), json.dumps(current, separators=(",", ":")))
         if px_per_m > 0:
-            app.lexecute("UPDATE pages SET px_per_m=? WHERE id=?", (px_per_m, int(page["id"])))
+            app.lexecute("UPDATE pages SET scale_method='manual_calibration',scale_verified=1,px_per_m=? WHERE id=?", (px_per_m, int(page["id"])))
         _replace_generated_rows(app, workspace_id, int(page["id"]), rows)
         app.st.success(f"Saved {len(rows)} floor-area row(s) totalling {sum(_num(r['quantity']) for r in rows):,.2f} m².")
         app.st.rerun()
