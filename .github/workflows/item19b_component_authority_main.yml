@@ -260,7 +260,7 @@ jobs:
               decision_scope_id=target.physical_wall_decision_scope_id,
               physical_wall_id=target.physical_wall_id,
           ))
-          print("ITEM19B_INTERNAL_TARGET_ROLE "+json.dumps({
+          print("ITEM19B_TARGET_ENVELOPE_ROLE "+json.dumps({
               "status":role.status.value,
               "reasons":list(role.reason_codes),
               "role":role.record.role.value if role.record else None,
@@ -268,7 +268,11 @@ jobs:
           },sort_keys=True))
           assert role.status is EvidenceResolutionStatus.CORROBORATED, role
           assert role.record is not None
-          assert role.record.role is WallRoleClassification.INTERNAL, role.record
+          # "internally" is a finish-face direction, not a claim that the
+          # physical wall is an internal partition.  The production semantic
+          # face contract maps EXTERNAL + internally to the room-facing
+          # interior face of the envelope wall.
+          assert role.record.role is WallRoleClassification.EXTERNAL, role.record
 
           print("ITEM19B_COMPONENT_TIMING "+json.dumps({
               "wall_authority_sec":round(t1-t0,3),
