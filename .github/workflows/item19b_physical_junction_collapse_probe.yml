@@ -37,16 +37,13 @@ jobs:
           from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
           from pb_source_wall_topology_authority import _topology_physical_records
 
-          TARGET_RAW_IDS={
-            "wall_2a6aea428172021beea6",
-            "wall_48e5daa94c1ef292c16e",
-            "wall_6d5d307a65f508cd486e",
-            "wall_76866e059af8c9b0ebf9",
-            "wall_a28e9b459b58354aeaba",
-            "wall_b7cb0e3fa0e31b209a19",
-            "wall_c7980c459d84cd53fbf9",
-            "wall_cd0e7b584c030cea017e",
-            "wall_e887d86dcd15cbbc501e",
+          TARGET_SOURCE_PRIMITIVES={
+            "d4763i0",
+            "d4772i0",
+            "d5179i1",
+            "d5179i3",
+            "d5214i0",
+            "d5215i0",
           }
 
           payload=Path("/tmp/kstvet.pdf").read_bytes()
@@ -77,11 +74,33 @@ jobs:
                       raw_to_physical[mid]=rec.wall_candidate_id
 
               target_phys=None
+              target_member_primitives={}
               for pid,rec in by_phys.items():
-                  members=set(getattr(rec,"_topology_member_ids",(pid,)))
-                  if members & TARGET_RAW_IDS:
+                  primitives=set()
+                  member_rows=[]
+                  for member in tuple(getattr(rec,"_topology_member_records",(rec,))):
+                      ids=set(tuple(getattr(member.physical_identity,"source_primitive_ids",()) or ()))
+                      primitives.update(ids)
+                      member_rows.append({
+                          "wall":member.wall_candidate_id,
+                          "source_primitives":sorted(ids),
+                      })
+                  overlap=sorted(primitives & TARGET_SOURCE_PRIMITIVES)
+                  if overlap:
                       target_phys=pid
+                      target_member_primitives={
+                          "physical":pid,
+                          "matched_source_primitives":overlap,
+                          "members":member_rows,
+                      }
                       break
+              if target_phys is None:
+                  print("ITEM19B_PHYSICAL_JUNCTIONS "+json.dumps({
+                      "error":"target_physical_wall_not_found_by_source_primitives",
+                      "target_source_primitives":sorted(TARGET_SOURCE_PRIMITIVES),
+                      "physical_count":len(by_phys),
+                  },sort_keys=True))
+                  raise SystemExit(2)
 
               node_rows=defaultdict(list)
               for pid,rec in by_phys.items():
@@ -129,5 +148,6 @@ jobs:
                       "angles_by_physical":angles_by_phys,
                       "raw_incidence":rows,
                   })
+              print("ITEM19B_TARGET_PHYSICAL "+json.dumps(target_member_primitives,sort_keys=True))
               print("ITEM19B_PHYSICAL_JUNCTIONS "+json.dumps(out,sort_keys=True))
           PY
