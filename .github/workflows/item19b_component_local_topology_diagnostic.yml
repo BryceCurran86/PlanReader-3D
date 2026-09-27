@@ -42,6 +42,8 @@ jobs:
               _record_touches_viewport_boundary,
               _line_intersects_bbox,
               _derive_complete_scope_records,
+              _trusted_component_node_ids,
+              _topology_member_records,
           )
           from dataclasses import replace
           from pb_physical_wall_candidate_authority import PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED
@@ -71,6 +73,67 @@ jobs:
               blockers=dict(getattr(scope.equivalence,"blocking_reasons_by_wall_id",{}) or {})
               by_id={r.wall_candidate_id:r for r in scope.records}
               components=_connected_record_components(selected)
+              target_raw_ids={
+                  "d4763i0","d4772i0","d5179i1",
+                  "d5179i3","d5214i0","d5215i0",
+              }
+              target_rows=[]
+              node_owners={}
+              for physical in selected:
+                  nodes=sorted(_trusted_component_node_ids(physical))
+                  for node in nodes:
+                      node_owners.setdefault(node,[]).append(physical.wall_candidate_id)
+                  primitive_ids=sorted({
+                      raw_id
+                      for member in _topology_member_records(physical)
+                      for raw_id in tuple(
+                          getattr(member.physical_identity,"source_primitive_ids",()) or ()
+                      )
+                  })
+                  if target_raw_ids & set(primitive_ids):
+                      target_rows.append({
+                          "physical_wall":physical.wall_candidate_id,
+                          "member_ids":[
+                              member.wall_candidate_id
+                              for member in _topology_member_records(physical)
+                          ],
+                          "source_primitives":primitive_ids,
+                          "trusted_nodes":nodes,
+                          "member_geometry":[{
+                              "wall":member.wall_candidate_id,
+                              "centerline":[
+                                  list(point) for point in tuple(
+                                      member.wall_candidate.centerline_pts or ()
+                                  )
+                              ],
+                              "end_nodes":list(
+                                  tuple(
+                                      getattr(member.wall_candidate,"end_node_ids",()) or ()
+                                  )
+                              ),
+                              "junction_types":[
+                                  (
+                                      value.value
+                                      if hasattr(value,"value")
+                                      else str(value)
+                                  )
+                                  for value in tuple(
+                                      getattr(member.wall_candidate,"junction_types",()) or ()
+                                  )
+                              ],
+                          } for member in _topology_member_records(physical)],
+                      })
+              target_neighbor_rows=[]
+              target_nodes={
+                  node
+                  for row in target_rows
+                  for node in row["trusted_nodes"]
+              }
+              for node in sorted(target_nodes):
+                  target_neighbor_rows.append({
+                      "node":node,
+                      "physical_walls":sorted(node_owners.get(node,[])),
+                  })
               component_rows=[]
               for component in components:
                   bbox=_bbox_union(component)
@@ -160,6 +223,8 @@ jobs:
                   "same_wall_count":len(same_ids),
                   "withheld_count":len(scope.withheld_structural_segments or ()),
                   "components":component_rows,
+                  "item19b_target_physical_rows":target_rows,
+                  "item19b_target_junction_neighbors":target_neighbor_rows,
               })
           print("ITEM19B_COMPONENT_DIAGNOSTIC "+json.dumps(out,sort_keys=True))
           PY
