@@ -253,7 +253,7 @@ def test_arbitrary_same_path_sibling_remains_blocking_even_with_strip_closures()
 
 
 def test_precomputed_withheld_context_preserves_decisions() -> None:
-    component = (_record("wall-a", ((0.0, 0.0), (10.0, 0.0)), raw_ids=("d100i0",)),)
+    component = (_record("wall-a", (0.0, 0.0), (10.0, 0.0), raw_id="d100i0"),)
     closures = ("d100i1",)
     same = (2.0,)
     context = _component_withheld_context(
