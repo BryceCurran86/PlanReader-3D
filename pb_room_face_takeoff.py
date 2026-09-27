@@ -15,7 +15,10 @@ Never produce a confidently stated m² quantity from an uncalibrated polygon.
 """
 from __future__ import annotations
 
+import copy
 import re
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from math import atan2, pi
 from pathlib import Path
@@ -1078,6 +1081,27 @@ def rooms_to_takeoff_rows(
 # ---------------------------------------------------------------------------
 
 
+# Extraction results keyed by everything they depend on: the PDF library that
+# read the file, the PDF file (path, device, inode, size, mtime), the page
+# number and label, and the calibration fields page_scale_info() reads. The 3D
+# page, automatic geometry and surface evidence re-extract the same unchanged
+# pages on every rerun. Page fields are keyed by their raw repr, so a malformed
+# value fails exactly where it did before and never shares an entry with a
+# well-formed one.
+_ROOM_FACE_CACHE: "OrderedDict[tuple, List[RoomFace]]" = OrderedDict()
+_ROOM_FACE_CACHE_LOCK = threading.Lock()
+_ROOM_FACE_CACHE_SIZE = 64
+_ROOM_FACE_PAGE_FIELDS = ("page_no", "page_label", "px_per_m", "render_zoom", "scale_text")
+
+
+def _room_face_cache_key(fitz: Any, pdf_path: Path, page: Dict[str, Any]) -> tuple:
+    stat = pdf_path.stat()
+    return (
+        fitz, str(pdf_path.resolve()), stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns,
+        *(repr(page.get(name)) for name in _ROOM_FACE_PAGE_FIELDS),
+    )
+
+
 def extract_room_faces_from_page(
     app: Any,
     page: Dict[str, Any],
@@ -1113,6 +1137,13 @@ def extract_room_faces_from_page(
     pdf_path = Path(str(docs[0].get("path") or ""))
     if pdf_path.suffix.lower() != ".pdf" or not pdf_path.is_file():
         return []
+    cache_key = _room_face_cache_key(fitz, pdf_path, page)
+    with _ROOM_FACE_CACHE_LOCK:
+        cached = _ROOM_FACE_CACHE.get(cache_key)
+        if cached is not None:
+            _ROOM_FACE_CACHE.move_to_end(cache_key)
+    if cached is not None:
+        return copy.deepcopy(cached)
 
     # Open PDF and extract page
     pdf = fitz.open(pdf_path)
@@ -1182,7 +1213,7 @@ def extract_room_faces_from_page(
     drawing_number = str(page.get("page_label") or "")
 
     # Run extraction
-    return extract_and_calibrate_rooms(
+    rooms = extract_and_calibrate_rooms(
         segments=segments,
         scale_info=scale_info,
         page_width_pt=page_width_pt,
@@ -1191,6 +1222,11 @@ def extract_room_faces_from_page(
         drawing_number=drawing_number,
         words=words,
     )
+    with _ROOM_FACE_CACHE_LOCK:
+        _ROOM_FACE_CACHE[cache_key] = copy.deepcopy(rooms)
+        while len(_ROOM_FACE_CACHE) > _ROOM_FACE_CACHE_SIZE:
+            _ROOM_FACE_CACHE.popitem(last=False)
+    return rooms
 
 
 def _manual_floor_blocked(auto_guard: Any, manual_keys: set, location: Any) -> bool:
