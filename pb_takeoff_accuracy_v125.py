@@ -378,8 +378,13 @@ def guarded_exec(app:Any,base_exec:Any):
     def run(sql:str,params:Sequence[Any]=()):
         n=" ".join(str(sql).strip().lower().split()); p=tuple(params or ())
         if n.startswith("update pages set px_per_m=") and len(p)>=2:
-            ppm,pid=max(0.0,app.to_float(p[0])),int(p[-1]); before=app.lquery("SELECT workspace_id,scale_method FROM pages WHERE id=?",(pid,)); ids={int(r["takeoff_row_id"]) for r in app.lquery("SELECT DISTINCT takeoff_row_id FROM measurement_lines WHERE page_id=? AND takeoff_row_id IS NOT NULL",(pid,))}; result=base_exec(sql,p); cand=AUTO_SCALE.get(pid); old=clean(before[0].get("scale_method")) if before else ""; auto=cand is not None and abs(ppm-cand)<=max(.001,abs(cand)*.0001)
-            method,verified=("auto_detected",0) if auto and old!="auto_detected" else ("manual_calibration",1); base_exec("UPDATE pages SET scale_method=?,scale_verified=? WHERE id=?",(method,verified,pid));
+            ppm,pid=max(0.0,app.to_float(p[0])),int(p[-1]); before=app.lquery("SELECT workspace_id,scale_method FROM pages WHERE id=?",(pid,)); ids={int(r["takeoff_row_id"]) for r in app.lquery("SELECT DISTINCT takeoff_row_id FROM measurement_lines WHERE page_id=? AND takeoff_row_id IS NOT NULL",(pid,))}; result=base_exec(sql,p)
+            # A generic px_per_m write is never evidence of human verification. Automatic
+            # calibration paths can repeat the same write on reruns; previously the second
+            # write was promoted to manual_calibration simply because scale_method was
+            # already auto_detected. Manual calibration UIs write scale_method and
+            # scale_verified explicitly in their own SQL and therefore bypass this guard.
+            base_exec("UPDATE pages SET scale_method=?,scale_verified=? WHERE id=?",("auto_detected",0,pid));
             if before and ids: recompute(app,base_exec,int(before[0]["workspace_id"]),ids)
             return result
         if n.startswith("delete from measurement_lines where page_id=") and p:
