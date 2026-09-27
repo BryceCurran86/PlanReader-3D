@@ -370,7 +370,7 @@ def _angle_delta_deg(first: float, second: float) -> float:
 
 
 def _endpoint_incidence(record):
-    """Yield exact producer node incidence with local edge angle.
+    """Yield exact producer node incidence with local edge angle + raw class.
 
     Angles are normalized modulo 180 to match Stage-A/W3 collinearity
     semantics.  No coordinate snapping is performed here.
@@ -389,9 +389,15 @@ def _endpoint_incidence(record):
             % 180.0
         )
 
+    junction_types = tuple(getattr(wall, "junction_types", ()) or ())
+    kinds = (
+        junction_types
+        if len(junction_types) == 2
+        else (JunctionType.UNRESOLVED, JunctionType.UNRESOLVED)
+    )
     return (
-        (str(node_ids[0]), angle(points[0], points[1])),
-        (str(node_ids[1]), angle(points[-1], points[-2])),
+        (str(node_ids[0]), angle(points[0], points[1]), kinds[0]),
+        (str(node_ids[1]), angle(points[-1], points[-2]), kinds[1]),
     )
 
 
@@ -507,20 +513,48 @@ def _physical_trusted_node_owners(records_by_id, equivalence) -> dict[str, tuple
     """Return exact producer nodes that become deterministic after SAME collapse."""
     owner_map = _physical_owner_map(records_by_id, equivalence)
     node_incidence: dict[str, dict[str, list[float]]] = {}
+    node_raw_kinds: dict[str, list[JunctionType]] = {}
+    node_raw_count: dict[str, int] = {}
     raw_members_by_owner: dict[str, set[str]] = {}
 
     for wall_id, record in records_by_id.items():
         physical_owner = owner_map[wall_id]
         raw_members_by_owner.setdefault(physical_owner, set()).add(wall_id)
-        for node_id, angle in _endpoint_incidence(record):
+        for node_id, angle, raw_kind in _endpoint_incidence(record):
             if not node_id:
                 continue
             node_incidence.setdefault(node_id, {}).setdefault(
                 physical_owner, []
             ).append(angle)
+            node_raw_count[node_id] = node_raw_count.get(node_id, 0) + 1
+            try:
+                kind = (
+                    raw_kind
+                    if isinstance(raw_kind, JunctionType)
+                    else JunctionType(str(raw_kind))
+                )
+            except ValueError:
+                kind = JunctionType.UNRESOLVED
+            node_raw_kinds.setdefault(node_id, []).append(kind)
 
     trusted: dict[str, tuple[str, ...]] = {}
+    forbidden_raw_kinds = {
+        JunctionType.UNRESOLVED,
+        JunctionType.NEAR_JUNCTION_REVIEW,
+        JunctionType.REJECTED_NON_WALL_CROSSING,
+    }
     for node_id, incidence in node_incidence.items():
+        raw_kinds = tuple(node_raw_kinds.get(node_id, ()))
+        # This path exists only to remove ambiguity caused by duplicate
+        # representations of already-proven SAME physical walls.  It cannot
+        # reinterpret a genuinely unresolved/review/rejected junction, and it
+        # must actually reduce incidence multiplicity.
+        if node_raw_count.get(node_id, 0) <= len(incidence):
+            continue
+        if not any(kind is JunctionType.AMBIGUOUS for kind in raw_kinds):
+            continue
+        if any(kind in forbidden_raw_kinds for kind in raw_kinds):
+            continue
         if not _physical_node_is_trusted(incidence):
             continue
         owners = tuple(sorted(incidence))
