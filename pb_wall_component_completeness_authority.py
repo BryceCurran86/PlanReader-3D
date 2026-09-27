@@ -360,12 +360,12 @@ def _withheld_affects_component(
         for record in component_records
         for raw_id in record.physical_identity.source_primitive_ids
     }
+    # Diagnostic ablation only: native PDF path-family membership alone is
+    # not treated as a blocking relationship here. Geometric contact,
+    # snap-continuation, and upstream-proven same-face separation remain
+    # fail-closed below.
     withheld_family = _raw_path_family(withheld_raw_id)
-    if withheld_family is not None and any(
-        _raw_path_family(raw_id) == withheld_family
-        for raw_id in component_raw_ids
-    ):
-        return WALL_COMPONENT_WITHHELD_SOURCE_PATH_RELATED
+    del withheld_family, component_raw_ids
 
     for line in component_lines:
         if _segments_intersect(line, withheld_line) or _collinear_snap_continuation(
