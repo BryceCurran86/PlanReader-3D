@@ -1,0 +1,173 @@
+name: Item19B Target Physical Axis Probe
+
+on:
+  push:
+    branches: [diag/item19b-target-physical-axis]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Probe target physical axis
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateProducer,
+              _decision_scope_id,
+              _proven_filled_wall_strips,
+              _source_page_segments,
+          )
+          from pb_wall_component_completeness_authority import (
+              WallComponentCompletenessProducer,
+              WallComponentCompletenessSelector,
+              _component_sets,
+              _proven_strip_closure_exemptions,
+          )
+          from pb_wall_role_authority import WallRoleProducer,WallRoleSelector
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-target-axis-probe",
+              producer_version="1.0",
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-target-axis",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          wall_prod=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          )
+          walls=wall_prod.authority()
+          scope=next(
+              s for s in walls._scopes.values()
+              if str(s.viewport_view_type or "")=="floor_plan"
+          )
+          target_raw={"d5179i1","d5179i3"}
+          target_records=[
+              r for r in scope.records
+              if target_raw & set(r.physical_identity.source_primitive_ids)
+          ]
+          target_ids={r.wall_candidate_id for r in target_records}
+          groups=[
+              tuple(g) for g in (scope.equivalence.equivalence_groups if scope.equivalence else ())
+              if target_ids & set(g)
+          ]
+          group_ids=set().union(*(set(g) for g in groups)) if groups else target_ids
+
+          components=_component_sets(scope.records,scope.equivalence)
+          target_components=[c for c in components if group_ids & set(c)]
+          by_id={r.wall_candidate_id:r for r in scope.records}
+          rows=[]
+          for cid in sorted(group_ids):
+              r=by_id[cid]
+              rows.append({
+                  "wall":cid,
+                  "source":list(r.physical_identity.source_primitive_ids),
+                  "centerline":[list(p) for p in r.wall_candidate.centerline_pts],
+                  "end_nodes":list(r.wall_candidate.end_node_ids),
+                  "junction_types":[j.value for j in r.wall_candidate.junction_types],
+                  "representation":r.wall_candidate.representation,
+              })
+          print("TARGET_EQUIVALENCE "+json.dumps({
+              "target_records":[r.wall_candidate_id for r in target_records],
+              "groups":[list(g) for g in groups],
+              "representatives":list(scope.equivalence.representative_wall_ids if scope.equivalence else ()),
+              "members":rows,
+              "components":[list(c) for c in target_components],
+          },sort_keys=True))
+
+          page_segments,_,_,_=_source_page_segments(
+              source_producer=source,
+              published=pub,
+              source_bytes=payload,
+              page_id="54",
+              decision_scope_id=_decision_scope_id("54"),
+          )
+          strips=_proven_filled_wall_strips(page_segments)
+          relevant=[
+              {
+                  "path":s.path_index,
+                  "faces":list(s.face_raw_ids),
+                  "boundary":list(s.boundary_raw_ids),
+                  "polygon":[list(p) for p in s.polygon],
+              }
+              for s in strips
+              if set(s.face_raw_ids)&target_raw or s.path_index==5179
+          ]
+          print("TARGET_PROVEN_STRIPS "+json.dumps(relevant,sort_keys=True))
+
+          comp_prod=WallComponentCompletenessProducer.from_authorities(
+              source_visibility_producer=source,
+              physical_wall_candidate_authority=walls,
+          )
+          comp_auth=comp_prod.authority()
+          comp_rows=[]
+          for r in target_records:
+              cr=comp_auth.resolve(WallComponentCompletenessSelector(
+                  document_id=scope.document_id,
+                  revision_id=scope.revision_id,
+                  source_sha256=scope.source_sha256,
+                  snapshot_id=scope.snapshot_id,
+                  page_id=scope.page_id,
+                  decision_scope_id=scope.decision_scope_id,
+                  physical_wall_id=r.wall_candidate_id,
+              ))
+              comp_rows.append({
+                  "wall":r.wall_candidate_id,
+                  "status":cr.status.value,
+                  "reasons":list(cr.reason_codes),
+                  "component":None if cr.record is None else {
+                      "id":cr.record.component_id,
+                      "members":list(cr.record.member_wall_ids),
+                      "sources":list(cr.record.member_source_primitive_ids),
+                  }
+              })
+          print("TARGET_COMPONENT_RESULTS "+json.dumps(comp_rows,sort_keys=True))
+
+          roles=WallRoleProducer.from_source_topology(
+              physical_wall_candidate_authority=walls,
+              wall_component_completeness_authority=comp_auth,
+          )
+          role_rows=[]
+          for r in target_records:
+              rr=roles.publish(WallRoleSelector(
+                  document_id=scope.document_id,
+                  revision_id=scope.revision_id,
+                  source_sha256=scope.source_sha256,
+                  snapshot_id=scope.snapshot_id,
+                  page_id=scope.page_id,
+                  decision_scope_id=scope.decision_scope_id,
+                  physical_wall_id=r.wall_candidate_id,
+              ))
+              role_rows.append({
+                  "wall":r.wall_candidate_id,
+                  "status":rr.status.value,
+                  "reasons":list(rr.reason_codes),
+                  "role":None if rr.record is None else rr.record.role.value,
+                  "ambiguity":None if rr.record is None else rr.record.ambiguity_reason,
+              })
+          print("TARGET_ROLE_RESULTS "+json.dumps(role_rows,sort_keys=True))
+          PY
