@@ -344,3 +344,102 @@ def test_component_sets_do_not_connect_nearby_endpoints_without_same_node() -> N
     )
     groups = _component_sets((left,stem), _equivalence((left,stem)))
     assert groups == (("left",),("stem",))
+
+
+def test_physical_junction_collapse_resolves_raw_duplicate_face_ambiguity() -> None:
+    from pb_wall_component_completeness_authority import _component_sets
+
+    face_a = _junction_record(
+        "face-a",(0,0),(10,0),raw_id="d70i0",
+        node_ids=("a-start","shared"),
+        junction_types=(JunctionType.ENDPOINT,JunctionType.AMBIGUOUS),
+    )
+    face_b = _junction_record(
+        "face-b",(0,1),(10,1),raw_id="d70i1",
+        node_ids=("b-start","shared"),
+        junction_types=(JunctionType.ENDPOINT,JunctionType.AMBIGUOUS),
+    )
+    return_wall = _junction_record(
+        "return",(10,0),(10,10),raw_id="d71i0",
+        node_ids=("shared","return-end"),
+        junction_types=(JunctionType.AMBIGUOUS,JunctionType.ENDPOINT),
+    )
+    records=(face_a,face_b,return_wall)
+    eq=_equivalence(records,same=(("face-a","face-b"),))
+    groups=_component_sets(records,eq)
+    assert groups == (("face-a","face-b","return"),)
+
+
+def test_physical_junction_collapse_does_not_resolve_branching_same_wall_identity() -> None:
+    from pb_wall_component_completeness_authority import _component_sets
+
+    same_a = _junction_record(
+        "same-a",(0,0),(10,0),raw_id="d72i0",
+        node_ids=("a-start","shared"),
+        junction_types=(JunctionType.ENDPOINT,JunctionType.AMBIGUOUS),
+    )
+    same_b = _junction_record(
+        "same-b",(10,0),(10,10),raw_id="d72i1",
+        node_ids=("shared","b-end"),
+        junction_types=(JunctionType.AMBIGUOUS,JunctionType.ENDPOINT),
+    )
+    other = _junction_record(
+        "other",(10,0),(20,0),raw_id="d73i0",
+        node_ids=("shared","other-end"),
+        junction_types=(JunctionType.AMBIGUOUS,JunctionType.ENDPOINT),
+    )
+    records=(same_a,same_b,other)
+    eq=_equivalence(records,same=(("same-a","same-b"),))
+    groups=_component_sets(records,eq)
+    assert groups == (("other",),("same-a","same-b"))
+
+
+def test_physical_junction_three_noncollinear_walls_remains_unresolved() -> None:
+    from pb_wall_component_completeness_authority import _component_sets
+
+    a=_junction_record(
+        "a",(0,0),(10,0),raw_id="d74i0",
+        node_ids=("a-start","shared"),
+        junction_types=(JunctionType.ENDPOINT,JunctionType.AMBIGUOUS),
+    )
+    b=_junction_record(
+        "b",(10,0),(14,8),raw_id="d75i0",
+        node_ids=("shared","b-end"),
+        junction_types=(JunctionType.AMBIGUOUS,JunctionType.ENDPOINT),
+    )
+    c=_junction_record(
+        "c",(10,0),(6,8),raw_id="d76i0",
+        node_ids=("shared","c-end"),
+        junction_types=(JunctionType.AMBIGUOUS,JunctionType.ENDPOINT),
+    )
+    groups=_component_sets((a,b,c),_equivalence((a,b,c)))
+    assert groups == (("a",),("b",),("c",))
+
+
+def test_physical_junction_t_pattern_connects_after_same_face_collapse() -> None:
+    from pb_wall_component_completeness_authority import _component_sets
+
+    left_face_a=_junction_record(
+        "left-a",(0,0),(10,0),raw_id="d77i0",
+        node_ids=("left-start","shared"),
+        junction_types=(JunctionType.ENDPOINT,JunctionType.AMBIGUOUS),
+    )
+    left_face_b=_junction_record(
+        "left-b",(0,1),(10,1),raw_id="d77i1",
+        node_ids=("left2-start","shared"),
+        junction_types=(JunctionType.ENDPOINT,JunctionType.AMBIGUOUS),
+    )
+    right=_junction_record(
+        "right",(10,0),(20,0),raw_id="d78i0",
+        node_ids=("shared","right-end"),
+        junction_types=(JunctionType.AMBIGUOUS,JunctionType.ENDPOINT),
+    )
+    stem=_junction_record(
+        "stem",(10,0),(10,10),raw_id="d79i0",
+        node_ids=("shared","stem-end"),
+        junction_types=(JunctionType.AMBIGUOUS,JunctionType.ENDPOINT),
+    )
+    records=(left_face_a,left_face_b,right,stem)
+    eq=_equivalence(records,same=(("left-a","left-b"),))
+    groups=_component_sets(records,eq)
+    assert groups == (("left-a","left-b","right","stem"),)

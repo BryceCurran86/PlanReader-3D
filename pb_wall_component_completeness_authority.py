@@ -360,6 +360,182 @@ def _has_producer_junction_metadata(record) -> bool:
     )
 
 
+
+_PHYSICAL_JUNCTION_ANGLE_TOLERANCE_DEG = 3.0
+
+
+def _angle_delta_deg(first: float, second: float) -> float:
+    delta = abs(float(first) - float(second)) % 180.0
+    return min(delta, 180.0 - delta)
+
+
+def _endpoint_incidence(record):
+    """Yield exact producer node incidence with local edge angle.
+
+    Angles are normalized modulo 180 to match Stage-A/W3 collinearity
+    semantics.  No coordinate snapping is performed here.
+    """
+    wall = record.wall_candidate
+    points = tuple(_point(point) for point in wall.centerline_pts)
+    node_ids = tuple(getattr(wall, "end_node_ids", ()) or ())
+    if len(points) < 2 or len(node_ids) != 2:
+        return ()
+
+    def angle(first, second):
+        return (
+            math.degrees(
+                math.atan2(second[1] - first[1], second[0] - first[0])
+            )
+            % 180.0
+        )
+
+    return (
+        (str(node_ids[0]), angle(points[0], points[1])),
+        (str(node_ids[1]), angle(points[-1], points[-2])),
+    )
+
+
+def _physical_owner_map(records_by_id, equivalence) -> dict[str, str]:
+    """Map raw wall candidates to deterministic proven physical identities."""
+    owner = {wall_id: wall_id for wall_id in records_by_id}
+    if equivalence is None:
+        return owner
+
+    seen: set[str] = set()
+    for raw_group in tuple(equivalence.equivalence_groups or ()):
+        group = tuple(sorted({
+            str(wall_id)
+            for wall_id in raw_group
+            if str(wall_id) in records_by_id
+        }))
+        if len(group) < 2:
+            continue
+        if any(wall_id in seen for wall_id in group):
+            # Overlapping positive SAME groups are contradictory identity
+            # evidence.  Leave those members uncollapsed rather than inventing
+            # one transitive owner here.
+            continue
+        representatives = tuple(sorted(
+            set(group) & set(tuple(equivalence.representative_wall_ids or ()))
+        ))
+        canonical = representatives[0] if len(representatives) == 1 else group[0]
+        for wall_id in group:
+            owner[wall_id] = canonical
+            seen.add(wall_id)
+    return owner
+
+
+def _collapse_angle_cluster(angles: Sequence[float]) -> Optional[float]:
+    """Collapse duplicate face/fragment incidence of one physical wall.
+
+    A physical wall may contribute several raw candidates at one producer node.
+    They are safe to collapse only when all of their directions belong to one
+    collinear angle family.  A physical identity that itself branches at the
+    node remains unresolved.
+    """
+    values = tuple(float(value) % 180.0 for value in angles)
+    if not values:
+        return None
+    anchor = values[0]
+    if any(
+        _angle_delta_deg(anchor, value)
+        > _PHYSICAL_JUNCTION_ANGLE_TOLERANCE_DEG
+        for value in values[1:]
+    ):
+        return None
+    return anchor
+
+
+def _physical_node_is_trusted(
+    incidence_by_owner: Mapping[str, Sequence[float]],
+) -> bool:
+    """Reclassify one exact node after proven SAME-wall collapse.
+
+    This mirrors the deterministic W3 angle-group cases, but the degree is the
+    number of *physical walls*, not raw face/fragment candidates.  Irregular or
+    internally branching physical incidence stays unresolved.
+    """
+    collapsed: list[tuple[str, float]] = []
+    for owner in sorted(incidence_by_owner):
+        angle = _collapse_angle_cluster(incidence_by_owner[owner])
+        if angle is None:
+            return False
+        collapsed.append((owner, angle))
+
+    degree = len(collapsed)
+    if degree < 2:
+        return False
+
+    groups: list[list[tuple[str, float]]] = []
+    used = [False] * degree
+    for i, item in enumerate(collapsed):
+        if used[i]:
+            continue
+        group = [item]
+        used[i] = True
+        for j in range(i + 1, degree):
+            if used[j]:
+                continue
+            if (
+                _angle_delta_deg(item[1], collapsed[j][1])
+                <= _PHYSICAL_JUNCTION_ANGLE_TOLERANCE_DEG
+            ):
+                group.append(collapsed[j])
+                used[j] = True
+        groups.append(group)
+
+    # More than two distinct physical walls in one collinear direction is still
+    # degenerate after identity collapse and therefore not trusted.
+    if any(len(group) > 2 for group in groups):
+        return False
+
+    n_pairs = sum(1 for group in groups if len(group) == 2)
+    n_singles = sum(1 for group in groups if len(group) == 1)
+
+    if degree == 2:
+        return (n_pairs == 1) or (n_singles == 2)
+    if degree == 3:
+        return n_pairs == 1 and n_singles == 1
+    if degree == 4:
+        return n_pairs == 2
+    if degree >= 5:
+        return n_singles == 0 and n_pairs > 0
+    return False
+
+
+def _physical_trusted_node_owners(records_by_id, equivalence) -> dict[str, tuple[str, ...]]:
+    """Return exact producer nodes that become deterministic after SAME collapse."""
+    owner_map = _physical_owner_map(records_by_id, equivalence)
+    node_incidence: dict[str, dict[str, list[float]]] = {}
+    raw_members_by_owner: dict[str, set[str]] = {}
+
+    for wall_id, record in records_by_id.items():
+        physical_owner = owner_map[wall_id]
+        raw_members_by_owner.setdefault(physical_owner, set()).add(wall_id)
+        for node_id, angle in _endpoint_incidence(record):
+            if not node_id:
+                continue
+            node_incidence.setdefault(node_id, {}).setdefault(
+                physical_owner, []
+            ).append(angle)
+
+    trusted: dict[str, tuple[str, ...]] = {}
+    for node_id, incidence in node_incidence.items():
+        if not _physical_node_is_trusted(incidence):
+            continue
+        owners = tuple(sorted(incidence))
+        # Expand back to raw candidate ids because _component_sets' union-find
+        # is keyed by those producer records.
+        raw_ids = tuple(sorted({
+            wall_id
+            for owner in owners
+            for wall_id in raw_members_by_owner.get(owner, ())
+        }))
+        if len(raw_ids) >= 2:
+            trusted[node_id] = raw_ids
+    return trusted
+
+
 def _component_sets(records, equivalence) -> tuple[tuple[str, ...], ...]:
     by_id = {str(r.wall_candidate_id): r for r in records}
     parent = {wall_id: wall_id for wall_id in by_id}
@@ -393,6 +569,17 @@ def _component_sets(records, equivalence) -> tuple[tuple[str, ...], ...]:
     for owners in node_owners.values():
         if len(owners) < 2:
             continue
+        anchor = min(owners)
+        for wall_id in owners:
+            if wall_id != anchor:
+                union(anchor, wall_id)
+
+    # Second positive path: a raw W3 junction may be AMBIGUOUS only because
+    # several raw candidates at that exact producer node are already proven by
+    # upstream equivalence to be the same physical wall.  Reclassify incidence
+    # after SAME collapse; connect only when the physical-wall angle pattern is
+    # deterministic under the same W3 cases.
+    for owners in _physical_trusted_node_owners(by_id, equivalence).values():
         anchor = min(owners)
         for wall_id in owners:
             if wall_id != anchor:
