@@ -151,6 +151,15 @@ def _norm(value: str) -> str:
     return re.sub(r"[^a-z0-9,]+", "", str(value or "").lower())
 
 
+def _claim_norm(value: str) -> str:
+    """Normalize only presentation differences for authority agreement.
+
+    Thousands separators, punctuation and case are not semantic changes to an
+    opening-detail token. Every alphanumeric character remains significant.
+    """
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
 def _number_mm(value: str) -> Optional[int]:
     token = str(value or "").strip().lower().replace(" ", "")
     m = _DIM_TOKEN.fullmatch(token)
@@ -378,7 +387,7 @@ class OpeningDetailDefinitionProducer:
             native.status is EvidenceResolutionStatus.CORROBORATED
             and native.receipt is not None
             and native.trusted_text
-            and _norm(native.trusted_text) == _norm(word.raw_text)
+            and _claim_norm(native.trusted_text) == _claim_norm(word.raw_text)
         ):
             return OpeningDetailWordEvidence(
                 observation_id=word.observation_id,
@@ -407,7 +416,7 @@ class OpeningDetailDefinitionProducer:
             raster.status is EvidenceResolutionStatus.CORROBORATED
             and raster.record is not None
             and raster.corroborated_text
-            and _norm(raster.corroborated_text) == _norm(word.raw_text)
+            and _claim_norm(raster.corroborated_text) == _claim_norm(word.raw_text)
         ):
             return OpeningDetailWordEvidence(
                 observation_id=word.observation_id,
@@ -596,5 +605,6 @@ __all__ = [
     "OpeningDetailDefinitionRecord",
     "OpeningDetailWordEvidence",
     "_candidate",
+    "_claim_norm",
     "_dimension_candidates",
 ]
