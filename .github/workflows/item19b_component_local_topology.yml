@@ -2,7 +2,7 @@ name: Item19B Component Local Topology
 
 on:
   push:
-    branches: [gpt/item19b-component-local-topology-v1]
+    branches: [gpt/item19b-component-local-topology-main-v2]
 
 jobs:
   validate:
