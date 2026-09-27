@@ -346,17 +346,15 @@ def _component_topology_records(scope, member_wall_ids: tuple[str, ...]):
         for wall_id in group_members:
             grouped_member[wall_id] = representative
 
-    abstained = set(tuple(getattr(equivalence, "abstained_wall_ids", ()) or ()))
     selected_ids: set[str] = set()
     for wall_id in sorted(member_set):
         if wall_id in grouped_member:
             if grouped_member[wall_id] == wall_id:
                 selected_ids.add(wall_id)
             continue
-        if wall_id in abstained:
-            # No positive physical-wall identity authorizes this member for
-            # local topology. Keep the component fail-closed.
-            return ()
+        # Pairwise equivalence abstention does not invalidate a wall candidate.
+        # Retain ungrouped candidates exactly as complete-scope topology does;
+        # only a positive SAME group authorizes collapsing multiple faces.
         selected_ids.add(wall_id)
 
     return tuple(by_id[wall_id] for wall_id in sorted(selected_ids))

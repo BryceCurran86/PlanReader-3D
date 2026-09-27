@@ -184,7 +184,7 @@ def test_positive_same_group_uses_same_canonical_representative_as_callout(
     assert max(left,right) not in selected_ids
 
 
-def test_ungrouped_abstained_identity_keeps_component_fail_closed(
+def test_ungrouped_equivalence_abstention_does_not_delete_wall_candidate(
     tmp_path: Path,
 ) -> None:
     path=tmp_path/"two-room-abstained.pdf"
@@ -198,7 +198,10 @@ def test_ungrouped_abstained_identity_keeps_component_fail_closed(
             abstained_wall_ids=(blocked,),
         ),
     )
-    authority=_FakeCompletenessAuthority(
-        member_wall_ids=tuple(r.wall_candidate_id for r in scope.records)
+    selected=_component_topology_records(
+        scope,
+        tuple(r.wall_candidate_id for r in scope.records),
     )
-    assert _derive_component_local_records(scope,authority)=={}
+    assert {r.wall_candidate_id for r in selected} == {
+        r.wall_candidate_id for r in scope.records
+    }
