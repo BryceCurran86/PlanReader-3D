@@ -1,0 +1,146 @@
+name: Item19B Component Topology V2
+
+on:
+  push:
+    branches: [gpt/item19b-component-topology-v2]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+          pip install rapidocr
+      - name: Focused authority tests
+        run: |
+          PYTHONPATH=. pytest -q             tests/test_wall_component_completeness_authority.py             tests/test_source_wall_topology_component_authority_v1.py             tests/test_source_wall_topology_authority_v1.py             tests/test_wall_finish_face_binding_authority_v1.py
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2             'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf'             -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Real KSTVET component topology and Item19B role shadow
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, time
+          from pathlib import Path
+
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_wall_component_completeness_authority import WallComponentCompletenessProducer
+          from pb_wall_role_authority import WallRoleProducer, WallRoleSelector
+          from pb_wall_finish_callout_wall_authority import WallFinishCalloutWallProducer
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-component-topology-v2-real",
+              producer_version="1.0",
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-component-topology-v2",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+
+          start=time.perf_counter()
+          wall_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          )
+          walls=wall_producer.authority()
+          completeness_producer=WallComponentCompletenessProducer.from_source_visibility_producer(
+              source,page_ids=("54",)
+          )
+          completeness=completeness_producer.authority()
+          roles=WallRoleProducer.from_source_topology(
+              physical_wall_candidate_authority=walls,
+              component_completeness_authority=completeness,
+          )
+          callouts=WallFinishCalloutWallProducer.from_source_visibility_producer(
+              source,page_ids=("54",)
+          )
+          elapsed=time.perf_counter()-start
+
+          comp_rows=[]
+          for result in completeness_producer.published_results():
+              rec=result.record
+              if rec is None:
+                  continue
+              comp_rows.append({
+                  "component":rec.component_id,
+                  "viewport":rec.viewport_id,
+                  "members":list(rec.member_wall_ids),
+                  "positive_groups":[list(g) for g in rec.positive_equivalence_groups],
+                  "checked_withheld":len(rec.checked_withheld_observation_ids),
+                  "source_scope_complete":rec.source_scope_complete,
+                  "reasons":list(rec.reason_codes),
+              })
+          print("ITEM19B_COMPONENT_COMPLETENESS "+json.dumps(comp_rows,sort_keys=True))
+          print("ITEM19B_COMPONENT_COMPLETENESS_COUNT",len(comp_rows))
+
+          role_rows=[]
+          for scope in walls._scopes.values():
+              if str(scope.viewport_view_type or "")!="floor_plan":
+                  continue
+              for record in scope.records:
+                  selector=WallRoleSelector(
+                      document_id=scope.document_id,
+                      revision_id=scope.revision_id,
+                      source_sha256=scope.source_sha256,
+                      snapshot_id=scope.snapshot_id,
+                      page_id=scope.page_id,
+                      decision_scope_id=scope.decision_scope_id,
+                      physical_wall_id=record.wall_candidate_id,
+                  )
+                  result=roles.publish(selector)
+                  if result.status is EvidenceResolutionStatus.CORROBORATED and result.record:
+                      role_rows.append({
+                          "viewport":scope.viewport_id,
+                          "wall":record.wall_candidate_id,
+                          "role":result.record.role.value,
+                          "evidence":list(result.record.corroborating_evidence_ids),
+                      })
+          print("ITEM19B_COMPONENT_ROLES "+json.dumps(role_rows,sort_keys=True))
+          print("ITEM19B_COMPONENT_ROLE_COUNT",len(role_rows))
+
+          binding_rows=[]
+          for result in callouts.published_results():
+              for b in result.bindings:
+                  if b.trade_scope_id not in {"internal_plaster","internal_paint"}:
+                      continue
+                  selector=WallRoleSelector(
+                      document_id=b.document_id,
+                      revision_id=b.revision_id,
+                      source_sha256=b.source_sha256,
+                      snapshot_id=b.snapshot_id,
+                      page_id=b.page_id,
+                      decision_scope_id=b.physical_wall_decision_scope_id,
+                      physical_wall_id=b.physical_wall_id,
+                  )
+                  rr=roles.publish(selector)
+                  binding_rows.append({
+                      "trade":b.trade_scope_id,
+                      "sequence":[
+                          b.source_execution_sequence_start,
+                          b.source_execution_sequence_end,
+                      ],
+                      "viewport":b.viewport_id,
+                      "wall":b.physical_wall_id,
+                      "group":list(b.equivalence_group_wall_ids),
+                      "role_status":rr.status.value,
+                      "role":rr.record.role.value if rr.record else None,
+                      "role_reasons":list(rr.reason_codes),
+                  })
+          print("ITEM19B_INTERNAL_CALLOUT_ROLES "+json.dumps(binding_rows,sort_keys=True))
+          print("ITEM19B_COMPONENT_TOPOLOGY_ELAPSED_SEC",round(elapsed,3))
+          PY
