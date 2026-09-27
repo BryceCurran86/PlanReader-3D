@@ -1,0 +1,117 @@
+name: Item19B Path Only Ablation Probe
+
+on:
+  push:
+    branches: [diag/item19b-path-only-ablation]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Probe target role after path-only ablation
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_wall_component_completeness_authority import (
+              WallComponentCompletenessProducer,
+              WallComponentCompletenessSelector,
+          )
+          from pb_wall_role_authority import WallRoleProducer, WallRoleSelector
+
+          target_raw={
+              "d4763i0","d4772i0","d5179i1","d5179i3","d5214i0","d5215i0"
+          }
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-path-ablation-probe",
+              producer_version="1.0",
+          )
+          source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-path-ablation",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          walls=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          ).authority()
+          components=WallComponentCompletenessProducer.from_authorities(
+              source_visibility_producer=source,
+              physical_wall_candidate_authority=walls,
+          )
+          component_auth=components.authority()
+          roles=WallRoleProducer.from_source_topology(
+              physical_wall_candidate_authority=walls,
+              wall_component_completeness_authority=component_auth,
+          )
+
+          rows=[]
+          for scope in walls._scopes.values():
+              if str(scope.viewport_id or "")!="view_p54_4":
+                  continue
+              matching=[]
+              for rec in scope.records:
+                  raw=set(rec.physical_identity.source_primitive_ids)
+                  if raw & target_raw:
+                      matching.append(rec.wall_candidate_id)
+              expanded=set(matching)
+              for group in tuple(scope.equivalence.equivalence_groups or ()):
+                  if expanded & set(group):
+                      expanded.update(group)
+              for wall_id in sorted(expanded):
+                  rec=next((r for r in scope.records if r.wall_candidate_id==wall_id),None)
+                  if rec is None:
+                      continue
+                  comp=component_auth.resolve(WallComponentCompletenessSelector(
+                      document_id=scope.document_id,
+                      revision_id=scope.revision_id,
+                      source_sha256=scope.source_sha256,
+                      snapshot_id=scope.snapshot_id,
+                      page_id=scope.page_id,
+                      decision_scope_id=scope.decision_scope_id,
+                      physical_wall_id=wall_id,
+                  ))
+                  role=roles.publish(WallRoleSelector(
+                      document_id=scope.document_id,
+                      revision_id=scope.revision_id,
+                      source_sha256=scope.source_sha256,
+                      snapshot_id=scope.snapshot_id,
+                      page_id=scope.page_id,
+                      decision_scope_id=scope.decision_scope_id,
+                      physical_wall_id=wall_id,
+                  ))
+                  rows.append({
+                      "wall":wall_id,
+                      "source_primitives":list(rec.physical_identity.source_primitive_ids),
+                      "component_status":comp.status.value,
+                      "component_reasons":list(comp.reason_codes),
+                      "component_members":list(comp.record.member_wall_ids) if comp.record else [],
+                      "role_status":role.status.value,
+                      "role_reasons":list(role.reason_codes),
+                      "role":role.record.role.value if role.record else None,
+                      "is_representative":wall_id in set(scope.equivalence.representative_wall_ids or ()),
+                  })
+          print("ITEM19B_PATH_ABLATION_TARGET "+json.dumps(rows,sort_keys=True))
+          PY
