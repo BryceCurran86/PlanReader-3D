@@ -63,7 +63,7 @@ def test_door_detail_definition_is_type_metadata_not_count() -> None:
     assert result["height_mm"] == 2100
     # Hinge count is not an opening count and does not participate.
     assert {w.observation_id for w in result["required_words"]} == {
-        "w", "x", "h", "mat", "sub", "fam"
+        "w", "h", "mat", "sub", "fam"
     }
 
 
