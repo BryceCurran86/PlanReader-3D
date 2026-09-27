@@ -89,6 +89,37 @@ def _page(app: Any, workspace_id: int, *, page_id: int = 0, page_label: str = ""
     return dict(rows[0]) if rows else None
 
 
+class _SummaryLookups:
+    """Read-only lookups shared by one render of the source summary.
+
+    The summary used to reload and re-parse the whole provenance map for every
+    row, and to repeat the same page and Takeoff Studio lookups. One render now
+    loads the map once and runs each distinct lookup once, through the same
+    queries. Each render builds a new instance, so nothing outlives it.
+    """
+
+    def __init__(self, app: Any, workspace_id: int):
+        self.app = app
+        self.workspace_id = int(workspace_id)
+        self.provenance = _load_provenance(app, self.workspace_id)
+        self._pages: Dict[Tuple[int, str], Optional[Dict[str, Any]]] = {}
+        self._studio_states: Dict[int, Any] = {}
+
+    def page(self, *, page_id: int = 0, page_label: str = "") -> Optional[Dict[str, Any]]:
+        # _page looks up by id when one is given, otherwise by label.
+        key = (int(page_id), "") if page_id else (0, str(page_label or ""))
+        if key not in self._pages:
+            self._pages[key] = _page(self.app, self.workspace_id, page_id=key[0], page_label=key[1])
+        found = self._pages[key]
+        return dict(found) if found is not None else None
+
+    def studio_state(self, page_id: int) -> Any:
+        if page_id not in self._studio_states:
+            self._studio_states[page_id] = _json(
+                self.app.workspace_setting(self.workspace_id, f"takeoff_studio_v1211_page_{page_id}", "{}"), {})
+        return self._studio_states[page_id]
+
+
 def _points_from_pixels(points: Sequence[Any], page: Dict[str, Any]) -> List[Dict[str, float]]:
     width = _num(page.get("width_px")); height = _num(page.get("height_px"))
     if width <= 0 or height <= 0:
@@ -113,15 +144,18 @@ def _bbox_percent(bbox: Sequence[Any], page: Dict[str, Any], mode: str = "xyxy")
     return _points_from_pixels([[x0,y0],[x1,y0],[x1,y1],[x0,y1]], page)
 
 
-def _studio_source(app: Any, workspace_id: int, source_reference: str) -> List[Dict[str, Any]]:
+def _studio_source(app: Any, workspace_id: int, source_reference: str, *, lookups: Optional[_SummaryLookups] = None) -> List[Dict[str, Any]]:
     match = re.search(r"PB Takeoff Studio v1\.2\.11\s*·\s*page:(\d+)\s*·\s*area:([^·]+)", source_reference)
     if not match:
         return []
     page_id, area_id = int(match.group(1)), match.group(2).strip()
-    page = _page(app, workspace_id, page_id=page_id)
+    page = lookups.page(page_id=page_id) if lookups else _page(app, workspace_id, page_id=page_id)
     if not page:
         return []
-    state = _json(app.workspace_setting(workspace_id, f"takeoff_studio_v1211_page_{page_id}", "{}"), {})
+    if lookups:
+        state = lookups.studio_state(page_id)
+    else:
+        state = _json(app.workspace_setting(workspace_id, f"takeoff_studio_v1211_page_{page_id}", "{}"), {})
     area = next((dict(item) for item in state.get("areas") or [] if str(item.get("id")) == area_id), None)
     if not area:
         return [{"page_id": page_id, "page_label": page.get("page_label"), "source_kind": "Takeoff Studio", "points": [], "evidence_text": source_reference}]
@@ -183,14 +217,16 @@ def _measurement_source(app: Any, workspace_id: int, source_reference: str) -> L
     }]
 
 
-def provenance_for_row(app: Any, workspace_id: int, row: Dict[str, Any]) -> Dict[str, Any]:
+def provenance_for_row(app: Any, workspace_id: int, row: Dict[str, Any], *, lookups: Optional[_SummaryLookups] = None) -> Dict[str, Any]:
     ref = str(row.get("source_reference") or "")
-    saved = _load_provenance(app, int(workspace_id)).get(ref)
+    saved = (lookups.provenance if lookups else _load_provenance(app, int(workspace_id))).get(ref)
     if isinstance(saved, dict):
         return dict(saved)
-    sources = _studio_source(app, workspace_id, ref) or _zone_source(app, workspace_id, ref) or _measurement_source(app, workspace_id, ref)
+    sources = (_studio_source(app, workspace_id, ref, lookups=lookups) or _zone_source(app, workspace_id, ref)
+               or _measurement_source(app, workspace_id, ref))
     if not sources:
-        page = _page(app, workspace_id, page_label=str(row.get("source_page") or ""))
+        label = str(row.get("source_page") or "")
+        page = lookups.page(page_label=label) if lookups else _page(app, workspace_id, page_label=label)
         if page:
             sources = [{
                 "page_id": int(page["id"]), "page_label": str(page.get("page_label") or ""),
@@ -252,13 +288,15 @@ def _row_label(row: Dict[str, Any]) -> str:
     return f"#{int(row.get('id') or 0)} · {row.get('section') or ''} · {row.get('location') or row.get('element') or ''} · {_num(row.get('quantity')):.2f} {row.get('unit') or ''}"
 
 
-def source_summary(app: Any, workspace_id: int, row: Dict[str, Any]) -> Tuple[str, str]:
-    provenance = provenance_for_row(app, int(workspace_id), row)
+def source_summary(app: Any, workspace_id: int, row: Dict[str, Any], *, lookups: Optional[_SummaryLookups] = None) -> Tuple[str, str]:
+    provenance = provenance_for_row(app, int(workspace_id), row, lookups=lookups)
     sources = provenance.get("sources") or []
     pages = _unique(source.get("page_label") for source in sources)
     geometry = []
     for source in sources:
-        if _source_points(source, _page(app, workspace_id, page_id=int(source.get("page_id") or 0)) or {}): geometry.append("polygon")
+        page_id = int(source.get("page_id") or 0)
+        page = lookups.page(page_id=page_id) if lookups else _page(app, workspace_id, page_id=page_id)
+        if _source_points(source, page or {}): geometry.append("polygon")
         elif source.get("text_bbox") or source.get("bbox") or source.get("boundary_bbox") or source.get("unit_bbox"): geometry.append("box")
         else: geometry.append("page")
     return " | ".join(pages) or str(row.get("source_page") or ""), " + ".join(_unique(geometry)) or "reference"
@@ -404,8 +442,9 @@ def review_panel(app: Any, workspace: Dict[str, Any]) -> None:
     if not rows:
         app.st.info("No take-off rows yet."); return
     summary = []
+    lookups = _SummaryLookups(app, workspace_id)
     for row in rows:
-        pages, geometry = source_summary(app, workspace_id, row)
+        pages, geometry = source_summary(app, workspace_id, row, lookups=lookups)
         summary.append({"ID": int(row["id"]), "Element": row.get("element"), "Location": row.get("location"), "Qty": row.get("quantity"), "Unit": row.get("unit"), "Source page(s)": pages, "Source geometry": geometry})
     app.st.dataframe(app.pd.DataFrame(summary), hide_index=True, use_container_width=True, height=min(420, 70 + len(summary) * 30))
 
