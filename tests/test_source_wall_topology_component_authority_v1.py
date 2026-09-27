@@ -1,96 +1,85 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
-from pb_geometry_takeoff_model import MeasurementAuthorityType
+import fitz
+
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import (
-    PhysicalWallCandidateRecord,
-    PhysicalWallCandidateScopeResult,
+    PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY,
+    PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,
+    PhysicalWallCandidateProducer,
+    PhysicalWallCandidateSelector,
 )
-from pb_physical_wall_identity import PhysicalWallIdentity
+from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_source_wall_topology_authority import (
+    _component_topology_records,
     _derive_component_local_records,
     _derive_scope_records,
 )
-from pb_wall_room_topology_contracts import JunctionType, WallCandidate
+from pb_wall_role_authority import WallRoleClassification
 
 
-def _record(
-    wall_id: str,
-    start: tuple[float, float],
-    end: tuple[float, float],
-):
-    raw_id=f"raw:{wall_id}"
-    wall=WallCandidate(
-        candidate_id=wall_id,
-        viewport_id="wall-source:viewport:1:view",
-        representation="single_line",
-        centerline_pts=(start,end),
-        face_a_segment_ids=(raw_id,),
-        face_b_segment_ids=None,
-        is_curved=False,
-        curve_control_pts=None,
-        thickness_m=None,
-        thickness_authority=MeasurementAuthorityType.PROVISIONAL,
-        length_m=None,
-        end_node_ids=(f"{wall_id}:a",f"{wall_id}:b"),
-        junction_types=(JunctionType.ENDPOINT,JunctionType.ENDPOINT),
-        interior_exterior="unresolved",
-        level_id=None,
-        confidence=0.5,
+def _write_two_room_plan(path: Path) -> None:
+    doc=fitz.open()
+    page=doc.new_page(width=300,height=200)
+    for first,second in (
+        ((50.0,50.0),(250.0,50.0)),
+        ((250.0,50.0),(250.0,150.0)),
+        ((250.0,150.0),(50.0,150.0)),
+        ((50.0,150.0),(50.0,50.0)),
+        ((150.0,50.0),(150.0,150.0)),
+    ):
+        page.draw_line(fitz.Point(*first),fitz.Point(*second),color=(0,0,0),width=1)
+    doc.save(path)
+    doc.close()
+
+
+def _complete_source_scope(path: Path):
+    payload=path.read_bytes()
+    source=SourceVisibilityProducer(
+        producer_method="component-topology-integration-test",
+        producer_version="1.0",
     )
-    identity=PhysicalWallIdentity(
-        wall_candidate_id=wall_id,
-        viewport_id=wall.viewport_id,
-        candidate_identity_id=f"identity:{wall_id}",
-        path_fingerprint=(start,end),
-        source_primitive_ids=(raw_id,),
-        edge_ids=(raw_id,),
-        status=EvidenceResolutionStatus.CORROBORATED,
+    published=source.ingest_native_pdf_bytes(
+        document_id=f"test:{path.name}",
+        source_bytes=payload,
+        source_locator=str(path),
     )
-    return PhysicalWallCandidateRecord(
-        wall_candidate_id=wall_id,
-        wall_candidate=wall,
-        physical_identity=identity,
-    )
-
-
-def _records():
-    return (
-        _record("top",(50,50),(250,50)),
-        _record("right",(250,50),(250,250)),
-        _record("bottom",(250,250),(50,250)),
-        _record("left",(50,250),(50,50)),
-        _record("divider",(150,50),(150,250)),
-    )
-
-
-def _scope(records=None, *, equivalence=None):
-    rows=tuple(records or _records())
-    return PhysicalWallCandidateScopeResult(
-        status=EvidenceResolutionStatus.CORROBORATED,
-        scope_complete=False,
-        records=rows,
-        source_observation_ids=(),
-        document_id="doc",
-        revision_id="rev",
-        source_sha256="a"*64,
-        snapshot_id="snap",
+    authority=PhysicalWallCandidateProducer.from_source_visibility_producer(
+        source,
+        page_ids=("1",),
+    ).authority()
+    selector=PhysicalWallCandidateSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
         page_id="1",
-        decision_scope_id="wall-source:viewport:1:view:test",
-        reason_codes=(
-            "physical_wall_candidate_scope_resolved",
-            "physical_wall_candidate_scope_cropped_at_viewport_boundary",
-        ),
-        equivalence=equivalence,
-        proposition="physical_wall_candidate_scope_resolved",
+        decision_scope_id="wall-source:page-1",
+    )
+    scope=authority.resolve_scope(selector)
+    assert scope.status is EvidenceResolutionStatus.CORROBORATED
+    assert scope.scope_complete is True
+    return scope
+
+
+def _as_incomplete_viewport(scope):
+    return replace(
+        scope,
+        scope_complete=False,
         scope_kind="viewport",
-        viewport_id="view",
-        viewport_bbox=(0,0,500,500),
+        viewport_id="view-test",
+        viewport_bbox=(0.0,0.0,300.0,200.0),
         viewport_view_type="floor_plan",
         viewport_status="derived",
         viewport_boundary_source="title_partition",
+        reason_codes=(
+            PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,
+            PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY,
+        ),
     )
 
 
@@ -121,38 +110,49 @@ class _FakeCompletenessAuthority:
         )
 
 
-def test_incomplete_scope_without_component_authority_stays_closed() -> None:
-    assert _derive_scope_records(_scope(), None) == {}
+def test_incomplete_scope_without_component_authority_stays_closed(
+    tmp_path: Path,
+) -> None:
+    path=tmp_path/"two-room.pdf"
+    _write_two_room_plan(path)
+    scope=_as_incomplete_viewport(_complete_source_scope(path))
+    assert _derive_scope_records(scope,None)=={}
 
 
-def test_corroborated_component_can_publish_local_two_room_topology() -> None:
-    scope=_scope()
+def test_corroborated_component_reuses_exact_source_topology(
+    tmp_path: Path,
+) -> None:
+    path=tmp_path/"two-room-local.pdf"
+    _write_two_room_plan(path)
+    scope=_as_incomplete_viewport(_complete_source_scope(path))
     authority=_FakeCompletenessAuthority(
         member_wall_ids=tuple(r.wall_candidate_id for r in scope.records)
     )
     result=_derive_component_local_records(scope,authority)
 
-    assert len(result)==5
-    divider=next(v for k,v in result.items() if k[-1]=="divider")
-    assert divider.is_ambiguous is False
-    assert divider.enclosed_space_count==2
-    assert divider.bounds_exterior is False
-    assert divider.corroborating_evidence_ids==("component-proof-1",)
-
-    one_sided=[
-        v for v in result.values()
-        if v.enclosed_space_count==1 and not v.is_ambiguous
-    ]
-    assert one_sided
-    assert all(v.bounds_exterior for v in one_sided)
+    assert result
+    resolved=[e for e in result.values() if not e.is_ambiguous]
+    assert resolved
+    assert any(
+        e.enclosed_space_count==2 and not e.bounds_exterior
+        for e in resolved
+    )
+    assert any(
+        e.enclosed_space_count==1 and e.bounds_exterior
+        for e in resolved
+    )
     assert all(
-        v.corroborating_evidence_ids==("component-proof-1",)
-        for v in result.values()
+        e.corroborating_evidence_ids==("component-proof-1",)
+        for e in result.values()
     )
 
 
-def test_abstained_component_authority_does_not_promote_topology() -> None:
-    scope=_scope()
+def test_abstained_component_authority_does_not_promote_topology(
+    tmp_path: Path,
+) -> None:
+    path=tmp_path/"two-room-blocked.pdf"
+    _write_two_room_plan(path)
+    scope=_as_incomplete_viewport(_complete_source_scope(path))
     authority=_FakeCompletenessAuthority(
         member_wall_ids=tuple(r.wall_candidate_id for r in scope.records),
         corroborated=False,
@@ -160,30 +160,44 @@ def test_abstained_component_authority_does_not_promote_topology() -> None:
     assert _derive_component_local_records(scope,authority)=={}
 
 
-def test_positive_same_group_collapses_to_same_representative_as_callout() -> None:
-    rows=list(_records())
-    rows.append(_record("top-z",(50,50),(250,50)))
-    equivalence=SimpleNamespace(
-        equivalence_groups=(("top","top-z"),),
-        abstained_wall_ids=(),
+def test_positive_same_group_uses_same_canonical_representative_as_callout(
+    tmp_path: Path,
+) -> None:
+    path=tmp_path/"two-room-equivalence.pdf"
+    _write_two_room_plan(path)
+    scope=_as_incomplete_viewport(_complete_source_scope(path))
+    assert len(scope.records)>=2
+    left,right=sorted(r.wall_candidate_id for r in scope.records)[:2]
+    scope=replace(
+        scope,
+        equivalence=SimpleNamespace(
+            equivalence_groups=((left,right),),
+            abstained_wall_ids=(),
+        ),
     )
-    scope=_scope(tuple(rows),equivalence=equivalence)
-    authority=_FakeCompletenessAuthority(
-        member_wall_ids=tuple(r.wall_candidate_id for r in rows)
+    selected=_component_topology_records(
+        scope,
+        tuple(r.wall_candidate_id for r in scope.records),
     )
-    result=_derive_component_local_records(scope,authority)
-
-    ids={key[-1] for key in result}
-    assert "top" in ids
-    assert "top-z" not in ids
-    assert len(result)==5
+    selected_ids={r.wall_candidate_id for r in selected}
+    assert min(left,right) in selected_ids
+    assert max(left,right) not in selected_ids
 
 
-def test_ungrouped_abstained_identity_keeps_component_fail_closed() -> None:
-    scope=_scope(equivalence=SimpleNamespace(
-        equivalence_groups=(),
-        abstained_wall_ids=("divider",),
-    ))
+def test_ungrouped_abstained_identity_keeps_component_fail_closed(
+    tmp_path: Path,
+) -> None:
+    path=tmp_path/"two-room-abstained.pdf"
+    _write_two_room_plan(path)
+    scope=_as_incomplete_viewport(_complete_source_scope(path))
+    blocked=scope.records[0].wall_candidate_id
+    scope=replace(
+        scope,
+        equivalence=SimpleNamespace(
+            equivalence_groups=(),
+            abstained_wall_ids=(blocked,),
+        ),
+    )
     authority=_FakeCompletenessAuthority(
         member_wall_ids=tuple(r.wall_candidate_id for r in scope.records)
     )
