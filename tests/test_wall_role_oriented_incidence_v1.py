@@ -207,3 +207,44 @@ def test_r12_mixed_interval_roles_do_not_collapse_to_any_external_or_internal(
     assert target["role_status"] is EvidenceResolutionStatus.ABSTAINED, target
     assert target["role"] is None, target
     assert "wall_role_mixed_interval_profile" in target["reasons"], target
+
+
+
+def _write_two_cell_table(path: Path) -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=320, height=220)
+    # Deliberately wall-like grid geometry, but explicit source semantics say
+    # this is a schedule/table, not a building floor plan.
+    page.insert_text((95.0, 24.0), "WINDOW SCHEDULE", fontsize=12)
+    for first, second in (
+        ((40.0, 40.0), (280.0, 40.0)),
+        ((280.0, 40.0), (280.0, 180.0)),
+        ((280.0, 180.0), (40.0, 180.0)),
+        ((40.0, 180.0), (40.0, 40.0)),
+        ((160.0, 40.0), (160.0, 180.0)),
+    ):
+        page.draw_line(
+            fitz.Point(*first),
+            fitz.Point(*second),
+            color=(0, 0, 0),
+            width=1,
+        )
+    page.insert_text((70.0, 95.0), "TYPE", fontsize=9)
+    page.insert_text((190.0, 95.0), "SIZE", fontsize=9)
+    doc.save(path)
+    doc.close()
+
+
+def test_r06_two_cell_schedule_geometry_cannot_mint_building_wall_role(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "r06-window-schedule.pdf"
+    _write_two_cell_table(path)
+    rows = _resolved_roles(path)
+
+    assert rows
+    assert all(
+        row["role_status"] is EvidenceResolutionStatus.ABSTAINED
+        and row["role"] is None
+        for row in rows
+    ), rows
