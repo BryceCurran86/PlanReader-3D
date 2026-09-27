@@ -449,7 +449,7 @@ def _topology_physical_records(scope):
             SimpleNamespace(
                 wall_candidate_id=owner_id,
                 wall_candidate=owner_record.wall_candidate,
-                physical_identity=owner_record.physical_identity,
+                physical_identity=getattr(owner_record, "physical_identity", None),
                 _topology_member_records=member_records,
                 _topology_member_ids=members,
             )
@@ -466,7 +466,7 @@ def _topology_physical_records(scope):
             SimpleNamespace(
                 wall_candidate_id=wall_id,
                 wall_candidate=record.wall_candidate,
-                physical_identity=record.physical_identity,
+                physical_identity=getattr(record, "physical_identity", None),
                 _topology_member_records=(record,),
                 _topology_member_ids=(wall_id,),
             )
@@ -484,6 +484,11 @@ def _topology_physical_records(scope):
         tuple(sorted(physical_records, key=lambda record: record.wall_candidate_id)),
         rejected,
     )
+
+
+def _topology_representative_records(scope):
+    """Backward-compatible test/debug alias for physical topology grouping."""
+    return _topology_physical_records(scope)
 
 
 def _connected_record_components(records):
