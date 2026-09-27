@@ -1,0 +1,155 @@
+name: Item19B Component Blocker Fast
+
+on:
+  push:
+    branches: [diag/item19b-component-blocker-fast]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install minimal project deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Run fast blocker attribution
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, hashlib, fitz
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_physical_wall_candidate_authority import (
+              _authenticated_viewports,
+              _decision_scope_id,
+              _source_page_segments,
+          )
+          from pb_viewport_segmentation import assign_bbox_to_viewport
+          from pb_wall_component_completeness_authority import (
+              _component_sets,
+              _positive_same_separations,
+              _observation_line,
+              _withheld_affects_component,
+          )
+          from scripts.item19b_kstvet_callout_wall_fast_shadow import (
+              _callouts,
+              _scope_for_viewport,
+              PAGE_ID,
+          )
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-fast-component-blocker",
+              producer_version="1.0",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-fast-component-blocker",
+              source_bytes=payload,
+              source_locator="sha256://"+hashlib.sha256(payload).hexdigest(),
+              page_ids=(PAGE_ID,),
+          )
+          page_scope_id=_decision_scope_id(PAGE_ID)
+          page_segments,_,pw,ph=_source_page_segments(
+              source_producer=source,
+              published=published,
+              source_bytes=payload,
+              page_id=PAGE_ID,
+              decision_scope_id=page_scope_id,
+          )
+          pdf=fitz.open(stream=payload,filetype="pdf")
+          page=pdf.load_page(int(PAGE_ID)-1)
+          allv,eligible=_authenticated_viewports(page,page_number=int(PAGE_ID))
+          callouts=_callouts(source,published)
+          target_callout=next(c for c in callouts if c["target"]=="internal_ground_plan")
+          viewport=assign_bbox_to_viewport(target_callout["bbox"],eligible,allow_derived=True)
+          scope=_scope_for_viewport(
+              source=source,
+              published=published,
+              payload=payload,
+              page_segments=page_segments,
+              page_width=pw,
+              page_height=ph,
+              all_viewports=allv,
+              eligible=eligible,
+              viewport=viewport,
+          )
+          print("FAST_SCOPE "+json.dumps({
+              "viewport":scope.viewport_id,
+              "complete":scope.scope_complete,
+              "reasons":list(scope.reason_codes),
+              "records":len(scope.records),
+              "boundary_obs":list(scope.scope_boundary_observation_ids),
+              "ambiguous_obs":list(scope.ambiguous_source_observation_ids),
+              "reps":list(scope.equivalence.representative_wall_ids if scope.equivalence else ()),
+              "same_groups":[list(g) for g in (scope.equivalence.equivalence_groups if scope.equivalence else ())],
+          },sort_keys=True))
+
+          vis=source.authority()
+          by_id={str(r.wall_candidate_id):r for r in scope.records}
+          components=_component_sets(scope.records,scope.equivalence)
+          same_seps=_positive_same_separations(by_id,scope.equivalence)
+          withheld_ids=tuple(sorted(set(scope.scope_boundary_observation_ids)|set(scope.ambiguous_source_observation_ids)))
+          withheld=[]
+          for oid in withheld_ids:
+              rr=vis.resolve_visible(ObservationSelector(
+                  document_id=scope.document_id,
+                  revision_id=scope.revision_id,
+                  source_sha256=scope.source_sha256,
+                  snapshot_id=scope.snapshot_id,
+                  observation_id=oid,
+              ))
+              obs=rr.observation
+              line=_observation_line(obs) if (rr.status is EvidenceResolutionStatus.CORROBORATED and obs is not None) else None
+              withheld.append({
+                  "oid":oid,
+                  "raw":str(getattr(obs,"source_primitive_ref","") or "") if obs else "",
+                  "geometry":None if line is None else list(line),
+                  "line":line,
+              })
+
+          rows=[]
+          for members in components:
+              recs=tuple(by_id[w] for w in members)
+              blocker=None
+              for w in withheld:
+                  if w["line"] is None:
+                      blocker={"reason":"unreplayable","oid":w["oid"],"raw":w["raw"]}
+                      break
+                  reason=_withheld_affects_component(
+                      withheld_line=w["line"],
+                      withheld_raw_id=w["raw"],
+                      component_records=recs,
+                      known_same_separations=same_seps,
+                  )
+                  if reason is not None:
+                      blocker={
+                          "reason":reason,
+                          "oid":w["oid"],
+                          "raw":w["raw"],
+                          "geometry":w["geometry"],
+                      }
+                      break
+              rows.append({
+                  "members":list(members),
+                  "sources":{r.wall_candidate_id:list(r.physical_identity.source_primitive_ids) for r in recs},
+                  "blocker":blocker,
+              })
+          print("FAST_COMPONENT_BLOCKERS "+json.dumps(rows,sort_keys=True))
+          print("FAST_WITHHELD "+json.dumps([{k:v for k,v in w.items() if k!="line"} for w in withheld],sort_keys=True))
+          pdf.close()
+          PY
