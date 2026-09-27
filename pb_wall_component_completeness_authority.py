@@ -41,6 +41,7 @@ from pb_physical_wall_candidate_authority import (
 from pb_physical_wall_identity import PhysicalEquivalenceClass
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_wall_room_topology_contracts import JunctionType
 from pb_wall_room_topology_stage_a import DEFAULT_GAP_SNAP_TOLERANCE_PT
 
 
@@ -319,6 +320,46 @@ def _proven_strip_closure_exemptions(
     return frozenset(exempt)
 
 
+_TRUSTED_COMPONENT_JUNCTION_TYPES = frozenset(
+    {
+        JunctionType.COLLINEAR_CONTINUATION,
+        JunctionType.L_CORNER,
+        JunctionType.T_JUNCTION,
+        JunctionType.X_CROSSING,
+        JunctionType.MULTI_WAY,
+    }
+)
+
+
+def _trusted_component_nodes(record) -> tuple[str, ...]:
+    wall = record.wall_candidate
+    node_ids = tuple(getattr(wall, "end_node_ids", ()) or ())
+    junction_types = tuple(getattr(wall, "junction_types", ()) or ())
+    if len(node_ids) != 2 or len(junction_types) != 2:
+        return ()
+    result = []
+    for node_id, junction_type in zip(node_ids, junction_types):
+        try:
+            kind = (
+                junction_type
+                if isinstance(junction_type, JunctionType)
+                else JunctionType(str(junction_type))
+            )
+        except ValueError:
+            continue
+        if kind in _TRUSTED_COMPONENT_JUNCTION_TYPES and str(node_id):
+            result.append(str(node_id))
+    return tuple(result)
+
+
+def _has_producer_junction_metadata(record) -> bool:
+    wall = record.wall_candidate
+    return (
+        len(tuple(getattr(wall, "end_node_ids", ()) or ())) == 2
+        and len(tuple(getattr(wall, "junction_types", ()) or ())) == 2
+    )
+
+
 def _component_sets(records, equivalence) -> tuple[tuple[str, ...], ...]:
     by_id = {str(r.wall_candidate_id): r for r in records}
     parent = {wall_id: wall_id for wall_id in by_id}
@@ -334,16 +375,36 @@ def _component_sets(records, equivalence) -> tuple[tuple[str, ...], ...]:
         if ra != rb:
             parent[max(ra, rb)] = min(ra, rb)
 
-    # Upstream positive SAME groups are physical connectivity authority.
+    # Upstream positive SAME groups are physical identity/connectivity authority.
     if equivalence is not None:
         for group in tuple(equivalence.equivalence_groups or ()):
             members = [str(x) for x in group if str(x) in by_id]
             for member in members[1:]:
                 union(members[0], member)
 
-    # Stage-A wall graph has already snapped genuine junction endpoints.
+    # Primary connectivity authority for real W4 candidates: exact producer node
+    # identity + a positive junction classification.  Coordinate equality alone
+    # cannot turn an ENDPOINT / AMBIGUOUS / REVIEW / UNRESOLVED crossing into
+    # a connected physical-wall component.
+    node_owners: dict[str, list[str]] = {}
+    for wall_id, record in by_id.items():
+        for node_id in _trusted_component_nodes(record):
+            node_owners.setdefault(node_id, []).append(wall_id)
+    for owners in node_owners.values():
+        if len(owners) < 2:
+            continue
+        anchor = min(owners)
+        for wall_id in owners:
+            if wall_id != anchor:
+                union(anchor, wall_id)
+
+    # Backward-compatible exact-endpoint fallback for synthetic/legacy records
+    # that do not carry producer junction metadata at all.  Real W4 candidates
+    # never use this path.
     endpoint_owners: dict[tuple[float, float], list[str]] = {}
     for wall_id, record in by_id.items():
+        if _has_producer_junction_metadata(record):
+            continue
         points = tuple(_point(p) for p in record.wall_candidate.centerline_pts)
         if not points:
             continue

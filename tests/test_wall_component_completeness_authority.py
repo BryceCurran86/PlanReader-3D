@@ -283,3 +283,63 @@ def test_precomputed_withheld_context_preserves_decisions() -> None:
             context=context,
         )
         assert cached == uncached
+
+
+def _junction_record(
+    wall_id: str,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    *,
+    raw_id: str,
+    node_ids: tuple[str, str],
+    junction_types: tuple[JunctionType, JunctionType],
+):
+    record = _record(wall_id, start, end, raw_id=raw_id)
+    object.__setattr__(record.wall_candidate, "end_node_ids", node_ids)
+    object.__setattr__(record.wall_candidate, "junction_types", junction_types)
+    return record
+
+
+def test_component_sets_connect_exact_positive_producer_junction_node() -> None:
+    left = _junction_record(
+        "left",(0,0),(10,0),raw_id="d50i0",
+        node_ids=("left-start","shared"),
+        junction_types=(JunctionType.ENDPOINT,JunctionType.T_JUNCTION),
+    )
+    stem = _junction_record(
+        "stem",(10.2,0),(10.2,10),raw_id="d51i0",
+        node_ids=("shared","stem-end"),
+        junction_types=(JunctionType.T_JUNCTION,JunctionType.ENDPOINT),
+    )
+    groups = _component_sets((left,stem), _equivalence((left,stem)))
+    assert groups == (("left","stem"),)
+
+
+def test_component_sets_do_not_connect_equal_coordinates_when_junction_unresolved() -> None:
+    left = _junction_record(
+        "left",(0,0),(10,0),raw_id="d52i0",
+        node_ids=("left-start","shared"),
+        junction_types=(JunctionType.ENDPOINT,JunctionType.UNRESOLVED),
+    )
+    stem = _junction_record(
+        "stem",(10,0),(10,10),raw_id="d53i0",
+        node_ids=("shared","stem-end"),
+        junction_types=(JunctionType.UNRESOLVED,JunctionType.ENDPOINT),
+    )
+    groups = _component_sets((left,stem), _equivalence((left,stem)))
+    assert groups == (("left",),("stem",))
+
+
+def test_component_sets_do_not_connect_nearby_endpoints_without_same_node() -> None:
+    left = _junction_record(
+        "left",(0,0),(10,0),raw_id="d54i0",
+        node_ids=("left-start","left-end"),
+        junction_types=(JunctionType.ENDPOINT,JunctionType.ENDPOINT),
+    )
+    stem = _junction_record(
+        "stem",(10.01,0),(10.01,10),raw_id="d55i0",
+        node_ids=("stem-start","stem-end"),
+        junction_types=(JunctionType.ENDPOINT,JunctionType.ENDPOINT),
+    )
+    groups = _component_sets((left,stem), _equivalence((left,stem)))
+    assert groups == (("left",),("stem",))
