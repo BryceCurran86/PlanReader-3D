@@ -442,6 +442,17 @@ class WallComponentCompletenessProducer:
         results: dict[tuple[str, ...], WallComponentCompletenessResult] = {}
 
         for scope in wall_authority._scopes.values():
+            published = source_visibility_producer.published_snapshot_for_revision(
+                scope.revision_id
+            )
+            if (
+                published is None
+                or published.revision.document_id != scope.document_id
+                or published.revision.revision_id != scope.revision_id
+                or published.revision.source_sha256 != scope.source_sha256
+                or published.snapshot.snapshot_id != scope.snapshot_id
+            ):
+                continue
             if (
                 scope.scope_kind != "viewport"
                 or str(scope.viewport_view_type or "") != "floor_plan"
