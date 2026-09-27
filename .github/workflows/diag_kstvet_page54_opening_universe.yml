@@ -1,0 +1,107 @@
+name: KSTVET Page54 Opening Universe Probe
+
+on:
+  push:
+    branches: [diag/kstvet-page54-opening-universe]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2             'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf'             -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Probe opening identities and inventory
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_semantic_opening_enumeration_authority import SemanticOpeningEnumerationProducer
+          from pb_opening_universe_completeness_source_adapter import build_semantic_opening_inventory_completeness
+          from pb_opening_universe_completeness_authority import OpeningUniverseSelector
+          from pb_physical_opening_authority import PhysicalOpeningAuthority
+          from pb_source_observation_authority import ObservationSelector
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="kstvet-page54-opening-universe-probe",
+              producer_version="1.0",
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-page54-opening-universe",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          sem=SemanticOpeningEnumerationProducer.from_source_visibility_producer(source)
+          sem_result=sem.publish_page_scope(
+              revision_id=pub.revision.revision_id,
+              decision_scope_id="diag:page54:opening-universe",
+              page_ids=("54",),
+          )
+          rec=sem_result.record
+          print("OPENING_ENUMERATION "+json.dumps({
+              "status":sem_result.status.value,
+              "reasons":list(sem_result.reason_codes),
+              "representatives":list(rec.representative_observation_ids) if rec else [],
+              "members":{
+                  k:list(v)
+                  for k,v in (rec.member_observation_ids_by_identity.items() if rec else [])
+              },
+          },sort_keys=True))
+
+          complete=build_semantic_opening_inventory_completeness(
+              source_visibility_producer=source,
+              revision_id=pub.revision.revision_id,
+              decision_scope_id="wall-source:page-54",
+              page_ids=("54",),
+          )
+          comp=complete.resolve(OpeningUniverseSelector(
+              document_id=pub.revision.document_id,
+              revision_id=pub.revision.revision_id,
+              source_sha256=pub.revision.source_sha256,
+              snapshot_id=pub.snapshot.snapshot_id,
+              decision_scope_id="wall-source:page-54",
+          ))
+          print("OPENING_UNIVERSE "+json.dumps({
+              "status":comp.status.value,
+              "reasons":list(comp.reason_codes),
+              "complete":bool(comp.decision_scope_complete),
+              "members":list(comp.record.accounted_member_ids) if comp.record else [],
+          },sort_keys=True))
+
+          physical=PhysicalOpeningAuthority(source.authority())
+          rows=[]
+          for oid in (rec.representative_observation_ids if rec else ()):
+              result=physical.prove_existence(ObservationSelector(
+                  document_id=pub.revision.document_id,
+                  revision_id=pub.revision.revision_id,
+                  source_sha256=pub.revision.source_sha256,
+                  snapshot_id=pub.snapshot.snapshot_id,
+                  observation_id=oid,
+              ))
+              r=result.existence_record
+              rows.append({
+                  "observation":oid,
+                  "status":result.status.value,
+                  "reasons":list(result.reason_codes),
+                  "opening":r.record_id if r else None,
+                  "page":r.page_id if r else None,
+                  "members":list(r.source_observation_ids) if r else [],
+              })
+          print("PHYSICAL_OPENINGS "+json.dumps(rows,sort_keys=True))
+          PY
