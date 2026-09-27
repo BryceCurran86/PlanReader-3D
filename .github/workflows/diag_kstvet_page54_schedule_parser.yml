@@ -1,0 +1,47 @@
+name: KSTVET Page54 Schedule Parser Probe
+
+on:
+  push:
+    branches: [diag/kstvet-page54-schedule-parser]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install minimal
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyMuPDF==1.28.0
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Parse native schedule
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, fitz
+          from pb_opening_schedule_v171 import parse_schedule_page, _basic_word_rows, parse_schedule_rows
+          doc=fitz.open("/tmp/kstvet.pdf")
+          page=doc[53]
+          entries=parse_schedule_page(page,page_no=54)
+          print("SCHEDULE_ENTRIES "+json.dumps([e.__dict__ for e in entries],sort_keys=True,default=list))
+          words=list(page.get_text("words") or [])
+          rows=_basic_word_rows(words)
+          interesting=[
+              {"text":r.get("text",""),"bbox":list(r.get("bbox",(0,0,0,0)))}
+              for r in rows
+              if any(k in r.get("text","").upper() for k in ("W1","W2","W3","W4","D1","D2","3000","2900","2100","1200","WINDOW","DOOR"))
+          ]
+          print("SCHEDULE_INTERESTING_ROWS "+json.dumps(interesting,sort_keys=True))
+          print("SCHEDULE_ENTRY_COUNT",len(entries))
+          PY
