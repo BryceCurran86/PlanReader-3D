@@ -10,6 +10,8 @@ import re
 import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
 
+import pb_page_title_authority as title_authority
+
 
 @dataclass
 class TitleBlockMetadata:
@@ -49,7 +51,7 @@ def extract_title_block_from_text(page_id: int, text: str) -> TitleBlockMetadata
     job_no = ""
     drawing_title = ""
     sheet_no = ""
-    revision = "A"
+    revision = ""
     scale_text = ""
     date_str = ""
     architect = ""
@@ -92,20 +94,27 @@ def extract_title_block_from_text(page_id: int, text: str) -> TitleBlockMetadata
             val = m_leg.group(2).strip()
             legend_keys[key] = val
 
-        # Drawing Title
-        if not drawing_title and any(k in l.lower() for k in ["floor plan", "reflected ceiling", "elevations", "schedule"]):
-            drawing_title = re.sub(r'^(?:drawing\s*title|title)[\s:]*', '', l, flags=re.IGNORECASE).strip()
+        # Drawing Title: only a value bound to a title label ("DRAWING TITLE:",
+        # "SHEET TITLE:", "TITLE:"; never "PROJECT TITLE"). Text alone has no
+        # geometry to tell a sheet title from a note that mentions a plan.
+        if not drawing_title:
+            label = title_authority.parse_label(title_authority.Cell(l, 0.0, 0.0, 1.0, 1.0, 1.0))
+            if (label is not None and label.field == "title" and label.remainder
+                    and title_authority.title_shape(label.remainder, bound=True)[0] > 0):
+                drawing_title = label.remainder
 
+    # Fail closed: a field the text does not support stays empty. There is no
+    # default title, sheet number, revision, scale, date or party.
     return TitleBlockMetadata(
         page_id=page_id,
-        project_name=project_name or "Commercial Project",
-        job_no=job_no or "PR-JOB-01",
-        drawing_title=drawing_title or "General Drawing",
-        sheet_no=sheet_no or "A-101",
+        project_name=project_name,
+        job_no=job_no,
+        drawing_title=drawing_title,
+        sheet_no=sheet_no,
         revision=revision,
-        scale_text=scale_text or "1:100",
-        date_str=date_str or "2026-08-30",
-        architect_name=architect or "Premier Architecture",
+        scale_text=scale_text,
+        date_str=date_str,
+        architect_name=architect,
         legend_keys=legend_keys,
         confidence=0.90 if (sheet_no or scale_text) else 0.60,
     )

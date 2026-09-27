@@ -35,3 +35,14 @@ def test_scope_gate_requires_included_group_when_enabled():
     assert _valid_scope({"enabled": False, "groups": {}})
     assert not _valid_scope({"enabled": True, "groups": {"Block B": "Reference only"}})
     assert _valid_scope({"enabled": True, "groups": {"Block B": "Included"}})
+
+
+def test_scope_group_detection_rejects_building_prose_false_positives():
+    text = "Building REGULATIONS and Building CONTRACT apply to this project"
+    assert groups_from_text(text) == []
+
+
+def test_scope_group_detection_accepts_compact_designators():
+    assert groups_from_text("Building A / Building B2 / Tower 03 / Stage IV") == [
+        "Building A", "Building B2", "Tower 03", "Stage IV"
+    ]
