@@ -358,7 +358,13 @@ def test_structural_bearing_layer_remains_wall_candidate() -> None:
 def test_single_nonwall_token_does_not_exclude_possible_real_wall_layer() -> None:
     from pb_wall_room_topology_stage_a import is_structural_candidate_segment
 
-    for layer in ("Section Bearing", "Roofing Walls", "Roof Wall", "Marker Bearing"):
+    for layer in (
+        "Section Bearing",
+        "Roofing Walls",
+        "Roof Wall",
+        "Structural - Roof Wall",
+        "Marker Bearing",
+    ):
         keep, reasons = is_structural_candidate_segment(
             _source_segment(layer=layer)
         )
