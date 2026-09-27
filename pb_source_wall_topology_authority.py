@@ -20,11 +20,17 @@ identity, benchmark value, or caller role hint participates in the proof.
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import replace
 from typing import Iterable
 
 from pb_accuracy_v13_engines_v145 import extract_planar_faces
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
-from pb_physical_wall_candidate_authority import PhysicalWallCandidateAuthority
+from pb_physical_wall_candidate_authority import (
+    PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY,
+    PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,
+    PHYSICAL_WALL_CANDIDATE_SOURCE_PRIMITIVE_OWNERSHIP_AMBIGUOUS,
+    PhysicalWallCandidateAuthority,
+)
 from pb_wall_role_authority import (
     WallTopologyAuthority,
     WallTopologyEvidence,
@@ -112,7 +118,7 @@ def _ambiguous_record(scope, wall_id: str, reason: str) -> WallTopologyEvidence:
     )
 
 
-def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str, str], WallTopologyEvidence]:
+def _derive_complete_scope_records(scope) -> dict[tuple[str, str, str, str, str, str, str], WallTopologyEvidence]:
     records = tuple(scope.records or ())
     if (
         scope.status is not EvidenceResolutionStatus.CORROBORATED
@@ -293,6 +299,215 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str, str
             ] = evidence
 
     return results
+
+
+
+def _line_intersects_bbox(
+    geometry: tuple[float, float, float, float],
+    bbox: tuple[float, float, float, float],
+) -> bool:
+    x1, y1, x2, y2 = (float(value) for value in geometry)
+    xmin, ymin, xmax, ymax = (float(value) for value in bbox)
+
+    def inside(x: float, y: float) -> bool:
+        return xmin <= x <= xmax and ymin <= y <= ymax
+
+    if inside(x1, y1) or inside(x2, y2):
+        return True
+    dx, dy = x2 - x1, y2 - y1
+    lower, upper = 0.0, 1.0
+    for p, q in (
+        (-dx, x1 - xmin),
+        (dx, xmax - x1),
+        (-dy, y1 - ymin),
+        (dy, ymax - y1),
+    ):
+        if p == 0.0:
+            if q < 0.0:
+                return False
+            continue
+        ratio = q / p
+        if p < 0.0:
+            if ratio > upper:
+                return False
+            lower = max(lower, ratio)
+        else:
+            if ratio < lower:
+                return False
+            upper = min(upper, ratio)
+    return lower <= upper
+
+
+def _record_bbox(record) -> tuple[float, float, float, float] | None:
+    points = tuple(getattr(record.wall_candidate, "centerline_pts", ()) or ())
+    if len(points) < 2:
+        return None
+    xs = [float(point[0]) for point in points]
+    ys = [float(point[1]) for point in points]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _bbox_union(records) -> tuple[float, float, float, float] | None:
+    boxes = [box for record in records if (box := _record_bbox(record)) is not None]
+    if not boxes:
+        return None
+    return (
+        min(box[0] for box in boxes),
+        min(box[1] for box in boxes),
+        max(box[2] for box in boxes),
+        max(box[3] for box in boxes),
+    )
+
+
+def _record_touches_viewport_boundary(record, viewport_bbox) -> bool:
+    if viewport_bbox is None:
+        return True
+    xmin, ymin, xmax, ymax = (float(value) for value in viewport_bbox)
+    for x, y in tuple(getattr(record.wall_candidate, "centerline_pts", ()) or ()):
+        if (
+            abs(float(x) - xmin) <= 1e-6
+            or abs(float(x) - xmax) <= 1e-6
+            or abs(float(y) - ymin) <= 1e-6
+            or abs(float(y) - ymax) <= 1e-6
+        ):
+            return True
+    return False
+
+
+def _topology_representative_records(scope):
+    records = tuple(scope.records or ())
+    equivalence = getattr(scope, "equivalence", None)
+    if equivalence is None:
+        return records, ()
+
+    representatives = set(tuple(equivalence.representative_wall_ids or ()))
+    if not representatives:
+        return (), records
+
+    selected = tuple(
+        record for record in records
+        if record.wall_candidate_id in representatives
+    )
+    rejected = tuple(
+        record for record in records
+        if record.wall_candidate_id not in representatives
+    )
+    return selected, rejected
+
+
+def _connected_record_components(records):
+    records = tuple(records)
+    endpoints = {}
+    for record in records:
+        points = tuple(getattr(record.wall_candidate, "centerline_pts", ()) or ())
+        endpoints[record.wall_candidate_id] = {
+            _point(points[0]),
+            _point(points[-1]),
+        } if len(points) >= 2 else set()
+
+    parent = {record.wall_candidate_id: record.wall_candidate_id for record in records}
+
+    def find(wall_id: str) -> str:
+        while parent[wall_id] != wall_id:
+            parent[wall_id] = parent[parent[wall_id]]
+            wall_id = parent[wall_id]
+        return wall_id
+
+    def union(left: str, right: str) -> None:
+        a, b = find(left), find(right)
+        if a != b:
+            parent[max(a, b)] = min(a, b)
+
+    ids = tuple(sorted(parent))
+    for index, left in enumerate(ids):
+        for right in ids[index + 1:]:
+            if endpoints[left] & endpoints[right]:
+                union(left, right)
+
+    grouped = defaultdict(list)
+    by_id = {record.wall_candidate_id: record for record in records}
+    for wall_id in ids:
+        grouped[find(wall_id)].append(by_id[wall_id])
+    return tuple(
+        tuple(sorted(component, key=lambda record: record.wall_candidate_id))
+        for _root, component in sorted(grouped.items())
+    )
+
+
+def _derive_incomplete_viewport_component_records(scope):
+    if (
+        scope.status is not EvidenceResolutionStatus.CORROBORATED
+        or scope.scope_complete
+        or getattr(scope, "scope_kind", "page") != "viewport"
+        or str(getattr(scope, "viewport_view_type", "") or "") != "floor_plan"
+        or getattr(scope, "viewport_bbox", None) is None
+        or not tuple(getattr(scope, "withheld_structural_segments", ()) or ())
+    ):
+        return {}
+
+    allowed_reasons = {
+        PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,
+        PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY,
+        PHYSICAL_WALL_CANDIDATE_SOURCE_PRIMITIVE_OWNERSHIP_AMBIGUOUS,
+    }
+    if set(tuple(scope.reason_codes or ())) - allowed_reasons:
+        return {}
+
+    selected, rejected = _topology_representative_records(scope)
+    if not selected:
+        return {}
+
+    withheld = tuple(scope.withheld_structural_segments or ())
+    results = {}
+    for component in _connected_record_components(selected):
+        component_bbox = _bbox_union(component)
+        if component_bbox is None:
+            continue
+        if any(
+            _record_touches_viewport_boundary(record, scope.viewport_bbox)
+            for record in component
+        ):
+            continue
+        if any(
+            _line_intersects_bbox(evidence.geometry, component_bbox)
+            for evidence in withheld
+        ):
+            continue
+        # An equivalence-abstained / non-representative wall remains potential
+        # physical geometry. If its own bbox overlaps this component, do not
+        # silently discard it from local topology.
+        if any(
+            (box := _record_bbox(record)) is not None
+            and not (
+                box[2] < component_bbox[0]
+                or box[0] > component_bbox[2]
+                or box[3] < component_bbox[1]
+                or box[1] > component_bbox[3]
+            )
+            for record in rejected
+            if record.wall_candidate_id
+            not in set(tuple(getattr(scope.equivalence, "same_wall_ids", ()) or ()))
+        ):
+            continue
+
+        local_scope = replace(
+            scope,
+            scope_complete=True,
+            records=component,
+            equivalence=None,
+            reason_codes=(PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,),
+            scope_boundary_observation_ids=(),
+            ambiguous_source_observation_ids=(),
+            withheld_structural_segments=(),
+        )
+        results.update(_derive_complete_scope_records(local_scope))
+    return results
+
+
+def _derive_scope_records(scope):
+    if getattr(scope, "scope_complete", False):
+        return _derive_complete_scope_records(scope)
+    return _derive_incomplete_viewport_component_records(scope)
 
 
 def build_source_wall_topology_authority(

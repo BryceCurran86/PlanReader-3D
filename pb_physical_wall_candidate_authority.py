@@ -141,6 +141,15 @@ class PhysicalWallCandidateRecord:
 
 
 @dataclass(frozen=True)
+class WithheldStructuralSegmentEvidence:
+    observation_id: str
+    raw_id: str
+    geometry: tuple[float, float, float, float]
+    layer: str
+    reason_code: str
+
+
+@dataclass(frozen=True)
 class PhysicalWallCandidateScopeResult:
     status: EvidenceResolutionStatus
     scope_complete: bool
@@ -165,6 +174,7 @@ class PhysicalWallCandidateScopeResult:
     viewport_sibling_set_fingerprint: Optional[str] = None
     scope_boundary_observation_ids: tuple[str, ...] = ()
     ambiguous_source_observation_ids: tuple[str, ...] = ()
+    withheld_structural_segments: tuple[WithheldStructuralSegmentEvidence, ...] = ()
     schema_version: str = PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION
 
 
@@ -1706,6 +1716,7 @@ def _assemble_scope_result(
     pre_boundary_reasons: Sequence[str] = (),
     scope_boundary_observation_ids: Sequence[str] = (),
     ambiguous_source_observation_ids: Sequence[str] = (),
+    withheld_structural_segments: Sequence[WithheldStructuralSegmentEvidence] = (),
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = selector.decision_scope_id
     proven_wall_strips = _proven_filled_wall_strips(tuple(segments))
@@ -1847,6 +1858,17 @@ def _assemble_scope_result(
         ambiguous_source_observation_ids=tuple(
             sorted(dict.fromkeys(ambiguous_source_observation_ids))
         ),
+        withheld_structural_segments=tuple(
+            sorted(
+                withheld_structural_segments,
+                key=lambda evidence: (
+                    evidence.reason_code,
+                    evidence.observation_id,
+                    evidence.raw_id,
+                    evidence.geometry,
+                ),
+            )
+        ),
     )
 
 
@@ -1954,6 +1976,7 @@ def _build_authenticated_viewport_scope_results(
         owned_observation_ids: list[str] = []
         boundary_observation_ids: list[str] = []
         ambiguous_observation_ids: list[str] = []
+        withheld_structural_segments: list[WithheldStructuralSegmentEvidence] = []
         pre_boundary_reasons: list[str] = []
 
         for segment in page_segments:
@@ -1995,6 +2018,17 @@ def _build_authenticated_viewport_scope_results(
                     )
                     if observation_id:
                         ambiguous_observation_ids.append(observation_id)
+                    withheld_structural_segments.append(
+                        WithheldStructuralSegmentEvidence(
+                            observation_id=observation_id,
+                            raw_id=str(segment.get("id") or ""),
+                            geometry=_segment_geometry(segment),
+                            layer=str(segment.get("layer") or ""),
+                            reason_code=(
+                                PHYSICAL_WALL_CANDIDATE_SOURCE_PRIMITIVE_OWNERSHIP_AMBIGUOUS
+                            ),
+                        )
+                    )
                 continue
 
             if _segment_intersects_bbox(segment, viewport.bounding_box) and structural:
@@ -2003,6 +2037,17 @@ def _build_authenticated_viewport_scope_results(
                 )
                 if observation_id:
                     boundary_observation_ids.append(observation_id)
+                withheld_structural_segments.append(
+                    WithheldStructuralSegmentEvidence(
+                        observation_id=observation_id,
+                        raw_id=str(segment.get("id") or ""),
+                        geometry=_segment_geometry(segment),
+                        layer=str(segment.get("layer") or ""),
+                        reason_code=(
+                            PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY
+                        ),
+                    )
+                )
 
         results.append(
             _assemble_scope_result(
@@ -2020,6 +2065,7 @@ def _build_authenticated_viewport_scope_results(
                 pre_boundary_reasons=pre_boundary_reasons,
                 scope_boundary_observation_ids=boundary_observation_ids,
                 ambiguous_source_observation_ids=ambiguous_observation_ids,
+                withheld_structural_segments=withheld_structural_segments,
             )
         )
     return tuple(results)
@@ -2364,4 +2410,5 @@ __all__ = [
     "PhysicalWallCandidateRecord",
     "PhysicalWallCandidateScopeResult",
     "PhysicalWallCandidateSelector",
+    "WithheldStructuralSegmentEvidence",
 ]
