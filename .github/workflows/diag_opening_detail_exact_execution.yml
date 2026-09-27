@@ -1,0 +1,95 @@
+name: Opening Detail Exact Execution Probe
+
+on:
+  push:
+    branches: [diag/opening-detail-exact-execution]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+          pip install rapidocr
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2             'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf'             -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Print exact source execution and corroboration
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_execution_callout_authority import _receipt_interval
+          from pb_raster_text_corroboration_authority import (
+              RasterTextCorroborationProducer,
+              RasterTextCorroborationSelector,
+          )
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(producer_method="opening-detail-exact-exec",producer_version="1")
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-opening-detail-exact-exec",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          text=source.text_integrity_authority()
+          raster=RasterTextCorroborationProducer.from_source_visibility_producer(source)
+          rows=[]
+          for oid in pub.text_observation_ids:
+              res=text.resolve_text(ObservationSelector(
+                  document_id=pub.revision.document_id,
+                  revision_id=pub.revision.revision_id,
+                  source_sha256=pub.revision.source_sha256,
+                  snapshot_id=pub.snapshot.snapshot_id,
+                  observation_id=oid,
+              ))
+              rec=res.receipt
+              if rec is None or str(rec.page_id)!="54":
+                  continue
+              interval=_receipt_interval(rec)
+              if interval is None:
+                  continue
+              a,b=interval
+              if not (
+                  10078 <= a <= 10122 or
+                  10148 <= a <= 10164 or
+                  10184 <= a <= 10214 or
+                  10288 <= a <= 10304
+              ):
+                  continue
+              rr=raster.publish(RasterTextCorroborationSelector(
+                  document_id=pub.revision.document_id,
+                  revision_id=pub.revision.revision_id,
+                  source_sha256=pub.revision.source_sha256,
+                  snapshot_id=pub.snapshot.snapshot_id,
+                  observation_id=oid,
+              ))
+              rows.append({
+                  "obs":oid,
+                  "raw":rec.raw_text,
+                  "trusted":res.trusted_text,
+                  "native_status":res.status.value,
+                  "native_reasons":list(res.reason_codes),
+                  "seq":[a,b],
+                  "geometry":list(rec.geometry),
+                  "raster_status":rr.status.value,
+                  "raster_text":rr.corroborated_text,
+                  "raster_reasons":list(rr.reason_codes),
+                  "raster_record":rr.record.record_id if rr.record else None,
+              })
+          print("OPENING_DETAIL_EXACT_EXEC "+json.dumps(sorted(rows,key=lambda r:(r["seq"],r["geometry"],r["obs"])),sort_keys=True))
+          PY
