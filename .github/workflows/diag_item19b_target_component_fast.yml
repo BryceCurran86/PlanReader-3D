@@ -1,0 +1,176 @@
+name: Item19B Target Component Fast
+
+on:
+  push:
+    branches: [diag/item19b-target-component-fast]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Diagnose target component from sealed source primitives
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateProducer,
+              _source_page_segments,
+              _decision_scope_id,
+              _proven_filled_wall_strips,
+          )
+          from pb_wall_component_completeness_authority import (
+              _component_sets,
+              _positive_same_separations,
+              _proven_strip_closure_exemptions,
+              _withheld_affects_component,
+              _observation_line,
+              _raw_path_family,
+              _raw_primitive_id,
+          )
+
+          # These immutable source primitive IDs come from the already-merged
+          # producer-owned #916 internal callout->wall record. They are used
+          # only to address the diagnostic target; they do not feed authority.
+          target_raw={
+              "d4763i0","d4772i0","d5179i1","d5179i3","d5214i0","d5215i0"
+          }
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(producer_method="item19b-target-fast",producer_version="1")
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-target-fast",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          walls=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          ).authority()
+
+          scope=next(
+              s for s in walls._scopes.values()
+              if str(s.viewport_view_type or "")=="floor_plan"
+          )
+          records_by_id={r.wall_candidate_id:r for r in scope.records}
+
+          matching=[
+              r for r in scope.records
+              if target_raw & {
+                  _raw_primitive_id(str(x))
+                  for x in r.physical_identity.source_primitive_ids
+              }
+          ]
+          print("TARGET_MATCHING_RECORDS "+json.dumps([
+              {
+                  "wall":r.wall_candidate_id,
+                  "sources":list(r.physical_identity.source_primitive_ids),
+                  "centerline":[list(p) for p in r.wall_candidate.centerline_pts],
+              } for r in matching
+          ],sort_keys=True))
+          assert matching, "no current wall records own merged #916 target primitives"
+
+          components=_component_sets(scope.records,scope.equivalence)
+          member_sets=[
+              group for group in components
+              if any(r.wall_candidate_id in group for r in matching)
+          ]
+          # The sealed source target must not split across unrelated components.
+          assert len(member_sets)==1, member_sets
+          members=member_sets[0]
+          component_records=tuple(records_by_id[x] for x in members)
+
+          source_bytes=source._producer._store.source_bytes_by_revision[scope.revision_id]
+          page_segments,_,_,_=_source_page_segments(
+              source_producer=source,published=pub,source_bytes=source_bytes,
+              page_id=scope.page_id,decision_scope_id=_decision_scope_id(scope.page_id),
+          )
+          strips=_proven_filled_wall_strips(page_segments)
+          exemptions=_proven_strip_closure_exemptions(
+              component_records=component_records,
+              proven_wall_strips=strips,
+          )
+          same_sep=_positive_same_separations(records_by_id,scope.equivalence)
+          vis=source.authority()
+          withheld_ids=tuple(sorted(set(scope.scope_boundary_observation_ids)|set(scope.ambiguous_source_observation_ids)))
+          blockers=[]
+          for obs_id in withheld_ids:
+              rr=vis.resolve_visible(ObservationSelector(
+                  document_id=scope.document_id,revision_id=scope.revision_id,
+                  source_sha256=scope.source_sha256,snapshot_id=scope.snapshot_id,
+                  observation_id=obs_id,
+              ))
+              obs=rr.observation
+              if obs is None: continue
+              line=_observation_line(obs)
+              if line is None: continue
+              raw=str(obs.source_primitive_ref or "")
+              reason=_withheld_affects_component(
+                  withheld_line=line,withheld_raw_id=raw,
+                  component_records=component_records,
+                  known_same_separations=same_sep,
+                  proven_subordinate_raw_ids=exemptions,
+              )
+              if reason:
+                  blockers.append({
+                      "observation":obs_id,
+                      "raw":raw,
+                      "raw_norm":_raw_primitive_id(raw),
+                      "path_family":_raw_path_family(raw),
+                      "geometry":list(line),
+                      "reason":reason,
+                      "exempt":_raw_primitive_id(raw) in {
+                          _raw_primitive_id(x) for x in exemptions
+                      },
+                  })
+
+          component_sources={
+              r.wall_candidate_id:[
+                  _raw_primitive_id(str(x))
+                  for x in r.physical_identity.source_primitive_ids
+              ]
+              for r in component_records
+          }
+          comp_raw={x for xs in component_sources.values() for x in xs}
+          relevant_strips=[]
+          for strip in strips:
+              all_ids=set(strip.boundary_raw_ids)
+              if comp_raw & all_ids or any(
+                  b["raw_norm"] in all_ids for b in blockers
+              ):
+                  relevant_strips.append({
+                      "path_index":strip.path_index,
+                      "faces":list(strip.face_raw_ids),
+                      "boundaries":list(strip.boundary_raw_ids),
+                      "owned_faces":sorted(set(strip.face_raw_ids)&comp_raw),
+                      "owns_both_faces":set(strip.face_raw_ids)<=comp_raw,
+                      "polygon":[list(p) for p in strip.polygon],
+                  })
+
+          print("TARGET_COMPONENT_FAST "+json.dumps({
+              "members":list(members),
+              "member_sources":component_sources,
+              "exemptions":sorted(exemptions),
+              "same_separations":list(same_sep),
+              "blockers":blockers,
+              "relevant_strips":relevant_strips,
+          },sort_keys=True))
+          PY
