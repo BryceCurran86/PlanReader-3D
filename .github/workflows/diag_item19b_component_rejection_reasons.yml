@@ -76,19 +76,34 @@ jobs:
               source,page_ids=("54",)
           )
           rows=[]
-          for result in producer.published_results():
+          seen=set()
+          for key,result in sorted(producer._results.items()):
+              record=result.record
+              component_key=(
+                  record.component_id if record is not None
+                  else (tuple(result.reason_codes), key[:6])
+              )
+              if component_key in seen:
+                  continue
+              seen.add(component_key)
               rows.append({
+                  "selector_wall":key[-1],
                   "status":result.status.value,
                   "reasons":list(result.reason_codes),
-                  "record":None if result.record is None else {
-                      "component":result.record.component_id,
-                      "members":list(result.record.member_wall_ids),
-                      "source_primitives":list(result.record.member_source_primitive_ids),
-                      "same_groups":[list(g) for g in result.record.positive_equivalence_groups],
-                      "checked_withheld":list(result.record.checked_withheld_observation_ids),
-                      "scope_complete":result.record.source_scope_complete,
-                      "scope_reasons":list(result.record.source_scope_reason_codes),
+                  "record":None if record is None else {
+                      "component":record.component_id,
+                      "members":list(record.member_wall_ids),
+                      "source_primitives":list(record.member_source_primitive_ids),
+                      "same_groups":[list(g) for g in record.positive_equivalence_groups],
+                      "checked_withheld":list(record.checked_withheld_observation_ids),
+                      "scope_complete":record.source_scope_complete,
+                      "scope_reasons":list(record.source_scope_reason_codes),
                   }
               })
           print("COMPONENT_COMPLETENESS "+json.dumps(rows,sort_keys=True))
+          from collections import Counter
+          print("COMPONENT_REASON_COUNTS "+json.dumps(
+              Counter(reason for row in rows for reason in row["reasons"]),
+              sort_keys=True
+          ))
           PY
