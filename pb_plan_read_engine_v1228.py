@@ -26,6 +26,7 @@ import pb_auto_geometry_v1219 as auto
 import pb_drawing_reading_v1226 as reading
 import pb_memory_stability_v1220 as memory
 import pb_page_registration_v1225 as registration
+import pb_page_title_authority as title_authority
 
 VERSION = "1.2.28"
 SETTING_PREFIX = "page_read_v1228_"
@@ -431,6 +432,7 @@ def enhance_document_pages(app: Any, document_id: int, *, visual_budget: int = 4
         return {"updated": 0, "visual": 0}
     pages = [dict(row) for row in app.lquery("SELECT * FROM pages WHERE document_id=? ORDER BY page_no,id", (int(document_id),))]
     updated = 0; visual_used = 0
+    pending: List[Tuple[Dict[str, Any], Dict[str, Any], Any, str]] = []
     pdf = app.fitz.open(path)
     try:
         for page in pages:
@@ -456,34 +458,52 @@ def enhance_document_pages(app: Any, document_id: int, *, visual_budget: int = 4
             title = spatial_title_block_evidence(pdf_page, registration._pb_v1228_base_title_reader)
             manual = str(app.workspace_setting(workspace_id, registration._manual_key(int(page["id"])), "")) == "1"
             if not manual:
-                drawing_no = str(title.get("drawing_no") or page.get("page_label") or f"Page {page_no}")
+                current_label = str(page.get("page_label") or "")
+                drawing_no = registration._authoritative_page_label(current_label, page_no, "")
                 page_type, confidence, evidence = registration.weighted_page_type(text, str(doc.get("file_name") or ""), title.get("text"))
-                drawing_title = str(title.get("drawing_title") or registration._sheet_title(title.get("text"), drawing_no, page_type) or "")
+                visual_title = ""
                 scale_text = str(page.get("scale_text") or title.get("scale") or "")
                 # For sparse raster pages, a high-confidence visual identity can fill
-                # missing title fields but never override a manual registration.
+                # missing title/type/scale fields but cannot create a sheet-number
+                # identity. Sheet numbers come only from the title-block authority.
                 if visual and _num(visual.get("confidence")) >= 90:
-                    if not drawing_no or drawing_no.lower().startswith("page "):
-                        drawing_no = _norm(visual.get("drawing_no")) or drawing_no
                     if page_type == "Other" and _norm(visual.get("page_type")):
                         page_type = _norm(visual.get("page_type"))
-                    if not drawing_title:
-                        drawing_title = _norm(visual.get("drawing_title"))
+                    visual_title = _norm(visual.get("drawing_title"))
                     if not scale_text:
                         scale_text = _norm(visual.get("scale"))
-                app.lexecute("UPDATE pages SET page_label=?,page_type=?,scale_text=? WHERE id=?", (drawing_no, page_type, scale_text, int(page["id"])))
+                app.lexecute("UPDATE pages SET page_type=?,scale_text=? WHERE id=?", (page_type, scale_text, int(page["id"])))
                 meta = {
-                    "version": VERSION, "title": drawing_title, "confidence": int(confidence), "evidence": evidence,
-                    "drawing_no": drawing_no, "revision": str(title.get("revision") or ""), "detected_scale": str(title.get("scale") or ""),
+                    "version": VERSION, "confidence": int(confidence), "evidence": evidence,
+                    "drawing_no": drawing_no, "legacy_drawing_no_candidate": str(title.get("drawing_no") or ""),
+                    "revision": str(title.get("revision") or ""), "detected_scale": str(title.get("scale") or ""),
                     "native_word_count": int(native.get("word_count") or 0), "visual_fallback": bool(visual and _num(visual.get("confidence")) >= 80),
                 }
-                app.set_workspace_setting(workspace_id, registration._meta_key(int(page["id"])), json.dumps(meta, separators=(",", ":")))
+                try:
+                    analysis = title_authority.analyse_page(pdf_page, page_no)
+                except Exception:
+                    analysis = title_authority.PageAnalysis(page_no=page_no, width=0.0, height=0.0, source="none")
+                pending.append((page, meta, analysis, visual_title))
             app.set_workspace_setting(workspace_id, _page_read_key(int(page["id"])), json.dumps({
                 "version": VERSION, "word_count": int(native.get("word_count") or 0), "char_count": int(native.get("char_count") or 0),
                 "table_mode": _table_like(page, native.get("block_text") or ""), "visual_fallback": bool(visual),
             }, separators=(",", ":")))
     finally:
         pdf.close()
+    # Drawing titles come from the page-title authority, resolved across the
+    # document's sheets. It fails closed; only then may a high-confidence
+    # visual read fill the title, and it stays marked as provisional.
+    for (page, meta, _analysis, visual_title), result in zip(pending, title_authority.resolve_document([item[2] for item in pending])):
+        meta.update(result.meta())
+        page_no = int(page.get("page_no") or 0)
+        final_label = registration._authoritative_page_label(page.get("page_label"), page_no, result.sheet_number)
+        if final_label != _norm(page.get("page_label")):
+            app.lexecute("UPDATE pages SET page_label=? WHERE id=?", (final_label, int(page["id"])))
+        meta["drawing_no"] = final_label
+        if not result.title and visual_title:
+            meta.update({"title": visual_title, "title_source": "visual read (provisional)", "title_confidence": 50,
+                         "title_reason": "no title evidence in the page text; read from the sheet image"})
+        app.set_workspace_setting(workspace_id, registration._meta_key(int(page["id"])), json.dumps(meta, separators=(",", ":")))
     try:
         registration.sync_drawing_register(app, workspace_id)
     except Exception:

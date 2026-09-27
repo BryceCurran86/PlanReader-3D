@@ -139,6 +139,10 @@ class ScaleTests(unittest.TestCase):
         self.assertTrue(any(i["code"] == "UNVERIFIED_SCALE" for i in app.takeoff_accuracy_issues(wid)))
         app.lexecute("UPDATE pages SET px_per_m=? WHERE id=?", (float(detected["px_per_m"]), pid))
         meta = app.lquery("SELECT scale_method,scale_verified FROM pages WHERE id=?", (pid,))[0]
+        self.assertEqual(meta["scale_method"], "auto_detected"); self.assertEqual(int(meta["scale_verified"]), 0)
+        self.assertTrue(any(i["code"] == "UNVERIFIED_SCALE" for i in app.takeoff_accuracy_issues(wid)))
+        app.lexecute("UPDATE pages SET scale_method='manual_calibration',scale_verified=1,px_per_m=? WHERE id=?", (float(detected["px_per_m"]), pid))
+        meta = app.lquery("SELECT scale_method,scale_verified FROM pages WHERE id=?", (pid,))[0]
         self.assertEqual(meta["scale_method"], "manual_calibration"); self.assertEqual(int(meta["scale_verified"]), 1)
         self.assertFalse(any(i["code"] == "UNVERIFIED_SCALE" for i in app.takeoff_accuracy_issues(wid)))
 

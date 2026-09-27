@@ -313,3 +313,75 @@ class TestFourWayCrossing:
         assert 4 in degrees
         center = next(n for n in graph["nodes"] if n["degree"] == 4)
         assert round(center["x"], 3) == 0.0 and round(center["y"], 3) == 0.0
+
+
+
+def _source_segment(*, layer: str, x1: float = 0.0, y1: float = 0.0,
+                    x2: float = 100.0, y2: float = 0.0):
+    return {
+        "id": f"seg-{layer}",
+        "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+        "layer": layer,
+        "dashes": "[] 0",
+        "width": 1.0,
+        "stroke": (0.0, 0.0, 0.0),
+        "fill": None,
+    }
+
+
+def test_explicit_section_marker_and_roof_shell_layers_are_not_walls() -> None:
+    from pb_wall_room_topology_stage_a import is_structural_candidate_segment
+
+    keep_section, section_reasons = is_structural_candidate_segment(
+        _source_segment(layer="Marker - Section")
+    )
+    keep_roof, roof_reasons = is_structural_candidate_segment(
+        _source_segment(layer="Shell - Roof")
+    )
+
+    assert keep_section is False
+    assert "explicit_non_wall_source_layer_excluded" in section_reasons
+    assert keep_roof is False
+    assert "explicit_non_wall_source_layer_excluded" in roof_reasons
+
+
+def test_structural_bearing_layer_remains_wall_candidate() -> None:
+    from pb_wall_room_topology_stage_a import is_structural_candidate_segment
+
+    keep, reasons = is_structural_candidate_segment(
+        _source_segment(layer="Structural - Bearing")
+    )
+    assert keep is True
+    assert reasons == []
+
+
+def test_single_nonwall_token_does_not_exclude_possible_real_wall_layer() -> None:
+    from pb_wall_room_topology_stage_a import is_structural_candidate_segment
+
+    for layer in (
+        "Section Bearing",
+        "Roofing Walls",
+        "Roof Wall",
+        "Structural - Roof Wall",
+        "Marker Bearing",
+    ):
+        keep, reasons = is_structural_candidate_segment(
+            _source_segment(layer=layer)
+        )
+        assert keep is True, (layer, reasons)
+        assert "explicit_non_wall_source_layer_excluded" not in reasons
+
+
+def test_length_does_not_drive_explicit_nonwall_layer_exclusion() -> None:
+    from pb_wall_room_topology_stage_a import is_structural_candidate_segment
+
+    short_keep, short_reasons = is_structural_candidate_segment(
+        _source_segment(layer="Structural - Bearing", x2=2.0)
+    )
+    long_keep, long_reasons = is_structural_candidate_segment(
+        _source_segment(layer="Structural - Bearing", x2=2000.0)
+    )
+    assert short_keep is True
+    assert long_keep is True
+    assert short_reasons == []
+    assert long_reasons == []
