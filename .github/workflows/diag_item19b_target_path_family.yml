@@ -1,0 +1,181 @@
+name: Item19B Target Path Family Probe
+
+on:
+  push:
+    branches: [diag/item19b-target-path-family]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+          pip install rapidocr
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Trace target component and same-path withheld primitives
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, re
+          from pathlib import Path
+
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_wall_finish_callout_wall_authority import WallFinishCalloutWallProducer
+          from pb_wall_component_completeness_authority import (
+              _component_sets,
+              _raw_path_family,
+              _wall_lines,
+              _segments_intersect,
+              _collinear_snap_continuation,
+              _parallel_overlap_and_separation,
+              _positive_same_separations,
+              _withheld_affects_component,
+          )
+          from pb_source_observation_authority import ObservationSelector
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_vector_geometry_v130 import extract_native_page
+          import fitz
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-target-path-family-probe",
+              producer_version="1.0",
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-target-path-family",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          walls=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          ).authority()
+
+          callouts=WallFinishCalloutWallProducer.from_source_visibility_producer(
+              source,page_ids=("54",)
+          )
+          bindings=[
+              b
+              for result in callouts.published_results()
+              for b in result.bindings
+              if b.source_execution_sequence_start==10070
+              and b.source_execution_sequence_end==10078
+              and b.trade_scope_id=="internal_plaster"
+          ]
+          assert len(bindings)==1, bindings
+          binding=bindings[0]
+
+          scope=next(
+              s for s in walls._scopes.values()
+              if s.decision_scope_id==binding.physical_wall_decision_scope_id
+          )
+          by_id={r.wall_candidate_id:r for r in scope.records}
+          components=_component_sets(scope.records,scope.equivalence)
+          members=next(group for group in components if binding.physical_wall_id in group)
+          records=tuple(by_id[x] for x in members)
+          component_raw=sorted({
+              str(raw)
+              for record in records
+              for raw in record.physical_identity.source_primitive_ids
+          })
+          component_families=sorted({
+              family for raw in component_raw
+              if (family:=_raw_path_family(raw)) is not None
+          })
+          same_separations=_positive_same_separations(by_id,scope.equivalence)
+
+          visibility=source.authority()
+          withheld_ids=tuple(sorted(
+              set(scope.scope_boundary_observation_ids)
+              | set(scope.ambiguous_source_observation_ids)
+          ))
+          withheld=[]
+          for oid in withheld_ids:
+              result=visibility.resolve_visible(ObservationSelector(
+                  document_id=scope.document_id,
+                  revision_id=scope.revision_id,
+                  source_sha256=scope.source_sha256,
+                  snapshot_id=scope.snapshot_id,
+                  observation_id=oid,
+              ))
+              obs=result.observation
+              if result.status is not EvidenceResolutionStatus.CORROBORATED or obs is None:
+                  continue
+              geom=tuple(float(v) for v in obs.geometry)
+              if len(geom)!=4:
+                  continue
+              raw=str(obs.source_primitive_ref or "")
+              family=_raw_path_family(raw)
+              if family not in component_families:
+                  continue
+              relations=[]
+              for rec in records:
+                  for line in _wall_lines(rec):
+                      relations.append({
+                          "wall":rec.wall_candidate_id,
+                          "line":list(line),
+                          "intersects":_segments_intersect(line,geom),
+                          "snap_continuation":_collinear_snap_continuation(line,geom),
+                          "parallel_relation":(
+                              list(rel)
+                              if (rel:=_parallel_overlap_and_separation(line,geom)) is not None
+                              else None
+                          ),
+                      })
+              withheld.append({
+                  "observation_id":oid,
+                  "source_primitive_ref":raw,
+                  "family":family,
+                  "geometry":list(geom),
+                  "authority_reason":_withheld_affects_component(
+                      withheld_line=geom,
+                      withheld_raw_id=raw,
+                      component_records=records,
+                      known_same_separations=same_separations,
+                  ),
+                  "relations":relations,
+              })
+
+          pdf=fitz.open(stream=payload,filetype="pdf")
+          native=extract_native_page(pdf[53])
+          pdf.close()
+          native_same=[]
+          for seg in native.get("segments") or ():
+              raw=str(seg.get("id") or "")
+              if _raw_path_family(raw) in component_families:
+                  native_same.append({
+                      "raw_id":raw,
+                      "family":_raw_path_family(raw),
+                      "geometry":[seg.get("x1"),seg.get("y1"),seg.get("x2"),seg.get("y2")],
+                      "path_index":seg.get("path_index"),
+                      "item_index":seg.get("item_index"),
+                      "layer":seg.get("layer"),
+                      "width":seg.get("width"),
+                  })
+
+          print("ITEM19B_TARGET_COMPONENT "+json.dumps({
+              "wall":binding.physical_wall_id,
+              "equivalence_group":list(binding.equivalence_group_wall_ids),
+              "component_members":list(members),
+              "component_raw_ids":component_raw,
+              "component_path_families":component_families,
+              "positive_same_separations":list(same_separations),
+              "withheld_same_family":withheld,
+              "native_same_family_segments":native_same,
+          },sort_keys=True))
+          PY
