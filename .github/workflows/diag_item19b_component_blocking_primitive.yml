@@ -1,0 +1,149 @@
+name: Item19B Component Blocking Primitive
+
+on:
+  push:
+    branches: [diag/item19b-component-blocking-primitive]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Attribute first blocker per component
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateProducer,
+              _viewport_scope_boundary_reason,
+          )
+          from pb_wall_component_completeness_authority import (
+              _component_sets,
+              _positive_same_separations,
+              _observation_line,
+              _withheld_affects_component,
+          )
+          from pb_migration_contracts import EvidenceResolutionStatus
+
+          payload=Path("/tmp/kstvet.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="item19b-component-blocker-probe",
+              producer_version="1.0",
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-item19b-component-blocker",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          vis=source.authority()
+          walls=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          ).authority()
+
+          for scope in walls._scopes.values():
+              if str(scope.viewport_view_type or "")!="floor_plan":
+                  continue
+              records_by_id={str(r.wall_candidate_id):r for r in scope.records}
+              components=_component_sets(scope.records,scope.equivalence)
+              same_seps=_positive_same_separations(records_by_id,scope.equivalence)
+              withheld_ids=tuple(sorted(
+                  set(scope.scope_boundary_observation_ids)
+                  | set(scope.ambiguous_source_observation_ids)
+              ))
+              withheld=[]
+              for oid in withheld_ids:
+                  rr=vis.resolve_visible(ObservationSelector(
+                      document_id=scope.document_id,
+                      revision_id=scope.revision_id,
+                      source_sha256=scope.source_sha256,
+                      snapshot_id=scope.snapshot_id,
+                      observation_id=oid,
+                  ))
+                  obs=rr.observation
+                  line=_observation_line(obs) if (
+                      rr.status is EvidenceResolutionStatus.CORROBORATED
+                      and obs is not None
+                  ) else None
+                  withheld.append({
+                      "oid":oid,
+                      "raw":str(getattr(obs,"source_primitive_ref","") or "") if obs else "",
+                      "geometry":None if line is None else list(line),
+                      "line":line,
+                  })
+
+              rows=[]
+              for members in components:
+                  recs=tuple(records_by_id[w] for w in members)
+                  blocker=None
+                  for rec in recs:
+                      reason=_viewport_scope_boundary_reason(
+                          rec.wall_candidate,
+                          bbox=scope.viewport_bbox,
+                          page_width=max(scope.viewport_bbox[2],1.0),
+                          page_height=max(scope.viewport_bbox[3],1.0),
+                      )
+                      if reason is not None:
+                          blocker={
+                              "reason":"member_boundary_cropped",
+                              "wall":rec.wall_candidate_id,
+                              "points":[list(p) for p in rec.wall_candidate.centerline_pts],
+                          }
+                          break
+                  if blocker is None:
+                      for w in withheld:
+                          if w["line"] is None:
+                              blocker={
+                                  "reason":"withheld_unreplayable",
+                                  "observation":w["oid"],
+                                  "raw":w["raw"],
+                              }
+                              break
+                          reason=_withheld_affects_component(
+                              withheld_line=w["line"],
+                              withheld_raw_id=w["raw"],
+                              component_records=recs,
+                              known_same_separations=same_seps,
+                          )
+                          if reason is not None:
+                              blocker={
+                                  "reason":reason,
+                                  "observation":w["oid"],
+                                  "raw":w["raw"],
+                                  "geometry":w["geometry"],
+                              }
+                              break
+                  rows.append({
+                      "viewport":scope.viewport_id,
+                      "members":list(members),
+                      "member_sources":{
+                          rec.wall_candidate_id:list(rec.physical_identity.source_primitive_ids)
+                          for rec in recs
+                      },
+                      "blocker":blocker,
+                  })
+              print("COMPONENT_BLOCKERS "+json.dumps(rows,sort_keys=True))
+              print("WITHHELD_SOURCE "+json.dumps([
+                  {k:v for k,v in w.items() if k!="line"} for w in withheld
+              ],sort_keys=True))
+          PY
