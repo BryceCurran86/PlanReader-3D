@@ -517,15 +517,24 @@ class WallRoleProducer:
         cls,
         *,
         physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
+        wall_component_completeness_authority=None,
     ) -> "WallRoleProducer":
-        """Build Item26 role authority from producer-owned multi-room topology."""
+        """Build Item26 role authority from producer-owned multi-room topology.
+
+        The optional component-completeness authority can prove a connected
+        floor-plan wall component locally complete without upgrading the
+        enclosing viewport's global completeness proposition.
+        """
 
         from pb_source_wall_topology_authority import (
             build_source_wall_topology_authority,
         )
 
         topology_authority = build_source_wall_topology_authority(
-            physical_wall_candidate_authority
+            physical_wall_candidate_authority,
+            wall_component_completeness_authority=(
+                wall_component_completeness_authority
+            ),
         )
         return cls(
             physical_wall_candidate_authority,

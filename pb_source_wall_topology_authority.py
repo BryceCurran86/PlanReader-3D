@@ -20,11 +20,17 @@ identity, benchmark value, or caller role hint participates in the proof.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Iterable
+from dataclasses import replace
+from typing import Iterable, Optional
 
 from pb_accuracy_v13_engines_v145 import extract_planar_faces
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateAuthority
+from pb_wall_component_completeness_authority import (
+    WALL_COMPONENT_COMPLETE,
+    WallComponentCompletenessAuthority,
+    WallComponentCompletenessSelector,
+)
 from pb_wall_role_authority import (
     WallTopologyAuthority,
     WallTopologyEvidence,
@@ -51,6 +57,43 @@ def _point(value: Iterable[float]) -> Point:
 def _edge(first: Iterable[float], second: Iterable[float]) -> Edge:
     a, b = _point(first), _point(second)
     return (a, b) if a <= b else (b, a)
+
+
+def _point_on_edge(point: Point, edge: Edge, tol: float = 1e-6) -> bool:
+    (ax, ay), (bx, by) = edge
+    px, py = point
+    cross = (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+    scale = max(1.0, abs(bx - ax), abs(by - ay))
+    if abs(cross) > tol * scale:
+        return False
+    return (
+        min(ax, bx) - tol <= px <= max(ax, bx) + tol
+        and min(ay, by) - tol <= py <= max(ay, by) + tol
+    )
+
+
+def _face_edge_owner(
+    face_edge: Edge,
+    edge_owner: dict[Edge, str],
+) -> str | None:
+    """Map an intersection-split face edge to exactly one source wall owner.
+
+    extract_planar_faces() splits source segments at junctions before returning
+    face polygons.  A returned polygon edge can therefore be a strict
+    subsegment of one authenticated wall edge.  Exact equality is preferred;
+    otherwise both subsegment endpoints must lie on one and only one source
+    wall edge.  Multiple physical owners remain ambiguous.
+    """
+    exact = edge_owner.get(face_edge)
+    if exact is not None:
+        return exact
+    owners = {
+        owner
+        for source_edge, owner in edge_owner.items()
+        if _point_on_edge(face_edge[0], source_edge)
+        and _point_on_edge(face_edge[1], source_edge)
+    }
+    return next(iter(owners)) if len(owners) == 1 else None
 
 
 def _polygon_area(points: tuple[Point, ...]) -> float:
@@ -166,7 +209,7 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str, str
         mapped: list[str] = []
         for index, first in enumerate(polygon):
             second = polygon[(index + 1) % len(polygon)]
-            owner = edge_owner.get(_edge(first, second))
+            owner = _face_edge_owner(_edge(first, second), edge_owner)
             if owner is None:
                 invalid_boundary = True
                 break
@@ -295,14 +338,142 @@ def _derive_scope_records(scope) -> dict[tuple[str, str, str, str, str, str, str
     return results
 
 
+
+def _component_topology_records(
+    scope,
+    completeness_authority: WallComponentCompletenessAuthority,
+) -> dict[tuple[str, str, str, str, str, str, str], WallTopologyEvidence]:
+    """Derive topology only for producer-proven complete wall components.
+
+    The source viewport remains globally incomplete. This helper never changes
+    that proposition. It constructs a temporary complete topology scope only
+    from the exact member set sealed by WallComponentCompletenessAuthority.
+    """
+    if (
+        scope.status is not EvidenceResolutionStatus.CORROBORATED
+        or scope.scope_complete
+        or getattr(scope, "scope_kind", "page") != "viewport"
+        or str(getattr(scope, "viewport_view_type", "") or "") != "floor_plan"
+        or not tuple(scope.records or ())
+    ):
+        return {}
+
+    by_id = {
+        str(record.wall_candidate_id): record
+        for record in tuple(scope.records or ())
+    }
+    equivalence = getattr(scope, "equivalence", None)
+    seen_components: set[str] = set()
+    output: dict[
+        tuple[str, str, str, str, str, str, str],
+        WallTopologyEvidence,
+    ] = {}
+
+    for wall_id in sorted(by_id):
+        result = completeness_authority.resolve(
+            WallComponentCompletenessSelector(
+                document_id=scope.document_id,
+                revision_id=scope.revision_id,
+                source_sha256=scope.source_sha256,
+                snapshot_id=scope.snapshot_id,
+                page_id=scope.page_id,
+                decision_scope_id=scope.decision_scope_id,
+                physical_wall_id=wall_id,
+            )
+        )
+        record = result.record
+        if (
+            result.status is not EvidenceResolutionStatus.CORROBORATED
+            or WALL_COMPONENT_COMPLETE not in result.reason_codes
+            or record is None
+            or record.status is not EvidenceResolutionStatus.CORROBORATED
+        ):
+            continue
+        if record.record_id in seen_components:
+            continue
+        if (
+            record.document_id != scope.document_id
+            or record.revision_id != scope.revision_id
+            or record.source_sha256 != scope.source_sha256
+            or record.snapshot_id != scope.snapshot_id
+            or record.page_id != scope.page_id
+            or record.decision_scope_id != scope.decision_scope_id
+            or wall_id not in record.member_wall_ids
+        ):
+            continue
+
+        member_ids = set(record.member_wall_ids)
+        if not member_ids or not member_ids <= set(by_id):
+            continue
+
+        # One topology representation per producer-proven physical-wall SAME
+        # group. Un-grouped walls remain unchanged. We accept only an upstream
+        # representative that is itself inside this component; no geometry
+        # ranking or local "best" member selection is introduced here.
+        keep_ids = set(member_ids)
+        if equivalence is not None:
+            representatives = set(
+                tuple(equivalence.representative_wall_ids or ())
+            )
+            for group in tuple(equivalence.equivalence_groups or ()):
+                group_members = member_ids & set(group)
+                if not group_members:
+                    continue
+                group_reps = group_members & representatives
+                if len(group_reps) != 1:
+                    keep_ids = set()
+                    break
+                keep = next(iter(group_reps))
+                keep_ids.difference_update(group_members - {keep})
+        if not keep_ids:
+            continue
+
+        component_records = tuple(
+            by_id[member]
+            for member in sorted(keep_ids)
+        )
+        local_scope = replace(
+            scope,
+            scope_complete=True,
+            records=component_records,
+            equivalence=None,
+        )
+        derived = _derive_scope_records(local_scope)
+        if not derived:
+            continue
+
+        seen_components.add(record.record_id)
+        output.update(derived)
+
+    return output
+
+
 def build_source_wall_topology_authority(
     physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
+    *,
+    wall_component_completeness_authority: Optional[
+        WallComponentCompletenessAuthority
+    ] = None,
 ) -> WallTopologyAuthority:
-    """Derive sealed wall topology evidence from producer-owned wall scopes only."""
+    """Derive sealed wall topology evidence from producer-owned wall scopes.
+
+    Complete source scopes retain the original topology path. An incomplete
+    authenticated floor-plan viewport can contribute only when an independent
+    producer-owned WallComponentCompletenessAuthority has proven one exact
+    connected wall component locally complete.
+    """
 
     if type(physical_wall_candidate_authority) is not PhysicalWallCandidateAuthority:
         raise TypeError(
             "physical_wall_candidate_authority must be producer-owned PhysicalWallCandidateAuthority"
+        )
+    if (
+        wall_component_completeness_authority is not None
+        and type(wall_component_completeness_authority)
+        is not WallComponentCompletenessAuthority
+    ):
+        raise TypeError(
+            "wall_component_completeness_authority must be producer-owned"
         )
 
     records: dict[tuple[str, str, str, str, str, str, str], WallTopologyEvidence] = {}
@@ -316,7 +487,15 @@ def build_source_wall_topology_authority(
             and str(getattr(scope, "viewport_view_type", "") or "") != "floor_plan"
         ):
             continue
-        records.update(_derive_scope_records(scope))
+        if getattr(scope, "scope_complete", False):
+            records.update(_derive_scope_records(scope))
+        elif wall_component_completeness_authority is not None:
+            records.update(
+                _component_topology_records(
+                    scope,
+                    wall_component_completeness_authority,
+                )
+            )
 
     authority = WallTopologyAuthority(records, _seal=_AUTHORITY_SEAL)
     object.__setattr__(

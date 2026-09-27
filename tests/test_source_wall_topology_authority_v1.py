@@ -130,3 +130,30 @@ def test_single_closed_loop_cannot_mint_exterior_wall_role(tmp_path: Path) -> No
     assert all(result.status is EvidenceResolutionStatus.ABSTAINED for result in results)
     assert all(result.record is None for result in results)
     assert all(WALL_ROLE_AMBIGUOUS in result.reason_codes for result in results)
+
+
+
+def test_face_edge_owner_accepts_unique_intersection_split_subsegment() -> None:
+    from pb_source_wall_topology_authority import _edge, _face_edge_owner
+
+    owners = {
+        _edge((0.0, 0.0), (20.0, 0.0)): "wall-top",
+        _edge((20.0, 0.0), (20.0, 20.0)): "wall-right",
+    }
+    assert _face_edge_owner(
+        _edge((0.0, 0.0), (10.0, 0.0)),
+        owners,
+    ) == "wall-top"
+
+
+def test_face_edge_owner_abstains_when_split_subsegment_has_multiple_wall_owners() -> None:
+    from pb_source_wall_topology_authority import _edge, _face_edge_owner
+
+    owners = {
+        _edge((0.0, 0.0), (20.0, 0.0)): "wall-a",
+        _edge((5.0, 0.0), (15.0, 0.0)): "wall-b",
+    }
+    assert _face_edge_owner(
+        _edge((7.0, 0.0), (10.0, 0.0)),
+        owners,
+    ) is None

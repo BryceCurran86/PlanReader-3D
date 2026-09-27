@@ -37,6 +37,9 @@ from pb_viewport_segmentation import (
     segment_page_viewports,
     validate_non_overlapping_viewports,
 )
+from pb_wall_component_completeness_authority import (
+    WallComponentCompletenessProducer,
+)
 from pb_wall_role_authority import WallRoleClassification, WallRoleProducer, WallRoleSelector
 
 WALL_FINISH_FACE_BINDING_SCHEMA_VERSION = "1.1.0"
@@ -625,8 +628,17 @@ class WallFinishFaceBindingProducer:
             source_visibility_producer,
             page_ids=selected,
         ).authority()
+        component_completeness_authority = (
+            WallComponentCompletenessProducer.from_authorities(
+                source_visibility_producer=source_visibility_producer,
+                physical_wall_candidate_authority=wall_authority,
+            ).authority()
+        )
         role_producer = WallRoleProducer.from_source_topology(
-            physical_wall_candidate_authority=wall_authority
+            physical_wall_candidate_authority=wall_authority,
+            wall_component_completeness_authority=(
+                component_completeness_authority
+            ),
         )
         results: dict[tuple[str, ...], WallFinishFaceBindingScopeResult] = {}
         store = source_visibility_producer._producer._store
