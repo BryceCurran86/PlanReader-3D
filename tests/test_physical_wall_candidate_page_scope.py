@@ -4,6 +4,8 @@ import fitz
 import pytest
 from unittest.mock import patch
 
+import pb_physical_wall_candidate_authority as wall_candidate_module
+
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import (
     PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE,
@@ -100,3 +102,45 @@ def test_empty_page_scope_rejected_instead_of_falling_back_to_all_pages() -> Non
             source,
             page_ids=("", "  "),
         )
+
+
+
+def test_page_scope_segments_viewports_once_for_all_wall_candidates() -> None:
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=320.0, height=240.0)
+        for y in (60.0, 100.0, 140.0, 180.0):
+            page.draw_line((40.0, y), (280.0, y))
+        payload = bytes(doc.tobytes(garbage=4, deflate=True))
+    finally:
+        doc.close()
+
+    source = SourceVisibilityProducer(
+        producer_method="page-scoped-wall-candidates-segmentation-test",
+        producer_version="1",
+    )
+    source.ingest_native_pdf_bytes(
+        document_id="page-scoped-wall-candidates-segmentation",
+        source_bytes=payload,
+        source_locator="memory://page-scoped-wall-candidates-segmentation.pdf",
+    )
+
+    original = wall_candidate_module.segment_page_viewports
+    with patch.object(
+        wall_candidate_module,
+        "segment_page_viewports",
+        wraps=original,
+    ) as segment:
+        authority = PhysicalWallCandidateProducer.from_source_visibility_producer(
+            source,
+            page_ids=("1",),
+        ).authority()
+
+    published = source.published_snapshot_for_revision(
+        next(iter(source._published_by_revision))
+    )
+    assert published is not None
+    result = authority.resolve_scope(_selector(published, "1"))
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) >= 4
+    segment.assert_called_once()
