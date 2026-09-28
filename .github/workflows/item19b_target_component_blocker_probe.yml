@@ -169,44 +169,35 @@ jobs:
                       ),
                   })
 
-          # Cross-scope diagnostic: test whether a complete page-wide
-          # producer-owned wall topology can independently corroborate the
-          # authenticated viewport target through exact immutable source
-          # primitive identity.  Production logic is unchanged here.
-          from pb_wall_finish_callout_wall_authority import WallFinishCalloutWallProducer
+          # Cross-scope diagnostic: map every member of the already-resolved
+          # target viewport component to a complete page-wide producer-owned
+          # wall topology through immutable source primitive identity.  This
+          # avoids rebuilding the viewport authority a second time and exposes
+          # all candidate mappings rather than selecting one target in the
+          # diagnostic.
           from pb_wall_role_authority import WallRoleProducer, WallRoleSelector
 
-          callout_wall=WallFinishCalloutWallProducer.from_source_visibility_producer(
+          page_walls=PhysicalWallCandidateProducer.from_source_visibility_producer(
               source,page_ids=("54",)
+          ).authority()
+          page_roles=WallRoleProducer.from_source_topology(
+              physical_wall_candidate_authority=page_walls,
           )
-          bindings=[
-              b
-              for result in callout_wall.published_results()
-              for b in result.bindings
-              if b.source_execution_sequence_start==10070
-              and b.source_execution_sequence_end==10078
-              and b.trade_scope_id in {"internal_plaster","internal_paint"}
+          page_scopes=[
+              s for s in page_walls._scopes.values()
+              if s.scope_kind=="page" and s.page_id=="54"
           ]
-          cross_scope={}
-          if bindings:
-              callout_target=bindings[0]
-              viewport_target=by_id.get(callout_target.physical_wall_id)
-              target_raw_ids=(
-                  set(str(x) for x in viewport_target.physical_identity.source_primitive_ids)
-                  if viewport_target is not None else set()
+          page_rows=[]
+          for viewport_rec in target_records:
+              target_raw_ids=set(
+                  str(x) for x in viewport_rec.physical_identity.source_primitive_ids
               )
-              page_walls=PhysicalWallCandidateProducer.from_source_visibility_producer(
-                  source,page_ids=("54",)
-              ).authority()
-              page_roles=WallRoleProducer.from_source_topology(
-                  physical_wall_candidate_authority=page_walls,
-              )
-              page_rows=[]
-              for page_scope in page_walls._scopes.values():
-                  if page_scope.scope_kind!="page":
-                      continue
+              matches=[]
+              for page_scope in page_scopes:
                   for rec in page_scope.records:
-                      raw_ids=set(str(x) for x in rec.physical_identity.source_primitive_ids)
+                      raw_ids=set(
+                          str(x) for x in rec.physical_identity.source_primitive_ids
+                      )
                       overlap=sorted(target_raw_ids & raw_ids)
                       if not overlap:
                           continue
@@ -220,7 +211,7 @@ jobs:
                           physical_wall_id=rec.wall_candidate_id,
                       )
                       role=page_roles.publish(selector)
-                      page_rows.append({
+                      matches.append({
                           "page_scope_complete":page_scope.scope_complete,
                           "page_scope_reasons":list(page_scope.reason_codes),
                           "page_wall":rec.wall_candidate_id,
@@ -230,12 +221,21 @@ jobs:
                           "role":role.record.role.value if role.record else None,
                           "role_reasons":list(role.reason_codes),
                       })
-              cross_scope={
-                  "viewport_target":callout_target.physical_wall_id,
-                  "viewport_target_raw_ids":sorted(target_raw_ids),
-                  "page_matches":page_rows,
-              }
-          print("ITEM19B_CROSS_SCOPE_ROLE "+json.dumps(cross_scope,sort_keys=True))
+              page_rows.append({
+                  "viewport_wall":viewport_rec.wall_candidate_id,
+                  "viewport_raw_ids":sorted(target_raw_ids),
+                  "matches":matches,
+              })
+          print("ITEM19B_CROSS_SCOPE_ROLE "+json.dumps({
+              "page_scope_count":len(page_scopes),
+              "page_scopes":[{
+                  "scope":s.decision_scope_id,
+                  "complete":s.scope_complete,
+                  "reasons":list(s.reason_codes),
+                  "records":len(s.records),
+              } for s in page_scopes],
+              "viewport_component_mappings":page_rows,
+          },sort_keys=True))
 
           print("ITEM19B_TARGET_BLOCKER "+json.dumps({
               "viewport_bbox":list(scope.viewport_bbox or ()),
