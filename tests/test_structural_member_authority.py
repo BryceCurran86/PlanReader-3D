@@ -258,6 +258,8 @@ def test_closed_structural_section_with_explicit_tag_is_valid_instance() -> None
     result = producer.authority().resolve(_selector(definition))
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.quantity == 1
+    assert result.member_kind == "chs_pillar"
+    assert result.section_text == "50 mm CHS pillar"
     assert len(result.physical_member_ids) == 1
 
 
