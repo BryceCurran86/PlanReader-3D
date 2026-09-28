@@ -1,0 +1,29 @@
+name: Structural Member Source Census Diagnostic
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download exact sources
+        run: |
+          curl -L --fail --retry 3 -o /tmp/kstvet.pdf "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          curl -L --fail --retry 3 -o /tmp/murera.pdf "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          echo "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf" | sha256sum -c -
+          echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  /tmp/murera.pdf" | sha256sum -c -
+      - name: Census target pages
+        run: |
+          PYTHONPATH=. python scripts/structural_member_source_census.py --pdf /tmp/murera.pdf --page 225 --label murera-p225 | tee /tmp/murera-225.jsonl
+          PYTHONPATH=. python scripts/structural_member_source_census.py --pdf /tmp/kstvet.pdf --page 54 --label kstvet-p54 | tee /tmp/kstvet-54.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: structural-member-source-census
+          path: |
+            /tmp/murera-225.jsonl
+            /tmp/kstvet-54.jsonl
