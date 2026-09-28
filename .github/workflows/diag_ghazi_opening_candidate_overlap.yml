@@ -35,7 +35,7 @@ jobs:
             -v /tmp/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf:/app/ghazi.pdf:ro \
             planreader-opening-overlap \
             python - <<'PY'
-          import hashlib, json
+          import hashlib, json, itertools, math
           from pathlib import Path
           from pb_source_visibility_authority import SourceVisibilityProducer
           from pb_semantic_opening_enumeration_authority import SemanticOpeningEnumerationProducer
@@ -103,5 +103,98 @@ jobs:
               "unresolved_candidate_count":len(closure.unresolved_candidate_ids),
               "unresolved_observation_count":len(closure.unresolved_observation_ids),
               "reason_codes":list(closure.reason_codes),
+          },sort_keys=True),flush=True)
+
+          # Diagnostic-only simulation: require the two same-gap face breaks
+          # of a six-segment structural candidate to be adjacent parallel axes.
+          # No production behavior is changed in this workflow.
+          by_obs={r.observation_id:r for r in records}
+          candidate_meta=[]
+          for cand in candidates:
+              support=[by_obs[oid] for oid in cand.source_observation_ids if oid in by_obs]
+              if len(support)!=6 or cand.structural_pattern!="jamb_bounded_two_face_interruption":
+                  continue
+              breaks=[]
+              for a,b in itertools.combinations(support,2):
+                  br=__import__("pb_physical_opening_authority",fromlist=["_face_break"])._face_break(a,b)
+                  if br is not None:
+                      ids=frozenset((br.first.observation_id,br.second.observation_id))
+                      if all(ids != prior[0] for prior in breaks):
+                          breaks.append((ids,br))
+              matches=[]
+              mod=__import__("pb_physical_opening_authority",fromlist=["_same_gap"])
+              for (_,left),(_,right) in itertools.combinations(breaks,2):
+                  if not mod._same_gap(left,right) or not mod._distinct_parallel_axes(left,right):
+                      continue
+                  face_ids={
+                      left.first.observation_id,left.second.observation_id,
+                      right.first.observation_id,right.second.observation_id,
+                  }
+                  remaining=[r for r in support if r.observation_id not in face_ids]
+                  if len(remaining)!=2:
+                      continue
+                  left_matches=[r for r in remaining if mod._segment_matches(r,left.start_point,right.start_point)]
+                  right_matches=[r for r in remaining if mod._segment_matches(r,left.end_point,right.end_point)]
+                  if len(left_matches)==1 and len(right_matches)==1 and left_matches[0].observation_id != right_matches[0].observation_id:
+                      direction=left.direction
+                      off1=mod._cross(direction,left.start_point)
+                      off2=mod._cross(direction,right.start_point)
+                      matches.append((left,right,off1,off2))
+              if len(matches)!=1:
+                  candidate_meta.append({
+                      "candidate_id":cand.candidate_id,
+                      "reconstruction_matches":len(matches),
+                      "retain":False,
+                  })
+                  continue
+              left,right,off1,off2=matches[0]
+              candidate_meta.append({
+                  "candidate_id":cand.candidate_id,
+                  "gap_start":round(left.gap_start,6),
+                  "gap_end":round(left.gap_end,6),
+                  "direction":[round(left.direction[0],6),round(left.direction[1],6)],
+                  "offset_a":round(off1,6),
+                  "offset_b":round(off2,6),
+                  "separation":round(abs(off2-off1),6),
+                  "support_ids":list(cand.source_observation_ids),
+                  "reconstruction_matches":1,
+              })
+
+          groups={}
+          for meta in candidate_meta:
+              if meta.get("reconstruction_matches")!=1:
+                  continue
+              key=(meta["gap_start"],meta["gap_end"],tuple(meta["direction"]))
+              groups.setdefault(key,[]).append(meta)
+          for metas in groups.values():
+              axes=sorted({m["offset_a"] for m in metas}|{m["offset_b"] for m in metas})
+              for meta in metas:
+                  lo=min(meta["offset_a"],meta["offset_b"])
+                  hi=max(meta["offset_a"],meta["offset_b"])
+                  between=[axis for axis in axes if lo < axis < hi]
+                  meta["intermediate_axes"]=between
+                  meta["retain"]=not between
+
+          retained={m["candidate_id"] for m in candidate_meta if m.get("retain")}
+          retained_conflicts=0
+          retained_multi=[]
+          for oid in rec.visible_observation_ids:
+              containing=[cand.candidate_id for cand in candidates if cand.candidate_id in retained and oid in cand.source_observation_ids]
+              if len(containing)>1:
+                  retained_conflicts+=1
+                  retained_multi.append({"observation_id":oid,"candidate_ids":containing})
+          print("ADJACENT_FACE_SIM="+json.dumps({
+              "candidate_total":len(candidates),
+              "reconstructed":sum(1 for m in candidate_meta if m.get("reconstruction_matches")==1),
+              "retained_count":len(retained),
+              "retained_conflict_observations":retained_conflicts,
+              "groups":[{
+                  "key":[key[0],key[1],list(key[2])],
+                  "candidate_count":len(metas),
+                  "axis_count":len({m["offset_a"] for m in metas}|{m["offset_b"] for m in metas}),
+                  "retained_count":sum(1 for m in metas if m.get("retain")),
+                  "metas":metas,
+              } for key,metas in groups.items()],
+              "retained_multi":retained_multi[:30],
           },sort_keys=True),flush=True)
           PY
