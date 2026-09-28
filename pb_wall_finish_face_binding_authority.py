@@ -624,10 +624,14 @@ class WallFinishFaceBindingProducer:
         if page_ids is not None and not selected:
             raise ValueError("page_ids must contain at least one source page")
 
-        wall_authority = PhysicalWallCandidateProducer.from_authenticated_viewports(
-            source_visibility_producer,
-            page_ids=selected,
-        ).authority()
+        wall_authority = (
+            PhysicalWallCandidateProducer
+            .from_source_visibility_with_authenticated_viewports(
+                source_visibility_producer,
+                page_ids=selected,
+            )
+            .authority()
+        )
         component_completeness_authority = (
             WallComponentCompletenessProducer.from_authorities(
                 source_visibility_producer=source_visibility_producer,
