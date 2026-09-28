@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from pb_source_execution_callout_authority import _Word
 from pb_opening_detail_definition_authority import (
     _candidate,
     _claim_norm,
     _dimension_candidates,
+    _glyph_only_separator_receipt,
     _norm,
     _same_line_dimension_pair,
 )
@@ -276,3 +279,52 @@ def test_far_apart_same_row_dimensions_do_not_form_detail_pair() -> None:
         sequence_end=6,
     )
     assert _same_line_dimension_pair(first, second) is False
+
+
+
+def test_glyph_only_x_receipt_is_separator_structure_only() -> None:
+    word = _Word(
+        observation_id="x",
+        receipt_id="receipt-x",
+        source_partition_id="partition",
+        raw_text="x",
+        geometry=(39.0, 0.0, 43.0, 10.0),
+        sequence_start=104,
+        sequence_end=104,
+    )
+    receipt = SimpleNamespace(
+        receipt_id="receipt-x",
+        raw_text="x",
+        source_partition_id="partition",
+        geometry=word.geometry,
+        reason_codes=("text_glyph_mapping_unverified",),
+        block_no=1,
+        line_no=0,
+        word_no=1,
+    )
+    native = SimpleNamespace(
+        status=__import__("pb_migration_contracts").EvidenceResolutionStatus.ABSTAINED,
+        reason_codes=("text_glyph_mapping_unverified",),
+        receipt=receipt,
+    )
+    assert _glyph_only_separator_receipt(native, word) is True
+
+    # The fallback cannot authorize arbitrary semantic text or a receipt with
+    # any additional integrity problem.
+    non_separator = _Word(
+        observation_id="steel",
+        receipt_id="receipt-steel",
+        source_partition_id="partition",
+        raw_text="steel",
+        geometry=word.geometry,
+        sequence_start=104,
+        sequence_end=104,
+    )
+    assert _glyph_only_separator_receipt(native, non_separator) is False
+
+    conflicting = SimpleNamespace(
+        status=native.status,
+        reason_codes=("text_glyph_mapping_unverified", "text_render_mode_untrusted"),
+        receipt=receipt,
+    )
+    assert _glyph_only_separator_receipt(conflicting, word) is False
