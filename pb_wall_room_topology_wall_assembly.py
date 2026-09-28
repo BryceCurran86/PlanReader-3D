@@ -162,8 +162,8 @@ def _canonical_fallback_edge_order(
     and the physical-identity path -- depend on the interpreter's string-hash
     seed. Order the edges by their own source coordinates instead (the edge id
     only breaks exact coordinate ties). This deliberately changes nothing but
-    the order: the fallback still uses exactly the same points as before, so
-    every result is one the previous implementation could already produce.
+    the order: the fallback still uses exactly the same points as before, and
+    only their previously hash-dependent iteration order is fixed.
     """
 
     def key(edge_id: str) -> Tuple[float, float, float, float, str]:

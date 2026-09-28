@@ -10,8 +10,8 @@ and never of which endpoint a source primitive happened to start at.
 The non-simple chain fixture reproduces the real-source failure mode: one line
 drawn twice -- once whole and once as fragments carrying T-junction stems --
 whose two copies union into one W4 group with no single traversal. The fix is
-deliberately order-only: the fallback keeps exactly the points it used before,
-so every result is one the previous implementation could already produce.
+deliberately order-only: the fallback keeps exactly the points it used before
+and only their previously hash-dependent iteration order is fixed.
 """
 from __future__ import annotations
 
