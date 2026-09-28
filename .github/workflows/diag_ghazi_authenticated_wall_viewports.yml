@@ -1,0 +1,102 @@
+name: TEST-ONLY Ghazi Authenticated Wall Viewports
+
+on:
+  pull_request:
+    branches: [fix/live-wall-opening-snapshot-stabilization]
+
+jobs:
+  ghazi-viewport-probe:
+    if: github.head_ref == 'diag/ghazi-authenticated-wall-viewports'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download SHA-pinned Ghazi source
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, urllib.request
+          bid="tenders_ke_ghazi_science_lab"
+          bench=pathlib.Path("benchmarks/public_tenders")/bid
+          dm=json.loads((bench/"download_manifest.json").read_text())
+          doc=next(d for d in dm["documents"] if d["role"]=="architectural_drawings")
+          out=pathlib.Path("/tmp")/doc["filename"]
+          req=urllib.request.Request(dm["source_url"],headers={"User-Agent":"PlanReader-viewport-probe/1.0"})
+          with urllib.request.urlopen(req,timeout=180) as r:
+              out.write_bytes(r.read())
+          got=hashlib.sha256(out.read_bytes()).hexdigest()
+          if got != doc["sha256"]:
+              raise SystemExit(f"sha mismatch {got}")
+          print(out)
+          PY
+
+      - name: Build exact production image
+        run: docker build -t planreader-viewport-probe .
+
+      - name: Probe producer-owned authenticated wall viewports
+        run: |
+          docker run --rm -i --cpus=2.0             -v /tmp/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf:/app/ghazi.pdf:ro             planreader-viewport-probe             python - <<'PY'
+          import hashlib, json, time
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+
+          payload=Path("/app/ghazi.pdf").read_bytes()
+          source_sha=hashlib.sha256(payload).hexdigest()
+          source=SourceVisibilityProducer(
+              producer_method="diag-ghazi-authenticated-wall-viewports",
+              producer_version="1.0.0",
+          )
+          t=time.time()
+          initial=source.ingest_native_pdf_bytes(
+              document_id=f"diag-source:{source_sha[:32]}",
+              source_bytes=payload,
+              source_locator="memory://ghazi-viewport-probe.pdf",
+              page_ids=("167",),
+          )
+          print("VIEWPORT_PROBE="+json.dumps({
+              "stage":"ingest",
+              "seconds":round(time.time()-t,3),
+              "snapshot_id":initial.snapshot.snapshot_id,
+              "visible_count":len(initial.visible_observation_ids),
+          },sort_keys=True),flush=True)
+
+          t=time.time()
+          producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,
+              page_ids=("167",),
+          )
+          stabilized=source.published_snapshot_for_revision(initial.revision.revision_id)
+          rows=[]
+          for result in producer._scopes.values():
+              rows.append({
+                  "scope_kind":result.scope_kind,
+                  "viewport_id":result.viewport_id,
+                  "viewport_status":result.viewport_status,
+                  "viewport_view_type":result.viewport_view_type,
+                  "viewport_boundary_source":result.viewport_boundary_source,
+                  "viewport_bbox":result.viewport_bbox,
+                  "status":getattr(result.status,"value",result.status),
+                  "scope_complete":result.scope_complete,
+                  "candidate_count":len(result.records),
+                  "reason_codes":list(result.reason_codes),
+                  "boundary_observation_count":len(result.scope_boundary_observation_ids),
+                  "ambiguous_observation_count":len(result.ambiguous_source_observation_ids),
+                  "representative_wall_count":(
+                      0 if result.equivalence is None
+                      else len(result.equivalence.representative_wall_ids)
+                  ),
+                  "ambiguous_wall_count":(
+                      0 if result.equivalence is None
+                      else len(result.equivalence.ambiguous_wall_ids)
+                  ),
+              })
+          print("VIEWPORT_PROBE="+json.dumps({
+              "stage":"authenticated_viewports",
+              "seconds":round(time.time()-t,3),
+              "initial_snapshot_id":initial.snapshot.snapshot_id,
+              "stabilized_snapshot_id":None if stabilized is None else stabilized.snapshot.snapshot_id,
+              "scope_count":len(rows),
+              "scopes":rows,
+          },sort_keys=True,default=str),flush=True)
+          PY
