@@ -62,7 +62,7 @@ jobs:
           mkdir -p "$OUT"
           START=$(date +%s)
           set +e
-          timeout --signal=TERM 1200s docker run --rm --cpus=2.0             -v "/tmp/canonical-source/$BENCHMARK_FILENAME:/app/$BENCHMARK_FILENAME:ro"             -v "$OUT:/tmp/results"             planreader-canonical             python -c "import json, os; import pb_benchmark_accuracy_engine as m; m.resolve_evaluated_commit_sha=lambda: os.environ['BASE_SHA']; e=m.BenchmarkAccuracyEngine(output_dir='/tmp/results'); r=e.evaluate_benchmark(benchmark_id=os.environ['BENCHMARK_ID'], auto_extract=True); print('SPLIT_RESULT='+json.dumps(r.to_dict(),sort_keys=True))"             | tee "/tmp/$BENCHMARK_ID.txt"
+          timeout --signal=TERM 1200s docker run --rm --cpus=2.0 -e BENCHMARK_ID -e BASE_SHA             -v "/tmp/canonical-source/$BENCHMARK_FILENAME:/app/$BENCHMARK_FILENAME:ro"             -v "$OUT:/tmp/results"             planreader-canonical             python -c "import json, os; import pb_benchmark_accuracy_engine as m; m.resolve_evaluated_commit_sha=lambda: os.environ['BASE_SHA']; e=m.BenchmarkAccuracyEngine(output_dir='/tmp/results'); r=e.evaluate_benchmark(benchmark_id=os.environ['BENCHMARK_ID'], auto_extract=True); print('SPLIT_RESULT='+json.dumps(r.to_dict(),sort_keys=True))"             | tee "/tmp/$BENCHMARK_ID.txt"
           code=${PIPESTATUS[0]}
           set -e
           END=$(date +%s)
