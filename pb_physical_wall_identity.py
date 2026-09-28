@@ -33,7 +33,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
-from pb_hosted_opening_geometry import _MAX_WALL_THICKNESS_PT
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_wall_room_topology_contracts import WallCandidate
 from pb_wall_room_topology_junction_classifier import (
@@ -314,23 +313,13 @@ _EQUIVALENCE_DEGENERATE_TOL = 1e-9
 # unusually thick wall body plus both finishes, not a typical partition.
 MAX_PLAUSIBLE_WALL_BODY_MM = 700.0
 
-# Source-space fallback when no verified scale is available.
-#
-# ``pb_hosted_opening_geometry`` documents the repository's plausible
-# face-separation policy as _MAX_WALL_THICKNESS_PT = 40.0pt covering wall
-# bodies up to roughly 500mm at the drawing scales seen so far.  That anchor
-# is widened to the conservative envelope above so the gate stays inclusive:
-#
-#     40.0pt @ ~500mm  ->  40.0 * (700 / 500) = 56.0pt @ ~700mm
-#
-# Exceeding this band never proves anything about identity; it only means the
-# pair is not worth comparing as one wall body.
-_PLAUSIBLE_WALL_BODY_ANCHOR_PT = _MAX_WALL_THICKNESS_PT
-_PLAUSIBLE_WALL_BODY_ANCHOR_MM = 500.0
-MAX_PLAUSIBLE_WALL_BODY_SOURCE_PT = _PLAUSIBLE_WALL_BODY_ANCHOR_PT * (
-    MAX_PLAUSIBLE_WALL_BODY_MM / _PLAUSIBLE_WALL_BODY_ANCHOR_MM
-)
-
+# There is intentionally NO unscaled source-space separation cutoff.
+# A point distance cannot be converted to a physical wall thickness without
+# authoritative scale.  Using a fixed source-space band could publish the two
+# faces of a 450-600mm wall on a larger-scale detail.  Therefore parallel,
+# longitudinally-overlapping pairs stay in contest until producer-owned scale
+# is corroborated; orientation/no-overlap filtering still removes unrelated
+# pairs without needing physical units.
 # Exclusion reason codes (diagnostic/provenance only).
 PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE = "pair_excluded_orientation_incompatible"
 PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP = "pair_excluded_no_longitudinal_overlap"
@@ -339,12 +328,12 @@ PAIR_EXCLUDED_SEPARATION_BEYOND_BAND = "pair_excluded_separation_beyond_wall_bod
 
 def max_plausible_wall_body_separation_pt(
     points_per_mm: Optional[float] = None,
-) -> float:
-    """Conservative maximum separation at which two faces may share a body.
+) -> Optional[float]:
+    """Scale-backed maximum separation for a plausible shared wall body.
 
-    With a verified scale the band is expressed in physical units; without
-    one it falls back to the documented source-space policy band.  This is a
-    candidate filter only and can never establish SAME_PHYSICAL_WALL.
+    No source-space fallback is returned. Without producer-owned physical
+    scale, absolute PDF-point separation cannot safely prove that two
+    overlapping parallel paths are different physical walls.
     """
     if (
         points_per_mm is not None
@@ -352,7 +341,7 @@ def max_plausible_wall_body_separation_pt(
         and points_per_mm > 0.0
     ):
         return MAX_PLAUSIBLE_WALL_BODY_MM * float(points_per_mm)
-    return MAX_PLAUSIBLE_WALL_BODY_SOURCE_PT
+    return None
 
 
 def _point_segment_distance(
@@ -639,13 +628,19 @@ def physical_wall_pair_identity_candidacy(
             if overlap <= _EQUIVALENCE_LATERAL_TOL_PT:
                 continue
             saw_overlap = True
-            if separation <= band:
+            # Physical separation may exclude a pair only when the exact
+            # source scope has producer-owned physical scale.  With no scale,
+            # keep every parallel overlapping pair in contest: abstention is
+            # safer than double-publishing two faces of one thick wall.
+            if band is None or separation <= band:
                 return True, None
 
     if not saw_parallel:
         return False, PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE
     if not saw_overlap:
         return False, PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP
+    if band is None:
+        return True, None
     return False, PAIR_EXCLUDED_SEPARATION_BEYOND_BAND
 
 
