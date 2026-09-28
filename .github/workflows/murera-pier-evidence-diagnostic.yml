@@ -1,0 +1,21 @@
+name: Murera Pier Evidence Diagnostic
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  murera:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install pymupdf
+      - run: |
+          curl -L --fail --retry 3 -o /tmp/murera.pdf "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  /tmp/murera.pdf" | sha256sum -c -
+      - run: python scripts/murera_pier_source_probe.py /tmp/murera.pdf 225 | tee /tmp/murera-p225.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: murera-p225-pier-evidence
+          path: /tmp/murera-p225.json
