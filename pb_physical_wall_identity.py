@@ -463,6 +463,35 @@ def _unit(seg: tuple[float, float, float, float]) -> Optional[tuple[float, float
     return ux, uy
 
 
+def _paths_share_both_endpoints(
+    left: Sequence[tuple[float, float]],
+    right: Sequence[tuple[float, float]],
+    tolerance: float,
+) -> bool:
+    """True when two reconstructed paths have the same endpoint pair.
+
+    Sharing both endpoints is materially different from an ordinary T/L/X
+    junction, which shares at most one contact point.  Two paths spanning the
+    same endpoint pair but taking different interior routes remain plausible
+    competing representations of one physical wall and must fail closed.
+    """
+
+    if len(left) < 2 or len(right) < 2:
+        return False
+
+    def near(a: tuple[float, float], b: tuple[float, float]) -> bool:
+        return math.hypot(
+            float(a[0]) - float(b[0]),
+            float(a[1]) - float(b[1]),
+        ) <= tolerance
+
+    return (
+        near(left[0], right[0]) and near(left[-1], right[-1])
+    ) or (
+        near(left[0], right[-1]) and near(left[-1], right[0])
+    )
+
+
 def _paths_meet_as_same_wall_candidates(
     left: Sequence[tuple[float, float]],
     right: Sequence[tuple[float, float]],
@@ -569,13 +598,14 @@ def physical_wall_pair_identity_candidacy(
     3. an identical reconstructed path fingerprint (duplicate geometry);
     4. a viewport/level scope difference, which may be the same physical wall
        drawn twice at different coordinates or scale;
-    5. geometric contact within the snap tolerance;
-    6. a parallel, longitudinally overlapping sub-segment pair. With
+    5. the same two path endpoints within the snap tolerance;
+    6. orientation-compatible geometric contact within the snap tolerance;
+    7. a parallel, longitudinally overlapping sub-segment pair. With
        producer-owned physical scale, separation beyond the conservative
        maximum wall body excludes the pair; without scale, separation cannot
        safely exclude it.
 
-    Rule 6 is a CANDIDATE FILTER ONLY.  Separation never proves
+    Rule 7 is a CANDIDATE FILTER ONLY.  Separation never proves
     SAME_PHYSICAL_WALL; it only admits the pair to normal SAME / DISTINCT /
     AMBIGUOUS classification, which still requires positive evidence.
 
@@ -606,6 +636,13 @@ def physical_wall_pair_identity_candidacy(
     left_path = tuple(left.path_fingerprint or ())
     right_path = tuple(right.path_fingerprint or ())
     if len(left_path) < 2 or len(right_path) < 2:
+        return True, None
+
+    if _paths_share_both_endpoints(
+        left_path,
+        right_path,
+        _EQUIVALENCE_LATERAL_TOL_PT,
+    ):
         return True, None
 
     if _paths_meet_as_same_wall_candidates(
