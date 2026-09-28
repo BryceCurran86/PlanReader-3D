@@ -55,7 +55,8 @@ jobs:
             --project "${{ matrix.project }}" \
             --page-start "${{ matrix.page_start }}" \
             --page-end "${{ matrix.page_end }}" \
-            --out "/tmp/${{ matrix.project }}-structural-source.json"
+            --out "/tmp/${{ matrix.project }}-structural-source.json" \
+            --source-only
 
       - uses: actions/upload-artifact@v4
         with:
