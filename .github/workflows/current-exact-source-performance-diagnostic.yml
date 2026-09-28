@@ -1,0 +1,31 @@
+name: Current Exact Source Performance Diagnostic
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  current:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download exact official sources
+        run: |
+          curl -L --fail --retry 3 -o /tmp/lamu.pdf "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          curl -L --fail --retry 3 -o /tmp/murera.pdf "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          echo "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  /tmp/lamu.pdf" | sha256sum -c -
+          echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  /tmp/murera.pdf" | sha256sum -c -
+      - name: Profile current Lamu
+        run: PYTHONPATH=. python scripts/profile_exact_source_perf_gate.py --repo . --pdf /tmp/lamu.pdf --pages 41-45 --label lamu-current | tee /tmp/lamu-current.jsonl
+      - name: Profile current Murera
+        run: PYTHONPATH=. python scripts/profile_exact_source_perf_gate.py --repo . --pdf /tmp/murera.pdf --pages 219-238 --label murera-current | tee /tmp/murera-current.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: current-exact-source-performance
+          path: |
+            /tmp/lamu-current.jsonl
+            /tmp/murera-current.jsonl
