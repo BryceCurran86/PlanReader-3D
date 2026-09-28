@@ -1,48 +1,45 @@
 # PlanReader Public Tender Benchmark — Executive Headline Accuracy Dashboard
 
-**Generated**: `2026-09-09T18:40:54.738454+00:00`
+**Generated**: `2026-09-28T02:45:25.977338+00:00`  
+**Evaluated commit**: `819b6aca4f671b34c37d97f63d9d31a678af247b`
 
-> **Official Headline Accuracy**: **`39.3%`** across `5` headline-verified public tender benchmark(s).  
-> **Strict Exact Accuracy** (zero-tolerance): **`29.5%`**.
+> **Official Headline Accuracy**: **`60.0%`** across `5` headline-verified public tender benchmark(s).  
+> **Strict Exact Accuracy** (zero-tolerance): **`48.3%`**.
 
 ## 1. Executive Headline Metrics (1:1 Material Scope Packages)
 
 | Metric | Value | Description |
 | :--- | :--- | :--- |
-| **Headline Overall Accuracy (<= 5% tol)** | **`39.3%`** | Combined exact matches and <= 5% tolerance across headline benchmarks |
-| **Headline Strict Exact Accuracy** | **`29.5%`** | Zero-tolerance exact numerical matches across headline benchmarks |
+| **Headline Overall Accuracy (<= 5% tol)** | **`60.0%`** | Combined exact matches and <= 5% tolerance across headline benchmarks |
+| **Headline Strict Exact Accuracy** | **`48.3%`** | Zero-tolerance exact numerical matches across headline benchmarks |
 | Scored Headline Benchmarks | `5` | Verified packages with 1:1 physical drawing-to-BOQ scope match |
 | Measurable Items Evaluated | `60` | Total expected architectural takeoff items |
-| Total Items Compared (Denominator) | `61` | Expected items + hallucinated extra predictions across packages |
-| Exact Matches | `18` | Exactly matched quantities |
-| Within 5% Tolerance | `6` | Minor variations within 5% tolerance |
+| Total Items Compared (Denominator) | `60` | Expected items + hallucinated extra predictions across packages |
+| Exact Matches | `29` | Exactly matched quantities |
+| Within 5% Tolerance | `7` | Minor variations within 5% tolerance |
 | Within 10% Tolerance | `0` | Minor variations (5% to 10%) |
-| Within 20% Tolerance | `0` | Moderate variations (10% to 20%) |
-| Gross Mismatches (> 20%) | `13` | Discrepancies exceeding 20% |
+| Within 20% Tolerance | `1` | Moderate variations (10% to 20%) |
+| Gross Mismatches (> 20%) | `0` | Discrepancies exceeding 20% |
 | Missed in Extraction | `23` | BOQ items missing from drawing predictions |
-| Hallucinated Extra Predictions | `1` | Predictions with no counterpart in BOQ |
+| Hallucinated Extra Predictions | `0` | Predictions with no counterpart in BOQ |
 
 ## 2. Headline Benchmark Breakdown (1:1 Physical Scope Match)
 
 | Benchmark ID | Project Name | Scope | Expected | Compared | Exact | <= 5% | Gross | Missed | Halluc. | Accuracy | Strict % | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `tenders_ke_kstvet_cbc_classroom` | Proposed Construction of CBC Classroom and Integrated Resource Center | 1:1 Match | `13` | `13` | `1` | `2` | `5` | `5` | `0` | **`23.1%`** | `7.7%` | `verified_scored_benchmark` |
-| `tenders_ke_murera_science_lab` | Proposed Construction of a Science Laboratory at Murera Senior School | 1:1 Match | `10` | `11` | `1` | `0` | `6` | `3` | `1` | **`9.1%`** | `9.1%` | `verified_scored_benchmark` |
-| `tenders_ke_ghazi_science_lab` | Proposed Construction of a Science Laboratory at Ghazi Primary School | 1:1 Match | `13` | `13` | `1` | `2` | `1` | `9` | `0` | **`23.1%`** | `7.7%` | `verified_scored_benchmark` |
+| `tenders_ke_kstvet_cbc_classroom` | Proposed Construction of CBC Classroom and Integrated Resource Center | 1:1 Match | `13` | `13` | `4` | `2` | `0` | `7` | `0` | **`46.1%`** | `30.8%` | `verified_scored_benchmark` |
+| `tenders_ke_murera_science_lab` | Proposed Construction of a Science Laboratory at Murera Senior School | 1:1 Match | `10` | `10` | `4` | `0` | `0` | `6` | `0` | **`40.0%`** | `40.0%` | `verified_scored_benchmark` |
+| `tenders_ke_ghazi_science_lab` | Proposed Construction of a Science Laboratory at Ghazi Primary School | 1:1 Match | `13` | `13` | `4` | `3` | `0` | `6` | `0` | **`53.9%`** | `30.8%` | `verified_scored_benchmark` |
 | `tenders_ke_umma_hostels` | Proposed Student Hostels for Umma University in Kajiado | 1:1 Match | `15` | `15` | `15` | `0` | `0` | `0` | `0` | **`100.0%`** | `100.0%` | `verified_scored_benchmark` |
-| `tenders_ke_lamu_ishakani_ecd_classrooms` | Proposed Construction of 2No. ECD Classrooms and 2 Doors VIP Toilets at Ishakani Primary School | 1:1 Match | `9` | `9` | `0` | `2` | `1` | `6` | `0` | **`22.2%`** | `0.0%` | `verified_scored_benchmark` |
+| `tenders_ke_lamu_ishakani_ecd_classrooms` | Proposed Construction of 2No. ECD Classrooms and 2 Doors VIP Toilets at Ishakani Primary School | 1:1 Match | `9` | `9` | `2` | `2` | `0` | `4` | `0` | **`44.4%`** | `22.2%` | `verified_scored_benchmark` |
 
 ## 3. Real-World Scope Divergence Stress Tests (Excluded from Headline)
 
-> **Scope Divergence Stress Tests**: These packages represent authentic tender documents where the architectural drawing set and the Bill of Quantities cover different physical boundaries (e.g., drawings cover a whole facility while the BOQ covers a single wing). They are preserved as real-world stress tests and are excluded from primary headline accuracy scoring.
-
 | Benchmark ID | Project Name | Scope Divergence | Total BOQ Items | Evaluated | Exact | Gross | Missed | Overall Acc | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `tenders_ke_mbagha_maternity_dispensary` | Proposed Construction of a Maternity Block at Mbagha Dispensary in Mwatate Sub-County | Facility drawings vs single-wing BOQ | `123` | `0` | `0` | `0` | `0` | `N/A` | `candidate_unscored` |
+| `tenders_ke_mbagha_maternity_dispensary` | Proposed Construction of a Maternity Block at Mbagha Dispensary in Mwatate Sub-County | Facility drawings vs single-wing BOQ | `123` | `0` | `0` | `0` | `0` | `N/A` | `source_unavailable` |
 
 ## 4. Candidate Seed Inventory (Unverified / Excluded)
-
-> **Candidate Seeds**: Prospective tender references. They are strictly excluded from headline accuracy metrics until physical drawing and matching BOQ files are retrieved, verified, and scope-audited.
 
 | Benchmark ID | Project Name | Organization | Reference | Status | Headline Eligible |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -55,7 +52,10 @@
 
 ## 5. Non-Penalized Denominator Exclusions
 
-Contractor overheads, site preliminaries, and provisional budget allowances are transparently excluded from physical geometric accuracy:
 - **Total Preliminaries Excluded**: `0`
 - **Total Provisional Sums Excluded**: `1`
 - **Total Non-Architectural Excluded**: `0`
+
+## Validation provenance
+
+Fresh test-only canonical five run: PR #945. The run used the five SHA-pinned source PDFs, the exact production Docker image, and the unchanged canonical evaluator. No benchmark gold, mappings, scorer, tolerances, denominator, acceptance rules, or source hashes changed.
