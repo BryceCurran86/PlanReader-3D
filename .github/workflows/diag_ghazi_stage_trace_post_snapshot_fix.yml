@@ -1,0 +1,153 @@
+name: TEST-ONLY Physical Net Wall Stage Trace
+
+on:
+  pull_request:
+    branches: [fix/live-wall-opening-snapshot-stabilization]
+
+jobs:
+  ghazi-stage-trace:
+    if: github.head_ref == 'diag/ghazi-stage-trace-post-snapshot-fix'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download SHA-pinned Ghazi source
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, urllib.request
+          bid="tenders_ke_ghazi_science_lab"
+          bench=pathlib.Path("benchmarks/public_tenders")/bid
+          dm=json.loads((bench/"download_manifest.json").read_text())
+          doc=next(d for d in dm["documents"] if d["role"]=="architectural_drawings")
+          out=pathlib.Path("/tmp")/doc["filename"]
+          req=urllib.request.Request(dm["source_url"],headers={"User-Agent":"PlanReader-stage-trace/1.0"})
+          with urllib.request.urlopen(req,timeout=180) as r:
+              out.write_bytes(r.read())
+          got=hashlib.sha256(out.read_bytes()).hexdigest()
+          if got != doc["sha256"]:
+              raise SystemExit(f"sha mismatch {got}")
+          print(out)
+          PY
+
+      - name: Build exact production image
+        run: docker build -t planreader-stage-trace .
+
+      - name: Trace authenticated physical net wall stages
+        run: |
+          docker run --rm -i --cpus=2.0             -v /tmp/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf:/app/ghazi.pdf:ro             planreader-stage-trace             python - <<'PY'
+          import hashlib, json, time
+          from pathlib import Path
+          import fitz
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
+          from pb_live_gross_wall_geometry_composition import compose_live_gross_wall_geometry
+          from pb_live_whole_wall_role_composition import compose_live_whole_wall_roles
+          from pb_live_external_physical_net_wall_publication import compose_live_external_physical_net_wall_publication
+
+          path=Path("/app/ghazi.pdf")
+          payload=path.read_bytes()
+          source_sha=hashlib.sha256(payload).hexdigest()
+          document_id=f"diag-source:{source_sha[:32]}"
+          page_ids=("167",)
+
+          def emit(stage, t0, obj):
+              print("STAGE_TRACE="+json.dumps({
+                  "stage":stage,
+                  "seconds":round(time.time()-t0,3),
+                  "status":getattr(getattr(obj,"status",None),"value",getattr(obj,"status",None)),
+                  "reason_codes":list(getattr(obj,"reason_codes",()) or ()),
+              },sort_keys=True), flush=True)
+
+          source=SourceVisibilityProducer(producer_method="diag-stage-trace",producer_version="1.0.0")
+          t=time.time()
+          published=source.ingest_native_pdf_bytes(
+              document_id=document_id,
+              source_bytes=payload,
+              source_locator="memory://ghazi-stage-trace.pdf",
+              page_ids=page_ids,
+          )
+          print("STAGE_TRACE="+json.dumps({
+              "stage":"ingest",
+              "seconds":round(time.time()-t,3),
+              "decoded_pages":list(published.coverage.decoded_pages),
+              "visible_count":len(published.visible_observation_ids),
+              "text_count":len(published.text_observation_ids),
+              "snapshot_id":published.snapshot.snapshot_id,
+          },sort_keys=True), flush=True)
+
+          t=time.time()
+          wall=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=page_ids,
+          )
+          emit("wall_opening",t,wall)
+          print("WALL_DETAIL="+json.dumps({
+              "wall_scopes":[{
+                  "page_id":x.page_id,
+                  "status":getattr(x.status,"value",x.status),
+                  "scope_complete":x.scope_complete,
+                  "wall_candidate_count":len(x.wall_candidate_ids),
+                  "reason_codes":list(x.reason_codes),
+              } for x in wall.wall_scopes],
+              "opening_binding_count":len(wall.opening_bindings),
+              "host_frame_count":len(wall.host_frames),
+              "opening_universe_status":getattr(wall.opening_universe_result.status,"value",wall.opening_universe_result.status),
+              "opening_universe_reasons":list(wall.opening_universe_result.reason_codes),
+          },sort_keys=True),flush=True)
+
+          t=time.time()
+          voids=compose_live_physical_opening_voids(
+              source_visibility_producer=source,
+              wall_opening_composition=wall,
+          )
+          emit("physical_voids",t,voids)
+
+          t=time.time()
+          gross=compose_live_gross_wall_geometry(
+              source_visibility_producer=source,
+              wall_opening_composition=wall,
+              physical_void_composition=voids,
+          )
+          emit("gross",t,gross)
+          print("GROSS_DETAIL="+json.dumps({
+              "trace_count":len(gross.traces),
+              "gross_selector_count":len(gross.gross_selectors),
+              "traces":[{
+                  "physical_wall_id":x.physical_wall_id,
+                  "page_id":x.page_id,
+                  "height_status":x.height_status,
+                  "height_m":x.height_m,
+                  "height_reason_codes":list(x.height_reason_codes),
+                  "scale_status":getattr(x.scale_status,"value",x.scale_status),
+                  "scale_reason_codes":list(x.scale_reason_codes),
+                  "gross_status":getattr(x.gross_status,"value",x.gross_status),
+                  "gross_reason_codes":list(x.gross_reason_codes),
+              } for x in gross.traces],
+          },sort_keys=True),flush=True)
+
+          t=time.time()
+          roles=compose_live_whole_wall_roles(gross_wall_composition=gross)
+          emit("roles",t,roles)
+
+          t=time.time()
+          pub=compose_live_external_physical_net_wall_publication(
+              wall_opening_composition=wall,
+              physical_void_composition=voids,
+              gross_wall_composition=gross,
+              whole_wall_role_composition=roles,
+          )
+          emit("publication",t,pub)
+          qe=pub.quantity_evidence
+          print("PUBLICATION_DETAIL="+json.dumps({
+              "external_wall_ids":list(pub.external_wall_ids),
+              "quantity":None if qe is None else qe.value,
+              "quantity_status":None if qe is None else qe.status,
+              "quantity_unit":None if qe is None else qe.unit,
+              "quantity_semantic_key":None if qe is None else qe.semantic_key,
+              "quantity_evidence_ids":[] if qe is None else list(qe.evidence_ids),
+              "metadata":{} if qe is None else dict(qe.metadata or {}),
+          },sort_keys=True,default=str),flush=True)
+          PY
