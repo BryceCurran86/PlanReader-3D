@@ -380,3 +380,53 @@ def test_page_component_bridge_requires_full_viewport_source_coverage() -> None:
     result=producer.publish(_selector("divider"))
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.record is None
+
+
+def test_page_component_bridge_rejects_foreign_sibling_owned_geometry() -> None:
+    page_records=_closed_records()
+    left=next(r for r in page_records if r.wall_candidate_id=="left")
+    right=next(r for r in page_records if r.wall_candidate_id=="right")
+
+    base=_combined_wall_authority(page_records,(left,))
+    mapping=dict(base._scopes)
+
+    foreign_scope_id="wall-source:viewport:1:foreign"
+    foreign_scope=PhysicalWallCandidateScopeResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=False,
+        records=(right,),
+        source_observation_ids=(),
+        document_id=DOC,
+        revision_id=REV,
+        source_sha256=SHA,
+        snapshot_id=SNAP,
+        page_id=PAGE,
+        decision_scope_id=foreign_scope_id,
+        reason_codes=(
+            "physical_wall_candidate_scope_resolved",
+            "physical_wall_candidate_scope_cropped_at_viewport_boundary",
+        ),
+        equivalence=_scope_equivalence((right,),foreign_scope_id),
+        proposition="physical_wall_candidate_scope_resolved",
+        scope_kind="viewport",
+        viewport_id="view-foreign",
+        viewport_bbox=(500.0,0.0,900.0,500.0),
+        viewport_view_type="elevation",
+        viewport_status="resolved",
+        viewport_boundary_source="vector_frame",
+    )
+    mapping[
+        _ScopeKey(DOC,REV,SHA,SNAP,PAGE,foreign_scope_id)
+    ]=foreign_scope
+    walls=PhysicalWallCandidateAuthority(
+        mapping,
+        _seal=CANDIDATE_AUTHORITY_SEAL,
+    )
+
+    producer=WallRoleProducer.from_source_topology(
+        physical_wall_candidate_authority=walls,
+    )
+    result=producer.publish(_selector("left"))
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
