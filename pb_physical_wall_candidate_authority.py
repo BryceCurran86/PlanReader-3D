@@ -36,6 +36,7 @@ from pb_physical_wall_identity import (
     PhysicalWallEquivalenceResolution,
     PhysicalWallIdentity,
     collect_physical_wall_identities,
+    CandidatePairAudit,
     resolve_physical_wall_equivalence,
 )
 from pb_source_observation_authority import ObservationSelector
@@ -1554,8 +1555,23 @@ def _apply_trusted_relation_overrides(
         tuple(sorted((left, right))): classification
         for left, right, classification in baseline.pair_classifications
     }
+    member_id_set = {identity.wall_candidate_id for identity in usable}
+    restored_pairs = 0
+    rejected_pairs = 0
     for pair, classification in overrides.items():
-        current = pair_map.get(tuple(sorted(pair)))
+        key = tuple(sorted(pair))
+        current = pair_map.get(key)
+        if current is None:
+            # The candidate gate saw no plausible same-wall relationship, but
+            # a producer has since proven one from source. Positive evidence
+            # outranks the gate, so restore the relation rather than dropping
+            # it. Pairs outside the usable member set are explicitly rejected.
+            if key[0] in member_id_set and key[1] in member_id_set:
+                pair_map[key] = classification.value
+                restored_pairs += 1
+            else:
+                rejected_pairs += 1
+            continue
         if (
             current == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value
             or (
@@ -1564,7 +1580,9 @@ def _apply_trusted_relation_overrides(
                 and current == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value
             )
         ):
-            pair_map[tuple(sorted(pair))] = classification.value
+            pair_map[key] = classification.value
+        else:
+            rejected_pairs += 1
 
     member_ids = [identity.wall_candidate_id for identity in usable]
     same_links: list[tuple[str, str]] = []
@@ -1687,6 +1705,18 @@ def _apply_trusted_relation_overrides(
             for wall_id, reasons in blockers.items()
             if reasons
         },
+        candidate_pair_audit=CandidatePairAudit(
+            total_pairs=baseline.candidate_pair_audit.total_pairs,
+            considered_pairs=len(pair_map),
+            excluded_pairs=max(
+                0, baseline.candidate_pair_audit.total_pairs - len(pair_map)
+            ),
+            exclusion_reason_counts=dict(
+                baseline.candidate_pair_audit.exclusion_reason_counts
+            ),
+            trusted_override_pairs_restored=restored_pairs,
+            trusted_override_pairs_rejected=rejected_pairs,
+        ),
     )
 
 
