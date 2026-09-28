@@ -98,6 +98,7 @@ class StructuralMemberIdentityRelation:
 @dataclass(frozen=True)
 class StructuralMemberCompleteness:
     scope_id: str
+    definition_id: str
     instance_bearing_view_ids: tuple[str, ...]
     complete_view_ids: tuple[str, ...]
     cropped_view_ids: tuple[str, ...] = ()
@@ -209,7 +210,7 @@ class StructuralMemberProducer:
         self._definitions: dict[str, StructuralMemberDefinition] = {}
         self._instances: dict[str, StructuralMemberInstance] = {}
         self._relations: list[StructuralMemberIdentityRelation] = []
-        self._completeness: dict[str, StructuralMemberCompleteness] = {}
+        self._completeness: dict[tuple[str, str], StructuralMemberCompleteness] = {}
         self._rejected_instance_evidence_ids: set[str] = set()
 
     @classmethod
@@ -398,6 +399,7 @@ class StructuralMemberProducer:
         self,
         *,
         scope_id: str,
+        definition_id: str,
         instance_bearing_view_ids: Sequence[str],
         complete_view_ids: Sequence[str],
         cropped_view_ids: Sequence[str] = (),
@@ -407,11 +409,18 @@ class StructuralMemberProducer:
         source_evidence_ids: Sequence[str] = (),
     ) -> StructuralMemberCompleteness:
         scope = str(scope_id or "").strip()
+        definition_key = str(definition_id or "").strip()
         views = _clean_tuple(instance_bearing_view_ids)
-        if not scope or not views:
-            raise ValueError("scope_id and instance_bearing_view_ids are required")
+        evidence = _clean_tuple(source_evidence_ids)
+        if definition_key not in self._definitions:
+            raise ValueError("definition_id is not producer-owned")
+        if not scope or not views or not evidence:
+            raise ValueError(
+                "scope_id, instance_bearing_view_ids, and source_evidence_ids are required"
+            )
         record = StructuralMemberCompleteness(
             scope_id=scope,
+            definition_id=definition_key,
             instance_bearing_view_ids=views,
             complete_view_ids=_clean_tuple(complete_view_ids),
             cropped_view_ids=_clean_tuple(cropped_view_ids),
@@ -420,12 +429,13 @@ class StructuralMemberProducer:
             ),
             missing_bay_view_ids=_clean_tuple(missing_bay_view_ids),
             cross_view_registration_complete=bool(cross_view_registration_complete),
-            source_evidence_ids=_clean_tuple(source_evidence_ids),
+            source_evidence_ids=evidence,
         )
-        existing = self._completeness.get(scope)
+        key = (scope, definition_key)
+        existing = self._completeness.get(key)
         if existing is not None and existing != record:
             raise RuntimeError("structural member completeness equivocation")
-        self._completeness[scope] = record
+        self._completeness[key] = record
         return record
 
     def authority(self) -> "StructuralMemberAuthority":
@@ -492,7 +502,9 @@ class StructuralMemberAuthority:
                 STRUCTURAL_MEMBER_DEFINITION_UNAVAILABLE,
             )
 
-        completeness = self._completeness.get(selector.scope_id)
+        completeness = self._completeness.get(
+            (selector.scope_id, selector.definition_id)
+        )
         if completeness is None:
             return _blocked(
                 selector,
