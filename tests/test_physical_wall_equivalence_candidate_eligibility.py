@@ -5,7 +5,7 @@ identity competitor: it carries no equivalence relation and must not link two
 candidates into one publication contest.
 
 Genuine identity competitors -- shared primitives, duplicate geometry,
-touching paths, cross-scope redraws, or plausible opposite faces of one wall
+orientation-compatible contact, cross-scope redraws, or plausible opposite faces of one wall
 body -- must keep failing closed exactly as before.
 
 Separation is only ever a candidate gate. It never proves SAME_PHYSICAL_WALL.
@@ -158,6 +158,31 @@ def test_band_is_conservative_and_scale_derived() -> None:
         assert max_plausible_wall_body_separation_pt(bad) == pytest.approx(
             MAX_PLAUSIBLE_WALL_BODY_SOURCE_PT
         )
+
+
+def test_resolver_audit_records_the_scale_and_band_actually_used() -> None:
+    face_a, face_b = _face_pair(_pt_at_1_50(500.0))
+    resolution = resolve_physical_wall_equivalence(
+        (face_a, face_b),
+        points_per_mm=_POINTS_PER_MM_AT_1_50,
+    )
+    audit = resolution.candidate_pair_audit
+    assert audit.verified_points_per_mm == pytest.approx(
+        _POINTS_PER_MM_AT_1_50
+    )
+    assert audit.candidate_wall_body_band_pt == pytest.approx(
+        MAX_PLAUSIBLE_WALL_BODY_MM * _POINTS_PER_MM_AT_1_50
+    )
+
+
+def test_resolver_audit_records_source_fallback_when_scale_is_unavailable() -> None:
+    left = _ident("scale-a", ((0.0, 0.0), (100.0, 0.0)), ("d1i0",))
+    right = _ident("scale-b", ((5000.0, 4000.0), (5100.0, 4000.0)), ("d9i0",))
+    audit = resolve_physical_wall_equivalence((left, right)).candidate_pair_audit
+    assert audit.verified_points_per_mm is None
+    assert audit.candidate_wall_body_band_pt == pytest.approx(
+        MAX_PLAUSIBLE_WALL_BODY_SOURCE_PT
+    )
 
 
 @pytest.mark.parametrize("real_mm", [450.0, 500.0, 550.0, 600.0])
@@ -371,15 +396,22 @@ def test_near_duplicate_cad_offsets_stay_competing(offset) -> None:
     ],
 )
 def test_junction_geometry_is_not_a_face_pairing(path, label) -> None:
-    """T / L / X perpendicular geometry never becomes a same-wall face pair."""
+    """T / L / X wall-network contacts are not identity competitors."""
     flange = _ident("j-flange", ((0.0, 0.0), (200.0, 0.0)), ("d1i0",))
     leg = _ident(f"j-{label}", path, ("d1i4",))
 
-    # Touching geometry stays in contest, but must never classify as SAME.
+    eligible, reason = physical_wall_pair_identity_candidacy(flange, leg)
+    assert not eligible
+    assert reason == PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE
     assert classify_physical_wall_pair(flange, leg) is not SAME
 
     resolution = resolve_physical_wall_equivalence((flange, leg))
     assert resolution.equivalence_groups == ()
+    assert set(resolution.representative_wall_ids) == {
+        "j-flange",
+        f"j-{label}",
+    }
+    assert resolution.ambiguous_wall_ids == ()
 
 
 def test_perpendicular_unrelated_walls_publish_independently() -> None:
@@ -399,15 +431,18 @@ def test_t_junction_stem_and_unrelated_wall_publish_independently() -> None:
     stem = _ident("w-stem", ((100.0, 0.0), (100.0, 150.0)), ("d1i4",))
     unrelated = _ident("w-other", ((800.0, 600.0), (900.0, 600.0)), ("d9i0",))
 
-    assert physical_wall_pair_is_identity_candidate(flange, stem)
+    assert not physical_wall_pair_is_identity_candidate(flange, stem)
     assert not physical_wall_pair_is_identity_candidate(flange, unrelated)
     assert not physical_wall_pair_is_identity_candidate(stem, unrelated)
 
     resolution = resolve_physical_wall_equivalence((flange, stem, unrelated))
-    assert "w-other" in resolution.representative_wall_ids
-    pairs = _ambiguous_pairs(resolution)
-    assert ("w-flange", "w-other") not in pairs
-    assert ("w-other", "w-stem") not in pairs
+    assert set(resolution.representative_wall_ids) == {
+        "w-flange",
+        "w-stem",
+        "w-other",
+    }
+    assert resolution.ambiguous_wall_ids == ()
+    assert _ambiguous_pairs(resolution) == set()
 
 
 def test_wall_split_by_opening_is_not_merged_by_the_gate() -> None:
@@ -574,11 +609,25 @@ def test_unusable_identity_never_escapes_classification() -> None:
     assert "u-bad" in resolution.abstained_wall_ids
 
 
-def test_touching_paths_remain_identity_candidates() -> None:
+def test_collinear_touching_paths_remain_identity_candidates() -> None:
     left = _ident("c-a", ((0.0, 0.0), (100.0, 0.0)), ("d1i0",))
-    crossing = _ident("c-b", ((50.0, -40.0), (50.0, 40.0)), ("d9i0",))
+    continuation = _ident("c-b", ((100.0, 0.0), (220.0, 0.0)), ("d9i0",))
 
-    assert physical_wall_pair_is_identity_candidate(left, crossing)
+    assert physical_wall_pair_is_identity_candidate(left, continuation)
+    resolution = resolve_physical_wall_equivalence((left, continuation))
+    assert resolution.representative_wall_ids == ()
+
+
+def test_perpendicular_touching_paths_are_not_identity_candidates() -> None:
+    left = _ident("x-a", ((0.0, 0.0), (100.0, 0.0)), ("d1i0",))
+    crossing = _ident("x-b", ((50.0, -40.0), (50.0, 40.0)), ("d9i0",))
+
+    eligible, reason = physical_wall_pair_identity_candidacy(left, crossing)
+    assert not eligible
+    assert reason == PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE
+    resolution = resolve_physical_wall_equivalence((left, crossing))
+    assert set(resolution.representative_wall_ids) == {"x-a", "x-b"}
+    assert resolution.ambiguous_wall_ids == ()
 
 
 # ===========================================================================
@@ -666,6 +715,13 @@ def test_opening_pattern_override_is_restored_after_narrowing() -> None:
     assert resolved.equivalence_groups == (("op-left", "op-right"),)
     assert resolved.representative_wall_ids == ("op-left",)
     assert resolved.candidate_pair_audit.trusted_override_pairs_restored == 1
+    assert resolved.candidate_pair_audit.total_pairs == baseline.candidate_pair_audit.total_pairs
+    assert resolved.candidate_pair_audit.considered_pairs == baseline.candidate_pair_audit.considered_pairs
+    assert resolved.candidate_pair_audit.excluded_pairs == baseline.candidate_pair_audit.excluded_pairs
+    assert (
+        resolved.candidate_pair_audit.exclusion_reason_counts
+        == baseline.candidate_pair_audit.exclusion_reason_counts
+    )
 
 
 def test_wall_strip_override_is_restored_after_narrowing() -> None:
@@ -727,6 +783,10 @@ def test_override_for_unknown_wall_is_explicitly_rejected() -> None:
 
     assert resolved.candidate_pair_audit.trusted_override_pairs_restored == 0
     assert resolved.candidate_pair_audit.trusted_override_pairs_rejected == 1
+    import pb_physical_wall_candidate_authority as module
+    assert resolved.candidate_pair_audit.trusted_override_rejection_reason_counts == {
+        module.TRUSTED_EQUIVALENCE_OVERRIDE_UNKNOWN_MEMBER: 1
+    }
     assert all(
         "ghost-wall" not in pair
         for pair in resolved.pair_classifications
@@ -745,6 +805,49 @@ def test_override_cannot_demote_a_proven_same_pair() -> None:
     assert baseline.pair_classifications == (("dm-a", "dm-b", SAME.value),)
     assert resolved.pair_classifications == (("dm-a", "dm-b", SAME.value),)
     assert resolved.candidate_pair_audit.trusted_override_pairs_rejected == 1
+    import pb_physical_wall_candidate_authority as module
+    assert resolved.candidate_pair_audit.trusted_override_rejection_reason_counts == {
+        module.TRUSTED_EQUIVALENCE_OVERRIDE_CONFLICT: 1
+    }
+
+
+def test_override_audit_accumulates_across_multiple_producer_passes() -> None:
+    import pb_physical_wall_candidate_authority as module
+
+    left = _ident("acc-a", ((0.0, 0.0), (500.0, 0.0)), ("d3i0",))
+    right = _ident("acc-b", ((4000.0, 3000.0), (4500.0, 3000.0)), ("d9i0",))
+    baseline = resolve_physical_wall_equivalence((left, right))
+    first = module._apply_trusted_relation_overrides(
+        (left, right),
+        baseline,
+        {("acc-a", "acc-b"): SAME},
+    )
+    second = module._apply_trusted_relation_overrides(
+        (left, right),
+        first,
+        {("acc-a", "ghost"): SAME},
+    )
+
+    assert second.candidate_pair_audit.total_pairs == baseline.candidate_pair_audit.total_pairs
+    assert second.candidate_pair_audit.considered_pairs == baseline.candidate_pair_audit.considered_pairs
+    assert second.candidate_pair_audit.excluded_pairs == baseline.candidate_pair_audit.excluded_pairs
+    assert second.candidate_pair_audit.trusted_override_pairs_restored == 1
+    assert second.candidate_pair_audit.trusted_override_pairs_rejected == 1
+    assert second.candidate_pair_audit.trusted_override_rejection_reason_counts == {
+        module.TRUSTED_EQUIVALENCE_OVERRIDE_UNKNOWN_MEMBER: 1
+    }
+
+
+def test_idempotent_trusted_override_is_not_counted_as_rejected() -> None:
+    same_a = _ident("idem-a", ((0.0, 0.0), (100.0, 0.0)), ("d1i0", "d1i1"))
+    same_b = _ident("idem-b", ((0.0, 0.0), (100.0, 0.0)), ("d1i0", "d1i1"))
+    baseline, resolved = _reconcile(
+        (same_a, same_b),
+        {("idem-a", "idem-b"): SAME},
+    )
+    assert baseline.pair_classifications == resolved.pair_classifications
+    assert resolved.candidate_pair_audit.trusted_override_pairs_rejected == 0
+    assert resolved.candidate_pair_audit.trusted_override_rejection_reason_counts == {}
 
 
 def test_no_overrides_leaves_narrowed_baseline_untouched() -> None:
