@@ -11,7 +11,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from tests.test_live_physical_opening_void_composition import _complete_void_pdf
 
 
-def test_live_physical_net_wall_runs_source_chain_and_fails_closed_without_wall_height(
+def test_live_physical_net_wall_runs_real_source_chain_and_fails_closed_without_height(
     tmp_path,
 ) -> None:
     path = tmp_path / "physical-net-wall.pdf"
@@ -19,9 +19,9 @@ def test_live_physical_net_wall_runs_source_chain_and_fails_closed_without_wall_
 
     result = collect_live_physical_net_wall_claim(path, pages=(0,))
 
-    # This fixture deliberately has no independent wall-height authority. The
-    # live seam must execute the real source-owned chain but never turn that
-    # absence into a default-height wall quantity.
+    # This fixture deliberately has no independent wall-height authority.
+    # The live seam must execute the source-owned chain without manufacturing
+    # a default-height gross/net wall quantity.
     assert result.status in {
         EvidenceResolutionStatus.ABSTAINED,
         EvidenceResolutionStatus.CONFLICT,
@@ -44,7 +44,7 @@ def test_live_physical_net_wall_rejects_empty_or_out_of_range_page_scope(
         collect_live_physical_net_wall_claim(path, pages=(999,))
 
 
-def test_live_physical_net_wall_integration_accepts_no_quantity_truth_inputs() -> None:
+def test_live_physical_net_wall_accepts_no_quantity_truth_inputs() -> None:
     parameters = set(
         inspect.signature(collect_live_physical_net_wall_claim).parameters
     )
@@ -59,5 +59,7 @@ def test_live_physical_net_wall_integration_accepts_no_quantity_truth_inputs() -
         "quantity",
         "trade_scope_id",
         "deduction_rule",
+        "expected",
+        "benchmark",
     }
     assert not (parameters & forbidden)
