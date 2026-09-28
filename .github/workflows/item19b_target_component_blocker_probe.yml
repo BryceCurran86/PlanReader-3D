@@ -80,6 +80,14 @@ jobs:
               s for s in walls._scopes.values()
               if s.viewport_id=="view_p54_4"
           )
+          current_pub=source.published_snapshot_for_revision(scope.revision_id)
+          if (
+              current_pub is None
+              or current_pub.snapshot.snapshot_id != scope.snapshot_id
+              or current_pub.revision.source_sha256 != scope.source_sha256
+          ):
+              raise SystemExit("current source snapshot does not match wall scope lineage")
+          pub=current_pub
           by_id={r.wall_candidate_id:r for r in scope.records}
           components=_component_sets(scope.records,scope.equivalence)
 
