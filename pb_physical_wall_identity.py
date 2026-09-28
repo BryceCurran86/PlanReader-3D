@@ -878,10 +878,15 @@ def resolve_physical_wall_equivalence(
         if wall_id not in blockers:
             representatives.append(wall_id)
 
-    # Preserve deterministic unique order.
-    representatives = list(dict.fromkeys(representatives))
-    # Drop representatives that somehow also got blockers.
-    representatives = [wall_id for wall_id in representatives if wall_id not in blockers]
+    # Publication semantics must not depend on caller/input ordering.
+    representatives = sorted(
+        {
+            wall_id
+            for wall_id in representatives
+            if wall_id not in blockers
+        }
+    )
+    same_groups = sorted(set(same_groups))
 
     abstained: list[str] = []
     for identity in identities:
@@ -900,7 +905,7 @@ def resolve_physical_wall_equivalence(
     return PhysicalWallEquivalenceResolution(
         scope_viewport_id=scope_viewport,
         representative_wall_ids=tuple(representatives),
-        abstained_wall_ids=tuple(dict.fromkeys(abstained)),
+        abstained_wall_ids=tuple(sorted(set(abstained))),
         equivalence_groups=tuple(same_groups),
         ambiguous_wall_ids=tuple(sorted(ambiguous_walls)),
         same_wall_ids=tuple(sorted({wall_id for group in same_groups for wall_id in group})),
