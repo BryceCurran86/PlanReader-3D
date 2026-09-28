@@ -1,0 +1,75 @@
+name: Item19B Native Context Probe
+
+on:
+  push:
+    branches: [gpt/item19b-native-context-probe]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install PyMuPDF
+      - name: Download pinned KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+      - name: Dump native neighbourhood and viewport
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, fitz
+          from pb_viewport_segmentation import segment_page_viewports
+
+          doc=fitz.open("/tmp/kstvet.pdf")
+          page=doc[53]
+          drawings=page.get_drawings()
+          rows=[]
+          for di in range(4758,4783):
+              d=drawings[di]
+              items=[]
+              for ii,item in enumerate(d.get("items",()) or ()):
+                  vals=[]
+                  for v in item[1:]:
+                      if hasattr(v,"x") and hasattr(v,"y"):
+                          vals.append([round(float(v.x),3),round(float(v.y),3)])
+                      elif isinstance(v,(int,float)):
+                          vals.append(round(float(v),3))
+                      else:
+                          vals.append(str(v))
+                  items.append({"raw_id":f"d{di}i{ii}","kind":item[0] if item else None,"values":vals})
+              rect=d["rect"]
+              rows.append({
+                  "drawing_index":di,
+                  "rect":[round(float(rect.x0),3),round(float(rect.y0),3),round(float(rect.x1),3),round(float(rect.y1),3)],
+                  "layer":d.get("layer"),
+                  "type":d.get("type"),
+                  "fill":d.get("fill"),
+                  "color":d.get("color"),
+                  "width":d.get("width"),
+                  "closePath":d.get("closePath"),
+                  "items":items,
+              })
+          print("ITEM19B_NATIVE_NEIGHBOURHOOD "+json.dumps(rows,sort_keys=True))
+
+          views=[]
+          for v in segment_page_viewports(page,page_number=54):
+              views.append({
+                  "view_id":v.view_id,
+                  "view_type":v.view_type,
+                  "label":v.label,
+                  "bbox":list(v.bounding_box) if v.bounding_box else None,
+                  "status":v.status,
+                  "boundary_source":v.boundary_source,
+                  "title_bbox":list(v.title_bbox),
+                  "notes":list(v.notes),
+              })
+          print("ITEM19B_VIEWPORTS "+json.dumps(views,sort_keys=True))
+          PY
