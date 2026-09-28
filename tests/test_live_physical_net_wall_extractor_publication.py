@@ -34,7 +34,18 @@ def _drawing_and_boq_pdf() -> bytes:
         doc.close()
 
 
-def test_extractor_scopes_live_physical_net_wall_to_drawing_pages_and_publishes_claim(
+def _disable_unrelated_late_live_paths(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "pb_live_ceiling_lining_integration.collect_live_ceiling_lining_claims",
+        lambda *args, **kwargs: SimpleNamespace(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=("test_no_ceiling",),
+            claims=(),
+        ),
+    )
+
+
+def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -60,14 +71,7 @@ def test_extractor_scopes_live_physical_net_wall_to_drawing_pages_and_publishes_
         "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
         fake_physical_wall_claim,
     )
-    monkeypatch.setattr(
-        "pb_live_ceiling_lining_integration.collect_live_ceiling_lining_claims",
-        lambda *args, **kwargs: SimpleNamespace(
-            status=EvidenceResolutionStatus.ABSTAINED,
-            reason_codes=("test_no_ceiling",),
-            claims=(),
-        ),
-    )
+    _disable_unrelated_late_live_paths(monkeypatch)
 
     extractor = GenericPlanReaderExtractor()
     predictions = extractor.extract_from_pdf(
@@ -87,3 +91,46 @@ def test_extractor_scopes_live_physical_net_wall_to_drawing_pages_and_publishes_
     assert wall.metadata["raw_evidence_ref"] == "physical-net-wall-q1"
     assert extractor.physical_net_wall_live["status"] == "corroborated"
     assert extractor.extraction_status["physical_net_wall_live"] == "corroborated"
+
+
+def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "drawing.pdf"
+    path.write_bytes(_drawing_and_boq_pdf())
+
+    monkeypatch.setattr(
+        GenericPlanReaderExtractor,
+        "_detect_outer_envelope",
+        staticmethod(lambda *args, **kwargs: (10.0, 8.0)),
+    )
+    monkeypatch.setattr(
+        "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
+        lambda *args, **kwargs: SimpleNamespace(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=("test_physical_net_wall_unavailable",),
+            quantity_m2=None,
+            source_pages=(),
+            external_wall_ids=(),
+            evidence_ids=(),
+            quantity_id=None,
+            confidence=0.0,
+        ),
+    )
+    _disable_unrelated_late_live_paths(monkeypatch)
+
+    extractor = GenericPlanReaderExtractor()
+    predictions = extractor.extract_from_pdf(
+        path,
+        collect_item35_shadow=False,
+    )
+
+    assert extractor.physical_net_wall_live["status"] == "abstained"
+    physical_promotions = [
+        pred
+        for pred in predictions
+        if (pred.metadata or {}).get("derivation")
+        == "source_owned_physical_external_net_wall"
+    ]
+    assert physical_promotions == []
