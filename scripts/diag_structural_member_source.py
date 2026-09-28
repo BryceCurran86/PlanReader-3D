@@ -25,8 +25,15 @@ from pb_viewport_segmentation import segment_page_viewports
 
 
 SUPPORT_RE = re.compile(
-    r"\b(?:masonry\s+piers?|piers?|pillars?|columns?|posts?|"
+    r"\b(?:masonry\s+piers?|piers?|pillars?|columns?|posts?|poles?|stanchions?|"
     r"CHS|RHS|SHS|circular\s+hollow|square\s+hollow|structural\s+steel)\b",
+    re.IGNORECASE,
+)
+
+STRUCTURAL_MATERIAL_RE = re.compile(
+    r"\b(?:masonry|stone|brick(?:work)?|block(?:work)?|walling|walls?|"
+    r"piers?|pillars?|columns?|posts?|poles?|stanchions?|"
+    r"CHS|RHS|SHS|hollow\s+section|veranda(?:h)?)\b",
     re.IGNORECASE,
 )
 
@@ -49,11 +56,11 @@ def _jsonable(value: Any) -> Any:
     return str(value)
 
 
-def _matching_text_blocks(page):
+def _text_blocks_matching(page, pattern):
     out = []
     for block in page.get_text("blocks") or ():
         text = " ".join(str(block[4]).split()).strip()
-        if text and SUPPORT_RE.search(text):
+        if text and pattern.search(text):
             out.append({
                 "text": text,
                 "bbox": [float(v) for v in block[:4]],
@@ -163,7 +170,8 @@ def main() -> int:
     try:
         for page_num in range(args.page_start, args.page_end + 1):
             page = doc.load_page(page_num - 1)
-            text_blocks = _matching_text_blocks(page)
+            text_blocks = _text_blocks_matching(page, SUPPORT_RE)
+            material_blocks = _text_blocks_matching(page, STRUCTURAL_MATERIAL_RE)
             dimensions = _dimension_summary(page, page_num)
             physical_support = None
             try:
@@ -177,6 +185,8 @@ def main() -> int:
                 "page": page_num,
                 "support_text_blocks": text_blocks,
                 "support_keyword_count": len(text_blocks),
+                "structural_material_text_blocks": material_blocks,
+                "structural_material_keyword_count": len(material_blocks),
                 "small_closed_geometry": _small_closed_geometry(page),
                 "dimensions": dimensions,
                 "viewports": _viewport_summary(page, page_num),
