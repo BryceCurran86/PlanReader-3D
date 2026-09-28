@@ -179,10 +179,17 @@ jobs:
                       ),
                   })
 
-          # Cross-scope diagnostic: derive a complete page scope from the
-          # exact page segment set already replayed above.  This reuses the
-          # current immutable snapshot and avoids a second raster/wall producer.
-          from pb_source_wall_topology_authority import _derive_scope_records
+          # Local source-component expansion diagnostic. Map the authenticated
+          # viewport target component to page-owned walls by exact immutable
+          # source primitive ids, then expand only through exact endpoint
+          # connectivity. This does not bless the whole page or alter the
+          # viewport boundary; it asks whether the source-owned connected wall
+          # subgraph itself closes into valid multi-room topology.
+          from dataclasses import replace
+          from pb_source_wall_topology_authority import (
+              _derive_scope_records,
+              _wall_edges,
+          )
 
           page_selector=PhysicalWallCandidateSelector(
               document_id=pub.revision.document_id,
@@ -203,64 +210,103 @@ jobs:
               page_height=page_height,
               source_bytes=payload,
           )
-          page_topology=_derive_scope_records(page_scope)
-          topology_by_wall={
-              evidence.physical_wall_id:evidence
-              for evidence in page_topology.values()
+
+          target_source_ids={
+              str(raw_id)
+              for rec in target_records
+              for raw_id in rec.physical_identity.source_primitive_ids
+          }
+          page_by_id={rec.wall_candidate_id:rec for rec in page_scope.records}
+          seed_ids={
+              rec.wall_candidate_id
+              for rec in page_scope.records
+              if target_source_ids & set(
+                  str(raw_id)
+                  for raw_id in rec.physical_identity.source_primitive_ids
+              )
           }
 
-          page_rows=[]
-          for viewport_rec in target_records:
-              target_raw_ids=set(
-                  str(x) for x in viewport_rec.physical_identity.source_primitive_ids
-              )
-              matches=[]
-              for rec in page_scope.records:
-                  raw_ids=set(
-                      str(x) for x in rec.physical_identity.source_primitive_ids
-                  )
-                  overlap=sorted(target_raw_ids & raw_ids)
-                  if not overlap:
+          endpoints={}
+          for rec in page_scope.records:
+              pts=set()
+              for edge in _wall_edges(rec):
+                  pts.add(edge[0]); pts.add(edge[1])
+              endpoints[rec.wall_candidate_id]=pts
+
+          component=set(seed_ids)
+          frontier=list(seed_ids)
+          while frontier:
+              current=frontier.pop()
+              current_pts=endpoints.get(current,set())
+              if not current_pts:
+                  continue
+              for other,other_pts in endpoints.items():
+                  if other in component or not other_pts:
                       continue
-                  topo=topology_by_wall.get(rec.wall_candidate_id)
-                  role=None
-                  role_status="abstained"
-                  role_reason=None
-                  if topo is not None:
-                      if topo.is_ambiguous:
-                          role_reason=topo.ambiguity_reason
-                      elif topo.bounds_exterior and topo.enclosed_space_count==1:
-                          role="external"
-                          role_status="corroborated"
-                      elif (not topo.bounds_exterior) and topo.enclosed_space_count==2:
-                          role="internal"
-                          role_status="corroborated"
-                      else:
-                          role_reason="topology_proposition_unresolved"
-                  matches.append({
-                      "page_wall":rec.wall_candidate_id,
-                      "page_raw_ids":sorted(raw_ids),
-                      "target_overlap":overlap,
-                      "role_status":role_status,
-                      "role":role,
-                      "role_reason":role_reason,
-                      "topology_evidence":topo.evidence_id if topo else None,
-                      "face_ids":list(topo.enclosed_space_ids) if topo else [],
-                  })
-              page_rows.append({
-                  "viewport_wall":viewport_rec.wall_candidate_id,
-                  "viewport_raw_ids":sorted(target_raw_ids),
-                  "matches":matches,
+                  if current_pts & other_pts:
+                      component.add(other)
+                      frontier.append(other)
+
+          component_records=tuple(
+              page_by_id[wall_id] for wall_id in sorted(component)
+          )
+          local_scope=replace(
+              page_scope,
+              scope_complete=True,
+              records=component_records,
+              equivalence=None,
+          )
+          local_topology=_derive_scope_records(local_scope)
+          topology_by_wall={
+              evidence.physical_wall_id:evidence
+              for evidence in local_topology.values()
+          }
+
+          seed_rows=[]
+          for wall_id in sorted(seed_ids):
+              rec=page_by_id[wall_id]
+              topo=topology_by_wall.get(wall_id)
+              seed_rows.append({
+                  "page_wall":wall_id,
+                  "page_raw_ids":list(rec.physical_identity.source_primitive_ids),
+                  "target_overlap":sorted(
+                      target_source_ids
+                      & set(str(x) for x in rec.physical_identity.source_primitive_ids)
+                  ),
+                  "topology":None if topo is None else {
+                      "ambiguous":topo.is_ambiguous,
+                      "reason":topo.ambiguity_reason,
+                      "bounds_exterior":topo.bounds_exterior,
+                      "face_count":topo.enclosed_space_count,
+                      "face_ids":list(topo.enclosed_space_ids),
+                      "evidence":topo.evidence_id,
+                  },
               })
-          print("ITEM19B_CROSS_SCOPE_ROLE "+json.dumps({
+
+          dangling=[]
+          point_degree={}
+          for rec in component_records:
+              for edge in _wall_edges(rec):
+                  for point in edge:
+                      point_degree[point]=point_degree.get(point,0)+1
+          for point,degree in sorted(point_degree.items()):
+              if degree==1:
+                  dangling.append([point[0],point[1]])
+
+          print("ITEM19B_LOCAL_SOURCE_COMPONENT "+json.dumps({
               "page_scope_complete":page_scope.scope_complete,
               "page_scope_reasons":list(page_scope.reason_codes),
               "page_record_count":len(page_scope.records),
-              "page_topology_count":len(page_topology),
-              "viewport_component_mappings":page_rows,
+              "seed_wall_ids":sorted(seed_ids),
+              "expanded_wall_count":len(component_records),
+              "expanded_wall_ids":sorted(component),
+              "dangling_endpoint_count":len(dangling),
+              "dangling_endpoints":dangling[:50],
+              "topology_record_count":len(local_topology),
+              "seed_topology":seed_rows,
           },sort_keys=True))
 
-          print("ITEM19B_TARGET_BLOCKER "+json.dumps({
+                    print("ITEM19B_TARGET_BLOCKER "+json.dumps({
               "viewport_bbox":list(scope.viewport_bbox or ()),
               "scope_boundary_observation_ids":list(scope.scope_boundary_observation_ids),
               "ambiguous_source_observation_ids":list(scope.ambiguous_source_observation_ids),
