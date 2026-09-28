@@ -1,5 +1,5 @@
 name: TEST-ONLY Physical Net Wall Stage Trace
-# refreshed-base: scoped-page-authority
+# refreshed-base: scoped-page-authority-v3
 
 on:
   pull_request:
