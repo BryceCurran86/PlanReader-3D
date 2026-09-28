@@ -156,6 +156,22 @@ def compose_live_wall_opening_authority(
         source_visibility_producer,
         page_ids=selected_pages,
     )
+
+    # Physical-wall materialization may add producer-owned raster visibility and
+    # advance the immutable source snapshot. Every downstream selector and
+    # semantic/opening authority must bind to that stabilized snapshot rather
+    # than the pre-materialization snapshot captured above.
+    stabilized = source_visibility_producer.published_snapshot_for_revision(revision_id)
+    if stabilized is None:
+        raise ValueError(LIVE_WALL_OPENING_COMPOSITION_UNAVAILABLE)
+    if (
+        stabilized.revision.document_id != published.revision.document_id
+        or stabilized.revision.revision_id != published.revision.revision_id
+        or stabilized.revision.source_sha256 != published.revision.source_sha256
+    ):
+        raise ValueError(LIVE_WALL_OPENING_COMPOSITION_UNAVAILABLE)
+    published = stabilized
+
     wall_authority = wall_producer.authority()
     host_universe_authority = (
         OpeningHostWallUniverseProducer.from_physical_wall_candidate_authority(
