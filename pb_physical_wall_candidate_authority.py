@@ -31,11 +31,17 @@ import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
+from pb_physical_scale_authority import (
+    PHYSICAL_SCALE_RESOLVED,
+    PhysicalScaleProducer,
+    PhysicalScaleSelector,
+)
 from pb_physical_wall_identity import (
     PhysicalEquivalenceClass,
     PhysicalWallEquivalenceResolution,
     PhysicalWallIdentity,
     collect_physical_wall_identities,
+    CandidatePairAudit,
     resolve_physical_wall_equivalence,
 )
 from pb_source_observation_authority import ObservationSelector
@@ -91,6 +97,16 @@ PHYSICAL_WALL_CANDIDATE_VIEWPORT_LINEAGE_MISMATCH = (
 )
 PHYSICAL_WALL_CANDIDATE_SOURCE_PRIMITIVE_OWNERSHIP_AMBIGUOUS = (
     "physical_wall_candidate_source_primitive_ownership_ambiguous"
+)
+
+TRUSTED_EQUIVALENCE_OVERRIDE_UNKNOWN_MEMBER = (
+    "trusted_equivalence_override_unknown_member"
+)
+TRUSTED_EQUIVALENCE_OVERRIDE_UNUSABLE_MEMBER = (
+    "trusted_equivalence_override_unusable_member"
+)
+TRUSTED_EQUIVALENCE_OVERRIDE_CONFLICT = (
+    "trusted_equivalence_override_conflicts_with_proven_relation"
 )
 
 _PRODUCER_SEAL = object()
@@ -283,6 +299,43 @@ def _authenticated_viewports(page: fitz.Page, *, page_number: int) -> Optional[t
         )
     )
     return rows, eligible
+
+
+def _producer_owned_points_per_mm(
+    *,
+    scale_producer: PhysicalScaleProducer,
+    published,
+    page_id: str,
+    viewport=None,
+) -> Optional[float]:
+    """Return only corroborated source-native physical scale for this scope.
+
+    Scale is an optional refinement of the candidate gate, never a caller
+    input and never identity evidence. If no producer-owned graphic scale
+    exists (including DERIVED-only viewports), no absolute point-distance
+    exclusion is applied; parallel overlapping candidates remain fail-closed.
+    """
+    selector = PhysicalScaleSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id=str(page_id),
+        viewport_id=None if viewport is None else str(viewport.view_id),
+    )
+    result = scale_producer.publish_scope(selector)
+    evidence = result.evidence
+    if (
+        result.status is not EvidenceResolutionStatus.CORROBORATED
+        or result.reason_codes != (PHYSICAL_SCALE_RESOLVED,)
+        or evidence is None
+        or evidence.selector != selector
+    ):
+        return None
+    value = float(evidence.points_per_mm)
+    if not math.isfinite(value) or value <= 0.0:
+        return None
+    return value
 
 
 def _segment_geometry(segment: Mapping[str, object]) -> Line:
@@ -1547,15 +1600,51 @@ def _apply_trusted_relation_overrides(
 ) -> PhysicalWallEquivalenceResolution:
     """Reconcile source-proven relations without changing generic classifier semantics."""
     usable = [identity for identity in identities if identity.usable]
-    if len(usable) != len(identities) or not overrides:
+    if not overrides:
         return baseline
 
     pair_map = {
         tuple(sorted((left, right))): classification
         for left, right, classification in baseline.pair_classifications
     }
+    member_id_set = {identity.wall_candidate_id for identity in usable}
+    known_id_set = {
+        identity.wall_candidate_id
+        for identity in identities
+        if identity is not None
+    }
+    unusable_id_set = known_id_set - member_id_set
+    restored_pairs = baseline.candidate_pair_audit.trusted_override_pairs_restored
+    rejected_pairs = baseline.candidate_pair_audit.trusted_override_pairs_rejected
+    rejection_reason_counts = dict(
+        baseline.candidate_pair_audit.trusted_override_rejection_reason_counts
+    )
     for pair, classification in overrides.items():
-        current = pair_map.get(tuple(sorted(pair)))
+        key = tuple(sorted(pair))
+        current = pair_map.get(key)
+        if current is None:
+            # The candidate gate saw no plausible same-wall relationship, but
+            # a producer has since proven one from source. Positive evidence
+            # outranks the gate, so restore the relation rather than dropping
+            # it. Pairs outside the usable member set are explicitly rejected.
+            if key[0] in member_id_set and key[1] in member_id_set:
+                pair_map[key] = classification.value
+                restored_pairs += 1
+            else:
+                rejected_pairs += 1
+                if key[0] not in known_id_set or key[1] not in known_id_set:
+                    reason = TRUSTED_EQUIVALENCE_OVERRIDE_UNKNOWN_MEMBER
+                elif key[0] in unusable_id_set or key[1] in unusable_id_set:
+                    reason = TRUSTED_EQUIVALENCE_OVERRIDE_UNUSABLE_MEMBER
+                else:
+                    reason = TRUSTED_EQUIVALENCE_OVERRIDE_UNKNOWN_MEMBER
+                rejection_reason_counts[reason] = (
+                    rejection_reason_counts.get(reason, 0) + 1
+                )
+            continue
+        if current == classification.value:
+            # Deterministic idempotent replay is accepted as a no-op.
+            continue
         if (
             current == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value
             or (
@@ -1564,7 +1653,14 @@ def _apply_trusted_relation_overrides(
                 and current == PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value
             )
         ):
-            pair_map[tuple(sorted(pair))] = classification.value
+            pair_map[key] = classification.value
+        else:
+            rejected_pairs += 1
+            rejection_reason_counts[
+                TRUSTED_EQUIVALENCE_OVERRIDE_CONFLICT
+            ] = rejection_reason_counts.get(
+                TRUSTED_EQUIVALENCE_OVERRIDE_CONFLICT, 0
+            ) + 1
 
     member_ids = [identity.wall_candidate_id for identity in usable]
     same_links: list[tuple[str, str]] = []
@@ -1607,7 +1703,14 @@ def _apply_trusted_relation_overrides(
     components = _union_find_groups(related_links, member_ids) if member_ids else []
     ambiguous_edges = {frozenset(pair) for pair in ambiguous_links}
     same_edges = {frozenset(pair) for pair in same_links}
-    blockers: dict[str, list[str]] = {}
+    # Recompute usable-pair publication from the reconciled graph, but preserve
+    # the original fail-closed blockers for identities that were unusable
+    # before trusted relation reconciliation.
+    blockers: dict[str, list[str]] = {
+        wall_id: list(baseline.blocking_reasons_by_wall_id.get(wall_id, ()))
+        for wall_id in sorted(unusable_id_set)
+        if baseline.blocking_reasons_by_wall_id.get(wall_id)
+    }
     ambiguous_walls: set[str] = set()
     same_groups: list[tuple[str, ...]] = []
     representatives: list[str] = []
@@ -1665,15 +1768,20 @@ def _apply_trusted_relation_overrides(
 
     # Retain producer-proven SAME subgroups for downstream identity
     # normalization even when ambient ambiguity blocks global publication.
-    # Deterministic de-duplication preserves any already-publishable SAME group.
-    same_groups = list(dict.fromkeys((*same_groups, *positive_same_groups)))
+    # Final publication ordering is canonical so caller/input ordering cannot
+    # alter semantic results.
+    same_groups = sorted(set((*same_groups, *positive_same_groups)))
 
-    representatives = list(dict.fromkeys(representatives))
-    abstained = [wall_id for wall_id in member_ids if wall_id in blockers]
+    representatives = sorted(set(representatives))
+    abstained = sorted(
+        wall_id
+        for wall_id in known_id_set
+        if wall_id in blockers
+    )
     return PhysicalWallEquivalenceResolution(
         scope_viewport_id=baseline.scope_viewport_id,
         representative_wall_ids=tuple(representatives),
-        abstained_wall_ids=tuple(dict.fromkeys(abstained)),
+        abstained_wall_ids=tuple(abstained),
         equivalence_groups=tuple(same_groups),
         ambiguous_wall_ids=tuple(sorted(ambiguous_walls)),
         same_wall_ids=tuple(
@@ -1687,6 +1795,28 @@ def _apply_trusted_relation_overrides(
             for wall_id, reasons in blockers.items()
             if reasons
         },
+        candidate_pair_audit=CandidatePairAudit(
+            # Preserve the gate census exactly. Restored trusted pairs are
+            # recorded separately and must not rewrite why the gate excluded
+            # the original pair.
+            total_pairs=baseline.candidate_pair_audit.total_pairs,
+            considered_pairs=baseline.candidate_pair_audit.considered_pairs,
+            excluded_pairs=baseline.candidate_pair_audit.excluded_pairs,
+            exclusion_reason_counts=dict(
+                baseline.candidate_pair_audit.exclusion_reason_counts
+            ),
+            trusted_override_pairs_restored=restored_pairs,
+            trusted_override_pairs_rejected=rejected_pairs,
+            trusted_override_rejection_reason_counts=dict(
+                sorted(rejection_reason_counts.items())
+            ),
+            verified_points_per_mm=(
+                baseline.candidate_pair_audit.verified_points_per_mm
+            ),
+            candidate_wall_body_band_pt=(
+                baseline.candidate_pair_audit.candidate_wall_body_band_pt
+            ),
+        ),
     )
 
 
@@ -1706,6 +1836,7 @@ def _assemble_scope_result(
     pre_boundary_reasons: Sequence[str] = (),
     scope_boundary_observation_ids: Sequence[str] = (),
     ambiguous_source_observation_ids: Sequence[str] = (),
+    points_per_mm: Optional[float] = None,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = selector.decision_scope_id
     proven_wall_strips = _proven_filled_wall_strips(tuple(segments))
@@ -1747,6 +1878,7 @@ def _assemble_scope_result(
     baseline_equivalence = resolve_physical_wall_equivalence(
         tuple(ordered_identities),
         walls_by_id={wall.candidate_id: wall for wall in ordered_walls},
+        points_per_mm=points_per_mm,
     )
     strip_overrides = _producer_wall_strip_relation_overrides(
         records=tuple(records),
@@ -1881,6 +2013,14 @@ def _build_scope_result(
         page_id=page_id,
         decision_scope_id=scope_id,
     )
+    scale_producer = PhysicalScaleProducer.from_source_visibility_producer(
+        source_producer
+    )
+    points_per_mm = _producer_owned_points_per_mm(
+        scale_producer=scale_producer,
+        published=published,
+        page_id=page_id,
+    )
     return _assemble_scope_result(
         source_producer=source_producer,
         published=published,
@@ -1891,6 +2031,7 @@ def _build_scope_result(
         page_width=page_width,
         page_height=page_height,
         source_bytes=source_bytes,
+        points_per_mm=points_per_mm,
     )
 
 
@@ -1932,6 +2073,9 @@ def _build_authenticated_viewport_scope_results(
     if not eligible:
         return ()
     sibling_fingerprint = _viewport_sibling_set_fingerprint(all_viewports)
+    scale_producer = PhysicalScaleProducer.from_source_visibility_producer(
+        source_producer
+    )
 
     results: list[PhysicalWallCandidateScopeResult] = []
     for viewport in eligible:
@@ -1949,6 +2093,12 @@ def _build_authenticated_viewport_scope_results(
             snapshot_id=published.snapshot.snapshot_id,
             page_id=page_id,
             decision_scope_id=scope_id,
+        )
+        points_per_mm = _producer_owned_points_per_mm(
+            scale_producer=scale_producer,
+            published=published,
+            page_id=page_id,
+            viewport=viewport,
         )
         owned: list[dict] = []
         owned_observation_ids: list[str] = []
@@ -2017,6 +2167,7 @@ def _build_authenticated_viewport_scope_results(
                 source_bytes=source_bytes,
                 viewport=viewport,
                 sibling_set_fingerprint=sibling_fingerprint,
+                points_per_mm=points_per_mm,
                 pre_boundary_reasons=pre_boundary_reasons,
                 scope_boundary_observation_ids=boundary_observation_ids,
                 ambiguous_source_observation_ids=ambiguous_observation_ids,

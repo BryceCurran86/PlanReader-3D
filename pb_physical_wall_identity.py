@@ -5,6 +5,14 @@ preserves U1 provenance, so the same physical path with duplicated native
 primitive IDs receives different V2 IDs. Quantity publication therefore must
 not treat ``different V2 ID ⇒ different physical wall``.
 
+Equivalence classification applies only to pairs that could plausibly be the
+same physical wall (``physical_wall_pair_is_identity_candidate``). Two
+candidates with no shared primitive, no duplicate path, no geometric contact,
+and no plausible shared wall body are not identity competitors: they carry NO
+equivalence relation and each publishes on its own. Treating "no possibility of
+SAME" as ambiguity would let unrelated walls link into one contest and suppress
+every representative in the scope.
+
 Physical equivalence is a separate fail-closed classification:
 
 - SAME_PHYSICAL_WALL — positive proof (same path + same U1 ancestry, or
@@ -20,12 +28,17 @@ No confidence, nearest, first, or epsilon merge.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_wall_room_topology_contracts import WallCandidate
+from pb_wall_room_topology_junction_classifier import (
+    DEFAULT_COLLINEAR_ANGLE_TOLERANCE_DEG,
+)
+from pb_wall_room_topology_stage_a import DEFAULT_GAP_SNAP_TOLERANCE_PT
 from pb_wall_room_topology_wall_identity_v2 import (
     _chain_source_primitive_ids,
     _path_from_edges,
@@ -76,6 +89,27 @@ class PhysicalWallIdentity:
 
 
 @dataclass(frozen=True)
+class CandidatePairAudit:
+    """Diagnostic census of which pairs entered equivalence classification.
+
+    Provenance only. Nothing here feeds an authority decision, and there is
+    no caller-controlled flag that can alter classification.
+    """
+
+    total_pairs: int = 0
+    considered_pairs: int = 0
+    excluded_pairs: int = 0
+    exclusion_reason_counts: Mapping[str, int] = field(default_factory=dict)
+    trusted_override_pairs_restored: int = 0
+    trusted_override_pairs_rejected: int = 0
+    trusted_override_rejection_reason_counts: Mapping[str, int] = field(
+        default_factory=dict
+    )
+    verified_points_per_mm: Optional[float] = None
+    candidate_wall_body_band_pt: Optional[float] = None
+
+
+@dataclass(frozen=True)
 class PhysicalWallEquivalenceResolution:
     """Fail-closed publication equivalence over competing wall candidates."""
 
@@ -88,6 +122,9 @@ class PhysicalWallEquivalenceResolution:
     pair_classifications: tuple[tuple[str, str, str], ...]
     blocking_reasons_by_wall_id: Mapping[str, tuple[str, ...]]
     schema_version: str = PHYSICAL_WALL_EQUIVALENCE_SCHEMA_VERSION
+    candidate_pair_audit: "CandidatePairAudit" = field(
+        default_factory=lambda: CandidatePairAudit()
+    )
 
     def blockers_for(self, wall_candidate_id: str) -> tuple[str, ...]:
         return tuple(self.blocking_reasons_by_wall_id.get(wall_candidate_id, ()))
@@ -254,6 +291,105 @@ def collect_physical_wall_identities(
     }
 
 
+# Candidate-gate tolerance policy.
+#
+# These are reused from the repository's existing geometry authorities rather
+# than invented here, so the candidate gate answers real PDF geometric
+# relationships at the same resolution as the producers that feed it.
+#
+# - lateral/contact and overlap: Stage-A gap snap tolerance
+# - orientation: W3 junction-classifier collinear angle tolerance
+_EQUIVALENCE_LATERAL_TOL_PT = DEFAULT_GAP_SNAP_TOLERANCE_PT
+_EQUIVALENCE_ANGLE_TOL_DEG = DEFAULT_COLLINEAR_ANGLE_TOLERANCE_DEG
+
+# Degenerate-length guard only. Never used as a geometric relationship test.
+_EQUIVALENCE_DEGENERATE_TOL = 1e-9
+
+# Conservative maximum plausible wall-body separation, in millimetres.
+#
+# The candidate gate must err toward INCLUDING a possible same-wall pair:
+# wrong exclusion can publish two faces of one wall and double-count, while
+# wrong inclusion only causes safe abstention.  This therefore covers an
+# unusually thick wall body plus both finishes, not a typical partition.
+MAX_PLAUSIBLE_WALL_BODY_MM = 700.0
+
+# There is intentionally NO unscaled source-space separation cutoff.
+# A point distance cannot be converted to a physical wall thickness without
+# authoritative scale.  Using a fixed source-space band could publish the two
+# faces of a 450-600mm wall on a larger-scale detail.  Therefore parallel,
+# longitudinally-overlapping pairs stay in contest until producer-owned scale
+# is corroborated; orientation/no-overlap filtering still removes unrelated
+# pairs without needing physical units.
+# Exclusion reason codes (diagnostic/provenance only).
+PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE = "pair_excluded_orientation_incompatible"
+PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP = "pair_excluded_no_longitudinal_overlap"
+PAIR_EXCLUDED_SEPARATION_BEYOND_BAND = "pair_excluded_separation_beyond_wall_body_band"
+
+
+def max_plausible_wall_body_separation_pt(
+    points_per_mm: Optional[float] = None,
+) -> Optional[float]:
+    """Scale-backed maximum separation for a plausible shared wall body.
+
+    No source-space fallback is returned. Without producer-owned physical
+    scale, absolute PDF-point separation cannot safely prove that two
+    overlapping parallel paths are different physical walls.
+    """
+    if (
+        points_per_mm is not None
+        and math.isfinite(points_per_mm)
+        and points_per_mm > 0.0
+    ):
+        return MAX_PLAUSIBLE_WALL_BODY_MM * float(points_per_mm)
+    return None
+
+
+def _point_segment_distance(
+    px: float, py: float, seg: tuple[float, float, float, float]
+) -> float:
+    ax, ay, bx, by = seg
+    dx, dy = bx - ax, by - ay
+    length_sq = dx * dx + dy * dy
+    if length_sq <= _EQUIVALENCE_DEGENERATE_TOL:
+        return math.hypot(px - ax, py - ay)
+    t = ((px - ax) * dx + (py - ay) * dy) / length_sq
+    t = max(0.0, min(1.0, t))
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+
+def _segments_meet_within(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+    tolerance: float,
+) -> bool:
+    """True when two segments cross or come within ``tolerance``.
+
+    Contact is evaluated at the repository's snap tolerance, so drafting
+    noise and split vertices do not change whether two candidate paths are
+    considered to meet.  Proximity here only admits a pair to comparison; it
+    never asserts that the pair is the same wall.
+    """
+    ax, ay, bx, by = left
+    cx, cy, dx, dy = right
+
+    def orient(x1, y1, x2, y2, x3, y3):
+        return (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1)
+
+    o1 = orient(ax, ay, bx, by, cx, cy)
+    o2 = orient(ax, ay, bx, by, dx, dy)
+    o3 = orient(cx, cy, dx, dy, ax, ay)
+    o4 = orient(cx, cy, dx, dy, bx, by)
+    if ((o1 > 0.0) != (o2 > 0.0)) and ((o3 > 0.0) != (o4 > 0.0)):
+        return True
+
+    return min(
+        _point_segment_distance(cx, cy, left),
+        _point_segment_distance(dx, dy, left),
+        _point_segment_distance(ax, ay, right),
+        _point_segment_distance(bx, by, right),
+    ) <= tolerance
+
+
 def _axis_interval(
     path: Sequence[tuple[float, float]],
 ) -> Optional[tuple[str, float, float]]:
@@ -293,6 +429,271 @@ def _ancestry_coverage_identical(left: Sequence[str], right: Sequence[str]) -> b
     (no silent contained-subspan merge).
     """
     return _ancestry_equal(left, right)
+
+
+def _path_bbox(
+    path: Sequence[tuple[float, float]],
+) -> Optional[tuple[float, float, float, float]]:
+    if len(path) < 2:
+        return None
+    xs = [float(point[0]) for point in path]
+    ys = [float(point[1]) for point in path]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _segments(
+    path: Sequence[tuple[float, float]],
+) -> tuple[tuple[float, float, float, float], ...]:
+    points = [(float(p[0]), float(p[1])) for p in path]
+    return tuple(
+        (a[0], a[1], b[0], b[1])
+        for a, b in zip(points, points[1:])
+        if math.hypot(b[0] - a[0], b[1] - a[1]) > _EQUIVALENCE_DEGENERATE_TOL
+    )
+
+
+def _unit(seg: tuple[float, float, float, float]) -> Optional[tuple[float, float]]:
+    dx, dy = seg[2] - seg[0], seg[3] - seg[1]
+    length = math.hypot(dx, dy)
+    if length <= _EQUIVALENCE_DEGENERATE_TOL:
+        return None
+    ux, uy = dx / length, dy / length
+    if ux < 0.0 or (ux == 0.0 and uy < 0.0):
+        ux, uy = -ux, -uy
+    return ux, uy
+
+
+def _paths_share_both_endpoints(
+    left: Sequence[tuple[float, float]],
+    right: Sequence[tuple[float, float]],
+    tolerance: float,
+) -> bool:
+    """True when two reconstructed paths have the same endpoint pair.
+
+    Sharing both endpoints is materially different from an ordinary T/L/X
+    junction, which shares at most one contact point.  Two paths spanning the
+    same endpoint pair but taking different interior routes remain plausible
+    competing representations of one physical wall and must fail closed.
+    """
+
+    if len(left) < 2 or len(right) < 2:
+        return False
+
+    def near(a: tuple[float, float], b: tuple[float, float]) -> bool:
+        return math.hypot(
+            float(a[0]) - float(b[0]),
+            float(a[1]) - float(b[1]),
+        ) <= tolerance
+
+    return (
+        near(left[0], right[0]) and near(left[-1], right[-1])
+    ) or (
+        near(left[0], right[-1]) and near(left[-1], right[0])
+    )
+
+
+def _paths_meet_as_same_wall_candidates(
+    left: Sequence[tuple[float, float]],
+    right: Sequence[tuple[float, float]],
+    tolerance: float,
+) -> bool:
+    """True only for orientation-compatible contact.
+
+    T/L/X junctions are real wall-network contacts but are not plausible
+    duplicate faces/representations of one physical wall.  Contact therefore
+    enters the equivalence contest only when at least one touching segment
+    pair is parallel within the repository's collinear-angle tolerance.
+    """
+    left_segs, right_segs = _segments(left), _segments(right)
+    if not left_segs or not right_segs:
+        return False
+    for a in left_segs:
+        for b in right_segs:
+            if (
+                _parallel_overlap_separation(
+                    a,
+                    b,
+                    angle_tolerance_deg=_EQUIVALENCE_ANGLE_TOL_DEG,
+                )
+                is None
+            ):
+                continue
+            if _segments_meet_within(a, b, tolerance):
+                return True
+    return False
+
+
+def _parallel_overlap_separation(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+    *,
+    angle_tolerance_deg: float,
+) -> Optional[tuple[float, float]]:
+    """Longitudinal overlap and perpendicular separation of a parallel pair.
+
+    Orientation is compared at the W3 collinear angle tolerance, so drafting
+    skew does not hide a genuine face pair.  Returns ``None`` when the pair is
+    not parallel within tolerance.
+    """
+    lu, ru = _unit(left), _unit(right)
+    if lu is None or ru is None:
+        return None
+    dot = max(-1.0, min(1.0, abs(lu[0] * ru[0] + lu[1] * ru[1])))
+    if math.degrees(math.acos(dot)) > angle_tolerance_deg:
+        return None
+
+    axis = lu
+    normal = (-axis[1], axis[0])
+
+    def interval(seg):
+        values = sorted(
+            (
+                seg[0] * axis[0] + seg[1] * axis[1],
+                seg[2] * axis[0] + seg[3] * axis[1],
+            )
+        )
+        return values[0], values[1]
+
+    liv, riv = interval(left), interval(right)
+    overlap = min(liv[1], riv[1]) - max(liv[0], riv[0])
+
+    # Perpendicular offset is measured at the overlapping run rather than at
+    # one endpoint, so a slightly skewed face pair is still measured across
+    # the part they actually share.
+    mid = (max(liv[0], riv[0]) + min(liv[1], riv[1])) / 2.0
+
+    def offset_at(seg):
+        a_long = seg[0] * axis[0] + seg[1] * axis[1]
+        b_long = seg[2] * axis[0] + seg[3] * axis[1]
+        a_perp = seg[0] * normal[0] + seg[1] * normal[1]
+        b_perp = seg[2] * normal[0] + seg[3] * normal[1]
+        span = b_long - a_long
+        if abs(span) <= _EQUIVALENCE_DEGENERATE_TOL:
+            return a_perp
+        t = max(0.0, min(1.0, (mid - a_long) / span))
+        return a_perp + t * (b_perp - a_perp)
+
+    separation = abs(offset_at(right) - offset_at(left))
+    return overlap, separation
+
+
+def physical_wall_pair_identity_candidacy(
+    left: PhysicalWallIdentity,
+    right: PhysicalWallIdentity,
+    *,
+    points_per_mm: Optional[float] = None,
+) -> tuple[bool, Optional[str]]:
+    """Could this pair plausibly represent the same physical wall?
+
+    Returns ``(eligible, exclusion_reason)``.  Only eligible pairs take part
+    in equivalence classification at all.  A pair that fails every test has
+    NO equivalence relation: it is neither SAME, nor DISTINCT, nor AMBIGUOUS,
+    and it must not link the two candidates into a shared publication
+    contest.
+
+    Eligibility (any one suffices, all fail-closed):
+
+    1. either identity unusable, or geometry too thin to compare;
+    2. a shared immutable source primitive;
+    3. an identical reconstructed path fingerprint (duplicate geometry);
+    4. a viewport/level scope difference, which may be the same physical wall
+       drawn twice at different coordinates or scale;
+    5. the same two path endpoints within the snap tolerance;
+    6. orientation-compatible geometric contact within the snap tolerance;
+    7. a parallel, longitudinally overlapping sub-segment pair. With
+       producer-owned physical scale, separation beyond the conservative
+       maximum wall body excludes the pair; without scale, separation cannot
+       safely exclude it.
+
+    Rule 7 is a CANDIDATE FILTER ONLY.  Separation never proves
+    SAME_PHYSICAL_WALL; it only admits the pair to normal SAME / DISTINCT /
+    AMBIGUOUS classification, which still requires positive evidence.
+
+    No nearest/first selection, no confidence, no proximity-as-identity, no
+    layer names, and no project-specific constant.
+    """
+    if not left.usable or not right.usable:
+        return True, None
+    if set(left.source_primitive_ids) & set(right.source_primitive_ids):
+        return True, None
+    if (
+        left.path_fingerprint is not None
+        and left.path_fingerprint == right.path_fingerprint
+    ):
+        return True, None
+
+    # Cross-scope duplicate safety: the same physical wall may be drawn in a
+    # plan and again in an enlarged plan or repeated detail, at different
+    # coordinates and a different scale. Coordinates cannot rule that out, so
+    # such pairs stay in contest until positive reconciliation exists.
+    left_level = str(left.level_id or "").strip()
+    right_level = str(right.level_id or "").strip()
+    if left.viewport_id != right.viewport_id or (
+        bool(left_level) and bool(right_level) and left_level != right_level
+    ):
+        return True, None
+
+    left_path = tuple(left.path_fingerprint or ())
+    right_path = tuple(right.path_fingerprint or ())
+    if len(left_path) < 2 or len(right_path) < 2:
+        return True, None
+
+    if _paths_share_both_endpoints(
+        left_path,
+        right_path,
+        _EQUIVALENCE_LATERAL_TOL_PT,
+    ):
+        return True, None
+
+    if _paths_meet_as_same_wall_candidates(
+        left_path,
+        right_path,
+        _EQUIVALENCE_LATERAL_TOL_PT,
+    ):
+        return True, None
+
+    band = max_plausible_wall_body_separation_pt(points_per_mm)
+    saw_parallel = False
+    saw_overlap = False
+    for a in _segments(left_path):
+        for b in _segments(right_path):
+            relation = _parallel_overlap_separation(
+                a, b, angle_tolerance_deg=_EQUIVALENCE_ANGLE_TOL_DEG
+            )
+            if relation is None:
+                continue
+            saw_parallel = True
+            overlap, separation = relation
+            if overlap <= _EQUIVALENCE_LATERAL_TOL_PT:
+                continue
+            saw_overlap = True
+            # Physical separation may exclude a pair only when the exact
+            # source scope has producer-owned physical scale.  With no scale,
+            # keep every parallel overlapping pair in contest: abstention is
+            # safer than double-publishing two faces of one thick wall.
+            if band is None or separation <= band:
+                return True, None
+
+    if not saw_parallel:
+        return False, PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE
+    if not saw_overlap:
+        return False, PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP
+    if band is None:
+        return True, None
+    return False, PAIR_EXCLUDED_SEPARATION_BEYOND_BAND
+
+
+def physical_wall_pair_is_identity_candidate(
+    left: PhysicalWallIdentity,
+    right: PhysicalWallIdentity,
+    *,
+    points_per_mm: Optional[float] = None,
+) -> bool:
+    """Boolean form of :func:`physical_wall_pair_identity_candidacy`."""
+    eligible, _reason = physical_wall_pair_identity_candidacy(
+        left, right, points_per_mm=points_per_mm
+    )
+    return eligible
 
 
 def classify_physical_wall_pair(
@@ -391,6 +792,7 @@ def resolve_physical_wall_equivalence(
     identities: Sequence[Optional[PhysicalWallIdentity]],
     *,
     walls_by_id: Optional[Mapping[str, WallCandidate]] = None,
+    points_per_mm: Optional[float] = None,
 ) -> PhysicalWallEquivalenceResolution:
     """Reconcile ALL competing candidates via SAME/DISTINCT/AMBIGUOUS components.
 
@@ -422,8 +824,37 @@ def resolve_physical_wall_equivalence(
     same_links: list[tuple[str, str]] = []
     ambiguous_links: list[tuple[str, str]] = []
 
+    total_pairs = 0
+    excluded_pairs = 0
+    exclusion_reason_counts: dict[str, int] = {}
+    verified_points_per_mm = (
+        float(points_per_mm)
+        if points_per_mm is not None
+        and math.isfinite(float(points_per_mm))
+        and float(points_per_mm) > 0.0
+        else None
+    )
+    candidate_wall_body_band_pt = max_plausible_wall_body_separation_pt(
+        verified_points_per_mm
+    )
+
     for i, left in enumerate(usable):
         for right in usable[i + 1 :]:
+            total_pairs += 1
+            # A pair that could not possibly represent the same physical wall
+            # is not an identity competitor and gets no relation at all.
+            # Absence of a SAME proof between unrelated candidates is not
+            # ambiguity, and must not link them into one publication contest.
+            eligible, exclusion_reason = physical_wall_pair_identity_candidacy(
+                left, right, points_per_mm=points_per_mm
+            )
+            if not eligible:
+                excluded_pairs += 1
+                if exclusion_reason:
+                    exclusion_reason_counts[exclusion_reason] = (
+                        exclusion_reason_counts.get(exclusion_reason, 0) + 1
+                    )
+                continue
             classification = classify_physical_wall_pair(left, right)
             a, b = sorted((left.wall_candidate_id, right.wall_candidate_id))
             pair_classifications.append((a, b, classification.value))
@@ -486,10 +917,15 @@ def resolve_physical_wall_equivalence(
         if wall_id not in blockers:
             representatives.append(wall_id)
 
-    # Preserve deterministic unique order.
-    representatives = list(dict.fromkeys(representatives))
-    # Drop representatives that somehow also got blockers.
-    representatives = [wall_id for wall_id in representatives if wall_id not in blockers]
+    # Publication semantics must not depend on caller/input ordering.
+    representatives = sorted(
+        {
+            wall_id
+            for wall_id in representatives
+            if wall_id not in blockers
+        }
+    )
+    same_groups = sorted(set(same_groups))
 
     abstained: list[str] = []
     for identity in identities:
@@ -508,7 +944,7 @@ def resolve_physical_wall_equivalence(
     return PhysicalWallEquivalenceResolution(
         scope_viewport_id=scope_viewport,
         representative_wall_ids=tuple(representatives),
-        abstained_wall_ids=tuple(dict.fromkeys(abstained)),
+        abstained_wall_ids=tuple(sorted(set(abstained))),
         equivalence_groups=tuple(same_groups),
         ambiguous_wall_ids=tuple(sorted(ambiguous_walls)),
         same_wall_ids=tuple(sorted({wall_id for group in same_groups for wall_id in group})),
@@ -516,6 +952,14 @@ def resolve_physical_wall_equivalence(
         blocking_reasons_by_wall_id={
             wall_id: tuple(dict.fromkeys(reasons)) for wall_id, reasons in blockers.items() if reasons
         },
+        candidate_pair_audit=CandidatePairAudit(
+            total_pairs=total_pairs,
+            considered_pairs=total_pairs - excluded_pairs,
+            excluded_pairs=excluded_pairs,
+            exclusion_reason_counts=dict(sorted(exclusion_reason_counts.items())),
+            verified_points_per_mm=verified_points_per_mm,
+            candidate_wall_body_band_pt=candidate_wall_body_band_pt,
+        ),
     )
 
 
