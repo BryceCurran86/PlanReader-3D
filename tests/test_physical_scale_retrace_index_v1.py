@@ -99,6 +99,11 @@ def test_indexed_retrace_lookup_matches_legacy_decisions() -> None:
         # Non-native source refs are untouched.
         _segment("r0", "visible:raster_segment:r1", (0.0, 25.0), (10.0, 25.0)),
         _segment("r1", "visible:raster_segment:r2", (10.0, 25.0), (0.0, 25.0)),
+        # Even malformed duplicate observation IDs retain the legacy first-item
+        # behavior rather than borrowing another segment's primitive position.
+        _segment("zdup", "visible:segment:d7i70", (0.0, 30.0), (10.0, 30.0)),
+        _segment("zmatch", "visible:segment:d7i71", (10.0, 30.0), (0.0, 30.0)),
+        _segment("zdup", "visible:segment:d7i90", (0.0, 35.0), (10.0, 35.0)),
     )
 
     assert scale_module._coalesce_retraced_segments(segments) == _legacy_coalesce(segments)
