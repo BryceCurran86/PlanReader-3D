@@ -1,0 +1,128 @@
+name: TEST-ONLY Ghazi Wall Assembly Timing
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ghazi-wall-assembly-timing:
+    if: github.head_ref == 'diag/ghazi-wall-assembly-timing'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download SHA-pinned Ghazi source
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, urllib.request
+          bid="tenders_ke_ghazi_science_lab"
+          bench=pathlib.Path("benchmarks/public_tenders")/bid
+          dm=json.loads((bench/"download_manifest.json").read_text())
+          doc=next(d for d in dm["documents"] if d["role"]=="architectural_drawings")
+          out=pathlib.Path("/tmp")/doc["filename"]
+          req=urllib.request.Request(dm["source_url"],headers={"User-Agent":"PlanReader-wall-assembly-timing/1.0"})
+          with urllib.request.urlopen(req,timeout=180) as r:
+              out.write_bytes(r.read())
+          got=hashlib.sha256(out.read_bytes()).hexdigest()
+          if got != doc["sha256"]:
+              raise SystemExit(f"sha mismatch {got}")
+          PY
+
+      - name: Build exact production image
+        run: docker build -t planreader-wall-assembly-timing .
+
+      - name: Time wall assembly internals
+        run: |
+          docker run --rm -i --cpus=2.0 \
+            -v /tmp/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf:/app/ghazi.pdf:ro \
+            planreader-wall-assembly-timing \
+            python - <<'PY'
+          import hashlib, json, time
+          from pathlib import Path
+          import pb_physical_wall_candidate_authority as wallmod
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          payload=Path("/app/ghazi.pdf").read_bytes()
+          source_sha=hashlib.sha256(payload).hexdigest()
+          source=SourceVisibilityProducer(producer_method="diag-wall-assembly",producer_version="1.0.0")
+          published=source.ingest_native_pdf_bytes(
+              document_id=f"diag-wall-assembly:{source_sha[:32]}",
+              source_bytes=payload,
+              source_locator="memory://ghazi-wall-assembly.pdf",
+              page_ids=("167",),
+          )
+
+          timings=[]
+          def wrap(name):
+              original=getattr(wallmod,name)
+              def wrapped(*args,**kwargs):
+                  t=time.time()
+                  result=original(*args,**kwargs)
+                  extra={}
+                  try:
+                      extra["result_len"]=len(result)
+                  except Exception:
+                      pass
+                  timings.append({"stage":name,"seconds":round(time.time()-t,3),**extra})
+                  print("ASSEMBLY_STAGE="+json.dumps(timings[-1],sort_keys=True),flush=True)
+                  return result
+              setattr(wallmod,name,wrapped)
+
+          for name in (
+              "_proven_filled_wall_strips",
+              "_filter_proven_wall_strip_geometry",
+              "build_wall_graph_for_viewport",
+              "classify_junctions",
+              "assemble_wall_topology",
+              "collect_physical_wall_identities",
+              "resolve_physical_wall_equivalence",
+              "_producer_wall_strip_relation_overrides",
+              "_apply_trusted_relation_overrides",
+              "_producer_shared_source_face_relation_overrides",
+              "_producer_opening_relation_overrides",
+          ):
+              wrap(name)
+
+          original_boundary=wallmod._scope_boundary_reason
+          boundary_total={"seconds":0.0,"calls":0,"non_null":0}
+          def boundary_wrapped(*args,**kwargs):
+              t=time.time()
+              result=original_boundary(*args,**kwargs)
+              boundary_total["seconds"]+=time.time()-t
+              boundary_total["calls"]+=1
+              if result is not None:
+                  boundary_total["non_null"]+=1
+              return result
+          wallmod._scope_boundary_reason=boundary_wrapped
+
+          t=time.time()
+          producer=wallmod.PhysicalWallCandidateProducer.from_source_visibility_producer(
+              source,
+              page_ids=("167",),
+          )
+          total=round(time.time()-t,3)
+          published=source.published_snapshot_for_revision(published.revision.revision_id)
+          assert published is not None
+          authority=producer.authority()
+          selector=wallmod.PhysicalWallCandidateSelector(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              page_id="167",
+              decision_scope_id="wall-source:page-167",
+          )
+          result=authority.resolve_scope(selector)
+          print("ASSEMBLY_SUMMARY="+json.dumps({
+              "total_seconds":total,
+              "candidate_count":len(result.records),
+              "scope_complete":result.scope_complete,
+              "status":getattr(result.status,"value",result.status),
+              "reason_codes":list(result.reason_codes),
+              "boundary_calls":boundary_total["calls"],
+              "boundary_non_null":boundary_total["non_null"],
+              "boundary_seconds":round(boundary_total["seconds"],3),
+              "timings":timings,
+          },sort_keys=True,default=str),flush=True)
+          PY
