@@ -429,6 +429,28 @@ def test_junction_geometry_is_not_a_face_pairing(path, label) -> None:
     assert resolution.ambiguous_wall_ids == ()
 
 
+def test_same_endpoints_different_interior_paths_remain_ambiguous() -> None:
+    straight = _ident(
+        "se-straight",
+        ((0.0, 0.0), (100.0, 0.0)),
+        ("d1i0",),
+    )
+    detour = _ident(
+        "se-detour",
+        ((0.0, 0.0), (50.0, 40.0), (100.0, 0.0)),
+        ("d9i0", "d9i1"),
+    )
+
+    eligible, reason = physical_wall_pair_identity_candidacy(straight, detour)
+    assert eligible
+    assert reason is None
+    assert classify_physical_wall_pair(straight, detour) is AMBIGUOUS
+
+    resolution = resolve_physical_wall_equivalence((straight, detour))
+    assert resolution.representative_wall_ids == ()
+    assert set(resolution.ambiguous_wall_ids) == {"se-straight", "se-detour"}
+
+
 def test_perpendicular_unrelated_walls_publish_independently() -> None:
     horizontal = _ident("w-h", ((0.0, 0.0), (100.0, 0.0)), ("d1i0",))
     vertical = _ident("w-v", ((400.0, 200.0), (400.0, 320.0)), ("d5i0",))
