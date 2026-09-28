@@ -72,4 +72,62 @@ jobs:
                   "geometry":list(rec.geometry),
               })
           print("OPENING_DETAIL_EXEC_WORDS "+json.dumps(sorted(rows,key=lambda r:(r["partition"],r["interval"],r["obs"])),sort_keys=True))
+
+          # Inspect immutable source observations around the dimension words.
+          # The KSTVET source stream exposes the two unit-bearing dimension
+          # words but may encode the visual WxH separator as a non-text source
+          # primitive.  Diagnose that primitive rather than weakening the
+          # production parser to treat arbitrary adjacent numbers as WxH.
+          source_auth=source.authority()
+          targets=[]
+          for row in rows:
+              digits=str(row["raw"] or "").lower().replace(",","")
+              if not any(k in digits for k in ("2900","3000","900")):
+                  continue
+              if len(row["geometry"]) < 4:
+                  continue
+              x0,y0,x1,y1=(float(v) for v in row["geometry"][:4])
+              targets.append((
+                  min(x0,x1)-14.0,min(y0,y1)-8.0,
+                  max(x0,x1)+14.0,max(y0,y1)+8.0,
+              ))
+
+          neighbourhood=[]
+          for oid in pub.snapshot.observation_ids:
+              resolved=source_auth.resolve(ObservationSelector(
+                  document_id=pub.revision.document_id,
+                  revision_id=pub.revision.revision_id,
+                  source_sha256=pub.revision.source_sha256,
+                  snapshot_id=pub.snapshot.snapshot_id,
+                  observation_id=oid,
+              ))
+              obs=resolved.observation
+              if obs is None or str(obs.page_id)!="54" or len(obs.geometry)<4:
+                  continue
+              gx0,gy0,gx1,gy1=(float(v) for v in obs.geometry[:4])
+              rect=(min(gx0,gx1),min(gy0,gy1),max(gx0,gx1),max(gy0,gy1))
+              if not any(
+                  not (
+                      rect[2] < target[0] or rect[0] > target[2]
+                      or rect[3] < target[1] or rect[1] > target[3]
+                  )
+                  for target in targets
+              ):
+                  continue
+              neighbourhood.append({
+                  "obs":obs.observation_id,
+                  "kind":obs.observation_kind,
+                  "origin":obs.origin_kind,
+                  "primitive":obs.source_primitive_ref,
+                  "raw":obs.raw_text,
+                  "geometry":list(obs.geometry),
+                  "partition":obs.source_partition_id,
+              })
+          print("OPENING_DETAIL_SOURCE_NEIGHBOURHOOD "+json.dumps(
+              sorted(
+                  neighbourhood,
+                  key=lambda r:(r["kind"],r["primitive"],r["obs"]),
+              ),
+              sort_keys=True,
+          ))
           PY
