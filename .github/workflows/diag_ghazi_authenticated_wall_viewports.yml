@@ -39,7 +39,12 @@ jobs:
           import hashlib, json, time
           from pathlib import Path
           from pb_source_visibility_authority import SourceVisibilityProducer
-          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateProducer,
+              _scope_boundary_reason,
+              _all_viewports,
+          )
+          import fitz
 
           payload=Path("/app/ghazi.pdf").read_bytes()
           source_sha=hashlib.sha256(payload).hexdigest()
@@ -98,5 +103,79 @@ jobs:
               "stabilized_snapshot_id":None if stabilized is None else stabilized.snapshot.snapshot_id,
               "scope_count":len(rows),
               "scopes":rows,
+          },sort_keys=True,default=str),flush=True)
+
+          t=time.time()
+          page_producer=PhysicalWallCandidateProducer.from_source_visibility_producer(
+              source,
+              page_ids=("167",),
+          )
+          current=source.published_snapshot_for_revision(initial.revision.revision_id)
+          page_results=[
+              result for result in page_producer._scopes.values()
+              if result.page_id=="167" and result.scope_kind=="page"
+          ]
+          if len(page_results) != 1:
+              raise SystemExit(f"expected one page scope, got {len(page_results)}")
+          result=page_results[0]
+          pdf=fitz.open(stream=payload,filetype="pdf")
+          try:
+              page=pdf.load_page(166)
+              viewports=_all_viewports(page,page_number=167)
+              reason_rows=[]
+              counts={}
+              rep_counts={}
+              junction_counts={}
+              samples={}
+              for rec in result.records:
+                  wall=rec.wall_candidate
+                  reason=_scope_boundary_reason(
+                      wall,
+                      page=page,
+                      page_number=167,
+                      page_width=float(page.rect.width),
+                      page_height=float(page.rect.height),
+                  )
+                  key=reason or "complete"
+                  counts[key]=counts.get(key,0)+1
+                  rep=str(wall.representation)
+                  rep_counts[rep]=rep_counts.get(rep,0)+1
+                  jk="|".join(str(getattr(x,"value",x)) for x in wall.junction_types)
+                  junction_counts[jk]=junction_counts.get(jk,0)+1
+                  if reason is not None and len(samples.setdefault(key,[])) < 12:
+                      samples[key].append({
+                          "candidate_id":wall.candidate_id,
+                          "representation":rep,
+                          "centerline_pts":[list(map(float,p)) for p in wall.centerline_pts],
+                          "junction_types":[str(getattr(x,"value",x)) for x in wall.junction_types],
+                          "face_a_segment_ids":list(wall.face_a_segment_ids),
+                          "face_b_segment_ids":[] if wall.face_b_segment_ids is None else list(wall.face_b_segment_ids),
+                          "supporting_evidence_ids":list(wall.supporting_evidence_ids),
+                          "reason_codes":list(wall.reason_codes),
+                      })
+              viewport_rows=[] if viewports is None else [{
+                  "view_id":getattr(v,"view_id",None),
+                  "status":getattr(v,"status",None),
+                  "view_type":getattr(v,"view_type",None),
+                  "boundary_source":getattr(v,"boundary_source",None),
+                  "bbox":getattr(v,"bounding_box",None),
+              } for v in viewports]
+          finally:
+              pdf.close()
+          print("PAGE_SCOPE_PROBE="+json.dumps({
+              "seconds":round(time.time()-t,3),
+              "snapshot_id":None if current is None else current.snapshot.snapshot_id,
+              "visible_count":0 if current is None else len(current.visible_observation_ids),
+              "status":getattr(result.status,"value",result.status),
+              "scope_complete":result.scope_complete,
+              "reason_codes":list(result.reason_codes),
+              "candidate_count":len(result.records),
+              "representative_wall_count":0 if result.equivalence is None else len(result.equivalence.representative_wall_ids),
+              "ambiguous_wall_count":0 if result.equivalence is None else len(result.equivalence.ambiguous_wall_ids),
+              "boundary_reason_counts":counts,
+              "representation_counts":rep_counts,
+              "junction_counts":junction_counts,
+              "segmented_viewports":viewport_rows,
+              "problem_samples":samples,
           },sort_keys=True,default=str),flush=True)
           PY
