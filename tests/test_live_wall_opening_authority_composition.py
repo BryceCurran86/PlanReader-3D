@@ -9,6 +9,7 @@ from pb_live_wall_opening_authority_composition import (
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_opening_universe_completeness_authority import OpeningUniverseSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
+from tests.test_physical_wall_candidate_raster_source_v1 import _image_only_wall_pdf
 
 
 def _host_fixture_pdf() -> bytes:
@@ -162,3 +163,31 @@ def test_composer_does_not_materialize_unselected_wall_page() -> None:
         composition.opening_universe_results["2"].record.decision_scope_id
         == "wall-source:page-2"
     )
+
+
+def test_composer_rebinds_to_snapshot_advanced_by_raster_wall_materialization() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="live-wall-opening-raster-stabilization-test",
+        producer_version="1",
+    )
+    initial = source.ingest_native_pdf_bytes(
+        document_id="host-composition-raster-stabilization",
+        source_bytes=_image_only_wall_pdf(),
+        source_locator="memory://host-composition-raster-stabilization.pdf",
+        page_ids=("1",),
+    )
+    assert initial.visible_observation_ids == ()
+
+    composition = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=initial.revision.revision_id,
+        page_ids=("1",),
+    )
+
+    stabilized = source.published_snapshot_for_revision(initial.revision.revision_id)
+    assert stabilized is not None
+    assert stabilized.snapshot.snapshot_id != initial.snapshot.snapshot_id
+    assert composition.wall_scopes
+    assert composition.wall_scopes[0].status is EvidenceResolutionStatus.CORROBORATED
+    assert composition.wall_scopes[0].scope_complete is True
+    assert composition.wall_scopes[0].wall_candidate_ids
