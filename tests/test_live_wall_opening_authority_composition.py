@@ -44,6 +44,29 @@ def _two_page_pdf() -> bytes:
         doc.close()
 
 
+
+
+def _two_page_host_pdf() -> bytes:
+    doc = fitz.open()
+    try:
+        doc.new_page(width=320.0, height=240.0)
+        page = doc.new_page(width=320.0, height=240.0)
+        shape = page.new_shape()
+        for start, end in (
+            ((20.0, 80.0), (120.0, 80.0)),
+            ((160.0, 80.0), (280.0, 80.0)),
+            ((20.0, 100.0), (120.0, 100.0)),
+            ((160.0, 100.0), (280.0, 100.0)),
+            ((120.0, 80.0), (120.0, 100.0)),
+            ((160.0, 80.0), (160.0, 100.0)),
+        ):
+            shape.draw_line(fitz.Point(*start), fitz.Point(*end))
+        shape.finish(width=1.0)
+        shape.commit()
+        return bytes(doc.tobytes(garbage=4, deflate=True))
+    finally:
+        doc.close()
+
 def _ingest(data: bytes, document_id: str):
     source = SourceVisibilityProducer(
         producer_method="live-wall-opening-composition-test",
@@ -233,3 +256,33 @@ def test_composer_refreshes_snapshot_after_wall_raster_augmentation(monkeypatch)
             composition.opening_universe_result.record.snapshot_id
             != original_snapshot_id
         )
+
+
+
+def test_composer_authorizes_successfully_decoded_scoped_page() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="live-wall-opening-composition-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="host-composition-scoped-page",
+        source_bytes=_two_page_host_pdf(),
+        source_locator="memory://host-composition-scoped-page.pdf",
+        page_ids=("2",),
+    )
+    assert published.coverage.state == "partial"
+    assert published.coverage.decoded_pages == (2,)
+    assert published.coverage.failed_pages == ()
+
+    composition = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("2",),
+    )
+
+    assert len(composition.wall_scopes) == 1
+    wall_scope = composition.wall_scopes[0]
+    assert wall_scope.page_id == "2"
+    assert wall_scope.status is EvidenceResolutionStatus.CORROBORATED
+    assert wall_scope.scope_complete is True
+    assert wall_scope.wall_candidate_ids
