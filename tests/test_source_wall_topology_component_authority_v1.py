@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from pb_geometry_takeoff_model import MeasurementAuthorityType
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import (
@@ -128,6 +130,96 @@ def _wall_authority(records) -> PhysicalWallCandidateAuthority:
     return PhysicalWallCandidateAuthority({key:scope},_seal=CANDIDATE_AUTHORITY_SEAL)
 
 
+def _closed_records():
+    records=list(_records())
+    node_data={
+        "top-left":(("a","b"),(JunctionType.L_CORNER,JunctionType.T_JUNCTION)),
+        "top-right":(("b","c"),(JunctionType.T_JUNCTION,JunctionType.L_CORNER)),
+        "right":(("c","d"),(JunctionType.L_CORNER,JunctionType.L_CORNER)),
+        "bottom-right":(("d","e"),(JunctionType.L_CORNER,JunctionType.T_JUNCTION)),
+        "bottom-left":(("e","f"),(JunctionType.T_JUNCTION,JunctionType.L_CORNER)),
+        "left":(("f","a"),(JunctionType.L_CORNER,JunctionType.L_CORNER)),
+        "divider":(("b","e"),(JunctionType.T_JUNCTION,JunctionType.T_JUNCTION)),
+    }
+    for record in records:
+        nodes,junctions=node_data[record.wall_candidate_id]
+        object.__setattr__(record.wall_candidate,"end_node_ids",nodes)
+        object.__setattr__(record.wall_candidate,"junction_types",junctions)
+    return tuple(records)
+
+
+def _scope_equivalence(records, scope_id: str):
+    ids=tuple(record.wall_candidate_id for record in records)
+    return PhysicalWallEquivalenceResolution(
+        scope_viewport_id=scope_id,
+        representative_wall_ids=ids,
+        abstained_wall_ids=(),
+        equivalence_groups=(),
+        ambiguous_wall_ids=(),
+        same_wall_ids=(),
+        pair_classifications=(),
+        blocking_reasons_by_wall_id={},
+    )
+
+
+def _combined_wall_authority(
+    page_records,
+    viewport_records,
+) -> PhysicalWallCandidateAuthority:
+    page_scope_id="wall-source:page-1"
+    page_scope=PhysicalWallCandidateScopeResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=False,
+        records=tuple(page_records),
+        source_observation_ids=(),
+        document_id=DOC,
+        revision_id=REV,
+        source_sha256=SHA,
+        snapshot_id=SNAP,
+        page_id=PAGE,
+        decision_scope_id=page_scope_id,
+        reason_codes=(
+            "physical_wall_candidate_scope_resolved",
+            "physical_wall_candidate_scope_bounds_unresolved",
+        ),
+        equivalence=_scope_equivalence(page_records,page_scope_id),
+        proposition="physical_wall_candidate_scope_resolved",
+        scope_kind="page",
+    )
+    viewport_scope=PhysicalWallCandidateScopeResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=False,
+        records=tuple(viewport_records),
+        source_observation_ids=(),
+        document_id=DOC,
+        revision_id=REV,
+        source_sha256=SHA,
+        snapshot_id=SNAP,
+        page_id=PAGE,
+        decision_scope_id=SCOPE,
+        reason_codes=(
+            "physical_wall_candidate_scope_resolved",
+            "physical_wall_candidate_scope_cropped_at_viewport_boundary",
+        ),
+        equivalence=_scope_equivalence(viewport_records,SCOPE),
+        proposition="physical_wall_candidate_scope_resolved",
+        scope_kind="viewport",
+        viewport_id="view-1",
+        viewport_bbox=(0.0,0.0,500.0,500.0),
+        viewport_view_type="floor_plan",
+        viewport_status="derived",
+        viewport_boundary_source="title_partition",
+    )
+    mapping={
+        _ScopeKey(DOC,REV,SHA,SNAP,PAGE,page_scope_id):page_scope,
+        _ScopeKey(DOC,REV,SHA,SNAP,PAGE,SCOPE):viewport_scope,
+    }
+    return PhysicalWallCandidateAuthority(
+        mapping,
+        _seal=CANDIDATE_AUTHORITY_SEAL,
+    )
+
+
 def _component_authority(records) -> WallComponentCompletenessAuthority:
     member_ids=tuple(record.wall_candidate_id for record in records)
     member_sources=tuple(
@@ -235,5 +327,56 @@ def test_component_authority_for_other_lineage_does_not_mint_role() -> None:
         wall_component_completeness_authority=components,
     )
     result=producer.publish(_selector("not-a-wall"))
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+
+
+
+def test_closed_page_component_bridges_role_into_cropped_viewport() -> None:
+    records=_closed_records()
+    walls=_combined_wall_authority(records,records)
+    producer=WallRoleProducer.from_source_topology(
+        physical_wall_candidate_authority=walls,
+    )
+
+    divider=producer.publish(_selector("divider"))
+    left=producer.publish(_selector("left"))
+
+    assert divider.status is EvidenceResolutionStatus.CORROBORATED
+    assert divider.record is not None
+    assert divider.record.role is WallRoleClassification.INTERNAL
+    assert left.status is EvidenceResolutionStatus.CORROBORATED
+    assert left.record is not None
+    assert left.record.role is WallRoleClassification.EXTERNAL
+    assert any(
+        evidence_id.startswith("source_wall_topology_viewport_bridge_")
+        for evidence_id in divider.record.corroborating_evidence_ids
+    )
+
+
+def test_page_component_bridge_requires_full_viewport_source_coverage() -> None:
+    page_records=_closed_records()
+    viewport_records=list(_closed_records())
+    index=next(
+        i for i,record in enumerate(viewport_records)
+        if record.wall_candidate_id=="divider"
+    )
+    original=viewport_records[index]
+    viewport_records[index]=replace(
+        original,
+        physical_identity=replace(
+            original.physical_identity,
+            source_primitive_ids=(
+                *original.physical_identity.source_primitive_ids,
+                "unmapped-source-primitive",
+            ),
+        ),
+    )
+    walls=_combined_wall_authority(page_records,tuple(viewport_records))
+    producer=WallRoleProducer.from_source_topology(
+        physical_wall_candidate_authority=walls,
+    )
+
+    result=producer.publish(_selector("divider"))
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.record is None
