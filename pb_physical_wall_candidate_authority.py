@@ -1774,7 +1774,7 @@ def _apply_trusted_relation_overrides(
     representatives = list(dict.fromkeys(representatives))
     abstained = [
         wall_id
-        for wall_id in known_id_set
+        for wall_id in sorted(known_id_set)
         if wall_id in blockers
     ]
     return PhysicalWallEquivalenceResolution(
