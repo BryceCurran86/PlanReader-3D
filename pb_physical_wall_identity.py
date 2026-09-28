@@ -103,6 +103,11 @@ class CandidatePairAudit:
     exclusion_reason_counts: Mapping[str, int] = field(default_factory=dict)
     trusted_override_pairs_restored: int = 0
     trusted_override_pairs_rejected: int = 0
+    trusted_override_rejection_reason_counts: Mapping[str, int] = field(
+        default_factory=dict
+    )
+    verified_points_per_mm: Optional[float] = None
+    candidate_wall_body_band_pt: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -469,16 +474,32 @@ def _unit(seg: tuple[float, float, float, float]) -> Optional[tuple[float, float
     return ux, uy
 
 
-def _paths_meet(
+def _paths_meet_as_same_wall_candidates(
     left: Sequence[tuple[float, float]],
     right: Sequence[tuple[float, float]],
     tolerance: float,
 ) -> bool:
+    """True only for orientation-compatible contact.
+
+    T/L/X junctions are real wall-network contacts but are not plausible
+    duplicate faces/representations of one physical wall.  Contact therefore
+    enters the equivalence contest only when at least one touching segment
+    pair is parallel within the repository's collinear-angle tolerance.
+    """
     left_segs, right_segs = _segments(left), _segments(right)
     if not left_segs or not right_segs:
         return False
     for a in left_segs:
         for b in right_segs:
+            if (
+                _parallel_overlap_separation(
+                    a,
+                    b,
+                    angle_tolerance_deg=_EQUIVALENCE_ANGLE_TOL_DEG,
+                )
+                is None
+            ):
+                continue
             if _segments_meet_within(a, b, tolerance):
                 return True
     return False
@@ -596,7 +617,11 @@ def physical_wall_pair_identity_candidacy(
     if len(left_path) < 2 or len(right_path) < 2:
         return True, None
 
-    if _paths_meet(left_path, right_path, _EQUIVALENCE_LATERAL_TOL_PT):
+    if _paths_meet_as_same_wall_candidates(
+        left_path,
+        right_path,
+        _EQUIVALENCE_LATERAL_TOL_PT,
+    ):
         return True, None
 
     band = max_plausible_wall_body_separation_pt(points_per_mm)
@@ -768,6 +793,16 @@ def resolve_physical_wall_equivalence(
     total_pairs = 0
     excluded_pairs = 0
     exclusion_reason_counts: dict[str, int] = {}
+    verified_points_per_mm = (
+        float(points_per_mm)
+        if points_per_mm is not None
+        and math.isfinite(float(points_per_mm))
+        and float(points_per_mm) > 0.0
+        else None
+    )
+    candidate_wall_body_band_pt = max_plausible_wall_body_separation_pt(
+        verified_points_per_mm
+    )
 
     for i, left in enumerate(usable):
         for right in usable[i + 1 :]:
@@ -883,6 +918,8 @@ def resolve_physical_wall_equivalence(
             considered_pairs=total_pairs - excluded_pairs,
             excluded_pairs=excluded_pairs,
             exclusion_reason_counts=dict(sorted(exclusion_reason_counts.items())),
+            verified_points_per_mm=verified_points_per_mm,
+            candidate_wall_body_band_pt=candidate_wall_body_band_pt,
         ),
     )
 
