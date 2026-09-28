@@ -35,7 +35,7 @@ jobs:
 
       - name: Trace authenticated physical net wall stages
         run: |
-          docker run --rm --cpus=2.0             -v /tmp/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf:/app/ghazi.pdf:ro             planreader-stage-trace             python - <<'PY'
+          docker run --rm -i --cpus=2.0             -v /tmp/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf:/app/ghazi.pdf:ro             planreader-stage-trace             python - <<'PY'
           import hashlib, json, time
           from pathlib import Path
           import fitz
