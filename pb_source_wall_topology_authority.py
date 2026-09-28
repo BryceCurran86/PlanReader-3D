@@ -30,7 +30,9 @@ from pb_wall_component_completeness_authority import (
     WALL_COMPONENT_COMPLETE,
     WallComponentCompletenessAuthority,
     WallComponentCompletenessSelector,
+    _component_sets,
 )
+from pb_wall_room_topology_contracts import JunctionType
 from pb_wall_role_authority import (
     WallTopologyAuthority,
     WallTopologyEvidence,
@@ -448,6 +450,290 @@ def _component_topology_records(
     return output
 
 
+
+_PAGE_LOCAL_BLOCKING_JUNCTIONS = frozenset({
+    JunctionType.ENDPOINT,
+    JunctionType.UNRESOLVED,
+    JunctionType.NEAR_JUNCTION_REVIEW,
+    JunctionType.AMBIGUOUS,
+    JunctionType.REJECTED_NON_WALL_CROSSING,
+})
+
+
+def _collapsed_component_records(scope, member_ids) -> tuple:
+    """Return one upstream-approved representative per SAME physical wall."""
+    by_id = {
+        str(record.wall_candidate_id): record
+        for record in tuple(scope.records or ())
+    }
+    members = set(str(value) for value in member_ids)
+    if not members or not members <= set(by_id):
+        return ()
+
+    keep_ids = set(members)
+    equivalence = getattr(scope, "equivalence", None)
+    if equivalence is not None:
+        representatives = set(tuple(equivalence.representative_wall_ids or ()))
+        for group in tuple(equivalence.equivalence_groups or ()):
+            group_members = members & set(group)
+            if not group_members:
+                continue
+            group_reps = group_members & representatives
+            if len(group_reps) != 1:
+                return ()
+            keep = next(iter(group_reps))
+            keep_ids.difference_update(group_members - {keep})
+    return tuple(by_id[wall_id] for wall_id in sorted(keep_ids))
+
+
+def _page_component_is_locally_closed(records) -> bool:
+    """Require producer junction evidence that leaves no unresolved wall end.
+
+    A page can be globally incomplete because another drawing region has
+    unresolved bounds. This narrower proof accepts one connected source-wall
+    component only when every member has two classified ends and neither end
+    is dangling, ambiguous, review-only, unresolved, or rejected.
+    """
+    if not records:
+        return False
+    for record in records:
+        junctions = tuple(
+            getattr(record.wall_candidate, "junction_types", ()) or ()
+        )
+        if len(junctions) != 2:
+            return False
+        normalized = []
+        for raw in junctions:
+            try:
+                normalized.append(
+                    raw if isinstance(raw, JunctionType) else JunctionType(str(raw))
+                )
+            except ValueError:
+                return False
+        if any(value in _PAGE_LOCAL_BLOCKING_JUNCTIONS for value in normalized):
+            return False
+    return True
+
+
+def _page_local_component_topology_records(
+    scope,
+) -> dict[tuple[str, str, str, str, str, str, str], WallTopologyEvidence]:
+    """Derive topology for closed page-local components on an incomplete page.
+
+    This never upgrades the enclosing page scope completeness. The exact page
+    wall graph is partitioned only by producer-owned physical equivalence and
+    trusted junction identities.
+    """
+    if (
+        scope.status is not EvidenceResolutionStatus.CORROBORATED
+        or scope.scope_complete
+        or getattr(scope, "scope_kind", "page") != "page"
+        or not tuple(scope.records or ())
+    ):
+        return {}
+
+    output = {}
+    for members in _component_sets(scope.records, scope.equivalence):
+        component_records = _collapsed_component_records(scope, members)
+        if not _page_component_is_locally_closed(component_records):
+            continue
+        local_scope = replace(
+            scope,
+            scope_complete=True,
+            records=component_records,
+            equivalence=None,
+        )
+        derived = _derive_scope_records(local_scope)
+        if not derived:
+            continue
+        if not any(not evidence.is_ambiguous for evidence in derived.values()):
+            continue
+        output.update(derived)
+    return output
+
+
+def _page_equivalence_representatives(page_scope) -> dict[str, str]:
+    mapping = {
+        str(record.wall_candidate_id): str(record.wall_candidate_id)
+        for record in tuple(page_scope.records or ())
+    }
+    equivalence = getattr(page_scope, "equivalence", None)
+    if equivalence is None:
+        return mapping
+    representatives = set(tuple(equivalence.representative_wall_ids or ()))
+    for group in tuple(equivalence.equivalence_groups or ()):
+        group_members = [str(value) for value in group if str(value) in mapping]
+        group_reps = set(group_members) & representatives
+        if len(group_reps) != 1:
+            continue
+        representative = next(iter(group_reps))
+        for wall_id in group_members:
+            mapping[wall_id] = representative
+    return mapping
+
+
+def _bridge_page_topology_to_viewports(
+    physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
+    records: dict[
+        tuple[str, str, str, str, str, str, str],
+        WallTopologyEvidence,
+    ],
+) -> dict[tuple[str, str, str, str, str, str, str], WallTopologyEvidence]:
+    """Project proven page-local topology onto exact viewport wall identities.
+
+    Every primitive owned by the viewport wall must be covered by page-wall
+    candidates, every overlapping page candidate must normalize through
+    producer-owned SAME equivalence to topology evidence, and all evidence must
+    agree on one exact face-adjacency signature.
+    """
+    output = {}
+    scopes = tuple(physical_wall_candidate_authority._scopes.values())
+    page_scopes = [scope for scope in scopes if scope.scope_kind == "page"]
+
+    for viewport_scope in scopes:
+        if (
+            viewport_scope.scope_kind != "viewport"
+            or str(viewport_scope.viewport_view_type or "") != "floor_plan"
+            or viewport_scope.status is not EvidenceResolutionStatus.CORROBORATED
+        ):
+            continue
+        matches = [
+            page_scope
+            for page_scope in page_scopes
+            if page_scope.document_id == viewport_scope.document_id
+            and page_scope.revision_id == viewport_scope.revision_id
+            and page_scope.source_sha256 == viewport_scope.source_sha256
+            and page_scope.snapshot_id == viewport_scope.snapshot_id
+            and page_scope.page_id == viewport_scope.page_id
+        ]
+        if len(matches) != 1:
+            continue
+        page_scope = matches[0]
+        page_records = tuple(page_scope.records or ())
+        representative_for = _page_equivalence_representatives(page_scope)
+
+        topology_by_page_wall = {}
+        for evidence in records.values():
+            if (
+                evidence.document_id == page_scope.document_id
+                and evidence.revision_id == page_scope.revision_id
+                and evidence.source_sha256 == page_scope.source_sha256
+                and evidence.snapshot_id == page_scope.snapshot_id
+                and evidence.page_id == page_scope.page_id
+                and evidence.decision_scope_id == page_scope.decision_scope_id
+            ):
+                topology_by_page_wall[evidence.physical_wall_id] = evidence
+        if not topology_by_page_wall:
+            continue
+
+        for viewport_record in tuple(viewport_scope.records or ()):
+            target_ids = {
+                str(raw_id)
+                for raw_id in viewport_record.physical_identity.source_primitive_ids
+                if str(raw_id)
+            }
+            if not target_ids:
+                continue
+
+            covered = set()
+            normalized_page_ids = set()
+            for page_record in page_records:
+                page_ids = {
+                    str(raw_id)
+                    for raw_id in page_record.physical_identity.source_primitive_ids
+                    if str(raw_id)
+                }
+                overlap = target_ids & page_ids
+                if not overlap:
+                    continue
+                covered.update(overlap)
+                normalized_page_ids.add(
+                    representative_for.get(
+                        str(page_record.wall_candidate_id),
+                        str(page_record.wall_candidate_id),
+                    )
+                )
+
+            if covered != target_ids or not normalized_page_ids:
+                continue
+
+            evidences = []
+            unresolved = False
+            for page_wall_id in sorted(normalized_page_ids):
+                evidence = topology_by_page_wall.get(page_wall_id)
+                if evidence is None or evidence.is_ambiguous:
+                    unresolved = True
+                    break
+                evidences.append(evidence)
+            if unresolved or not evidences:
+                continue
+
+            signatures = {
+                (
+                    bool(evidence.bounds_exterior),
+                    int(evidence.enclosed_space_count),
+                    tuple(evidence.enclosed_space_ids),
+                )
+                for evidence in evidences
+            }
+            if len(signatures) != 1:
+                continue
+            bounds_exterior, enclosed_space_count, enclosed_space_ids = next(
+                iter(signatures)
+            )
+            if (bounds_exterior, enclosed_space_count) not in (
+                (True, 1),
+                (False, 2),
+            ):
+                continue
+
+            payload = {
+                "document_id": viewport_scope.document_id,
+                "revision_id": viewport_scope.revision_id,
+                "source_sha256": viewport_scope.source_sha256,
+                "snapshot_id": viewport_scope.snapshot_id,
+                "page_id": viewport_scope.page_id,
+                "decision_scope_id": viewport_scope.decision_scope_id,
+                "physical_wall_id": viewport_record.wall_candidate_id,
+                "source_primitive_ids": tuple(sorted(target_ids)),
+                "page_topology_evidence_ids": tuple(
+                    sorted(evidence.evidence_id for evidence in evidences)
+                ),
+                "face_ids": enclosed_space_ids,
+            }
+            bridged = WallTopologyEvidence(
+                evidence_id=stable_contract_id(
+                    "source_wall_topology_viewport_bridge",
+                    payload,
+                    digest_chars=32,
+                ),
+                document_id=viewport_scope.document_id,
+                revision_id=viewport_scope.revision_id,
+                source_sha256=viewport_scope.source_sha256,
+                snapshot_id=viewport_scope.snapshot_id,
+                page_id=viewport_scope.page_id,
+                physical_wall_id=viewport_record.wall_candidate_id,
+                bounds_exterior=bounds_exterior,
+                decision_scope_id=viewport_scope.decision_scope_id,
+                enclosed_space_count=enclosed_space_count,
+                enclosed_space_ids=enclosed_space_ids,
+                is_ambiguous=False,
+                ambiguity_reason=None,
+            )
+            output[
+                (
+                    viewport_scope.document_id,
+                    viewport_scope.revision_id,
+                    viewport_scope.source_sha256,
+                    viewport_scope.snapshot_id,
+                    viewport_scope.page_id,
+                    viewport_scope.decision_scope_id,
+                    viewport_record.wall_candidate_id,
+                )
+            ] = bridged
+    return output
+
+
 def build_source_wall_topology_authority(
     physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
     *,
@@ -496,6 +782,20 @@ def build_source_wall_topology_authority(
                     wall_component_completeness_authority,
                 )
             )
+
+    for scope in physical_wall_candidate_authority._scopes.values():
+        if (
+            getattr(scope, "scope_kind", "page") == "page"
+            and not getattr(scope, "scope_complete", False)
+        ):
+            records.update(_page_local_component_topology_records(scope))
+
+    records.update(
+        _bridge_page_topology_to_viewports(
+            physical_wall_candidate_authority,
+            records,
+        )
+    )
 
     authority = WallTopologyAuthority(records, _seal=_AUTHORITY_SEAL)
     object.__setattr__(
