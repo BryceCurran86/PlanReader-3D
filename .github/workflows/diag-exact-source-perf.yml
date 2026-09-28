@@ -1,0 +1,214 @@
+name: TEST ONLY Exact Source Performance Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/diag-exact-source-perf.yml"
+      - "scripts/diag_exact_source_perf.py"
+  workflow_dispatch:
+
+jobs:
+  exact-source:
+    name: ${{ matrix.project }} / ${{ matrix.revision }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: lamu
+            revision: pre-969
+            code_ref: 3a0de480a1f06c5a4044a3efd707588a4409c678
+            url: https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf
+            sha256: fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2
+            page_start: 41
+            page_end: 45
+          - project: lamu
+            revision: post-969
+            code_ref: 8b4cdf3ecba21c3a16921734b3a0a1300ee96113
+            url: https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf
+            sha256: fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2
+            page_start: 41
+            page_end: 45
+          - project: lamu
+            revision: scale-970
+            code_ref: 1ba839a99243959c6f3c044a85b70e5216618456
+            url: https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf
+            sha256: fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2
+            page_start: 41
+            page_end: 45
+          - project: murera
+            revision: pre-969
+            code_ref: 3a0de480a1f06c5a4044a3efd707588a4409c678
+            url: https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf
+            sha256: 84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b
+            page_start: 219
+            page_end: 238
+          - project: murera
+            revision: post-969
+            code_ref: 8b4cdf3ecba21c3a16921734b3a0a1300ee96113
+            url: https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf
+            sha256: 84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b
+            page_start: 219
+            page_end: 238
+          - project: murera
+            revision: scale-970
+            code_ref: 1ba839a99243959c6f3c044a85b70e5216618456
+            url: https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf
+            sha256: 84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b
+            page_start: 219
+            page_end: 238
+
+    steps:
+      - name: Checkout measured code state
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.code_ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Fetch test-only diagnostic script
+        run: |
+          curl -L --fail --retry 3 \
+            https://raw.githubusercontent.com/BryceCurran86/PlanReader-3D/diag/exact-source-perf-970/scripts/diag_exact_source_perf.py \
+            -o /tmp/diag_exact_source_perf.py
+
+      - name: Download exact official source
+        env:
+          SOURCE_URL: ${{ matrix.url }}
+          EXPECTED_SHA: ${{ matrix.sha256 }}
+        run: |
+          curl -L --fail --retry 4 --retry-delay 2 -A "Mozilla/5.0" "$SOURCE_URL" -o /tmp/source.pdf
+          echo "$EXPECTED_SHA  /tmp/source.pdf" | sha256sum -c -
+
+      - name: Run exact-source diagnostic
+        run: |
+          PYTHONPATH=. python /tmp/diag_exact_source_perf.py \
+            --pdf /tmp/source.pdf \
+            --project "${{ matrix.project }}" \
+            --page-start "${{ matrix.page_start }}" \
+            --page-end "${{ matrix.page_end }}" \
+            --out "/tmp/${{ matrix.project }}-${{ matrix.revision }}.json"
+
+      - name: Upload exact-source result
+        uses: actions/upload-artifact@v4
+        with:
+          name: exact-source-${{ matrix.project }}-${{ matrix.revision }}
+          path: /tmp/${{ matrix.project }}-${{ matrix.revision }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  compare:
+    name: Exact-source invariance comparison
+    needs: exact-source
+    if: always() && needs.exact-source.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: exact-source-*
+          path: results
+          merge-multiple: true
+
+      - name: Compare authority and commercial outputs
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          revisions = ("pre-969", "post-969", "scale-970")
+          projects = ("lamu", "murera")
+          rows = []
+          failures = []
+
+          for project in projects:
+              reports = {
+                  revision: json.loads(
+                      Path(f"results/{project}-{revision}.json").read_text(encoding="utf-8")
+                  )
+                  for revision in revisions
+              }
+              baseline = reports["pre-969"]
+
+              for revision in ("post-969", "scale-970"):
+                  current = reports[revision]
+                  for key in ("authority_digest", "commercial_prediction_digest"):
+                      if current[key] != baseline[key]:
+                          failures.append(f"{project} {revision}: {key} changed")
+
+                  base_pages = {
+                      row["page_id"]: row["normalized_digest"]
+                      for row in baseline["scale"]["pages"]
+                  }
+                  current_pages = {
+                      row["page_id"]: row["normalized_digest"]
+                      for row in current["scale"]["pages"]
+                  }
+                  if current_pages != base_pages:
+                      failures.append(
+                          f"{project} {revision}: normalized scale-segment output changed"
+                      )
+
+              for revision in revisions:
+                  r = reports[revision]
+                  rows.append({
+                      "project": project,
+                      "revision": revision,
+                      "visible_segments": r["scale"]["visible_segment_count_total"],
+                      "normalized_segments": r["scale"]["normalized_segment_count_total"],
+                      "scale_seconds": r["timings_seconds"]["scale_normalization"],
+                      "wall_opening_seconds": r["timings_seconds"]["wall_opening_composition"],
+                      "commercial_seconds": r["timings_seconds"]["commercial_extraction"],
+                      "peak_rss_kb": r["process_peak_rss_kb"],
+                      "authority_digest": r["authority_digest"],
+                      "prediction_digest": r["commercial_prediction_digest"],
+                  })
+
+          summary = {"rows": rows, "failures": failures}
+          Path("exact-source-comparison.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8"
+          )
+
+          md = [
+              "# Exact-source performance / invariance",
+              "",
+              "| Project | Revision | Visible segs | Normalized | Scale s | Wall/opening s | Full extraction s | Peak RSS KB |",
+              "|---|---:|---:|---:|---:|---:|---:|---:|",
+          ]
+          for row in rows:
+              md.append(
+                  f"| {row['project']} | {row['revision']} | {row['visible_segments']} | "
+                  f"{row['normalized_segments']} | {row['scale_seconds']:.3f} | "
+                  f"{row['wall_opening_seconds']:.3f} | {row['commercial_seconds']:.3f} | "
+                  f"{row['peak_rss_kb']} |"
+              )
+          md.extend(["", f"Invariance failures: **{len(failures)}**"])
+          if failures:
+              md.extend([f"- {failure}" for failure in failures])
+          Path("exact-source-comparison.md").write_text("\n".join(md), encoding="utf-8")
+          print("\n".join(md))
+
+          if failures:
+              raise SystemExit("\n".join(failures))
+
+      - name: Publish step summary
+        run: cat exact-source-comparison.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: exact-source-comparison
+          path: |
+            exact-source-comparison.json
+            exact-source-comparison.md
+          retention-days: 7
