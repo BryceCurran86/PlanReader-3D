@@ -92,7 +92,7 @@ def publish_live_structural_member_quantity(
     evidence = QuantityEvidence(
         quantity_id=quantity_id,
         family="structural_member_count",
-        semantic_key=f"structural_member:{selector.definition_id}",
+        semantic_key=f"structural_member:{result.member_kind}",
         value=float(result.quantity),
         unit="NO",
         input_entity_ids=tuple(result.physical_member_ids),
@@ -107,6 +107,8 @@ def publish_live_structural_member_quantity(
         reason_codes=(LIVE_STRUCTURAL_MEMBER_PUBLICATION_RESOLVED,),
         metadata={
             "definition_id": selector.definition_id,
+            "member_kind": result.member_kind,
+            "section_text": result.section_text,
             "scope_id": selector.scope_id,
             "source_page_ids": result.source_page_ids,
             "source_view_ids": result.source_view_ids,
