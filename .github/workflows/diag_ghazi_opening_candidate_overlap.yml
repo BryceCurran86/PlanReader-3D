@@ -197,4 +197,89 @@ jobs:
               } for key,metas in groups.items()],
               "retained_multi":retained_multi[:30],
           },sort_keys=True),flush=True)
+
+
+          # Diagnostic-only stronger topology check: a single physical opening
+          # bounded by two jambs may not contain another complete face-to-face
+          # cross segment strictly inside its claimed longitudinal gap.
+          # Such an interior cross-segment is positive source evidence that the
+          # outer interval is not one uninterrupted aperture.
+          all_records=[r for r in records if getattr(r,"page_id",None)=="167"]
+          topo_meta=[]
+          for meta in candidate_meta:
+              if meta.get("reconstruction_matches")!=1:
+                  continue
+              direction=tuple(meta["direction"])
+              lo_gap=float(meta["gap_start"])
+              hi_gap=float(meta["gap_end"])
+              off_lo=min(float(meta["offset_a"]),float(meta["offset_b"]))
+              off_hi=max(float(meta["offset_a"]),float(meta["offset_b"]))
+              support=set(meta["support_ids"])
+              interior=[]
+              for rec in all_records:
+                  if rec.observation_id in support:
+                      continue
+                  line=mod._line_geometry(rec)
+                  if line is None:
+                      continue
+                  p1=(line[0],line[1]); p2=(line[2],line[3])
+                  # Cross-wall segment: endpoints lie on the two candidate
+                  # face axes (either direction) and its longitudinal
+                  # projection sits strictly inside the candidate gap.
+                  o1=mod._cross(direction,p1)
+                  o2=mod._cross(direction,p2)
+                  axis_match=(
+                      abs(o1-off_lo)<=mod._COORD_EQ_ABS_TOL and abs(o2-off_hi)<=mod._COORD_EQ_ABS_TOL
+                  ) or (
+                      abs(o1-off_hi)<=mod._COORD_EQ_ABS_TOL and abs(o2-off_lo)<=mod._COORD_EQ_ABS_TOL
+                  )
+                  if not axis_match:
+                      continue
+                  t1=mod._projection(p1,direction)
+                  t2=mod._projection(p2,direction)
+                  t=(t1+t2)/2.0
+                  if (
+                      t > lo_gap + mod._COORD_EQ_ABS_TOL
+                      and t < hi_gap - mod._COORD_EQ_ABS_TOL
+                  ):
+                      interior.append({
+                          "observation_id":rec.observation_id,
+                          "projection":round(t,6),
+                          "geometry":[round(v,6) for v in line],
+                      })
+              topo_meta.append({
+                  **meta,
+                  "interior_cross_segments":interior,
+                  "retain_no_interior_cross":not interior,
+              })
+
+          topo_retained={m["candidate_id"] for m in topo_meta if m["retain_no_interior_cross"]}
+          topo_conflicts=[]
+          for oid in rec.visible_observation_ids:
+              containing=[
+                  cand.candidate_id for cand in candidates
+                  if cand.candidate_id in topo_retained
+                  and oid in cand.source_observation_ids
+              ]
+              if len(containing)>1:
+                  topo_conflicts.append({
+                      "observation_id":oid,
+                      "candidate_ids":containing,
+                  })
+          print("INTERIOR_JAMB_SIM="+json.dumps({
+              "candidate_total":len(candidates),
+              "reconstructed":len(topo_meta),
+              "retained_count":len(topo_retained),
+              "rejected_count":len(topo_meta)-len(topo_retained),
+              "retained_conflict_observations":len(topo_conflicts),
+              "retained_ids":sorted(topo_retained),
+              "rejected":[{
+                  "candidate_id":m["candidate_id"],
+                  "gap_start":m["gap_start"],
+                  "gap_end":m["gap_end"],
+                  "separation":m["separation"],
+                  "interior_cross_segments":m["interior_cross_segments"],
+              } for m in topo_meta if not m["retain_no_interior_cross"]],
+              "retained_multi":topo_conflicts[:40],
+          },sort_keys=True),flush=True)
           PY
