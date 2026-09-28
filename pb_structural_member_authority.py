@@ -124,6 +124,8 @@ class StructuralMemberQuantityResult:
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
     definition_id: str
+    member_kind: str
+    section_text: str
     scope_id: str
     quantity: Optional[int]
     physical_member_ids: tuple[str, ...]
@@ -150,6 +152,8 @@ def _blocked(
         status=status,
         reason_codes=clean or (STRUCTURAL_MEMBER_COMPLETENESS_UNAVAILABLE,),
         definition_id=selector.definition_id,
+        member_kind="",
+        section_text="",
         scope_id=selector.scope_id,
         quantity=None,
         physical_member_ids=(),
@@ -685,6 +689,8 @@ class StructuralMemberAuthority:
             status=EvidenceResolutionStatus.CORROBORATED,
             reason_codes=(STRUCTURAL_MEMBER_RESOLVED,),
             definition_id=selector.definition_id,
+            member_kind=definition.member_kind,
+            section_text=definition.section_text,
             scope_id=selector.scope_id,
             quantity=len(physical_member_ids),
             physical_member_ids=physical_member_ids,
