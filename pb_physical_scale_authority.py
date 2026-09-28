@@ -206,23 +206,33 @@ def _coalesce_retraced_segments(
     normalization only prevents that source representation detail from looking
     like two competing scale ticks.
     """
+    # Only adjacent primitives in the same native drawing can pass the
+    # existing predicate. Index that immutable ancestry once instead of
+    # reparsing all N source references for every segment. Keep every entry
+    # in a bucket: competing retraces must still prevent coalescing.
+    positions = [_primitive_position(segment) for segment in segments]
+    by_position: dict[tuple[int, int], list[_VisibleSegment]] = {}
+    for segment, position in zip(segments, positions):
+        if position is not None:
+            by_position.setdefault(position, []).append(segment)
+
     consumed: set[str] = set()
     normalized: list[_VisibleSegment] = []
-    for segment in sorted(segments, key=lambda item: item.observation_id):
+    for index, segment in sorted(enumerate(segments), key=lambda item: item[1].observation_id):
         if segment.observation_id in consumed:
             continue
-        position = _primitive_position(segment)
+        position = positions[index]
         matches = []
         if position is not None:
             drawing_index, primitive_index = position
-            for other in segments:
-                other_position = _primitive_position(other)
+            neighbours = (
+                *by_position.get((drawing_index, primitive_index - 1), ()),
+                *by_position.get((drawing_index, primitive_index + 1), ()),
+            )
+            for other in neighbours:
                 if (
                     other.observation_id != segment.observation_id
                     and other.observation_id not in consumed
-                    and other_position is not None
-                    and other_position[0] == drawing_index
-                    and abs(other_position[1] - primitive_index) == 1
                     and _distance(segment.start, other.end) <= 1e-6
                     and _distance(segment.end, other.start) <= 1e-6
                 ):
