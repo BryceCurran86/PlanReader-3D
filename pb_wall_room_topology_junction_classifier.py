@@ -569,7 +569,10 @@ def derive_topology_relationships(
             )
 
         if junction.junction_type == JunctionType.T_JUNCTION and pairs and singles:
-            bar_edge_ids = {info["edge_id"] for info in pairs[0]}
+            # Ordered, de-duplicated bar arms: a set here would emit these
+            # relationships in string-hash order, making W3 output order
+            # depend on the interpreter hash seed.
+            bar_edge_ids = tuple(dict.fromkeys(info["edge_id"] for info in pairs[0]))
             for stem in singles:
                 for bar_edge_id in bar_edge_ids:
                     relationships.append(
