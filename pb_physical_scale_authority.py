@@ -205,7 +205,19 @@ def _coalesce_retraced_segments(
     directions.  Both authenticated observation IDs remain in provenance; this
     normalization only prevents that source representation detail from looking
     like two competing scale ticks.
+
+    A qualifying retrace must be an immediately adjacent primitive from the
+    same native drawing path. Index those immutable source positions once so
+    each segment probes only its two possible neighbours instead of rescanning
+    every visible segment on the page. The matching and ambiguity predicates
+    remain unchanged.
     """
+    by_position: dict[tuple[int, int], list[_VisibleSegment]] = {}
+    for candidate in segments:
+        position = _primitive_position(candidate)
+        if position is not None:
+            by_position.setdefault(position, []).append(candidate)
+
     consumed: set[str] = set()
     normalized: list[_VisibleSegment] = []
     for segment in sorted(segments, key=lambda item: item.observation_id):
@@ -215,14 +227,14 @@ def _coalesce_retraced_segments(
         matches = []
         if position is not None:
             drawing_index, primitive_index = position
-            for other in segments:
-                other_position = _primitive_position(other)
+            adjacent = (
+                *by_position.get((drawing_index, primitive_index - 1), ()),
+                *by_position.get((drawing_index, primitive_index + 1), ()),
+            )
+            for other in adjacent:
                 if (
                     other.observation_id != segment.observation_id
                     and other.observation_id not in consumed
-                    and other_position is not None
-                    and other_position[0] == drawing_index
-                    and abs(other_position[1] - primitive_index) == 1
                     and _distance(segment.start, other.end) <= 1e-6
                     and _distance(segment.end, other.start) <= 1e-6
                 ):
