@@ -1,0 +1,107 @@
+name: TEST-ONLY Ghazi Opening Candidate Overlap
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ghazi-opening-overlap:
+    if: github.head_ref == 'diag/ghazi-opening-candidate-overlap'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download SHA-pinned Ghazi source
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, urllib.request
+          bid="tenders_ke_ghazi_science_lab"
+          bench=pathlib.Path("benchmarks/public_tenders")/bid
+          dm=json.loads((bench/"download_manifest.json").read_text())
+          doc=next(d for d in dm["documents"] if d["role"]=="architectural_drawings")
+          out=pathlib.Path("/tmp")/doc["filename"]
+          req=urllib.request.Request(dm["source_url"],headers={"User-Agent":"PlanReader-opening-overlap/1.0"})
+          with urllib.request.urlopen(req,timeout=180) as r:
+              out.write_bytes(r.read())
+          got=hashlib.sha256(out.read_bytes()).hexdigest()
+          if got != doc["sha256"]:
+              raise SystemExit(f"sha mismatch {got}")
+          PY
+      - name: Build exact production image
+        run: docker build -t planreader-opening-overlap .
+      - name: Probe candidate overlaps
+        run: |
+          docker run --rm -i --cpus=2.0 \
+            -v /tmp/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf:/app/ghazi.pdf:ro \
+            planreader-opening-overlap \
+            python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_semantic_opening_enumeration_authority import SemanticOpeningEnumerationProducer
+          from pb_physical_opening_authority import PhysicalOpeningAuthority
+          from pb_source_observation_authority import ObservationSelector
+
+          payload=Path("/app/ghazi.pdf").read_bytes()
+          sha=hashlib.sha256(payload).hexdigest()
+          source=SourceVisibilityProducer(producer_method="diag-opening-overlap",producer_version="1.0.0")
+          published=source.ingest_native_pdf_bytes(
+              document_id=f"diag-opening-overlap:{sha[:32]}",
+              source_bytes=payload,
+              source_locator="memory://ghazi-opening-overlap.pdf",
+              page_ids=("167",),
+          )
+          source.augment_with_raster_visible_segments(published.revision.revision_id,page_ids=("167",))
+          published=source.published_snapshot_for_revision(published.revision.revision_id)
+          assert published is not None
+          sem=SemanticOpeningEnumerationProducer.from_source_visibility_producer(source)
+          result=sem.publish_page_scope(
+              revision_id=published.revision.revision_id,
+              decision_scope_id="diag:ghazi:overlap",
+              page_ids=("167",),
+          )
+          rec=result.record
+          assert rec is not None
+          physical=PhysicalOpeningAuthority(source.authority())
+
+          seed_id=rec.visible_observation_ids[0]
+          seed_sel=ObservationSelector(
+              document_id=rec.document_id,
+              revision_id=rec.revision_id,
+              source_sha256=rec.source_sha256,
+              snapshot_id=rec.snapshot_id,
+              observation_id=seed_id,
+          )
+          seed_res=source.authority().resolve_visible(seed_sel)
+          records, failures=physical._visible_snapshot_records(seed_res)
+          assert not failures
+          candidates=physical._visible_candidates_for(seed_res.observation,records)
+
+          conflicts=[]
+          for oid in rec.conflict_observation_ids:
+              containing=[c for c in candidates if oid in c.source_observation_ids]
+              conflicts.append({
+                  "observation_id":oid,
+                  "candidate_count":len(containing),
+                  "candidates":[{
+                      "candidate_id":c.candidate_id,
+                      "pattern":c.structural_pattern,
+                      "support_count":len(c.source_observation_ids),
+                      "support_ids":list(c.source_observation_ids),
+                  } for c in containing],
+              })
+          print("OPENING_OVERLAP="+json.dumps({
+              "candidate_total":len(candidates),
+              "conflict_total":len(conflicts),
+              "conflicts":conflicts[:40],
+          },sort_keys=True),flush=True)
+
+          closure=physical.assess_visible_candidate_closure(seed_sel)
+          print("OPENING_CLOSURE="+json.dumps({
+              "raw_candidate_count":closure.raw_candidate_count,
+              "resolved_candidate_count":closure.resolved_candidate_count,
+              "unresolved_candidate_count":len(closure.unresolved_candidate_ids),
+              "unresolved_observation_count":len(closure.unresolved_observation_ids),
+              "reason_codes":list(closure.reason_codes),
+          },sort_keys=True),flush=True)
+          PY
