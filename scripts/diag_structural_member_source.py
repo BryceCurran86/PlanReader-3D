@@ -151,6 +151,7 @@ def main() -> int:
     parser.add_argument("--page-start", required=True, type=int)
     parser.add_argument("--page-end", required=True, type=int)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--source-only", action="store_true")
     args = parser.parse_args()
 
     path = Path(args.pdf)
@@ -184,27 +185,30 @@ def main() -> int:
     finally:
         doc.close()
 
-    extractor = GenericPlanReaderExtractor()
-    predictions = extractor.extract_from_pdf(
-        path,
-        pages=tuple(range(args.page_start - 1, args.page_end)),
-        collect_item35_shadow=False,
-    )
     structural_predictions = []
-    for prediction in predictions:
-        row = prediction.to_dict()
-        haystack = " ".join(
-            [
-                str(row.get("tag") or ""),
-                str(row.get("trade_type") or ""),
-                str(row.get("description") or ""),
-            ]
+    extractor_status = {"diagnostic_mode": "source_only"}
+    if not args.source_only:
+        extractor = GenericPlanReaderExtractor()
+        predictions = extractor.extract_from_pdf(
+            path,
+            pages=tuple(range(args.page_start - 1, args.page_end)),
+            collect_item35_shadow=False,
         )
-        if (
-            str(row.get("trade_type") or "").lower() == "structure"
-            or SUPPORT_RE.search(haystack)
-        ):
-            structural_predictions.append(row)
+        for prediction in predictions:
+            row = prediction.to_dict()
+            haystack = " ".join(
+                [
+                    str(row.get("tag") or ""),
+                    str(row.get("trade_type") or ""),
+                    str(row.get("description") or ""),
+                ]
+            )
+            if (
+                str(row.get("trade_type") or "").lower() == "structure"
+                or SUPPORT_RE.search(haystack)
+            ):
+                structural_predictions.append(row)
+        extractor_status = _jsonable(extractor.extraction_status)
 
     result = {
         "project": args.project,
@@ -213,7 +217,7 @@ def main() -> int:
         "page_end": args.page_end,
         "pages": pages,
         "structural_predictions": structural_predictions,
-        "extractor_status": _jsonable(extractor.extraction_status),
+        "extractor_status": extractor_status,
     }
 
     out = Path(args.out)
