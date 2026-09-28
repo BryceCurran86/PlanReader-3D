@@ -1999,10 +1999,13 @@ def _build_scope_result(
         decision_scope_id=scope_id,
     )
     page_number = int(page_id)
+    # Page-scope completeness is local to the exact addressed page. A scoped
+    # native ingestion intentionally reports overall coverage.state == "partial"
+    # when unrelated document pages were not decoded; that must not invalidate
+    # a fully decoded, non-failed page scope.
     if (
-        published.coverage.state != "complete"
-        or published.coverage.failed_pages
-        or page_number not in published.coverage.decoded_pages
+        page_number not in published.coverage.decoded_pages
+        or page_number in published.coverage.failed_pages
     ):
         return _blocked(selector, PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
 
