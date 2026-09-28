@@ -954,17 +954,31 @@ def test_scaling_geometry_and_band_together_preserves_outcome(scale) -> None:
     assert set(resolution.representative_wall_ids) == {"w1", "w2", "w3"}
 
 
-def test_input_order_does_not_change_published_representatives() -> None:
+def test_input_order_does_not_change_semantic_resolution() -> None:
     walls = {wid: _ident(wid, path, prims) for wid, path, prims in _UNRELATED_PATHS}
     expected = None
     for order in itertools.permutations(walls):
         resolution = resolve_physical_wall_equivalence(
             tuple(walls[wid] for wid in order)
         )
-        published = tuple(sorted(resolution.representative_wall_ids))
+        semantic = (
+            resolution.representative_wall_ids,
+            resolution.abstained_wall_ids,
+            resolution.equivalence_groups,
+            resolution.ambiguous_wall_ids,
+            resolution.same_wall_ids,
+            resolution.pair_classifications,
+            tuple(
+                sorted(
+                    (wall_id, tuple(reasons))
+                    for wall_id, reasons
+                    in resolution.blocking_reasons_by_wall_id.items()
+                )
+            ),
+        )
         if expected is None:
-            expected = published
-        assert published == expected
+            expected = semantic
+        assert semantic == expected
 
 
 def test_stable_ids_are_deterministic_across_repeated_resolution() -> None:
