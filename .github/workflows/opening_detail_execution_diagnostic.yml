@@ -78,7 +78,7 @@ jobs:
           # words but may encode the visual WxH separator as a non-text source
           # primitive.  Diagnose that primitive rather than weakening the
           # production parser to treat arbitrary adjacent numbers as WxH.
-          source_auth=source.authority()
+          source_auth=source._producer.authority()
           targets=[]
           for row in rows:
               digits=str(row["raw"] or "").lower().replace(",","")
