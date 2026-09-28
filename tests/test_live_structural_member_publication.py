@@ -100,7 +100,10 @@ def test_corrobated_physical_members_publish_traceable_quantity_evidence() -> No
     assert evidence.value == 2.0
     assert evidence.unit == "NO"
     assert evidence.family == "structural_member_count"
+    assert evidence.semantic_key == "structural_member:chs_pillar"
     assert evidence.authority == "source_owned_structural_member_identity"
+    assert evidence.metadata["member_kind"] == "chs_pillar"
+    assert evidence.metadata["section_text"] == "50 mm CHS pillar"
     assert set(evidence.input_entity_ids) == set(publication.physical_member_ids)
     assert len(evidence.input_entity_ids) == 2
     assert set(evidence.evidence_ids) >= {
