@@ -573,15 +573,32 @@ def _page_equivalence_representatives(page_scope) -> dict[str, str]:
 
 
 def _page_component_source_ids_by_wall(page_scope) -> dict[str, frozenset[str]]:
-    """Map each page wall to the immutable source ids of its full wall component."""
+    """Map each page wall to every immutable source id in its full component.
+
+    Topology itself may collapse producer-proven SAME representations, but the
+    sibling-ownership safety check must retain the source ids of *all* members.
+    Otherwise a foreign-owned duplicate could disappear behind the chosen
+    representative and incorrectly make a mixed-drawing component look local.
+    """
     output: dict[str, frozenset[str]] = {}
+    by_id = {
+        str(record.wall_candidate_id): record
+        for record in tuple(page_scope.records or ())
+    }
     for members in _component_sets(page_scope.records, page_scope.equivalence):
-        component_records = _collapsed_component_records(page_scope, members)
-        if not component_records:
+        # Preserve the same fail-closed representative gate used by topology.
+        if not _collapsed_component_records(page_scope, members):
+            continue
+        member_records = tuple(
+            by_id[str(wall_id)]
+            for wall_id in members
+            if str(wall_id) in by_id
+        )
+        if len(member_records) != len(tuple(members)):
             continue
         source_ids = frozenset(
             str(raw_id)
-            for record in component_records
+            for record in member_records
             for raw_id in record.physical_identity.source_primitive_ids
             if str(raw_id)
         )
@@ -589,8 +606,6 @@ def _page_component_source_ids_by_wall(page_scope) -> dict[str, frozenset[str]]:
             continue
         for wall_id in members:
             output[str(wall_id)] = source_ids
-        for record in component_records:
-            output[str(record.wall_candidate_id)] = source_ids
     return output
 
 
