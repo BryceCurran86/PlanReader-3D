@@ -73,6 +73,7 @@ def test_schedule_definition_without_physical_instance_abstains() -> None:
     definition = _definition(producer)
     producer.publish_completeness(
         scope_id="scope-a",
+        definition_id=definition.definition_id,
         instance_bearing_view_ids=("plan",),
         complete_view_ids=("plan",),
         source_evidence_ids=("complete-plan",),
@@ -122,6 +123,7 @@ def test_four_plan_instances_and_same_four_elevation_instances_count_four() -> N
         )
     producer.publish_completeness(
         scope_id="scope-a",
+        definition_id=definition.definition_id,
         instance_bearing_view_ids=("plan", "elevation"),
         complete_view_ids=("plan", "elevation"),
         cross_view_registration_complete=True,
@@ -172,6 +174,7 @@ def test_four_plan_and_three_conflicting_elevation_instances_conflict() -> None:
         )
     producer.publish_completeness(
         scope_id="scope-a",
+        definition_id=definition.definition_id,
         instance_bearing_view_ids=("plan", "elevation"),
         complete_view_ids=("plan", "elevation"),
         cross_view_registration_complete=True,
@@ -197,8 +200,10 @@ def test_wall_end_resembling_pier_is_not_a_member() -> None:
     )
     producer.publish_completeness(
         scope_id="scope-a",
+        definition_id=definition.definition_id,
         instance_bearing_view_ids=("plan",),
         complete_view_ids=("plan",),
+        source_evidence_ids=("plan-complete",),
     )
 
     assert candidate is None
@@ -221,8 +226,10 @@ def test_opening_jamb_resembling_pier_is_not_a_member() -> None:
     )
     producer.publish_completeness(
         scope_id="scope-a",
+        definition_id=definition.definition_id,
         instance_bearing_view_ids=("plan",),
         complete_view_ids=("plan",),
+        source_evidence_ids=("plan-complete",),
     )
 
     assert candidate is None
@@ -240,6 +247,7 @@ def test_closed_structural_section_with_explicit_tag_is_valid_instance() -> None
     )
     producer.publish_completeness(
         scope_id="scope-a",
+        definition_id=definition.definition_id,
         instance_bearing_view_ids=("plan",),
         complete_view_ids=("plan",),
         source_evidence_ids=("plan-complete",),
@@ -267,6 +275,7 @@ def test_repeated_identical_chs_pillars_remain_distinct_instances() -> None:
         assert candidate is not None
     producer.publish_completeness(
         scope_id="scope-a",
+        definition_id=definition.definition_id,
         instance_bearing_view_ids=("plan",),
         complete_view_ids=("plan",),
         source_evidence_ids=("plan-complete",),
@@ -285,6 +294,7 @@ def test_cropped_plan_completeness_abstains() -> None:
     assert _instance(producer, definition, evidence="plan-instance") is not None
     producer.publish_completeness(
         scope_id="scope-a",
+        definition_id=definition.definition_id,
         instance_bearing_view_ids=("plan",),
         complete_view_ids=(),
         cropped_view_ids=("plan",),
@@ -317,8 +327,10 @@ def test_duplicate_cad_primitive_does_not_double_count() -> None:
     )
     producer.publish_completeness(
         scope_id="scope-a",
+        definition_id=definition.definition_id,
         instance_bearing_view_ids=("plan",),
         complete_view_ids=("plan",),
+        source_evidence_ids=("plan-complete",),
     )
 
     assert first is not None and duplicate is not None
@@ -348,6 +360,7 @@ def test_ambiguous_plan_elevation_registration_abstains() -> None:
     ) is not None
     producer.publish_completeness(
         scope_id="scope-a",
+        definition_id=definition.definition_id,
         instance_bearing_view_ids=("plan", "elevation"),
         complete_view_ids=("plan", "elevation"),
         cross_view_registration_complete=False,
@@ -387,8 +400,10 @@ def test_conflicting_identity_evidence_conflicts_instead_of_choosing() -> None:
     )
     producer.publish_completeness(
         scope_id="scope-a",
+        definition_id=definition.definition_id,
         instance_bearing_view_ids=("plan",),
         complete_view_ids=("plan",),
+        source_evidence_ids=("plan-complete",),
     )
 
     result = producer.authority().resolve(_selector(definition))
