@@ -31,6 +31,7 @@ from pb_wall_component_completeness_authority import (
     WallComponentCompletenessAuthority,
     WallComponentCompletenessSelector,
     _component_sets,
+    _raw_path_family,
 )
 from pb_wall_room_topology_contracts import JunctionType
 from pb_wall_role_authority import (
@@ -609,6 +610,16 @@ def _page_component_source_ids_by_wall(page_scope) -> dict[str, frozenset[str]]:
     return output
 
 
+def _source_path_families(source_ids) -> frozenset[str]:
+    """Return immutable native-PDF path families where the raw id encodes one."""
+    return frozenset(
+        family
+        for raw_id in source_ids
+        for family in (_raw_path_family(str(raw_id)),)
+        if family is not None
+    )
+
+
 def _foreign_sibling_source_ids(
     scopes,
     *,
@@ -685,6 +696,9 @@ def _bridge_page_topology_to_viewports(
             scopes,
             viewport_scope=viewport_scope,
         )
+        foreign_sibling_path_families = _source_path_families(
+            foreign_sibling_source_ids
+        )
 
         topology_by_page_wall = {}
         for evidence in records.values():
@@ -737,9 +751,15 @@ def _bridge_page_topology_to_viewports(
                 component_source_ids = component_source_ids_by_wall.get(
                     page_wall_id
                 )
+                if not component_source_ids:
+                    unresolved = True
+                    break
+                component_path_families = _source_path_families(
+                    component_source_ids
+                )
                 if (
-                    not component_source_ids
-                    or component_source_ids & foreign_sibling_source_ids
+                    component_source_ids & foreign_sibling_source_ids
+                    or component_path_families & foreign_sibling_path_families
                 ):
                     unresolved = True
                     break
