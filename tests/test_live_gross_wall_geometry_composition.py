@@ -55,24 +55,24 @@ def test_live_gross_wall_never_defaults_height_without_cross_sheet_identity() ->
 
     assert composition.status is EvidenceResolutionStatus.ABSTAINED
     assert LIVE_GROSS_WALL_PARTIAL in composition.reason_codes
-    assert len(composition.traces) == 1
+    assert composition.traces
 
-    trace = composition.traces[0]
-    assert trace.registration_target_page_ids == ()
-    assert trace.registration_record_ids == ()
-    assert trace.height_m is None
-    assert "no_cross_sheet_bound_wall_height_evidence" in trace.height_reason_codes
-    assert trace.gross_status is EvidenceResolutionStatus.ABSTAINED
-    assert trace.gross_record_id is None
-    assert GROSS_WALL_GEOMETRY_HEIGHT_UNRESOLVED in trace.gross_reason_codes
-
-    # The sealed replay remains unknown: lack of a source-bound wall height is
-    # never converted to zero, gross=net, or a model/default height.
-    selector = composition.gross_selectors[trace.physical_wall_id]
+    # More source-owned representatives may legitimately enter the live wall
+    # target set. None may borrow a default height or become gross quantity.
     assert composition.gross_wall_geometry_authority is not None
-    replay = composition.gross_wall_geometry_authority.resolve(selector)
-    assert replay.status is EvidenceResolutionStatus.ABSTAINED
-    assert replay.record is None
+    for trace in composition.traces:
+        assert trace.registration_target_page_ids == ()
+        assert trace.registration_record_ids == ()
+        assert trace.height_m is None
+        assert "no_cross_sheet_bound_wall_height_evidence" in trace.height_reason_codes
+        assert trace.gross_status is EvidenceResolutionStatus.ABSTAINED
+        assert trace.gross_record_id is None
+        assert GROSS_WALL_GEOMETRY_HEIGHT_UNRESOLVED in trace.gross_reason_codes
+
+        selector = composition.gross_selectors[trace.physical_wall_id]
+        replay = composition.gross_wall_geometry_authority.resolve(selector)
+        assert replay.status is EvidenceResolutionStatus.ABSTAINED
+        assert replay.record is None
 
 
 def test_live_gross_wall_uses_shared_whole_wall_frame_identity() -> None:
@@ -98,8 +98,13 @@ def test_live_gross_wall_uses_shared_whole_wall_frame_identity() -> None:
         physical_void_composition=physical_void,
     )
 
-    assert len(composition.traces) == 1
-    trace = composition.traces[0]
+    matching = tuple(
+        trace
+        for trace in composition.traces
+        if trace.physical_wall_id == void_record.wall_local_frame_id
+    )
+    assert len(matching) == 1
+    trace = matching[0]
     assert trace.physical_wall_id == void_record.wall_local_frame_id
     assert trace.physical_wall_id != void_record.host_wall_id
     assert void_record.wall_local_frame_id in composition.gross_selectors
@@ -118,6 +123,20 @@ def test_live_gross_wall_targets_proven_zero_opening_wall_without_weakening_glob
         page.draw_line(
             fitz.Point(80.0, 250.0),
             fitz.Point(300.0, 250.0),
+            width=1.0,
+        )
+        # Separate unresolved face pair. These two overlapping parallel
+        # paths have no positive SAME evidence and no page-two physical scale,
+        # so they must remain ambiguous and keep the global coverage firewall
+        # active without suppressing the independent centreline above.
+        page.draw_line(
+            fitz.Point(400.0, 300.0),
+            fitz.Point(600.0, 300.0),
+            width=1.0,
+        )
+        page.draw_line(
+            fitz.Point(400.0, 312.0),
+            fitz.Point(600.0, 312.0),
             width=1.0,
         )
         payload = bytes(doc.tobytes(garbage=4, deflate=True))
