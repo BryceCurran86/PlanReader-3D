@@ -102,6 +102,9 @@ PHYSICAL_WALL_CANDIDATE_SOURCE_PRIMITIVE_OWNERSHIP_AMBIGUOUS = (
 TRUSTED_EQUIVALENCE_OVERRIDE_UNKNOWN_MEMBER = (
     "trusted_equivalence_override_unknown_member"
 )
+TRUSTED_EQUIVALENCE_OVERRIDE_UNUSABLE_MEMBER = (
+    "trusted_equivalence_override_unusable_member"
+)
 TRUSTED_EQUIVALENCE_OVERRIDE_CONFLICT = (
     "trusted_equivalence_override_conflicts_with_proven_relation"
 )
@@ -1597,7 +1600,7 @@ def _apply_trusted_relation_overrides(
 ) -> PhysicalWallEquivalenceResolution:
     """Reconcile source-proven relations without changing generic classifier semantics."""
     usable = [identity for identity in identities if identity.usable]
-    if len(usable) != len(identities) or not overrides:
+    if not overrides:
         return baseline
 
     pair_map = {
@@ -1605,6 +1608,12 @@ def _apply_trusted_relation_overrides(
         for left, right, classification in baseline.pair_classifications
     }
     member_id_set = {identity.wall_candidate_id for identity in usable}
+    known_id_set = {
+        identity.wall_candidate_id
+        for identity in identities
+        if identity is not None
+    }
+    unusable_id_set = known_id_set - member_id_set
     restored_pairs = baseline.candidate_pair_audit.trusted_override_pairs_restored
     rejected_pairs = baseline.candidate_pair_audit.trusted_override_pairs_rejected
     rejection_reason_counts = dict(
@@ -1623,11 +1632,15 @@ def _apply_trusted_relation_overrides(
                 restored_pairs += 1
             else:
                 rejected_pairs += 1
-                rejection_reason_counts[
-                    TRUSTED_EQUIVALENCE_OVERRIDE_UNKNOWN_MEMBER
-                ] = rejection_reason_counts.get(
-                    TRUSTED_EQUIVALENCE_OVERRIDE_UNKNOWN_MEMBER, 0
-                ) + 1
+                if key[0] not in known_id_set or key[1] not in known_id_set:
+                    reason = TRUSTED_EQUIVALENCE_OVERRIDE_UNKNOWN_MEMBER
+                elif key[0] in unusable_id_set or key[1] in unusable_id_set:
+                    reason = TRUSTED_EQUIVALENCE_OVERRIDE_UNUSABLE_MEMBER
+                else:
+                    reason = TRUSTED_EQUIVALENCE_OVERRIDE_UNKNOWN_MEMBER
+                rejection_reason_counts[reason] = (
+                    rejection_reason_counts.get(reason, 0) + 1
+                )
             continue
         if current == classification.value:
             # Deterministic idempotent replay is accepted as a no-op.
@@ -1690,7 +1703,14 @@ def _apply_trusted_relation_overrides(
     components = _union_find_groups(related_links, member_ids) if member_ids else []
     ambiguous_edges = {frozenset(pair) for pair in ambiguous_links}
     same_edges = {frozenset(pair) for pair in same_links}
-    blockers: dict[str, list[str]] = {}
+    # Recompute usable-pair publication from the reconciled graph, but preserve
+    # the original fail-closed blockers for identities that were unusable
+    # before trusted relation reconciliation.
+    blockers: dict[str, list[str]] = {
+        wall_id: list(baseline.blocking_reasons_by_wall_id.get(wall_id, ()))
+        for wall_id in sorted(unusable_id_set)
+        if baseline.blocking_reasons_by_wall_id.get(wall_id)
+    }
     ambiguous_walls: set[str] = set()
     same_groups: list[tuple[str, ...]] = []
     representatives: list[str] = []
@@ -1752,7 +1772,11 @@ def _apply_trusted_relation_overrides(
     same_groups = list(dict.fromkeys((*same_groups, *positive_same_groups)))
 
     representatives = list(dict.fromkeys(representatives))
-    abstained = [wall_id for wall_id in member_ids if wall_id in blockers]
+    abstained = [
+        wall_id
+        for wall_id in known_id_set
+        if wall_id in blockers
+    ]
     return PhysicalWallEquivalenceResolution(
         scope_viewport_id=baseline.scope_viewport_id,
         representative_wall_ids=tuple(representatives),
