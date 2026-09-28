@@ -63,7 +63,7 @@ def test_door_detail_definition_is_type_metadata_not_count() -> None:
     assert result["height_mm"] == 2100
     # Hinge count is not an opening count and does not participate.
     assert {w.observation_id for w in result["required_words"]} == {
-        "w", "h", "mat", "sub", "fam"
+        "w", "x", "h", "mat", "sub", "fam"
     }
 
 
@@ -172,7 +172,7 @@ def test_text_claim_normalization_keeps_raster_corroboration_exact() -> None:
     assert _claim_norm("windows") != _claim_norm("doors")
 
 
-def test_same_row_adjacent_dimensions_form_detail_pair_without_trusting_x_glyph() -> None:
+def test_same_row_adjacent_dimensions_require_x_glyph_as_evidence() -> None:
     first = _Word(
         observation_id="w",
         receipt_id="rw",
@@ -201,7 +201,36 @@ def test_same_row_adjacent_dimensions_form_detail_pair_without_trusting_x_glyph(
         sequence_end=106,
     )
     dims = _dimension_candidates((first, raw_x, second))
-    assert dims == ((3000, 900, (first, second)),)
+    assert dims == ((3000, 900, (first, raw_x, second)),)
+
+
+def test_adjacent_unitless_numbers_cannot_mint_opening_definition() -> None:
+    assert _candidate((
+        _word("a", "600", 1),
+        _word("b", "1200", 2),
+        _word("family", "window", 3),
+    )) is None
+
+
+def test_missing_separator_or_units_cannot_mint_opening_definition() -> None:
+    assert _candidate((
+        _word("a", "3000mm", 1),
+        _word("b", "900mm", 2),
+        _word("family", "window", 3),
+    )) is None
+    assert _candidate((
+        _word("a", "3000", 1),
+        _word("x", "x", 2),
+        _word("b", "900", 3),
+        _word("family", "window", 4),
+    )) is None
+
+
+def test_dimension_separator_cannot_borrow_other_partition() -> None:
+    a, x, b = (_word("a", "3000mm", 1), _word("x", "x", 2), _word("b", "900mm", 3))
+    from dataclasses import replace
+    x = replace(x, source_partition_id="unrelated-view")
+    assert _dimension_candidates((a, x, b)) == ()
 
 
 def test_numeric_tokens_on_different_rows_do_not_form_dimension_pair() -> None:

@@ -5,7 +5,7 @@ It cannot mint a physical opening, host wall, quantity, deduction, or count.
 
 Supported generic proposition:
   one compact source-execution run
-  + exactly one plausible WxH dimension proposition
+  + exactly one trusted, unit-bearing WxH dimension proposition
   + exactly one opening family (window or door)
   -> one opening detail definition.
 
@@ -52,8 +52,8 @@ _AUTHORITY_SEAL = object()
 
 _DIM_TOKEN = re.compile(r"^(\d{1,2}(?:,\d{3})?|\d{2,5})(?:mm)?$", re.IGNORECASE)
 _COMBINED_DIM = re.compile(
-    r"^(\d{1,2}(?:,\d{3})?|\d{2,5})\s*mm?\s*[x×]\s*"
-    r"(\d{1,2}(?:,\d{3})?|\d{2,5})\s*mm?$",
+    r"^(\d{1,2}(?:,\d{3})?|\d{2,5})\s*mm\s*[x×]\s*"
+    r"(\d{1,2}(?:,\d{3})?|\d{2,5})\s*mm$",
     re.IGNORECASE,
 )
 
@@ -175,6 +175,8 @@ def _number_mm(value: str) -> Optional[int]:
 
 
 def _same_line_dimension_pair(first: _Word, second: _Word) -> bool:
+    if first.source_partition_id != second.source_partition_id:
+        return False
     first_value = _number_mm(first.raw_text)
     second_value = _number_mm(second.raw_text)
     if first_value is None or second_value is None:
@@ -222,22 +224,37 @@ def _dimension_candidates(words: Sequence[_Word]):
             ):
                 out.append((a, b, (word,)))
 
-    # Drawing-detail layout form: exactly two plausible dimension tokens on the
-    # same source row, adjacent in execution and geometry. A separate raw "x"
-    # glyph may exist between them, but it is deliberately not authority: if
-    # glyph mapping cannot verify that tiny delimiter, the two independently
-    # authorised dimensions plus their source layout still prove the pair.
-    numeric = [
-        word for word in ordered
-        if _number_mm(word.raw_text) is not None
-    ]
-    for first, second in zip(numeric, numeric[1:]):
+    # Two adjacent numbers do not establish a WxH proposition. Require a
+    # separately trusted multiplication/dimension separator in the same
+    # execution partition. Its observation participates in required evidence,
+    # so an unmappable glyph cannot silently acquire dimension authority.
+    for first, separator, second in zip(ordered, ordered[1:], ordered[2:]):
+        if str(separator.raw_text).strip().lower() not in {"x", "×"}:
+            continue
+        if not (
+            first.source_partition_id
+            == separator.source_partition_id
+            == second.source_partition_id
+        ):
+            continue
+        if not (
+            str(first.raw_text).strip().lower().endswith("mm")
+            and str(second.raw_text).strip().lower().endswith("mm")
+        ):
+            continue
         if not _same_line_dimension_pair(first, second):
+            continue
+        if not (
+            first.sequence_end <= separator.sequence_start
+            and separator.sequence_end <= second.sequence_start
+            and first.geometry[2] <= separator.geometry[0]
+            and separator.geometry[2] <= second.geometry[0]
+        ):
             continue
         a = _number_mm(first.raw_text)
         b = _number_mm(second.raw_text)
         assert a is not None and b is not None
-        out.append((a, b, (first, second)))
+        out.append((a, b, (first, separator, second)))
 
     # De-duplicate the same semantic dimension proposition. Prefer the source
     # form with fewer required observations when combined and layout forms
