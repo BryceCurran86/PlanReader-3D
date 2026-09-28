@@ -1768,19 +1768,20 @@ def _apply_trusted_relation_overrides(
 
     # Retain producer-proven SAME subgroups for downstream identity
     # normalization even when ambient ambiguity blocks global publication.
-    # Deterministic de-duplication preserves any already-publishable SAME group.
-    same_groups = list(dict.fromkeys((*same_groups, *positive_same_groups)))
+    # Final publication ordering is canonical so caller/input ordering cannot
+    # alter semantic results.
+    same_groups = sorted(set((*same_groups, *positive_same_groups)))
 
-    representatives = list(dict.fromkeys(representatives))
-    abstained = [
+    representatives = sorted(set(representatives))
+    abstained = sorted(
         wall_id
-        for wall_id in sorted(known_id_set)
+        for wall_id in known_id_set
         if wall_id in blockers
-    ]
+    )
     return PhysicalWallEquivalenceResolution(
         scope_viewport_id=baseline.scope_viewport_id,
         representative_wall_ids=tuple(representatives),
-        abstained_wall_ids=tuple(dict.fromkeys(abstained)),
+        abstained_wall_ids=tuple(abstained),
         equivalence_groups=tuple(same_groups),
         ambiguous_wall_ids=tuple(sorted(ambiguous_walls)),
         same_wall_ids=tuple(
