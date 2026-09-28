@@ -1,0 +1,65 @@
+name: TEST ONLY Structural Member Source Probe
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/diag-structural-member-source.yml"
+      - "scripts/diag_structural_member_source.py"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: kstvet
+            url: https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf
+            sha256: 6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc
+            page_start: 54
+            page_end: 55
+          - project: murera
+            url: https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf
+            sha256: 84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b
+            page_start: 219
+            page_end: 238
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download exact official source
+        env:
+          SOURCE_URL: ${{ matrix.url }}
+          EXPECTED_SHA: ${{ matrix.sha256 }}
+        run: |
+          curl -L --fail --retry 4 --retry-delay 2 -A "Mozilla/5.0" "$SOURCE_URL" -o /tmp/source.pdf
+          echo "$EXPECTED_SHA  /tmp/source.pdf" | sha256sum -c -
+
+      - name: Run source-only structural diagnostic
+        run: |
+          PYTHONPATH=. python scripts/diag_structural_member_source.py \
+            --pdf /tmp/source.pdf \
+            --project "${{ matrix.project }}" \
+            --page-start "${{ matrix.page_start }}" \
+            --page-end "${{ matrix.page_end }}" \
+            --out "/tmp/${{ matrix.project }}-structural-source.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: structural-source-${{ matrix.project }}
+          path: /tmp/${{ matrix.project }}-structural-source.json
+          if-no-files-found: error
+          retention-days: 7
