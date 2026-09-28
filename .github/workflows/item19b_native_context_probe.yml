@@ -72,4 +72,69 @@ jobs:
                   "notes":list(v.notes),
               })
           print("ITEM19B_VIEWPORTS "+json.dumps(views,sort_keys=True))
+
+          # Diagnostic-only counterfactual: keep every production authority
+          # unchanged except the final withheld-affects-component predicate.
+          # This answers whether those five boundary blockers are the sole
+          # reason the target role does not publish, before production code is
+          # changed.
+          import pb_wall_component_completeness_authority as compmod
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_wall_role_authority import WallRoleProducer, WallRoleSelector
+          from pb_wall_finish_callout_wall_authority import WallFinishCalloutWallProducer
+
+          source=SourceVisibilityProducer(
+              producer_method="item19b-counterfactual-probe",
+              producer_version="1.0",
+          )
+          payload=open("/tmp/kstvet.pdf","rb").read()
+          pub=source.ingest_native_pdf_bytes(
+              document_id="kstvet-counterfactual",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+          walls=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("54",)
+          ).authority()
+          original=compmod._withheld_affects_component
+          compmod._withheld_affects_component=lambda **kwargs: None
+          try:
+              component=compmod.WallComponentCompletenessProducer.from_authorities(
+                  source_visibility_producer=source,
+                  physical_wall_candidate_authority=walls,
+              ).authority()
+          finally:
+              compmod._withheld_affects_component=original
+          roles=WallRoleProducer.from_source_topology(
+              physical_wall_candidate_authority=walls,
+              wall_component_completeness_authority=component,
+          )
+          callout=WallFinishCalloutWallProducer.from_source_visibility_producer(
+              source,page_ids=("54",)
+          )
+          bindings=[
+              b for result in callout.published_results() for b in result.bindings
+              if b.source_execution_sequence_start==10070
+              and b.source_execution_sequence_end==10078
+              and b.trade_scope_id in {"internal_plaster","internal_paint"}
+          ]
+          target=bindings[0]
+          role=roles.publish(WallRoleSelector(
+              document_id=target.document_id,
+              revision_id=target.revision_id,
+              source_sha256=target.source_sha256,
+              snapshot_id=target.snapshot_id,
+              page_id=target.page_id,
+              decision_scope_id=target.physical_wall_decision_scope_id,
+              physical_wall_id=target.physical_wall_id,
+          ))
+          print("ITEM19B_COUNTERFACTUAL_ROLE "+json.dumps({
+              "binding_count":len(bindings),
+              "wall":target.physical_wall_id,
+              "status":role.status.value,
+              "role":role.record.role.value if role.record else None,
+              "reasons":list(role.reason_codes),
+          },sort_keys=True))
           PY
