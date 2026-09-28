@@ -210,10 +210,12 @@ def test_composer_refreshes_snapshot_after_wall_raster_augmentation(monkeypatch)
     )
     assert refreshed is not None
     assert seen["snapshot_id"] == refreshed.snapshot.snapshot_id
-    assert composition.semantic_enumeration_result.snapshot_id == (
+    assert composition.semantic_enumeration_result.record is not None
+    assert composition.semantic_enumeration_result.record.snapshot_id == (
         refreshed.snapshot.snapshot_id
     )
-    assert composition.opening_universe_result.snapshot_id == (
+    assert composition.opening_universe_result.record is not None
+    assert composition.opening_universe_result.record.snapshot_id == (
         refreshed.snapshot.snapshot_id
     )
     for trace in composition.wall_scopes:
@@ -227,4 +229,7 @@ def test_composer_refreshes_snapshot_after_wall_raster_augmentation(monkeypatch)
         )
         assert selector is not None
     if refreshed.snapshot.snapshot_id != original_snapshot_id:
-        assert composition.opening_universe_result.snapshot_id != original_snapshot_id
+        assert (
+            composition.opening_universe_result.record.snapshot_id
+            != original_snapshot_id
+        )
