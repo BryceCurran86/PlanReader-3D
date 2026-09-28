@@ -49,6 +49,32 @@ def _selector(published, page_id: str) -> PhysicalWallCandidateSelector:
     )
 
 
+def test_page_scope_materializes_from_page_scoped_source_ingestion() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="page-scoped-wall-candidates-test",
+        producer_version="1",
+    )
+    initial = source.ingest_native_pdf_bytes(
+        document_id="page-scoped-wall-candidates-partial-source",
+        source_bytes=_pdf_bytes(),
+        source_locator="memory://page-scoped-wall-candidates-partial-source.pdf",
+        page_ids=("2",),
+    )
+    assert tuple(initial.coverage.decoded_pages) == (2,)
+
+    authority = PhysicalWallCandidateProducer.from_source_visibility_producer(
+        source,
+        page_ids=("2",),
+    ).authority()
+    stabilized = source.published_snapshot_for_revision(initial.revision.revision_id)
+    assert stabilized is not None
+
+    page_two = authority.resolve_scope(_selector(stabilized, "2"))
+    assert page_two.status is EvidenceResolutionStatus.CORROBORATED
+    assert page_two.scope_complete is True
+    assert page_two.records
+
+
 def test_page_scope_materializes_only_requested_decoded_page() -> None:
     source, published = _source()
     authority = PhysicalWallCandidateProducer.from_source_visibility_producer(
