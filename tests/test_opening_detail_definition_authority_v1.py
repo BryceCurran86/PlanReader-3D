@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_execution_callout_authority import _Word
 from pb_opening_detail_definition_authority import (
     _candidate,
@@ -298,12 +299,11 @@ def test_glyph_only_x_receipt_is_separator_structure_only() -> None:
         source_partition_id="partition",
         geometry=word.geometry,
         reason_codes=("text_glyph_mapping_unverified",),
-        block_no=1,
-        line_no=0,
-        word_no=1,
+        sequence_number=104,
+        trace_sequence_numbers=(),
     )
     native = SimpleNamespace(
-        status=__import__("pb_migration_contracts").EvidenceResolutionStatus.ABSTAINED,
+        status=EvidenceResolutionStatus.ABSTAINED,
         reason_codes=("text_glyph_mapping_unverified",),
         receipt=receipt,
     )
