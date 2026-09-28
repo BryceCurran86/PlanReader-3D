@@ -570,8 +570,10 @@ def physical_wall_pair_identity_candidacy(
     4. a viewport/level scope difference, which may be the same physical wall
        drawn twice at different coordinates or scale;
     5. geometric contact within the snap tolerance;
-    6. a parallel, longitudinally overlapping sub-segment pair separated by
-       no more than the conservative maximum plausible wall body.
+    6. a parallel, longitudinally overlapping sub-segment pair. With
+       producer-owned physical scale, separation beyond the conservative
+       maximum wall body excludes the pair; without scale, separation cannot
+       safely exclude it.
 
     Rule 6 is a CANDIDATE FILTER ONLY.  Separation never proves
     SAME_PHYSICAL_WALL; it only admits the pair to normal SAME / DISTINCT /
