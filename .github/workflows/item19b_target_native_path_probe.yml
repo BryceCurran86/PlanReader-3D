@@ -25,7 +25,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, fitz
-          TARGET={4763,4772,5179,5214,5215}
+          TARGET={47,4763,4764,4766,4770,4772,5179,5214,5215}
           doc=fitz.open("/tmp/kstvet.pdf")
           page=doc[53]
           drawings=page.get_drawings()
