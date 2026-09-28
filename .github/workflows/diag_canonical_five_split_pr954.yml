@@ -1,0 +1,82 @@
+name: TEST-ONLY Canonical Five Split PR954
+
+on:
+  pull_request:
+    branches: [fix/scoped-page-wall-authority-post950]
+
+jobs:
+  benchmark-project:
+    if: github.head_ref == 'diag/canonical-five-split-pr954'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        benchmark:
+          - tenders_ke_kstvet_cbc_classroom
+          - tenders_ke_murera_science_lab
+          - tenders_ke_ghazi_science_lab
+          - tenders_ke_lamu_ishakani_ecd_classrooms
+          - tenders_ke_umma_hostels
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download SHA-pinned project source
+        env:
+          BENCHMARK_ID: ${{ matrix.benchmark }}
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, pathlib, urllib.request
+          bid = os.environ["BENCHMARK_ID"]
+          bench = pathlib.Path("benchmarks/public_tenders") / bid
+          dm = json.loads((bench / "download_manifest.json").read_text())
+          doc = next(d for d in dm["documents"] if d["role"] == "architectural_drawings")
+          root = pathlib.Path("/tmp/canonical-source")
+          root.mkdir(parents=True, exist_ok=True)
+          out = root / doc["filename"]
+          req = urllib.request.Request(
+              dm["source_url"],
+              headers={"User-Agent": "PlanReader-canonical-five-split-pr954/1.0"},
+          )
+          with urllib.request.urlopen(req, timeout=180) as response:
+              out.write_bytes(response.read())
+          got = hashlib.sha256(out.read_bytes()).hexdigest()
+          if got != doc["sha256"]:
+              raise SystemExit(f"{bid}: sha mismatch {got}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"BENCHMARK_FILENAME={doc['filename']}\n")
+          print(bid, doc["filename"], got)
+          PY
+
+      - name: Build exact production image
+        run: docker build -t planreader-canonical .
+
+      - name: Run isolated canonical project
+        env:
+          BENCHMARK_ID: ${{ matrix.benchmark }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          OUT="$GITHUB_WORKSPACE/benchmark_results_runtime/$BENCHMARK_ID"
+          mkdir -p "$OUT"
+          START=$(date +%s)
+          set +e
+          timeout --signal=TERM 1200s docker run --rm --cpus=2.0 -e BENCHMARK_ID -e BASE_SHA             -v "/tmp/canonical-source/$BENCHMARK_FILENAME:/app/$BENCHMARK_FILENAME:ro"             -v "$OUT:/tmp/results"             planreader-canonical             python -c "import json, os; import pb_benchmark_accuracy_engine as m; m.resolve_evaluated_commit_sha=lambda: os.environ['BASE_SHA']; e=m.BenchmarkAccuracyEngine(output_dir='/tmp/results'); r=e.evaluate_benchmark(benchmark_id=os.environ['BENCHMARK_ID'], auto_extract=True); print('SPLIT_RESULT='+json.dumps(r.to_dict(),sort_keys=True))"             | tee "/tmp/$BENCHMARK_ID.txt"
+          code=${PIPESTATUS[0]}
+          set -e
+          END=$(date +%s)
+          echo "SPLIT_RUNTIME_SECONDS=$((END-START))"
+          if [ "$code" -eq 124 ]; then
+            echo "SPLIT_TIMEOUT=$BENCHMARK_ID"
+            exit 124
+          fi
+          exit "$code"
+
+      - name: Upload isolated report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-split-pr954-${{ matrix.benchmark }}
+          path: benchmark_results_runtime/${{ matrix.benchmark }}/
+          if-no-files-found: warn
