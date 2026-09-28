@@ -2076,6 +2076,28 @@ class PhysicalWallCandidateProducer:
         )
 
     @classmethod
+    def from_source_visibility_with_authenticated_viewports(
+        cls,
+        source_visibility_producer,
+        *,
+        page_ids: Optional[Sequence[str]] = None,
+    ):
+        """Build page and authenticated viewport wall scopes on one snapshot.
+
+        This constructor exists for source-topology adapters that must compare
+        an authenticated viewport wall with source-owned continuation outside
+        that viewport.  It does not make either scope more complete; it only
+        materializes both producer-owned address spaces from the same immutable
+        post-raster source snapshot.
+        """
+        return cls._from_source_visibility_producer(
+            source_visibility_producer,
+            page_ids=page_ids,
+            include_authenticated_viewports=True,
+            include_page_scopes=True,
+        )
+
+    @classmethod
     def _from_source_visibility_producer(
         cls,
         source_visibility_producer,
