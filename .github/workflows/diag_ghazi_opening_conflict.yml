@@ -102,7 +102,7 @@ jobs:
                   )
                   vis=visibility.resolve_visible(sel)
                   obs=vis.observation
-                  disp=physical.classify_visible_candidate(sel)
+                  disp=physical.classify_disposition(sel)
                   details.append({
                       "id":oid,
                       "kind":None if obs is None else obs.observation_kind,
