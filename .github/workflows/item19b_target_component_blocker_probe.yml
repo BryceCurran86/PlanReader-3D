@@ -306,7 +306,7 @@ jobs:
               "seed_topology":seed_rows,
           },sort_keys=True))
 
-                    print("ITEM19B_TARGET_BLOCKER "+json.dumps({
+          print("ITEM19B_TARGET_BLOCKER "+json.dumps({
               "viewport_bbox":list(scope.viewport_bbox or ()),
               "scope_boundary_observation_ids":list(scope.scope_boundary_observation_ids),
               "ambiguous_source_observation_ids":list(scope.ambiguous_source_observation_ids),
