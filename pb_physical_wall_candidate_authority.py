@@ -1265,6 +1265,18 @@ def _producer_opening_relation_overrides(
             snapshot_id=published.snapshot.snapshot_id,
             observation_id=observation_id,
         )
+        # Existence is page-local, and this helper can use only records on
+        # page_id below. Authenticate that address before the expensive proof:
+        # otherwise each wall page reconstructs every other page's opening
+        # candidates. The proof still checks the complete immutable snapshot;
+        # this neither supplies evidence nor changes its identity/closure rules.
+        visible = visibility.resolve_visible(selector)
+        if (
+            visible.status is not EvidenceResolutionStatus.CORROBORATED
+            or visible.observation is None
+            or visible.observation.page_id != page_id
+        ):
+            continue
         result = opening_authority.prove_existence(selector)
         existence = result.existence_record
         if (
