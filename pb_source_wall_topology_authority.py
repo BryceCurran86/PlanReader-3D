@@ -572,6 +572,58 @@ def _page_equivalence_representatives(page_scope) -> dict[str, str]:
     return mapping
 
 
+def _page_component_source_ids_by_wall(page_scope) -> dict[str, frozenset[str]]:
+    """Map each page wall to the immutable source ids of its full wall component."""
+    output: dict[str, frozenset[str]] = {}
+    for members in _component_sets(page_scope.records, page_scope.equivalence):
+        component_records = _collapsed_component_records(page_scope, members)
+        if not component_records:
+            continue
+        source_ids = frozenset(
+            str(raw_id)
+            for record in component_records
+            for raw_id in record.physical_identity.source_primitive_ids
+            if str(raw_id)
+        )
+        if not source_ids:
+            continue
+        for wall_id in members:
+            output[str(wall_id)] = source_ids
+        for record in component_records:
+            output[str(record.wall_candidate_id)] = source_ids
+    return output
+
+
+def _foreign_sibling_source_ids(
+    scopes,
+    *,
+    viewport_scope,
+) -> frozenset[str]:
+    """Return source primitives uniquely published into other sibling viewports.
+
+    PhysicalWallCandidateProducer publishes a primitive into a viewport scope
+    only when that primitive has exactly one authenticated viewport owner.
+    Therefore an id present in another same-lineage viewport is positive
+    evidence that it does not belong to the target drawing universe.
+    """
+    return frozenset(
+        str(raw_id)
+        for sibling in scopes
+        if sibling is not viewport_scope
+        and sibling.scope_kind == "viewport"
+        and sibling.status is EvidenceResolutionStatus.CORROBORATED
+        and sibling.document_id == viewport_scope.document_id
+        and sibling.revision_id == viewport_scope.revision_id
+        and sibling.source_sha256 == viewport_scope.source_sha256
+        and sibling.snapshot_id == viewport_scope.snapshot_id
+        and sibling.page_id == viewport_scope.page_id
+        and sibling.decision_scope_id != viewport_scope.decision_scope_id
+        for record in tuple(sibling.records or ())
+        for raw_id in record.physical_identity.source_primitive_ids
+        if str(raw_id)
+    )
+
+
 def _bridge_page_topology_to_viewports(
     physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
     records: dict[
@@ -611,6 +663,13 @@ def _bridge_page_topology_to_viewports(
         page_scope = matches[0]
         page_records = tuple(page_scope.records or ())
         representative_for = _page_equivalence_representatives(page_scope)
+        component_source_ids_by_wall = _page_component_source_ids_by_wall(
+            page_scope
+        )
+        foreign_sibling_source_ids = _foreign_sibling_source_ids(
+            scopes,
+            viewport_scope=viewport_scope,
+        )
 
         topology_by_page_wall = {}
         for evidence in records.values():
@@ -660,6 +719,15 @@ def _bridge_page_topology_to_viewports(
             evidences = []
             unresolved = False
             for page_wall_id in sorted(normalized_page_ids):
+                component_source_ids = component_source_ids_by_wall.get(
+                    page_wall_id
+                )
+                if (
+                    not component_source_ids
+                    or component_source_ids & foreign_sibling_source_ids
+                ):
+                    unresolved = True
+                    break
                 evidence = topology_by_page_wall.get(page_wall_id)
                 if evidence is None or evidence.is_ambiguous:
                     unresolved = True
