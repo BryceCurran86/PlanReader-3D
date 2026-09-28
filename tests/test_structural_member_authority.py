@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_structural_member_authority import (
+    STRUCTURAL_MEMBER_COMPLETENESS_UNAVAILABLE,
     STRUCTURAL_MEMBER_CROSS_VIEW_REGISTRATION_AMBIGUOUS,
     STRUCTURAL_MEMBER_INSTANCE_UNAVAILABLE,
     STRUCTURAL_MEMBER_SCOPE_CROPPED,
@@ -409,3 +410,49 @@ def test_conflicting_identity_evidence_conflicts_instead_of_choosing() -> None:
     result = producer.authority().resolve(_selector(definition))
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert result.quantity is None
+
+
+
+def test_completeness_for_one_definition_cannot_authorize_another() -> None:
+    producer = _producer()
+    chs = _definition(producer, kind="chs_pillar", section="50 mm CHS pillar")
+    pier = producer.publish_definition(
+        member_kind="masonry_pier",
+        section_text="Masonry pier",
+        source_evidence_ids=("pier-definition",),
+        source_page_ids=("1",),
+        source_view_ids=("plan",),
+    )
+    assert _instance(
+        producer,
+        chs,
+        evidence="chs-instance",
+        tag="P1",
+    ) is not None
+    pier_instance = producer.publish_instance(
+        scope_id="scope-a",
+        definition_id=pier.definition_id,
+        page_id="1",
+        view_id="plan",
+        view_kind="plan",
+        source_evidence_ids=("pier-instance",),
+        source_role="structural_member",
+        member_tag="MP1",
+        has_closed_geometry=True,
+        bbox=(30.0, 10.0, 35.0, 15.0),
+    )
+    assert pier_instance is not None
+
+    producer.publish_completeness(
+        scope_id="scope-a",
+        definition_id=chs.definition_id,
+        instance_bearing_view_ids=("plan",),
+        complete_view_ids=("plan",),
+        source_evidence_ids=("chs-plan-complete",),
+    )
+
+    result = producer.authority().resolve(_selector(pier))
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.quantity is None
+    assert STRUCTURAL_MEMBER_COMPLETENESS_UNAVAILABLE in result.reason_codes
