@@ -385,6 +385,15 @@ class GenericPlanReaderExtractor:
             "slope_length_m": None,
             "roof_covering_area_m2": None,
         }
+        self.physical_net_wall_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "quantity_m2": None,
+            "source_pages": [],
+            "external_wall_ids": [],
+            "evidence_ids": [],
+            "quantity_id": None,
+        }
         # Live extraction visibility: distinguish absence from failure/conflict.
         self.extraction_status: Dict[str, str] = {}
 
@@ -933,6 +942,16 @@ class GenericPlanReaderExtractor:
             "ridge_length_m": None,
             "slope_length_m": None,
             "roof_covering_area_m2": None,
+        }
+
+        self.physical_net_wall_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "quantity_m2": None,
+            "source_pages": [],
+            "external_wall_ids": [],
+            "evidence_ids": [],
+            "quantity_id": None,
         }
 
         # ------------------------------------------------------------------
@@ -2798,6 +2817,135 @@ class GenericPlanReaderExtractor:
                     reason=f"shadow_exception:{type(exc).__name__}"
                 )
                 self.extraction_status["item35_authority_shadow"] = "extraction_failed"
+
+        # Source-owned physical external net-wall LIVE firm output.
+        #
+        # This is intentionally late: the complete source-owned
+        # wall -> opening/void -> gross geometry -> whole-wall role ->
+        # physical net-wall chain must corroborate before it can replace the
+        # legacy perimeter_walling claim. Abstention/conflict never deletes or
+        # mutates the pre-existing prediction.
+        try:
+            from pb_live_physical_net_wall_integration import (
+                collect_live_physical_net_wall_claim,
+            )
+
+            physical_net_pages = [
+                page_index
+                for page_index in target_pages
+                if (
+                    0 <= page_index < len(doc)
+                    and self.is_drawing_page(
+                        doc[page_index].get_text("text"),
+                        doc[page_index],
+                    )
+                )
+            ]
+            if physical_net_pages:
+                physical_wall_result = collect_live_physical_net_wall_claim(
+                    p_path,
+                    pages=physical_net_pages,
+                )
+                self.physical_net_wall_live = {
+                    "status": physical_wall_result.status.value,
+                    "reason_codes": list(physical_wall_result.reason_codes),
+                    "quantity_m2": physical_wall_result.quantity_m2,
+                    "source_pages": list(physical_wall_result.source_pages),
+                    "external_wall_ids": list(
+                        physical_wall_result.external_wall_ids
+                    ),
+                    "evidence_ids": list(physical_wall_result.evidence_ids),
+                    "quantity_id": physical_wall_result.quantity_id,
+                }
+                self.extraction_status["physical_net_wall_live"] = (
+                    physical_wall_result.status.value
+                )
+
+                if (
+                    physical_wall_result.status.value == "corroborated"
+                    and physical_wall_result.quantity_m2 is not None
+                    and physical_wall_result.quantity_m2 > 0
+                    and physical_wall_result.quantity_id
+                ):
+                    source_page = (
+                        min(physical_wall_result.source_pages)
+                        if physical_wall_result.source_pages
+                        else (
+                            physical_net_pages[0] + 1
+                            if physical_net_pages
+                            else 1
+                        )
+                    )
+                    pred_dict["perimeter_walling"] = ExtractedPrediction(
+                        tag="perimeter_walling",
+                        trade_type="walls",
+                        description=(
+                            "External walling — source-authenticated physical "
+                            "net whole-wall area with proven opening voids "
+                            "deducted"
+                        ),
+                        quantity=round(
+                            float(physical_wall_result.quantity_m2),
+                            4,
+                        ),
+                        unit="SM",
+                        confidence=float(physical_wall_result.confidence),
+                        source_page=int(source_page),
+                        sheet_number=None,
+                        dimensions=None,
+                        bounding_box=None,
+                        metadata={
+                            "derivation": (
+                                "source_owned_physical_external_net_wall"
+                            ),
+                            "live_authority_status": (
+                                physical_wall_result.status.value
+                            ),
+                            "commercial_projection_allowed": True,
+                            "source_pages": list(
+                                physical_wall_result.source_pages
+                            ),
+                            "external_wall_ids": list(
+                                physical_wall_result.external_wall_ids
+                            ),
+                            "evidence_ids": list(
+                                physical_wall_result.evidence_ids
+                            ),
+                            "quantity_id": physical_wall_result.quantity_id,
+                            "reason_codes": list(
+                                physical_wall_result.reason_codes
+                            ),
+                            "raw_evidence_ref": (
+                                physical_wall_result.quantity_id
+                            ),
+                        },
+                    )
+            else:
+                self.physical_net_wall_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "quantity_m2": None,
+                    "source_pages": [],
+                    "external_wall_ids": [],
+                    "evidence_ids": [],
+                    "quantity_id": None,
+                }
+                self.extraction_status["physical_net_wall_live"] = "abstained"
+        except Exception as exc:
+            self.physical_net_wall_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_physical_net_wall_exception:{type(exc).__name__}"
+                ],
+                "quantity_m2": None,
+                "source_pages": [],
+                "external_wall_ids": [],
+                "evidence_ids": [],
+                "quantity_id": None,
+            }
+            self.extraction_status["physical_net_wall_live"] = (
+                "extraction_failed"
+            )
 
         # Source-owned ceiling-lining LIVE provisional output.
         #
