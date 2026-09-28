@@ -162,9 +162,17 @@ jobs:
                       "geometry":[round(float(v),3) for v in line],
                       "reason":reason,
                       "is_subordinate":raw_id.replace("visible:segment:","").replace("segment:","") in subordinate,
+                      "withheld_bucket":(
+                          "scope_boundary"
+                          if observation_id in set(scope.scope_boundary_observation_ids)
+                          else "ambiguous_ownership"
+                      ),
                   })
 
           print("ITEM19B_TARGET_BLOCKER "+json.dumps({
+              "viewport_bbox":list(scope.viewport_bbox or ()),
+              "scope_boundary_observation_ids":list(scope.scope_boundary_observation_ids),
+              "ambiguous_source_observation_ids":list(scope.ambiguous_source_observation_ids),
               "target_members":list(target_members),
               "target_matches":target_matches,
               "member_source_primitives":{
