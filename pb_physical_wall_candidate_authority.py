@@ -310,10 +310,10 @@ def _producer_owned_points_per_mm(
 ) -> Optional[float]:
     """Return only corroborated source-native physical scale for this scope.
 
-    Scale is an optional refinement of the candidate band, never a caller
-    input and never identity evidence.  If no producer-owned graphic scale
-    exists (including DERIVED-only viewports), equivalence falls back to the
-    deliberately conservative source-space band.
+    Scale is an optional refinement of the candidate gate, never a caller
+    input and never identity evidence. If no producer-owned graphic scale
+    exists (including DERIVED-only viewports), no absolute point-distance
+    exclusion is applied; parallel overlapping candidates remain fail-closed.
     """
     selector = PhysicalScaleSelector(
         document_id=published.revision.document_id,
