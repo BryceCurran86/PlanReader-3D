@@ -1,0 +1,116 @@
+name: TEST-ONLY Ghazi Opening Conflict Probe
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ghazi-opening-probe:
+    if: github.head_ref == 'diag/ghazi-opening-conflict'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download SHA-pinned Ghazi source
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, urllib.request
+          bid="tenders_ke_ghazi_science_lab"
+          bench=pathlib.Path("benchmarks/public_tenders")/bid
+          dm=json.loads((bench/"download_manifest.json").read_text())
+          doc=next(d for d in dm["documents"] if d["role"]=="architectural_drawings")
+          out=pathlib.Path("/tmp")/doc["filename"]
+          req=urllib.request.Request(dm["source_url"],headers={"User-Agent":"PlanReader-opening-probe/1.0"})
+          with urllib.request.urlopen(req,timeout=180) as r:
+              out.write_bytes(r.read())
+          got=hashlib.sha256(out.read_bytes()).hexdigest()
+          if got != doc["sha256"]:
+              raise SystemExit(f"sha mismatch {got}")
+          PY
+
+      - name: Build exact production image
+        run: docker build -t planreader-opening-probe .
+
+      - name: Probe semantic opening closure
+        run: |
+          docker run --rm -i --cpus=2.0 \
+            -v /tmp/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf:/app/ghazi.pdf:ro \
+            planreader-opening-probe \
+            python - <<'PY'
+          import hashlib, json, time
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_semantic_opening_enumeration_authority import SemanticOpeningEnumerationProducer
+          from pb_physical_opening_authority import PhysicalOpeningAuthority
+          from pb_source_observation_authority import ObservationSelector
+
+          payload=Path("/app/ghazi.pdf").read_bytes()
+          source_sha=hashlib.sha256(payload).hexdigest()
+          document_id=f"diag-opening:{source_sha[:32]}"
+          page_ids=("167",)
+          source=SourceVisibilityProducer(producer_method="diag-opening",producer_version="1.0.0")
+          published=source.ingest_native_pdf_bytes(
+              document_id=document_id,
+              source_bytes=payload,
+              source_locator="memory://ghazi-opening.pdf",
+              page_ids=page_ids,
+          )
+          source.augment_with_raster_visible_segments(published.revision.revision_id,page_ids=page_ids)
+          published=source.published_snapshot_for_revision(published.revision.revision_id)
+          assert published is not None
+
+          semantic=SemanticOpeningEnumerationProducer.from_source_visibility_producer(source)
+          t=time.time()
+          result=semantic.publish_page_scope(
+              revision_id=published.revision.revision_id,
+              decision_scope_id="diag:ghazi:167",
+              page_ids=page_ids,
+          )
+          rec=result.record
+          out={
+              "seconds":round(time.time()-t,3),
+              "status":getattr(result.status,"value",result.status),
+              "reason_codes":list(result.reason_codes),
+              "record":None if rec is None else {
+                  "visible_count":len(rec.visible_observation_ids),
+                  "opening_count":len(rec.physical_opening_record_ids),
+                  "representative_count":len(rec.representative_observation_ids),
+                  "support_count":len(rec.opening_support_observation_ids),
+                  "residual_count":len(rec.residual_visible_observation_ids),
+                  "conflict_count":len(rec.conflict_observation_ids),
+                  "structural_complete":rec.structural_enumeration_complete,
+                  "physical_universe_complete":rec.physical_opening_universe_complete,
+                  "residual_ids":list(rec.residual_visible_observation_ids)[:25],
+                  "conflict_ids":list(rec.conflict_observation_ids)[:25],
+              }
+          }
+          print("OPENING_PROBE="+json.dumps(out,sort_keys=True),flush=True)
+
+          if rec is not None:
+              visibility=source.authority()
+              physical=PhysicalOpeningAuthority(visibility)
+              ids=list(rec.conflict_observation_ids)[:12]+list(rec.residual_visible_observation_ids)[:12]
+              details=[]
+              for oid in ids:
+                  sel=ObservationSelector(
+                      document_id=rec.document_id,
+                      revision_id=rec.revision_id,
+                      source_sha256=rec.source_sha256,
+                      snapshot_id=rec.snapshot_id,
+                      observation_id=oid,
+                  )
+                  vis=visibility.resolve_visible(sel)
+                  obs=vis.observation
+                  disp=physical.classify_visible_candidate(sel)
+                  details.append({
+                      "id":oid,
+                      "kind":None if obs is None else obs.observation_kind,
+                      "origin":None if obs is None else obs.origin_kind,
+                      "geometry":None if obs is None else list(obs.geometry),
+                      "disposition_status":getattr(disp.status,"value",disp.status),
+                      "disposition":getattr(disp,"disposition",None),
+                      "reason_codes":list(getattr(disp,"reason_codes",()) or ()),
+                  })
+              print("OPENING_DETAIL="+json.dumps(details,sort_keys=True,default=str),flush=True)
+          PY
