@@ -1999,10 +1999,13 @@ def _build_scope_result(
         decision_scope_id=scope_id,
     )
     page_number = int(page_id)
+    # This authority proves a complete exact *page* scope, not complete
+    # document ingestion. A caller may address only pages already decoded by
+    # the producer; unrelated undecoded or failed pages elsewhere in the PDF do
+    # not make this page's producer-owned visible universe incomplete.
     if (
-        published.coverage.state != "complete"
-        or published.coverage.failed_pages
-        or page_number not in published.coverage.decoded_pages
+        page_number not in published.coverage.decoded_pages
+        or page_number in published.coverage.failed_pages
     ):
         return _blocked(selector, PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
 
