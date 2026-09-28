@@ -66,6 +66,38 @@ def test_page_scope_materializes_only_requested_decoded_page() -> None:
     assert PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE in page_one.reason_codes
 
 
+def test_scoped_native_ingestion_can_resolve_complete_addressed_page() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="page-scoped-wall-candidates-test",
+        producer_version="1",
+    )
+    initial = source.ingest_native_pdf_bytes(
+        document_id="page-scoped-native-ingestion",
+        source_bytes=_pdf_bytes(),
+        source_locator="memory://page-scoped-native-ingestion.pdf",
+        page_ids=("2",),
+    )
+    assert initial.coverage.state == "partial"
+    assert initial.coverage.decoded_pages == (2,)
+    assert initial.coverage.failed_pages == ()
+
+    authority = PhysicalWallCandidateProducer.from_source_visibility_producer(
+        source,
+        page_ids=("2",),
+    ).authority()
+    published = source.published_snapshot_for_revision(initial.revision.revision_id)
+    assert published is not None
+
+    page_two = authority.resolve_scope(_selector(published, "2"))
+    assert page_two.status is EvidenceResolutionStatus.CORROBORATED
+    assert page_two.page_id == "2"
+    assert page_two.records
+
+    page_one = authority.resolve_scope(_selector(published, "1"))
+    assert page_one.status is EvidenceResolutionStatus.ABSTAINED
+    assert PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE in page_one.reason_codes
+
+
 def test_page_scope_limits_raster_augmentation_to_requested_pages() -> None:
     source, _ = _source()
     with patch.object(
