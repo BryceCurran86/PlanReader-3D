@@ -23,7 +23,6 @@ import pytest
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_identity import (
     MAX_PLAUSIBLE_WALL_BODY_MM,
-    MAX_PLAUSIBLE_WALL_BODY_SOURCE_PT,
     PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP,
     PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE,
     PAIR_EXCLUDED_SEPARATION_BEYOND_BAND,
@@ -145,19 +144,14 @@ def test_no_separation_inside_band_ever_yields_same(real_mm) -> None:
 # ===========================================================================
 
 
-def test_band_is_conservative_and_scale_derived() -> None:
+def test_band_is_scale_derived_and_absent_without_verified_scale() -> None:
     scaled = max_plausible_wall_body_separation_pt(_POINTS_PER_MM_AT_1_50)
     assert scaled == pytest.approx(
         MAX_PLAUSIBLE_WALL_BODY_MM * _POINTS_PER_MM_AT_1_50
     )
-    # Without verified scale the documented source-space policy band applies.
-    assert max_plausible_wall_body_separation_pt(None) == pytest.approx(
-        MAX_PLAUSIBLE_WALL_BODY_SOURCE_PT
-    )
+    assert max_plausible_wall_body_separation_pt(None) is None
     for bad in (0.0, -1.0, float("nan"), float("inf")):
-        assert max_plausible_wall_body_separation_pt(bad) == pytest.approx(
-            MAX_PLAUSIBLE_WALL_BODY_SOURCE_PT
-        )
+        assert max_plausible_wall_body_separation_pt(bad) is None
 
 
 def test_resolver_audit_records_the_scale_and_band_actually_used() -> None:
@@ -175,27 +169,27 @@ def test_resolver_audit_records_the_scale_and_band_actually_used() -> None:
     )
 
 
-def test_resolver_audit_records_source_fallback_when_scale_is_unavailable() -> None:
+def test_resolver_audit_records_no_band_when_scale_is_unavailable() -> None:
     left = _ident("scale-a", ((0.0, 0.0), (100.0, 0.0)), ("d1i0",))
     right = _ident("scale-b", ((5000.0, 4000.0), (5100.0, 4000.0)), ("d9i0",))
     audit = resolve_physical_wall_equivalence((left, right)).candidate_pair_audit
     assert audit.verified_points_per_mm is None
-    assert audit.candidate_wall_body_band_pt == pytest.approx(
-        MAX_PLAUSIBLE_WALL_BODY_SOURCE_PT
-    )
+    assert audit.candidate_wall_body_band_pt is None
 
 
-@pytest.mark.parametrize("real_mm", [450.0, 500.0, 550.0, 600.0])
-def test_thick_wall_faces_remain_competing_without_scale(real_mm) -> None:
-    """A 450-600mm wall at 1:50 must keep both faces in one contest."""
-    face_a, face_b = _face_pair(_pt_at_1_50(real_mm))
+@pytest.mark.parametrize("separation_pt", [10.0, 40.0, 56.0, 100.0, 250.0, 600.0])
+def test_parallel_overlapping_faces_remain_competing_without_scale(
+    separation_pt,
+) -> None:
+    """Unknown scale must never convert point separation into DISTINCT walls."""
+    face_a, face_b = _face_pair(separation_pt)
 
     eligible, reason = physical_wall_pair_identity_candidacy(face_a, face_b)
-    assert eligible, f"{real_mm}mm wall excluded: {reason}"
+    assert eligible, f"unscaled parallel faces excluded: {reason}"
 
     resolution = resolve_physical_wall_equivalence((face_a, face_b))
-    assert len(resolution.representative_wall_ids) != 2
     assert resolution.representative_wall_ids == ()
+    assert set(resolution.ambiguous_wall_ids) == {"f-a", "f-b"}
 
 
 @pytest.mark.parametrize("real_mm", [450.0, 500.0, 550.0, 600.0])
@@ -245,28 +239,39 @@ def test_short_pier_is_not_paired_with_collinear_neighbour_by_proximity() -> Non
 
 
 @pytest.mark.parametrize("multiplier", [1.5, 3.0, 10.0])
-def test_separation_far_beyond_band_is_excluded(multiplier) -> None:
-    separation = MAX_PLAUSIBLE_WALL_BODY_SOURCE_PT * multiplier
+def test_scaled_separation_far_beyond_band_is_excluded(multiplier) -> None:
+    band = max_plausible_wall_body_separation_pt(_POINTS_PER_MM_AT_1_50)
+    assert band is not None
+    separation = band * multiplier
     face_a, face_b = _face_pair(separation)
 
-    eligible, reason = physical_wall_pair_identity_candidacy(face_a, face_b)
+    eligible, reason = physical_wall_pair_identity_candidacy(
+        face_a,
+        face_b,
+        points_per_mm=_POINTS_PER_MM_AT_1_50,
+    )
     assert not eligible
     assert reason == PAIR_EXCLUDED_SEPARATION_BEYOND_BAND
 
-    resolution = resolve_physical_wall_equivalence((face_a, face_b))
+    resolution = resolve_physical_wall_equivalence(
+        (face_a, face_b),
+        points_per_mm=_POINTS_PER_MM_AT_1_50,
+    )
     assert set(resolution.representative_wall_ids) == {"f-a", "f-b"}
 
 
-def test_no_separation_sweep_ever_publishes_two_faces_inside_band() -> None:
-    """Sweep the whole band; a face pair never publishes twice."""
-    band = MAX_PLAUSIBLE_WALL_BODY_SOURCE_PT
+def test_no_scaled_separation_inside_band_publishes_two_faces() -> None:
+    """Sweep a verified physical band; a face pair never publishes twice."""
+    band = max_plausible_wall_body_separation_pt(_POINTS_PER_MM_AT_1_50)
+    assert band is not None
     steps = 40
-    for index in range(steps + 1):
+    for index in range(1, steps + 1):
         separation = band * index / steps
-        if separation <= 0.0:
-            continue
         face_a, face_b = _face_pair(separation)
-        resolution = resolve_physical_wall_equivalence((face_a, face_b))
+        resolution = resolve_physical_wall_equivalence(
+            (face_a, face_b),
+            points_per_mm=_POINTS_PER_MM_AT_1_50,
+        )
         assert len(resolution.representative_wall_ids) != 2, (
             f"both faces published at separation={separation:.4f}pt"
         )
@@ -312,12 +317,19 @@ def test_corridor_walls_are_independent_and_never_same() -> None:
         ("d5i0",),
     )
 
-    eligible, reason = physical_wall_pair_identity_candidacy(left, right)
+    eligible, reason = physical_wall_pair_identity_candidacy(
+        left,
+        right,
+        points_per_mm=_POINTS_PER_MM_AT_1_50,
+    )
     assert not eligible
     assert reason == PAIR_EXCLUDED_SEPARATION_BEYOND_BAND
     assert classify_physical_wall_pair(left, right) is not SAME
 
-    resolution = resolve_physical_wall_equivalence((left, right))
+    resolution = resolve_physical_wall_equivalence(
+        (left, right),
+        points_per_mm=_POINTS_PER_MM_AT_1_50,
+    )
     assert set(resolution.representative_wall_ids) == {"cor-left", "cor-right"}
 
 
@@ -344,7 +356,10 @@ def test_corridor_walls_with_own_unresolved_faces_still_abstain() -> None:
         ),
     )
 
-    resolution = resolve_physical_wall_equivalence(walls)
+    resolution = resolve_physical_wall_equivalence(
+        walls,
+        points_per_mm=_POINTS_PER_MM_AT_1_50,
+    )
 
     # No face pairs across the corridor.
     pairs = _ambiguous_pairs(resolution)
@@ -729,7 +744,7 @@ def test_wall_strip_override_is_restored_after_narrowing() -> None:
     face_a = _ident("st-a", ((0.0, 0.0), (2000.0, 0.0)), ("d2i0",))
     face_b = _ident(
         "st-b",
-        ((0.0, MAX_PLAUSIBLE_WALL_BODY_SOURCE_PT * 4.0), (2000.0, MAX_PLAUSIBLE_WALL_BODY_SOURCE_PT * 4.0)),
+        ((3000.0, 0.0), (5000.0, 0.0)),
         ("d2i7",),
     )
 
