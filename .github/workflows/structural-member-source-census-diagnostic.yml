@@ -21,9 +21,11 @@ jobs:
         run: |
           PYTHONPATH=. python scripts/structural_member_source_census.py --pdf /tmp/murera.pdf --page 225 --label murera-p225 | tee /tmp/murera-225.jsonl
           PYTHONPATH=. python scripts/structural_member_source_census.py --pdf /tmp/kstvet.pdf --page 54 --label kstvet-p54 | tee /tmp/kstvet-54.jsonl
+          PYTHONPATH=. python scripts/structural_member_range_census.py --pdf /tmp/murera.pdf --start 219 --end 238 | tee /tmp/murera-range.jsonl
       - uses: actions/upload-artifact@v4
         with:
           name: structural-member-source-census
           path: |
             /tmp/murera-225.jsonl
             /tmp/kstvet-54.jsonl
+            /tmp/murera-range.jsonl
