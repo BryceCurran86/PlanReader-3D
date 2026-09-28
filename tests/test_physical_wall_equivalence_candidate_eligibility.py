@@ -809,6 +809,41 @@ def test_restored_distinct_override_lets_both_publish() -> None:
     assert set(resolved.representative_wall_ids) == {"rd-a", "rd-b"}
 
 
+def test_override_for_unusable_wall_is_explicitly_rejected() -> None:
+    import pb_physical_wall_candidate_authority as module
+
+    usable = _ident(
+        "ku-ok",
+        ((0.0, 0.0), (500.0, 0.0)),
+        ("d3i0",),
+    )
+    unusable = PhysicalWallIdentity(
+        wall_candidate_id="ku-bad",
+        viewport_id="vp",
+        candidate_identity_id=None,
+        path_fingerprint=None,
+        source_primitive_ids=(),
+        edge_ids=(),
+        status=EvidenceResolutionStatus.ABSTAINED,
+        blocking_reasons=("physical_identity_edge_missing",),
+    )
+
+    _baseline, resolved = _reconcile(
+        (usable, unusable),
+        {("ku-ok", "ku-bad"): SAME},
+    )
+
+    assert resolved.candidate_pair_audit.trusted_override_pairs_restored == 0
+    assert resolved.candidate_pair_audit.trusted_override_pairs_rejected == 1
+    assert resolved.candidate_pair_audit.trusted_override_rejection_reason_counts == {
+        module.TRUSTED_EQUIVALENCE_OVERRIDE_UNUSABLE_MEMBER: 1
+    }
+    assert all(
+        "ku-bad" not in pair
+        for pair in resolved.pair_classifications
+    )
+
+
 def test_override_for_unknown_wall_is_explicitly_rejected() -> None:
     """An override outside the usable member set is rejected, not applied."""
     left = _ident("k-a", ((0.0, 0.0), (500.0, 0.0)), ("d3i0",))
