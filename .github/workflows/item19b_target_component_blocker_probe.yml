@@ -236,6 +236,8 @@ jobs:
                       "role_status":role_status,
                       "role":role,
                       "role_reason":role_reason,
+                      "topology_evidence":topo.evidence_id if topo else None,
+                      "face_ids":list(topo.enclosed_space_ids) if topo else [],
                   })
               page_rows.append({
                   "viewport_wall":viewport_rec.wall_candidate_id,
