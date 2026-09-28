@@ -213,8 +213,10 @@ def _coalesce_retraced_segments(
     remain unchanged.
     """
     by_position: dict[tuple[int, int], list[_VisibleSegment]] = {}
+    position_by_observation_id: dict[str, Optional[tuple[int, int]]] = {}
     for candidate in segments:
         position = _primitive_position(candidate)
+        position_by_observation_id[candidate.observation_id] = position
         if position is not None:
             by_position.setdefault(position, []).append(candidate)
 
@@ -223,7 +225,7 @@ def _coalesce_retraced_segments(
     for segment in sorted(segments, key=lambda item: item.observation_id):
         if segment.observation_id in consumed:
             continue
-        position = _primitive_position(segment)
+        position = position_by_observation_id.get(segment.observation_id)
         matches = []
         if position is not None:
             drawing_index, primitive_index = position
