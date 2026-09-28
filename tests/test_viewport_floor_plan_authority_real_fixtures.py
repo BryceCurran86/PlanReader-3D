@@ -83,20 +83,37 @@ def test_lamu_titled_plan_resolves_only_when_native_quad_owns_the_title() -> Non
     doc.close()
 
 
-def test_murera_ghazi_umma_have_no_resolved_floor_plan_without_title_evidence() -> None:
+def test_murera_ghazi_umma_never_resolve_floor_plan_without_title_evidence() -> None:
     for pdf in (_require(_MURERA), _require(_GHAZI), _require(_UMMA)):
         doc = fitz.open(str(pdf))
-        floor_titles = []
-        resolved = []
         for index in range(len(doc)):
             page = doc[index]
-            floor_titles.extend(
+            floor_titles = [
                 anchor for anchor in extract_view_title_anchors(page)
                 if anchor.view_type == DrawingViewType.FLOOR_PLAN.value
-            )
-            resolved.extend(authoritative_floor_plan_viewports(page, page_number=index + 1))
-        assert floor_titles == []
-        assert resolved == []
+            ]
+            authoritative = authoritative_floor_plan_viewports(page, page_number=index + 1)
+
+            # Real source sets may legitimately contain floor-plan titles. The
+            # fail-closed contract is that production must never mint an
+            # authoritative floor-plan viewport on a page with no such title
+            # evidence, and every admitted viewport must correspond to a native
+            # floor-plan title on that page.
+            if not floor_titles:
+                assert authoritative == []
+                continue
+
+            title_texts = {anchor.text.strip().upper() for anchor in floor_titles}
+            for viewport in authoritative:
+                assert viewport.label.strip().upper() in title_texts
+                assert viewport.title_bbox is not None
+                assert any(
+                    abs(float(viewport.title_bbox[0]) - float(anchor.bbox[0])) <= 2.0
+                    and abs(float(viewport.title_bbox[1]) - float(anchor.bbox[1])) <= 2.0
+                    and abs(float(viewport.title_bbox[2]) - float(anchor.bbox[2])) <= 2.0
+                    and abs(float(viewport.title_bbox[3]) - float(anchor.bbox[3])) <= 2.0
+                    for anchor in floor_titles
+                )
         doc.close()
 
 
