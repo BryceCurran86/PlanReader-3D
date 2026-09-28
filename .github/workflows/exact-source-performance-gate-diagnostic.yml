@@ -1,0 +1,46 @@
+name: Exact Source Performance Gate Diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  exact-source-perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download exact official sources
+        run: |
+          curl -L --fail --retry 3 -o /tmp/lamu.pdf "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          curl -L --fail --retry 3 -o /tmp/murera.pdf "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          echo "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  /tmp/lamu.pdf" | sha256sum -c -
+          echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  /tmp/murera.pdf" | sha256sum -c -
+      - name: Prepare baseline worktree
+        run: git worktree add /tmp/baseline 3a0de480a1f06c5a4044a3efd707588a4409c678
+      - name: Profile Lamu baseline/current
+        run: |
+          PYTHONPATH=/tmp/baseline python scripts/profile_exact_source_perf_gate.py --repo /tmp/baseline --pdf /tmp/lamu.pdf --pages 41-45 --label lamu-baseline | tee /tmp/lamu-baseline.jsonl
+          PYTHONPATH=$GITHUB_WORKSPACE python scripts/profile_exact_source_perf_gate.py --repo $GITHUB_WORKSPACE --pdf /tmp/lamu.pdf --pages 41-45 --label lamu-current | tee /tmp/lamu-current.jsonl
+      - name: Profile Murera baseline/current
+        run: |
+          PYTHONPATH=/tmp/baseline python scripts/profile_exact_source_perf_gate.py --repo /tmp/baseline --pdf /tmp/murera.pdf --pages 219-238 --label murera-baseline | tee /tmp/murera-baseline.jsonl
+          PYTHONPATH=$GITHUB_WORKSPACE python scripts/profile_exact_source_perf_gate.py --repo $GITHUB_WORKSPACE --pdf /tmp/murera.pdf --pages 219-238 --label murera-current | tee /tmp/murera-current.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-source-performance-gate
+          path: |
+            /tmp/lamu-baseline.jsonl
+            /tmp/lamu-current.jsonl
+            /tmp/murera-baseline.jsonl
+            /tmp/murera-current.jsonl
