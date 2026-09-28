@@ -60,6 +60,7 @@ a false combined wall or silently disappearing.
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from pb_geometry_takeoff_model import MeasurementAuthorityType
@@ -151,6 +152,56 @@ def _junction_by_node_idx(
     return mapping
 
 
+def _canonical_non_simple_points(
+    edge_ids: Set[str],
+    edges_by_id: Dict[str, Dict[str, Any]],
+) -> List[Tuple[float, float]]:
+    """Deterministic, content-derived point list for a non-simple chain.
+
+    A non-simple chain (a closed loop or branch, typically the same line drawn
+    twice -- once whole and once fragmented -- so both copies union into one
+    group) has no single traversal. The point list must still be a pure
+    function of the chain's own edge geometry: it may not depend on set
+    iteration order (the interpreter's string-hash seed), on edge-id
+    numbering, or on which endpoint a source primitive happened to start at,
+    and it may not silently drop geometry.
+
+    Every distinct edge endpoint is kept, ordered by its projection onto the
+    chain's own extent axis (its two most distant endpoints, lexicographically
+    first pair on ties) with the point itself breaking projection ties. A line
+    drawn twice therefore collapses to exactly the fingerprint of that line
+    drawn once. The result stays flagged non-simple by the caller; this only
+    makes it replay-stable and geometry-faithful.
+    """
+    unique_points = sorted(
+        {
+            (float(edges_by_id[edge_id][x_key]), float(edges_by_id[edge_id][y_key]))
+            for edge_id in edge_ids
+            for x_key, y_key in (("x1", "y1"), ("x2", "y2"))
+        }
+    )
+    if len(unique_points) < 2:
+        return list(unique_points)
+    best_pair = (unique_points[0], unique_points[1])
+    best_distance = -1.0
+    for index, first in enumerate(unique_points):
+        for second in unique_points[index + 1 :]:
+            distance = math.hypot(second[0] - first[0], second[1] - first[1])
+            if distance > best_distance:
+                best_distance = distance
+                best_pair = (first, second)
+    origin, far = best_pair
+    axis_x = far[0] - origin[0]
+    axis_y = far[1] - origin[1]
+    return sorted(
+        unique_points,
+        key=lambda point: (
+            (point[0] - origin[0]) * axis_x + (point[1] - origin[1]) * axis_y,
+            point,
+        ),
+    )
+
+
 def _order_chain_path(
     edge_ids: Set[str],
     edges_by_id: Dict[str, Dict[str, Any]],
@@ -185,13 +236,9 @@ def _order_chain_path(
         # Degenerate (closed loop, or a branch that should be impossible
         # given the merge rules above) -- best-effort fallback, flagged by
         # the caller via is_simple_path=False rather than raising.
-        points: List[Tuple[float, float]] = []
         start = min(adjacency)
-        for edge_id in edge_ids:
-            edge = edges_by_id[edge_id]
-            points.append((edge["x1"], edge["y1"]))
         end = max(adjacency)
-        return points, start, end, False
+        return _canonical_non_simple_points(edge_ids, edges_by_id), start, end, False
 
     start_node, end_node = endpoints
     points = [(node_lookup[start_node]["x"], node_lookup[start_node]["y"])]
