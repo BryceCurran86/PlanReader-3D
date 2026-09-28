@@ -207,3 +207,27 @@ def test_live_gross_wall_public_interface_has_no_height_or_area_truth_inputs() -
         "scale",
     }
     assert not (forbidden & set(signature.parameters))
+
+
+
+def test_live_gross_wall_reuses_upstream_wall_authority(monkeypatch) -> None:
+    source, wall_opening, physical_void = _one_page_chain()
+
+    def forbidden_rebuild(*args, **kwargs):
+        raise AssertionError("gross composition rebuilt physical wall candidates")
+
+    monkeypatch.setattr(
+        "pb_live_gross_wall_geometry_composition."
+        "PhysicalWallCandidateProducer.from_source_visibility_producer",
+        forbidden_rebuild,
+    )
+
+    composition = compose_live_gross_wall_geometry(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+        physical_void_composition=physical_void,
+    )
+
+    assert composition.physical_wall_candidate_authority is (
+        wall_opening.physical_wall_candidate_authority
+    )
