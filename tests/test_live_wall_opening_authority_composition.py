@@ -162,3 +162,69 @@ def test_composer_does_not_materialize_unselected_wall_page() -> None:
         composition.opening_universe_results["2"].record.decision_scope_id
         == "wall-source:page-2"
     )
+
+
+
+def test_composer_refreshes_snapshot_after_wall_raster_augmentation(monkeypatch) -> None:
+    source, published = _ingest(_host_fixture_pdf(), "host-composition-refresh")
+
+    original_snapshot_id = published.snapshot.snapshot_id
+    original_from_source = (
+        __import__(
+            "pb_live_wall_opening_authority_composition",
+            fromlist=["PhysicalWallCandidateProducer"],
+        ).PhysicalWallCandidateProducer.from_source_visibility_producer
+    )
+    seen: dict[str, str] = {}
+
+    def wrapped_from_source_visibility_producer(
+        source_visibility_producer,
+        *,
+        page_ids=None,
+    ):
+        producer = original_from_source(
+            source_visibility_producer,
+            page_ids=page_ids,
+        )
+        refreshed = source_visibility_producer.published_snapshot_for_revision(
+            published.revision.revision_id
+        )
+        assert refreshed is not None
+        seen["snapshot_id"] = refreshed.snapshot.snapshot_id
+        return producer
+
+    monkeypatch.setattr(
+        "pb_live_wall_opening_authority_composition."
+        "PhysicalWallCandidateProducer.from_source_visibility_producer",
+        wrapped_from_source_visibility_producer,
+    )
+
+    composition = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+
+    refreshed = source.published_snapshot_for_revision(
+        published.revision.revision_id
+    )
+    assert refreshed is not None
+    assert seen["snapshot_id"] == refreshed.snapshot.snapshot_id
+    assert composition.semantic_enumeration_result.snapshot_id == (
+        refreshed.snapshot.snapshot_id
+    )
+    assert composition.opening_universe_result.snapshot_id == (
+        refreshed.snapshot.snapshot_id
+    )
+    for trace in composition.wall_scopes:
+        selector = composition.physical_wall_candidate_authority.selector_for_decision_scope(
+            document_id=refreshed.revision.document_id,
+            revision_id=refreshed.revision.revision_id,
+            source_sha256=refreshed.revision.source_sha256,
+            snapshot_id=refreshed.snapshot.snapshot_id,
+            page_id=trace.page_id,
+            decision_scope_id=f"wall-source:page-{trace.page_id}",
+        )
+        assert selector is not None
+    if refreshed.snapshot.snapshot_id != original_snapshot_id:
+        assert composition.opening_universe_result.snapshot_id != original_snapshot_id
