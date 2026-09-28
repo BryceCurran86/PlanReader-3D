@@ -56,6 +56,12 @@ def test_matches_original_with_conflicts_duplicates_order_and_transforms(angle, 
         _segment("f", 3, 1),
         _segment("g", 3, 1, (10.0, 0.0), (0.0, 0.0)),
         _segment("h", 3, 9, (10.0, 0.0), (0.0, 0.0)),
+        # Adjacent but same direction must remain distinct.
+        _segment("same-dir-a", 5, 10, (0.0, 5.0), (10.0, 5.0)),
+        _segment("same-dir-b", 5, 11, (0.0, 5.0), (10.0, 5.0)),
+        # Exact reverse geometry but non-adjacent primitive positions must remain distinct.
+        _segment("non-adj-a", 6, 20, (0.0, 10.0), (10.0, 10.0)),
+        _segment("non-adj-b", 6, 22, (10.0, 10.0), (0.0, 10.0)),
         replace(_segment("raster", 4, 1), source_primitive_ref="visible:raster_segment:1"),
     ]
     def point(p):
