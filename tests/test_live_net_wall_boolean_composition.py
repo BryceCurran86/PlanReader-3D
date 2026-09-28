@@ -80,24 +80,27 @@ def test_net_wall_never_relabels_unresolved_gross_geometry_as_net() -> None:
 
     assert composition.status is EvidenceResolutionStatus.ABSTAINED
     assert LIVE_NET_WALL_PARTIAL in composition.reason_codes
-    assert len(composition.traces) == 1
+    assert composition.traces
 
-    trace = composition.traces[0]
-    assert trace.target_scope_id == TARGET_ID
-    assert trace.status is EvidenceResolutionStatus.ABSTAINED
-    assert NET_WALL_GROSS_UNRESOLVED in trace.reason_codes
-    assert trace.record_id is None
-    assert trace.gross_area_m2 is None
-    assert trace.void_union_area_m2 is None
-    assert trace.net_area_m2 is None
+    # Every source-owned wall target must remain fail-closed when gross
+    # geometry is unresolved. Additional repaired representatives may add
+    # traces, but none may be relabelled as net quantity.
+    for trace in composition.traces:
+        assert trace.target_scope_id == TARGET_ID
+        assert trace.status is EvidenceResolutionStatus.ABSTAINED
+        assert NET_WALL_GROSS_UNRESOLVED in trace.reason_codes
+        assert trace.record_id is None
+        assert trace.gross_area_m2 is None
+        assert trace.void_union_area_m2 is None
+        assert trace.net_area_m2 is None
 
-    selector = composition.net_wall_selectors[
-        (trace.physical_wall_id, TARGET_ID)
-    ]
-    authority = composition.net_wall_authorities[trace.page_id]
-    replay = authority.resolve(selector)
-    assert replay.status is EvidenceResolutionStatus.ABSTAINED
-    assert replay.record is None
+        selector = composition.net_wall_selectors[
+            (trace.physical_wall_id, TARGET_ID)
+        ]
+        authority = composition.net_wall_authorities[trace.page_id]
+        replay = authority.resolve(selector)
+        assert replay.status is EvidenceResolutionStatus.ABSTAINED
+        assert replay.record is None
 
 
 def test_net_wall_composer_accepts_no_geometry_or_quantity_truth_inputs() -> None:
