@@ -37,6 +37,8 @@ jobs:
           from pb_source_observation_authority import ObservationSelector
           from pb_physical_wall_candidate_authority import (
               PhysicalWallCandidateProducer,
+              PhysicalWallCandidateSelector,
+              _assemble_scope_result,
               _source_page_segments,
               _decision_scope_id,
           )
@@ -101,7 +103,7 @@ jobs:
           target_records=tuple(by_id[x] for x in target_members)
           same_separations=_positive_same_separations(by_id,scope.equivalence)
 
-          page_segments,_,_,_=_source_page_segments(
+          page_segments,page_observation_ids,page_width,page_height=_source_page_segments(
               source_producer=source,
               published=pub,
               source_bytes=payload,
@@ -169,71 +171,82 @@ jobs:
                       ),
                   })
 
-          # Cross-scope diagnostic: map every member of the already-resolved
-          # target viewport component to a complete page-wide producer-owned
-          # wall topology through immutable source primitive identity.  This
-          # avoids rebuilding the viewport authority a second time and exposes
-          # all candidate mappings rather than selecting one target in the
-          # diagnostic.
-          from pb_wall_role_authority import WallRoleProducer, WallRoleSelector
+          # Cross-scope diagnostic: derive a complete page scope from the
+          # exact page segment set already replayed above.  This reuses the
+          # current immutable snapshot and avoids a second raster/wall producer.
+          from pb_source_wall_topology_authority import _derive_scope_records
 
-          page_walls=PhysicalWallCandidateProducer.from_source_visibility_producer(
-              source,page_ids=("54",)
-          ).authority()
-          page_roles=WallRoleProducer.from_source_topology(
-              physical_wall_candidate_authority=page_walls,
+          page_selector=PhysicalWallCandidateSelector(
+              document_id=pub.revision.document_id,
+              revision_id=pub.revision.revision_id,
+              source_sha256=pub.revision.source_sha256,
+              snapshot_id=pub.snapshot.snapshot_id,
+              page_id="54",
+              decision_scope_id=_decision_scope_id("54"),
           )
-          page_scopes=[
-              s for s in page_walls._scopes.values()
-              if s.scope_kind=="page" and s.page_id=="54"
-          ]
+          page_scope=_assemble_scope_result(
+              source_producer=source,
+              published=pub,
+              page_id="54",
+              selector=page_selector,
+              segments=page_segments,
+              source_observation_ids=page_observation_ids,
+              page_width=page_width,
+              page_height=page_height,
+              source_bytes=payload,
+          )
+          page_topology=_derive_scope_records(page_scope)
+          topology_by_wall={
+              evidence.physical_wall_id:evidence
+              for evidence in page_topology.values()
+          }
+
           page_rows=[]
           for viewport_rec in target_records:
               target_raw_ids=set(
                   str(x) for x in viewport_rec.physical_identity.source_primitive_ids
               )
               matches=[]
-              for page_scope in page_scopes:
-                  for rec in page_scope.records:
-                      raw_ids=set(
-                          str(x) for x in rec.physical_identity.source_primitive_ids
-                      )
-                      overlap=sorted(target_raw_ids & raw_ids)
-                      if not overlap:
-                          continue
-                      selector=WallRoleSelector(
-                          document_id=page_scope.document_id,
-                          revision_id=page_scope.revision_id,
-                          source_sha256=page_scope.source_sha256,
-                          snapshot_id=page_scope.snapshot_id,
-                          page_id=page_scope.page_id,
-                          decision_scope_id=page_scope.decision_scope_id,
-                          physical_wall_id=rec.wall_candidate_id,
-                      )
-                      role=page_roles.publish(selector)
-                      matches.append({
-                          "page_scope_complete":page_scope.scope_complete,
-                          "page_scope_reasons":list(page_scope.reason_codes),
-                          "page_wall":rec.wall_candidate_id,
-                          "page_raw_ids":sorted(raw_ids),
-                          "target_overlap":overlap,
-                          "role_status":role.status.value,
-                          "role":role.record.role.value if role.record else None,
-                          "role_reasons":list(role.reason_codes),
-                      })
+              for rec in page_scope.records:
+                  raw_ids=set(
+                      str(x) for x in rec.physical_identity.source_primitive_ids
+                  )
+                  overlap=sorted(target_raw_ids & raw_ids)
+                  if not overlap:
+                      continue
+                  topo=topology_by_wall.get(rec.wall_candidate_id)
+                  role=None
+                  role_status="abstained"
+                  role_reason=None
+                  if topo is not None:
+                      if topo.is_ambiguous:
+                          role_reason=topo.ambiguity_reason
+                      elif topo.bounds_exterior and topo.enclosed_space_count==1:
+                          role="external"
+                          role_status="corroborated"
+                      elif (not topo.bounds_exterior) and topo.enclosed_space_count==2:
+                          role="internal"
+                          role_status="corroborated"
+                      else:
+                          role_reason="topology_proposition_unresolved"
+                  matches.append({
+                      "page_wall":rec.wall_candidate_id,
+                      "page_raw_ids":sorted(raw_ids),
+                      "target_overlap":overlap,
+                      "role_status":role_status,
+                      "role":role,
+                      "role_reason":role_reason,
+                  })
               page_rows.append({
                   "viewport_wall":viewport_rec.wall_candidate_id,
                   "viewport_raw_ids":sorted(target_raw_ids),
                   "matches":matches,
               })
           print("ITEM19B_CROSS_SCOPE_ROLE "+json.dumps({
-              "page_scope_count":len(page_scopes),
-              "page_scopes":[{
-                  "scope":s.decision_scope_id,
-                  "complete":s.scope_complete,
-                  "reasons":list(s.reason_codes),
-                  "records":len(s.records),
-              } for s in page_scopes],
+              "page_scope_complete":page_scope.scope_complete,
+              "page_scope_reasons":list(page_scope.reason_codes),
+              "page_record_count":len(page_scope.records),
+              "page_topology_count":len(page_topology),
               "viewport_component_mappings":page_rows,
           },sort_keys=True))
 
