@@ -26,6 +26,7 @@ from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_pdf_text_integrity_authority import TEXT_GLYPH_MAPPING_UNVERIFIED
 from pb_portable_raster_ocr_authority import MockOCRBackend
 from pb_raster_text_corroboration_authority import (
     RasterTextCorroborationProducer,
@@ -329,6 +330,44 @@ def _candidate(cluster: Sequence[_Word]):
     }
 
 
+def _glyph_only_separator_receipt(native, word: _Word) -> bool:
+    """Allow a native x/× receipt only as dimension-separator structure.
+
+    The separator never authorizes a number, family, material or subtype.
+    This narrow fallback exists because a tiny standalone multiplication glyph
+    can be producer-visible yet too small for exact-word raster OCR.  Every
+    surrounding semantic token remains independently text-integrity/raster
+    corroborated.
+
+    Fail closed unless glyph mapping is the *only* unresolved integrity
+    condition and the receipt exactly replays the producer-owned word,
+    partition, geometry and execution interval.
+    """
+    raw = str(word.raw_text or "").strip().lower()
+    if raw not in {"x", "×"}:
+        return False
+    receipt = getattr(native, "receipt", None)
+    if (
+        native.status is not EvidenceResolutionStatus.ABSTAINED
+        or receipt is None
+        or tuple(native.reason_codes) != (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+        or tuple(receipt.reason_codes) != (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+        or str(receipt.raw_text or "").strip().lower() != raw
+        or str(receipt.source_partition_id) != str(word.source_partition_id)
+    ):
+        return False
+    try:
+        geometry = tuple(float(value) for value in receipt.geometry)
+    except (TypeError, ValueError):
+        return False
+    if geometry != tuple(float(value) for value in word.geometry):
+        return False
+    return _receipt_interval(receipt) == (
+        word.sequence_start,
+        word.sequence_end,
+    )
+
+
 def _bbox_union(words: Sequence[_Word]):
     return (
         min(w.geometry[0] for w in words),
@@ -450,6 +489,24 @@ class OpeningDetailDefinitionProducer:
                 receipt_id=native.receipt.receipt_id,
                 trusted_text=str(native.trusted_text),
                 authority_kind="native_text_integrity",
+                authority_record_id=native.receipt.receipt_id,
+                sequence_start=word.sequence_start,
+                sequence_end=word.sequence_end,
+                geometry=word.geometry,
+            )
+
+        # A standalone multiplication glyph is syntax, not semantic text.
+        # Permit its producer-owned receipt as separator structure only when
+        # glyph mapping is the sole unresolved integrity condition.  The two
+        # unit-bearing dimensions and all opening semantics are still required
+        # to pass the normal trusted-word path below/above.
+        if _glyph_only_separator_receipt(native, word):
+            assert native.receipt is not None
+            return OpeningDetailWordEvidence(
+                observation_id=word.observation_id,
+                receipt_id=native.receipt.receipt_id,
+                trusted_text=str(native.receipt.raw_text),
+                authority_kind="native_dimension_separator_structure",
                 authority_record_id=native.receipt.receipt_id,
                 sequence_start=word.sequence_start,
                 sequence_end=word.sequence_end,
