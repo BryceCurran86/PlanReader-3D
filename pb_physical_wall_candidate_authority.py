@@ -691,27 +691,16 @@ def _all_viewports(page: fitz.Page, *, page_number: int) -> Optional[list]:
         return None
 
 
-def _scope_boundary_reason(
+def _scope_boundary_reason_from_viewports(
     wall: WallCandidate,
     *,
-    page: fitz.Page,
-    page_number: int,
+    all_viewports,
     page_width: float,
     page_height: float,
 ) -> Optional[str]:
-    """Classify this wall's scope-completeness boundary state.
-
-    Returns ``None`` when every dangling end is a RESOLVED_INTERIOR_TERMINUS
-    (either no dangling end exists at all, or every dangling end sits
-    strictly inside both the page and any containing RESOLVED viewport).
-    Otherwise returns the specific reason code for the first problem found:
-    PAGE boundary, VIEWPORT boundary, or unresolved scope bounds.
-    """
     dangling = _dangling_ends(wall)
     if not dangling:
         return None
-
-    all_viewports = _all_viewports(page, page_number=page_number)
 
     for point in dangling:
         if _on_rect_boundary(point, x0=0.0, y0=0.0, x1=page_width, y1=page_height):
@@ -752,6 +741,34 @@ def _scope_boundary_reason(
             return PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY
 
     return None
+
+
+def _scope_boundary_reason(
+    wall: WallCandidate,
+    *,
+    page: fitz.Page,
+    page_number: int,
+    page_width: float,
+    page_height: float,
+) -> Optional[str]:
+    """Classify this wall's scope-completeness boundary state.
+
+    Returns ``None`` when every dangling end is a RESOLVED_INTERIOR_TERMINUS
+    (either no dangling end exists at all, or every dangling end sits
+    strictly inside both the page and any containing RESOLVED viewport).
+    Otherwise returns the specific reason code for the first problem found:
+    PAGE boundary, VIEWPORT boundary, or unresolved scope bounds.
+
+    This compatibility wrapper performs segmentation once for a standalone
+    call. Page-scope assembly precomputes the same immutable segmentation result
+    once and reuses it across all wall candidates.
+    """
+    return _scope_boundary_reason_from_viewports(
+        wall,
+        all_viewports=_all_viewports(page, page_number=page_number),
+        page_width=page_width,
+        page_height=page_height,
+    )
 
 
 def _viewport_scope_boundary_reason(
@@ -1917,12 +1934,16 @@ def _assemble_scope_result(
     boundary_pdf = fitz.open(stream=source_bytes, filetype="pdf")
     try:
         boundary_page = boundary_pdf.load_page(int(page_id) - 1)
+        page_viewports = (
+            _all_viewports(boundary_page, page_number=int(page_id))
+            if viewport is None
+            else None
+        )
         for wall in ordered_walls:
             if viewport is None:
-                reason = _scope_boundary_reason(
+                reason = _scope_boundary_reason_from_viewports(
                     wall,
-                    page=boundary_page,
-                    page_number=int(page_id),
+                    all_viewports=page_viewports,
                     page_width=page_width,
                     page_height=page_height,
                 )
@@ -1999,10 +2020,14 @@ def _build_scope_result(
         decision_scope_id=scope_id,
     )
     page_number = int(page_id)
+    # Page-wide wall authority is page-local. A scoped native ingestion hashes
+    # and inventories the complete immutable PDF while decoding only the addressed
+    # source pages, so coverage.state is intentionally "partial" for that mode.
+    # Require this page itself to be decoded successfully; unrelated pages must
+    # not block an otherwise authenticated page scope.
     if (
-        published.coverage.state != "complete"
-        or published.coverage.failed_pages
-        or page_number not in published.coverage.decoded_pages
+        page_number not in published.coverage.decoded_pages
+        or page_number in published.coverage.failed_pages
     ):
         return _blocked(selector, PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
 

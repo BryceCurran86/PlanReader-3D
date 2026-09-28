@@ -166,14 +166,21 @@ def compose_live_gross_wall_geometry(
             reason_codes=(LIVE_GROSS_WALL_UNAVAILABLE,),
         )
 
-    # Build the complete decoded-page candidate universe. This may add
-    # producer-owned raster evidence on pages that had no usable native vectors.
-    # Never mix a newly advanced snapshot with already-sealed opening records.
-    wall_candidate_producer = (
-        PhysicalWallCandidateProducer.from_source_visibility_producer(
-            source_visibility_producer
-        )
+    # Reuse the exact sealed wall authority that the upstream wall/opening
+    # composition already authenticated for this producer snapshot. Rebuilding
+    # PhysicalWallCandidateProducer here repeats raster/topology work and can
+    # advance or simply recompute the same source-owned wall universe at high
+    # cost. The exact lineage and page-scope checks below still fail closed if
+    # the upstream authority does not match the current producer snapshot.
+    wall_candidate_authority = (
+        wall_opening_composition.physical_wall_candidate_authority
     )
+    if type(wall_candidate_authority) is not PhysicalWallCandidateAuthority:
+        return _blocked(
+            revision_id=revision_id,
+            reason_codes=(LIVE_GROSS_WALL_UPSTREAM_INCOMPLETE,),
+        )
+
     published_after = source_visibility_producer.published_snapshot_for_revision(
         revision_id
     )
@@ -200,8 +207,6 @@ def compose_live_gross_wall_geometry(
             revision_id=revision_id,
             reason_codes=(LIVE_GROSS_WALL_UPSTREAM_INCOMPLETE,),
         )
-
-    wall_candidate_authority = wall_candidate_producer.authority()
 
     # Build the complete wall-equivalence universe for the exact source pages
     # selected by the upstream live wall/opening composition. A downstream

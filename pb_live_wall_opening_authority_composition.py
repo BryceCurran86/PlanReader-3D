@@ -156,6 +156,23 @@ def compose_live_wall_opening_authority(
         source_visibility_producer,
         page_ids=selected_pages,
     )
+
+    # Wall-candidate materialization may legitimately augment the producer-owned
+    # source snapshot with raster-visible segments. Any selector built after
+    # that point must use the refreshed snapshot lineage; otherwise the wall
+    # authority is keyed to the new snapshot while downstream selectors still
+    # address the stale pre-augmentation snapshot and fail closed.
+    refreshed = source_visibility_producer.published_snapshot_for_revision(revision_id)
+    if refreshed is None:
+        raise ValueError(LIVE_WALL_OPENING_COMPOSITION_UNAVAILABLE)
+    if (
+        refreshed.revision.document_id != published.revision.document_id
+        or refreshed.revision.revision_id != published.revision.revision_id
+        or refreshed.revision.source_sha256 != published.revision.source_sha256
+    ):
+        raise ValueError(LIVE_WALL_OPENING_COMPOSITION_UNAVAILABLE)
+    published = refreshed
+
     wall_authority = wall_producer.authority()
     host_universe_authority = (
         OpeningHostWallUniverseProducer.from_physical_wall_candidate_authority(
