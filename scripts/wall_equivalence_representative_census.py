@@ -65,16 +65,17 @@ def _double_face_representatives(identities_by_id, representatives):
 
     Returns (genuine, marginal).
 
-    ``genuine`` is the signature of two faces bounding one wall body: a
-    parallel pair separated within the plausible band whose longitudinal
-    overlap is meaningful, i.e. above the snap tolerance AND covering most of
-    the shorter face. Any entry here is a real double-publication defect.
+    ``genuine`` is a conservative potential double-face signature:
+    parallel published representatives whose longitudinal overlap is
+    meaningful.  This read-only census has no producer-owned physical scale,
+    so it deliberately applies no absolute source-space separation cutoff.
 
-    ``marginal`` is a parallel pair inside the band whose overlap is at or
-    below the snap tolerance -- typically adjacent hatch strokes clipping
-    each other's ends. Reported for completeness, not a face pair.
+    ``marginal`` is a parallel pair whose overlap is at or below the snap
+    tolerance -- typically adjacent hatch strokes clipping each other's ends.
+    Reported for completeness, not a face pair.
     """
     band = max_plausible_wall_body_separation_pt(None)
+    assert band is None
     genuine = []
     marginal = []
     reps = sorted(representatives)
@@ -99,7 +100,7 @@ def _double_face_representatives(identities_by_id, representatives):
                     if relation is None:
                         continue
                     overlap, separation = relation
-                    if overlap <= 0.0 or not (0.0 < separation <= band):
+                    if overlap <= 0.0 or separation <= 0.0:
                         continue
                     shorter = min(_seg_len(a), _seg_len(b)) or 1.0
                     fraction = overlap / shorter
