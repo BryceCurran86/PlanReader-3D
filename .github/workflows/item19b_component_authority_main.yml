@@ -63,9 +63,13 @@ jobs:
           )
 
           t0=time.perf_counter()
-          walls=PhysicalWallCandidateProducer.from_authenticated_viewports(
-              source,page_ids=("54",)
-          ).authority()
+          walls=(
+              PhysicalWallCandidateProducer
+              .from_source_visibility_with_authenticated_viewports(
+                  source,page_ids=("54",)
+              )
+              .authority()
+          )
           t1=time.perf_counter()
           component_producer=WallComponentCompletenessProducer.from_authorities(
               source_visibility_producer=source,
