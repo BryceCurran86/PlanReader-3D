@@ -1,13 +1,12 @@
 """Live source-owned physical external net-wall integration.
 
 This is the extractor-facing composition seam for perimeter walling. It ingests
-the immutable PDF bytes through SourceVisibilityProducer, replays the complete
-wall/opening authority chain, composes gross whole-wall geometry and source-owned
+immutable PDF bytes through SourceVisibilityProducer, replays the complete
+wall/opening authority chain, composes gross whole-wall geometry plus source-owned
 whole-wall roles, and publishes physical external net wall area.
 
-Unlike finish/trade deductions, physical wall net geometry does not consume or
-invent ODTARGET/ODRULE policy declarations. A proven physical opening in a
-complete source opening universe is geometric absence from its proven host wall.
+No caller-supplied wall ids, areas, counts, expected quantities, benchmark truth,
+or trade deduction policy enters the numeric path.
 """
 from __future__ import annotations
 
@@ -22,18 +21,14 @@ from pb_live_external_physical_net_wall_publication import (
     LiveExternalPhysicalNetWallPublication,
     compose_live_external_physical_net_wall_publication,
 )
-from pb_live_gross_wall_geometry_composition import (
-    compose_live_gross_wall_geometry,
-)
+from pb_live_gross_wall_geometry_composition import compose_live_gross_wall_geometry
 from pb_live_physical_opening_void_composition import (
     compose_live_physical_opening_voids,
 )
 from pb_live_wall_opening_authority_composition import (
     compose_live_wall_opening_authority,
 )
-from pb_live_whole_wall_role_composition import (
-    compose_live_whole_wall_roles,
-)
+from pb_live_whole_wall_role_composition import compose_live_whole_wall_roles
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -86,7 +81,7 @@ def collect_live_physical_net_wall_claim(
     *,
     pages: Optional[Sequence[int]] = None,
 ) -> LivePhysicalNetWallClaim:
-    """Run the source-owned physical external wall chain for one PDF."""
+    """Run the complete source-owned physical external wall chain for one PDF."""
 
     path = Path(pdf_path)
     payload = path.read_bytes()
@@ -99,6 +94,7 @@ def collect_live_physical_net_wall_claim(
     finally:
         doc.close()
 
+    page_ids = tuple(str(index + 1) for index in selected)
     source = SourceVisibilityProducer(
         producer_method="live-physical-net-wall",
         producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
@@ -107,9 +103,8 @@ def collect_live_physical_net_wall_claim(
         document_id=document_id,
         source_bytes=payload,
         source_locator="memory://live-physical-net-wall-source.pdf",
-        page_ids=tuple(str(index + 1) for index in selected),
+        page_ids=page_ids,
     )
-    page_ids = tuple(str(index + 1) for index in selected)
 
     wall_opening = compose_live_wall_opening_authority(
         source_visibility_producer=source,
@@ -140,6 +135,8 @@ def collect_live_physical_net_wall_claim(
         publication.status is EvidenceResolutionStatus.CORROBORATED
         and evidence is not None
         and evidence.value is not None
+        and not evidence.abstained
+        and evidence.status == "corroborated"
     ):
         source_pages = tuple(
             sorted(
