@@ -1,0 +1,330 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from pb_migration_contracts import EvidenceResolutionStatus
+from pb_source_execution_callout_authority import _Word
+from pb_opening_detail_definition_authority import (
+    _candidate,
+    _claim_norm,
+    _dimension_candidates,
+    _glyph_only_separator_receipt,
+    _norm,
+    _same_line_dimension_pair,
+)
+
+
+def _word(obs: str, text: str, seq: int, x: float | None = None) -> _Word:
+    # Synthetic words preserve source-execution order spatially unless a test
+    # supplies an explicit coordinate. Real detail authority requires both
+    # execution adjacency and same-row geometric adjacency.
+    x0 = float(seq * 12 if x is None else x)
+    return _Word(
+        observation_id=obs,
+        receipt_id=f"receipt-{obs}",
+        source_partition_id="partition",
+        raw_text=text,
+        geometry=(x0, 0.0, x0 + 10.0, 10.0),
+        sequence_start=seq,
+        sequence_end=seq,
+    )
+
+
+def test_window_detail_definition_requires_one_dimension_and_window_family() -> None:
+    cluster = (
+        _word("w", "2,900mm", 1),
+        _word("x", "x", 2),
+        _word("h", "900mm", 3),
+        _word("mat", "steel", 4),
+        _word("sub", "casement", 5),
+        _word("fam", "windows", 6),
+    )
+    result = _candidate(cluster)
+    assert result is not None
+    assert result["family"] == "window"
+    assert result["subtype"] == "casement"
+    assert result["material"] == "steel"
+    assert result["width_mm"] == 2900
+    assert result["height_mm"] == 900
+
+
+def test_door_detail_definition_is_type_metadata_not_count() -> None:
+    cluster = (
+        _word("w", "1,000mm", 1),
+        _word("x", "x", 2),
+        _word("h", "2,100mm", 3),
+        _word("mat", "timber", 4),
+        _word("sub", "batten", 5),
+        _word("fam", "door", 6),
+        _word("countish", "3", 7),
+        _word("nos", "nos.", 8),
+        _word("hinges", "hinges", 9),
+    )
+    result = _candidate(cluster)
+    assert result is not None
+    assert result["family"] == "door"
+    assert result["width_mm"] == 1000
+    assert result["height_mm"] == 2100
+    # Hinge count is not an opening count and does not participate.
+    assert {w.observation_id for w in result["required_words"]} == {
+        "w", "x", "h", "mat", "sub", "fam"
+    }
+
+
+def test_dimensions_without_opening_family_do_not_create_definition() -> None:
+    assert _candidate((
+        _word("w", "2900mm", 1),
+        _word("x", "x", 2),
+        _word("h", "900mm", 3),
+        _word("steel", "steel", 4),
+    )) is None
+
+
+def test_opening_family_without_dimensions_does_not_create_definition() -> None:
+    assert _candidate((
+        _word("steel", "steel", 1),
+        _word("casement", "casement", 2),
+        _word("window", "window", 3),
+    )) is None
+
+
+def test_competing_window_and_door_semantics_abstain() -> None:
+    assert _candidate((
+        _word("w", "2900mm", 1),
+        _word("x", "x", 2),
+        _word("h", "900mm", 3),
+        _word("window", "window", 4),
+        _word("door", "door", 5),
+    )) is None
+
+
+def test_two_dimension_propositions_in_one_execution_run_abstain() -> None:
+    assert _candidate((
+        _word("w1", "2900mm", 1),
+        _word("x1", "x", 2),
+        _word("h1", "900mm", 3),
+        _word("window", "window", 4),
+        _word("w2", "3000mm", 5),
+        _word("x2", "x", 6),
+        _word("h2", "900mm", 7),
+    )) is None
+
+
+def test_conflicting_materials_abstain() -> None:
+    assert _candidate((
+        _word("w", "2900mm", 1),
+        _word("x", "x", 2),
+        _word("h", "900mm", 3),
+        _word("window", "window", 4),
+        _word("steel", "steel", 5),
+        _word("timber", "timber", 6),
+    )) is None
+
+
+def test_conflicting_subtypes_abstain() -> None:
+    assert _candidate((
+        _word("w", "2900mm", 1),
+        _word("x", "x", 2),
+        _word("h", "900mm", 3),
+        _word("window", "window", 4),
+        _word("casement", "casement", 5),
+        _word("sliding", "sliding", 6),
+    )) is None
+
+
+def test_plausibility_bounds_reject_non_opening_dimension_chain() -> None:
+    assert _dimension_candidates((
+        _word("w", "10150mm", 1),
+        _word("x", "x", 2),
+        _word("h", "9850mm", 3),
+    )) == ()
+
+
+def test_duplicate_identical_detail_definitions_are_semantically_equal_not_instances() -> None:
+    left = _candidate((
+        _word("lw", "2900mm", 1),
+        _word("lx", "x", 2),
+        _word("lh", "900mm", 3),
+        _word("ls", "steel", 4),
+        _word("lc", "casement", 5),
+        _word("lf", "windows", 6),
+    ))
+    right = _candidate((
+        _word("rw", "2900mm", 10),
+        _word("rx", "x", 11),
+        _word("rh", "900mm", 12),
+        _word("rs", "steel", 13),
+        _word("rc", "casement", 14),
+        _word("rf", "windows", 15),
+    ))
+    assert left is not None and right is not None
+    assert {
+        key:left[key]
+        for key in ("family","subtype","material","width_mm","height_mm")
+    } == {
+        key:right[key]
+        for key in ("family","subtype","material","width_mm","height_mm")
+    }
+
+
+def test_text_claim_normalization_keeps_raster_corroboration_exact() -> None:
+    # Raster corroboration may normalize punctuation/case/thousands separators
+    # only; it may not reinterpret the native source token.
+    assert _claim_norm("2,900mm") == _claim_norm("2900MM")
+    assert _claim_norm("windows.") == _claim_norm("WINDOWS")
+    assert _claim_norm("2,900mm") != _claim_norm("3,000mm")
+    assert _claim_norm("windows") != _claim_norm("doors")
+
+
+def test_same_row_adjacent_dimensions_require_x_glyph_as_evidence() -> None:
+    first = _Word(
+        observation_id="w",
+        receipt_id="rw",
+        source_partition_id="partition",
+        raw_text="3,000mm",
+        geometry=(0.0, 0.0, 37.0, 10.0),
+        sequence_start=100,
+        sequence_end=104,
+    )
+    raw_x = _Word(
+        observation_id="x",
+        receipt_id="rx",
+        source_partition_id="partition",
+        raw_text="x",
+        geometry=(39.0, 0.0, 43.0, 10.0),
+        sequence_start=104,
+        sequence_end=104,
+    )
+    second = _Word(
+        observation_id="h",
+        receipt_id="rh",
+        source_partition_id="partition",
+        raw_text="900mm",
+        geometry=(45.0, 0.0, 75.0, 10.0),
+        sequence_start=105,
+        sequence_end=106,
+    )
+    dims = _dimension_candidates((first, raw_x, second))
+    assert dims == ((3000, 900, (first, raw_x, second)),)
+
+
+def test_adjacent_unitless_numbers_cannot_mint_opening_definition() -> None:
+    assert _candidate((
+        _word("a", "600", 1),
+        _word("b", "1200", 2),
+        _word("family", "window", 3),
+    )) is None
+
+
+def test_missing_separator_or_units_cannot_mint_opening_definition() -> None:
+    assert _candidate((
+        _word("a", "3000mm", 1),
+        _word("b", "900mm", 2),
+        _word("family", "window", 3),
+    )) is None
+    assert _candidate((
+        _word("a", "3000", 1),
+        _word("x", "x", 2),
+        _word("b", "900", 3),
+        _word("family", "window", 4),
+    )) is None
+
+
+def test_dimension_separator_cannot_borrow_other_partition() -> None:
+    a, x, b = (_word("a", "3000mm", 1), _word("x", "x", 2), _word("b", "900mm", 3))
+    from dataclasses import replace
+    x = replace(x, source_partition_id="unrelated-view")
+    assert _dimension_candidates((a, x, b)) == ()
+
+
+def test_numeric_tokens_on_different_rows_do_not_form_dimension_pair() -> None:
+    first = _Word(
+        observation_id="w",
+        receipt_id="rw",
+        source_partition_id="partition",
+        raw_text="3,000mm",
+        geometry=(0.0, 0.0, 37.0, 10.0),
+        sequence_start=1,
+        sequence_end=4,
+    )
+    second = _Word(
+        observation_id="h",
+        receipt_id="rh",
+        source_partition_id="partition",
+        raw_text="900mm",
+        geometry=(45.0, 20.0, 75.0, 30.0),
+        sequence_start=5,
+        sequence_end=6,
+    )
+    assert _same_line_dimension_pair(first, second) is False
+    assert _dimension_candidates((first, second)) == ()
+
+
+def test_far_apart_same_row_dimensions_do_not_form_detail_pair() -> None:
+    first = _Word(
+        observation_id="w",
+        receipt_id="rw",
+        source_partition_id="partition",
+        raw_text="3,000mm",
+        geometry=(0.0, 0.0, 37.0, 10.0),
+        sequence_start=1,
+        sequence_end=4,
+    )
+    second = _Word(
+        observation_id="h",
+        receipt_id="rh",
+        source_partition_id="partition",
+        raw_text="900mm",
+        geometry=(100.0, 0.0, 130.0, 10.0),
+        sequence_start=5,
+        sequence_end=6,
+    )
+    assert _same_line_dimension_pair(first, second) is False
+
+
+
+def test_glyph_only_x_receipt_is_separator_structure_only() -> None:
+    word = _Word(
+        observation_id="x",
+        receipt_id="receipt-x",
+        source_partition_id="partition",
+        raw_text="x",
+        geometry=(39.0, 0.0, 43.0, 10.0),
+        sequence_start=104,
+        sequence_end=104,
+    )
+    receipt = SimpleNamespace(
+        receipt_id="receipt-x",
+        raw_text="x",
+        source_partition_id="partition",
+        geometry=word.geometry,
+        reason_codes=("text_glyph_mapping_unverified",),
+        sequence_number=104,
+        trace_sequence_numbers=(),
+    )
+    native = SimpleNamespace(
+        status=EvidenceResolutionStatus.ABSTAINED,
+        reason_codes=("text_glyph_mapping_unverified",),
+        receipt=receipt,
+    )
+    assert _glyph_only_separator_receipt(native, word) is True
+
+    # The fallback cannot authorize arbitrary semantic text or a receipt with
+    # any additional integrity problem.
+    non_separator = _Word(
+        observation_id="steel",
+        receipt_id="receipt-steel",
+        source_partition_id="partition",
+        raw_text="steel",
+        geometry=word.geometry,
+        sequence_start=104,
+        sequence_end=104,
+    )
+    assert _glyph_only_separator_receipt(native, non_separator) is False
+
+    conflicting = SimpleNamespace(
+        status=native.status,
+        reason_codes=("text_glyph_mapping_unverified", "text_render_mode_untrusted"),
+        receipt=receipt,
+    )
+    assert _glyph_only_separator_receipt(conflicting, word) is False
