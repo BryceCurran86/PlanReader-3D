@@ -1,0 +1,32 @@
+name: TEST-ONLY Murera Cross-View Member Source Probe
+
+on:
+  pull_request:
+    branches: [fix/structural-registration-trust-boundary-v2]
+
+jobs:
+  murera-member-source-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download exact official Murera source
+        run: |
+          curl -L --fail --retry 3             -o /tmp/murera.pdf             "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  /tmp/murera.pdf" | sha256sum -c -
+      - name: Run source-only cross-view structural-member probe
+        run: |
+          PYTHONPATH=. python scripts/diag_murera_cross_view_member_source_probe.py             /tmp/murera.pdf             --start 219             --end 238             | tee /tmp/murera-cross-view-member-source-probe.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: murera-cross-view-member-source-probe
+          path: /tmp/murera-cross-view-member-source-probe.json
