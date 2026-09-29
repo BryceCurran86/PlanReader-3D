@@ -1320,7 +1320,7 @@ def _producer_opening_relation_overrides(
                 visible.status is not EvidenceResolutionStatus.CORROBORATED
                 or visible.observation is None
             ):
-                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+                continue
             if str(visible.observation.page_id) == str(page_id):
                 page_visible_rows.append((observation_id, visible.observation))
     else:
