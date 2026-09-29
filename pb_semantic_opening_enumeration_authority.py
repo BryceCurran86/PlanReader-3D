@@ -353,7 +353,15 @@ class SemanticOpeningEnumerationProducer:
             decision_scope_id=decision_scope_id,
         )
         cached_result = self._results.get(selector.key)
-        if cached_result is not None:
+        if (
+            cached_result is not None
+            and cached_result.record is not None
+            and cached_result.record.decision_scope_kind == decision_scope_kind
+            and (
+                decision_scope_kind == "document"
+                or tuple(cached_result.record.page_ids) == tuple(page_ids or ())
+            )
+        ):
             return cached_result
 
         coverage = published.coverage
