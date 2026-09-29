@@ -75,6 +75,83 @@ def _meta_key(page_id: int) -> str:
     return f"{SETTING_PREFIX}{int(page_id)}_meta"
 
 
+def _snapshot_manual_registration(app: Any, document_id: int) -> Dict[int, Dict[str, Any]]:
+    """Capture estimator-owned registration fields before a page re-render.
+
+    Full force reprocessing can delete and recreate page rows, so page id is
+    not a stable restoration key. PDF page number is stable within the same
+    source document and is therefore used only to carry the already-manual
+    registration state across that re-render.
+    """
+    out: Dict[int, Dict[str, Any]] = {}
+    rows = app.lquery(
+        "SELECT id,workspace_id,page_no,page_label,page_type,scale_text "
+        "FROM pages WHERE document_id=? ORDER BY page_no,id",
+        (int(document_id),),
+    )
+    for raw in rows:
+        row = dict(raw)
+        page_id = int(row.get("id") or 0)
+        workspace_id = int(row.get("workspace_id") or 0)
+        if not page_id or not workspace_id:
+            continue
+        if str(app.workspace_setting(
+            workspace_id, _manual_key(page_id), ""
+        )) != "1":
+            continue
+        out[int(row.get("page_no") or 0)] = {
+            "old_page_id": page_id,
+            "workspace_id": workspace_id,
+            "page_label": str(row.get("page_label") or ""),
+            "page_type": str(row.get("page_type") or "Other"),
+            "scale_text": str(row.get("scale_text") or ""),
+            "meta": str(app.workspace_setting(
+                workspace_id, _meta_key(page_id), "{}"
+            ) or "{}"),
+        }
+    return out
+
+
+def _restore_manual_registration(
+    app: Any,
+    document_id: int,
+    snapshot: Dict[int, Dict[str, Any]],
+) -> int:
+    if not snapshot:
+        return 0
+    rows = app.lquery(
+        "SELECT id,workspace_id,page_no FROM pages "
+        "WHERE document_id=? ORDER BY page_no,id",
+        (int(document_id),),
+    )
+    restored = 0
+    for raw in rows:
+        row = dict(raw)
+        page_no = int(row.get("page_no") or 0)
+        saved = snapshot.get(page_no)
+        if saved is None:
+            continue
+        page_id = int(row.get("id") or 0)
+        workspace_id = int(row.get("workspace_id") or saved["workspace_id"])
+        if not page_id or not workspace_id:
+            continue
+        app.lexecute(
+            "UPDATE pages SET page_label=?,page_type=?,scale_text=? WHERE id=?",
+            (
+                saved["page_label"],
+                saved["page_type"],
+                saved["scale_text"],
+                page_id,
+            ),
+        )
+        app.set_workspace_setting(workspace_id, _manual_key(page_id), "1")
+        app.set_workspace_setting(
+            workspace_id, _meta_key(page_id), saved["meta"]
+        )
+        restored += 1
+    return restored
+
+
 def _registration_input_signature(
     app: Any,
     *,
@@ -572,7 +649,9 @@ def apply(app: Any) -> None:
         return result
 
     def _processed(document_id: int, *args, **kwargs):
+        manual_snapshot = _snapshot_manual_registration(app, int(document_id))
         result = base_process(document_id, *args, **kwargs)
+        _restore_manual_registration(app, int(document_id), manual_snapshot)
         repair_document_registration(app, int(document_id))
         return result
 
