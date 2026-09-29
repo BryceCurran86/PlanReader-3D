@@ -22,10 +22,21 @@ Paths that add an observation to ``conflict_observation_ids`` in
   4. ``classify_disposition`` is CONFLICT
        a. ``ambiguous_physical_opening_candidates`` (observation is a member of
           more than one candidate)                 -> same label
-       b. ``snapshot_observation_integrity_failure`` -> ``source_observation_failure``
+       b. ``snapshot_observation_integrity_failure``: some observation of the
+          SNAPSHOT failed to resolve, which makes EVERY observation's
+          disposition a conflict            -> ``snapshot_observation_integrity_failure``
        c. anything else                            -> ``disposition_conflict_other``
   5. page candidate closure incomplete and the observation is both closure-
      unresolved and support of a proven opening   -> ``closure_unresolved_overlap_with_proven_opening``
+  6. two proven-opening records share a record id but are not equal (a
+     content-hash id makes this unreachable in practice).  The diagnostic does
+     not try to reproduce it: such an observation is reported ``unattributed``.
+
+The user-facing "source-observation failure" family is path 1 plus path 4b,
+kept as two labels because their causes differ (one observation vs the whole
+snapshot).  Closure is assessed only for pages that contain a diagnosed
+observation, seeded by the smallest diagnosed observation on the page; closure
+depends on the seed's page and lineage only (a test checks this).
 
 The record does not store which path fired, so this module RE-DERIVES it by
 asking the same public questions of the same producer-owned snapshot.  Nothing
@@ -71,6 +82,7 @@ SEMANTIC_CONFLICT_DIAGNOSTIC_SCHEMA_VERSION = "1.0.0"
 # Conflict provenance labels (diagnostic path labels, not evidence statuses).
 CONFLICT_PATH_AMBIGUOUS_CANDIDATES = AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES
 CONFLICT_PATH_SOURCE_OBSERVATION_FAILURE = "source_observation_failure"
+CONFLICT_PATH_SNAPSHOT_INTEGRITY_FAILURE = SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE
 CONFLICT_PATH_CLOSURE_UNRESOLVED_OVERLAP = (
     "closure_unresolved_overlap_with_proven_opening"
 )
@@ -80,11 +92,24 @@ CONFLICT_PATH_UNATTRIBUTED = "unattributed"
 CONFLICT_PATHS = (
     CONFLICT_PATH_AMBIGUOUS_CANDIDATES,
     CONFLICT_PATH_SOURCE_OBSERVATION_FAILURE,
+    CONFLICT_PATH_SNAPSHOT_INTEGRITY_FAILURE,
     CONFLICT_PATH_CLOSURE_UNRESOLVED_OVERLAP,
     CONFLICT_PATH_LINEAGE_MISMATCH,
     CONFLICT_PATH_DISPOSITION_CONFLICT_OTHER,
     CONFLICT_PATH_UNATTRIBUTED,
 )
+
+# The three families the investigation asks about.  Ties are reported, never broken.
+FAMILY_AMBIGUOUS_CANDIDATES = "ambiguous_physical_opening_candidates"
+FAMILY_SOURCE_OBSERVATION_FAILURE = "source_observation_failure"
+FAMILY_CLOSURE_UNRESOLVED_OVERLAP = "closure_unresolved_overlap_with_proven_opening"
+FAMILY_OTHER = "other"
+_PATH_FAMILY = {
+    CONFLICT_PATH_AMBIGUOUS_CANDIDATES: FAMILY_AMBIGUOUS_CANDIDATES,
+    CONFLICT_PATH_SOURCE_OBSERVATION_FAILURE: FAMILY_SOURCE_OBSERVATION_FAILURE,
+    CONFLICT_PATH_SNAPSHOT_INTEGRITY_FAILURE: FAMILY_SOURCE_OBSERVATION_FAILURE,
+    CONFLICT_PATH_CLOSURE_UNRESOLVED_OVERLAP: FAMILY_CLOSURE_UNRESOLVED_OVERLAP,
+}
 
 # How an ambiguous observation relates to the PROVEN openings on its page,
 # derived from each proven opening's public support set.
@@ -514,12 +539,14 @@ def _clusters(conflicts: Sequence[ConflictObservation]) -> tuple[ConflictCluster
     return tuple(sorted(clusters, key=lambda cluster: cluster.cluster_id))
 
 
-def _empty_diagnostic(reason: str) -> SemanticConflictDiagnostic:
+def _empty_diagnostic(
+    reason: str, *, status: Optional[str] = None, reason_codes: Iterable[str] = ()
+) -> SemanticConflictDiagnostic:
     return _build(
         {
             "semantic_record_id": None,
-            "semantic_status": None,
-            "semantic_reason_codes": (),
+            "semantic_status": status,
+            "semantic_reason_codes": _sorted_unique(reason_codes),
             "document_id": None,
             "revision_id": None,
             "source_sha256": None,
@@ -550,7 +577,6 @@ def diagnose_semantic_conflicts(
     *,
     source_visibility_producer: SourceVisibilityProducer,
     semantic_result: SemanticOpeningEnumerationResult,
-    physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
 ) -> SemanticConflictDiagnostic:
     """Explain the conflict and residual sets of one published semantic scope.
 
@@ -564,14 +590,14 @@ def diagnose_semantic_conflicts(
         raise TypeError("source_visibility_producer must be producer-owned")
     if not isinstance(semantic_result, SemanticOpeningEnumerationResult):
         raise TypeError("semantic_result must be a SemanticOpeningEnumerationResult")
-    if physical_opening_authority is not None and not isinstance(
-        physical_opening_authority, PhysicalOpeningAuthority
-    ):
-        raise TypeError("physical_opening_authority must be a PhysicalOpeningAuthority")
 
     record = semantic_result.record
     if record is None:
-        return _empty_diagnostic(UNAVAILABLE_SEMANTIC_RECORD_ABSENT)
+        return _empty_diagnostic(
+            UNAVAILABLE_SEMANTIC_RECORD_ABSENT,
+            status=str(semantic_result.status.value),
+            reason_codes=semantic_result.reason_codes,
+        )
 
     published = source_visibility_producer.published_snapshot_for_revision(
         record.revision_id
@@ -587,7 +613,10 @@ def diagnose_semantic_conflicts(
         )
 
     visibility = source_visibility_producer.authority()
-    physical = physical_opening_authority or PhysicalOpeningAuthority(visibility)
+    # A private authority over the producer's own visibility authority.  Only this
+    # object's memo caches are filled; no producer or shared authority is touched,
+    # and a caller cannot substitute an authority over different data.
+    physical = PhysicalOpeningAuthority(visibility)
     scope_kind = record.decision_scope_kind
     allowed_pages = {str(page) for page in record.page_ids}
     support_ids = set(record.opening_support_observation_ids)
@@ -716,7 +745,7 @@ def diagnose_semantic_conflicts(
                 if AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES in codes:
                     paths.add(CONFLICT_PATH_AMBIGUOUS_CANDIDATES)
                 elif SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE in codes:
-                    paths.add(CONFLICT_PATH_SOURCE_OBSERVATION_FAILURE)
+                    paths.add(CONFLICT_PATH_SNAPSHOT_INTEGRITY_FAILURE)
                 else:
                     paths.add(CONFLICT_PATH_DISPOSITION_CONFLICT_OTHER)
             elif (
@@ -811,7 +840,13 @@ def diagnose_semantic_conflicts(
                 paths.add(RESIDUAL_PATH_UNRESOLVED_DISPOSITION)
         page_id = evidence.page_id
         closure_flag = in_closure_unresolved(page_id, observation_id)
-        if closure_flag and observation_id not in support_ids:
+        residual_closure = closure_by_page.get(page_id) if page_id is not None else None
+        if (
+            closure_flag
+            and residual_closure is not None
+            and not residual_closure.candidate_universe_complete
+            and observation_id not in support_ids
+        ):
             paths.add(RESIDUAL_PATH_CLOSURE_UNRESOLVED)
         if not paths:
             paths.add(RESIDUAL_PATH_UNATTRIBUTED)
@@ -873,18 +908,28 @@ def collect_semantic_scope(
     *,
     document_id: str,
     pages: Optional[Sequence[int]] = None,
+    source_bytes: Optional[bytes] = None,
 ) -> tuple[SourceVisibilityProducer, SemanticOpeningEnumerationResult]:
     """Publish the same semantic scope ``collect_item35_authority_shadow`` publishes.
 
     Mirrors the shadow's source -> semantic steps (same producer method/version,
     same scope-id formulas) so the record is identical to the shadow's; the
     completeness / view-class / count stages are not needed and not run.
-    ``pages`` are 0-based indexes, as in the shadow.
+    ``pages`` are 0-based indexes, as in the shadow.  ``source_bytes`` lets a
+    caller that already read (and hashed) the file pass exactly those bytes, so
+    the diagnosed content cannot differ from the hashed content.
     """
     path = Path(pdf_path)
-    payload = path.read_bytes()
+    payload = source_bytes if source_bytes is not None else path.read_bytes()
     if not payload:
         raise ValueError("source PDF is empty")
+    scoped_page_ids: tuple[str, ...] = ()
+    if pages is not None:
+        scoped_page_ids = tuple(
+            str(int(page_index) + 1) for page_index in sorted({int(v) for v in pages})
+        )
+        if not scoped_page_ids:
+            raise ValueError("pages must contain at least one page index")
     source = SourceVisibilityProducer(
         producer_method=SHADOW_PRODUCER_METHOD,
         producer_version=SHADOW_PRODUCER_VERSION,
@@ -903,11 +948,6 @@ def collect_semantic_scope(
             decision_scope_id=f"item35:document:{published.revision.revision_id}",
         )
         return source, result
-    scoped_page_ids = tuple(
-        str(int(page_index) + 1) for page_index in sorted({int(v) for v in pages})
-    )
-    if not scoped_page_ids:
-        raise ValueError("pages must contain at least one page index")
     published = source.augment_with_raster_visible_segments(
         published.revision.revision_id, page_ids=scoped_page_ids
     )
@@ -926,8 +966,11 @@ def collect_semantic_conflict_diagnostic(
     *,
     document_id: str,
     pages: Optional[Sequence[int]] = None,
+    source_bytes: Optional[bytes] = None,
 ) -> SemanticConflictDiagnostic:
-    source, result = collect_semantic_scope(pdf_path, document_id=document_id, pages=pages)
+    source, result = collect_semantic_scope(
+        pdf_path, document_id=document_id, pages=pages, source_bytes=source_bytes
+    )
     return diagnose_semantic_conflicts(
         source_visibility_producer=source, semantic_result=result
     )
@@ -955,9 +998,10 @@ def aggregate_semantic_conflict_diagnostics(
     diagnostics: Iterable[SemanticConflictDiagnostic],
 ) -> dict[str, Any]:
     """Deterministic, order-invariant tally.  Ties for the dominant path are kept."""
-    ordered = sorted(list(diagnostics), key=lambda item: getattr(item, "record_id", ""))
-    if not all(isinstance(item, SemanticConflictDiagnostic) for item in ordered):
+    items = list(diagnostics)
+    if not all(isinstance(item, SemanticConflictDiagnostic) for item in items):
         raise TypeError("diagnostics must be SemanticConflictDiagnostic instances")
+    ordered = sorted(items, key=lambda item: item.record_id)
 
     obs_paths: Counter = Counter()
     scope_paths: Counter = Counter()
@@ -981,7 +1025,8 @@ def aggregate_semantic_conflict_diagnostics(
     conflicts_total = residuals_total = 0
     scopes_with_conflict = 0
     unattributed = 0
-    involved_observation_ids = 0
+    family_counts: Counter = Counter()
+    family_scope_counts: Counter = Counter()
     openings_total = 0
     representative_unresolved_total = 0
     representative_codes: Counter = Counter()
@@ -997,13 +1042,16 @@ def aggregate_semantic_conflict_diagnostics(
         if diag.conflicts:
             scopes_with_conflict += 1
         seen_paths: set[str] = set()
+        seen_families: set[str] = set()
         pair_counter: Counter = Counter()
         for item in diag.conflicts:
             conflicts_total += 1
-            involved_observation_ids += 1
             for path in item.paths:
                 obs_paths[path] += 1
                 seen_paths.add(path)
+            for family in {_PATH_FAMILY.get(path, FAMILY_OTHER) for path in item.paths}:
+                family_counts[family] += 1
+                seen_families.add(family)
             if len(item.paths) == 1:
                 exclusive[item.paths[0]] += 1
             combos["+".join(item.paths)] += 1
@@ -1021,6 +1069,8 @@ def aggregate_semantic_conflict_diagnostics(
                 unattributed += 1
         for path in seen_paths:
             scope_paths[path] += 1
+        for family in seen_families:
+            family_scope_counts[family] += 1
         pair_shares.update(pair_counter.values())
         for cluster in diag.clusters:
             cluster_obs.append(len(cluster.observation_ids))
@@ -1058,7 +1108,10 @@ def aggregate_semantic_conflict_diagnostics(
         "semantic_status_counts": _sorted_counts(statuses),
         "semantic_record_reason_code_counts": _sorted_counts(record_codes),
         "conflict_observations_total": conflicts_total,
-        "conflict_observations_involved": involved_observation_ids,
+        "conflict_family_observation_counts": _sorted_counts(family_counts),
+        "conflict_family_scope_counts": _sorted_counts(family_scope_counts),
+        "dominant_conflict_families_by_observations": _dominant(family_counts),
+        "dominant_conflict_families_by_scopes": _dominant(family_scope_counts),
         "conflict_path_observation_counts": _sorted_counts(obs_paths),
         "conflict_path_scope_counts": _sorted_counts(scope_paths),
         "conflict_path_exclusive_observation_counts": _sorted_counts(exclusive),
@@ -1110,8 +1163,13 @@ __all__ = [
     "CONFLICT_PATH_CLOSURE_UNRESOLVED_OVERLAP",
     "CONFLICT_PATH_DISPOSITION_CONFLICT_OTHER",
     "CONFLICT_PATH_LINEAGE_MISMATCH",
+    "CONFLICT_PATH_SNAPSHOT_INTEGRITY_FAILURE",
     "CONFLICT_PATH_SOURCE_OBSERVATION_FAILURE",
     "CONFLICT_PATH_UNATTRIBUTED",
+    "FAMILY_AMBIGUOUS_CANDIDATES",
+    "FAMILY_CLOSURE_UNRESOLVED_OVERLAP",
+    "FAMILY_OTHER",
+    "FAMILY_SOURCE_OBSERVATION_FAILURE",
     "ConflictCluster",
     "ConflictObservation",
     "DispositionEvidence",

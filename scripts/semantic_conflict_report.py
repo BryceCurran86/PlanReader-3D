@@ -125,12 +125,21 @@ def build_report(
         else:
             try:
                 diagnostic = collect_semantic_conflict_diagnostic(
-                    pdf_path, document_id=document_id_for(payload), pages=pages
+                    pdf_path,
+                    document_id=document_id_for(payload),
+                    pages=pages,
+                    source_bytes=payload,  # the exact bytes that were hashed
                 )
             except Exception as exc:  # reported, never swallowed silently
                 entry["status"] = "error"
                 entry["error"] = f"{type(exc).__name__}: {exc}"[:500]
         if diagnostic is not None:
+            if diagnostic.semantic_record_id is None:
+                # The semantic authority published no record: report why, do not
+                # present the scope as a clean one.
+                entry["status"] = "semantic_record_absent"
+                entry["semantic_status"] = diagnostic.semantic_status
+                entry["semantic_reason_codes"] = list(diagnostic.semantic_reason_codes)
             entry["summary"] = aggregate_semantic_conflict_diagnostics([diagnostic])
             entry["examples"] = illustrative_examples(diagnostic, examples)
             if detail == "full":
@@ -138,10 +147,20 @@ def build_report(
         entries.append((digest, pdf_path.name, entry, diagnostic))
     entries.sort(key=lambda item: (item[0], item[1]))
     diagnostics = [diag for _, _, _, diag in entries if diag is not None]
+    statuses = [entry["status"] for _, _, entry, _ in entries]
     return {
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "diagnostic_schema_version": SEMANTIC_CONFLICT_DIAGNOSTIC_SCHEMA_VERSION,
         "entries": [entry for _, _, entry, _ in entries],
+        # The summary covers only entries that produced a diagnostic; this says
+        # how many did not, so a partial result cannot read as a complete one.
+        "coverage": {
+            "entries_total": len(statuses),
+            "entries_with_semantic_record": statuses.count("ok"),
+            "entries_without_semantic_record": statuses.count("semantic_record_absent"),
+            "entries_error": statuses.count("error"),
+            "entries_source_unavailable": statuses.count("source_unavailable"),
+        },
         "summary": aggregate_semantic_conflict_diagnostics(diagnostics),
     }
 
@@ -178,7 +197,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     else:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text, encoding="utf-8")
-    return 0
+    coverage = report["coverage"]
+    # Non-zero when any entry failed or could not be read, so a partial run is
+    # never mistaken for a complete one by a caller that only checks the exit code.
+    return 1 if coverage["entries_error"] or coverage["entries_source_unavailable"] else 0
 
 
 if __name__ == "__main__":

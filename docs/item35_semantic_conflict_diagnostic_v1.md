@@ -28,11 +28,16 @@ residual observation from the authorities' public results.
 | 2 | observation lineage differs from the scope | `lineage_mismatch` |
 | 3 | proven-opening record lineage / page differs | `lineage_mismatch` |
 | 4a | `classify_disposition` is `CONFLICT` with `ambiguous_physical_opening_candidates` (the observation belongs to more than one candidate) | `ambiguous_physical_opening_candidates` |
-| 4b | `classify_disposition` is `CONFLICT` with `snapshot_observation_integrity_failure` | `source_observation_failure` |
+| 4b | `classify_disposition` is `CONFLICT` with `snapshot_observation_integrity_failure`. This reason comes from resolving EVERY observation of the snapshot and collecting failures, so one failed observation makes every observation's disposition a conflict | `snapshot_observation_integrity_failure` (its own label: a snapshot-wide cause, not one observation's) |
 | 4c | any other `CONFLICT` disposition | `disposition_conflict_other` |
 | 5 | page candidate closure incomplete, and the observation is both closure-unresolved and support of a proven opening | `closure_unresolved_overlap_with_proven_opening` |
+| 6 | two proven-opening records share a record id but are not equal (record ids are content hashes, so this is unreachable in practice) | not reproduced; the observation is reported `unattributed` |
 
-The record does not keep the path.
+The record does not keep the path. The "source-observation failure" family the
+investigation asks about is paths 1 and 4b; aggregation reports both labels and
+also the three families (`ambiguous_physical_opening_candidates`,
+`source_observation_failure`, `closure_unresolved_overlap_with_proven_opening`)
+with ties preserved.
 
 ## What the diagnostic exposes
 
@@ -50,6 +55,25 @@ representative cannot re-prove existence.
 Derived relation for an ambiguous observation, from each proven opening's public
 support set: `shared_between_proven_openings` (two or more proven openings list
 it), `one_proven_opening_plus_competitor` (one does), `no_proven_opening`.
+
+## Scope of what is assessed
+
+* Page closure is assessed only for pages that contain a diagnosed (conflicting
+  or residual) observation, seeded by the smallest diagnosed observation on the
+  page. The producer seeds it with the first visible observation; closure depends
+  only on the seed's page and lineage, and a test checks that the result is
+  seed-independent. `closure.pages_assessed` counts those pages, not every scoped
+  page.
+* The diagnostic builds its own private `PhysicalOpeningAuthority` over the
+  producer's visibility authority. A caller cannot substitute an authority, and
+  only that private object's memo caches are filled; no producer or shared
+  authority is touched (a test compares the semantic producer's state before and
+  after).
+* A scope whose semantic authority published no record keeps that result's
+  status and reason codes and is reported `semantic_record_absent`, not as a
+  clean scope. `scripts/semantic_conflict_report.py` adds a `coverage` block
+  (entries with/without a semantic record, errors, unreadable sources) and exits
+  non-zero when an entry errored or could not be read.
 
 ## Rules
 

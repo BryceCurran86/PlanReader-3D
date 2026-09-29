@@ -9,7 +9,6 @@ actually took.
 from __future__ import annotations
 
 import ast
-import copy
 import dataclasses
 import json
 import os
@@ -20,7 +19,10 @@ from pathlib import Path
 import fitz
 import pytest
 
-from pb_item35_production_authority_shadow import collect_item35_authority_shadow
+from pb_item35_production_authority_shadow import (
+    ITEM35_PRODUCTION_SHADOW_SCHEMA_VERSION,
+    collect_item35_authority_shadow,
+)
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_opening_authority import (
     AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES,
@@ -40,8 +42,13 @@ from pb_semantic_conflict_diagnostic import (
     CONFLICT_PATH_CLOSURE_UNRESOLVED_OVERLAP,
     CONFLICT_PATH_DISPOSITION_CONFLICT_OTHER,
     CONFLICT_PATH_LINEAGE_MISMATCH,
+    CONFLICT_PATH_SNAPSHOT_INTEGRITY_FAILURE,
     CONFLICT_PATH_SOURCE_OBSERVATION_FAILURE,
     CONFLICT_PATH_UNATTRIBUTED,
+    FAMILY_AMBIGUOUS_CANDIDATES,
+    FAMILY_CLOSURE_UNRESOLVED_OVERLAP,
+    FAMILY_SOURCE_OBSERVATION_FAILURE,
+    SHADOW_PRODUCER_VERSION,
     RELATION_NOT_APPLICABLE,
     RELATION_ONE_PROVEN_OPENING_PLUS_COMPETITOR,
     RELATION_SHARED_BETWEEN_PROVEN_OPENINGS,
@@ -55,9 +62,10 @@ from pb_semantic_conflict_diagnostic import (
 )
 from pb_semantic_opening_enumeration_authority import (
     SEMANTIC_OPENING_PHYSICAL_CONFLICT,
+    SemanticOpeningEnumerationProducer,
     SemanticOpeningEnumerationResult,
 )
-from pb_source_observation_authority import SourceObservationAuthorityResult
+from pb_source_observation_authority import ObservationSelector, SourceObservationAuthorityResult
 from pb_source_visibility_authority import SourceVisibilityAuthority, SourceVisibilityProducer
 from scripts import semantic_conflict_report as report_script
 
@@ -159,8 +167,9 @@ def test_input_types_are_validated(single_pdf):
         diagnose_semantic_conflicts(source_visibility_producer=object(), semantic_result=result)
     with pytest.raises(TypeError):
         diagnose_semantic_conflicts(source_visibility_producer=source, semantic_result=object())
+    # A caller cannot substitute an authority over different data.
     with pytest.raises(TypeError):
-        diagnose_semantic_conflicts(
+        diagnose_semantic_conflicts(  # type: ignore[call-arg]
             source_visibility_producer=source,
             semantic_result=result,
             physical_opening_authority=object(),
@@ -349,8 +358,11 @@ def test_source_observation_failure_via_snapshot_integrity_is_attributed(monkeyp
     _source, result, diag = _diagnose(single_pdf)
     assert target in result.record.conflict_observation_ids
     item = next(c for c in diag.conflicts if c.evidence.observation_id == target)
-    assert item.paths == (CONFLICT_PATH_SOURCE_OBSERVATION_FAILURE,)
+    # A snapshot-wide integrity failure is not a per-observation visibility conflict.
+    assert item.paths == (CONFLICT_PATH_SNAPSHOT_INTEGRITY_FAILURE,)
     assert item.disposition.reason_codes == (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,)
+    summary = aggregate_semantic_conflict_diagnostics([diag])
+    assert summary["conflict_family_observation_counts"][FAMILY_SOURCE_OBSERVATION_FAILURE] >= 1
 
 
 def test_source_observation_failure_at_visibility_is_attributed_in_document_scope(
@@ -525,6 +537,68 @@ def test_a_visibility_conflict_only_counts_as_a_conflict_path_in_document_scope(
     assert item.paths == (CONFLICT_PATH_UNATTRIBUTED,)
 
 
+def test_residual_closure_attribution_requires_an_incomplete_closure(monkeypatch, tmp_path):
+    """A closure that reports itself complete adds nothing to the residual set, so
+    it must not be credited with an observation that is residual for another reason."""
+    pdf = _write(tmp_path / "s.pdf", lambda p: (_single(p), _line(p, (300, 300), (400, 320))))
+    _source, result = collect_semantic_scope(pdf, document_id=DOC)
+    stray = sorted(
+        set(result.record.visible_observation_ids) - set(result.record.opening_support_observation_ids)
+    )[0]
+    _wrap_disposition(
+        monkeypatch,
+        {
+            stray: PhysicalOpeningDispositionResult(
+                status=EvidenceResolutionStatus.CANDIDATE,
+                disposition="candidate_unresolved",
+                reason_codes=("insufficient_independent_source_lineage",),
+                candidate_ids=("only_candidate",),
+            )
+        },
+    )
+
+    def complete_but_listing(self, selector):
+        return PhysicalOpeningCandidateClosureResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            page_id="1",
+            candidate_universe_complete=True,
+            raw_candidate_count=1,
+            resolved_candidate_count=1,
+            unresolved_candidate_ids=(),
+            unresolved_observation_ids=(stray,),
+            reason_codes=("physical_opening_candidate_closure_resolved",),
+        )
+
+    monkeypatch.setattr(
+        PhysicalOpeningAuthority, "assess_visible_candidate_closure", complete_but_listing
+    )
+    _source, result, diag = _diagnose(pdf)
+    assert stray in result.record.residual_visible_observation_ids
+    (residual,) = [r for r in diag.residuals if r.evidence.observation_id == stray]
+    assert residual.paths == (RESIDUAL_PATH_UNRESOLVED_DISPOSITION,)
+
+
+def test_the_diagnosed_bytes_are_the_hashed_bytes(single_pdf, adjacent_pdf):
+    """A caller that already read the file passes those bytes; the path is only a
+    locator, so the content diagnosed cannot differ from the content hashed."""
+    payload = adjacent_pdf.read_bytes()
+    from_bytes = collect_semantic_conflict_diagnostic(
+        single_pdf, document_id=DOC, source_bytes=payload
+    )
+    direct = collect_semantic_conflict_diagnostic(adjacent_pdf, document_id=DOC)
+    assert from_bytes.source_sha256 == direct.source_sha256
+    assert from_bytes.counts_dict() == direct.counts_dict()
+
+
+def test_empty_page_scope_is_rejected_before_any_ingestion(monkeypatch, single_pdf):
+    def boom(*_args, **_kwargs):
+        raise AssertionError("ingestion must not start for an invalid page scope")
+
+    monkeypatch.setattr(SourceVisibilityProducer, "ingest_native_pdf_bytes", boom)
+    with pytest.raises(ValueError, match="at least one page"):
+        collect_semantic_scope(single_pdf, document_id=DOC, pages=[])
+
+
 def test_residual_unresolved_dispositions_are_attributed(monkeypatch, tmp_path):
     pdf = _write(tmp_path / "s.pdf", lambda p: (_single(p), _line(p, (300, 300), (400, 320))))
     _source, result = collect_semantic_scope(pdf, document_id=DOC)
@@ -561,6 +635,14 @@ def test_absent_semantic_record_is_reported_unavailable(single_pdf):
     assert diag.semantic_record_id is None
     assert diag.conflicts == () and diag.residuals == ()
     assert "semantic_record_absent" in diag.unavailable
+    # The cause is public data and must not be discarded.
+    assert diag.semantic_status == "abstained"
+    assert diag.semantic_reason_codes == ("semantic_opening_source_coverage_incomplete",)
+    summary = aggregate_semantic_conflict_diagnostics([diag])
+    assert summary["semantic_status_counts"] == {"abstained": 1}
+    assert summary["semantic_record_reason_code_counts"] == {
+        "semantic_opening_source_coverage_incomplete": 1
+    }
 
 
 # ------------------------------------------------- determinism / immutability
@@ -579,23 +661,108 @@ def test_diagnostic_is_deterministic_with_a_recomputable_stable_id(adjacent_pdf)
         dataclasses.replace(first, commercial_authority_granted=True)
 
 
-def test_diagnosing_is_read_only(adjacent_pdf):
-    source, result = collect_semantic_scope(adjacent_pdf, document_id=DOC)
-    record_before = copy.deepcopy(result)
-    published_before = copy.deepcopy(
-        source.published_snapshot_for_revision(result.record.revision_id).visible_observation_ids
+def _shared_objects(pdf, document_id=DOC):
+    """The producer objects a diagnostic must leave untouched, built directly so
+    the test can hold (and inspect) the semantic producer as well."""
+    payload = pdf.read_bytes()
+    source = SourceVisibilityProducer(
+        producer_method="planreader_live_item35_shadow", producer_version="1.0.0"
     )
-    method_before = PhysicalOpeningAuthority.classify_disposition
+    published = source.ingest_native_pdf_bytes(
+        document_id=document_id, source_bytes=payload, source_locator=str(pdf)
+    )
+    semantic_producer = SemanticOpeningEnumerationProducer.from_source_visibility_producer(source)
+    scope = f"item35:document:{published.revision.revision_id}"
+    result = semantic_producer.publish_document_scope(
+        revision_id=published.revision.revision_id, decision_scope_id=scope
+    )
+    return source, semantic_producer, published, scope, result
+
+
+def test_diagnosing_leaves_the_shared_producers_untouched(adjacent_pdf):
+    source, semantic_producer, published, scope, result = _shared_objects(adjacent_pdf)
+    revision = published.revision.revision_id
+    results_before = repr(sorted(semantic_producer._results.items(), key=lambda kv: kv[0]))
+    physical_keys_before = sorted(semantic_producer._physical_opening_authorities)
+    snapshot_before = source.published_snapshot_for_revision(revision)
+    visible_before = [
+        source.authority().resolve_visible(
+            ObservationSelector(
+                document_id=snapshot_before.revision.document_id,
+                revision_id=revision,
+                source_sha256=snapshot_before.revision.source_sha256,
+                snapshot_id=snapshot_before.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        for observation_id in snapshot_before.visible_observation_ids
+    ]
+
     first = diagnose_semantic_conflicts(source_visibility_producer=source, semantic_result=result)
     second = diagnose_semantic_conflicts(source_visibility_producer=source, semantic_result=result)
-    assert result == record_before
-    assert first == second
-    assert source.published_snapshot_for_revision(result.record.revision_id).visible_observation_ids == published_before
-    assert PhysicalOpeningAuthority.classify_disposition is method_before
+
+    assert first == second and first.counts_dict()["conflict"] > 0
+    assert repr(sorted(semantic_producer._results.items(), key=lambda kv: kv[0])) == results_before
+    assert sorted(semantic_producer._physical_opening_authorities) == physical_keys_before
+    assert source.published_snapshot_for_revision(revision) == snapshot_before
+    snapshot_after = source.published_snapshot_for_revision(revision)
+    visible_after = [
+        source.authority().resolve_visible(
+            ObservationSelector(
+                document_id=snapshot_after.revision.document_id,
+                revision_id=revision,
+                source_sha256=snapshot_after.revision.source_sha256,
+                snapshot_id=snapshot_after.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        for observation_id in snapshot_after.visible_observation_ids
+    ]
+    assert visible_after == visible_before
+    # The same producer still serves the identical record (its equivocation guard
+    # would raise if the diagnostic had altered anything it stores).
+    again = semantic_producer.publish_document_scope(revision_id=revision, decision_scope_id=scope)
+    assert again == result
     exported = first.to_dict()
     exported["conflicts"].clear()
-    exported["unavailable"].append("mutated")
     assert first.to_dict() == second.to_dict()
+
+
+def test_the_diagnostic_matches_the_shadow_on_a_shared_scope_and_changes_nothing(adjacent_pdf):
+    before = collect_item35_authority_shadow(adjacent_pdf, document_id=DOC)
+    diag = collect_semantic_conflict_diagnostic(adjacent_pdf, document_id=DOC)
+    after = collect_item35_authority_shadow(adjacent_pdf, document_id=DOC)
+    assert before == after
+    assert diag.semantic_record_id == before["semantic_record_id"]
+    assert SHADOW_PRODUCER_VERSION == ITEM35_PRODUCTION_SHADOW_SCHEMA_VERSION
+
+
+def test_no_caller_supplied_authority_parameter_exists():
+    import inspect
+
+    assert "physical_opening_authority" not in inspect.signature(diagnose_semantic_conflicts).parameters
+
+
+def test_closure_result_does_not_depend_on_which_page_observation_seeds_it(adjacent_pdf):
+    """The diagnostic seeds closure with the smallest diagnosed observation; the
+    producer seeds it with the first visible one.  Closure must not care."""
+    source, result = collect_semantic_scope(adjacent_pdf, document_id=DOC)
+    record = result.record
+    physical = PhysicalOpeningAuthority(source.authority())
+    seeds = sorted(record.visible_observation_ids)
+    results = {
+        physical.assess_visible_candidate_closure(
+            ObservationSelector(
+                document_id=record.document_id,
+                revision_id=record.revision_id,
+                source_sha256=record.source_sha256,
+                snapshot_id=record.snapshot_id,
+                observation_id=seed,
+            )
+        )
+        for seed in (seeds[0], seeds[len(seeds) // 2], seeds[-1])
+    }
+    assert len(results) == 1
 
 
 # ---------------------------------------------------------------- aggregation
@@ -632,9 +799,14 @@ def test_aggregate_reports_ties_and_is_order_invariant(monkeypatch, single_pdf, 
 
     two = aggregate_semantic_conflict_diagnostics([closure, failure])
     assert two["dominant_conflict_paths_by_observations"] == sorted(
-        [CONFLICT_PATH_CLOSURE_UNRESOLVED_OVERLAP, CONFLICT_PATH_SOURCE_OBSERVATION_FAILURE]
+        [CONFLICT_PATH_CLOSURE_UNRESOLVED_OVERLAP, CONFLICT_PATH_SNAPSHOT_INTEGRITY_FAILURE]
     )
     assert two["dominant_conflict_paths_by_scopes"] == two["dominant_conflict_paths_by_observations"]
+    # The families the investigation asks about tie as well; no tie is broken.
+    assert two["dominant_conflict_families_by_observations"] == sorted(
+        [FAMILY_CLOSURE_UNRESOLVED_OVERLAP, FAMILY_SOURCE_OBSERVATION_FAILURE]
+    )
+    assert two["dominant_conflict_families_by_scopes"] == two["dominant_conflict_families_by_observations"]
 
     diagnostics = [closure, failure, ambiguous, clean]
     forward = aggregate_semantic_conflict_diagnostics(diagnostics)
@@ -646,7 +818,8 @@ def test_aggregate_reports_ties_and_is_order_invariant(monkeypatch, single_pdf, 
     counts = forward["conflict_path_observation_counts"]
     assert counts[CONFLICT_PATH_AMBIGUOUS_CANDIDATES] == len(ambiguous.conflicts)
     assert counts[CONFLICT_PATH_CLOSURE_UNRESOLVED_OVERLAP] == 1
-    assert counts[CONFLICT_PATH_SOURCE_OBSERVATION_FAILURE] == 1
+    assert counts[CONFLICT_PATH_SNAPSHOT_INTEGRITY_FAILURE] == 1
+    assert forward["dominant_conflict_families_by_observations"] == [FAMILY_AMBIGUOUS_CANDIDATES]
     assert forward["conflict_disposition_reason_code_counts"][AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES] == len(
         ambiguous.conflicts
     )
@@ -667,8 +840,10 @@ def test_aggregate_edge_cases():
     assert empty["scope_count"] == 0
     assert empty["dominant_conflict_paths_by_observations"] == []
     assert empty["record_id"] == aggregate_semantic_conflict_diagnostics(iter(()))["record_id"]
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="SemanticConflictDiagnostic"):
         aggregate_semantic_conflict_diagnostics([{"not": "a diagnostic"}])  # type: ignore[list-item]
+    with pytest.raises(TypeError, match="SemanticConflictDiagnostic"):
+        aggregate_semantic_conflict_diagnostics([1, 2])  # type: ignore[list-item]
 
 
 # ------------------------------------------------- isolation / authority rules
@@ -742,13 +917,6 @@ def test_importing_the_live_extractor_does_not_load_the_diagnostic():
     assert result.returncode == 0, result.stderr[-2000:]
 
 
-def test_authority_behaviour_is_unchanged_by_the_diagnostic(adjacent_pdf):
-    before = collect_item35_authority_shadow(adjacent_pdf, document_id=DOC)
-    collect_semantic_conflict_diagnostic(adjacent_pdf, document_id=DOC)
-    after = collect_item35_authority_shadow(adjacent_pdf, document_id=DOC)
-    assert before == after
-
-
 # ---------------------------------------------------------------- the script
 def test_script_report_is_deterministic_and_carries_the_breakdown(tmp_path, adjacent_pdf, single_pdf):
     missing = tmp_path / "missing.pdf"
@@ -803,3 +971,59 @@ def test_script_cli(tmp_path, adjacent_pdf, capsys):
     with pytest.raises(SystemExit) as excinfo:
         report_script.main([str(adjacent_pdf), "--pages", "x"])
     assert excinfo.value.code == 2
+
+
+
+def test_script_coverage_makes_partial_results_visible(tmp_path, monkeypatch, adjacent_pdf, single_pdf):
+    absent_source, _ = collect_semantic_scope(single_pdf, document_id=DOC)
+    absent_diag = diagnose_semantic_conflicts(
+        source_visibility_producer=absent_source,
+        semantic_result=SemanticOpeningEnumerationResult(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=("semantic_opening_source_coverage_incomplete",),
+            record=None,
+        ),
+    )
+    real_collect = report_script.collect_semantic_conflict_diagnostic
+
+    def collect(pdf_path, **kwargs):
+        if Path(pdf_path).name == "single.pdf":
+            return absent_diag
+        return real_collect(pdf_path, **kwargs)
+
+    monkeypatch.setattr(report_script, "collect_semantic_conflict_diagnostic", collect)
+    missing = tmp_path / "missing.pdf"
+    report = report_script.build_report([adjacent_pdf, single_pdf, missing])
+    assert report["coverage"] == {
+        "entries_total": 3,
+        "entries_with_semantic_record": 1,
+        "entries_without_semantic_record": 1,
+        "entries_error": 0,
+        "entries_source_unavailable": 1,
+    }
+    absent = next(e for e in report["entries"] if e["label"] == "single.pdf")
+    assert absent["status"] == "semantic_record_absent"
+    assert absent["semantic_status"] == "abstained"
+    assert absent["semantic_reason_codes"] == ["semantic_opening_source_coverage_incomplete"]
+
+    # exit code: partial input is not success
+    assert report_script.main([str(adjacent_pdf), str(missing)]) == 1
+    assert report_script.main([str(adjacent_pdf)]) == 0
+    failing = report_script.build_report([adjacent_pdf], pages=[9])
+    assert failing["coverage"]["entries_error"] == 1
+
+
+def test_script_diagnoses_exactly_the_bytes_it_hashed(monkeypatch, adjacent_pdf):
+    captured = {}
+    real_collect = report_script.collect_semantic_conflict_diagnostic
+
+    def spy(pdf_path, **kwargs):
+        captured.update(kwargs)
+        return real_collect(pdf_path, **kwargs)
+
+    monkeypatch.setattr(report_script, "collect_semantic_conflict_diagnostic", spy)
+    report = report_script.build_report([adjacent_pdf])
+    payload = adjacent_pdf.read_bytes()
+    assert captured["source_bytes"] == payload
+    assert captured["document_id"] == report_script.document_id_for(payload)
+    assert report["entries"][0]["pdf_sha256"] == __import__("hashlib").sha256(payload).hexdigest()
