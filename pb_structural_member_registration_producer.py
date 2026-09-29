@@ -55,6 +55,7 @@ STRUCTURAL_REGISTRATION_VIEW_COMPLETENESS_UNAUTHENTICATED = (
 )
 
 _SOURCE_INPUT_SEAL = object()
+_TEST_SOURCE_INPUT_SEAL = object()
 _EVIDENCE_PRODUCER_SEAL = object()
 
 
@@ -408,7 +409,9 @@ class StructuralMemberRegistrationEvidenceProducer:
             snapshot_id=str(self._selector.snapshot_id),
             source_scope_receipt_id=self._source_scope_receipt_id,
             record_id=record_id,
-            _producer_seal=_SOURCE_INPUT_SEAL,
+            _producer_seal=(
+                _TEST_SOURCE_INPUT_SEAL if self._test_mode else _SOURCE_INPUT_SEAL
+            ),
         )
 
     def view(
@@ -461,17 +464,25 @@ class StructuralMemberRegistrationEvidenceProducer:
             snapshot_id=str(self._selector.snapshot_id),
             source_scope_receipt_id=self._source_scope_receipt_id,
             record_id=record_id,
-            _producer_seal=_SOURCE_INPUT_SEAL,
+            _producer_seal=(
+                _TEST_SOURCE_INPUT_SEAL if self._test_mode else _SOURCE_INPUT_SEAL
+            ),
         )
 
 
 def _observation_is_authenticated(
     selector: StructuralMemberSelector,
     source: object,
+    *,
+    allow_synthetic_inputs: bool = False,
 ) -> bool:
     if type(source) is not AuthenticatedStructuralMemberObservation:
         return False
-    if source._producer_seal is not _SOURCE_INPUT_SEAL:
+    if source._producer_seal is not _SOURCE_INPUT_SEAL and not (
+        allow_synthetic_inputs and source._producer_seal is _TEST_SOURCE_INPUT_SEAL
+    ):
+        return False
+    if source.schema_version != STRUCTURAL_REGISTRATION_SCHEMA_VERSION:
         return False
     expected_source = _selector_source_payload(selector)
     if (
@@ -509,10 +520,16 @@ def _observation_is_authenticated(
 def _view_is_authenticated(
     selector: StructuralMemberSelector,
     source: object,
+    *,
+    allow_synthetic_inputs: bool = False,
 ) -> bool:
     if type(source) is not AuthenticatedStructuralMemberView:
         return False
-    if source._producer_seal is not _SOURCE_INPUT_SEAL:
+    if source._producer_seal is not _SOURCE_INPUT_SEAL and not (
+        allow_synthetic_inputs and source._producer_seal is _TEST_SOURCE_INPUT_SEAL
+    ):
+        return False
+    if source.schema_version != STRUCTURAL_REGISTRATION_SCHEMA_VERSION:
         return False
     expected_source = _selector_source_payload(selector)
     if (
@@ -857,7 +874,31 @@ def build_structural_member_registration_authority(
     source_views: Sequence[AuthenticatedStructuralMemberView],
     definitions: Sequence[StructuralMemberDefinition] = (),
 ) -> StructuralMemberRegistrationResult:
-    """Build authority inputs from producer-authenticated source evidence."""
+    """Build authority inputs from production source evidence only.
+
+    Records minted by create_for_tests() are intentionally rejected here.
+    Synthetic tests exercise the same implementation through the private
+    _build_structural_member_registration_authority helper.
+    """
+
+    return _build_structural_member_registration_authority(
+        selector=selector,
+        source_observations=source_observations,
+        source_views=source_views,
+        definitions=definitions,
+        allow_synthetic_inputs=False,
+    )
+
+
+def _build_structural_member_registration_authority(
+    *,
+    selector: StructuralMemberSelector,
+    source_observations: Sequence[AuthenticatedStructuralMemberObservation],
+    source_views: Sequence[AuthenticatedStructuralMemberView],
+    definitions: Sequence[StructuralMemberDefinition] = (),
+    allow_synthetic_inputs: bool = False,
+) -> StructuralMemberRegistrationResult:
+    """Shared implementation; synthetic access is for unit tests only."""
 
     if type(selector) is not StructuralMemberSelector:
         raise TypeError("selector must be StructuralMemberSelector")
@@ -866,9 +907,16 @@ def build_structural_member_registration_authority(
     source_views = tuple(source_views)
 
     if any(
-        not _observation_is_authenticated(selector, source)
+        not _observation_is_authenticated(
+            selector, source, allow_synthetic_inputs=allow_synthetic_inputs
+        )
         for source in source_observations
-    ) or any(not _view_is_authenticated(selector, view) for view in source_views):
+    ) or any(
+        not _view_is_authenticated(
+            selector, view, allow_synthetic_inputs=allow_synthetic_inputs
+        )
+        for view in source_views
+    ):
         return _blocked_result(
             selector=selector,
             status=EvidenceResolutionStatus.ABSTAINED,
