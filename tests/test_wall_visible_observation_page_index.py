@@ -207,3 +207,95 @@ def test_wall_candidate_producer_constructs_one_opening_authority_per_revision(
     )
     assert producer.authority() is not None
     assert constructions == 1
+
+
+
+def test_opening_override_proves_only_wall_relevant_source_primitives(monkeypatch):
+    source, published, _payload = _source(page_count=1)
+    indexed = module._visible_observations_by_page(
+        source_producer=source,
+        published=published,
+    )
+    rows = list(indexed["1"])
+    native = [
+        (oid, observation)
+        for oid, observation in rows
+        if str(observation.source_primitive_ref).startswith("visible:segment:")
+    ]
+    assert len(native) >= 6
+
+    selected = native[:6]
+    records = tuple(
+        SimpleNamespace(
+            wall_candidate_id=f"wall-{index}",
+            physical_identity=SimpleNamespace(
+                source_primitive_ids=(
+                    str(observation.source_primitive_ref)[len("visible:segment:"):],
+                )
+            ),
+        )
+        for index, (_oid, observation) in enumerate(selected)
+    )
+
+    calls = []
+
+    def blocked(self, selector):
+        calls.append(selector.observation_id)
+        return SimpleNamespace(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            proposition=None,
+            existence_record=None,
+            reason_codes=("test_blocked",),
+        )
+
+    monkeypatch.setattr(PhysicalOpeningAuthority, "prove_existence", blocked)
+    result = module._producer_opening_relation_overrides(
+        source_producer=source,
+        published=published,
+        page_id="1",
+        records=records,
+        resolved_visible_observations=rows,
+        physical_opening_authority=PhysicalOpeningAuthority(source.authority()),
+    )
+
+    assert result == {}
+    assert set(calls) == {oid for oid, _observation in selected}
+    assert len(calls) < len(rows)
+
+
+def test_fewer_than_six_wall_candidates_skips_opening_proof_entirely(monkeypatch):
+    source, published, _payload = _source(page_count=1)
+    indexed = module._visible_observations_by_page(
+        source_producer=source,
+        published=published,
+    )
+    rows = list(indexed["1"])
+    native = [
+        (oid, observation)
+        for oid, observation in rows
+        if str(observation.source_primitive_ref).startswith("visible:segment:")
+    ]
+    records = tuple(
+        SimpleNamespace(
+            wall_candidate_id=f"wall-{index}",
+            physical_identity=SimpleNamespace(
+                source_primitive_ids=(
+                    str(observation.source_primitive_ref)[len("visible:segment:"):],
+                )
+            ),
+        )
+        for index, (_oid, observation) in enumerate(native[:5])
+    )
+
+    def forbidden(self, selector):
+        raise AssertionError("opening proof cannot contribute with fewer than six wall candidates")
+
+    monkeypatch.setattr(PhysicalOpeningAuthority, "prove_existence", forbidden)
+    assert module._producer_opening_relation_overrides(
+        source_producer=source,
+        published=published,
+        page_id="1",
+        records=records,
+        resolved_visible_observations=rows,
+        physical_opening_authority=PhysicalOpeningAuthority(source.authority()),
+    ) == {}
