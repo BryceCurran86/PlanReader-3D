@@ -1298,13 +1298,42 @@ def _producer_opening_relation_overrides(
     published,
     page_id: str,
     records: Sequence[PhysicalWallCandidateRecord],
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
 ) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
     """Re-prove G17 source openings and map their exact primitives to W4 candidates."""
     visibility = source_producer.authority()
     opening_authority = PhysicalOpeningAuthority(visibility)
     proven_records: dict[str, object] = {}
 
-    for observation_id in published.visible_observation_ids:
+    if resolved_visible_observations is None:
+        page_visible_rows: list[tuple[str, object]] = []
+        for observation_id in published.visible_observation_ids:
+            selector = ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+            visible = visibility.resolve_visible(selector)
+            if (
+                visible.status is not EvidenceResolutionStatus.CORROBORATED
+                or visible.observation is None
+            ):
+                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+            if str(visible.observation.page_id) == str(page_id):
+                page_visible_rows.append((observation_id, visible.observation))
+    else:
+        page_visible_rows = list(resolved_visible_observations)
+
+    page_observation_by_id = {
+        observation_id: observation
+        for observation_id, observation in page_visible_rows
+    }
+
+    for observation_id, observation in page_visible_rows:
+        if str(observation.page_id) != str(page_id):
+            raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
         selector = ObservationSelector(
             document_id=published.revision.document_id,
             revision_id=published.revision.revision_id,
@@ -1312,18 +1341,6 @@ def _producer_opening_relation_overrides(
             snapshot_id=published.snapshot.snapshot_id,
             observation_id=observation_id,
         )
-        # Existence is page-local, and this helper can use only records on
-        # page_id below. Authenticate that address before the expensive proof:
-        # otherwise each wall page reconstructs every other page's opening
-        # candidates. The proof still checks the complete immutable snapshot;
-        # this neither supplies evidence nor changes its identity/closure rules.
-        visible = visibility.resolve_visible(selector)
-        if (
-            visible.status is not EvidenceResolutionStatus.CORROBORATED
-            or visible.observation is None
-            or visible.observation.page_id != page_id
-        ):
-            continue
         result = opening_authority.prove_existence(selector)
         existence = result.existence_record
         if (
@@ -1348,19 +1365,22 @@ def _producer_opening_relation_overrides(
         raw_lines: dict[str, Line] = {}
         valid = True
         for observation_id in existence.source_observation_ids:  # type: ignore[attr-defined]
-            resolved = visibility.resolve_visible(
-                ObservationSelector(
-                    document_id=existence.document_id,  # type: ignore[attr-defined]
-                    revision_id=existence.revision_id,  # type: ignore[attr-defined]
-                    source_sha256=existence.source_sha256,  # type: ignore[attr-defined]
-                    snapshot_id=existence.snapshot_id,  # type: ignore[attr-defined]
-                    observation_id=observation_id,
+            observation = page_observation_by_id.get(observation_id)
+            if observation is None and resolved_visible_observations is None:
+                resolved = visibility.resolve_visible(
+                    ObservationSelector(
+                        document_id=existence.document_id,  # type: ignore[attr-defined]
+                        revision_id=existence.revision_id,  # type: ignore[attr-defined]
+                        source_sha256=existence.source_sha256,  # type: ignore[attr-defined]
+                        snapshot_id=existence.snapshot_id,  # type: ignore[attr-defined]
+                        observation_id=observation_id,
+                    )
                 )
-            )
-            observation = resolved.observation
+                if resolved.status is EvidenceResolutionStatus.CORROBORATED:
+                    observation = resolved.observation
             if (
-                resolved.status is not EvidenceResolutionStatus.CORROBORATED
-                or observation is None
+                observation is None
+                or str(observation.page_id) != str(page_id)
                 or not observation.source_primitive_ref.startswith(prefix)
             ):
                 valid = False
@@ -1913,6 +1933,7 @@ def _assemble_scope_result(
     scope_boundary_observation_ids: Sequence[str] = (),
     ambiguous_source_observation_ids: Sequence[str] = (),
     points_per_mm: Optional[float] = None,
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = selector.decision_scope_id
     proven_wall_strips = _proven_filled_wall_strips(tuple(segments))
@@ -1982,6 +2003,7 @@ def _assemble_scope_result(
         published=published,
         page_id=page_id,
         records=tuple(records),
+        resolved_visible_observations=resolved_visible_observations,
     )
     equivalence = _apply_trusted_relation_overrides(
         tuple(ordered_identities),
@@ -2118,6 +2140,7 @@ def _build_scope_result(
         page_height=page_height,
         source_bytes=source_bytes,
         points_per_mm=points_per_mm,
+        resolved_visible_observations=resolved_visible_observations,
     )
 
 
@@ -2259,6 +2282,7 @@ def _build_authenticated_viewport_scope_results(
                 pre_boundary_reasons=pre_boundary_reasons,
                 scope_boundary_observation_ids=boundary_observation_ids,
                 ambiguous_source_observation_ids=ambiguous_observation_ids,
+                resolved_visible_observations=resolved_visible_observations,
             )
         )
     return tuple(results)
