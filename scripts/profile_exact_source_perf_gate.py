@@ -25,6 +25,7 @@ from pb_physical_scale_authority import PhysicalScaleProducer, PhysicalScaleSele
 import pb_physical_wall_candidate_authority as wall_candidates
 import pb_live_wall_opening_authority_composition as wall_composition
 import pb_wall_room_topology_stage_a as topology_stage_a
+import pb_physical_scale_authority as scale_authority
 
 def pagespec(text):
     out=[]
@@ -149,6 +150,12 @@ wrap_method(
     "publish",
     "openings.host_frame_publish",
 )
+for attr in ("_scope_bbox", "_trusted_words", "_visible_segments", "publish_scope"):
+    wrap_method(
+        scale_authority.PhysicalScaleProducer,
+        attr,
+        f"scale.{attr}",
+    )
 
 page_ids=tuple(str(p) for p in pagespec(args.pages))
 page_indices=[int(p)-1 for p in page_ids]
