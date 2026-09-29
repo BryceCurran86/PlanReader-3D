@@ -1,0 +1,111 @@
+name: TEST-ONLY Opening Viewport Contest V2
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  exact-source-opening-viewport-contest:
+    if: startsWith(github.head_ref, 'diag/opening-viewport-contest-v2')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run exact-source shadow census
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          import urllib.request
+
+          from pb_physical_opening_viewport_scope_shadow import (
+              assess_opening_candidate_viewport_scope,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          CASES = (
+              {
+                  "name": "lamu_p41",
+                  "url": "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf",
+                  "sha256": "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2",
+                  "page": "41",
+              },
+              {
+                  "name": "kstvet_p54",
+                  "url": "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf",
+                  "sha256": "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+                  "page": "54",
+              },
+              {
+                  "name": "ghazi_p167",
+                  "url": "https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf",
+                  "sha256": "c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f",
+                  "page": "167",
+              },
+          )
+
+          for case in CASES:
+              req = urllib.request.Request(
+                  case["url"],
+                  headers={"User-Agent": "PlanReader-opening-viewport-contest-v2/1.0"},
+              )
+              with urllib.request.urlopen(req, timeout=180) as response:
+                  payload = response.read()
+              got = hashlib.sha256(payload).hexdigest()
+              if got != case["sha256"]:
+                  raise SystemExit(
+                      f'{case["name"]}: source sha mismatch {got} != {case["sha256"]}'
+                  )
+
+              source = SourceVisibilityProducer(
+                  producer_method="opening-viewport-contest-v2",
+                  producer_version="1.0",
+              )
+              published = source.ingest_native_pdf_bytes(
+                  document_id=f'diag:{case["name"]}',
+                  source_bytes=payload,
+                  source_locator=case["url"],
+              )
+              report = assess_opening_candidate_viewport_scope(
+                  source_visibility_producer=source,
+                  revision_id=published.revision.revision_id,
+                  page_id=case["page"],
+              )
+              result = {
+                  "name": case["name"],
+                  "source_sha256": got,
+                  "page": int(case["page"]),
+                  "status": report.status.value,
+                  "reason_codes": list(report.reason_codes),
+                  "authenticated_viewports": [
+                      {
+                          "view_id": row.view_id,
+                          "view_type": row.view_type,
+                          "status": row.status,
+                          "boundary_source": row.boundary_source,
+                          "bounding_box": row.bounding_box,
+                      }
+                      for row in report.authenticated_viewports
+                  ],
+                  "unauthenticated_viewport_count": report.unauthenticated_viewport_count,
+                  "candidate_count": len(report.candidate_scopes),
+                  "scope_counts": dict(report.scope_counts),
+                  "corroborated_scope_counts": dict(report.corroborated_scope_counts),
+                  "deletion_authority": report.deletion_authority,
+                  "takeoff_eligible": report.takeoff_eligible,
+              }
+              print(
+                  "OPENING_VIEWPORT_CONTEST_V2="
+                  + json.dumps(result, sort_keys=True, default=str),
+                  flush=True,
+              )
+          PY
