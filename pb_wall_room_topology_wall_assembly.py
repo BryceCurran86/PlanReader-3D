@@ -151,6 +151,34 @@ def _junction_by_node_idx(
     return mapping
 
 
+def _canonical_fallback_edge_order(
+    edge_ids: Set[str],
+    edges_by_id: Dict[str, Dict[str, Any]],
+) -> List[str]:
+    """Replay-stable iteration order for a non-simple chain's edges.
+
+    ``edge_ids`` is an unordered set of strings, so iterating it directly makes
+    the fallback point order -- and therefore the content-derived candidate id
+    and the physical-identity path -- depend on the interpreter's string-hash
+    seed. Order the edges by their own source coordinates instead (the edge id
+    only breaks exact coordinate ties). This deliberately changes nothing but
+    the order: the fallback still uses exactly the same points as before, and
+    only their previously hash-dependent iteration order is fixed.
+    """
+
+    def key(edge_id: str) -> Tuple[float, float, float, float, str]:
+        edge = edges_by_id[edge_id]
+        return (
+            float(edge["x1"]),
+            float(edge["y1"]),
+            float(edge["x2"]),
+            float(edge["y2"]),
+            str(edge_id),
+        )
+
+    return sorted(edge_ids, key=key)
+
+
 def _order_chain_path(
     edge_ids: Set[str],
     edges_by_id: Dict[str, Dict[str, Any]],
@@ -187,7 +215,7 @@ def _order_chain_path(
         # the caller via is_simple_path=False rather than raising.
         points: List[Tuple[float, float]] = []
         start = min(adjacency)
-        for edge_id in edge_ids:
+        for edge_id in _canonical_fallback_edge_order(edge_ids, edges_by_id):
             edge = edges_by_id[edge_id]
             points.append((edge["x1"], edge["y1"]))
         end = max(adjacency)
