@@ -106,22 +106,34 @@ def _endpoint_wall_pair_candidates(
     return tuple(sorted(pairs))
 
 
-def _midpoint_grid_candidates(
+def _build_midpoint_grid(
     segments: Sequence[Segment],
     candidate_indexes: Sequence[int],
+    *,
+    cell: float,
+) -> dict[tuple[int, int], tuple[int, ...]]:
+    size = max(float(cell), 1e-9)
+    grid: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for index in candidate_indexes:
+        segment = segments[index]
+        key = (
+            math.floor(float(segment.cx) / size),
+            math.floor(float(segment.cy) / size),
+        )
+        grid[key].append(index)
+    return {key: tuple(values) for key, values in grid.items()}
+
+
+def _query_midpoint_grid(
+    grid: dict[tuple[int, int], tuple[int, ...]],
     wall: Segment,
     *,
     radius: float,
 ) -> tuple[int, ...]:
     cell = max(float(radius), 1e-9)
-    grid: dict[tuple[int, int], list[int]] = defaultdict(list)
 
     def cell_of(x: float, y: float) -> tuple[int, int]:
         return (math.floor(float(x) / cell), math.floor(float(y) / cell))
-
-    for index in candidate_indexes:
-        segment = segments[index]
-        grid[cell_of(segment.cx, segment.cy)].append(index)
 
     min_x = min(wall.x1, wall.x2) - radius
     max_x = max(wall.x1, wall.x2) + radius
@@ -157,13 +169,17 @@ def detect_door_candidates_indexed(
         if min_leaf <= segment.length <= max_leaf
     )
 
+    midpoint_grid = _build_midpoint_grid(
+        segments,
+        candidate_leaf_indexes,
+        cell=proximity,
+    )
     local_by_wall: list[tuple[int, ...]] = []
     wall_local_parallel: set[int] = set()
     for wall_line in wall_lines:
         wall = wall_line.segment
-        spatial = _midpoint_grid_candidates(
-            segments,
-            candidate_leaf_indexes,
+        spatial = _query_midpoint_grid(
+            midpoint_grid,
             wall,
             radius=proximity,
         )
