@@ -10,6 +10,8 @@ from __future__ import annotations
 import gc
 import io
 import math
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -21,6 +23,10 @@ VERSION = "1.2.20"
 REGISTER_PAGE_SIZE = 30
 PREVIEW_LONG_EDGE_PX = 1000
 CV_LONG_EDGE_PX = 1100
+
+_THUMBNAIL_CACHE: "OrderedDict[tuple, bytes]" = OrderedDict()
+_THUMBNAIL_CACHE_LOCK = threading.Lock()
+_THUMBNAIL_CACHE_SIZE = 64
 
 
 def regular_file(value: Any) -> Optional[Path]:
@@ -35,18 +41,45 @@ def regular_file(value: Any) -> Optional[Path]:
 
 
 def thumbnail_bytes(value: Any, max_long_edge: int = PREVIEW_LONG_EDGE_PX) -> bytes:
-    """Return a small deterministic JPEG preview, or b'' for blank/missing paths."""
+    """Return a small deterministic JPEG preview, or b'' for blank/missing paths.
+
+    Streamlit reruns frequently ask for the same Drawing Register preview. Cache
+    the already-bounded JPEG by immutable file state so the UI does not reopen
+    and recompress a multi-megapixel source on every rerun. The cache is
+    process-local and bounded; file size/mtime changes invalidate it.
+    """
     path = regular_file(value)
     if path is None:
         return b""
     limit = max(320, min(int(max_long_edge or PREVIEW_LONG_EDGE_PX), 1400))
+    try:
+        stat = path.stat()
+        key = (str(path.resolve()), int(stat.st_size), int(stat.st_mtime_ns), limit)
+    except OSError:
+        key = None
+
+    if key is not None:
+        with _THUMBNAIL_CACHE_LOCK:
+            cached = _THUMBNAIL_CACHE.get(key)
+            if cached is not None:
+                _THUMBNAIL_CACHE.move_to_end(key)
+                return cached
+
     with Image.open(path) as image:
         image.thumbnail((limit, limit), Image.Resampling.LANCZOS)
         if image.mode != "RGB":
             image = image.convert("RGB")
         buffer = io.BytesIO()
         image.save(buffer, format="JPEG", quality=78, optimize=False)
-        return buffer.getvalue()
+        payload = buffer.getvalue()
+
+    if key is not None:
+        with _THUMBNAIL_CACHE_LOCK:
+            _THUMBNAIL_CACHE[key] = payload
+            _THUMBNAIL_CACHE.move_to_end(key)
+            while len(_THUMBNAIL_CACHE) > _THUMBNAIL_CACHE_SIZE:
+                _THUMBNAIL_CACHE.popitem(last=False)
+    return payload
 
 
 def _release_memory(app: Any) -> None:
