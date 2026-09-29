@@ -12,6 +12,7 @@ viewport boxes are never accepted as truth inputs.
 """
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 import hashlib
 import math
@@ -194,7 +195,6 @@ _TICK_PERPENDICULAR_TOLERANCE_DEG = 5.0
 _TICK_PARAMETER_MIN = 0.15
 _TICK_PARAMETER_MAX = 0.85
 _TICK_MAX_DISTANCE_PT = 0.5
-_TICK_INDEX_CELL_PT = 32.0
 _TICK_INDEX_ANGLE_BUCKET_DEG = 10.0
 
 
@@ -211,18 +211,17 @@ class _TickEndpointIndex:
 
     Therefore the tick midpoint is within
     hypot(0.35 * 0.75 * baseline.length, 0.5) of the endpoint. Midpoints
-    are indexed once by a fixed performance-only spatial cell and orientation
-    bucket. Query results are still rechecked by the unchanged exact predicate.
+    are indexed once by orientation and sorted X coordinate. Query results are
+    still rechecked by the unchanged exact predicate.
     """
 
     def __init__(self, segments: Sequence[_VisibleSegment]) -> None:
         self._segments = tuple(segments)
-        self._cell_size = _TICK_INDEX_CELL_PT
         self._angle_width = _TICK_INDEX_ANGLE_BUCKET_DEG
         self._angle_bucket_count = max(
             1, int(math.ceil(180.0 / self._angle_width))
         )
-        grid: dict[tuple[int, int, int], list[int]] = {}
+        by_angle: dict[int, list[tuple[float, float, int]]] = {}
         for index, segment in enumerate(self._segments):
             unit = _unit(segment)
             if unit is None:
@@ -231,12 +230,16 @@ class _TickEndpointIndex:
             bucket = self._angle_bucket(angle)
             midpoint_x = (segment.start[0] + segment.end[0]) / 2.0
             midpoint_y = (segment.start[1] + segment.end[1]) / 2.0
-            cell_x = math.floor(midpoint_x / self._cell_size)
-            cell_y = math.floor(midpoint_y / self._cell_size)
-            grid.setdefault((bucket, cell_x, cell_y), []).append(index)
-        self._grid = {
-            key: tuple(indexes)
-            for key, indexes in grid.items()
+            by_angle.setdefault(bucket, []).append(
+                (midpoint_x, midpoint_y, index)
+            )
+        self._by_angle = {
+            bucket: tuple(sorted(rows))
+            for bucket, rows in by_angle.items()
+        }
+        self._x_by_angle = {
+            bucket: tuple(row[0] for row in rows)
+            for bucket, rows in self._by_angle.items()
         }
 
     def _angle_bucket(self, angle_deg: float) -> int:
@@ -269,23 +272,26 @@ class _TickEndpointIndex:
             * baseline.length
         )
         radius = math.hypot(max_along_midpoint, _TICK_MAX_DISTANCE_PT) + 1e-9
-        x0 = math.floor((endpoint[0] - radius) / self._cell_size)
-        x1 = math.floor((endpoint[0] + radius) / self._cell_size)
-        y0 = math.floor((endpoint[1] - radius) / self._cell_size)
-        y1 = math.floor((endpoint[1] + radius) / self._cell_size)
+        min_x = endpoint[0] - radius
+        max_x = endpoint[0] + radius
+        min_y = endpoint[1] - radius
+        max_y = endpoint[1] + radius
 
         found: set[int] = set()
         # Width is 10 degrees while exact acceptance is +/-5 degrees.
         # Two buckets on either side are a conservative superset across
         # bucket boundaries and the 0/180 wrap.
-        angle_buckets = tuple(
-            (center_bucket + offset) % self._angle_bucket_count
-            for offset in (-2, -1, 0, 1, 2)
-        )
-        for bucket in angle_buckets:
-            for cell_x in range(x0, x1 + 1):
-                for cell_y in range(y0, y1 + 1):
-                    found.update(self._grid.get((bucket, cell_x, cell_y), ()))
+        for offset in (-2, -1, 0, 1, 2):
+            bucket = (center_bucket + offset) % self._angle_bucket_count
+            rows = self._by_angle.get(bucket, ())
+            xs = self._x_by_angle.get(bucket, ())
+            if not rows:
+                continue
+            first = bisect_left(xs, min_x)
+            last = bisect_right(xs, max_x)
+            for _mid_x, mid_y, index in rows[first:last]:
+                if min_y <= mid_y <= max_y:
+                    found.add(index)
 
         return tuple(self._segments[index] for index in sorted(found))
 
