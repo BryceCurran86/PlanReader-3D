@@ -1299,10 +1299,15 @@ def _producer_opening_relation_overrides(
     page_id: str,
     records: Sequence[PhysicalWallCandidateRecord],
     resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
 ) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
     """Re-prove G17 source openings and map their exact primitives to W4 candidates."""
     visibility = source_producer.authority()
-    opening_authority = PhysicalOpeningAuthority(visibility)
+    opening_authority = (
+        physical_opening_authority
+        if physical_opening_authority is not None
+        else PhysicalOpeningAuthority(visibility)
+    )
     proven_records: dict[str, object] = {}
 
     if resolved_visible_observations is None:
@@ -1934,6 +1939,7 @@ def _assemble_scope_result(
     ambiguous_source_observation_ids: Sequence[str] = (),
     points_per_mm: Optional[float] = None,
     resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = selector.decision_scope_id
     proven_wall_strips = _proven_filled_wall_strips(tuple(segments))
@@ -2004,6 +2010,7 @@ def _assemble_scope_result(
         page_id=page_id,
         records=tuple(records),
         resolved_visible_observations=resolved_visible_observations,
+        physical_opening_authority=physical_opening_authority,
     )
     equivalence = _apply_trusted_relation_overrides(
         tuple(ordered_identities),
@@ -2091,6 +2098,7 @@ def _build_scope_result(
     source_bytes: bytes,
     page_id: str,
     resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = _decision_scope_id(page_id)
     selector = PhysicalWallCandidateSelector(
@@ -2141,6 +2149,7 @@ def _build_scope_result(
         source_bytes=source_bytes,
         points_per_mm=points_per_mm,
         resolved_visible_observations=resolved_visible_observations,
+        physical_opening_authority=physical_opening_authority,
     )
 
 
@@ -2151,6 +2160,7 @@ def _build_authenticated_viewport_scope_results(
     source_bytes: bytes,
     page_id: str,
     resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
 ) -> tuple[PhysicalWallCandidateScopeResult, ...]:
     page_number = int(page_id)
     # A viewport scope is page-local authority. A scoped native ingestion still
@@ -2283,6 +2293,7 @@ def _build_authenticated_viewport_scope_results(
                 scope_boundary_observation_ids=boundary_observation_ids,
                 ambiguous_source_observation_ids=ambiguous_observation_ids,
                 resolved_visible_observations=resolved_visible_observations,
+                physical_opening_authority=physical_opening_authority,
             )
         )
     return tuple(results)
@@ -2434,6 +2445,9 @@ class PhysicalWallCandidateProducer:
                 source_producer=source_visibility_producer,
                 published=published,
             )
+            physical_opening_authority = PhysicalOpeningAuthority(
+                source_visibility_producer.authority()
+            )
 
             for page_id in materialized_page_ids:
                 page_visible_observations = visible_by_page.get(page_id, ())
@@ -2444,6 +2458,7 @@ class PhysicalWallCandidateProducer:
                         source_bytes=source_bytes,
                         page_id=page_id,
                         resolved_visible_observations=page_visible_observations,
+                        physical_opening_authority=physical_opening_authority,
                     )
                     key = _ScopeKey(
                         document_id=result.document_id,
@@ -2462,6 +2477,7 @@ class PhysicalWallCandidateProducer:
                         source_bytes=source_bytes,
                         page_id=page_id,
                         resolved_visible_observations=page_visible_observations,
+                        physical_opening_authority=physical_opening_authority,
                     ):
                         viewport_key = _ScopeKey(
                             document_id=viewport_result.document_id,
