@@ -1,0 +1,57 @@
+name: TEST-ONLY Murera Semantic Reuse Gate
+
+on:
+  pull_request:
+    branches: [perf/reuse-semantic-opening-proof-snapshot]
+
+jobs:
+  murera-perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download exact official Murera source
+        run: |
+          curl -L --fail --retry 3 -o /tmp/murera.pdf "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  /tmp/murera.pdf" | sha256sum -c -
+      - name: Prepare current main
+        run: |
+          git fetch origin main
+          git worktree add /tmp/current-main origin/main
+          echo "main=$(git -C /tmp/current-main rev-parse HEAD)"
+          echo "candidate=$(git rev-parse HEAD)"
+      - name: Gate semantic reuse invariance tests
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_semantic_opening_enumeration_reuse.py \
+            tests/test_live_wall_opening_authority_composition.py
+      - name: Profile semantic-reuse candidate Murera 219-238
+        run: |
+          set -o pipefail
+          timeout 1200s env PYTHONPATH=. python scripts/profile_exact_source_perf_gate.py \
+            --repo . --pdf /tmp/murera.pdf --pages 219-238 \
+            --label murera-semantic-reuse --wall-only | tee /tmp/murera-semantic-reuse.jsonl
+        continue-on-error: true
+      - name: Profile current main Murera 219-238
+        run: |
+          set -o pipefail
+          timeout 1200s env PYTHONPATH=/tmp/current-main python scripts/profile_exact_source_perf_gate.py \
+            --repo /tmp/current-main --pdf /tmp/murera.pdf --pages 219-238 \
+            --label murera-main --wall-only | tee /tmp/murera-main.jsonl
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: murera-semantic-reuse-performance
+          path: |
+            /tmp/murera-semantic-reuse.jsonl
+            /tmp/murera-main.jsonl
