@@ -17,7 +17,7 @@ import hashlib
 import math
 import re
 from types import MappingProxyType
-from typing import Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 import fitz
 
@@ -441,6 +441,46 @@ class PhysicalScaleAuthority:
         )
 
 
+class _MemoizedViewportPage:
+    """Read-through cache for one immutable PyMuPDF page during segmentation.
+
+    F.07 viewport segmentation is allowed to ask for the same native drawings
+    and text representations multiple times while testing candidate frames.
+    PyMuPDF extraction is deterministic for the unchanged page, so caching the
+    exact returned objects inside one scale-scope call changes no evidence or
+    ordering; it only avoids reparsing the page.
+    """
+
+    def __init__(self, page: Any) -> None:
+        self._page = page
+        self._drawings = None
+        self._text: dict[tuple[tuple[Any, ...], tuple[tuple[str, Any], ...]], Any] = {}
+
+    @property
+    def rect(self):
+        return self._page.rect
+
+    def get_drawings(self, *args, **kwargs):
+        if args or kwargs:
+            return self._page.get_drawings(*args, **kwargs)
+        if self._drawings is None:
+            self._drawings = self._page.get_drawings()
+        return self._drawings
+
+    def get_text(self, *args, **kwargs):
+        try:
+            key = (tuple(args), tuple(sorted(kwargs.items())))
+            hash(key)
+        except Exception:
+            return self._page.get_text(*args, **kwargs)
+        if key not in self._text:
+            self._text[key] = self._page.get_text(*args, **kwargs)
+        return self._text[key]
+
+    def __getattr__(self, name: str):
+        return getattr(self._page, name)
+
+
 class PhysicalScaleProducer:
     """Trusted writer derived only from a producer-owned source-visibility root."""
 
@@ -564,7 +604,11 @@ class PhysicalScaleProducer:
             if page_index >= pdf.page_count:
                 return None, PHYSICAL_SCALE_SCOPE_UNAVAILABLE
             page = pdf.load_page(page_index)
-            viewports = segment_page_viewports(page, page_number=page_index + 1)
+            viewport_page = _MemoizedViewportPage(page)
+            viewports = segment_page_viewports(
+                viewport_page,
+                page_number=page_index + 1,
+            )
             usable = tuple(
                 viewport
                 for viewport in viewports
