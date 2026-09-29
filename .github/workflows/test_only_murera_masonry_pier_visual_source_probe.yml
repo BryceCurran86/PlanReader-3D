@@ -1,0 +1,143 @@
+name: TEST-ONLY Murera Masonry-Pier Visual Source Probe
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-masonry-pier-source-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install PyMuPDF
+        run: python -m pip install --disable-pip-version-check PyMuPDF
+
+      - name: Download and SHA-256 verify official Murera source
+        run: |
+          curl -L --fail --retry 3 --retry-delay 2 \
+            -o /tmp/murera.pdf \
+            "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  /tmp/murera.pdf" | sha256sum -c -
+
+      - name: Render structural pages and inventory source text/drawings
+        run: |
+          mkdir -p /tmp/murera-pier-probe/pages
+          python - <<'PY'
+          import json
+          import math
+          import re
+          from pathlib import Path
+
+          import fitz
+
+          source = Path("/tmp/murera.pdf")
+          out_dir = Path("/tmp/murera-pier-probe")
+          pages_dir = out_dir / "pages"
+          pages_dir.mkdir(parents=True, exist_ok=True)
+
+          role_re = re.compile(
+              r"\b(?:masonry|stone|block|pier|piers|pillar|pillars|column|columns|"
+              r"post|posts|stanchion|stanchions|chs|shs|rhs|verandah|veranda)\b",
+              re.I,
+          )
+
+          doc = fitz.open(source)
+          result = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "source_sha256": "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b",
+              "term_hits": [],
+              "pages": [],
+          }
+
+          for page_index in range(doc.page_count):
+              page = doc[page_index]
+              text = page.get_text("text") or ""
+              hits = sorted({m.group(0).lower() for m in role_re.finditer(text)})
+              if not hits:
+                  continue
+              blocks = []
+              for block_index, block in enumerate(page.get_text("blocks") or ()):
+                  block_text = " ".join(str(block[4]).split()).strip()
+                  if not block_text or role_re.search(block_text) is None:
+                      continue
+                  blocks.append({
+                      "block_id": f"page:{page_index + 1}:block:{block_index}",
+                      "bbox": [round(float(v), 3) for v in block[:4]],
+                      "text": block_text,
+                  })
+              result["term_hits"].append({
+                  "page": page_index + 1,
+                  "hits": hits,
+                  "blocks": blocks,
+              })
+
+          for page_no in range(219, 227):
+              page = doc[page_no - 1]
+              pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0), alpha=False)
+              pix.save(pages_dir / f"murera-page-{page_no}.png")
+
+              blocks = []
+              for block_index, block in enumerate(page.get_text("blocks") or ()):
+                  text = " ".join(str(block[4]).split()).strip()
+                  if not text:
+                      continue
+                  blocks.append({
+                      "block_id": f"page:{page_no}:block:{block_index}",
+                      "bbox": [round(float(v), 3) for v in block[:4]],
+                      "text": text,
+                  })
+
+              drawings = []
+              for drawing_index, drawing in enumerate(page.get_drawings() or ()):
+                  rect = drawing.get("rect")
+                  if rect is None:
+                      continue
+                  bbox = [
+                      round(float(rect.x0), 3),
+                      round(float(rect.y0), 3),
+                      round(float(rect.x1), 3),
+                      round(float(rect.y1), 3),
+                  ]
+                  width = float(rect.width)
+                  height = float(rect.height)
+                  if not all(math.isfinite(v) for v in (*bbox, width, height)):
+                      continue
+                  items = list(drawing.get("items") or ())
+                  drawings.append({
+                      "drawing_id": f"page:{page_no}:drawing:{drawing_index}",
+                      "bbox": bbox,
+                      "width_pt": round(width, 3),
+                      "height_pt": round(height, 3),
+                      "item_kinds": [str(item[0]) for item in items if item],
+                      "fill": drawing.get("fill"),
+                      "stroke": drawing.get("color"),
+                      "stroke_width": drawing.get("width"),
+                      "layer": drawing.get("layer"),
+                  })
+
+              result["pages"].append({
+                  "page": page_no,
+                  "page_size": [round(float(page.rect.width), 3), round(float(page.rect.height), 3)],
+                  "text_blocks": blocks,
+                  "drawings": drawings,
+              })
+
+          doc.close()
+          (out_dir / "murera-masonry-pier-source-probe.json").write_text(
+              json.dumps(result, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: murera-masonry-pier-visual-source-probe
+          path: /tmp/murera-pier-probe
