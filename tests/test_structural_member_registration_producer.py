@@ -21,6 +21,7 @@ from pb_structural_member_registration_producer import (
     STRUCTURAL_REGISTRATION_ANCHOR_CONFLICT,
     STRUCTURAL_REGISTRATION_INPUT_UNAUTHENTICATED,
     STRUCTURAL_REGISTRATION_OBSERVATION_EQUIVOCATION,
+    STRUCTURAL_REGISTRATION_SCHEMA_VERSION,
     STRUCTURAL_REGISTRATION_VIEW_COMPLETENESS_UNAUTHENTICATED,
     STRUCTURAL_REGISTRATION_VIEW_OWNERSHIP_CONFLICT,
     AuthenticatedStructuralMemberObservation,
@@ -28,6 +29,7 @@ from pb_structural_member_registration_producer import (
     StructuralMemberRegistrationEvidenceProducer,
     StructuralRegistrationAnchor,
     StructuralRegistrationAnchorKind,
+    _build_structural_member_registration_authority,
     build_structural_member_registration_authority,
 )
 
@@ -108,11 +110,12 @@ def view(p, name: str, *, page: str = "1", complete: bool = True):
 
 
 def build(observations, views, *, definitions=(), sel=None):
-    return build_structural_member_registration_authority(
+    return _build_structural_member_registration_authority(
         selector=sel or selector(),
         source_observations=observations,
         source_views=views,
         definitions=definitions,
+        allow_synthetic_inputs=True,
     )
 
 
@@ -317,6 +320,18 @@ def test_directly_constructed_inputs_are_not_authenticated() -> None:
     assert STRUCTURAL_REGISTRATION_INPUT_UNAUTHENTICATED in result.resolution.reason_codes
 
 
+def test_public_authority_builder_rejects_synthetic_factory_records() -> None:
+    p = producer()
+    result = build_structural_member_registration_authority(
+        selector=selector(),
+        source_observations=(obs(p, "a", "plan"),),
+        source_views=(view(p, "plan", complete=True),),
+    )
+    assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.resolution.quantity is None
+    assert STRUCTURAL_REGISTRATION_INPUT_UNAUTHENTICATED in result.resolution.reason_codes
+
+
 def test_mutated_producer_record_is_not_authenticated() -> None:
     p = producer()
     original = obs(p, "a", "plan")
@@ -324,6 +339,20 @@ def test_mutated_producer_record_is_not_authenticated() -> None:
     result = build((mutated,), (view(p, "plan"),))
     assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
     assert STRUCTURAL_REGISTRATION_INPUT_UNAUTHENTICATED in result.resolution.reason_codes
+
+
+def test_mutated_record_schema_versions_fail_closed() -> None:
+    p = producer()
+    observation = obs(p, "a", "plan")
+    scope = view(p, "plan")
+    for observations, views in (
+        ((replace(observation, schema_version="1.0.0"),), (scope,)),
+        ((observation,), (replace(scope, schema_version="1.0.0"),)),
+    ):
+        result = build(observations, views)
+        assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
+        assert STRUCTURAL_REGISTRATION_INPUT_UNAUTHENTICATED in result.resolution.reason_codes
+    assert observation.schema_version == STRUCTURAL_REGISTRATION_SCHEMA_VERSION
 
 
 def test_same_source_proposition_with_different_anchor_claims_conflicts() -> None:
