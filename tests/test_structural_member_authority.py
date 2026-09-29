@@ -4,6 +4,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_structural_member_authority import (
     STRUCTURAL_MEMBER_COUNT_CONFLICT,
     STRUCTURAL_MEMBER_DEFINITION_ONLY,
+    STRUCTURAL_MEMBER_DEFINITION_CONFLICT,
     STRUCTURAL_MEMBER_REGISTRATION_INCOMPLETE,
     STRUCTURAL_MEMBER_RELATION_AMBIGUOUS,
     STRUCTURAL_MEMBER_RELATION_CONFLICT,
@@ -258,6 +259,68 @@ def test_definition_binding_does_not_add_quantity():
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.quantity == 2
     assert all(member.definition_ids == ("def:chs_pillar",) for member in result.members)
+
+
+def test_missing_definition_reference_cannot_publish_an_unowned_type():
+    result = resolve(
+        observations=(obs("p0", "plan", definition_id="unknown-definition"),),
+        scopes=(scope("plan"),),
+    )
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.quantity is None
+    assert STRUCTURAL_MEMBER_DEFINITION_CONFLICT in result.reason_codes
+
+
+def test_duplicate_definition_identity_abstains_even_for_one_physical_member():
+    duplicated = definition()
+    result = resolve(
+        definitions=(duplicated, duplicated),
+        observations=(obs("p0", "plan", definition_id=duplicated.definition_id),),
+        scopes=(scope("plan"),),
+    )
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert STRUCTURAL_MEMBER_DEFINITION_CONFLICT in result.reason_codes
+
+
+def test_registered_cross_view_member_cannot_inherit_conflicting_definitions():
+    first = definition()
+    second = StructuralMemberDefinition(
+        definition_id="def:other-column", member_kind="column",
+        section_spec="another column type", source_evidence_ids=("schedule:other",),
+        page_id="3", view_id="schedule",
+    )
+    result = resolve(
+        definitions=(first, second),
+        observations=(
+            obs("plan-0", "plan", definition_id=first.definition_id),
+            obs("elev-0", "elevation", definition_id=second.definition_id),
+        ),
+        relations=(relation(
+            "plan-0", "elev-0", StructuralMemberRelation.SAME_PHYSICAL_MEMBER
+        ),),
+        scopes=(scope("plan"), scope("elevation")),
+    )
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.quantity is None
+    assert STRUCTURAL_MEMBER_DEFINITION_CONFLICT in result.reason_codes
+
+
+def test_registered_views_with_one_owned_definition_keep_one_physical_member():
+    owned = definition()
+    result = resolve(
+        definitions=(owned,),
+        observations=(
+            obs("plan-0", "plan", definition_id=owned.definition_id),
+            obs("elev-0", "elevation"),
+        ),
+        relations=(relation(
+            "plan-0", "elev-0", StructuralMemberRelation.SAME_PHYSICAL_MEMBER
+        ),),
+        scopes=(scope("plan"), scope("elevation")),
+    )
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.quantity == 1
+    assert result.members[0].definition_ids == (owned.definition_id,)
 
 
 def test_wall_end_or_jamb_shape_alone_cannot_mint_member_quantity():
