@@ -26,35 +26,36 @@ jobs:
           curl -L --fail --retry 3 -o /tmp/murera.pdf "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
           echo "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  /tmp/lamu.pdf" | sha256sum -c -
           echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  /tmp/murera.pdf" | sha256sum -c -
-      - name: Prepare #984 candidate worktree
+      - name: Prepare latest #984 candidate
         run: |
           git fetch origin refs/pull/984/head:refs/remotes/origin/pr984
           git worktree add /tmp/pr984 refs/remotes/origin/pr984
-      - name: Profile #984 Lamu wall/opening
+          git -C /tmp/pr984 rev-parse HEAD
+      - name: Profile #984 Lamu page 44 first
+        run: |
+          set -o pipefail
+          timeout 420s env PYTHONPATH=/tmp/pr984 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr984 --pdf /tmp/lamu.pdf --pages 44 --label lamu-p44-pr984 --wall-only | tee /tmp/lamu-p44-pr984.jsonl
+        continue-on-error: true
+      - name: Profile current-main Lamu page 44
+        run: |
+          set -o pipefail
+          timeout 420s env PYTHONPATH=$GITHUB_WORKSPACE python scripts/profile_exact_source_perf_gate.py --repo $GITHUB_WORKSPACE --pdf /tmp/lamu.pdf --pages 44 --label lamu-p44-main --wall-only | tee /tmp/lamu-p44-main.jsonl
+        continue-on-error: true
+      - name: Profile #984 Lamu 41-45
         run: |
           set -o pipefail
           timeout 900s env PYTHONPATH=/tmp/pr984 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr984 --pdf /tmp/lamu.pdf --pages 41-45 --label lamu-pr984 --wall-only | tee /tmp/lamu-pr984.jsonl
         continue-on-error: true
-      - name: Profile current-main Lamu wall/opening
-        run: |
-          set -o pipefail
-          timeout 900s env PYTHONPATH=$GITHUB_WORKSPACE python scripts/profile_exact_source_perf_gate.py --repo $GITHUB_WORKSPACE --pdf /tmp/lamu.pdf --pages 41-45 --label lamu-main --wall-only | tee /tmp/lamu-main.jsonl
-        continue-on-error: true
-      - name: Profile #984 Murera wall/opening
+      - name: Profile #984 Murera 219-238
         run: |
           set -o pipefail
           timeout 1200s env PYTHONPATH=/tmp/pr984 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr984 --pdf /tmp/murera.pdf --pages 219-238 --label murera-pr984 --wall-only | tee /tmp/murera-pr984.jsonl
-        continue-on-error: true
-      - name: Profile current-main Murera wall/opening
-        run: |
-          set -o pipefail
-          timeout 1200s env PYTHONPATH=$GITHUB_WORKSPACE python scripts/profile_exact_source_perf_gate.py --repo $GITHUB_WORKSPACE --pdf /tmp/murera.pdf --pages 219-238 --label murera-main --wall-only | tee /tmp/murera-main.jsonl
         continue-on-error: true
       - uses: actions/upload-artifact@v4
         with:
           name: exact-source-performance-gate
           path: |
+            /tmp/lamu-p44-pr984.jsonl
+            /tmp/lamu-p44-main.jsonl
             /tmp/lamu-pr984.jsonl
-            /tmp/lamu-main.jsonl
             /tmp/murera-pr984.jsonl
-            /tmp/murera-main.jsonl
