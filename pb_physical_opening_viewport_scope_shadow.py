@@ -12,11 +12,12 @@ Authentication is NOT decided here. It reuses the existing F.07 gate
 must be a ``segment_page_viewports`` product; a ``RESOLVED`` vector frame is
 authenticated; a ``DERIVED`` partition is authenticated only when it is an
 authoritative columnar title grid AND the complete sibling set is
-non-overlapping. Every other viewport (ambiguous, unsupported, ordinary title
-partition, or an authoritative partition whose sibling set overlaps) is not
-authenticated and *contests* ownership: a candidate that touches one of its
-rectangles, or one of the ``candidate_frames`` of an ambiguous view, cannot be
-scoped and is reported as ambiguous.
+non-overlapping. Every other viewport remains unauthenticated. Only positive
+source-drawn frame geometry may contest an authenticated view: an
+unauthenticated ``VECTOR_FRAME`` bbox or a genuine ``candidate_frames``
+alternative from an ambiguous view. Synthetic ``TITLE_PARTITION`` cells
+remain abstention-class evidence but do not independently contest ownership
+established by a drawn frame.
 
 Scopes (a candidate is "in" a view only when every support segment lies inside
 exactly one authenticated view and touches no contesting view):
@@ -36,12 +37,13 @@ exactly one authenticated view and touches no contesting view):
     or unrecognised type, or a non-plan type whose boundary is only a derived
     title partition (a bisector cell, not a drawn extent).
 ``outside_authenticated_viewports``
-    the page has authenticated views, every unauthenticated view is localised
-    and none owns the candidate: title block, notes, unframed linework. Never a
-    negative proof; only the floor-plan scope can promote.
+    the page has authenticated views, no source-drawn contest frame owns the
+    candidate, and there is no unlocalised unauthenticated view that could still
+    own it. Never a negative proof; only the floor-plan scope can promote.
 ``ambiguous_authenticated_viewport_ownership``
-    the support straddles or crosses a view boundary, lies in overlapping views,
-    or touches a contesting (unauthenticated / ambiguous) view.
+    the support straddles or crosses a view boundary, lies in overlapping
+    authenticated views, or touches positive source-drawn competing frame
+    geometry from an unauthenticated / ambiguous view.
 ``support_geometry_unreadable``
     a support observation has no usable finite geometry: abstains, never relaxes
     containment.
@@ -232,7 +234,7 @@ def _contesting_boxes(
     eligible_ids: frozenset[str],
     authenticated: Sequence[AuthenticatedViewportRecord],
 ) -> tuple[tuple[BBox, ...], bool]:
-    """Rectangles of every non-authenticated view, plus whether any could not be localised."""
+    """Source-drawn contest rectangles, plus whether other views lack localised frame proof."""
 
     boxes: list[BBox] = []
     unlocalised = False
