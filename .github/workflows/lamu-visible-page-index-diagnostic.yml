@@ -1,0 +1,33 @@
+name: Lamu Visible Page Index Diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lamu-page-index:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download exact Lamu source
+        run: |
+          curl -L --fail --retry 3 -o /tmp/lamu.pdf "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          echo "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  /tmp/lamu.pdf" | sha256sum -c -
+      - name: Profile Lamu with page-index candidate
+        run: |
+          set -o pipefail
+          timeout 2400s env PYTHONPATH=$GITHUB_WORKSPACE python scripts/profile_exact_source_perf_gate.py --repo $GITHUB_WORKSPACE --pdf /tmp/lamu.pdf --pages 41-45 --label lamu-page-index | tee /tmp/lamu-page-index.jsonl
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lamu-visible-page-index-profile
+          path: /tmp/lamu-page-index.jsonl
