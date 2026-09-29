@@ -54,6 +54,16 @@ jobs:
           set -o pipefail
           timeout 420s env PYTHONPATH=/tmp/pr992 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr992 --pdf /tmp/lamu.pdf --pages 44 --label lamu-p44-pr992 --wall-only | tee /tmp/lamu-p44-pr992.jsonl
         continue-on-error: true
+      - name: Profile #992 Lamu 41-45 immediately
+        run: |
+          set -o pipefail
+          timeout 900s env PYTHONPATH=/tmp/pr992 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr992 --pdf /tmp/lamu.pdf --pages 41-45 --label lamu-pr992 --wall-only | tee /tmp/lamu-pr992.jsonl
+        continue-on-error: true
+      - name: Profile #992 Murera 219-238 immediately
+        run: |
+          set -o pipefail
+          timeout 1200s env PYTHONPATH=/tmp/pr992 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr992 --pdf /tmp/murera.pdf --pages 219-238 --label murera-pr992 --wall-only | tee /tmp/murera-pr992.jsonl
+        continue-on-error: true
       - name: Profile #991 Lamu page 44 first
         run: |
           set -o pipefail
@@ -89,6 +99,8 @@ jobs:
           name: exact-source-performance-gate
           path: |
             /tmp/lamu-p44-pr992.jsonl
+            /tmp/lamu-pr992.jsonl
+            /tmp/murera-pr992.jsonl
             /tmp/lamu-p44-pr991.jsonl
             /tmp/lamu-p44-pr990.jsonl
             /tmp/lamu-p44-pr984.jsonl
