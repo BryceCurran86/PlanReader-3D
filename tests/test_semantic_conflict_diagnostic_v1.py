@@ -249,6 +249,10 @@ def test_clean_scope_has_no_conflict_and_is_consistent(single_pdf):
 def test_unavailable_information_is_declared_and_not_invented(adjacent_pdf):
     _source, _result, diag = _diagnose(adjacent_pdf)
     assert set(STATIC_UNAVAILABLE) <= set(diag.unavailable)
+    # Candidate patterns / members ARE available now (read-only accessor), so they
+    # are no longer declared unavailable for a scope whose structure was read ...
+    assert "candidate_structural_pattern_for_ambiguous_candidates" not in diag.unavailable
+    assert "candidate_member_observation_ids_for_unproven_candidates" not in diag.unavailable
 
     def keys(value):
         if isinstance(value, dict):
@@ -259,8 +263,8 @@ def test_unavailable_information_is_declared_and_not_invented(adjacent_pdf):
             for inner in value:
                 yield from keys(inner)
 
-    # Candidate patterns / member ids are not public for ambiguous candidates,
-    # so no such FIELD may appear in the output (they are only declared above).
+    # ... but raw member ids are still not copied into the output: only counts and
+    # histograms of them are.
     names = set(keys(diag.to_dict()))
     assert not {"structural_pattern", "member_observation_ids", "candidate_members"} & names
 
@@ -1027,3 +1031,268 @@ def test_script_diagnoses_exactly_the_bytes_it_hashed(monkeypatch, adjacent_pdf)
     assert captured["source_bytes"] == payload
     assert captured["document_id"] == report_script.document_id_for(payload)
     assert report["entries"][0]["pdf_sha256"] == __import__("hashlib").sha256(payload).hexdigest()
+
+
+# ------------------------------------------------ candidate structure (schema 1.1.0)
+def _overlapping_stroke(page):  # one opening + an overlapping duplicate stroke of a face
+    _single(page)
+    _line(page, (50, 100), (100, 100))
+
+
+def _structure_sets(diag):
+    return {name: dict(value) if isinstance(value, tuple) else value
+            for name, value in dataclasses.asdict(diag.candidate_structure).items()}
+
+
+def test_candidate_structure_of_adjacent_openings_is_reported_from_member_sets(adjacent_pdf):
+    from pb_semantic_conflict_diagnostic import CandidateStructureSummary
+
+    _source, _result, diag = _diagnose(adjacent_pdf)
+    assert diag.schema_version == "1.1.0"
+    summary = diag.candidate_structure
+    assert isinstance(summary, CandidateStructureSummary)
+    assert summary.pages_enumerated == 1 and summary.pages_unavailable == 0
+    # two adjacent gaps + the collinear pair spanning both: three 6-member candidates
+    assert summary.candidates_total == 3
+    assert dict(summary.candidates_by_pattern) == {"jamb_bounded_two_face_interruption": 3}
+    assert dict(summary.members_per_candidate) == {"jamb_bounded_two_face_interruption:6": 3}
+    # 10 observations belong to candidates; 8 belong to two of them
+    assert summary.observations_in_candidates == 10
+    assert summary.observations_in_multiple_candidates == 8
+    assert dict(summary.candidates_per_observation) == {"1": 2, "2": 8}
+    # every candidate differs from every other by more than one member: 3 families
+    assert summary.variant_families_total == 3
+    assert dict(summary.variant_family_sizes) == {"1": 3}
+    assert summary.candidates_with_strict_superset == 0
+    assert summary.candidates_with_identical_member_set == 0
+    # every ambiguous observation spans two distinct families; nothing is resolved
+    assert summary.ambiguous_observations_assessed == len(diag.conflicts) == 8
+    assert dict(summary.ambiguous_observation_family_span) == {"2": 8}
+    assert summary.disposition_candidate_id_mismatches == 0
+    assert {c.candidate_family_count for c in diag.conflicts} == {2}
+
+
+def test_overlapping_strokes_form_one_variant_family(tmp_path):
+    pdf = _write(tmp_path / "stroke.pdf", _overlapping_stroke)
+    _source, _result, diag = _diagnose(pdf)
+    summary = diag.candidate_structure
+    assert summary.candidates_total == 2
+    assert summary.variant_families_total == 1
+    assert dict(summary.variant_family_sizes) == {"2": 1}
+    # 5 of 6 members are shared, so 5 observations are ambiguous ...
+    assert summary.ambiguous_observations_assessed == len(diag.conflicts) == 5
+    # ... and all of them lie inside a single family (no cross-structure ambiguity)
+    assert dict(summary.ambiguous_observation_family_span) == {"1": 5}
+    assert {c.candidate_family_count for c in diag.conflicts} == {1}
+    assert summary.disposition_candidate_id_mismatches == 0
+    # Single-family is a description of member sets, never a resolution.
+    assert all(c.paths == (CONFLICT_PATH_AMBIGUOUS_CANDIDATES,) for c in diag.conflicts)
+    assert all(len(c.disposition.candidate_ids) == 2 for c in diag.conflicts)
+
+
+def test_clean_scope_assesses_no_page_structure(single_pdf):
+    _source, _result, diag = _diagnose(single_pdf)
+    summary = diag.candidate_structure
+    assert summary.pages_enumerated == 0 and summary.candidates_total == 0
+    assert summary.ambiguous_observations_assessed == 0
+
+
+def test_candidate_structure_is_deterministic_and_part_of_the_stable_id(adjacent_pdf):
+    _s, _r, first = _diagnose(adjacent_pdf)
+    _s, _r, second = _diagnose(adjacent_pdf)
+    assert first.candidate_structure == second.candidate_structure
+    assert first.to_dict()["candidate_structure"] == second.to_dict()["candidate_structure"]
+    json.dumps(first.to_dict(), sort_keys=True)  # serializable
+    # The structure is inside the hashed payload: changing it changes the id check.
+    changed = dataclasses.replace(
+        first.candidate_structure, candidates_total=first.candidate_structure.candidates_total + 1
+    )
+    with pytest.raises(ValueError, match="record_id does not match"):
+        dataclasses.replace(first, candidate_structure=changed)
+
+
+@pytest.mark.parametrize("transform", ["translate", "transpose"])
+def test_candidate_structure_is_invariant_under_exact_similarity_transforms(
+    tmp_path, adjacent_pdf, transform
+):
+    def moved(page):
+        for x0, x1 in [(20, 100), (140, 180), (220, 300)]:
+            for offset in (0.0, 10.0):
+                a, b = ((x0, 100.0 + offset), (x1, 100.0 + offset))
+                if transform == "translate":
+                    a, b = (a[0] + 30, a[1] + 40), (b[0] + 30, b[1] + 40)
+                else:
+                    a, b = (a[1], a[0]), (b[1], b[0])
+                _line(page, a, b)
+        for x in (100, 140, 180, 220):
+            a, b = (x, 100.0), (x, 110.0)
+            if transform == "translate":
+                a, b = (a[0] + 30, a[1] + 40), (b[0] + 30, b[1] + 40)
+            else:
+                a, b = (a[1], a[0]), (b[1], b[0])
+            _line(page, a, b)
+
+    _s, _r, base = _diagnose(adjacent_pdf)
+    _s, _r, other = _diagnose(_write(tmp_path / f"{transform}.pdf", moved))
+    assert other.candidate_structure == base.candidate_structure
+
+
+def test_unavailable_structure_is_declared_not_inferred(monkeypatch, adjacent_pdf):
+    from pb_physical_opening_authority import PhysicalOpeningCandidateStructureResult
+
+    def abstain(self, selector):
+        return PhysicalOpeningCandidateStructureResult(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            page_id=None,
+            candidates=(),
+            reason_codes=("forced_unavailable",),
+        )
+
+    monkeypatch.setattr(PhysicalOpeningAuthority, "visible_candidate_structures", abstain)
+    _s, _r, diag = _diagnose(adjacent_pdf)
+    summary = diag.candidate_structure
+    assert summary.pages_enumerated == 0 and summary.pages_unavailable == 1
+    assert summary.candidates_total == 0 and summary.ambiguous_observations_assessed == 0
+    assert {c.candidate_family_count for c in diag.conflicts} == {None}
+    for item in (
+        "candidate_structure_unavailable_for_some_pages",
+        "candidate_structural_pattern_for_ambiguous_candidates",
+        "candidate_member_observation_ids_for_unproven_candidates",
+    ):
+        assert item in diag.unavailable
+
+
+def test_an_accessor_that_disagrees_with_the_disposition_is_reported(monkeypatch, adjacent_pdf):
+    original = PhysicalOpeningAuthority.visible_candidate_structures
+
+    def dropped(self, selector):
+        result = original(self, selector)
+        return dataclasses.replace(result, candidates=result.candidates[1:])
+
+    monkeypatch.setattr(PhysicalOpeningAuthority, "visible_candidate_structures", dropped)
+    _s, _r, diag = _diagnose(adjacent_pdf)
+    summary = diag.candidate_structure
+    assert summary.disposition_candidate_id_mismatches > 0
+    # A disagreeing observation gets no family count; nothing is guessed.
+    assert None in {c.candidate_family_count for c in diag.conflicts}
+
+
+def test_candidate_structure_aggregation_sums_and_is_order_invariant(
+    adjacent_pdf, tmp_path
+):
+    stroke = _write(tmp_path / "stroke.pdf", _overlapping_stroke)
+    _s, _r, first = _diagnose(adjacent_pdf)
+    _s, _r, second = _diagnose(stroke)
+    forward = aggregate_semantic_conflict_diagnostics([first, second])
+    backward = aggregate_semantic_conflict_diagnostics([second, first])
+    assert forward == backward
+    block = forward["candidate_structure"]
+    assert block["candidates_total"] == 5
+    assert block["variant_families_total"] == 4
+    assert block["ambiguous_observations_assessed"] == 13
+    assert block["ambiguous_observation_family_span"] == {"1": 5, "2": 8}
+    assert block["variant_family_sizes"] == {"1": 3, "2": 1}
+    assert block["disposition_candidate_id_mismatches"] == 0
+    assert aggregate_semantic_conflict_diagnostics([])["candidate_structure"]["candidates_total"] == 0
+
+
+def test_script_report_carries_the_candidate_structure(tmp_path, adjacent_pdf):
+    report = report_script.build_report([adjacent_pdf], detail="full")
+    (entry,) = report["entries"]
+    assert entry["diagnostic"]["candidate_structure"]["candidates_total"] == 3
+    assert report["summary"]["candidate_structure"]["candidates_total"] == 3
+
+
+# ---------------------------------------- member-set analysis on fabricated candidates
+def _fabricated(pattern, *members):
+    from pb_physical_opening_authority import CandidateSemanticOpening
+
+    return CandidateSemanticOpening(
+        candidate_id=f"cand_{pattern}_{'_'.join(members)}",
+        source_observation_ids=tuple(sorted(members)),
+        source_lineage_root_ids=(),
+        document_id="d",
+        revision_id="r",
+        source_sha256="s",
+        snapshot_id="n",
+        page_id="1",
+        viewport_id=None,
+        structural_pattern=pattern,
+        status=EvidenceResolutionStatus.CANDIDATE,
+        reason_codes=(),
+    )
+
+
+def _analyse(*candidates):
+    from pb_semantic_conflict_diagnostic import _analyse_page_candidates, _new_structure_tally
+
+    tally = _new_structure_tally()
+    page = _analyse_page_candidates(candidates, tally)
+    return page, tally
+
+
+def test_variant_families_join_transitively_but_only_through_single_substitutions():
+    a = _fabricated("p", "o1", "o2", "o3", "o4")
+    b = _fabricated("p", "o1", "o2", "o3", "o5")  # differs from a by one member
+    c = _fabricated("p", "o1", "o2", "o6", "o5")  # differs from b by one, from a by two
+    d = _fabricated("p", "o1", "o7", "o8", "o9")  # shares one member only
+    page, tally = _analyse(a, b, c, d)
+    roots = dict(zip(page.candidate_ids, page.family_of))
+    assert roots[a.candidate_id] == roots[b.candidate_id] == roots[c.candidate_id]
+    assert roots[d.candidate_id] != roots[a.candidate_id]
+    assert tally["variant_families_total"] == 2
+    assert dict(tally["variant_family_sizes"]) == {3: 1, 1: 1}
+
+
+def test_different_sized_candidates_are_never_variants_of_each_other():
+    small = _fabricated("p", "o1", "o2", "o3")
+    large = _fabricated("p", "o1", "o2", "o3", "o4")
+    page, tally = _analyse(small, large)
+    assert tally["variant_families_total"] == 2
+    assert tally["candidates_with_strict_superset"] == 1  # `small` is contained in `large`
+    assert tally["candidates_with_identical_member_set"] == 0
+
+
+def test_identical_member_sets_under_different_patterns_are_counted_and_share_a_family():
+    first = _fabricated("p1", "o1", "o2", "o3")
+    second = _fabricated("p2", "o1", "o2", "o3")
+    page, tally = _analyse(first, second)
+    assert tally["candidates_with_identical_member_set"] == 2
+    assert tally["candidates_with_strict_superset"] == 0
+    assert tally["variant_families_total"] == 1
+
+
+def test_disjoint_and_singly_shared_candidates_stay_separate_families():
+    page, tally = _analyse(
+        _fabricated("p", "o1", "o2", "o3"),
+        _fabricated("p", "o3", "o4", "o5"),
+        _fabricated("p", "o6", "o7", "o8"),
+    )
+    assert tally["variant_families_total"] == 3
+    assert dict(tally["candidates_per_observation"]) == {1: 7, 2: 1}
+    assert tally["observations_in_multiple_candidates"] == 1
+
+
+def test_member_set_analysis_ignores_input_order():
+    cands = [
+        _fabricated("p", "o1", "o2", "o3", "o4"),
+        _fabricated("p", "o1", "o2", "o3", "o5"),
+        _fabricated("p", "o9", "o8", "o7", "o6"),
+    ]
+    _p, forward = _analyse(*cands)
+    _p, backward = _analyse(*reversed(cands))
+    assert {k: v for k, v in forward.items()} == {k: v for k, v in backward.items()}
+
+
+def test_a_structure_read_for_a_different_page_is_not_used(monkeypatch, adjacent_pdf):
+    original = PhysicalOpeningAuthority.visible_candidate_structures
+
+    def other_page(self, selector):
+        return dataclasses.replace(original(self, selector), page_id="99")
+
+    monkeypatch.setattr(PhysicalOpeningAuthority, "visible_candidate_structures", other_page)
+    _s, _r, diag = _diagnose(adjacent_pdf)
+    summary = diag.candidate_structure
+    assert summary.pages_enumerated == 0 and summary.pages_unavailable == 1
+    assert summary.candidates_total == 0
+    assert {c.candidate_family_count for c in diag.conflicts} == {None}

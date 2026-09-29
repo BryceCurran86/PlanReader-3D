@@ -86,10 +86,12 @@ it), `one_proven_opening_plus_competitor` (one does), `no_proven_opening`.
 * The collector mirrors the shadow's source -> semantic steps exactly, and a
   test asserts its `semantic_record_id` equals the shadow's, so both describe
   the same authenticated scope.
-* Unavailable, not inferred: a candidate's structural pattern and member
-  observations (`prove_existence` returns no candidate on a conflict), the
-  relation between closure candidate ids and disposition candidate ids, the
-  view kind (resolved later, by the count stage), and the recorded path itself.
+* Unavailable, not inferred: the relation between closure candidate ids and
+  disposition candidate ids, the view kind (resolved later, by the count
+  stage), and the recorded path itself.  A candidate's structural pattern and
+  member observations were unavailable in schema 1.0.0; schema 1.1.0 reads them
+  through the read-only accessor below and declares them unavailable again only
+  for a scope whose page structure could not be read.
 * No identity is inferred from counts, similarity, proximity or adjacency. The
   relations above describe how public support sets overlap; they do not claim
   two candidates are the same opening.
@@ -109,6 +111,44 @@ it), `one_proven_opening_plus_competitor` (one does), `no_proven_opening`.
   observation-id order. The diagnostic lists these openings.
 * `GenericOpeningCountProducer.publish` raises for a complete universe with zero
   proven openings (queued as a separate task).
+
+## Candidate structure (schema 1.1.0)
+
+`PhysicalOpeningAuthority.visible_candidate_structures(selector)` is a new
+read-only accessor. It follows the same source-visibility and snapshot-integrity
+gates as `classify_disposition` and returns the page's memoized candidates
+(`CandidateSemanticOpening`: member observation ids, lineage roots, structural
+pattern) inside a `PhysicalOpeningCandidateStructureResult`. Its status is
+`CANDIDATE` when the page was enumerated (never `CORROBORATED`), `ABSTAINED` /
+`CONFLICT` otherwise. It decides nothing, changes no other result and is called
+by nothing except this diagnostic (both tested).
+
+From member observation ids alone (no geometry, distance, count or threshold),
+the diagnostic reports for every page that holds a diagnosed observation:
+
+* candidates by pattern and members per candidate;
+* how many candidates each observation belongs to;
+* **variant families**: candidates with the same number of members that differ
+  in exactly one member, joined transitively (found by grouping candidates on
+  "members minus one member", not by a pairwise scan);
+* candidates whose member set is strictly contained in another's, and candidates
+  with an identical member set under another pattern;
+* for each ambiguous conflicting observation, the number of distinct variant
+  families among its candidates (`candidate_family_count`; histogram
+  `ambiguous_observation_family_span`). A span of 1 means every candidate of
+  that observation is a one-member variant of the others; a span of 2 or more
+  means the observation is shared by structurally different candidates;
+* `disposition_candidate_id_mismatches`: ambiguous observations whose candidate
+  ids from the accessor differ from those `classify_disposition` returned. It
+  must be 0; a non-zero count is reported and those observations get no family
+  count.
+
+A variant family is a description of member sets. It is **not** a claim that its
+candidates are one opening, and a multi-family span is not a claim that they are
+different openings. Neither result resolves the ambiguity, breaks a tie or feeds
+any authority. The synthetic drawings in the tests check that the accessor and
+the classification behave as specified; they are not evidence about real
+drawings and do not choose a production rule.
 
 Run:
 
