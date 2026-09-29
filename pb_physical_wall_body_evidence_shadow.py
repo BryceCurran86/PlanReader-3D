@@ -444,8 +444,10 @@ def resolve_physical_wall_body_evidence_shadow(
 ) -> PhysicalWallBodyEvidence:
     """Resolve one local wall-body proposition in SHADOW only.
 
-    One-face candidates require segmentation support, a source-supported
-    thickness family, and at least two independent topology witnesses.
+    Candidate faces always require immutable source observations; segmentation
+    support can never replace primitive/source provenance. One-face candidates
+    additionally require segmentation support, a source-supported thickness
+    family, and at least two independent topology witnesses.
     Two-face candidates require independent topology and a source-supported
     thickness family; segmentation may strengthen that proof but can never
     substitute for thickness evidence. Parallel faces alone can never
@@ -508,7 +510,7 @@ def resolve_physical_wall_body_evidence_shadow(
 
     if len(faces) not in (1, 2):
         reasons.append(PHYSICAL_WALL_BODY_EVIDENCE_INSUFFICIENT)
-    elif not observations:
+    elif not base_observations:
         reasons.extend(
             (
                 PHYSICAL_WALL_BODY_SOURCE_PROVENANCE_INCOMPLETE,
