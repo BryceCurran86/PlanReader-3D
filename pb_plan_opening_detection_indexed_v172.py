@@ -285,7 +285,24 @@ def detect_gap_candidates_indexed(
     collinear_offset = 15.0
     endpoint_proximity = 5.0
 
-    pair_radius = math.hypot(max_gap, collinear_offset)
+    max_wall_length = max(
+        (float(wall_line.segment.length) for wall_line in wall_lines),
+        default=0.0,
+    )
+    # Legacy acceptance permits up to 10 degrees angular difference while
+    # measuring perpendicular offset at b's midpoint. A long tilted segment can
+    # therefore have terminal endpoints farther from a than MAX_GAP alone.
+    # Include the worst allowed half-length angular displacement so the endpoint
+    # grid remains a conservative superset before exact legacy predicates run.
+    angular_endpoint_drift = (
+        0.5
+        * max_wall_length
+        * math.sin(math.radians(collinear_tol_deg))
+    )
+    pair_radius = math.hypot(
+        max_gap,
+        collinear_offset + angular_endpoint_drift,
+    )
     wall_pairs = _endpoint_wall_pair_candidates(
         wall_lines,
         max_endpoint_distance=pair_radius,
