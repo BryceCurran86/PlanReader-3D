@@ -19,6 +19,7 @@ from pb_raster_plan_dimension_authority import (
     _bind_text_to_geometry,
     _canonicalize_numeric_ocr_lines,
     _inverse_rotated_bbox_px,
+    _producer_rotated_numeric_ocr_lines,
     _resolve_overall,
     _text_orientation_candidates,
 )
@@ -198,6 +199,45 @@ def test_numeric_ocr_dedupe_requires_same_value_and_substantial_overlap():
     assert any(line.text == "4700" for line in result)
     assert _bbox_overlap_over_min_area(first.bbox_pt, same_print.bbox_pt) > 0.9
     assert _bbox_overlap_over_min_area(first.bbox_pt, separate_same_value.bbox_pt) == 0.0
+
+
+
+def test_rotated_numeric_ocr_passes_remap_same_print_to_one_page_box():
+    calls = []
+
+    def responder(image, _dpi):
+        calls.append(image.size)
+        call = len(calls)
+        if call == 1:
+            return ()
+        if call == 2:
+            # 90 clockwise form of source bbox (40,30)-(100,50)
+            return (
+                OCRLine(
+                    text="4100",
+                    confidence=0.4,
+                    bbox_px=(150.0, 40.0, 170.0, 100.0),
+                ),
+            )
+        # 270 clockwise form of the same source bbox.
+        return (
+            OCRLine(
+                text="4100",
+                confidence=0.9,
+                bbox_px=(30.0, 300.0, 50.0, 360.0),
+            ),
+        )
+
+    backend = MockOCRBackend(responder=responder)
+    image = Image.new("RGB", (400, 200), "white")
+
+    result = _producer_rotated_numeric_ocr_lines(image, backend=backend, dpi=72)
+
+    assert calls == [(400, 200), (200, 400), (200, 400)]
+    assert len(result) == 1
+    assert result[0].text == "4100"
+    assert result[0].bbox_pt == pytest.approx((40.0, 30.0, 100.0, 50.0))
+
 
 
 def test_strong_ocr_bbox_orientation_is_positive_but_square_stays_ambiguous():
