@@ -1,0 +1,113 @@
+name: TEST-ONLY Murera Raster Dimension Shadow V2
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-raster-dimension-shadow:
+    if: startsWith(github.head_ref, 'diag/murera-raster-dimension-shadow-v2')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Run exact-source shadow
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          import urllib.request
+
+          from pb_raster_plan_dimension_authority import RasterPlanDimensionProducer
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          url = "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected = "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          req = urllib.request.Request(
+              url,
+              headers={"User-Agent": "PlanReader-Murera-raster-dimension-shadow-v2/1.0"},
+          )
+          with urllib.request.urlopen(req, timeout=120) as response:
+              source_bytes = response.read()
+          got = hashlib.sha256(source_bytes).hexdigest()
+          if got != expected:
+              raise SystemExit(f"source sha mismatch: {got}")
+
+          source = SourceVisibilityProducer(
+              producer_method="murera-raster-dimension-shadow-v2",
+              producer_version="1.0",
+          )
+          published = source.ingest_native_pdf_bytes(
+              document_id="murera-raster-dimension-shadow-v2",
+              source_bytes=source_bytes,
+              source_locator=url,
+          )
+          producer = RasterPlanDimensionProducer.create(source_visibility=source)
+          result = producer.publish(
+              revision_id=published.revision.revision_id,
+              page_id="228",
+          )
+
+          def overall(value):
+              if value is None:
+                  return None
+              return {
+                  "orientation": value.orientation,
+                  "value_mm": value.value_mm,
+                  "span_pt": value.span_pt,
+                  "endpoints_pt": value.endpoints_pt,
+                  "child_values_mm": value.child_values_mm,
+              }
+
+          bound = [
+              {
+                  "value_mm": item.value_mm,
+                  "orientation": item.orientation,
+                  "span_pt": item.span_pt,
+                  "endpoints_pt": item.endpoints_pt,
+              }
+              for item in result.bound_dimensions
+          ]
+          bound.sort(
+              key=lambda item: (
+                  item["orientation"],
+                  item["endpoints_pt"],
+                  item["value_mm"],
+              )
+          )
+          payload = {
+              "source_sha256": got,
+              "page": 228,
+              "backend": {
+                  "name": producer._backend.name,
+                  "version": producer._backend.version,
+              },
+              "status": result.status.value,
+              "reason_codes": result.reason_codes,
+              "horizontal": overall(result.horizontal),
+              "vertical": overall(result.vertical),
+              "length_m": result.length_m,
+              "width_m": result.width_m,
+              "scale_status": result.scale_status,
+              "scale_px_per_m": result.scale_px_per_m,
+              "bound_count": len(bound),
+              "bound_dimensions": bound[:120],
+              "quantity_m2": result.quantity_m2,
+          }
+          print(
+              "MURERA_RASTER_DIMENSION_SHADOW_V2="
+              + json.dumps(payload, sort_keys=True, default=str),
+              flush=True,
+          )
+          PY
