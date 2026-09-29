@@ -170,7 +170,7 @@ def test_duplicate_anchor_in_one_view_is_ambiguous_not_first_match() -> None:
     assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
     assert result.resolution.quantity is None
     assert STRUCTURAL_MEMBER_REGISTRATION_ANCHOR_AMBIGUOUS in result.reason_codes
-    assert result.audit.ambiguous_anchor_keys == ("grid_intersection|BUILDING-A:GRID|A/1",)
+    assert result.audit.ambiguous_anchor_keys == ("grid_intersection|building-a:grid|A/1",)
     assert not any(
         relation.relation is StructuralMemberRelation.SAME_PHYSICAL_MEMBER
         for relation in result.relations
