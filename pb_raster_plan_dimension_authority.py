@@ -189,6 +189,68 @@ def _parse_dimension_value_mm(text: str) -> Optional[int]:
     return value if 0 < value <= 1_000_000 else None
 
 
+def _inverse_rotated_bbox_px(
+    bbox_px: Sequence[float],
+    *,
+    rotation_deg: int,
+    original_width_px: float,
+    original_height_px: float,
+) -> tuple[float, float, float, float]:
+    """Map a rotated OCR bbox back into the original producer-rendered page."""
+
+    if len(bbox_px) != 4:
+        raise ValueError("bbox_px must have four coordinates")
+    x0, y0, x1, y1 = (float(value) for value in bbox_px)
+    if rotation_deg == 0:
+        mapped = (x0, y0, x1, y1)
+    elif rotation_deg == 90:
+        mapped = (
+            y0,
+            original_height_px - x1,
+            y1,
+            original_height_px - x0,
+        )
+    elif rotation_deg == 270:
+        mapped = (
+            original_width_px - y1,
+            x0,
+            original_width_px - y0,
+            x1,
+        )
+    else:
+        raise ValueError("rotation_deg must be one of 0, 90, 270")
+    mx0, my0, mx1, my1 = mapped
+    if (
+        not all(math.isfinite(value) for value in mapped)
+        or mx1 <= mx0
+        or my1 <= my0
+        or mx0 < 0.0
+        or my0 < 0.0
+        or mx1 > original_width_px
+        or my1 > original_height_px
+    ):
+        raise ValueError("rotated OCR bbox does not map inside source page")
+    return mapped
+
+
+def _bbox_overlap_over_min_area(
+    left: Sequence[float],
+    right: Sequence[float],
+) -> float:
+    if len(left) != 4 or len(right) != 4:
+        return 0.0
+    lx0, ly0, lx1, ly1 = (float(value) for value in left)
+    rx0, ry0, rx1, ry1 = (float(value) for value in right)
+    left_area = max(0.0, lx1 - lx0) * max(0.0, ly1 - ly0)
+    right_area = max(0.0, rx1 - rx0) * max(0.0, ry1 - ry0)
+    if left_area <= 0.0 or right_area <= 0.0:
+        return 0.0
+    ix0, iy0 = max(lx0, rx0), max(ly0, ry0)
+    ix1, iy1 = min(lx1, rx1), min(ly1, ry1)
+    intersection = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
+    return intersection / min(left_area, right_area)
+
+
 def _segment_orientation(
     geometry: Sequence[float],
 ) -> Optional[str]:
