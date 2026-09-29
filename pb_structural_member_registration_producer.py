@@ -88,6 +88,21 @@ def _unique_nonempty(values: Sequence[str], name: str) -> tuple[str, ...]:
 
 
 @dataclass(frozen=True)
+class StructuralMemberSourceLineage:
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    snapshot_id: str
+    schema_version: str = STRUCTURAL_MEMBER_REGISTRATION_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "document_id", _nonempty(self.document_id, "document_id"))
+        object.__setattr__(self, "revision_id", _nonempty(self.revision_id, "revision_id"))
+        object.__setattr__(self, "source_sha256", _nonempty(self.source_sha256, "source_sha256"))
+        object.__setattr__(self, "snapshot_id", _nonempty(self.snapshot_id, "snapshot_id"))
+
+
+@dataclass(frozen=True)
 class StructuralMemberRegistrationAnchor:
     """Positive source registration key shared by representations of one member."""
 
@@ -122,6 +137,7 @@ class StructuralMemberRegistrationAnchor:
 class StructuralMemberCandidateEvidence:
     """One positively evidenced structural-member representation in one view."""
 
+    lineage: StructuralMemberSourceLineage
     candidate_id: str
     member_kind: str
     page_id: str
@@ -135,6 +151,8 @@ class StructuralMemberCandidateEvidence:
     schema_version: str = STRUCTURAL_MEMBER_REGISTRATION_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
+        if type(self.lineage) is not StructuralMemberSourceLineage:
+            raise TypeError("lineage must be StructuralMemberSourceLineage")
         object.__setattr__(self, "candidate_id", _nonempty(self.candidate_id, "candidate_id"))
         object.__setattr__(self, "member_kind", _nonempty(self.member_kind, "member_kind").lower())
         object.__setattr__(self, "page_id", _nonempty(self.page_id, "page_id"))
@@ -167,6 +185,7 @@ class StructuralMemberCandidateEvidence:
 class StructuralMemberSourceView:
     """Explicit completeness statement for one source-owned drawing view."""
 
+    lineage: StructuralMemberSourceLineage
     page_id: str
     view_id: str
     view_type: str
@@ -176,6 +195,8 @@ class StructuralMemberSourceView:
     schema_version: str = STRUCTURAL_MEMBER_REGISTRATION_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
+        if type(self.lineage) is not StructuralMemberSourceLineage:
+            raise TypeError("lineage must be StructuralMemberSourceLineage")
         object.__setattr__(self, "page_id", _nonempty(self.page_id, "page_id"))
         object.__setattr__(self, "view_id", _nonempty(self.view_id, "view_id"))
         object.__setattr__(self, "view_type", _nonempty(self.view_type, "view_type").lower())
@@ -195,6 +216,7 @@ class StructuralMemberSourceView:
 class StructuralMemberRegistrationProof:
     """Explicit positive relation proof supplied by a source adapter."""
 
+    lineage: StructuralMemberSourceLineage
     left_candidate_id: str
     right_candidate_id: str
     relation: StructuralMemberRelation
@@ -203,6 +225,8 @@ class StructuralMemberRegistrationProof:
     schema_version: str = STRUCTURAL_MEMBER_REGISTRATION_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
+        if type(self.lineage) is not StructuralMemberSourceLineage:
+            raise TypeError("lineage must be StructuralMemberSourceLineage")
         object.__setattr__(
             self,
             "left_candidate_id",
@@ -265,20 +289,33 @@ class StructuralMemberRegistrationProducer:
         self._relation_proofs = tuple(relation_proofs)
         self._definitions = tuple(definitions)
 
+    def _lineage_matches(self, lineage: StructuralMemberSourceLineage) -> bool:
+        return (
+            lineage.document_id == self._selector.document_id
+            and lineage.revision_id == self._selector.revision_id
+            and lineage.source_sha256 == self._selector.source_sha256
+            and lineage.snapshot_id == self._selector.snapshot_id
+        )
+
     def _eligible_candidates(
         self,
     ) -> tuple[tuple[StructuralMemberCandidateEvidence, ...], tuple[str, ...]]:
         target_kind = self._selector.member_kind.strip().lower()
         eligible: list[StructuralMemberCandidateEvidence] = []
         rejected: list[str] = []
-        view_by_id = {view.view_id: view for view in self._views}
+        view_by_id = {
+            view.view_id: view
+            for view in self._views
+            if self._lineage_matches(view.lineage)
+        }
 
         for candidate in self._candidates:
             if type(candidate) is not StructuralMemberCandidateEvidence:
                 raise TypeError("candidates must contain StructuralMemberCandidateEvidence")
             view = view_by_id.get(candidate.view_id)
             if (
-                candidate.member_kind != target_kind
+                not self._lineage_matches(candidate.lineage)
+                or candidate.member_kind != target_kind
                 or candidate.role_evidence_kind not in _ALLOWED_ROLE_EVIDENCE_KINDS
                 or view is None
                 or view.page_id != candidate.page_id
@@ -404,6 +441,8 @@ class StructuralMemberRegistrationProducer:
                 raise TypeError(
                     "relation_proofs must contain StructuralMemberRegistrationProof"
                 )
+            if not self._lineage_matches(proof.lineage):
+                continue
             left = observation_by_candidate.get(proof.left_candidate_id)
             right = observation_by_candidate.get(proof.right_candidate_id)
             if left is None or right is None:
@@ -443,7 +482,10 @@ class StructuralMemberRegistrationProducer:
                 reason_codes=view.reason_codes,
             )
             for view in sorted(self._views, key=lambda row: row.view_id)
-            if view.view_id in candidate_view_ids
+            if (
+                view.view_id in candidate_view_ids
+                and self._lineage_matches(view.lineage)
+            )
         )
 
         resolution = StructuralMemberProducer.from_authenticated_evidence(
@@ -469,5 +511,6 @@ __all__ = [
     "StructuralMemberRegistrationProof",
     "StructuralMemberRegistrationProducer",
     "StructuralMemberRegistrationResult",
+    "StructuralMemberSourceLineage",
     "StructuralMemberSourceView",
 ]
