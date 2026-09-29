@@ -33,10 +33,40 @@ def page_census(pdf_path, page_number):
             page,source_page=page_number,dimension_chains=chains
         )
         glyphs=support._physical_support_glyphs(page,source_page=page_number)
+        page_width=float(page.rect.width)
+        page_height=float(page.rect.height)
+        scale_ref=max(1.0,min(page_width,page_height))
+        min_side=scale_ref*0.00035
+        max_side=scale_ref*0.03
+        outlined_rectangles=[]
+        for index,drawing in enumerate(page.get_drawings() or ()):
+            rect=drawing.get("rect")
+            if rect is None:
+                continue
+            width=float(rect.width); height=float(rect.height)
+            if width<=0 or height<=0:
+                continue
+            if width<min_side or height<min_side or width>max_side or height>max_side:
+                continue
+            if max(width,height)/min(width,height)>1.25:
+                continue
+            kinds=tuple(str(item[0]) for item in (drawing.get("items") or ()))
+            rectangular=(kinds==("re",) or (len(kinds)==4 and all(k=="l" for k in kinds)))
+            if not rectangular:
+                continue
+            outlined_rectangles.append({
+                "drawing_id":f"page:{page_number}:drawing:{index}",
+                "bbox":[float(rect.x0),float(rect.y0),float(rect.x1),float(rect.y1)],
+                "width":width,"height":height,
+                "fill":drawing.get("fill"),
+                "stroke":drawing.get("color"),
+                "layer":drawing.get("layer"),
+            })
         return {
             "page":page_number,
             "support_text_blocks":blocks,
             "dimension_chains":[chain_payload(c) for c in chains],
+            "outlined_rectangular_candidates":outlined_rectangles,
             "physical_support_glyphs":[
                 {
                     "glyph_id":g.glyph_id,
