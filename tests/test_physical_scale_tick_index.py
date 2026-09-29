@@ -256,3 +256,32 @@ def test_index_preserves_duplicate_observation_exclusion() -> None:
 
     assert expected == (independent_tick,)
     assert actual == expected
+
+
+
+def test_non_finite_geometry_falls_back_to_full_exact_universe() -> None:
+    baseline = _segment("base", (0.0, 0.0), (100.0, 0.0))
+    valid_tick = _segment("valid", (0.0, -10.0), (0.0, 10.0))
+    malformed_tick = _segment("malformed", (float("nan"), 0.0), (1.0, 1.0))
+    segments = [baseline, valid_tick, malformed_tick]
+    index = module._TickEndpointIndex(segments)
+
+    expected = module._tick_for_endpoint(baseline, baseline.start, segments)
+    actual = module._tick_for_endpoint(
+        baseline,
+        baseline.start,
+        index.candidates(baseline, baseline.start),
+    )
+    assert actual == expected
+
+    malformed_baseline = _segment(
+        "malformed-base",
+        (float("inf"), 0.0),
+        (100.0, 0.0),
+    )
+    malformed_universe = [malformed_baseline, valid_tick, malformed_tick]
+    malformed_index = module._TickEndpointIndex(malformed_universe)
+    assert malformed_index.candidates(
+        malformed_baseline,
+        malformed_baseline.start,
+    ) == tuple(malformed_universe)
