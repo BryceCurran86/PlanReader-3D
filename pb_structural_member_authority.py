@@ -16,6 +16,7 @@ STRUCTURAL_MEMBER_RELATION_CONFLICT = "structural_member_relation_conflict"
 STRUCTURAL_MEMBER_REGISTRATION_INCOMPLETE = "structural_member_registration_incomplete"
 STRUCTURAL_MEMBER_COUNT_CONFLICT = "structural_member_count_conflict"
 STRUCTURAL_MEMBER_DEFINITION_ONLY = "structural_member_definition_only"
+STRUCTURAL_MEMBER_DEFINITION_CONFLICT = "structural_member_definition_conflict"
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
@@ -142,6 +143,19 @@ class StructuralMemberProducer:
         kind = self._selector.member_kind.strip().lower()
         defs = tuple(d for d in self._definitions if d.member_kind.strip().lower() == kind)
         obs = tuple(o for o in self._observations if o.member_kind.strip().lower() == kind)
+        definition_ids = {d.definition_id for d in defs}
+        if (
+            len(definition_ids) != len(defs)
+            or any(not definition_id for definition_id in definition_ids)
+            or any(o.definition_id and o.definition_id not in definition_ids for o in obs)
+        ):
+            self._result = self._blocked(
+                EvidenceResolutionStatus.CONFLICT,
+                STRUCTURAL_MEMBER_DEFINITION_CONFLICT,
+                definitions=defs,
+                unresolved=tuple(sorted(o.observation_id for o in obs)),
+            )
+            return self._result
         by_id = {o.observation_id: o for o in obs}
         if len(by_id) != len(obs):
             self._result = self._blocked(EvidenceResolutionStatus.CONFLICT,
@@ -217,6 +231,21 @@ class StructuralMemberProducer:
         groups = {}
         for o in obs:
             groups.setdefault(find(o.observation_id), []).append(o)
+
+        # A registered physical member cannot silently inherit two different
+        # specifications from its plan and elevation observations. Count and
+        # type publication both abstain until that source conflict is resolved.
+        if any(
+            len({row.definition_id for row in grouped if row.definition_id}) > 1
+            for grouped in groups.values()
+        ):
+            self._result = self._blocked(
+                EvidenceResolutionStatus.CONFLICT,
+                STRUCTURAL_MEMBER_DEFINITION_CONFLICT,
+                definitions=defs,
+                unresolved=tuple(sorted(by_id)),
+            )
+            return self._result
 
         counts_by_view = {
             view_id: sum(1 for members in groups.values() if any(m.view_id == view_id for m in members))
