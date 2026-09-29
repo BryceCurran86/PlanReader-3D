@@ -239,6 +239,35 @@ def _ocr(text: str, bbox: tuple[float, float, float, float]) -> OCRLine:
     return OCRLine(text=text, confidence=1.0, bbox_px=bbox, bbox_pt=bbox)
 
 
+def _debug_result(result):
+    return {
+        "status": result.status.value,
+        "reasons": result.reason_codes,
+        "horizontal": None if result.horizontal is None else {
+            "value_mm": result.horizontal.value_mm,
+            "span_pt": result.horizontal.span_pt,
+            "children": result.horizontal.child_values_mm,
+        },
+        "vertical": None if result.vertical is None else {
+            "value_mm": result.vertical.value_mm,
+            "span_pt": result.vertical.span_pt,
+            "children": result.vertical.child_values_mm,
+        },
+        "bound": [
+            {
+                "value_mm": item.value_mm,
+                "orientation": item.orientation,
+                "span_pt": item.span_pt,
+                "endpoints": item.endpoints_pt,
+                "line_ids": item.dimension_line_observation_ids,
+                "witness_ids": item.witness_observation_ids,
+            }
+            for item in result.bound_dimensions
+        ],
+        "scale_status": result.scale_status,
+    }
+
+
 def test_end_to_end_producer_resolves_only_source_owned_orthogonal_chains():
     source = SourceVisibilityProducer(
         producer_method="raster-dimension-test",
@@ -268,7 +297,7 @@ def test_end_to_end_producer_resolves_only_source_owned_orthogonal_chains():
         revision_id=published.revision.revision_id,
         page_id="1",
     )
-    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.status is EvidenceResolutionStatus.CANDIDATE, _debug_result(result)
     assert result.length_m == 10.0
     assert result.width_m == 5.0
     assert result.horizontal is not None
@@ -316,7 +345,7 @@ def test_producer_scale_conflict_fails_closed():
         revision_id=published.revision.revision_id,
         page_id="1",
     )
-    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.status is EvidenceResolutionStatus.CONFLICT, _debug_result(result)
     assert result.length_m is None
     assert result.width_m is None
     assert result.scale_status == "conflicting"
