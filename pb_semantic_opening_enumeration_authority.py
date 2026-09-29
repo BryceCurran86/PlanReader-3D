@@ -242,6 +242,10 @@ class SemanticOpeningEnumerationProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
         self._source_visibility_producer = source_visibility_producer
         self._results: dict[_Key, SemanticOpeningEnumerationResult] = {}
+        self._physical_opening_authorities: dict[
+            tuple[str, str, str, str],
+            PhysicalOpeningAuthority,
+        ] = {}
 
     @classmethod
     def from_source_visibility_producer(
@@ -348,6 +352,9 @@ class SemanticOpeningEnumerationProducer:
             snapshot_id=published.snapshot.snapshot_id,
             decision_scope_id=decision_scope_id,
         )
+        cached_result = self._results.get(selector.key)
+        if cached_result is not None:
+            return cached_result
 
         coverage = published.coverage
         decoded_pages = tuple(sorted({int(page) for page in coverage.decoded_pages}))
@@ -381,7 +388,16 @@ class SemanticOpeningEnumerationProducer:
             )
 
         visibility = self._source_visibility_producer.authority()
-        physical = PhysicalOpeningAuthority(visibility)
+        physical_key = (
+            published.revision.document_id,
+            published.revision.revision_id,
+            published.revision.source_sha256,
+            published.snapshot.snapshot_id,
+        )
+        physical = self._physical_opening_authorities.get(physical_key)
+        if physical is None:
+            physical = PhysicalOpeningAuthority(visibility)
+            self._physical_opening_authorities[physical_key] = physical
         allowed_pages = set(scoped_page_ids)
 
         opening_records: dict[str, PhysicalOpeningExistenceRecord] = {}
