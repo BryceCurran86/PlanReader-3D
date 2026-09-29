@@ -12,6 +12,7 @@ viewport boxes are never accepted as truth inputs.
 """
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 import hashlib
 import math
@@ -189,6 +190,138 @@ def _distance(left: _Point, right: _Point) -> float:
     return math.hypot(left[0] - right[0], left[1] - right[1])
 
 
+_TICK_MAX_LENGTH_RATIO = 0.75
+_TICK_PERPENDICULAR_TOLERANCE_DEG = 5.0
+_TICK_PARAMETER_MIN = 0.15
+_TICK_PARAMETER_MAX = 0.85
+_TICK_MAX_DISTANCE_PT = 0.5
+_TICK_INDEX_ANGLE_BUCKET_DEG = 5.0
+
+
+class _TickEndpointIndex:
+    """Conservative broad phase for physical-scale endpoint ticks.
+
+    The exact tick predicate remains in _tick_for_endpoint. This index only
+    removes segments that cannot possibly pass it.
+
+    For any accepted tick:
+    - tick.length <= 0.75 * baseline.length;
+    - the baseline endpoint projects into tick parameter [0.15, 0.85];
+    - perpendicular distance to the tick is at most 0.5pt.
+
+    Therefore the tick midpoint is within
+    hypot(0.35 * 0.75 * baseline.length, 0.5) of the endpoint. Midpoints
+    are indexed once by orientation and sorted X coordinate. Query results are
+    still rechecked by the unchanged exact predicate.
+    """
+
+    def __init__(self, segments: Sequence[_VisibleSegment]) -> None:
+        self._segments = tuple(segments)
+        self._angle_width = _TICK_INDEX_ANGLE_BUCKET_DEG
+        self._angle_bucket_count = max(
+            1, int(math.ceil(180.0 / self._angle_width))
+        )
+        by_angle: dict[int, list[tuple[float, float, int]]] = {}
+        unindexed: list[int] = []
+        for index, segment in enumerate(self._segments):
+            unit = _unit(segment)
+            if unit is None:
+                continue
+            angle = math.degrees(math.atan2(unit[1], unit[0])) % 180.0
+            midpoint_x = (segment.start[0] + segment.end[0]) / 2.0
+            midpoint_y = (segment.start[1] + segment.end[1]) / 2.0
+            if not all(
+                math.isfinite(value)
+                for value in (angle, midpoint_x, midpoint_y, segment.length)
+            ):
+                # Preserve legacy behavior for malformed source geometry by
+                # keeping it in every exact candidate universe instead of
+                # attempting to bucket a non-finite coordinate.
+                unindexed.append(index)
+                continue
+            bucket = self._angle_bucket(angle)
+            by_angle.setdefault(bucket, []).append(
+                (midpoint_x, midpoint_y, index)
+            )
+        self._by_angle = {
+            bucket: tuple(sorted(rows))
+            for bucket, rows in by_angle.items()
+        }
+        self._x_by_angle = {
+            bucket: tuple(row[0] for row in rows)
+            for bucket, rows in self._by_angle.items()
+        }
+        self._unindexed = tuple(unindexed)
+
+    def _angle_bucket(self, angle_deg: float) -> int:
+        return (
+            int(math.floor((float(angle_deg) % 180.0) / self._angle_width))
+            % self._angle_bucket_count
+        )
+
+    def candidates(
+        self,
+        baseline: _VisibleSegment,
+        endpoint: _Point,
+    ) -> tuple[_VisibleSegment, ...]:
+        baseline_unit = _unit(baseline)
+        if baseline_unit is None:
+            return ()
+        if not all(
+            math.isfinite(value)
+            for value in (
+                baseline.length,
+                baseline.start[0],
+                baseline.start[1],
+                baseline.end[0],
+                baseline.end[1],
+                endpoint[0],
+                endpoint[1],
+                baseline_unit[0],
+                baseline_unit[1],
+            )
+        ):
+            return self._segments
+
+        perpendicular_angle = (
+            math.degrees(math.atan2(baseline_unit[1], baseline_unit[0]))
+            + 90.0
+        ) % 180.0
+        center_bucket = self._angle_bucket(perpendicular_angle)
+
+        max_along_midpoint = (
+            max(
+                abs(0.5 - _TICK_PARAMETER_MIN),
+                abs(_TICK_PARAMETER_MAX - 0.5),
+            )
+            * _TICK_MAX_LENGTH_RATIO
+            * baseline.length
+        )
+        radius = math.hypot(max_along_midpoint, _TICK_MAX_DISTANCE_PT) + 1e-9
+        min_x = endpoint[0] - radius
+        max_x = endpoint[0] + radius
+        min_y = endpoint[1] - radius
+        max_y = endpoint[1] + radius
+
+        found: set[int] = set(self._unindexed)
+        # Bucket width equals the exact +/-5 degree acceptance tolerance.
+        # The target bucket plus its two neighbors is therefore a complete
+        # superset, including the 0/180 wrap boundary.
+        for offset in (-1, 0, 1):
+            bucket = (center_bucket + offset) % self._angle_bucket_count
+            rows = self._by_angle.get(bucket, ())
+            xs = self._x_by_angle.get(bucket, ())
+            if not rows:
+                continue
+            first = bisect_left(xs, min_x)
+            last = bisect_right(xs, max_x)
+            for _mid_x, mid_y, index in rows[first:last]:
+                if min_y <= mid_y <= max_y:
+                    found.add(index)
+
+        return tuple(self._segments[index] for index in sorted(found))
+
+
 def _primitive_position(segment: _VisibleSegment) -> Optional[tuple[int, int]]:
     match = _SEGMENT_PRIMITIVE_RE.match(segment.source_primitive_ref)
     if match is None:
@@ -343,18 +476,28 @@ def _tick_for_endpoint(
     for tick in segments:
         if set(tick.observation_ids) & set(baseline.observation_ids):
             continue
-        if tick.length <= 1e-9 or tick.length > baseline.length * 0.75:
+        if (
+            tick.length <= 1e-9
+            or tick.length > baseline.length * _TICK_MAX_LENGTH_RATIO
+        ):
             continue
         tick_unit = _unit(tick)
-        if tick_unit is None or abs(_dot(baseline_unit, tick_unit)) > math.sin(math.radians(5.0)):
+        if (
+            tick_unit is None
+            or abs(_dot(baseline_unit, tick_unit))
+            > math.sin(math.radians(_TICK_PERPENDICULAR_TOLERANCE_DEG))
+        ):
             continue
         distance, parameter = _distance_point_to_segment(endpoint, tick)
-        tolerance = max(1e-4, min(0.5, tick.length * 0.01))
+        tolerance = max(
+            1e-4,
+            min(_TICK_MAX_DISTANCE_PT, tick.length * 0.01),
+        )
         if distance > tolerance:
             continue
         # A scale tick crosses the bar endpoint in its interior.  Rectangle
         # corners terminate at the endpoint and therefore do not qualify.
-        if not (0.15 <= parameter <= 0.85):
+        if not (_TICK_PARAMETER_MIN <= parameter <= _TICK_PARAMETER_MAX):
             continue
         candidates.append(tick)
     return tuple(sorted(candidates, key=lambda item: item.observation_id))
@@ -365,11 +508,20 @@ def _bar_candidates(
     words: Sequence[_TrustedWord],
 ) -> tuple[_BarCandidate, ...]:
     candidates: list[_BarCandidate] = []
+    tick_index = _TickEndpointIndex(segments)
     for baseline in segments:
         if baseline.length <= 1e-6:
             continue
-        left_ticks = _tick_for_endpoint(baseline, baseline.start, segments)
-        right_ticks = _tick_for_endpoint(baseline, baseline.end, segments)
+        left_ticks = _tick_for_endpoint(
+            baseline,
+            baseline.start,
+            tick_index.candidates(baseline, baseline.start),
+        )
+        right_ticks = _tick_for_endpoint(
+            baseline,
+            baseline.end,
+            tick_index.candidates(baseline, baseline.end),
+        )
         if len(left_ticks) != 1 or len(right_ticks) != 1:
             continue
         left_tick, right_tick = left_ticks[0], right_ticks[0]
