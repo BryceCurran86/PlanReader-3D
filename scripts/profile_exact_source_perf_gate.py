@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, hashlib, json, sys, time, tracemalloc
+import argparse, hashlib, json, resource, sys, time
 from pathlib import Path
 
 parser=argparse.ArgumentParser()
@@ -8,6 +8,7 @@ parser.add_argument("--repo", required=True)
 parser.add_argument("--pdf", required=True)
 parser.add_argument("--pages", required=True, help="1-based inclusive comma/range, e.g. 41-45")
 parser.add_argument("--label", required=True)
+parser.add_argument("--wall-only", action="store_true")
 args=parser.parse_args()
 repo=Path(args.repo).resolve()
 sys.path.insert(0,str(repo))
@@ -21,6 +22,8 @@ from pb_live_whole_wall_role_composition import compose_live_whole_wall_roles
 from pb_live_external_physical_net_wall_publication import compose_live_external_physical_net_wall_publication
 from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
 from pb_physical_scale_authority import PhysicalScaleProducer, PhysicalScaleSelector
+import pb_physical_wall_candidate_authority as wall_candidates
+import pb_live_wall_opening_authority_composition as wall_composition
 
 def pagespec(text):
     out=[]
@@ -37,6 +40,74 @@ def canon_hash(obj):
     payload=json.dumps(obj,sort_keys=True,separators=(",",":"),default=str).encode()
     return hashlib.sha256(payload).hexdigest()
 
+stage_calls={}
+def timed(name, fn):
+    def wrapper(*a, **k):
+        started=time.perf_counter()
+        try:
+            return fn(*a, **k)
+        finally:
+            elapsed=time.perf_counter()-started
+            row=stage_calls.setdefault(name, {"calls":0, "total_s":0.0, "max_s":0.0})
+            row["calls"] += 1
+            row["total_s"] += elapsed
+            row["max_s"] = max(row["max_s"], elapsed)
+    return wrapper
+
+def wrap_module_function(module, attr, label):
+    if hasattr(module, attr):
+        original=getattr(module, attr)
+        setattr(module, attr, timed(label, original))
+
+for attr in (
+    "_visible_observations_by_page",
+    "_source_page_segments",
+    "_build_scope_result",
+    "_assemble_scope_result",
+    "_proven_filled_wall_strips",
+    "_filter_proven_wall_strip_geometry",
+    "build_wall_graph_for_viewport",
+    "classify_junctions",
+    "assemble_wall_topology",
+    "collect_physical_wall_identities",
+    "resolve_physical_wall_equivalence",
+    "_producer_wall_strip_relation_overrides",
+    "_producer_shared_source_face_relation_overrides",
+    "_producer_opening_relation_overrides",
+):
+    wrap_module_function(wall_candidates, attr, f"walls.{attr}")
+
+wrap_module_function(
+    wall_composition,
+    "build_semantic_opening_inventory_completeness",
+    "openings.build_semantic_opening_inventory_completeness",
+)
+
+def wrap_method(cls, attr, label):
+    original=getattr(cls, attr)
+    setattr(cls, attr, timed(label, original))
+
+wrap_method(
+    wall_composition.SemanticOpeningEnumerationProducer,
+    "publish_page_scope",
+    "openings.semantic_publish_page_scope",
+)
+wrap_method(
+    wall_composition.PhysicalOpeningAuthority,
+    "prove_existence",
+    "openings.prove_existence",
+)
+wrap_method(
+    wall_composition.OpeningHostBindingProducer,
+    "publish",
+    "openings.host_binding_publish",
+)
+wrap_method(
+    wall_composition.OpeningHostFrameProducer,
+    "publish",
+    "openings.host_frame_publish",
+)
+
 page_ids=tuple(str(p) for p in pagespec(args.pages))
 page_indices=[int(p)-1 for p in page_ids]
 pdf=Path(args.pdf)
@@ -44,11 +115,9 @@ payload=pdf.read_bytes()
 source_sha=hashlib.sha256(payload).hexdigest()
 source=SourceVisibilityProducer(producer_method="exact-source-perf-gate",producer_version="1")
 timings={}
-partial={"label":args.label,"repo":str(repo),"source_sha256":source_sha,"pages":list(page_ids),"timings":timings}
+partial={"label":args.label,"repo":str(repo),"source_sha256":source_sha,"pages":list(page_ids),"timings":timings,"stage_calls":stage_calls}
 def emit():
     print("PERF_GATE_JSON="+json.dumps(partial,sort_keys=True,default=str), flush=True)
-tracemalloc.start()
-
 t=time.perf_counter()
 published=source.ingest_native_pdf_bytes(
     document_id=f"diag:{source_sha[:24]}",
@@ -88,7 +157,12 @@ wall=compose_live_wall_opening_authority(
     page_ids=page_ids,
 )
 timings["wall_opening_composition_s"]=time.perf_counter()-t
+partial["peak_rss_kb"]=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 emit()
+
+if args.wall_only:
+    print(json.dumps(partial,sort_keys=True,default=str))
+    raise SystemExit(0)
 
 t=time.perf_counter()
 voids=compose_live_physical_opening_voids(
@@ -175,8 +249,7 @@ authority={
  "quantity_evidence":None if pub.quantity_evidence is None else pub.quantity_evidence.__dict__,
 }
 
-current,peak=tracemalloc.get_traced_memory()
-tracemalloc.stop()
+peak=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
 
 extractor=GenericPlanReaderExtractor()
 t=time.perf_counter()
