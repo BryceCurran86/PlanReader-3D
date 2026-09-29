@@ -44,6 +44,9 @@ payload=pdf.read_bytes()
 source_sha=hashlib.sha256(payload).hexdigest()
 source=SourceVisibilityProducer(producer_method="exact-source-perf-gate",producer_version="1")
 timings={}
+partial={"label":args.label,"repo":str(repo),"source_sha256":source_sha,"pages":list(page_ids),"timings":timings}
+def emit():
+    print("PERF_GATE_JSON="+json.dumps(partial,sort_keys=True,default=str), flush=True)
 tracemalloc.start()
 
 t=time.perf_counter()
@@ -54,14 +57,8 @@ published=source.ingest_native_pdf_bytes(
     page_ids=page_ids,
 )
 timings["source_ingest_s"]=time.perf_counter()-t
-
-t=time.perf_counter()
-wall=compose_live_wall_opening_authority(
-    source_visibility_producer=source,
-    revision_id=published.revision.revision_id,
-    page_ids=page_ids,
-)
-timings["wall_opening_composition_s"]=time.perf_counter()-t
+partial["visible_segment_count"]=len(published.visible_observation_ids)
+emit()
 
 refreshed=source.published_snapshot_for_revision(published.revision.revision_id)
 assert refreshed is not None
@@ -80,7 +77,18 @@ for page_id in page_ids:
     segs=scale_producer._visible_segments(sel,refreshed)
     elapsed=time.perf_counter()-t
     scale_rows.append({"page_id":page_id,"normalized_visible_segments":len(segs),"elapsed_s":elapsed})
-timings["scale_normalization_total_s"]=sum(x["elapsed_s"] for x in scale_rows)
+    partial["scale_rows"]=scale_rows
+    timings["scale_normalization_total_s"]=sum(x["elapsed_s"] for x in scale_rows)
+    emit()
+
+t=time.perf_counter()
+wall=compose_live_wall_opening_authority(
+    source_visibility_producer=source,
+    revision_id=published.revision.revision_id,
+    page_ids=page_ids,
+)
+timings["wall_opening_composition_s"]=time.perf_counter()-t
+emit()
 
 t=time.perf_counter()
 voids=compose_live_physical_opening_voids(
@@ -88,6 +96,7 @@ voids=compose_live_physical_opening_voids(
     wall_opening_composition=wall,
 )
 timings["physical_opening_void_s"]=time.perf_counter()-t
+emit()
 
 t=time.perf_counter()
 gross=compose_live_gross_wall_geometry(
@@ -96,10 +105,12 @@ gross=compose_live_gross_wall_geometry(
     physical_void_composition=voids,
 )
 timings["gross_wall_s"]=time.perf_counter()-t
+emit()
 
 t=time.perf_counter()
 roles=compose_live_whole_wall_roles(gross_wall_composition=gross)
 timings["whole_wall_role_s"]=time.perf_counter()-t
+emit()
 
 t=time.perf_counter()
 pub=compose_live_external_physical_net_wall_publication(
@@ -109,6 +120,7 @@ pub=compose_live_external_physical_net_wall_publication(
     whole_wall_role_composition=roles,
 )
 timings["net_wall_publication_s"]=time.perf_counter()-t
+emit()
 
 wall_scopes=[]
 for trace in wall.wall_scopes:
@@ -170,6 +182,7 @@ extractor=GenericPlanReaderExtractor()
 t=time.perf_counter()
 preds=extractor.extract_from_pdf(pdf,pages=page_indices,collect_item35_shadow=False)
 timings["commercial_extraction_s"]=time.perf_counter()-t
+emit()
 
 pred_payload=[p.to_dict() for p in preds]
 out={
