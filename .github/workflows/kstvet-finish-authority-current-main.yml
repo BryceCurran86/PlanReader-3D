@@ -144,6 +144,14 @@ jobs:
           print("KSTVET_FINISH_CURRENT_MAIN_SUMMARY " + json.dumps(summary, sort_keys=True), flush=True)
           PY
 
+      - name: Trace C47-A callout-to-wall gates
+        env:
+          PYTHONPATH: .
+        run: |
+          set -o pipefail
+          timeout 1200s python scripts/diag_kstvet_finish_callout_wall_gate.py /tmp/kstvet.pdf \
+            2>&1 | tee /tmp/kstvet-c47a-wall-gate.log
+
       - name: Current-main Item19B preflight
         env:
           PYTHONPATH: .
@@ -158,5 +166,6 @@ jobs:
           name: kstvet-finish-authority-current-main
           path: |
             /tmp/kstvet-finish-current-main.log
+            /tmp/kstvet-c47a-wall-gate.log
             /tmp/kstvet-item19b-preflight.log
           if-no-files-found: warn
