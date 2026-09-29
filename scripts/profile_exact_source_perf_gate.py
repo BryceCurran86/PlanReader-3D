@@ -44,6 +44,8 @@ stage_calls={}
 def timed(name, fn):
     def wrapper(*a, **k):
         started=time.perf_counter()
+        call_no=stage_calls.get(name, {"calls":0})["calls"] + 1
+        print(f"PERF_STAGE_START name={name} call={call_no}", flush=True)
         try:
             return fn(*a, **k)
         finally:
@@ -52,6 +54,10 @@ def timed(name, fn):
             row["calls"] += 1
             row["total_s"] += elapsed
             row["max_s"] = max(row["max_s"], elapsed)
+            print(
+                f"PERF_STAGE_END name={name} call={call_no} elapsed_s={elapsed:.6f}",
+                flush=True,
+            )
     return wrapper
 
 def wrap_module_function(module, attr, label):
