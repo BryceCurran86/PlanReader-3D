@@ -35,6 +35,10 @@ jobs:
           git -C /tmp/pr984 rev-parse HEAD
           git -C /tmp/pr990 rev-parse HEAD
           git -C /tmp/pr984 merge-base --is-ancestor 674dbe8948bff2547ca1b65177d9fb5670ad12df HEAD
+      - name: Gate #990 indexed geometry tests
+        run: |
+          cd /tmp/pr990
+          PYTHONPATH=. pytest -q tests/test_plan_opening_detection_indexed_v172.py tests/test_wall_visible_observation_page_index.py tests/test_plan_opening_detection_v171.py
       - name: Profile #990 Lamu page 44 first
         run: |
           set -o pipefail
