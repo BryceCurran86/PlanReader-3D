@@ -1302,6 +1302,17 @@ def _producer_opening_relation_overrides(
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
 ) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
     """Re-prove G17 source openings and map their exact primitives to W4 candidates."""
+    by_raw_id: dict[str, list[PhysicalWallCandidateRecord]] = {}
+    for record in records:
+        for raw_id in record.physical_identity.source_primitive_ids:
+            by_raw_id.setdefault(str(raw_id), []).append(record)
+
+    # An opening override is accepted only when its six source primitives map
+    # to six distinct wall candidates below. Fewer than six candidate records
+    # can therefore never contribute an override.
+    if len(records) < 6 or len(by_raw_id) < 6:
+        return {}
+
     visibility = source_producer.authority()
     opening_authority = (
         physical_opening_authority
@@ -1336,9 +1347,19 @@ def _producer_opening_relation_overrides(
         for observation_id, observation in page_visible_rows
     }
 
+    prefix = "visible:segment:"
+    relevant_rows: list[tuple[str, object]] = []
     for observation_id, observation in page_visible_rows:
         if str(observation.page_id) != str(page_id):
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+        primitive_ref = str(observation.source_primitive_ref or "")
+        if not primitive_ref.startswith(prefix):
+            continue
+        raw_id = primitive_ref[len(prefix) :]
+        if raw_id in by_raw_id:
+            relevant_rows.append((observation_id, observation))
+
+    for observation_id, observation in relevant_rows:
         selector = ObservationSelector(
             document_id=published.revision.document_id,
             revision_id=published.revision.revision_id,
@@ -1356,15 +1377,9 @@ def _producer_opening_relation_overrides(
         ):
             proven_records[existence.record_id] = existence
 
-    by_raw_id: dict[str, list[PhysicalWallCandidateRecord]] = {}
-    for record in records:
-        for raw_id in record.physical_identity.source_primitive_ids:
-            by_raw_id.setdefault(str(raw_id), []).append(record)
-
     candidate_relation_sets: dict[
         tuple[str, str], set[PhysicalEquivalenceClass]
     ] = {}
-    prefix = "visible:segment:"
 
     for existence in proven_records.values():
         raw_lines: dict[str, Line] = {}
