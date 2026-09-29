@@ -367,7 +367,7 @@ def test_page_expansion_leaves_the_candidate_structure_unchanged():
 
 
 # ------------------------------------------------------------------ isolation
-def test_only_the_diagnostic_calls_the_accessor():
+def test_only_the_diagnostics_call_the_accessor():
     callers = []
     for path in sorted(REPO.glob("*.py")):
         if path.name in {"pb_physical_opening_authority.py"}:
@@ -378,4 +378,5 @@ def test_only_the_diagnostic_calls_the_accessor():
             for node in ast.walk(tree)
         ):
             callers.append(path.name)
-    assert callers == ["pb_semantic_conflict_diagnostic.py"]
+    # Only the diagnostics call it: the conflict diagnostic and the provenance census.
+    assert callers == ["pb_candidate_provenance_census.py", "pb_semantic_conflict_diagnostic.py"]

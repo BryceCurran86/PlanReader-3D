@@ -71,6 +71,8 @@ from scripts import semantic_conflict_report as report_script
 
 REPO = Path(__file__).resolve().parents[1]
 MODULE = "pb_semantic_conflict_diagnostic"
+# Diagnostic modules (never production) that may build on this one.
+DIAGNOSTIC_MODULES = {f"{MODULE}.py", "pb_candidate_provenance_census.py"}
 DOC = "conflict-test"
 
 
@@ -898,7 +900,7 @@ def test_no_production_module_imports_the_diagnostic():
     offenders = []
     for path in sorted(REPO.rglob("*.py")):
         relative = path.relative_to(REPO)
-        if relative.parts[0] in {"tests", "scripts", ".git"} or path.name == f"{MODULE}.py":
+        if relative.parts[0] in {"tests", "scripts", ".git"} or path.name in DIAGNOSTIC_MODULES:
             continue
         if MODULE in path.read_text(encoding="utf-8", errors="ignore"):
             offenders.append(str(relative))
