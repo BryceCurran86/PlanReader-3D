@@ -15,7 +15,10 @@ from pb_raster_plan_dimension_authority import (
     RasterPlanDimensionProducer,
     _RECORD_SEAL,
     _VisibleSegment,
+    _bbox_overlap_over_min_area,
     _bind_text_to_geometry,
+    _canonicalize_numeric_ocr_lines,
+    _inverse_rotated_bbox_px,
     _resolve_overall,
     _text_orientation_candidates,
 )
@@ -138,6 +141,63 @@ def test_missing_or_competing_witnesses_fail_closed():
     )
     assert _bind_text_to_geometry(text, competing) is None
 
+
+
+def test_rotated_bbox_inverse_mapping_preserves_original_page_coordinates():
+    # Original page is 400x200 px. A source box (40, 30)-(100, 50)
+    # becomes (150, 40)-(170, 100) after a 90-degree clockwise rotation.
+    assert _inverse_rotated_bbox_px(
+        (150.0, 40.0, 170.0, 100.0),
+        rotation_deg=90,
+        original_width_px=400.0,
+        original_height_px=200.0,
+    ) == pytest.approx((40.0, 30.0, 100.0, 50.0))
+
+    # The same source box becomes (30, 300)-(50, 360) after 270 clockwise.
+    assert _inverse_rotated_bbox_px(
+        (30.0, 300.0, 50.0, 360.0),
+        rotation_deg=270,
+        original_width_px=400.0,
+        original_height_px=200.0,
+    ) == pytest.approx((40.0, 30.0, 100.0, 50.0))
+
+
+def test_numeric_ocr_dedupe_requires_same_value_and_substantial_overlap():
+    first = OCRLine(
+        text="4100",
+        confidence=0.1,
+        bbox_px=(10.0, 10.0, 40.0, 20.0),
+        bbox_pt=(10.0, 10.0, 40.0, 20.0),
+    )
+    same_print = OCRLine(
+        text="4100",
+        confidence=0.9,
+        bbox_px=(11.0, 10.0, 41.0, 20.0),
+        bbox_pt=(11.0, 10.0, 41.0, 20.0),
+    )
+    conflicting_read = OCRLine(
+        text="4700",
+        confidence=0.99,
+        bbox_px=(11.0, 10.0, 41.0, 20.0),
+        bbox_pt=(11.0, 10.0, 41.0, 20.0),
+    )
+    separate_same_value = OCRLine(
+        text="4100",
+        confidence=1.0,
+        bbox_px=(80.0, 10.0, 110.0, 20.0),
+        bbox_pt=(80.0, 10.0, 110.0, 20.0),
+    )
+
+    result = _canonicalize_numeric_ocr_lines(
+        (same_print, conflicting_read, separate_same_value, first)
+    )
+
+    assert len(result) == 3
+    assert sorted(int(line.text) for line in result) == [4100, 4100, 4700]
+    # Confidence never votes away a conflicting reading.
+    assert any(line.text == "4700" for line in result)
+    assert _bbox_overlap_over_min_area(first.bbox_pt, same_print.bbox_pt) > 0.9
+    assert _bbox_overlap_over_min_area(first.bbox_pt, separate_same_value.bbox_pt) == 0.0
 
 
 def test_strong_ocr_bbox_orientation_is_positive_but_square_stays_ambiguous():
