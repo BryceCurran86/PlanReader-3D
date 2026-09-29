@@ -395,12 +395,15 @@ def _frame_has_title_block_labels(
 def _frame_looks_like_table(
     frame: Sequence[float],
     page: Any,
+    *,
+    drawings: Optional[Sequence[Any]] = None,
 ) -> bool:
     cells = 0
     frame_area = _bbox_area(frame)
     if frame_area <= 0:
         return False
-    for drawing in page.get_drawings() or []:
+    drawing_rows = page.get_drawings() or [] if drawings is None else drawings
+    for drawing in drawing_rows:
         for item in drawing.get("items", []) or []:
             if not item or item[0] != "re" or len(item) < 2:
                 continue
@@ -420,12 +423,14 @@ def _rejected_ownership_frame(
     frame: Sequence[float],
     calibration: ViewportLayoutCalibration,
     fragments: Sequence[tuple[tuple[float, float, float, float], str]],
+    *,
+    drawings: Optional[Sequence[Any]] = None,
 ) -> bool:
     if _is_page_or_crop_border(frame, calibration):
         return True
     if _frame_has_title_block_labels(frame, fragments, calibration):
         return True
-    if _frame_looks_like_table(frame, page):
+    if _frame_looks_like_table(frame, page, drawings=drawings):
         return True
     return False
 
@@ -507,9 +512,16 @@ def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
     )
 
 
-def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
+def extract_view_title_anchors(
+    page: Any,
+    *,
+    fragments: Optional[
+        Sequence[tuple[tuple[float, float, float, float], str]]
+    ] = None,
+) -> list[_TitleAnchor]:
     candidates: list[_TitleAnchor] = []
-    for bbox, text in _text_fragments(page):
+    fragment_rows = _text_fragments(page) if fragments is None else fragments
+    for bbox, text in fragment_rows:
         if not _TITLE_SHAPE_RE.match(text):
             continue
         view_type = DrawingViewClassifier.classify_text(_strip_scale_suffix(text)).value
@@ -533,10 +545,16 @@ def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
     return anchors
 
 
-def extract_vector_frames(page: Any, calibration: ViewportLayoutCalibration) -> list[tuple[float, float, float, float]]:
+def extract_vector_frames(
+    page: Any,
+    calibration: ViewportLayoutCalibration,
+    *,
+    drawings: Optional[Sequence[Any]] = None,
+) -> list[tuple[float, float, float, float]]:
     frames: list[tuple[float, float, float, float]] = []
     tol = max(calibration.median_word_height_pt * 0.15, 0.75)
-    for drawing in page.get_drawings() or []:
+    drawing_rows = page.get_drawings() or [] if drawings is None else drawings
+    for drawing in drawing_rows:
         items = drawing.get("items", []) or []
         closed = _closed_four_line_rect(items, tol=tol)
         if closed is not None:
@@ -598,9 +616,17 @@ def _frame_candidates_for_title(
     return candidates
 
 
-def _extract_scales_for_bbox(page: Any, bbox: Sequence[float]) -> tuple[Optional[str], Optional[float], bool, list[str]]:
+def _extract_scales_for_bbox(
+    page: Any,
+    bbox: Sequence[float],
+    *,
+    fragments: Optional[
+        Sequence[tuple[tuple[float, float, float, float], str]]
+    ] = None,
+) -> tuple[Optional[str], Optional[float], bool, list[str]]:
     seen: list[tuple[str, float]] = []
-    for text_bbox, text in _text_fragments(page):
+    fragment_rows = _text_fragments(page) if fragments is None else fragments
+    for text_bbox, text in fragment_rows:
         if not _point_in_bbox(_bbox_center(text_bbox), bbox):
             continue
         for match in _SCALE_RE.finditer(text):
@@ -625,15 +651,25 @@ def _frame_resolved_viewports(
     calibration: ViewportLayoutCalibration,
     *,
     page_number: int,
+    fragments: Optional[
+        Sequence[tuple[tuple[float, float, float, float], str]]
+    ] = None,
+    drawings: Optional[Sequence[Any]] = None,
 ) -> tuple[list[SegmentedViewport], set[int]]:
-    fragments = _text_fragments(page)
+    fragment_rows = _text_fragments(page) if fragments is None else fragments
     selected: dict[int, tuple[float, float, float, float]] = {}
     out: list[SegmentedViewport] = []; consumed: set[int] = set()
     for index, anchor in enumerate(anchors):
         candidates = _frame_candidates_for_title(anchor, frames, calibration, anchors=anchors)
         usable = [
             frame for frame in candidates
-            if not _rejected_ownership_frame(page, frame, calibration, fragments)
+            if not _rejected_ownership_frame(
+                page,
+                frame,
+                calibration,
+                fragment_rows,
+                drawings=drawings,
+            )
         ]
         usable = _collapse_nested_band_frames(usable)
         if len(usable) > 1:
@@ -668,7 +704,11 @@ def _frame_resolved_viewports(
                 )); consumed.add(index)
             continue
         index = indices[0]; anchor = anchors[index]
-        raw, denominator, scale_conflict, scale_notes = _extract_scales_for_bbox(page, frame)
+        raw, denominator, scale_conflict, scale_notes = _extract_scales_for_bbox(
+            page,
+            frame,
+            fragments=fragment_rows,
+        )
         out.append(SegmentedViewport(
             view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
             view_type=anchor.view_type, label=anchor.text, title_bbox=anchor.bbox,
@@ -738,6 +778,9 @@ def _columnar_title_grid_partitions(
     calibration: ViewportLayoutCalibration,
     *,
     page_number: int,
+    fragments: Optional[
+        Sequence[tuple[tuple[float, float, float, float], str]]
+    ] = None,
 ) -> Optional[list[SegmentedViewport]]:
     """Derive a strict non-overlapping 2-D title grid.
 
@@ -872,7 +915,9 @@ def _columnar_title_grid_partitions(
             if not _bbox_contains(bbox, anchor.bbox):
                 return None
             raw, denominator, scale_conflict, scale_notes = _extract_scales_for_bbox(
-                page, bbox
+                page,
+                bbox,
+                fragments=fragments,
             )
             duplicates = [
                 anchors[dup].bbox
@@ -949,6 +994,9 @@ def _derived_partitions(
     calibration: ViewportLayoutCalibration,
     *,
     page_number: int,
+    fragments: Optional[
+        Sequence[tuple[tuple[float, float, float, float], str]]
+    ] = None,
 ) -> list[SegmentedViewport]:
     if len(unresolved_indices) < 2:
         return [SegmentedViewport(
@@ -973,6 +1021,7 @@ def _derived_partitions(
             unresolved_indices,
             calibration,
             page_number=page_number,
+            fragments=fragments,
         )
         if grid is not None:
             return grid
@@ -996,7 +1045,11 @@ def _derived_partitions(
             (0.0, bounds[position], calibration.page_width_pt, bounds[position + 1])
         )
         anchor = anchors[index]
-        raw, denominator, scale_conflict, scale_notes = _extract_scales_for_bbox(page, bbox)
+        raw, denominator, scale_conflict, scale_notes = _extract_scales_for_bbox(
+            page,
+            bbox,
+            fragments=fragments,
+        )
         out.append(SegmentedViewport(
             view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
             view_type=anchor.view_type, label=anchor.text, title_bbox=anchor.bbox,
@@ -1011,13 +1064,34 @@ def _derived_partitions(
 
 def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedViewport]:
     calibration = calibrate_viewport_layout(page)
-    anchors = extract_view_title_anchors(page)
+    fragments = tuple(_text_fragments(page))
+    anchors = extract_view_title_anchors(page, fragments=fragments)
     if not anchors:
         return []
-    frames = extract_vector_frames(page, calibration)
-    framed, consumed = _frame_resolved_viewports(page, anchors, frames, calibration, page_number=page_number)
+    drawings = tuple(page.get_drawings() or [])
+    frames = extract_vector_frames(page, calibration, drawings=drawings)
+    framed, consumed = _frame_resolved_viewports(
+        page,
+        anchors,
+        frames,
+        calibration,
+        page_number=page_number,
+        fragments=fragments,
+        drawings=drawings,
+    )
     unresolved = [i for i in range(len(anchors)) if i not in consumed]
-    derived = _derived_partitions(page, anchors, unresolved, calibration, page_number=page_number) if unresolved else []
+    derived = (
+        _derived_partitions(
+            page,
+            anchors,
+            unresolved,
+            calibration,
+            page_number=page_number,
+            fragments=fragments,
+        )
+        if unresolved
+        else []
+    )
     ordered = sorted(
         framed + derived,
         key=lambda v: (v.title_bbox[1], v.title_bbox[0], v.view_id),
