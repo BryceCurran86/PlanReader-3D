@@ -222,14 +222,24 @@ class _TickEndpointIndex:
             1, int(math.ceil(180.0 / self._angle_width))
         )
         by_angle: dict[int, list[tuple[float, float, int]]] = {}
+        unindexed: list[int] = []
         for index, segment in enumerate(self._segments):
             unit = _unit(segment)
             if unit is None:
                 continue
             angle = math.degrees(math.atan2(unit[1], unit[0])) % 180.0
-            bucket = self._angle_bucket(angle)
             midpoint_x = (segment.start[0] + segment.end[0]) / 2.0
             midpoint_y = (segment.start[1] + segment.end[1]) / 2.0
+            if not all(
+                math.isfinite(value)
+                for value in (angle, midpoint_x, midpoint_y, segment.length)
+            ):
+                # Preserve legacy behavior for malformed source geometry by
+                # keeping it in every exact candidate universe instead of
+                # attempting to bucket a non-finite coordinate.
+                unindexed.append(index)
+                continue
+            bucket = self._angle_bucket(angle)
             by_angle.setdefault(bucket, []).append(
                 (midpoint_x, midpoint_y, index)
             )
@@ -241,6 +251,7 @@ class _TickEndpointIndex:
             bucket: tuple(row[0] for row in rows)
             for bucket, rows in self._by_angle.items()
         }
+        self._unindexed = tuple(unindexed)
 
     def _angle_bucket(self, angle_deg: float) -> int:
         return (
@@ -256,6 +267,21 @@ class _TickEndpointIndex:
         baseline_unit = _unit(baseline)
         if baseline_unit is None:
             return ()
+        if not all(
+            math.isfinite(value)
+            for value in (
+                baseline.length,
+                baseline.start[0],
+                baseline.start[1],
+                baseline.end[0],
+                baseline.end[1],
+                endpoint[0],
+                endpoint[1],
+                baseline_unit[0],
+                baseline_unit[1],
+            )
+        ):
+            return self._segments
 
         perpendicular_angle = (
             math.degrees(math.atan2(baseline_unit[1], baseline_unit[0]))
@@ -277,7 +303,7 @@ class _TickEndpointIndex:
         min_y = endpoint[1] - radius
         max_y = endpoint[1] + radius
 
-        found: set[int] = set()
+        found: set[int] = set(self._unindexed)
         # Width is 10 degrees while exact acceptance is +/-5 degrees.
         # Two buckets on either side are a conservative superset across
         # bucket boundaries and the 0/180 wrap.
