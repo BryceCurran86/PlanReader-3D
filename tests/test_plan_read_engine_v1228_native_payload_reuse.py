@@ -127,6 +127,29 @@ def test_shared_payload_reuses_one_dict_and_one_words_read() -> None:
     assert analysis.page_no == 1
 
 
+def test_shared_text_dict_preserves_page_title_analysis() -> None:
+    legacy_page = _Page()
+    legacy = title_authority.analyse_page(
+        legacy_page,
+        1,
+        allow_ocr=False,
+    )
+
+    shared_page = _Page()
+    text_payload, _word_payload = reading._native_text_payloads(shared_page)
+    shared = title_authority.analyse_page(
+        shared_page,
+        1,
+        spans=title_authority.spans_from_text_dict(
+            text_payload,
+            shared_page,
+        ),
+        allow_ocr=False,
+    )
+
+    assert shared == legacy
+
+
 def test_precomputed_span_lines_preserve_spatial_title_result() -> None:
     page = _Page()
 
