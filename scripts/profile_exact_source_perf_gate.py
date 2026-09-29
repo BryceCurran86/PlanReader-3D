@@ -9,6 +9,7 @@ parser.add_argument("--pdf", required=True)
 parser.add_argument("--pages", required=True, help="1-based inclusive comma/range, e.g. 41-45")
 parser.add_argument("--label", required=True)
 parser.add_argument("--wall-only", action="store_true")
+parser.add_argument("--scale-only", action="store_true")
 args=parser.parse_args()
 repo=Path(args.repo).resolve()
 sys.path.insert(0,str(repo))
@@ -205,6 +206,30 @@ for page_id in page_ids:
     partial["scale_rows"]=scale_rows
     timings["scale_normalization_total_s"]=sum(x["elapsed_s"] for x in scale_rows)
     emit()
+
+if args.scale_only:
+    publish_rows=[]
+    for page_id in page_ids:
+        sel=PhysicalScaleSelector(
+            document_id=refreshed.revision.document_id,
+            revision_id=refreshed.revision.revision_id,
+            source_sha256=refreshed.revision.source_sha256,
+            snapshot_id=refreshed.snapshot.snapshot_id,
+            page_id=page_id,
+        )
+        t=time.perf_counter()
+        result=scale_producer.publish_scope(sel)
+        elapsed=time.perf_counter()-t
+        publish_rows.append({
+            "page_id":page_id,
+            "status":status(result.status),
+            "reason_codes":list(result.reason_codes),
+            "elapsed_s":elapsed,
+        })
+        partial["scale_publish_rows"]=publish_rows
+        emit()
+    print(json.dumps(partial,sort_keys=True,default=str))
+    raise SystemExit(0)
 
 t=time.perf_counter()
 wall=compose_live_wall_opening_authority(
