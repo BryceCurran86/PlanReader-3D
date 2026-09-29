@@ -402,7 +402,7 @@ def _frame_looks_like_table(
     frame_area = _bbox_area(frame)
     if frame_area <= 0:
         return False
-    drawing_rows = page.get_drawings() or [] if drawings is None else drawings
+    drawing_rows = (page.get_drawings() or []) if drawings is None else drawings
     for drawing in drawing_rows:
         for item in drawing.get("items", []) or []:
             if not item or item[0] != "re" or len(item) < 2:
@@ -553,7 +553,7 @@ def extract_vector_frames(
 ) -> list[tuple[float, float, float, float]]:
     frames: list[tuple[float, float, float, float]] = []
     tol = max(calibration.median_word_height_pt * 0.15, 0.75)
-    drawing_rows = page.get_drawings() or [] if drawings is None else drawings
+    drawing_rows = (page.get_drawings() or []) if drawings is None else drawings
     for drawing in drawing_rows:
         items = drawing.get("items", []) or []
         closed = _closed_four_line_rect(items, tol=tol)
