@@ -123,9 +123,6 @@ wrap_method(
 for attr in (
     "_visible_snapshot_records",
     "_visible_candidates_for",
-    "_visible_all_structural_candidates",
-    "_visible_structural_candidates",
-    "_visible_generic_correlated_candidates",
 ):
     wrap_method(
         wall_composition.PhysicalOpeningAuthority,
