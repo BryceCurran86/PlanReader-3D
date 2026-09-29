@@ -326,19 +326,49 @@ def build_structural_member_registration_authority(
                 )
             )
 
-    view_scopes = tuple(
-        StructuralMemberViewScope(
-            page_id=str(view.page_id),
-            view_id=str(view.view_id),
-            view_type=str(view.view_type),
-            complete=bool(view.complete),
-            reason_codes=_clean_nonempty(view.reason_codes),
+    grouped_views: dict[str, list[AuthenticatedStructuralMemberView]] = {}
+    for view in source_views:
+        grouped_views.setdefault(str(view.view_id), []).append(view)
+
+    view_scope_rows: list[StructuralMemberViewScope] = []
+    for view_id in sorted(grouped_views):
+        group = grouped_views[view_id]
+        signatures = {
+            (
+                str(view.page_id),
+                str(view.view_type),
+                bool(view.complete),
+                _clean_nonempty(view.source_evidence_ids),
+                _clean_nonempty(view.reason_codes),
+            )
+            for view in group
+        }
+        first = sorted(
+            group,
+            key=lambda row: (
+                str(row.page_id),
+                str(row.view_type),
+                bool(row.complete),
+            ),
+        )[0]
+        evidence_ids = _clean_nonempty(first.source_evidence_ids)
+        reasons = list(_clean_nonempty(first.reason_codes))
+        complete = bool(first.complete) and bool(evidence_ids)
+        if bool(first.complete) and not evidence_ids:
+            reasons.append("structural_view_completeness_unproven")
+        if len(signatures) > 1:
+            complete = False
+            reasons.append("structural_view_scope_conflict")
+        view_scope_rows.append(
+            StructuralMemberViewScope(
+                page_id=str(first.page_id),
+                view_id=view_id,
+                view_type=str(first.view_type),
+                complete=complete,
+                reason_codes=_clean_nonempty(reasons),
+            )
         )
-        for view in sorted(
-            source_views,
-            key=lambda row: (str(row.view_id), str(row.page_id)),
-        )
-    )
+    view_scopes = tuple(view_scope_rows)
     observations = tuple(row[2] for row in ordered)
     relation_rows = tuple(
         sorted(
