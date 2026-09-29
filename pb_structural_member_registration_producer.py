@@ -175,6 +175,7 @@ def _normalised_anchor_payload(
         evidence = _clean_nonempty(anchor.source_evidence_ids)
         if (
             type(anchor.kind) is not StructuralRegistrationAnchorKind
+            or anchor.schema_version != STRUCTURAL_REGISTRATION_SCHEMA_VERSION
             or not namespace
             or not value
             or not evidence
