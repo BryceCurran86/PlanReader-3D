@@ -43,6 +43,62 @@ def _primitive_rows(page, page_no: int):
     return sorted(rows, key=lambda r: (r["w"], r["h"], r["bbox"][1], r["bbox"][0]))
 
 
+
+
+def _drawing_rows(page, page_no: int):
+    rows = []
+    for drawing_index, drawing in enumerate(page.get_drawings() or ()):
+        rect = drawing.get("rect")
+        if rect is None:
+            continue
+        items = list(drawing.get("items") or ())
+        kinds = [str(item[0]) for item in items]
+        rows.append({
+            "id": f"page:{page_no}:drawing:{drawing_index}",
+            "bbox": _rect_tuple(rect),
+            "w": round(float(rect.width), 3),
+            "h": round(float(rect.height), 3),
+            "fill": drawing.get("fill"),
+            "color": drawing.get("color"),
+            "stroke_width": drawing.get("width"),
+            "item_count": len(items),
+            "kinds": kinds,
+        })
+    return sorted(rows, key=lambda r: (r["bbox"][1], r["bbox"][0]))
+
+
+def _closed_line_shapes(page, page_no: int):
+    shapes = []
+    for drawing_index, drawing in enumerate(page.get_drawings() or ()):
+        items = list(drawing.get("items") or ())
+        if len(items) < 3 or not all(str(item[0]) == "l" for item in items):
+            continue
+        rect = drawing.get("rect")
+        if rect is None or float(rect.width) <= 0 or float(rect.height) <= 0:
+            continue
+        w = float(rect.width)
+        h = float(rect.height)
+        aspect = max(w, h) / min(w, h)
+        if aspect > 1.5 or max(w, h) > 60.0:
+            continue
+        first = items[0][1]
+        last = items[-1][2]
+        closure = ((float(first.x) - float(last.x)) ** 2 + (float(first.y) - float(last.y)) ** 2) ** 0.5
+        if closure > 0.05:
+            continue
+        shapes.append({
+            "id": f"page:{page_no}:drawing:{drawing_index}",
+            "bbox": _rect_tuple(rect),
+            "w": round(w, 3),
+            "h": round(h, 3),
+            "aspect": round(aspect, 4),
+            "item_count": len(items),
+            "fill": drawing.get("fill"),
+            "color": drawing.get("color"),
+            "stroke_width": drawing.get("width"),
+        })
+    return sorted(shapes, key=lambda r: (r["w"], r["h"], r["bbox"][1], r["bbox"][0]))
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("pdf")
@@ -87,6 +143,12 @@ def main() -> int:
         print("SOURCE_TEXT_BLOCKS=" + json.dumps(text_rows, sort_keys=True))
         print("SQUAREISH_PRIMITIVE_RECTS=" + json.dumps(
             _primitive_rows(page, args.page), sort_keys=True
+        ))
+        print("CLOSED_LINE_SHAPES=" + json.dumps(
+            _closed_line_shapes(page, args.page), sort_keys=True
+        ))
+        print("DRAWING_SUMMARIES=" + json.dumps(
+            _drawing_rows(page, args.page), sort_keys=True
         ))
     finally:
         doc.close()
