@@ -2078,24 +2078,17 @@ class GenericPlanReaderExtractor:
                     sheet_number=sheet_no,
                 )
 
-            # Masonry piers: ONLY if explicitly called out with a count in text
-            # DO NOT copy truss count!
+            # Explicit pier count text is evidence only. Physical masonry-pier
+            # quantity must come from StructuralMemberAuthority after source-owned
+            # member observations and completeness are proven.
             pier_matches = re.findall(
                 r"(\d+)\s*(?:No\.?s?|Nos?)\s*.*?pier|pier.*?(\d+)\s*(?:No\.?s?|Nos?)",
                 page_text,
                 re.I,
             )
             if pier_matches:
-                p_qty = float(pier_matches[0][0] or pier_matches[0][1])
-                pred_dict["masonry_piers"] = ExtractedPrediction(
-                    tag="masonry_piers",
-                    trade_type="walls",
-                    description=f"Masonry piers ({int(p_qty)} No parsed from drawing)",
-                    quantity=p_qty,
-                    unit="NO",
-                    confidence=0.90,
-                    source_page=page_num,
-                    sheet_number=sheet_no,
+                self.extraction_status["masonry_pier_text_count"] = (
+                    "evidence_present_unresolved_physical_members"
                 )
 
             # ------------------------------------------------------------------
