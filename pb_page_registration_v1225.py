@@ -12,7 +12,7 @@ import json
 import math
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import pb_auto_geometry_v1219 as auto
 import pb_memory_stability_v1220 as memory
@@ -357,6 +357,20 @@ def _sheet_title(title_text: Any, drawing_no: str, page_type: str) -> str:
     return max(candidates, key=lambda item: (item[0], len(item[1])), default=(0, ""))[1]
 
 
+def _registration_settings_for_workspace(
+    app: Any, workspace_id: int
+) -> Dict[str, str]:
+    rows = app.lquery(
+        "SELECT key,value FROM workspace_settings "
+        "WHERE workspace_id=? AND key LIKE ? ORDER BY key",
+        (int(workspace_id), f"{SETTING_PREFIX}%"),
+    )
+    return {
+        str(row.get("key") or ""): str(row.get("value") or "")
+        for row in rows
+    }
+
+
 def sync_drawing_register(app: Any, workspace_id: int) -> int:
     """Upsert by immutable document/page source reference, removing stale duplicates."""
     pages = app.lquery(
@@ -365,10 +379,27 @@ def sync_drawing_register(app: Any, workspace_id: int) -> int:
            WHERE p.workspace_id=? ORDER BY p.document_id,p.page_no,p.id""",
         (int(workspace_id),),
     )
+    registration_settings = _registration_settings_for_workspace(app, workspace_id)
+    source_counts: Dict[str, int] = {}
+    for page in pages:
+        source = f"{page.get('file_name')} p{page.get('page_no')}"
+        source_counts[source] = source_counts.get(source, 0) + 1
+
+    existing_rows = app.lquery(
+        "SELECT id,source_reference FROM register_items "
+        "WHERE workspace_id=? AND register_name='drawing_register' "
+        "ORDER BY source_reference,id",
+        (int(workspace_id),),
+    )
+    existing_by_source: Dict[str, List[Dict[str, Any]]] = {}
+    for raw in existing_rows:
+        row = dict(raw)
+        existing_by_source.setdefault(str(row.get("source_reference") or ""), []).append(row)
+
     changed = 0
     for page in pages:
         source = f"{page.get('file_name')} p{page.get('page_no')}"
-        meta_raw = app.workspace_setting(workspace_id, _meta_key(int(page["id"])), "{}")
+        meta_raw = registration_settings.get(_meta_key(int(page["id"])), "{}")
         try:
             meta = json.loads(str(meta_raw or "{}"))
         except Exception:
@@ -377,10 +408,19 @@ def sync_drawing_register(app: Any, workspace_id: int) -> int:
         detail = str(page.get("page_type") or "Other")
         if meta.get("title"):
             detail = f"{detail} · {meta['title']}"
-        existing = app.lquery(
-            "SELECT id FROM register_items WHERE workspace_id=? AND register_name='drawing_register' AND source_reference=? ORDER BY id",
-            (int(workspace_id), source),
-        )
+        # Normal drawing sources are unique by file/page, so reuse the one
+        # workspace-wide lookup above. If a workspace contains duplicate
+        # file/page source references, preserve the historical sequential
+        # semantics by querying that ambiguous source live.
+        if source_counts.get(source, 0) > 1:
+            existing = app.lquery(
+                "SELECT id FROM register_items "
+                "WHERE workspace_id=? AND register_name='drawing_register' "
+                "AND source_reference=? ORDER BY id",
+                (int(workspace_id), source),
+            )
+        else:
+            existing = existing_by_source.get(source, [])
         status = "Reviewed" if page.get("page_type") != "Other" else "To classify"
         priority = str(page.get("scale_text") or "")
         if existing:
@@ -510,11 +550,23 @@ def repair_document_registration(app: Any, document_id: int) -> Dict[str, Any]:
     return {"updated": len(updated), "pages": updated, "workspace_id": workspace_id}
 
 
-def _meta_for_pages(app: Any, workspace_id: int, pages) -> Dict[int, Dict[str, Any]]:
+def _meta_for_pages(
+    app: Any,
+    workspace_id: int,
+    pages,
+    registration_settings: Optional[Mapping[str, str]] = None,
+) -> Dict[int, Dict[str, Any]]:
+    settings = (
+        dict(registration_settings)
+        if registration_settings is not None
+        else _registration_settings_for_workspace(app, workspace_id)
+    )
     out: Dict[int, Dict[str, Any]] = {}
     for row in pages.itertuples():
         try:
-            out[int(row.id)] = json.loads(str(app.workspace_setting(workspace_id, _meta_key(int(row.id)), "{}") or "{}"))
+            out[int(row.id)] = json.loads(
+                str(settings.get(_meta_key(int(row.id)), "{}") or "{}")
+            )
         except Exception:
             out[int(row.id)] = {}
     return out
@@ -530,11 +582,17 @@ def drawing_register_page(app: Any, workspace: Dict[str, Any]) -> None:
     )
     if pages.empty:
         app.st.info("Upload/process documents first."); return
-    metadata = _meta_for_pages(app, workspace_id, pages)
+    registration_settings = _registration_settings_for_workspace(app, workspace_id)
+    metadata = _meta_for_pages(
+        app, workspace_id, pages, registration_settings=registration_settings
+    )
     pages["drawing_title"] = [metadata.get(int(pid), {}).get("title", "") for pid in pages["id"]]
     pages["sheet_number"] = [metadata.get(int(pid), {}).get("sheet_number", "") for pid in pages["id"]]
     pages["confidence"] = [metadata.get(int(pid), {}).get("confidence", "") for pid in pages["id"]]
-    pages["manual"] = [str(app.workspace_setting(workspace_id, _manual_key(int(pid)), "")) == "1" for pid in pages["id"]]
+    pages["manual"] = [
+        str(registration_settings.get(_manual_key(int(pid)), "")) == "1"
+        for pid in pages["id"]
+    ]
     c1, c2, c3, c4 = app.st.columns(4)
     c1.metric("Sheets", len(pages)); c2.metric("Take-off selected", int(pages["selected"].fillna(0).astype(bool).sum()))
     c3.metric("Needs classification", int((pages["page_type"].astype(str) == "Other").sum()))
