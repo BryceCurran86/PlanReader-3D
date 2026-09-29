@@ -251,6 +251,118 @@ def _bbox_overlap_over_min_area(
     return intersection / min(left_area, right_area)
 
 
+def _canonicalize_numeric_ocr_lines(
+    lines: Sequence[OCRLine],
+) -> tuple[OCRLine, ...]:
+    """Collapse repeat reads of one printed numeric token without confidence voting."""
+
+    groups: list[list[OCRLine]] = []
+    for line in sorted(
+        lines,
+        key=lambda item: (
+            _parse_dimension_value_mm(item.text) or -1,
+            tuple(round(float(value), 3) for value in (item.bbox_pt or ())),
+            str(item.text),
+        ),
+    ):
+        value_mm = _parse_dimension_value_mm(line.text)
+        if value_mm is None or line.bbox_pt is None:
+            continue
+        matched = None
+        for group in groups:
+            exemplar = group[0]
+            if _parse_dimension_value_mm(exemplar.text) != value_mm:
+                continue
+            if exemplar.bbox_pt is None:
+                continue
+            if _bbox_overlap_over_min_area(exemplar.bbox_pt, line.bbox_pt) >= 0.70:
+                matched = group
+                break
+        if matched is None:
+            groups.append([line])
+        else:
+            matched.append(line)
+
+    canonical: list[OCRLine] = []
+    for group in groups:
+        ordered = sorted(
+            group,
+            key=lambda item: (
+                tuple(round(float(value), 4) for value in (item.bbox_pt or ())),
+                str(item.text),
+            ),
+        )
+        boxes = [item.bbox_pt for item in ordered if item.bbox_pt is not None]
+        if not boxes:
+            continue
+        coordinates = tuple(
+            sorted(float(box[index]) for box in boxes)[len(boxes) // 2]
+            for index in range(4)
+        )
+        raw = ordered[0]
+        canonical.append(
+            OCRLine(
+                text=raw.text,
+                confidence=raw.confidence,
+                bbox_px=raw.bbox_px,
+                bbox_pt=tuple(round(value, 4) for value in coordinates),
+            )
+        )
+    return tuple(
+        sorted(
+            canonical,
+            key=lambda item: (
+                tuple(round(float(value), 4) for value in (item.bbox_pt or ())),
+                _parse_dimension_value_mm(item.text) or -1,
+                str(item.text),
+            ),
+        )
+    )
+
+
+def _producer_rotated_numeric_ocr_lines(
+    image: Image.Image,
+    *,
+    backend: RasterOCRBackend,
+    dpi: int,
+) -> tuple[OCRLine, ...]:
+    """Read numeric text at 0/90/270 degrees and remap all boxes to page space."""
+
+    scale_to_pt = 72.0 / float(dpi) if dpi > 0 else 1.0
+    original_width_px = float(image.width)
+    original_height_px = float(image.height)
+    remapped: list[OCRLine] = []
+    for rotation_deg in (0, 90, 270):
+        if rotation_deg == 0:
+            work = image
+        elif rotation_deg == 90:
+            work = image.transpose(Image.Transpose.ROTATE_270)
+        else:
+            work = image.transpose(Image.Transpose.ROTATE_90)
+        for line in backend.extract_lines(work, dpi=dpi):
+            if _parse_dimension_value_mm(line.text) is None:
+                continue
+            try:
+                mapped_px = _inverse_rotated_bbox_px(
+                    line.bbox_px,
+                    rotation_deg=rotation_deg,
+                    original_width_px=original_width_px,
+                    original_height_px=original_height_px,
+                )
+            except (TypeError, ValueError):
+                continue
+            mapped_pt = tuple(round(value * scale_to_pt, 4) for value in mapped_px)
+            remapped.append(
+                OCRLine(
+                    text=line.text,
+                    confidence=line.confidence,
+                    bbox_px=tuple(round(value, 4) for value in mapped_px),
+                    bbox_pt=mapped_pt,
+                )
+            )
+    return _canonicalize_numeric_ocr_lines(remapped)
+
+
 def _segment_orientation(
     geometry: Sequence[float],
 ) -> Optional[str]:
@@ -613,6 +725,7 @@ class RasterPlanDimensionProducer:
             raise TypeError("production OCR backend type is not trusted")
         self._source_visibility = source_visibility
         self._backend = backend
+        self._allow_test_backend = bool(allow_test_backend)
         self._results: dict[tuple[str, str], RasterPlanDimensionResult] = {}
 
     @classmethod
@@ -747,9 +860,16 @@ class RasterPlanDimensionProducer:
                 dpi=float(RASTER_DIMENSION_OCR_DPI),
             )
             image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
-            raw_lines = self._backend.extract_lines(
-                image, dpi=RASTER_DIMENSION_OCR_DPI
-            )
+            if self._allow_test_backend:
+                raw_lines = self._backend.extract_lines(
+                    image, dpi=RASTER_DIMENSION_OCR_DPI
+                )
+            else:
+                raw_lines = _producer_rotated_numeric_ocr_lines(
+                    image,
+                    backend=self._backend,
+                    dpi=RASTER_DIMENSION_OCR_DPI,
+                )
         except Exception:
             raw_lines = ()
 
