@@ -18,6 +18,7 @@ from pb_structural_member_registration_producer import (
     StructuralMemberRegistrationAnchor,
     StructuralMemberRegistrationProof,
     StructuralMemberRegistrationProducer,
+    StructuralMemberSourceLineage,
     StructuralMemberSourceView,
 )
 
@@ -33,6 +34,21 @@ def selector(kind: str = "masonry_pier") -> StructuralMemberSelector:
     )
 
 
+def lineage(
+    *,
+    document_id: str = "doc",
+    revision_id: str = "rev",
+    source_sha256: str = "a" * 64,
+    snapshot_id: str = "snap",
+) -> StructuralMemberSourceLineage:
+    return StructuralMemberSourceLineage(
+        document_id=document_id,
+        revision_id=revision_id,
+        source_sha256=source_sha256,
+        snapshot_id=snapshot_id,
+    )
+
+
 def view(
     view_id: str,
     view_type: str,
@@ -41,6 +57,7 @@ def view(
     complete: bool = True,
 ) -> StructuralMemberSourceView:
     return StructuralMemberSourceView(
+        lineage=lineage(),
         page_id=page,
         view_id=view_id,
         view_type=view_type,
@@ -77,6 +94,7 @@ def candidate(
     definition_id: str | None = None,
 ) -> StructuralMemberCandidateEvidence:
     return StructuralMemberCandidateEvidence(
+        lineage=lineage(),
         candidate_id=cid,
         member_kind=kind,
         page_id=page,
@@ -167,6 +185,7 @@ def test_conflicting_same_and_distinct_registration_conflicts() -> None:
         ),
         proofs=(
             StructuralMemberRegistrationProof(
+                lineage=lineage(),
                 left_candidate_id="p1",
                 right_candidate_id="e1",
                 relation=StructuralMemberRelation.DISTINCT_PHYSICAL_MEMBERS,
@@ -215,6 +234,7 @@ def test_duplicate_primitive_collapses_only_with_positive_same_proof() -> None:
         views=(view("plan", "floor_plan", page="1"),),
         proofs=(
             StructuralMemberRegistrationProof(
+                lineage=lineage(),
                 left_candidate_id="raw-a",
                 right_candidate_id="raw-b",
                 relation=StructuralMemberRelation.SAME_PHYSICAL_MEMBER,
@@ -320,6 +340,43 @@ def test_observation_ids_are_deterministic_under_input_permutation() -> None:
         row.observation_id for row in second.observations
     }
     assert first.resolution.quantity == second.resolution.quantity == 1
+
+
+def test_foreign_revision_snapshot_evidence_cannot_cross_selector_boundary() -> None:
+    foreign = StructuralMemberSourceLineage(
+        document_id="doc",
+        revision_id="other-rev",
+        source_sha256="b" * 64,
+        snapshot_id="other-snapshot",
+    )
+    result = publish(
+        candidates=(
+            StructuralMemberCandidateEvidence(
+                lineage=foreign,
+                candidate_id="foreign",
+                member_kind="masonry_pier",
+                page_id="1",
+                view_id="plan",
+                view_type="floor_plan",
+                source_evidence_ids=("foreign-evidence",),
+                source_primitive_ids=("foreign-primitive",),
+                role_evidence_kind="registered_structural_symbol",
+            ),
+        ),
+        views=(
+            StructuralMemberSourceView(
+                lineage=foreign,
+                page_id="1",
+                view_id="plan",
+                view_type="floor_plan",
+                complete=True,
+                source_evidence_ids=("foreign-view",),
+            ),
+        ),
+    )
+    assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.resolution.quantity is None
+    assert result.rejected_candidate_ids == ("foreign",)
 
 
 def test_production_module_has_no_benchmark_or_gold_imports() -> None:
