@@ -297,3 +297,56 @@ def test_public_standalone_pair_api_remains_self_contained(monkeypatch):
     physical_wall_pair_identity_candidacy(left, right, points_per_mm=1.0)
     classify_physical_wall_pair(left, right)
     assert calls == 4
+
+
+def test_full_resolver_matches_pre_cache_pair_logic(monkeypatch):
+    rng = random.Random(424242)
+    groups = []
+    for group_index in range(20):
+        identities = [
+            _random_identity(rng, group_index * 20 + i)
+            for i in range(12)
+        ]
+        groups.append((identities, rng.choice((None, 0.02, 0.1, 1.0))))
+
+    cached_candidacy = module._physical_wall_pair_identity_candidacy_with_features
+    cached_classify = module._classify_physical_wall_pair_with_features
+
+    for identities, scale in groups:
+        def legacy_candidacy(left, right, _lf, _rf, *, points_per_mm=None):
+            return _legacy_candidacy(
+                left, right, points_per_mm=points_per_mm
+            )
+
+        def legacy_classify(left, right, _lf, _rf):
+            return _legacy_classify(left, right)
+
+        monkeypatch.setattr(
+            module,
+            "_physical_wall_pair_identity_candidacy_with_features",
+            legacy_candidacy,
+        )
+        monkeypatch.setattr(
+            module,
+            "_classify_physical_wall_pair_with_features",
+            legacy_classify,
+        )
+        expected = resolve_physical_wall_equivalence(
+            identities, points_per_mm=scale
+        )
+
+        monkeypatch.setattr(
+            module,
+            "_physical_wall_pair_identity_candidacy_with_features",
+            cached_candidacy,
+        )
+        monkeypatch.setattr(
+            module,
+            "_classify_physical_wall_pair_with_features",
+            cached_classify,
+        )
+        actual = resolve_physical_wall_equivalence(
+            identities, points_per_mm=scale
+        )
+
+        assert actual == expected
