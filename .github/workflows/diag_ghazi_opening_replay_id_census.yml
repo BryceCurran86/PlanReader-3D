@@ -1,0 +1,91 @@
+name: TEST-ONLY Ghazi Opening Replay ID Census
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ghazi-replay-id-census:
+    if: startsWith(github.head_ref, 'diag/ghazi-opening-replay-id-census')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run identical-byte document-id census
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          import urllib.request
+
+          from pb_physical_opening_viewport_scope_shadow import (
+              assess_opening_candidate_viewport_scope,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          url = "https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf"
+          expected = "c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f"
+          req = urllib.request.Request(
+              url,
+              headers={"User-Agent": "PlanReader-Ghazi-opening-replay-id/1.0"},
+          )
+          with urllib.request.urlopen(req, timeout=180) as response:
+              payload = response.read()
+          got = hashlib.sha256(payload).hexdigest()
+          if got != expected:
+              raise SystemExit(f"source sha mismatch: {got}")
+
+          document_ids = (
+              "diag:ghazi_p167",
+              "tenders_ke_ghazi_science_lab",
+              "ghazi",
+              "test:ghazi",
+              "1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf",
+              "ghazi-opening-scope-real",
+          )
+
+          results = []
+          for document_id in document_ids:
+              source = SourceVisibilityProducer(
+                  producer_method="ghazi-opening-replay-id",
+                  producer_version="1.0",
+              )
+              published = source.ingest_native_pdf_bytes(
+                  document_id=document_id,
+                  source_bytes=payload,
+                  source_locator=url,
+              )
+              report = assess_opening_candidate_viewport_scope(
+                  source_visibility_producer=source,
+                  revision_id=published.revision.revision_id,
+                  page_id="167",
+              )
+              results.append({
+                  "document_id": document_id,
+                  "candidate_count": len(report.candidate_scopes),
+                  "scope_counts": dict(report.scope_counts),
+                  "authenticated_viewport_count": len(report.authenticated_viewports),
+                  "unauthenticated_viewport_count": report.unauthenticated_viewport_count,
+                  "status": report.status.value,
+                  "reason_codes": list(report.reason_codes),
+              })
+
+          print(
+              "GHAZI_OPENING_REPLAY_ID_CENSUS="
+              + json.dumps({
+                  "source_sha256": got,
+                  "page": 167,
+                  "results": results,
+              }, sort_keys=True),
+              flush=True,
+          )
+          PY
