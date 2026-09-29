@@ -8,6 +8,7 @@ import fitz
 import pb_physical_wall_candidate_authority as module
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_opening_authority import PhysicalOpeningAuthority
+from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
 from pb_source_visibility_authority import (
     SourceVisibilityAuthority,
     SourceVisibilityProducer,
@@ -156,3 +157,53 @@ def test_opening_override_indexed_and_fallback_agree_on_empty_records():
         resolved_visible_observations=indexed["1"],
     )
     assert current == legacy
+
+
+
+def test_shared_opening_authority_matches_fresh_per_page_scope_results():
+    source, published, payload = _source(page_count=3)
+    indexed = module._visible_observations_by_page(
+        source_producer=source,
+        published=published,
+    )
+    shared = PhysicalOpeningAuthority(source.authority())
+
+    for page_id in ("1", "2", "3"):
+        fresh_result = module._build_scope_result(
+            source_producer=source,
+            published=published,
+            source_bytes=payload,
+            page_id=page_id,
+            resolved_visible_observations=indexed.get(page_id, ()),
+        )
+        shared_result = module._build_scope_result(
+            source_producer=source,
+            published=published,
+            source_bytes=payload,
+            page_id=page_id,
+            resolved_visible_observations=indexed.get(page_id, ()),
+            physical_opening_authority=shared,
+        )
+        assert shared_result == fresh_result
+
+
+def test_wall_candidate_producer_constructs_one_opening_authority_per_revision(
+    monkeypatch,
+):
+    source, _published, _payload = _source(page_count=5)
+    original = module.PhysicalOpeningAuthority
+    constructions = 0
+
+    def counted(authority):
+        nonlocal constructions
+        constructions += 1
+        return original(authority)
+
+    monkeypatch.setattr(module, "PhysicalOpeningAuthority", counted)
+
+    producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
+        source,
+        page_ids=("1", "2", "3", "4", "5"),
+    )
+    assert producer.authority() is not None
+    assert constructions == 1
