@@ -54,15 +54,15 @@ jobs:
           set -o pipefail
           timeout 420s env PYTHONPATH=$GITHUB_WORKSPACE python scripts/profile_exact_source_perf_gate.py --repo $GITHUB_WORKSPACE --pdf /tmp/lamu.pdf --pages 44 --label lamu-p44-main --wall-only | tee /tmp/lamu-p44-main.jsonl
         continue-on-error: true
-      - name: Profile #984 Lamu 41-45
+      - name: Profile #990 Lamu 41-45
         run: |
           set -o pipefail
-          timeout 900s env PYTHONPATH=/tmp/pr984 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr984 --pdf /tmp/lamu.pdf --pages 41-45 --label lamu-pr984 --wall-only | tee /tmp/lamu-pr984.jsonl
+          timeout 900s env PYTHONPATH=/tmp/pr990 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr990 --pdf /tmp/lamu.pdf --pages 41-45 --label lamu-pr990 --wall-only | tee /tmp/lamu-pr990.jsonl
         continue-on-error: true
-      - name: Profile #984 Murera 219-238
+      - name: Profile #990 Murera 219-238
         run: |
           set -o pipefail
-          timeout 1200s env PYTHONPATH=/tmp/pr984 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr984 --pdf /tmp/murera.pdf --pages 219-238 --label murera-pr984 --wall-only | tee /tmp/murera-pr984.jsonl
+          timeout 1200s env PYTHONPATH=/tmp/pr990 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr990 --pdf /tmp/murera.pdf --pages 219-238 --label murera-pr990 --wall-only | tee /tmp/murera-pr990.jsonl
         continue-on-error: true
       - uses: actions/upload-artifact@v4
         with:
@@ -71,5 +71,5 @@ jobs:
             /tmp/lamu-p44-pr990.jsonl
             /tmp/lamu-p44-pr984.jsonl
             /tmp/lamu-p44-main.jsonl
-            /tmp/lamu-pr984.jsonl
-            /tmp/murera-pr984.jsonl
+            /tmp/lamu-pr990.jsonl
+            /tmp/murera-pr990.jsonl
