@@ -223,6 +223,15 @@ def test_opening_override_proves_only_wall_relevant_source_primitives(monkeypatc
         if str(observation.source_primitive_ref).startswith("visible:segment:")
     ]
     assert len(native) >= 6
+    rows.append(
+        (
+            "irrelevant-visible-observation",
+            SimpleNamespace(
+                page_id="1",
+                source_primitive_ref="visible:segment:unrelated-primitive",
+            ),
+        )
+    )
 
     selected = native[:6]
     records = tuple(
