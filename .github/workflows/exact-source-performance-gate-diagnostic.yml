@@ -31,6 +31,7 @@ jobs:
           git fetch origin refs/pull/984/head:refs/remotes/origin/pr984
           git worktree add /tmp/pr984 refs/remotes/origin/pr984
           git -C /tmp/pr984 rev-parse HEAD
+          git -C /tmp/pr984 merge-base --is-ancestor 674dbe8948bff2547ca1b65177d9fb5670ad12df HEAD
       - name: Profile #984 Lamu page 44 first
         run: |
           set -o pipefail
