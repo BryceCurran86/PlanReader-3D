@@ -30,17 +30,26 @@ jobs:
         run: |
           git fetch origin refs/pull/984/head:refs/remotes/origin/pr984
           git fetch origin refs/pull/990/head:refs/remotes/origin/pr990
+          git fetch origin refs/pull/991/head:refs/remotes/origin/pr991
           git worktree add /tmp/pr984 refs/remotes/origin/pr984
           git worktree add /tmp/pr990 refs/remotes/origin/pr990
+          git worktree add /tmp/pr991 refs/remotes/origin/pr991
           git -C /tmp/pr984 rev-parse HEAD
           git -C /tmp/pr990 rev-parse HEAD
+          git -C /tmp/pr991 rev-parse HEAD
           git -C /tmp/pr990 merge-base --is-ancestor "$(git -C /tmp/pr984 rev-parse HEAD)" HEAD
+          git -C /tmp/pr991 merge-base --is-ancestor "$(git -C /tmp/pr990 rev-parse HEAD)" HEAD
           echo "performance stack integrity: OK"
           git -C /tmp/pr984 merge-base --is-ancestor 674dbe8948bff2547ca1b65177d9fb5670ad12df HEAD
-      - name: Gate #990 indexed geometry tests
+      - name: Gate #990/#991 indexed performance tests
         run: |
-          cd /tmp/pr990
-          PYTHONPATH=. pytest -q tests/test_plan_opening_detection_indexed_v172.py tests/test_wall_visible_observation_page_index.py tests/test_plan_opening_detection_v171.py
+          cd /tmp/pr991
+          PYTHONPATH=. pytest -q tests/test_plan_opening_detection_indexed_v172.py tests/test_wall_visible_observation_page_index.py tests/test_plan_opening_detection_v171.py tests/test_wall_room_topology_snap_index.py tests/test_wall_room_topology_stage_a.py
+      - name: Profile #991 Lamu page 44 first
+        run: |
+          set -o pipefail
+          timeout 420s env PYTHONPATH=/tmp/pr991 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr991 --pdf /tmp/lamu.pdf --pages 44 --label lamu-p44-pr991 --wall-only | tee /tmp/lamu-p44-pr991.jsonl
+        continue-on-error: true
       - name: Profile #990 Lamu page 44 first
         run: |
           set -o pipefail
@@ -56,22 +65,23 @@ jobs:
           set -o pipefail
           timeout 420s env PYTHONPATH=$GITHUB_WORKSPACE python scripts/profile_exact_source_perf_gate.py --repo $GITHUB_WORKSPACE --pdf /tmp/lamu.pdf --pages 44 --label lamu-p44-main --wall-only | tee /tmp/lamu-p44-main.jsonl
         continue-on-error: true
-      - name: Profile #990 Lamu 41-45
+      - name: Profile #991 Lamu 41-45
         run: |
           set -o pipefail
-          timeout 900s env PYTHONPATH=/tmp/pr990 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr990 --pdf /tmp/lamu.pdf --pages 41-45 --label lamu-pr990 --wall-only | tee /tmp/lamu-pr990.jsonl
+          timeout 900s env PYTHONPATH=/tmp/pr991 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr991 --pdf /tmp/lamu.pdf --pages 41-45 --label lamu-pr991 --wall-only | tee /tmp/lamu-pr991.jsonl
         continue-on-error: true
-      - name: Profile #990 Murera 219-238
+      - name: Profile #991 Murera 219-238
         run: |
           set -o pipefail
-          timeout 1200s env PYTHONPATH=/tmp/pr990 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr990 --pdf /tmp/murera.pdf --pages 219-238 --label murera-pr990 --wall-only | tee /tmp/murera-pr990.jsonl
+          timeout 1200s env PYTHONPATH=/tmp/pr991 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr991 --pdf /tmp/murera.pdf --pages 219-238 --label murera-pr991 --wall-only | tee /tmp/murera-pr991.jsonl
         continue-on-error: true
       - uses: actions/upload-artifact@v4
         with:
           name: exact-source-performance-gate
           path: |
+            /tmp/lamu-p44-pr991.jsonl
             /tmp/lamu-p44-pr990.jsonl
             /tmp/lamu-p44-pr984.jsonl
             /tmp/lamu-p44-main.jsonl
-            /tmp/lamu-pr990.jsonl
-            /tmp/murera-pr990.jsonl
+            /tmp/lamu-pr991.jsonl
+            /tmp/murera-pr991.jsonl
