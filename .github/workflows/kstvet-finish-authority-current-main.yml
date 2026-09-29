@@ -1,0 +1,162 @@
+name: TEST-ONLY KSTVET Finish Authority Current Main
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  kstvet-finish-authority:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+          # TEST-ONLY real-source corroboration backend. Do not add this
+          # dependency to production requirements from this diagnostic.
+          pip install rapidocr
+
+      - name: Focused finish authority tests
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_source_execution_callout_authority_v1.py \
+            tests/test_wall_finish_callout_wall_authority_v1.py \
+            tests/test_wall_finish_face_binding_authority_v1.py \
+            tests/test_wall_finish_propagation_authority_v2.py
+
+      - name: Download exact KSTVET source
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o /tmp/kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
+
+      - name: Current-main source execution and wall binding
+        env:
+          PYTHONPATH: .
+        run: |
+          set -o pipefail
+          timeout 1200s python - <<'PY' | tee /tmp/kstvet-finish-current-main.log
+          import json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_execution_callout_authority import SourceExecutionCalloutProducer
+          from pb_wall_finish_callout_wall_authority import WallFinishCalloutWallProducer
+
+          payload = Path("/tmp/kstvet.pdf").read_bytes()
+          source = SourceVisibilityProducer(
+              producer_method="kstvet-finish-current-main-diagnostic",
+              producer_version="1.0",
+          )
+          source.ingest_native_pdf_bytes(
+              document_id="kstvet-finish-current-main",
+              source_bytes=payload,
+              source_locator="sha256://6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc",
+              page_ids=("54",),
+          )
+
+          callouts = SourceExecutionCalloutProducer.from_source_visibility_producer(
+              source, page_ids=("54",)
+          )
+          callout_rows = []
+          for result in callouts.published_results():
+              for record in result.records:
+                  callout_rows.append({
+                      "page": record.page_id,
+                      "sequence": [record.sequence_start, record.sequence_end],
+                      "semantics": [
+                          {
+                              "trade": semantic.trade_scope_id,
+                              "material": semantic.finish_material,
+                              "direction": semantic.direction,
+                          }
+                          for semantic in record.semantics
+                      ],
+                      "evidence": [
+                          {
+                              "text": word.trusted_text,
+                              "authority": word.authority_kind,
+                              "sequence": [word.sequence_start, word.sequence_end],
+                          }
+                          for word in record.word_evidence
+                      ],
+                  })
+          print("KSTVET_FINISH_CALLOUTS " + json.dumps(callout_rows, sort_keys=True), flush=True)
+
+          wall_bindings = WallFinishCalloutWallProducer.from_source_visibility_producer(
+              source, page_ids=("54",)
+          )
+          binding_rows = []
+          for result in wall_bindings.published_results():
+              for binding in result.bindings:
+                  binding_rows.append({
+                      "page": binding.page_id,
+                      "viewport": binding.viewport_id,
+                      "trade": binding.trade_scope_id,
+                      "material": binding.finish_material,
+                      "direction": binding.semantic_direction,
+                      "sequence": [
+                          binding.source_execution_sequence_start,
+                          binding.source_execution_sequence_end,
+                      ],
+                      "wall": binding.physical_wall_id,
+                      "raw_owners": list(binding.raw_owner_wall_ids),
+                      "equivalence_group": list(binding.equivalence_group_wall_ids),
+                      "source_wall_primitives": list(binding.source_wall_primitive_ids),
+                  })
+          print("KSTVET_FINISH_WALL_BINDINGS " + json.dumps(binding_rows, sort_keys=True), flush=True)
+
+          summary = {
+              "callout_count": len(callout_rows),
+              "wall_binding_count": len(binding_rows),
+              "trades": sorted({
+                  semantic["trade"]
+                  for row in callout_rows
+                  for semantic in row["semantics"]
+              }),
+              "wall_bound_trades": sorted({row["trade"] for row in binding_rows}),
+              "external_key_pointing_callouts": sum(
+                  1 for row in callout_rows
+                  for semantic in row["semantics"]
+                  if semantic["trade"] == "external_key_pointing"
+              ),
+              "external_key_pointing_wall_bindings": sum(
+                  1 for row in binding_rows
+                  if row["trade"] == "external_key_pointing"
+              ),
+              "internal_plaster_wall_bindings": sum(
+                  1 for row in binding_rows
+                  if row["trade"] == "internal_plaster"
+              ),
+              "internal_paint_wall_bindings": sum(
+                  1 for row in binding_rows
+                  if row["trade"] == "internal_paint"
+              ),
+          }
+          print("KSTVET_FINISH_CURRENT_MAIN_SUMMARY " + json.dumps(summary, sort_keys=True), flush=True)
+          PY
+
+      - name: Current-main Item19B preflight
+        env:
+          PYTHONPATH: .
+        run: |
+          set -o pipefail
+          timeout 1200s python scripts/wall_finish_face_binding_kstvet_shadow.py /tmp/kstvet.pdf \
+            2>&1 | tee /tmp/kstvet-item19b-preflight.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kstvet-finish-authority-current-main
+          path: |
+            /tmp/kstvet-finish-current-main.log
+            /tmp/kstvet-item19b-preflight.log
+          if-no-files-found: warn
