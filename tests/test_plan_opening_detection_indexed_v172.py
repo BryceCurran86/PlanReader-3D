@@ -226,3 +226,45 @@ def test_indexed_door_output_order_matches_legacy_under_segment_permutations():
         expected = legacy.detect_door_candidates(segments, walls, (), page_no=11)
         actual = indexed.detect_door_candidates_indexed(segments, walls, (), page_no=11)
         assert actual == expected
+
+
+def test_gap_endpoint_broad_phase_contains_every_random_legacy_positive():
+    import math
+    rng = random.Random(20260929)
+    positives = 0
+    for _ in range(2500):
+        a_len = rng.uniform(210.0, 1200.0)
+        b_len = rng.uniform(210.0, 1200.0)
+        a_angle = rng.uniform(0.0, 180.0)
+        delta = rng.uniform(-9.9, 9.9)
+        b_angle = a_angle + delta
+        gap = rng.uniform(31.0, 195.0)
+        perp = rng.uniform(-14.5, 14.5)
+
+        ar = math.radians(a_angle)
+        br = math.radians(b_angle)
+        ux, uy = math.cos(ar), math.sin(ar)
+        nx, ny = -uy, ux
+        a = legacy.Segment(0.0, 0.0, a_len * ux, a_len * uy)
+        start_x = a_len * ux + gap * ux + perp * nx
+        start_y = a_len * uy + gap * uy + perp * ny
+        b = legacy.Segment(
+            start_x,
+            start_y,
+            start_x + b_len * math.cos(br),
+            start_y + b_len * math.sin(br),
+        )
+        walls = [legacy.WallLine(a), legacy.WallLine(b)]
+        accepted = legacy.detect_gap_candidates([a, b], walls, ())
+        if not accepted:
+            continue
+        positives += 1
+        max_wall_length = max(a.length, b.length)
+        radius = math.hypot(
+            200.0,
+            15.0 + 0.5 * max_wall_length * math.sin(math.radians(10.0)),
+        )
+        assert (0, 1) in indexed._endpoint_wall_pair_candidates(
+            walls, max_endpoint_distance=radius
+        )
+    assert positives > 100
