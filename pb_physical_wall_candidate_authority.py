@@ -1354,48 +1354,14 @@ def _producer_opening_relation_overrides(
     }
 
     prefix = "visible:segment:"
-    relevant_rows: list[tuple[str, object]] = []
+
+    # Preserve the #969 authority contract exactly: every authenticated visible
+    # observation on this page is proved once. The page index removes repeated
+    # document-wide ownership scans, but does not narrow the opening authority's
+    # evidence universe or preflight candidate membership.
     for observation_id, observation in page_visible_rows:
         if str(observation.page_id) != str(page_id):
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        primitive_ref = str(observation.source_primitive_ref or "")
-        if not primitive_ref.startswith(prefix):
-            continue
-        raw_id = primitive_ref[len(prefix) :]
-        if raw_id in by_raw_id:
-            relevant_rows.append((observation_id, observation))
-
-    if not relevant_rows:
-        return {}
-
-    # This wall-equivalence bridge accepts only existence records backed by
-    # exactly six native source lines (see raw_lines gate below). The generic
-    # correlated opening paths produce 3- or 4-observation candidates and can
-    # therefore never contribute a relation override here. Preflight the
-    # existing strong six-line structural path first; only if it has a candidate
-    # do we invoke the full opening existence authority, which preserves all of
-    # its normal generic-conflict/closure semantics for that candidate.
-    _seed_observation_id, seed_observation = relevant_rows[0]
-    page_records = tuple(
-        observation
-        for _observation_id, observation in page_visible_rows
-    )
-    strong_candidates = opening_authority._visible_structural_candidates(
-        seed_observation,
-        page_records,
-    )
-    strong_source_ids = {
-        observation_id
-        for candidate in strong_candidates
-        if len(candidate.source_observation_ids) == 6
-        for observation_id in candidate.source_observation_ids
-    }
-    if not strong_source_ids:
-        return {}
-
-    for observation_id, observation in relevant_rows:
-        if observation_id not in strong_source_ids:
-            continue
         selector = ObservationSelector(
             document_id=published.revision.document_id,
             revision_id=published.revision.revision_id,
