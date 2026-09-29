@@ -121,7 +121,9 @@ for attr in (
     "filter_structural_segments",
     "split_segments_at_intersections",
     "snap_geometry",
+    "_snap_geometry_indexed",
     "merge_collinear_degree_two_nodes",
+    "_merge_collinear_degree_two_nodes_indexed",
 ):
     wrap_module_function(topology_stage_a, attr, f"topology.{attr}")
 wrap_method(
