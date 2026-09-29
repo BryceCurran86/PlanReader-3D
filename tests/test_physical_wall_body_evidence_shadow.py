@@ -171,6 +171,16 @@ def test_missing_source_observations_abstains():
     assert PHYSICAL_WALL_BODY_SOURCE_PROVENANCE_INCOMPLETE in result.reason_codes
 
 
+def test_segmentation_observation_cannot_replace_candidate_source_provenance():
+    result = _resolve(
+        source_observation_ids=(),
+        segmentation_support_observation_ids=("segmentation-wall-mask-1",),
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert PHYSICAL_WALL_BODY_SOURCE_PROVENANCE_INCOMPLETE in result.reason_codes
+
+
 def test_missing_wall_band_geometry_abstains():
     result = _resolve(wall_band_geometry=None)
 
