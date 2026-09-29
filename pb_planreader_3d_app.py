@@ -5590,6 +5590,60 @@ def _page_thumb(path: str, mtime: float, max_w: int) -> bytes | None:
         return None
 
 
+def plan_mapper_preview(
+    path: str,
+    max_w: int = 900,
+) -> tuple[bytes, int, int, int, int] | None:
+    """Cached bounded mapper display plus original/display pixel dimensions.
+
+    Measurement authority remains the original rendered page. Only the UI
+    background is cached/downsampled; display coordinates are converted back to
+    original pixels using the returned dimensions.
+    """
+    try:
+        p = Path(path)
+        stat = p.stat()
+        if not p.is_file():
+            return None
+        limit = max(320, min(int(max_w or 900), 1400))
+        return _plan_mapper_preview_cached(
+            str(p.resolve()),
+            int(stat.st_size),
+            int(stat.st_mtime_ns),
+            limit,
+        )
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=8)
+def _plan_mapper_preview_cached(
+    path: str,
+    file_size: int,
+    mtime_ns: int,
+    max_w: int,
+) -> tuple[bytes, int, int, int, int] | None:
+    del file_size, mtime_ns  # cache-key authority only
+    try:
+        with Image.open(Path(path)) as source:
+            original_w, original_h = int(source.width), int(source.height)
+            if original_w <= 0 or original_h <= 0:
+                return None
+            display_scale = min(1.0, max_w / float(original_w))
+            display_w = max(1, int(original_w * display_scale))
+            display_h = max(1, int(original_h * display_scale))
+            display = source.resize((display_w, display_h))
+            try:
+                buf = io.BytesIO()
+                display.save(buf, format="PNG")
+                payload = buf.getvalue()
+            finally:
+                display.close()
+        return payload, original_w, original_h, display_w, display_h
+    except Exception:
+        return None
+
+
 def page_preview_picker(workspace_id: int, doc_ids: Sequence[int]) -> None:
     pages = lquery(
         "SELECT p.id,p.document_id,p.page_no,p.page_label,p.page_type,p.image_path,p.extracted_text,p.selected,d.file_name "
@@ -6397,26 +6451,30 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
         st.caption("Use a known dimension line from the drawing. Accurate scale calibration is essential before treating mapped areas as measured.")
     with tab2:
         image_path=Path(str(page.get("image_path") or ""))
-        img=Image.open(image_path) if image_path.exists() else None
+        preview=plan_mapper_preview(str(image_path),900) if image_path.exists() else None
         pxpm=to_float(page.get("px_per_m"))
-        if not img:
+        if preview is None:
             st.error("Rendered page image is missing.")
         else:
+            preview_bytes,original_w,original_h,display_w,display_h=preview
+            display_scale=display_w/float(original_w)
             c_form,c_draw=st.columns([.34,.66])
             drawn_rect=None
             with c_draw:
                 st.caption("Draw a rectangle around a room footprint, wall/elevation section or paintable zone. Rectangle mapping is intentionally simple and reviewable.")
                 if CANVAS_AVAILABLE:
-                    max_width=900
-                    display_scale=min(1.0,max_width/img.width)
-                    display=img.resize((int(img.width*display_scale),int(img.height*display_scale)))
-                    canvas=st_canvas(fill_color="rgba(215,162,27,0.25)",stroke_width=3,stroke_color="#B33A3A",background_image=display,update_streamlit=True,height=display.height,width=display.width,drawing_mode="rect",key=f"canvas_{page['id']}")
+                    with Image.open(io.BytesIO(preview_bytes)) as cached_display:
+                        display=cached_display.copy()
+                    try:
+                        canvas=st_canvas(fill_color="rgba(215,162,27,0.25)",stroke_width=3,stroke_color="#B33A3A",background_image=display,update_streamlit=True,height=display_h,width=display_w,drawing_mode="rect",key=f"canvas_{page['id']}")
+                    finally:
+                        display.close()
                     if canvas.json_data and canvas.json_data.get("objects"):
                         obj=canvas.json_data["objects"][-1]
                         drawn_rect=(to_float(obj.get("left"))/display_scale,to_float(obj.get("top"))/display_scale,to_float(obj.get("width"))*to_float(obj.get("scaleX"),1)/display_scale,to_float(obj.get("height"))*to_float(obj.get("scaleY"),1)/display_scale)
                 else:
                     overlay=overlay_image(page,zones)
-                    st.image(overlay if overlay else img,use_container_width=True)
+                    st.image(overlay if overlay else preview_bytes,use_container_width=True)
                     st.info("Drawing canvas is unavailable. Enter rectangle coordinates manually.")
             with c_form:
                 name=st.text_input("Zone name",value=f"{page.get('page_label')} zone")
@@ -6424,7 +6482,7 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
                 if drawn_rect:
                     dx,dy,dw,dh=drawn_rect
                 else:
-                    dx,dy,dw,dh=0.0,0.0,min(500.0,float(img.width)),min(300.0,float(img.height))
+                    dx,dy,dw,dh=0.0,0.0,min(500.0,float(original_w)),min(300.0,float(original_h))
                 if pxpm>0:
                     xm=st.number_input("X position (m)",min_value=0.0,value=float(dx/pxpm),step=0.1,help="Distance in real metres from the page's left edge to the rectangle's left edge, converted from the calibrated scale.")
                     ym=st.number_input("Y position (m)",min_value=0.0,value=float(dy/pxpm),step=0.1,help="Distance in real metres from the top of the page to the rectangle's top edge.")
