@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, hashlib, json, resource, sys, time
+import argparse, hashlib, json, resource, subprocess, sys, time
 from pathlib import Path
 
 parser=argparse.ArgumentParser()
@@ -142,7 +142,11 @@ payload=pdf.read_bytes()
 source_sha=hashlib.sha256(payload).hexdigest()
 source=SourceVisibilityProducer(producer_method="exact-source-perf-gate",producer_version="1")
 timings={}
-partial={"label":args.label,"repo":str(repo),"source_sha256":source_sha,"pages":list(page_ids),"timings":timings,"stage_calls":stage_calls}
+repo_head = subprocess.check_output(
+    ["git", "-C", str(repo), "rev-parse", "HEAD"],
+    text=True,
+).strip()
+partial={"label":args.label,"repo":str(repo),"repo_head":repo_head,"source_sha256":source_sha,"pages":list(page_ids),"timings":timings,"stage_calls":stage_calls}
 def emit():
     print("PERF_GATE_JSON="+json.dumps(partial,sort_keys=True,default=str), flush=True)
 t=time.perf_counter()
