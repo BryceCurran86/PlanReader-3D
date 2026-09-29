@@ -268,7 +268,7 @@ class _TickEndpointIndex:
             * _TICK_MAX_LENGTH_RATIO
             * baseline.length
         )
-        radius = math.hypot(max_along_midpoint, _TICK_MAX_DISTANCE_PT)
+        radius = math.hypot(max_along_midpoint, _TICK_MAX_DISTANCE_PT) + 1e-9
         x0 = math.floor((endpoint[0] - radius) / self._cell_size)
         x1 = math.floor((endpoint[0] + radius) / self._cell_size)
         y0 = math.floor((endpoint[1] - radius) / self._cell_size)
