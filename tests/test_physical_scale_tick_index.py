@@ -285,3 +285,34 @@ def test_non_finite_geometry_falls_back_to_full_exact_universe() -> None:
         malformed_baseline,
         malformed_baseline.start,
     ) == tuple(malformed_universe)
+
+
+
+def test_angle_bucket_wrap_boundary_preserves_exact_candidates() -> None:
+    baseline = _segment("base-wrap", (0.0, 0.0), (0.0, 100.0))
+    tick_length = 20.0
+
+    def centered_tick(observation_id: str, angle_deg: float):
+        angle = math.radians(angle_deg)
+        dx = math.cos(angle) * tick_length / 2.0
+        dy = math.sin(angle) * tick_length / 2.0
+        return _segment(
+            observation_id,
+            (-dx, -dy),
+            (dx, dy),
+        )
+
+    low = centered_tick("wrap-low", 175.0001)
+    high = centered_tick("wrap-high", 4.9999)
+    segments = [baseline, low, high]
+
+    expected = module._tick_for_endpoint(baseline, baseline.start, segments)
+    index = module._TickEndpointIndex(segments)
+    actual = module._tick_for_endpoint(
+        baseline,
+        baseline.start,
+        index.candidates(baseline, baseline.start),
+    )
+
+    assert expected == tuple(sorted((low, high), key=lambda item: item.observation_id))
+    assert actual == expected
