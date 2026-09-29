@@ -79,3 +79,9 @@ def test_multi_page_instance_row_is_not_treated_as_one_complete_view():
     r=build(ev)
     assert r.status is EvidenceResolutionStatus.ABSTAINED
     assert r.quantity is None
+
+def test_duplicate_physical_symbol_ids_cannot_double_count_member():
+    r=build(evidence(ids=("g1","g1","g2","g3")))
+    assert r.status is EvidenceResolutionStatus.CONFLICT
+    assert r.quantity is None
+
