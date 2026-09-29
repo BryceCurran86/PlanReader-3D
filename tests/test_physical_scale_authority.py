@@ -58,3 +58,82 @@ def test_agreeing_ratio_preserves_native_bar_geometry() -> None:
     assert abs(result.evidence.source_span_pt - measured_span) <= 5.0e-5
     assert abs(result.evidence.points_per_mm - measured_span / 1000.0) <= 5.0e-8
     assert abs(measured_span - POINTS_PER_METRE_AT_1_1 / 100.0) > 1.0e-4
+
+
+def test_viewport_page_proxy_caches_repeated_drawings_and_text_reads() -> None:
+    from pb_physical_scale_authority import _MemoizedViewportPage
+
+    class FakePage:
+        rect = (0.0, 0.0, 100.0, 100.0)
+
+        def __init__(self):
+            self.draw_calls = 0
+            self.text_calls = {}
+
+        def get_drawings(self, *args, **kwargs):
+            self.draw_calls += 1
+            return [{"items": [("sentinel", self.draw_calls)]}]
+
+        def get_text(self, *args, **kwargs):
+            key = (tuple(args), tuple(sorted(kwargs.items())))
+            self.text_calls[key] = self.text_calls.get(key, 0) + 1
+            return {"key": key, "call": self.text_calls[key]}
+
+    raw = FakePage()
+    page = _MemoizedViewportPage(raw)
+
+    first_drawings = page.get_drawings()
+    second_drawings = page.get_drawings()
+    assert first_drawings is second_drawings
+    assert raw.draw_calls == 1
+
+    first_words = page.get_text("words")
+    second_words = page.get_text("words")
+    first_dict = page.get_text("dict")
+    second_dict = page.get_text("dict")
+    assert first_words is second_words
+    assert first_dict is second_dict
+    assert raw.text_calls[(("words",), ())] == 1
+    assert raw.text_calls[(("dict",), ())] == 1
+
+
+def test_scope_bbox_uses_memoized_page_without_changing_viewport_result(monkeypatch) -> None:
+    import pb_physical_scale_authority as module
+
+    payload, _measured_span = _near_agreeing_bar_pdf()
+    source = SourceVisibilityProducer(
+        producer_method="physical-scale-page-cache",
+        producer_version="1.0",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="physical-scale-page-cache",
+        source_bytes=payload,
+        source_locator="memory://physical-scale-page-cache.pdf",
+    )
+    producer = PhysicalScaleProducer.from_source_visibility_producer(source)
+    selector = PhysicalScaleSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id="1",
+    )
+
+    seen = {}
+
+    def fake_segment(page, *, page_number):
+        seen["type"] = type(page).__name__
+        seen["page_number"] = page_number
+        # Exercise the same repeated native reads that make dense CAD sheets
+        # expensive in real F.07 segmentation.
+        assert page.get_drawings() is page.get_drawings()
+        assert page.get_text("words") is page.get_text("words")
+        return []
+
+    monkeypatch.setattr(module, "segment_page_viewports", fake_segment)
+    bbox, reason = producer._scope_bbox(selector, payload)
+
+    assert seen == {"type": "_MemoizedViewportPage", "page_number": 1}
+    assert reason is None
+    assert bbox is not None
+    assert tuple(round(value, 6) for value in bbox) == (0.0, 0.0, 420.0, 260.0)
