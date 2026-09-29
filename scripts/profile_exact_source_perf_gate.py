@@ -24,6 +24,7 @@ from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
 from pb_physical_scale_authority import PhysicalScaleProducer, PhysicalScaleSelector
 import pb_physical_wall_candidate_authority as wall_candidates
 import pb_live_wall_opening_authority_composition as wall_composition
+import pb_wall_room_topology_stage_a as topology_stage_a
 
 def pagespec(text):
     out=[]
@@ -103,6 +104,26 @@ wrap_method(
     "prove_existence",
     "openings.prove_existence",
 )
+for attr in (
+    "_visible_snapshot_records",
+    "_visible_candidates_for",
+    "_visible_all_structural_candidates",
+    "_visible_structural_candidates",
+    "_visible_generic_correlated_candidates",
+):
+    wrap_method(
+        wall_composition.PhysicalOpeningAuthority,
+        attr,
+        f"openings.{attr}",
+    )
+
+for attr in (
+    "filter_structural_segments",
+    "split_segments_at_intersections",
+    "snap_geometry",
+    "merge_collinear_degree_two_nodes",
+):
+    wrap_module_function(topology_stage_a, attr, f"topology.{attr}")
 wrap_method(
     wall_composition.OpeningHostBindingProducer,
     "publish",
