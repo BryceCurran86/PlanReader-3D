@@ -33,6 +33,7 @@ from pb_physical_opening_viewport_scope_shadow import (
     SUPPORT_GEOMETRY_UNREADABLE,
     AuthenticatedViewportRecord,
     _candidate_scope,
+    _contesting_boxes,
     assess_opening_candidate_viewport_scope,
 )
 from pb_source_observation_authority import STALE_REVISION
@@ -158,6 +159,75 @@ def test_derived_cells_are_not_authenticated_when_sibling_set_overlaps() -> None
     assert report.candidate_scopes
     assert IN_AUTHENTICATED_FLOOR_PLAN not in _scopes(report)
     assert all(v.boundary_source == "vector_frame" for v in report.authenticated_viewports)
+
+
+def test_derived_title_partition_bbox_does_not_contest_authenticated_drawn_frame() -> None:
+    authenticated = (_vp(1, "floor_plan", PLAN),)
+    derived = SimpleNamespace(
+        view_id="derived",
+        bounding_box=(0.0, 0.0, 100.0, 100.0),
+        boundary_source="title_partition",
+        provenance={},
+    )
+    boxes, unlocalised = _contesting_boxes(
+        (derived,),
+        frozenset({"v1"}),
+        authenticated,
+    )
+    assert boxes == ()
+    assert unlocalised is True
+    assert _candidate_scope(
+        INSIDE,
+        authenticated,
+        boxes,
+        unlocalised_unauthenticated=unlocalised,
+    )[0] == IN_AUTHENTICATED_FLOOR_PLAN
+
+
+def test_page_wide_derived_partition_cannot_override_drawn_plan_ownership() -> None:
+    authenticated = (_vp(1, "floor_plan", PLAN),)
+    page_wide = SimpleNamespace(
+        view_id="partition",
+        bounding_box=(-1000.0, -1000.0, 1000.0, 1000.0),
+        boundary_source="title_partition",
+        provenance={"partition_mode": "ordinary_title_partition"},
+    )
+    boxes, unlocalised = _contesting_boxes(
+        (page_wide,),
+        frozenset({"v1"}),
+        authenticated,
+    )
+    assert boxes == ()
+    assert unlocalised is True
+    assert _candidate_scope(
+        INSIDE,
+        authenticated,
+        boxes,
+        unlocalised_unauthenticated=unlocalised,
+    )[0] == IN_AUTHENTICATED_FLOOR_PLAN
+
+
+def test_ambiguous_candidate_vector_frame_still_contests_drawn_plan() -> None:
+    authenticated = (_vp(1, "floor_plan", PLAN),)
+    ambiguous = SimpleNamespace(
+        view_id="ambiguous",
+        bounding_box=None,
+        boundary_source="none",
+        provenance={"candidate_frames": [(5.0, 5.0, 30.0, 30.0)]},
+    )
+    boxes, unlocalised = _contesting_boxes(
+        (ambiguous,),
+        frozenset({"v1"}),
+        authenticated,
+    )
+    assert boxes == ((5.0, 5.0, 30.0, 30.0),)
+    assert unlocalised is False
+    assert _candidate_scope(
+        INSIDE,
+        authenticated,
+        boxes,
+        unlocalised_unauthenticated=unlocalised,
+    )[0] == AMBIGUOUS_AUTHENTICATED_OWNERSHIP
 
 
 # ---------------------------------------------------------------------------
