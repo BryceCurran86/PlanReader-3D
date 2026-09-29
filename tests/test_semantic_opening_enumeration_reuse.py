@@ -119,3 +119,22 @@ def test_completeness_adapter_rejects_semantic_producer_from_other_source() -> N
             page_ids=("1",),
             _semantic_opening_producer=foreign,
         )
+
+
+def test_semantic_result_cache_does_not_hide_scope_equivocation() -> None:
+    source, revision_id = _ingest("semantic-scope-equivocation")
+    producer = semantic.SemanticOpeningEnumerationProducer.from_source_visibility_producer(
+        source
+    )
+    producer.publish_page_scope(
+        revision_id=revision_id,
+        decision_scope_id="shared-scope-id",
+        page_ids=("1",),
+    )
+
+    with pytest.raises(RuntimeError):
+        producer.publish_page_scope(
+            revision_id=revision_id,
+            decision_scope_id="shared-scope-id",
+            page_ids=("2",),
+        )
