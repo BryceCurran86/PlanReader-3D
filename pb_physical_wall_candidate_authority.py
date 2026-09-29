@@ -458,27 +458,19 @@ def _blocked(selector: PhysicalWallCandidateSelector, reason: str) -> PhysicalWa
     )
 
 
-def _source_page_segments(
+def _visible_observations_by_page(
     *,
     source_producer: SourceVisibilityProducer,
     published,
-    source_bytes: bytes,
-    page_id: str,
-    decision_scope_id: str,
-) -> tuple[list[dict], tuple[str, ...], float, float]:
-    """Rebuild W2 inputs from exact bytes and exact receipted visible membership.
+) -> dict[str, tuple[tuple[str, object], ...]]:
+    """Resolve immutable visible observations once and index exact page ownership.
 
-    Also returns the page's own (width, height) in points, so callers can
-    determine whether a wall's dangling end actually terminates inside the
-    drawing (a real wall end) or merely at the page edge (the wall's true
-    continuation is unknown -- it may simply be cropped by this sheet).
+    Every visible observation is still authenticated through the existing source
+    visibility authority. This only avoids repeating the same authentication for
+    every requested wall page.
     """
-
     visibility = source_producer.authority()
-    native_visible_by_raw_id: dict[str, tuple[str, tuple[float, ...]]] = {}
-    raster_visible: list[tuple[str, str, tuple[float, ...]]] = []
-    page_visible_ids: list[str] = []
-
+    by_page: dict[str, list[tuple[str, object]]] = {}
     for observation_id in published.visible_observation_ids:
         result = visibility.resolve_visible(
             ObservationSelector(
@@ -495,8 +487,63 @@ def _source_page_segments(
             or observation is None
         ):
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        if observation.page_id != page_id:
-            continue
+        by_page.setdefault(str(observation.page_id), []).append(
+            (observation_id, observation)
+        )
+    return {
+        page_id: tuple(rows)
+        for page_id, rows in by_page.items()
+    }
+
+
+def _source_page_segments(
+    *,
+    source_producer: SourceVisibilityProducer,
+    published,
+    source_bytes: bytes,
+    page_id: str,
+    decision_scope_id: str,
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+) -> tuple[list[dict], tuple[str, ...], float, float]:
+    """Rebuild W2 inputs from exact bytes and exact receipted visible membership.
+
+    Also returns the page's own (width, height) in points, so callers can
+    determine whether a wall's dangling end actually terminates inside the
+    drawing (a real wall end) or merely at the page edge (the wall's true
+    continuation is unknown -- it may simply be cropped by this sheet).
+    """
+
+    visibility = source_producer.authority()
+    native_visible_by_raw_id: dict[str, tuple[str, tuple[float, ...]]] = {}
+    raster_visible: list[tuple[str, str, tuple[float, ...]]] = []
+    page_visible_ids: list[str] = []
+
+    if resolved_visible_observations is None:
+        page_rows: list[tuple[str, object]] = []
+        for observation_id in published.visible_observation_ids:
+            result = visibility.resolve_visible(
+                ObservationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    observation_id=observation_id,
+                )
+            )
+            observation = result.observation
+            if (
+                result.status is not EvidenceResolutionStatus.CORROBORATED
+                or observation is None
+            ):
+                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+            if observation.page_id == page_id:
+                page_rows.append((observation_id, observation))
+    else:
+        page_rows = list(resolved_visible_observations)
+
+    for observation_id, observation in page_rows:
+        if str(observation.page_id) != str(page_id):
+            raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
 
         geometry = tuple(float(value) for value in observation.geometry)
         if len(geometry) != 4:
@@ -2021,6 +2068,7 @@ def _build_scope_result(
     published,
     source_bytes: bytes,
     page_id: str,
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = _decision_scope_id(page_id)
     selector = PhysicalWallCandidateSelector(
@@ -2049,6 +2097,7 @@ def _build_scope_result(
         source_bytes=source_bytes,
         page_id=page_id,
         decision_scope_id=scope_id,
+        resolved_visible_observations=resolved_visible_observations,
     )
     scale_producer = PhysicalScaleProducer.from_source_visibility_producer(
         source_producer
@@ -2078,6 +2127,7 @@ def _build_authenticated_viewport_scope_results(
     published,
     source_bytes: bytes,
     page_id: str,
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
 ) -> tuple[PhysicalWallCandidateScopeResult, ...]:
     page_number = int(page_id)
     # A viewport scope is page-local authority. A scoped native ingestion still
@@ -2097,6 +2147,7 @@ def _build_authenticated_viewport_scope_results(
         source_bytes=source_bytes,
         page_id=page_id,
         decision_scope_id=page_scope_id,
+        resolved_visible_observations=resolved_visible_observations,
     )
     pdf = fitz.open(stream=source_bytes, filetype="pdf")
     try:
@@ -2355,14 +2406,20 @@ class PhysicalWallCandidateProducer:
                 if selected_page_ids is not None
                 else sorted(decoded_page_ids, key=lambda value: int(value))
             )
+            visible_by_page = _visible_observations_by_page(
+                source_producer=source_visibility_producer,
+                published=published,
+            )
 
             for page_id in materialized_page_ids:
+                page_visible_observations = visible_by_page.get(page_id, ())
                 if include_page_scopes:
                     result = _build_scope_result(
                         source_producer=source_visibility_producer,
                         published=published,
                         source_bytes=source_bytes,
                         page_id=page_id,
+                        resolved_visible_observations=page_visible_observations,
                     )
                     key = _ScopeKey(
                         document_id=result.document_id,
@@ -2380,6 +2437,7 @@ class PhysicalWallCandidateProducer:
                         published=published,
                         source_bytes=source_bytes,
                         page_id=page_id,
+                        resolved_visible_observations=page_visible_observations,
                     ):
                         viewport_key = _ScopeKey(
                             document_id=viewport_result.document_id,
