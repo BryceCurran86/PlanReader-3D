@@ -1,4 +1,5 @@
 name: TEST-ONLY Murera Semantic Reuse Gate
+# Scope-cache guard sync
 
 on:
   pull_request:
