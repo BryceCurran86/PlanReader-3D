@@ -36,6 +36,7 @@ consume.
 """
 from __future__ import annotations
 
+import heapq
 import math
 import re
 from typing import Any, Dict, List, Sequence, Tuple
@@ -204,6 +205,109 @@ def _point_pairs_to_segment_dicts(
     return attach_lineage_to_split_fragments(pairs, source_segments, id_prefix=id_prefix)
 
 
+def _snap_geometry_indexed(
+    segments: Sequence[Dict[str, Any]],
+    tolerance_pt: float = DEFAULT_GAP_SNAP_TOLERANCE_PT,
+) -> Dict[str, Any]:
+    """Exact Stage-A equivalent of snap_geometry with a local endpoint index.
+
+    Candidate membership is unchanged: a node is eligible iff its current
+    centroid is within tolerance_pt. The same lowest-distance / lowest-existing
+    node index wins because candidates are visited in ascending node id and the
+    historical strict distance comparison is retained. Node centroids still
+    move by the same running mean after every accepted endpoint.
+    """
+    if tolerance_pt <= 0:
+        return snap_geometry(segments, tolerance_pt=tolerance_pt)
+
+    nodes: List[Dict[str, Any]] = []
+    node_for: Dict[Tuple[str, int], int] = {}
+    cell_size = float(tolerance_pt)
+    grid: Dict[Tuple[int, int], set[int]] = {}
+
+    def cell_for(x: float, y: float) -> Tuple[int, int]:
+        return (
+            math.floor(float(x) / cell_size),
+            math.floor(float(y) / cell_size),
+        )
+
+    def add_to_grid(node_idx: int) -> None:
+        node = nodes[node_idx]
+        grid.setdefault(cell_for(node["x"], node["y"]), set()).add(node_idx)
+
+    def move_in_grid(node_idx: int, old_cell: Tuple[int, int]) -> None:
+        new_cell = cell_for(nodes[node_idx]["x"], nodes[node_idx]["y"])
+        if new_cell == old_cell:
+            return
+        members = grid.get(old_cell)
+        if members is not None:
+            members.discard(node_idx)
+            if not members:
+                grid.pop(old_cell, None)
+        grid.setdefault(new_cell, set()).add(node_idx)
+
+    def locate(pt: Tuple[float, float]) -> int:
+        cx, cy = cell_for(pt[0], pt[1])
+        candidate_indexes: set[int] = set()
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                candidate_indexes.update(grid.get((cx + dx, cy + dy), ()))
+
+        best = -1
+        best_d = tolerance_pt + 1.0
+        for idx in sorted(candidate_indexes):
+            node = nodes[idx]
+            d = math.hypot(node["x"] - pt[0], node["y"] - pt[1])
+            if d <= tolerance_pt and d < best_d:
+                best, best_d = idx, d
+
+        if best >= 0:
+            node = nodes[best]
+            old_cell = cell_for(node["x"], node["y"])
+            count = node["samples"] + 1
+            node["x"] = (node["x"] * node["samples"] + pt[0]) / count
+            node["y"] = (node["y"] * node["samples"] + pt[1]) / count
+            node["samples"] = count
+            move_in_grid(best, old_cell)
+            return best
+
+        nodes.append(
+            {"id": len(nodes), "x": pt[0], "y": pt[1], "samples": 1}
+        )
+        add_to_grid(len(nodes) - 1)
+        return len(nodes) - 1
+
+    edges = []
+    for seg in segments:
+        a = locate((float(seg["x1"]), float(seg["y1"])))
+        b = locate((float(seg["x2"]), float(seg["y2"])))
+        if a == b:
+            continue
+        edge = dict(seg)
+        edge.update({"a": a, "b": b})
+        edge["length_pt"] = math.hypot(
+            float(seg["x2"]) - float(seg["x1"]),
+            float(seg["y2"]) - float(seg["y1"]),
+        )
+        edge["angle_deg"] = math.degrees(
+            math.atan2(
+                float(seg["y2"]) - float(seg["y1"]),
+                float(seg["x2"]) - float(seg["x1"]),
+            )
+        ) % 180.0
+        edges.append(edge)
+        node_for[(str(seg.get("id")), 0)] = a
+        node_for[(str(seg.get("id")), 1)] = b
+
+    adjacency: Dict[int, List[int]] = {idx: [] for idx in range(len(nodes))}
+    for edge_index, edge in enumerate(edges):
+        adjacency[edge["a"]].append(edge_index)
+        adjacency[edge["b"]].append(edge_index)
+    for node in nodes:
+        node["degree"] = len(adjacency[node["id"]])
+    return {"nodes": nodes, "edges": edges, "adjacency": adjacency}
+
+
 def merge_collinear_degree_two_nodes(
     graph: Dict[str, Any],
     angle_tolerance_deg: float = DEFAULT_COLLINEAR_ANGLE_TOLERANCE_DEG,
@@ -342,6 +446,145 @@ def merge_collinear_degree_two_nodes(
     return {"nodes": nodes, "edges": final_edges, "adjacency": adjacency}
 
 
+def _merge_collinear_degree_two_nodes_indexed(
+    graph: Dict[str, Any],
+    angle_tolerance_deg: float = DEFAULT_COLLINEAR_ANGLE_TOLERANCE_DEG,
+) -> Dict[str, Any]:
+    """Exact active-incidence equivalent of merge_collinear_degree_two_nodes."""
+    nodes = [dict(n) for n in graph["nodes"]]
+    edges = []
+    for edge in graph["edges"]:
+        copied = dict(edge)
+        copied[LINEAGE_KEY] = isolated_lineage(edge.get(LINEAGE_KEY))
+        edges.append(copied)
+
+    def other_endpoint(edge: Dict[str, Any], node_idx: int) -> int:
+        return edge["b"] if edge["a"] == node_idx else edge["a"]
+
+    active_incident: Dict[int, set[int]] = {node["id"]: set() for node in nodes}
+    for edge_index, edge in enumerate(edges):
+        active_incident.setdefault(edge["a"], set()).add(edge_index)
+        active_incident.setdefault(edge["b"], set()).add(edge_index)
+
+    node_position = {node["id"]: pos for pos, node in enumerate(nodes)}
+    queue = [
+        pos
+        for pos, node in enumerate(nodes)
+        if node.get("degree", 0) == 2 and not node.get("merged_into_edge")
+    ]
+    heapq.heapify(queue)
+    queued = set(queue)
+    redirect: Dict[str, str] = {}
+    merge_count = 0
+    safety_cap = len(edges) + 1
+
+    def requeue(node_idx: int) -> None:
+        pos = node_position.get(node_idx)
+        if pos is None or pos in queued:
+            return
+        node = nodes[pos]
+        if node.get("degree", 0) != 2 or node.get("merged_into_edge"):
+            return
+        heapq.heappush(queue, pos)
+        queued.add(pos)
+
+    while queue and merge_count < safety_cap:
+        pos = heapq.heappop(queue)
+        queued.discard(pos)
+        node = nodes[pos]
+        node_idx = node["id"]
+        if node.get("degree", 0) != 2 or node.get("merged_into_edge"):
+            continue
+
+        incident = sorted(active_incident.get(node_idx, ()))
+        if len(incident) != 2:
+            continue
+        e1_idx, e2_idx = incident
+        e1, e2 = edges[e1_idx], edges[e2_idx]
+        if _angle_delta(e1["angle_deg"], e2["angle_deg"]) > angle_tolerance_deg:
+            continue
+
+        far1 = other_endpoint(e1, node_idx)
+        far2 = other_endpoint(e2, node_idx)
+        if far1 == far2:
+            continue
+
+        n_far1, n_far2 = nodes[far1], nodes[far2]
+        merged_id = f"merged_{e1.get('id', e1_idx)}_{e2.get('id', e2_idx)}"
+        merged_edge = {
+            **e1,
+            "id": merged_id,
+            "a": far1,
+            "b": far2,
+            "x1": n_far1["x"],
+            "y1": n_far1["y"],
+            "x2": n_far2["x"],
+            "y2": n_far2["y"],
+        }
+        merged_edge["length_pt"] = math.hypot(
+            merged_edge["x2"] - merged_edge["x1"],
+            merged_edge["y2"] - merged_edge["y1"],
+        )
+        merged_edge["angle_deg"] = math.degrees(
+            math.atan2(
+                merged_edge["y2"] - merged_edge["y1"],
+                merged_edge["x2"] - merged_edge["x1"],
+            )
+        ) % 180.0
+        merged_edge["collinear_merge_source_edge_ids"] = [
+            e1.get("id", e1_idx),
+            e2.get("id", e2_idx),
+        ]
+        merged_edge["collinear_merge_leaf_edge_ids"] = (
+            collinear_merge_leaf_edge_ids(e1, e2)
+        )
+        merged_edge[LINEAGE_KEY] = isolated_lineage(lineage_from_edges(e1, e2))
+
+        edges[e1_idx]["_removed"] = True
+        edges[e2_idx]["_removed"] = True
+        active_incident[e1["a"]].discard(e1_idx)
+        active_incident[e1["b"]].discard(e1_idx)
+        active_incident[e2["a"]].discard(e2_idx)
+        active_incident[e2["b"]].discard(e2_idx)
+
+        new_index = len(edges)
+        edges.append(merged_edge)
+        active_incident.setdefault(far1, set()).add(new_index)
+        active_incident.setdefault(far2, set()).add(new_index)
+
+        node["degree"] = 0
+        node["merged_into_edge"] = merged_id
+        redirect[str(e1.get("id", e1_idx))] = merged_id
+        redirect[str(e2.get("id", e2_idx))] = merged_id
+        merge_count += 1
+
+        # The legacy implementation restarts the whole node scan after a merge.
+        # Only the two far endpoints can have changed eligibility, so requeue
+        # them; the min-heap preserves the same earliest-node merge order.
+        requeue(far1)
+        requeue(far2)
+
+    final_edges = [edge for edge in edges if not edge.get("_removed")]
+    adjacency: Dict[int, List[int]] = {node["id"]: [] for node in nodes}
+    for edge_index, edge in enumerate(final_edges):
+        adjacency[edge["a"]].append(edge_index)
+        adjacency[edge["b"]].append(edge_index)
+    for node in nodes:
+        if not node.get("merged_into_edge"):
+            node["degree"] = len(adjacency[node["id"]])
+            continue
+        target = node["merged_into_edge"]
+        seen_targets = {target}
+        while target in redirect:
+            target = redirect[target]
+            if target in seen_targets:
+                break
+            seen_targets.add(target)
+        node["merged_into_edge"] = target
+
+    return {"nodes": nodes, "edges": final_edges, "adjacency": adjacency}
+
+
 def build_wall_graph_for_viewport(
     segments: Sequence[Dict[str, Any]],
     *,
@@ -365,12 +608,15 @@ def build_wall_graph_for_viewport(
     split_segment_dicts = _point_pairs_to_segment_dicts(
         split_pairs, source_segments=structural_segments
     )
-    snapped_graph = snap_geometry(split_segment_dicts, tolerance_pt=gap_snap_tolerance_pt)
+    snapped_graph = _snap_geometry_indexed(
+        split_segment_dicts,
+        tolerance_pt=gap_snap_tolerance_pt,
+    )
     isolate_graph_lineage(snapped_graph)
     snap_collapsed_fragments = observe_snap_collapsed_fragments(
         split_segment_dicts, snapped_graph
     )
-    merged_graph = merge_collinear_degree_two_nodes(
+    merged_graph = _merge_collinear_degree_two_nodes_indexed(
         snapped_graph, angle_tolerance_deg=collinear_angle_tolerance_deg
     )
     merged_graph["excluded_segments"] = excluded_segments

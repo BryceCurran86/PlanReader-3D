@@ -458,27 +458,19 @@ def _blocked(selector: PhysicalWallCandidateSelector, reason: str) -> PhysicalWa
     )
 
 
-def _source_page_segments(
+def _visible_observations_by_page(
     *,
     source_producer: SourceVisibilityProducer,
     published,
-    source_bytes: bytes,
-    page_id: str,
-    decision_scope_id: str,
-) -> tuple[list[dict], tuple[str, ...], float, float]:
-    """Rebuild W2 inputs from exact bytes and exact receipted visible membership.
+) -> dict[str, tuple[tuple[str, object], ...]]:
+    """Resolve immutable visible observations once and index exact page ownership.
 
-    Also returns the page's own (width, height) in points, so callers can
-    determine whether a wall's dangling end actually terminates inside the
-    drawing (a real wall end) or merely at the page edge (the wall's true
-    continuation is unknown -- it may simply be cropped by this sheet).
+    Every visible observation is still authenticated through the existing source
+    visibility authority. This only avoids repeating the same authentication for
+    every requested wall page.
     """
-
     visibility = source_producer.authority()
-    native_visible_by_raw_id: dict[str, tuple[str, tuple[float, ...]]] = {}
-    raster_visible: list[tuple[str, str, tuple[float, ...]]] = []
-    page_visible_ids: list[str] = []
-
+    by_page: dict[str, list[tuple[str, object]]] = {}
     for observation_id in published.visible_observation_ids:
         result = visibility.resolve_visible(
             ObservationSelector(
@@ -495,8 +487,63 @@ def _source_page_segments(
             or observation is None
         ):
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        if observation.page_id != page_id:
-            continue
+        by_page.setdefault(str(observation.page_id), []).append(
+            (observation_id, observation)
+        )
+    return {
+        page_id: tuple(rows)
+        for page_id, rows in by_page.items()
+    }
+
+
+def _source_page_segments(
+    *,
+    source_producer: SourceVisibilityProducer,
+    published,
+    source_bytes: bytes,
+    page_id: str,
+    decision_scope_id: str,
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+) -> tuple[list[dict], tuple[str, ...], float, float]:
+    """Rebuild W2 inputs from exact bytes and exact receipted visible membership.
+
+    Also returns the page's own (width, height) in points, so callers can
+    determine whether a wall's dangling end actually terminates inside the
+    drawing (a real wall end) or merely at the page edge (the wall's true
+    continuation is unknown -- it may simply be cropped by this sheet).
+    """
+
+    visibility = source_producer.authority()
+    native_visible_by_raw_id: dict[str, tuple[str, tuple[float, ...]]] = {}
+    raster_visible: list[tuple[str, str, tuple[float, ...]]] = []
+    page_visible_ids: list[str] = []
+
+    if resolved_visible_observations is None:
+        page_rows: list[tuple[str, object]] = []
+        for observation_id in published.visible_observation_ids:
+            result = visibility.resolve_visible(
+                ObservationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    observation_id=observation_id,
+                )
+            )
+            observation = result.observation
+            if (
+                result.status is not EvidenceResolutionStatus.CORROBORATED
+                or observation is None
+            ):
+                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+            if observation.page_id == page_id:
+                page_rows.append((observation_id, observation))
+    else:
+        page_rows = list(resolved_visible_observations)
+
+    for observation_id, observation in page_rows:
+        if str(observation.page_id) != str(page_id):
+            raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
 
         geometry = tuple(float(value) for value in observation.geometry)
         if len(geometry) != 4:
@@ -1118,6 +1165,19 @@ def _filter_proven_wall_strip_geometry(
     """
     face_ids = {raw_id for strip in strips for raw_id in strip.face_raw_ids}
     boundary_ids = {raw_id for strip in strips for raw_id in strip.boundary_raw_ids}
+    segment_by_id = {
+        str(segment.get("id") or ""): segment
+        for segment in segments
+        if str(segment.get("id") or "")
+    }
+    strip_face_lines = {
+        strip.path_index: (
+            _segment_geometry(segment_by_id[strip.face_raw_ids[0]])
+            if strip.face_raw_ids[0] in segment_by_id
+            else None
+        )
+        for strip in strips
+    }
     kept: list[dict] = []
     for original in segments:
         segment = dict(original)
@@ -1137,14 +1197,7 @@ def _filter_proven_wall_strip_geometry(
                 excluded = True
                 break
             line = _segment_geometry(segment)
-            face_line = next(
-                (
-                    _segment_geometry(candidate)
-                    for candidate in segments
-                    if str(candidate.get("id") or "") == strip.face_raw_ids[0]
-                ),
-                None,
-            )
+            face_line = strip_face_lines.get(strip.path_index)
             if face_line is not None and not _parallel(line, face_line):
                 excluded = True
                 break
@@ -1251,13 +1304,64 @@ def _producer_opening_relation_overrides(
     published,
     page_id: str,
     records: Sequence[PhysicalWallCandidateRecord],
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
 ) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
     """Re-prove G17 source openings and map their exact primitives to W4 candidates."""
+    by_raw_id: dict[str, list[PhysicalWallCandidateRecord]] = {}
+    for record in records:
+        for raw_id in record.physical_identity.source_primitive_ids:
+            by_raw_id.setdefault(str(raw_id), []).append(record)
+
+    # An opening override is accepted only when its six source primitives map
+    # to six distinct wall candidates below. Fewer than six candidate records
+    # can therefore never contribute an override.
+    if len(records) < 6 or len(by_raw_id) < 6:
+        return {}
+
     visibility = source_producer.authority()
-    opening_authority = PhysicalOpeningAuthority(visibility)
+    opening_authority = (
+        physical_opening_authority
+        if physical_opening_authority is not None
+        else PhysicalOpeningAuthority(visibility)
+    )
     proven_records: dict[str, object] = {}
 
-    for observation_id in published.visible_observation_ids:
+    if resolved_visible_observations is None:
+        page_visible_rows: list[tuple[str, object]] = []
+        for observation_id in published.visible_observation_ids:
+            selector = ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+            visible = visibility.resolve_visible(selector)
+            if (
+                visible.status is not EvidenceResolutionStatus.CORROBORATED
+                or visible.observation is None
+            ):
+                continue
+            if str(visible.observation.page_id) == str(page_id):
+                page_visible_rows.append((observation_id, visible.observation))
+    else:
+        page_visible_rows = list(resolved_visible_observations)
+
+    page_observation_by_id = {
+        observation_id: observation
+        for observation_id, observation in page_visible_rows
+    }
+
+    prefix = "visible:segment:"
+
+    # Preserve the #969 authority contract exactly: every authenticated visible
+    # observation on this page is proved once. The page index removes repeated
+    # document-wide ownership scans, but does not narrow the opening authority's
+    # evidence universe or preflight candidate membership.
+    for observation_id, observation in page_visible_rows:
+        if str(observation.page_id) != str(page_id):
+            raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
         selector = ObservationSelector(
             document_id=published.revision.document_id,
             revision_id=published.revision.revision_id,
@@ -1265,18 +1369,6 @@ def _producer_opening_relation_overrides(
             snapshot_id=published.snapshot.snapshot_id,
             observation_id=observation_id,
         )
-        # Existence is page-local, and this helper can use only records on
-        # page_id below. Authenticate that address before the expensive proof:
-        # otherwise each wall page reconstructs every other page's opening
-        # candidates. The proof still checks the complete immutable snapshot;
-        # this neither supplies evidence nor changes its identity/closure rules.
-        visible = visibility.resolve_visible(selector)
-        if (
-            visible.status is not EvidenceResolutionStatus.CORROBORATED
-            or visible.observation is None
-            or visible.observation.page_id != page_id
-        ):
-            continue
         result = opening_authority.prove_existence(selector)
         existence = result.existence_record
         if (
@@ -1287,33 +1379,30 @@ def _producer_opening_relation_overrides(
         ):
             proven_records[existence.record_id] = existence
 
-    by_raw_id: dict[str, list[PhysicalWallCandidateRecord]] = {}
-    for record in records:
-        for raw_id in record.physical_identity.source_primitive_ids:
-            by_raw_id.setdefault(str(raw_id), []).append(record)
-
     candidate_relation_sets: dict[
         tuple[str, str], set[PhysicalEquivalenceClass]
     ] = {}
-    prefix = "visible:segment:"
 
     for existence in proven_records.values():
         raw_lines: dict[str, Line] = {}
         valid = True
         for observation_id in existence.source_observation_ids:  # type: ignore[attr-defined]
-            resolved = visibility.resolve_visible(
-                ObservationSelector(
-                    document_id=existence.document_id,  # type: ignore[attr-defined]
-                    revision_id=existence.revision_id,  # type: ignore[attr-defined]
-                    source_sha256=existence.source_sha256,  # type: ignore[attr-defined]
-                    snapshot_id=existence.snapshot_id,  # type: ignore[attr-defined]
-                    observation_id=observation_id,
+            observation = page_observation_by_id.get(observation_id)
+            if observation is None and resolved_visible_observations is None:
+                resolved = visibility.resolve_visible(
+                    ObservationSelector(
+                        document_id=existence.document_id,  # type: ignore[attr-defined]
+                        revision_id=existence.revision_id,  # type: ignore[attr-defined]
+                        source_sha256=existence.source_sha256,  # type: ignore[attr-defined]
+                        snapshot_id=existence.snapshot_id,  # type: ignore[attr-defined]
+                        observation_id=observation_id,
+                    )
                 )
-            )
-            observation = resolved.observation
+                if resolved.status is EvidenceResolutionStatus.CORROBORATED:
+                    observation = resolved.observation
             if (
-                resolved.status is not EvidenceResolutionStatus.CORROBORATED
-                or observation is None
+                observation is None
+                or str(observation.page_id) != str(page_id)
                 or not observation.source_primitive_ref.startswith(prefix)
             ):
                 valid = False
@@ -1866,6 +1955,8 @@ def _assemble_scope_result(
     scope_boundary_observation_ids: Sequence[str] = (),
     ambiguous_source_observation_ids: Sequence[str] = (),
     points_per_mm: Optional[float] = None,
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = selector.decision_scope_id
     proven_wall_strips = _proven_filled_wall_strips(tuple(segments))
@@ -1935,6 +2026,8 @@ def _assemble_scope_result(
         published=published,
         page_id=page_id,
         records=tuple(records),
+        resolved_visible_observations=resolved_visible_observations,
+        physical_opening_authority=physical_opening_authority,
     )
     equivalence = _apply_trusted_relation_overrides(
         tuple(ordered_identities),
@@ -2021,6 +2114,9 @@ def _build_scope_result(
     published,
     source_bytes: bytes,
     page_id: str,
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
+    physical_scale_producer: Optional[PhysicalScaleProducer] = None,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = _decision_scope_id(page_id)
     selector = PhysicalWallCandidateSelector(
@@ -2049,9 +2145,12 @@ def _build_scope_result(
         source_bytes=source_bytes,
         page_id=page_id,
         decision_scope_id=scope_id,
+        resolved_visible_observations=resolved_visible_observations,
     )
-    scale_producer = PhysicalScaleProducer.from_source_visibility_producer(
-        source_producer
+    scale_producer = (
+        physical_scale_producer
+        if physical_scale_producer is not None
+        else PhysicalScaleProducer.from_source_visibility_producer(source_producer)
     )
     points_per_mm = _producer_owned_points_per_mm(
         scale_producer=scale_producer,
@@ -2069,6 +2168,8 @@ def _build_scope_result(
         page_height=page_height,
         source_bytes=source_bytes,
         points_per_mm=points_per_mm,
+        resolved_visible_observations=resolved_visible_observations,
+        physical_opening_authority=physical_opening_authority,
     )
 
 
@@ -2078,6 +2179,9 @@ def _build_authenticated_viewport_scope_results(
     published,
     source_bytes: bytes,
     page_id: str,
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
+    physical_scale_producer: Optional[PhysicalScaleProducer] = None,
 ) -> tuple[PhysicalWallCandidateScopeResult, ...]:
     page_number = int(page_id)
     # A viewport scope is page-local authority. A scoped native ingestion still
@@ -2097,6 +2201,7 @@ def _build_authenticated_viewport_scope_results(
         source_bytes=source_bytes,
         page_id=page_id,
         decision_scope_id=page_scope_id,
+        resolved_visible_observations=resolved_visible_observations,
     )
     pdf = fitz.open(stream=source_bytes, filetype="pdf")
     try:
@@ -2110,8 +2215,10 @@ def _build_authenticated_viewport_scope_results(
     if not eligible:
         return ()
     sibling_fingerprint = _viewport_sibling_set_fingerprint(all_viewports)
-    scale_producer = PhysicalScaleProducer.from_source_visibility_producer(
-        source_producer
+    scale_producer = (
+        physical_scale_producer
+        if physical_scale_producer is not None
+        else PhysicalScaleProducer.from_source_visibility_producer(source_producer)
     )
 
     results: list[PhysicalWallCandidateScopeResult] = []
@@ -2208,6 +2315,8 @@ def _build_authenticated_viewport_scope_results(
                 pre_boundary_reasons=pre_boundary_reasons,
                 scope_boundary_observation_ids=boundary_observation_ids,
                 ambiguous_source_observation_ids=ambiguous_observation_ids,
+                resolved_visible_observations=resolved_visible_observations,
+                physical_opening_authority=physical_opening_authority,
             )
         )
     return tuple(results)
@@ -2355,14 +2464,30 @@ class PhysicalWallCandidateProducer:
                 if selected_page_ids is not None
                 else sorted(decoded_page_ids, key=lambda value: int(value))
             )
+            visible_by_page = _visible_observations_by_page(
+                source_producer=source_visibility_producer,
+                published=published,
+            )
+            physical_opening_authority = PhysicalOpeningAuthority(
+                source_visibility_producer.authority()
+            )
+            physical_scale_producer = (
+                PhysicalScaleProducer.from_source_visibility_producer(
+                    source_visibility_producer
+                )
+            )
 
             for page_id in materialized_page_ids:
+                page_visible_observations = visible_by_page.get(page_id, ())
                 if include_page_scopes:
                     result = _build_scope_result(
                         source_producer=source_visibility_producer,
                         published=published,
                         source_bytes=source_bytes,
                         page_id=page_id,
+                        resolved_visible_observations=page_visible_observations,
+                        physical_opening_authority=physical_opening_authority,
+                        physical_scale_producer=physical_scale_producer,
                     )
                     key = _ScopeKey(
                         document_id=result.document_id,
@@ -2380,6 +2505,9 @@ class PhysicalWallCandidateProducer:
                         published=published,
                         source_bytes=source_bytes,
                         page_id=page_id,
+                        resolved_visible_observations=page_visible_observations,
+                        physical_opening_authority=physical_opening_authority,
+                        physical_scale_producer=physical_scale_producer,
                     ):
                         viewport_key = _ScopeKey(
                             document_id=viewport_result.document_id,
