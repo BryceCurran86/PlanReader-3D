@@ -209,6 +209,7 @@ def compose_live_wall_opening_authority(
         revision_id=revision_id,
         decision_scope_id=semantic_scope_id,
         page_ids=selected_pages,
+        _semantic_opening_producer=semantic_producer,
     )
     opening_universe_result = opening_universe_authority.resolve(
         OpeningUniverseSelector(
@@ -238,6 +239,7 @@ def compose_live_wall_opening_authority(
             revision_id=revision_id,
             decision_scope_id=page_scope_id,
             page_ids=(page_id,),
+            _semantic_opening_producer=semantic_producer,
         )
         page_result = page_authority.resolve(
             OpeningUniverseSelector(
