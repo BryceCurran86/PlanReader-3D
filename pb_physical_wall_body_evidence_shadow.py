@@ -442,11 +442,13 @@ def resolve_physical_wall_body_evidence_shadow(
 ) -> PhysicalWallBodyEvidence:
     """Resolve one local wall-body proposition in SHADOW only.
 
-    One-face candidates require segmentation support, a thickness family, and
-    at least two independent topology witnesses. Two-face candidates require
-    topology plus either segmentation support or a source-supported thickness
-    family. Parallel faces alone can never corroborate. Any typed negative
-    evidence blocks corroboration. Scope completeness is never minted here.
+    One-face candidates require segmentation support, a source-supported
+    thickness family, and at least two independent topology witnesses.
+    Two-face candidates require independent topology and a source-supported
+    thickness family; segmentation may strengthen that proof but can never
+    substitute for thickness evidence. Parallel faces alone can never
+    corroborate. Any typed negative evidence blocks corroboration. Scope
+    completeness is never minted here.
     """
 
     document_id = _clean_required(document_id, "document_id")
@@ -532,13 +534,10 @@ def resolve_physical_wall_body_evidence_shadow(
         else:
             reasons.append(PHYSICAL_WALL_BODY_EVIDENCE_INSUFFICIENT)
     else:
-        has_strong_nonsegmented_proof = (
+        has_strong_wall_body_proof = (
             bool(topology) and thickness_family_id is not None
         )
-        has_hybrid_proof = bool(topology) and bool(
-            segmentation_observations
-        )
-        if has_strong_nonsegmented_proof or has_hybrid_proof:
+        if has_strong_wall_body_proof:
             status = EvidenceResolutionStatus.CORROBORATED
             reasons.append(PHYSICAL_WALL_BODY_CORROBORATED_LOCAL)
         else:
