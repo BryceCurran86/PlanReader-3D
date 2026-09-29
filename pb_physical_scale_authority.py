@@ -605,6 +605,12 @@ class PhysicalScaleProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
         self._source = source_visibility_producer
         self._results: dict[_Key, PhysicalScaleResult] = {}
+        self._trusted_words_by_snapshot: dict[
+            tuple[str, str, str, str], dict[str, tuple[_TrustedWord, ...]]
+        ] = {}
+        self._visible_segments_by_snapshot: dict[
+            tuple[str, str, str, str], dict[str, tuple[_VisibleSegment, ...]]
+        ] = {}
 
     @classmethod
     def from_source_visibility_producer(
@@ -643,68 +649,103 @@ class PhysicalScaleProducer:
             raise RuntimeError(PHYSICAL_SCALE_SOURCE_INTEGRITY_FAILURE)
         return published, bytes(source_bytes)
 
-    def _trusted_words(self, selector: PhysicalScaleSelector, published) -> tuple[_TrustedWord, ...]:
-        authority = self._source.text_integrity_authority()
-        words: list[_TrustedWord] = []
-        for observation_id in published.text_observation_ids:
-            result = authority.resolve_text(
-                ObservationSelector(
-                    document_id=selector.document_id,
-                    revision_id=selector.revision_id,
-                    source_sha256=selector.source_sha256,
-                    snapshot_id=selector.snapshot_id,
-                    observation_id=observation_id,
-                )
-            )
-            receipt = result.receipt
-            if (
-                result.status is EvidenceResolutionStatus.CORROBORATED
-                and result.proposition == TRUSTED_PDF_TEXT
-                and result.trusted_text is not None
-                and receipt is not None
-                and receipt.page_id == selector.page_id
-                and len(receipt.geometry) >= 4
-            ):
-                words.append(
-                    _TrustedWord(
-                        observation_id=observation_id,
-                        text=result.trusted_text,
-                        bbox=tuple(float(receipt.geometry[index]) for index in range(4)),
-                    )
-                )
-        return tuple(words)
+    @staticmethod
+    def _snapshot_key(selector: PhysicalScaleSelector) -> tuple[str, str, str, str]:
+        return (
+            selector.document_id,
+            selector.revision_id,
+            selector.source_sha256,
+            selector.snapshot_id,
+        )
 
-    def _visible_segments(self, selector: PhysicalScaleSelector, published) -> tuple[_VisibleSegment, ...]:
-        authority = self._source.authority()
-        segments: list[_VisibleSegment] = []
-        for observation_id in published.visible_observation_ids:
-            result = authority.resolve_visible(
-                ObservationSelector(
-                    document_id=selector.document_id,
-                    revision_id=selector.revision_id,
-                    source_sha256=selector.source_sha256,
-                    snapshot_id=selector.snapshot_id,
-                    observation_id=observation_id,
-                )
-            )
-            observation = result.observation
-            if (
-                result.status is EvidenceResolutionStatus.CORROBORATED
-                and result.proposition == VISIBLE_SOURCE_OBSERVATION_EXISTS
-                and observation is not None
-                and observation.page_id == selector.page_id
-                and len(observation.geometry) == 4
-            ):
-                x0, y0, x1, y1 = (float(value) for value in observation.geometry)
-                segments.append(
-                    _VisibleSegment(
+    def _trusted_words(
+        self,
+        selector: PhysicalScaleSelector,
+        published,
+    ) -> tuple[_TrustedWord, ...]:
+        snapshot_key = self._snapshot_key(selector)
+        cached = self._trusted_words_by_snapshot.get(snapshot_key)
+        if cached is None:
+            authority = self._source.text_integrity_authority()
+            by_page: dict[str, list[_TrustedWord]] = {}
+            for observation_id in published.text_observation_ids:
+                result = authority.resolve_text(
+                    ObservationSelector(
+                        document_id=selector.document_id,
+                        revision_id=selector.revision_id,
+                        source_sha256=selector.source_sha256,
+                        snapshot_id=selector.snapshot_id,
                         observation_id=observation_id,
-                        source_primitive_ref=observation.source_primitive_ref,
-                        start=(x0, y0),
-                        end=(x1, y1),
                     )
                 )
-        return _coalesce_retraced_segments(segments)
+                receipt = result.receipt
+                if (
+                    result.status is EvidenceResolutionStatus.CORROBORATED
+                    and result.proposition == TRUSTED_PDF_TEXT
+                    and result.trusted_text is not None
+                    and receipt is not None
+                    and len(receipt.geometry) >= 4
+                ):
+                    by_page.setdefault(str(receipt.page_id), []).append(
+                        _TrustedWord(
+                            observation_id=observation_id,
+                            text=result.trusted_text,
+                            bbox=tuple(
+                                float(receipt.geometry[index]) for index in range(4)
+                            ),
+                        )
+                    )
+            cached = {
+                page_id: tuple(words)
+                for page_id, words in by_page.items()
+            }
+            self._trusted_words_by_snapshot[snapshot_key] = cached
+        return cached.get(str(selector.page_id), ())
+
+    def _visible_segments(
+        self,
+        selector: PhysicalScaleSelector,
+        published,
+    ) -> tuple[_VisibleSegment, ...]:
+        snapshot_key = self._snapshot_key(selector)
+        cached = self._visible_segments_by_snapshot.get(snapshot_key)
+        if cached is None:
+            authority = self._source.authority()
+            by_page: dict[str, list[_VisibleSegment]] = {}
+            for observation_id in published.visible_observation_ids:
+                result = authority.resolve_visible(
+                    ObservationSelector(
+                        document_id=selector.document_id,
+                        revision_id=selector.revision_id,
+                        source_sha256=selector.source_sha256,
+                        snapshot_id=selector.snapshot_id,
+                        observation_id=observation_id,
+                    )
+                )
+                observation = result.observation
+                if (
+                    result.status is EvidenceResolutionStatus.CORROBORATED
+                    and result.proposition == VISIBLE_SOURCE_OBSERVATION_EXISTS
+                    and observation is not None
+                    and len(observation.geometry) == 4
+                ):
+                    x0, y0, x1, y1 = (
+                        float(value) for value in observation.geometry
+                    )
+                    by_page.setdefault(str(observation.page_id), []).append(
+                        _VisibleSegment(
+                            observation_id=observation_id,
+                            source_primitive_ref=observation.source_primitive_ref,
+                            start=(x0, y0),
+                            end=(x1, y1),
+                        )
+                    )
+            cached = {
+                page_id: _coalesce_retraced_segments(segments)
+                for page_id, segments in by_page.items()
+            }
+            self._visible_segments_by_snapshot[snapshot_key] = cached
+        return cached.get(str(selector.page_id), ())
 
     @staticmethod
     def _scope_bbox(selector: PhysicalScaleSelector, source_bytes: bytes):
