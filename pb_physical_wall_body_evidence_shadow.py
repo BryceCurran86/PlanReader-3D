@@ -278,6 +278,8 @@ def _aligned_band_polygon(
     if length <= 1e-12:
         raise ValueError("candidate face is degenerate")
     ux, uy = ax / length, ay / length
+    if ux < 0.0 or (abs(ux) <= 1e-12 and uy < 0.0):
+        ux, uy = -ux, -uy
 
     def ordered(line: tuple[float, float, float, float]) -> tuple[Point, Point]:
         p1 = (line[0], line[1])
@@ -319,15 +321,15 @@ def generate_wall_band_candidates_shadow(
         right_id = str(row.get("face_b") or "").strip()
         if not left_id or not right_id or left_id == right_id:
             continue
-        first = by_id.get(left_id)
-        second = by_id.get(right_id)
+        face_ids = tuple(sorted((left_id, right_id)))
+        first = by_id.get(face_ids[0])
+        second = by_id.get(face_ids[1])
         if first is None or second is None:
             continue
         gap = float(row.get("gap_pt") or 0.0)
         overlap = float(row.get("overlap_pt") or 0.0)
         if gap <= 0.0 or overlap <= 0.0:
             continue
-        face_ids = tuple(sorted((left_id, right_id)))
         candidate_id = stable_contract_id(
             "wall_band_candidate",
             {
