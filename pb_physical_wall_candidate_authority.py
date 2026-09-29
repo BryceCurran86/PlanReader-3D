@@ -1375,28 +1375,14 @@ def _producer_opening_relation_overrides(
     # existing strong six-line structural path first; only if it has a candidate
     # do we invoke the full opening existence authority, which preserves all of
     # its normal generic-conflict/closure semantics for that candidate.
-    seed_observation_id, _seed_observation = relevant_rows[0]
-    seed_selector = ObservationSelector(
-        document_id=published.revision.document_id,
-        revision_id=published.revision.revision_id,
-        source_sha256=published.revision.source_sha256,
-        snapshot_id=published.snapshot.snapshot_id,
-        observation_id=seed_observation_id,
+    _seed_observation_id, seed_observation = relevant_rows[0]
+    page_records = tuple(
+        observation
+        for _observation_id, observation in page_visible_rows
     )
-    seed_result = visibility.resolve_visible(seed_selector)
-    if (
-        seed_result.status is not EvidenceResolutionStatus.CORROBORATED
-        or seed_result.observation is None
-    ):
-        return {}
-    snapshot_records, snapshot_failures = opening_authority._visible_snapshot_records(
-        seed_result
-    )
-    if snapshot_failures:
-        return {}
     strong_candidates = opening_authority._visible_structural_candidates(
-        seed_result.observation,
-        snapshot_records,
+        seed_observation,
+        page_records,
     )
     strong_source_ids = {
         observation_id
