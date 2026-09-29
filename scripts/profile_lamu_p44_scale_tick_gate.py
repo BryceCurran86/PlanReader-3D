@@ -146,10 +146,30 @@ refreshed = source.published_snapshot_for_revision(published.revision.revision_i
 if refreshed is None:
     raise RuntimeError("published snapshot disappeared")
 
+wall_selector = authority.selector_for_decision_scope(
+    document_id=refreshed.revision.document_id,
+    revision_id=refreshed.revision.revision_id,
+    source_sha256=refreshed.revision.source_sha256,
+    snapshot_id=refreshed.snapshot.snapshot_id,
+    page_id=page_id,
+    decision_scope_id=f"wall-source:page-{page_id}",
+)
+wall_result = authority.resolve_scope(wall_selector) if wall_selector is not None else None
+equivalence = getattr(wall_result, "equivalence", None)
+audit = getattr(equivalence, "candidate_pair_audit", None)
+
 emit(
     "complete",
     refreshed_snapshot_id=refreshed.snapshot.snapshot_id,
     visible_observation_count=len(refreshed.visible_observation_ids),
     authority_type=type(authority).__name__,
+    wall_candidate_count=(len(wall_result.records) if wall_result is not None else None),
+    equivalence_total_pairs=(getattr(audit, "total_pairs", None) if audit is not None else None),
+    equivalence_excluded_pairs=(getattr(audit, "excluded_pairs", None) if audit is not None else None),
+    equivalence_classified_pairs=(
+        len(getattr(equivalence, "pair_classifications", ()) or ())
+        if equivalence is not None
+        else None
+    ),
 )
 faulthandler.cancel_dump_traceback_later()
