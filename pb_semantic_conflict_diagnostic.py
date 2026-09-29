@@ -42,10 +42,19 @@ The record does not store which path fired, so this module RE-DERIVES it by
 asking the same public questions of the same producer-owned snapshot.  Nothing
 is manufactured: an observation for which no path reproduces is reported as
 ``unattributed``, and anything the producer does not expose is listed in
-``unavailable`` instead of being inferred.  In particular a candidate's member
-observations and structural pattern are NOT public for an ambiguous candidate
-(``prove_existence`` returns ``candidate=None`` on a conflict), so they are
-reported unavailable.
+``unavailable`` instead of being inferred.
+
+Candidate structure (schema 1.1.0): ``PhysicalOpeningAuthority.visible_candidate_structures``
+is a read-only accessor over the same memoized page candidates the disposition
+uses.  From each candidate's MEMBER OBSERVATION IDS ALONE (no geometry, distance,
+count or threshold) this module reports how candidates overlap: the number of
+candidates each observation belongs to, "variant families" (candidates that
+differ from another in exactly one member, joined transitively), candidates
+whose member set is contained in another's, and how many distinct families the
+candidates of each ambiguous observation span.  A family is a descriptive
+grouping of member sets, NOT a claim that its candidates are one opening; a
+single-family ambiguity and a multi-family ambiguity are reported, and neither
+is resolved.
 
 Diagnostic only: every call here is read-only, the record is never altered, no
 authority module is edited or monkey-patched, nothing is scored, no benchmark
@@ -77,7 +86,7 @@ from pb_semantic_opening_enumeration_authority import (
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
-SEMANTIC_CONFLICT_DIAGNOSTIC_SCHEMA_VERSION = "1.0.0"
+SEMANTIC_CONFLICT_DIAGNOSTIC_SCHEMA_VERSION = "1.1.0"
 
 # Conflict provenance labels (diagnostic path labels, not evidence statuses).
 CONFLICT_PATH_AMBIGUOUS_CANDIDATES = AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES
@@ -144,9 +153,13 @@ UNAVAILABLE_CLOSURE_CANDIDATE_ID_RELATION = (
     "relation_between_closure_candidate_ids_and_disposition_candidate_ids"
 )
 UNAVAILABLE_VIEW_KIND = "viewport_view_kind_not_part_of_the_semantic_layer"
+UNAVAILABLE_CANDIDATE_STRUCTURE_SOME_PAGES = (
+    "candidate_structure_unavailable_for_some_pages"
+)
+# The candidate pattern / member items above became available through
+# ``visible_candidate_structures`` (schema 1.1.0); they are reported only for a
+# scope whose candidate structure could not be read.
 STATIC_UNAVAILABLE = (
-    UNAVAILABLE_CANDIDATE_STRUCTURAL_PATTERN,
-    UNAVAILABLE_CANDIDATE_MEMBER_OBSERVATIONS,
     UNAVAILABLE_CONFLICT_PATH_NOT_RECORDED,
     UNAVAILABLE_CLOSURE_CANDIDATE_ID_RELATION,
     UNAVAILABLE_VIEW_KIND,
@@ -225,6 +238,10 @@ class ConflictObservation:
     candidate_relation: str
     in_closure_unresolved: Optional[bool]
     paths: tuple[str, ...]
+    # Number of distinct variant families among the candidates containing this
+    # observation (member sets only); None when not an ambiguous observation or
+    # when the page's candidate structure is unavailable.
+    candidate_family_count: Optional[int] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -235,6 +252,7 @@ class ConflictObservation:
             "candidate_relation": self.candidate_relation,
             "in_closure_unresolved": self.in_closure_unresolved,
             "paths": list(self.paths),
+            "candidate_family_count": self.candidate_family_count,
         }
 
 
@@ -323,7 +341,179 @@ class ConflictCluster:
         }
 
 
+def _pairs(counter: Counter) -> tuple[tuple[str, int], ...]:
+    return tuple((str(key), int(counter[key])) for key in sorted(counter, key=str))
+
+
+@dataclass(frozen=True)
+class CandidateStructureSummary:
+    """Member-set-only anatomy of the candidates on the diagnosed pages.
+
+    Every field derives from candidate member observation ids and structural
+    pattern labels.  No geometry, distance, count agreement or threshold is used,
+    and no candidate is declared the same opening as another.
+    """
+
+    pages_enumerated: int
+    pages_unavailable: int
+    candidates_total: int
+    candidates_by_pattern: tuple[tuple[str, int], ...]
+    members_per_candidate: tuple[tuple[str, int], ...]
+    observations_in_candidates: int
+    observations_in_multiple_candidates: int
+    candidates_per_observation: tuple[tuple[str, int], ...]
+    variant_families_total: int
+    variant_family_sizes: tuple[tuple[str, int], ...]
+    candidates_with_strict_superset: int
+    candidates_with_identical_member_set: int
+    ambiguous_observations_assessed: int
+    ambiguous_observation_family_span: tuple[tuple[str, int], ...]
+    disposition_candidate_id_mismatches: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "pages_enumerated": self.pages_enumerated,
+            "pages_unavailable": self.pages_unavailable,
+            "candidates_total": self.candidates_total,
+            "candidates_by_pattern": dict(self.candidates_by_pattern),
+            "members_per_candidate": dict(self.members_per_candidate),
+            "observations_in_candidates": self.observations_in_candidates,
+            "observations_in_multiple_candidates": self.observations_in_multiple_candidates,
+            "candidates_per_observation": dict(self.candidates_per_observation),
+            "variant_families_total": self.variant_families_total,
+            "variant_family_sizes": dict(self.variant_family_sizes),
+            "candidates_with_strict_superset": self.candidates_with_strict_superset,
+            "candidates_with_identical_member_set": self.candidates_with_identical_member_set,
+            "ambiguous_observations_assessed": self.ambiguous_observations_assessed,
+            "ambiguous_observation_family_span": dict(self.ambiguous_observation_family_span),
+            "disposition_candidate_id_mismatches": self.disposition_candidate_id_mismatches,
+        }
+
+
+_EMPTY_STRUCTURE = CandidateStructureSummary(
+    pages_enumerated=0,
+    pages_unavailable=0,
+    candidates_total=0,
+    candidates_by_pattern=(),
+    members_per_candidate=(),
+    observations_in_candidates=0,
+    observations_in_multiple_candidates=0,
+    candidates_per_observation=(),
+    variant_families_total=0,
+    variant_family_sizes=(),
+    candidates_with_strict_superset=0,
+    candidates_with_identical_member_set=0,
+    ambiguous_observations_assessed=0,
+    ambiguous_observation_family_span=(),
+    disposition_candidate_id_mismatches=0,
+)
+
+
+@dataclass(frozen=True)
+class _PageStructure:
+    """Working (not serialized) index of one page's candidates."""
+
+    candidate_ids: tuple[str, ...]
+    family_of: tuple[int, ...]  # candidate index -> family root index
+    candidates_by_observation: Mapping[str, tuple[int, ...]]
+
+
+def _analyse_page_candidates(
+    candidates: Sequence[Any], tally: dict[str, Any]
+) -> _PageStructure:
+    """Index one page's candidates and fold their member-set facts into ``tally``.
+
+    Variant family: candidates that have the same number of members and differ in
+    exactly one member (joined transitively).  Found by grouping candidates on
+    "members minus one member" signatures, so it needs no pairwise scan.
+    """
+    ordered = sorted(candidates, key=lambda item: item.candidate_id)
+    members = [tuple(sorted(item.source_observation_ids)) for item in ordered]
+    by_observation: dict[str, list[int]] = {}
+    for index, member_ids in enumerate(members):
+        for observation_id in member_ids:
+            by_observation.setdefault(observation_id, []).append(index)
+
+    parent = list(range(len(ordered)))
+
+    def find(node: int) -> int:
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    first_with_signature: dict[tuple[str, ...], int] = {}
+    for index, member_ids in enumerate(members):
+        for drop in range(len(member_ids)):
+            signature = member_ids[:drop] + member_ids[drop + 1 :]
+            owner = first_with_signature.setdefault(signature, index)
+            a, b = find(owner), find(index)
+            if a != b:
+                parent[max(a, b)] = min(a, b)
+    family_of = tuple(find(index) for index in range(len(ordered)))
+
+    member_sets = {name: frozenset(indexes) for name, indexes in by_observation.items()}
+    for index, member_ids in enumerate(members):
+        smallest = min((member_sets[name] for name in member_ids), key=len)
+        others = [member_sets[name] for name in member_ids]
+        has_superset = has_identical = False
+        for other in smallest:
+            if other == index or not all(other in group for group in others):
+                continue
+            if len(members[other]) == len(member_ids):
+                has_identical = True
+            else:
+                has_superset = True
+        if has_superset:
+            tally["candidates_with_strict_superset"] += 1
+        if has_identical:
+            tally["candidates_with_identical_member_set"] += 1
+
+    tally["candidates_total"] += len(ordered)
+    for item, member_ids in zip(ordered, members):
+        tally["candidates_by_pattern"][str(item.structural_pattern)] += 1
+        tally["members_per_candidate"][
+            f"{item.structural_pattern}:{len(member_ids)}"
+        ] += 1
+    tally["observations_in_candidates"] += len(by_observation)
+    for indexes in by_observation.values():
+        tally["candidates_per_observation"][len(indexes)] += 1
+        if len(indexes) > 1:
+            tally["observations_in_multiple_candidates"] += 1
+    family_sizes = Counter(family_of)
+    tally["variant_families_total"] += len(family_sizes)
+    for size in family_sizes.values():
+        tally["variant_family_sizes"][size] += 1
+
+    return _PageStructure(
+        candidate_ids=tuple(item.candidate_id for item in ordered),
+        family_of=family_of,
+        candidates_by_observation={
+            name: tuple(indexes) for name, indexes in by_observation.items()
+        },
+    )
+
+
+def _new_structure_tally() -> dict[str, Any]:
+    return {
+        "candidates_total": 0,
+        "candidates_by_pattern": Counter(),
+        "members_per_candidate": Counter(),
+        "observations_in_candidates": 0,
+        "observations_in_multiple_candidates": 0,
+        "candidates_per_observation": Counter(),
+        "variant_families_total": 0,
+        "variant_family_sizes": Counter(),
+        "candidates_with_strict_superset": 0,
+        "candidates_with_identical_member_set": 0,
+        "family_span": Counter(),
+        "ambiguous_assessed": 0,
+        "mismatches": 0,
+    }
+
+
 _FIELD_NAMES = (
+    "candidate_structure",
     "semantic_record_id",
     "semantic_status",
     "semantic_reason_codes",
@@ -370,6 +560,7 @@ def _payload_from_fields(fields: Mapping[str, Any]) -> dict[str, Any]:
         ],
         "rederivation_consistent": fields["rederivation_consistent"],
         "unavailable": list(fields["unavailable"]),
+        "candidate_structure": fields["candidate_structure"].to_dict(),
         "commercial_authority_granted": False,
     }
 
@@ -398,6 +589,7 @@ class SemanticConflictDiagnostic:
     representative_existence_unresolved: tuple[RepresentativeExistenceEvidence, ...]
     rederivation_consistent: bool
     unavailable: tuple[str, ...]
+    candidate_structure: CandidateStructureSummary
     commercial_authority_granted: bool = False
     schema_version: str = SEMANTIC_CONFLICT_DIAGNOSTIC_SCHEMA_VERSION
 
@@ -568,7 +760,15 @@ def _empty_diagnostic(
             "opening_support_unresolved_count": 0,
             "representative_existence_unresolved": (),
             "rederivation_consistent": True,
-            "unavailable": _sorted_unique((*STATIC_UNAVAILABLE, reason)),
+            "unavailable": _sorted_unique(
+                (
+                    *STATIC_UNAVAILABLE,
+                    UNAVAILABLE_CANDIDATE_STRUCTURAL_PATTERN,
+                    UNAVAILABLE_CANDIDATE_MEMBER_OBSERVATIONS,
+                    reason,
+                )
+            ),
+            "candidate_structure": _EMPTY_STRUCTURE,
         }
     )
 
@@ -712,6 +912,25 @@ def diagnose_semantic_conflicts(
         for page_id, closure in closure_by_page.items()
     }
 
+    # Candidate structure of every page that holds a diagnosed observation,
+    # through the read-only accessor (same memoized candidates as the disposition).
+    structure_tally = _new_structure_tally()
+    structure_by_page: dict[str, _PageStructure] = {}
+    pages_unavailable = 0
+    for page_id in sorted(seed_by_page, key=lambda p: (0, int(p)) if p.isdigit() else (1, p)):
+        structures = physical.visible_candidate_structures(
+            _selector(record, seed_by_page[page_id])
+        )
+        if (
+            structures.status is not EvidenceResolutionStatus.CANDIDATE
+            or structures.page_id != page_id
+        ):
+            pages_unavailable += 1
+            continue
+        structure_by_page[page_id] = _analyse_page_candidates(
+            structures.candidates, structure_tally
+        )
+
     def in_closure_unresolved(page_id: Optional[str], observation_id: str) -> Optional[bool]:
         closure = closure_by_page.get(page_id) if page_id is not None else None
         if closure is None or closure.status != EvidenceResolutionStatus.CORROBORATED.value:
@@ -790,6 +1009,23 @@ def diagnose_semantic_conflicts(
         else:
             relation = RELATION_NO_PROVEN_OPENING
 
+        family_count: Optional[int] = None
+        page_structure = structure_by_page.get(page_id) if page_id is not None else None
+        if (
+            CONFLICT_PATH_AMBIGUOUS_CANDIDATES in paths
+            and disposition_result is not None
+            and page_structure is not None
+        ):
+            containing = page_structure.candidates_by_observation.get(observation_id, ())
+            containing_ids = {page_structure.candidate_ids[i] for i in containing}
+            structure_tally["ambiguous_assessed"] += 1
+            if containing_ids != set(disposition_result.candidate_ids):
+                # The accessor and the disposition disagree: report it, never hide it.
+                structure_tally["mismatches"] += 1
+            else:
+                family_count = len({page_structure.family_of[i] for i in containing})
+                structure_tally["family_span"][family_count] += 1
+
         conflicts.append(
             ConflictObservation(
                 evidence=evidence,
@@ -799,6 +1035,7 @@ def diagnose_semantic_conflicts(
                 candidate_relation=relation,
                 in_closure_unresolved=closure_flag,
                 paths=tuple(sorted(paths)),
+                candidate_family_count=family_count,
             )
         )
 
@@ -863,6 +1100,35 @@ def diagnose_semantic_conflicts(
         1 for item in conflicts if CONFLICT_PATH_UNATTRIBUTED in item.paths
     ) + sum(1 for item in residuals if RESIDUAL_PATH_UNATTRIBUTED in item.paths)
     unavailable = list(STATIC_UNAVAILABLE)
+    if pages_unavailable:
+        unavailable.extend(
+            (
+                UNAVAILABLE_CANDIDATE_STRUCTURE_SOME_PAGES,
+                UNAVAILABLE_CANDIDATE_STRUCTURAL_PATTERN,
+                UNAVAILABLE_CANDIDATE_MEMBER_OBSERVATIONS,
+            )
+        )
+    candidate_structure = CandidateStructureSummary(
+        pages_enumerated=len(structure_by_page),
+        pages_unavailable=pages_unavailable,
+        candidates_total=structure_tally["candidates_total"],
+        candidates_by_pattern=_pairs(structure_tally["candidates_by_pattern"]),
+        members_per_candidate=_pairs(structure_tally["members_per_candidate"]),
+        observations_in_candidates=structure_tally["observations_in_candidates"],
+        observations_in_multiple_candidates=structure_tally[
+            "observations_in_multiple_candidates"
+        ],
+        candidates_per_observation=_pairs(structure_tally["candidates_per_observation"]),
+        variant_families_total=structure_tally["variant_families_total"],
+        variant_family_sizes=_pairs(structure_tally["variant_family_sizes"]),
+        candidates_with_strict_superset=structure_tally["candidates_with_strict_superset"],
+        candidates_with_identical_member_set=structure_tally[
+            "candidates_with_identical_member_set"
+        ],
+        ambiguous_observations_assessed=structure_tally["ambiguous_assessed"],
+        ambiguous_observation_family_span=_pairs(structure_tally["family_span"]),
+        disposition_candidate_id_mismatches=structure_tally["mismatches"],
+    )
     if support_unresolved:
         unavailable.append("proven_opening_support_sets_unresolved")
     if representative_unresolved:
@@ -899,6 +1165,7 @@ def diagnose_semantic_conflicts(
             ),
             "rederivation_consistent": unattributed == 0 and support_unresolved == 0,
             "unavailable": _sorted_unique(unavailable),
+            "candidate_structure": candidate_structure,
         }
     )
 
@@ -1030,8 +1297,33 @@ def aggregate_semantic_conflict_diagnostics(
     openings_total = 0
     representative_unresolved_total = 0
     representative_codes: Counter = Counter()
+    structure_scalars: Counter = Counter()
+    structure_hist: dict[str, Counter] = {
+        "candidates_by_pattern": Counter(),
+        "members_per_candidate": Counter(),
+        "candidates_per_observation": Counter(),
+        "variant_family_sizes": Counter(),
+        "ambiguous_observation_family_span": Counter(),
+    }
+    structure_scalar_names = (
+        "pages_enumerated",
+        "pages_unavailable",
+        "candidates_total",
+        "observations_in_candidates",
+        "observations_in_multiple_candidates",
+        "variant_families_total",
+        "candidates_with_strict_superset",
+        "candidates_with_identical_member_set",
+        "ambiguous_observations_assessed",
+        "disposition_candidate_id_mismatches",
+    )
 
     for diag in ordered:
+        for name in structure_scalar_names:
+            structure_scalars[name] += getattr(diag.candidate_structure, name)
+        for name, counter in structure_hist.items():
+            for key, value in getattr(diag.candidate_structure, name):
+                counter[key] += value
         statuses[str(diag.semantic_status)] += 1
         record_codes.update(diag.semantic_reason_codes)
         openings_total += diag.counts_dict().get("openings", 0)
@@ -1149,6 +1441,18 @@ def aggregate_semantic_conflict_diagnostics(
         ),
         "unattributed_observations": unattributed,
         "unavailable_scope_counts": _sorted_counts(unavailable),
+        "candidate_structure": {
+            **{name: structure_scalars[name] for name in structure_scalar_names},
+            **{
+                name: {
+                    key: counter[key]
+                    for key in sorted(
+                        counter, key=lambda k: (0, int(k)) if str(k).lstrip("-").isdigit() else (1, str(k))
+                    )
+                }
+                for name, counter in structure_hist.items()
+            },
+        },
         "commercial_authority_granted": False,
     }
     payload["record_id"] = stable_contract_id(
@@ -1166,6 +1470,7 @@ __all__ = [
     "CONFLICT_PATH_SNAPSHOT_INTEGRITY_FAILURE",
     "CONFLICT_PATH_SOURCE_OBSERVATION_FAILURE",
     "CONFLICT_PATH_UNATTRIBUTED",
+    "CandidateStructureSummary",
     "FAMILY_AMBIGUOUS_CANDIDATES",
     "FAMILY_CLOSURE_UNRESOLVED_OVERLAP",
     "FAMILY_OTHER",

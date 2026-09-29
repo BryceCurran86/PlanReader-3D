@@ -180,6 +180,24 @@ class PhysicalOpeningCandidateClosureResult:
 
 
 @dataclass(frozen=True)
+class PhysicalOpeningCandidateStructureResult:
+    """Read-only view of the candidates discovered on one source-visible page.
+
+    Diagnostic seam.  ``candidates`` are exactly the objects
+    ``classify_disposition`` / ``prove_existence`` / ``assess_visible_candidate_closure``
+    already use for this page; nothing here is proof that any of them is an
+    opening, that two of them are or are not the same opening, or a count.  The
+    status is ``CANDIDATE`` when the page was enumerated (never
+    ``CORROBORATED``) and ``ABSTAINED`` / ``CONFLICT`` when it could not be.
+    """
+
+    status: EvidenceResolutionStatus
+    page_id: Optional[str]
+    candidates: tuple[CandidateSemanticOpening, ...]
+    reason_codes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class PhysicalOpeningIdentityResult:
     """Fail-closed result for whether two observations denote one opening."""
 
@@ -1382,6 +1400,62 @@ class PhysicalOpeningAuthority:
             reason_codes=reasons,
         )
 
+    def visible_candidate_structures(
+        self,
+        selector: ObservationSelector,
+    ) -> PhysicalOpeningCandidateStructureResult:
+        """Return the page's discovered candidates with their member observations.
+
+        Read-only diagnostic accessor.  It follows the same source-visibility and
+        snapshot-integrity gates as ``classify_disposition`` and returns the same
+        memoized page candidates that method inspects; it decides nothing and
+        changes no other result.  The selector only names the page (and the
+        authenticated snapshot) whose candidates are wanted.
+        """
+
+        if not isinstance(selector, ObservationSelector):
+            raise TypeError("selector must be ObservationSelector")
+        if self._source_visibility_authority is None:
+            return PhysicalOpeningCandidateStructureResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                page_id=None,
+                candidates=(),
+                reason_codes=(VISIBLE_SOURCE_AUTHORITY_REQUIRED,),
+            )
+
+        visibility = self._source_visibility_authority
+        source_result = visibility.resolve_visible(selector)
+        if (
+            source_result.status is not EvidenceResolutionStatus.CORROBORATED
+            or source_result.observation is None
+        ):
+            return PhysicalOpeningCandidateStructureResult(
+                status=_source_failure_status(source_result),
+                page_id=None,
+                candidates=(),
+                reason_codes=_dedupe_reason_codes(source_result.reason_codes),
+            )
+
+        records, failures = self._visible_snapshot_records(source_result)
+        if failures:
+            return PhysicalOpeningCandidateStructureResult(
+                status=_source_failure_status(*failures),
+                page_id=str(source_result.observation.page_id),
+                candidates=(),
+                reason_codes=_dedupe_reason_codes(
+                    (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),
+                    *tuple(result.reason_codes for result in failures),
+                ),
+            )
+
+        observation = source_result.observation
+        return PhysicalOpeningCandidateStructureResult(
+            status=EvidenceResolutionStatus.CANDIDATE,
+            page_id=str(observation.page_id),
+            candidates=self._visible_candidates_for(observation, records),
+            reason_codes=(STRUCTURAL_OPENING_CANDIDATE,),
+        )
+
     def classify_disposition(
         self,
         selector: ObservationSelector,
@@ -1728,6 +1802,7 @@ __all__ = [
     "PHYSICAL_OPENING_IDENTITY_UNRESOLVED",
     "PhysicalOpeningAuthority",
     "PhysicalOpeningCandidateClosureResult",
+    "PhysicalOpeningCandidateStructureResult",
     "PhysicalOpeningExistenceRecord",
     "PhysicalOpeningExistenceResult",
     "PhysicalOpeningIdentityResult",
