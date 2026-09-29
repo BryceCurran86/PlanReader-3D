@@ -129,10 +129,13 @@ class TestPhysicalVerandahSupportWiring:
         assert prediction.quantity == 4.0
         assert prediction.unit == "NO"
         assert prediction.metadata["derivation"] == (
-            "physical_secondary_area_support_instances"
+            "physical_structural_member_authority"
         )
+        assert prediction.metadata["structural_member_status"] == "corroborated"
         assert prediction.metadata["evidence_mode"] == "physical_symbol"
         assert len(prediction.metadata["support_symbol_ids"]) == 4
+        assert len(prediction.metadata["physical_member_ids"]) == 4
+        assert len(set(prediction.metadata["physical_member_ids"])) == 4
         # No textual support keyword exists, so the older dimension+keyword
         # structural_columns path must remain locked.
         assert "structural_columns" not in pred_map
@@ -150,3 +153,36 @@ class TestPhysicalVerandahSupportWiring:
             for prediction in extractor.extract_from_pdf(pdf_path)
         }
         assert "verandah_pillars" not in pred_map
+
+
+def _make_text_only_verandah_pdf(tmp_path: Path) -> Path:
+    doc = fitz.open()
+    page = doc.new_page(width=842, height=595)
+    page.insert_text((72, 72), "GROUND FLOOR PLAN\nSCALE 1:100", fontsize=10)
+
+    # Two independently reconstructed, matching dimension chains plus a
+    # plausible support specification are intentionally sufficient for the
+    # evidence module's text-specification mode, but not for live physical
+    # structural-member quantity publication.
+    for x in (198.0, 298.0, 398.0):
+        page.insert_text((x, 220), "2,500", fontsize=8)
+        page.insert_text((x, 270), "2,500", fontsize=8)
+    page.insert_text((275, 245), "VERANDAH", fontsize=10)
+    page.insert_text((255, 290), "100mm RHS Steel Poles", fontsize=8)
+
+    pdf_path = tmp_path / "text_only_verandah_supports.pdf"
+    doc.save(str(pdf_path))
+    doc.close()
+    return pdf_path
+
+
+def test_text_only_secondary_support_evidence_cannot_publish_live_quantity(
+    tmp_path: Path,
+) -> None:
+    pdf_path = _make_text_only_verandah_pdf(tmp_path)
+    extractor = GenericPlanReaderExtractor()
+    pred_map = {
+        prediction.tag: prediction
+        for prediction in extractor.extract_from_pdf(pdf_path)
+    }
+    assert "verandah_pillars" not in pred_map
