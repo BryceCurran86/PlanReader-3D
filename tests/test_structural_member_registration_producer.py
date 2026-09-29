@@ -368,3 +368,33 @@ def test_registration_producer_is_not_live_wired_before_promotion_review() -> No
     )
     for path in live_files:
         assert module_name not in path.read_text(encoding="utf-8")
+
+
+def test_complete_flag_without_source_evidence_fails_closed() -> None:
+    observation = obs("a", "plan", anchors=(anchor("A|1"),))
+    unproven_view = AuthenticatedStructuralMemberView(
+        page_id="1",
+        view_id="plan",
+        view_type="plan",
+        complete=True,
+        source_evidence_ids=(),
+    )
+    result = build((observation,), (unproven_view,))
+    assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
+    assert "structural_view_completeness_unproven" in result.resolution.reason_codes
+
+
+def test_conflicting_duplicate_view_scope_fails_closed() -> None:
+    observation = obs("a", "plan", anchors=(anchor("A|1"),))
+    first = view("plan")
+    second = AuthenticatedStructuralMemberView(
+        page_id="1",
+        view_id="plan",
+        view_type="plan",
+        complete=False,
+        source_evidence_ids=("view-proof:plan",),
+        reason_codes=("cropped_view",),
+    )
+    result = build((observation,), (first, second))
+    assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
+    assert "structural_view_scope_conflict" in result.resolution.reason_codes
