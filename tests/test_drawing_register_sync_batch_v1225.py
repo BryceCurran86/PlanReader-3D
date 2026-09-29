@@ -1,3 +1,5 @@
+"""Regression coverage for batched Drawing Register database reads."""
+
 from __future__ import annotations
 
 import pb_page_registration_v1225 as registration
