@@ -17,6 +17,7 @@ from pb_raster_plan_dimension_authority import (
     _VisibleSegment,
     _bind_text_to_geometry,
     _resolve_overall,
+    _text_orientation_candidates,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -136,6 +137,34 @@ def test_missing_or_competing_witnesses_fail_closed():
         _seg("right", (100.0, 0.0, 100.0, 20.0), "vertical"),
     )
     assert _bind_text_to_geometry(text, competing) is None
+
+
+
+def test_strong_ocr_bbox_orientation_is_positive_but_square_stays_ambiguous():
+    assert _text_orientation_candidates((0.0, 0.0, 30.0, 8.0)) == ("horizontal",)
+    assert _text_orientation_candidates((0.0, 0.0, 8.0, 30.0)) == ("vertical",)
+    assert _text_orientation_candidates((0.0, 0.0, 12.0, 12.0)) == (
+        "horizontal",
+        "vertical",
+    )
+
+
+def test_tall_dimension_text_does_not_promote_perpendicular_witness_ticks():
+    text = _text(2500, (306.0, 44.0, 314.0, 66.0))
+    segments = (
+        _seg("dimension", (310.0, 30.0, 310.0, 80.0), "vertical"),
+        _seg("top_witness", (304.5, 30.0, 316.5, 30.0), "horizontal"),
+        _seg("bottom_witness", (304.5, 80.0, 316.5, 80.0), "horizontal"),
+    )
+
+    result = _bind_text_to_geometry(text, segments)
+
+    assert result is not None
+    assert result.orientation == "vertical"
+    assert result.value_mm == 2500
+    assert result.span_pt == 50.0
+    assert result.dimension_line_observation_ids == ("dimension",)
+    assert set(result.witness_observation_ids) == {"top_witness", "bottom_witness"}
 
 
 def test_overall_requires_exact_contiguous_child_sum():
