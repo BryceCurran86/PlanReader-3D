@@ -1,0 +1,38 @@
+name: Murera Page 225 Render Diagnostic
+
+on:
+  push:
+    branches:
+      - diag/murera-p225-render
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install PyMuPDF
+        run: python -m pip install PyMuPDF==1.28.0
+      - name: Download exact Murera source
+        run: |
+          curl -L --fail --retry 3 -o /tmp/murera.pdf             "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  /tmp/murera.pdf" | sha256sum -c -
+      - name: Render page 225
+        run: |
+          python - <<'PY'
+          import fitz
+          doc = fitz.open("/tmp/murera.pdf")
+          page = doc[224]
+          pix = page.get_pixmap(matrix=fitz.Matrix(3, 3), alpha=False)
+          pix.save("/tmp/murera-page-225.png")
+          print("page_rect", tuple(page.rect))
+          print("drawings", len(page.get_drawings() or ()))
+          print("words", len(page.get_text("words") or ()))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: murera-page-225-render
+          path: /tmp/murera-page-225.png
