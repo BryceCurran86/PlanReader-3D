@@ -240,7 +240,20 @@ def _contesting_boxes(
         if str(viewport.view_id) in eligible_ids:
             continue
         localised: list[BBox] = []
-        own = _finite_bbox(viewport.bounding_box) if viewport.bounding_box is not None else None
+        # A derived TITLE_PARTITION bbox is a synthetic ownership cell, not
+        # source-drawn viewport geometry. It may remain unauthenticated evidence,
+        # but it cannot independently contest positive ownership established by
+        # an authenticated drawn frame. Only a source-owned VECTOR_FRAME may
+        # contribute its own bbox as contest geometry.
+        own = (
+            _finite_bbox(viewport.bounding_box)
+            if (
+                viewport.bounding_box is not None
+                and str(viewport.boundary_source)
+                == ViewportBoundarySource.VECTOR_FRAME.value
+            )
+            else None
+        )
         if own is not None:
             localised.append(own)
         provenance = getattr(viewport, "provenance", None) or {}
