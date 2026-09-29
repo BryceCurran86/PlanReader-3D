@@ -169,6 +169,7 @@ def build_semantic_opening_inventory_completeness(
     page_ids: Sequence[str] | None = None,
     optional_content_known_visible: bool = False,
     xobject_traversal_truncated: bool = False,
+    _semantic_opening_producer: SemanticOpeningEnumerationProducer | None = None,
 ) -> OpeningUniverseCompletenessAuthority:
     """Project the semantic opening inventory into the completeness contract.
 
@@ -185,11 +186,27 @@ def build_semantic_opening_inventory_completeness(
     if type(source_visibility_producer) is not SourceVisibilityProducer:
         raise TypeError("source_visibility_producer must be producer-owned")
 
-    semantic_producer = (
-        SemanticOpeningEnumerationProducer.from_source_visibility_producer(
-            source_visibility_producer
+    if _semantic_opening_producer is None:
+        semantic_producer = (
+            SemanticOpeningEnumerationProducer.from_source_visibility_producer(
+                source_visibility_producer
+            )
         )
-    )
+    else:
+        if type(_semantic_opening_producer) is not SemanticOpeningEnumerationProducer:
+            raise TypeError(
+                "_semantic_opening_producer must be a producer-owned "
+                "SemanticOpeningEnumerationProducer"
+            )
+        if (
+            _semantic_opening_producer._source_visibility_producer
+            is not source_visibility_producer
+        ):
+            raise ValueError(
+                "_semantic_opening_producer must be bound to the same "
+                "SourceVisibilityProducer"
+            )
+        semantic_producer = _semantic_opening_producer
     if page_ids is None:
         semantic_result = semantic_producer.publish_document_scope(
             revision_id=revision_id,

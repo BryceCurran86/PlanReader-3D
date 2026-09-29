@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -27,6 +28,33 @@ class MemoryStabilityV1220Tests(unittest.TestCase):
             with Image.open(io.BytesIO(payload)) as preview:
                 self.assertLessEqual(max(preview.size), 1000)
                 self.assertEqual(preview.mode, "RGB")
+
+    def test_thumbnail_cache_reuses_unchanged_file_and_invalidates_on_change(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "preview.png"
+            Image.new("RGB", (1800, 1200), "white").save(source)
+            memory._THUMBNAIL_CACHE.clear()
+
+            real_open = memory.Image.open
+            calls = []
+
+            def counted_open(*args, **kwargs):
+                calls.append(str(args[0]))
+                return real_open(*args, **kwargs)
+
+            with mock.patch.object(memory.Image, "open", side_effect=counted_open):
+                first = memory.thumbnail_bytes(source, max_long_edge=900)
+                second = memory.thumbnail_bytes(source, max_long_edge=900)
+
+            self.assertEqual(first, second)
+            self.assertEqual(len(calls), 1)
+
+            Image.new("RGB", (1810, 1200), "white").save(source)
+            with mock.patch.object(memory.Image, "open", side_effect=counted_open):
+                third = memory.thumbnail_bytes(source, max_long_edge=900)
+
+            self.assertTrue(third)
+            self.assertEqual(len(calls), 2)
 
     def test_cv_working_copy_is_bounded_but_preserves_original_scale_factors(self):
         if getattr(memory.auto_v1219, "cv2", None) is None:
