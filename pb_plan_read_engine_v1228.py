@@ -342,6 +342,81 @@ def _visual_signature(path: Path) -> str:
         return hashlib.sha1(str(path).encode()).hexdigest()
 
 
+def _native_read_signature(path: Path, page: Dict[str, Any], app: Any = None) -> str:
+    """Stable input signature for the native spatial-read pass.
+
+    The fast path may reuse a completed page read only when the immutable PDF
+    file state and every page attribute that can change reconstruction/visual
+    fallback are unchanged. Output fields such as extracted_text are
+    intentionally excluded: they are products of this pass, not authority
+    inputs.
+    """
+    try:
+        stat = path.stat()
+        source = {
+            "path": str(path.resolve()),
+            "size": int(stat.st_size),
+            "mtime_ns": int(stat.st_mtime_ns),
+        }
+    except OSError:
+        source = {"path": str(path), "size": None, "mtime_ns": None}
+
+    image_path = _regular_file(page.get("image_path"))
+    image_signature = _visual_signature(image_path) if image_path is not None else ""
+    visual_enabled = (
+        str(os.environ.get("PLANREADER_VISUAL_READ", "1")).strip().lower()
+        not in {"0", "false", "off", "no"}
+        and app is not None
+        and hasattr(app, "_gemini_generate")
+        and bool(str(os.environ.get("GEMINI_API_KEY", "")).strip())
+    )
+    payload = {
+        "version": VERSION,
+        "source": source,
+        "page_id": int(page.get("id") or 0),
+        "page_no": int(page.get("page_no") or 0),
+        "page_type": str(page.get("page_type") or ""),
+        "page_label": str(page.get("page_label") or ""),
+        "selected": int(page.get("selected") or 0),
+        "image_signature": image_signature,
+        "visual_enabled": bool(visual_enabled),
+        "visual_model": (
+            str(os.environ.get("GEMINI_MODEL") or "gemini-3.5-flash")
+            if visual_enabled
+            else ""
+        ),
+    }
+    return hashlib.sha1(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _cached_native_read_matches(
+    app: Any,
+    workspace_id: int,
+    path: Path,
+    page: Dict[str, Any],
+) -> bool:
+    try:
+        cached = json.loads(
+            str(
+                app.workspace_setting(
+                    int(workspace_id),
+                    _page_read_key(int(page["id"])),
+                    "{}",
+                )
+                or "{}"
+            )
+        )
+    except Exception:
+        return False
+    return (
+        cached.get("version") == VERSION
+        and cached.get("native_signature")
+        == _native_read_signature(path, page, app)
+    )
+
+
 def _visual_read_allowed(app: Any, page: Dict[str, Any], native: Dict[str, Any]) -> bool:
     if str(os.environ.get("PLANREADER_VISUAL_READ", "1")).strip().lower() in {"0", "false", "off", "no"}:
         return False
@@ -431,8 +506,27 @@ def enhance_document_pages(app: Any, document_id: int, *, visual_budget: int = 4
     if path.suffix.lower() != ".pdf" or not path.is_file() or getattr(app, "fitz", None) is None:
         return {"updated": 0, "visual": 0}
     pages = [dict(row) for row in app.lquery("SELECT * FROM pages WHERE document_id=? ORDER BY page_no,id", (int(document_id),))]
+    # Automatic geometry can call this reader repeatedly for the same unchanged
+    # document. Do not reopen and rebuild every page when the exact source file
+    # and all reconstruction inputs already match the completed prior pass.
+    # Any input drift falls through to the existing full source-owned path.
+    if pages and all(
+        _cached_native_read_matches(app, workspace_id, path, page)
+        for page in pages
+    ):
+        return {
+            "updated": 0,
+            "visual": 0,
+            "workspace_id": workspace_id,
+            "cached": len(pages),
+        }
+
     updated = 0; visual_used = 0
     pending: List[Tuple[Dict[str, Any], Dict[str, Any], Any, str]] = []
+    input_signatures = {
+        int(page["id"]): _native_read_signature(path, page, app)
+        for page in pages
+    }
     pdf = app.fitz.open(path)
     try:
         for page in pages:
@@ -485,8 +579,12 @@ def enhance_document_pages(app: Any, document_id: int, *, visual_budget: int = 4
                     analysis = title_authority.PageAnalysis(page_no=page_no, width=0.0, height=0.0, source="none")
                 pending.append((page, meta, analysis, visual_title))
             app.set_workspace_setting(workspace_id, _page_read_key(int(page["id"])), json.dumps({
-                "version": VERSION, "word_count": int(native.get("word_count") or 0), "char_count": int(native.get("char_count") or 0),
-                "table_mode": _table_like(page, native.get("block_text") or ""), "visual_fallback": bool(visual),
+                "version": VERSION,
+                "native_signature": input_signatures.get(int(page["id"]), ""),
+                "word_count": int(native.get("word_count") or 0),
+                "char_count": int(native.get("char_count") or 0),
+                "table_mode": _table_like(page, native.get("block_text") or ""),
+                "visual_fallback": bool(visual),
             }, separators=(",", ":")))
     finally:
         pdf.close()
