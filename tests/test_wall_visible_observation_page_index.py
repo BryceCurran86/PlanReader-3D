@@ -308,3 +308,114 @@ def test_fewer_than_six_wall_candidates_skips_opening_proof_entirely(monkeypatch
         resolved_visible_observations=rows,
         physical_opening_authority=PhysicalOpeningAuthority(source.authority()),
     ) == {}
+
+
+
+def test_no_strong_six_source_candidate_never_enters_generic_opening_path(monkeypatch):
+    source, published, _payload = _source(page_count=1)
+    indexed = module._visible_observations_by_page(
+        source_producer=source,
+        published=published,
+    )
+    rows = list(indexed["1"])
+    native = [
+        (oid, observation)
+        for oid, observation in rows
+        if str(observation.source_primitive_ref).startswith("visible:segment:")
+    ]
+    records = tuple(
+        SimpleNamespace(
+            wall_candidate_id=f"wall-{index}",
+            physical_identity=SimpleNamespace(
+                source_primitive_ids=(
+                    str(observation.source_primitive_ref)[len("visible:segment:"):],
+                )
+            ),
+        )
+        for index, (_oid, observation) in enumerate(native[:6])
+    )
+
+    monkeypatch.setattr(
+        PhysicalOpeningAuthority,
+        "_visible_structural_candidates",
+        staticmethod(lambda seed, records: ()),
+    )
+
+    def forbidden_generic(seed, records):
+        raise AssertionError("generic opening detector must not run without a six-source candidate")
+
+    monkeypatch.setattr(
+        PhysicalOpeningAuthority,
+        "_visible_generic_correlated_candidates",
+        staticmethod(forbidden_generic),
+    )
+
+    result = module._producer_opening_relation_overrides(
+        source_producer=source,
+        published=published,
+        page_id="1",
+        records=records,
+        resolved_visible_observations=rows,
+        physical_opening_authority=PhysicalOpeningAuthority(source.authority()),
+    )
+    assert result == {}
+
+
+def test_strong_candidate_preflight_still_uses_normal_existence_proof(monkeypatch):
+    source, published, _payload = _source(page_count=1)
+    indexed = module._visible_observations_by_page(
+        source_producer=source,
+        published=published,
+    )
+    rows = list(indexed["1"])
+    native = [
+        (oid, observation)
+        for oid, observation in rows
+        if str(observation.source_primitive_ref).startswith("visible:segment:")
+    ]
+    selected = native[:6]
+    records = tuple(
+        SimpleNamespace(
+            wall_candidate_id=f"wall-{index}",
+            physical_identity=SimpleNamespace(
+                source_primitive_ids=(
+                    str(observation.source_primitive_ref)[len("visible:segment:"):],
+                )
+            ),
+        )
+        for index, (_oid, observation) in enumerate(selected)
+    )
+    strong_ids = tuple(oid for oid, _observation in selected)
+
+    monkeypatch.setattr(
+        PhysicalOpeningAuthority,
+        "_visible_structural_candidates",
+        staticmethod(
+            lambda seed, records: (
+                SimpleNamespace(source_observation_ids=strong_ids),
+            )
+        ),
+    )
+    calls = []
+
+    def blocked(self, selector):
+        calls.append(selector.observation_id)
+        return SimpleNamespace(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            proposition=None,
+            existence_record=None,
+            reason_codes=("test_blocked",),
+        )
+
+    monkeypatch.setattr(PhysicalOpeningAuthority, "prove_existence", blocked)
+
+    result = module._producer_opening_relation_overrides(
+        source_producer=source,
+        published=published,
+        page_id="1",
+        records=records,
+        resolved_visible_observations=rows,
+        physical_opening_authority=PhysicalOpeningAuthority(source.authority()),
+    )
+    assert result == {}
+    assert set(calls) == set(strong_ids)
