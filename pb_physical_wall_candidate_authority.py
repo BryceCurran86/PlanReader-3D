@@ -2120,6 +2120,7 @@ def _build_scope_result(
     page_id: str,
     resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
+    physical_scale_producer: Optional[PhysicalScaleProducer] = None,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = _decision_scope_id(page_id)
     selector = PhysicalWallCandidateSelector(
@@ -2150,8 +2151,10 @@ def _build_scope_result(
         decision_scope_id=scope_id,
         resolved_visible_observations=resolved_visible_observations,
     )
-    scale_producer = PhysicalScaleProducer.from_source_visibility_producer(
-        source_producer
+    scale_producer = (
+        physical_scale_producer
+        if physical_scale_producer is not None
+        else PhysicalScaleProducer.from_source_visibility_producer(source_producer)
     )
     points_per_mm = _producer_owned_points_per_mm(
         scale_producer=scale_producer,
@@ -2182,6 +2185,7 @@ def _build_authenticated_viewport_scope_results(
     page_id: str,
     resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
+    physical_scale_producer: Optional[PhysicalScaleProducer] = None,
 ) -> tuple[PhysicalWallCandidateScopeResult, ...]:
     page_number = int(page_id)
     # A viewport scope is page-local authority. A scoped native ingestion still
@@ -2215,8 +2219,10 @@ def _build_authenticated_viewport_scope_results(
     if not eligible:
         return ()
     sibling_fingerprint = _viewport_sibling_set_fingerprint(all_viewports)
-    scale_producer = PhysicalScaleProducer.from_source_visibility_producer(
-        source_producer
+    scale_producer = (
+        physical_scale_producer
+        if physical_scale_producer is not None
+        else PhysicalScaleProducer.from_source_visibility_producer(source_producer)
     )
 
     results: list[PhysicalWallCandidateScopeResult] = []
@@ -2469,6 +2475,11 @@ class PhysicalWallCandidateProducer:
             physical_opening_authority = PhysicalOpeningAuthority(
                 source_visibility_producer.authority()
             )
+            physical_scale_producer = (
+                PhysicalScaleProducer.from_source_visibility_producer(
+                    source_visibility_producer
+                )
+            )
 
             for page_id in materialized_page_ids:
                 page_visible_observations = visible_by_page.get(page_id, ())
@@ -2480,6 +2491,7 @@ class PhysicalWallCandidateProducer:
                         page_id=page_id,
                         resolved_visible_observations=page_visible_observations,
                         physical_opening_authority=physical_opening_authority,
+                        physical_scale_producer=physical_scale_producer,
                     )
                     key = _ScopeKey(
                         document_id=result.document_id,
@@ -2499,6 +2511,7 @@ class PhysicalWallCandidateProducer:
                         page_id=page_id,
                         resolved_visible_observations=page_visible_observations,
                         physical_opening_authority=physical_opening_authority,
+                        physical_scale_producer=physical_scale_producer,
                     ):
                         viewport_key = _ScopeKey(
                             document_id=viewport_result.document_id,
