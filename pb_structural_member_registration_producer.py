@@ -50,6 +50,9 @@ STRUCTURAL_REGISTRATION_ANCHOR_AMBIGUOUS = (
 STRUCTURAL_REGISTRATION_VIEW_OWNERSHIP_CONFLICT = (
     "structural_registration_view_ownership_conflict"
 )
+STRUCTURAL_REGISTRATION_VIEW_COMPLETENESS_UNAUTHENTICATED = (
+    "structural_registration_view_completeness_unauthenticated"
+)
 
 _SOURCE_INPUT_SEAL = object()
 _EVIDENCE_PRODUCER_SEAL = object()
@@ -265,6 +268,8 @@ class StructuralMemberRegistrationEvidenceProducer:
         *,
         selector: StructuralMemberSelector,
         source_scope_receipt_id: str,
+        allowed_source_evidence_ids: Sequence[str] = (),
+        test_mode: bool = False,
         _seal: object = None,
     ) -> None:
         if _seal is not _EVIDENCE_PRODUCER_SEAL:
@@ -273,6 +278,10 @@ class StructuralMemberRegistrationEvidenceProducer:
             )
         self._selector = selector
         self._source_scope_receipt_id = source_scope_receipt_id
+        self._allowed_source_evidence_ids = frozenset(
+            _clean_nonempty(allowed_source_evidence_ids)
+        )
+        self._test_mode = bool(test_mode)
 
     @classmethod
     def from_source_visibility(
@@ -302,9 +311,18 @@ class StructuralMemberRegistrationEvidenceProducer:
             or str(published.snapshot.snapshot_id) != str(selector.snapshot_id)
         ):
             raise ValueError(STRUCTURAL_REGISTRATION_SOURCE_SCOPE_MISMATCH)
+        allowed = _clean_nonempty(
+            (
+                *published.visible_observation_ids,
+                *published.text_observation_ids,
+                *published.ocr_tag_observation_ids,
+            )
+        )
         return cls(
             selector=selector,
             source_scope_receipt_id=_source_scope_receipt_id(selector),
+            allowed_source_evidence_ids=allowed,
+            test_mode=False,
             _seal=_EVIDENCE_PRODUCER_SEAL,
         )
 
@@ -319,6 +337,8 @@ class StructuralMemberRegistrationEvidenceProducer:
         return cls(
             selector=selector,
             source_scope_receipt_id=_source_scope_receipt_id(selector),
+            allowed_source_evidence_ids=(),
+            test_mode=True,
             _seal=_EVIDENCE_PRODUCER_SEAL,
         )
 
@@ -336,6 +356,21 @@ class StructuralMemberRegistrationEvidenceProducer:
         definition_id: Optional[str] = None,
         geometry_signature: str = "",
     ) -> AuthenticatedStructuralMemberObservation:
+        cleaned_source = _clean_nonempty(source_evidence_ids)
+        cleaned_proposition = _clean_nonempty(member_proposition_evidence_ids)
+        cleaned_anchor_evidence = _clean_nonempty(
+            evidence_id
+            for anchor in registration_anchors
+            for evidence_id in anchor.source_evidence_ids
+        )
+        if not self._test_mode:
+            claimed = set(
+                (*cleaned_source, *cleaned_proposition, *cleaned_anchor_evidence)
+            )
+            if not claimed or not claimed.issubset(
+                self._allowed_source_evidence_ids
+            ):
+                raise ValueError(STRUCTURAL_REGISTRATION_INPUT_UNAUTHENTICATED)
         payload = _observation_record_payload(
             self._selector,
             member_kind=member_kind,
@@ -386,6 +421,19 @@ class StructuralMemberRegistrationEvidenceProducer:
         source_evidence_ids: Sequence[str],
         reason_codes: Sequence[str] = (),
     ) -> AuthenticatedStructuralMemberView:
+        cleaned_evidence = _clean_nonempty(source_evidence_ids)
+        if not self._test_mode:
+            if complete:
+                raise ValueError(
+                    STRUCTURAL_REGISTRATION_VIEW_COMPLETENESS_UNAUTHENTICATED
+                )
+            if (
+                not cleaned_evidence
+                or not set(cleaned_evidence).issubset(
+                    self._allowed_source_evidence_ids
+                )
+            ):
+                raise ValueError(STRUCTURAL_REGISTRATION_INPUT_UNAUTHENTICATED)
         payload = _view_record_payload(
             self._selector,
             page_id=page_id,
@@ -1024,6 +1072,7 @@ __all__ = [
     "STRUCTURAL_REGISTRATION_OBSERVATION_EQUIVOCATION",
     "STRUCTURAL_REGISTRATION_SCHEMA_VERSION",
     "STRUCTURAL_REGISTRATION_SOURCE_SCOPE_MISMATCH",
+    "STRUCTURAL_REGISTRATION_VIEW_COMPLETENESS_UNAUTHENTICATED",
     "STRUCTURAL_REGISTRATION_VIEW_OWNERSHIP_CONFLICT",
     "StructuralMemberRegistrationEvidenceProducer",
     "StructuralMemberRegistrationResult",
