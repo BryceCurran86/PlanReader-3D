@@ -1,0 +1,147 @@
+name: TEST-ONLY Murera Rotated Raster Dimension V3
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-rotated-raster:
+    if: startsWith(github.head_ref, 'diag/murera-raster-rotated-ocr-v3')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+      - name: Run exact-source rotated OCR shadow
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import io
+          import json
+          import urllib.request
+
+          from PIL import Image
+
+          from pb_raster_plan_dimension_authority import (
+              RASTER_DIMENSION_OCR_DPI,
+              RasterPlanDimensionProducer,
+              _producer_rotated_numeric_ocr_lines,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          url = "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
+          expected = "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          req = urllib.request.Request(
+              url,
+              headers={"User-Agent": "PlanReader-Murera-rotated-raster-v3/1.0"},
+          )
+          with urllib.request.urlopen(req, timeout=120) as response:
+              source_bytes = response.read()
+          got = hashlib.sha256(source_bytes).hexdigest()
+          if got != expected:
+              raise SystemExit(f"source sha mismatch: {got}")
+
+          source = SourceVisibilityProducer(
+              producer_method="murera-rotated-raster-v3",
+              producer_version="1.0",
+          )
+          published = source.ingest_native_pdf_bytes(
+              document_id="murera-rotated-raster-v3",
+              source_bytes=source_bytes,
+              source_locator=url,
+          )
+          producer = RasterPlanDimensionProducer.create(source_visibility=source)
+
+          source_writer = source._producer
+          png_bytes, _page_parent = source_writer.render_native_page_png(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              page_id="228",
+              dpi=float(RASTER_DIMENSION_OCR_DPI),
+          )
+          image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+          numeric = _producer_rotated_numeric_ocr_lines(
+              image,
+              backend=producer._backend,
+              dpi=RASTER_DIMENSION_OCR_DPI,
+          )
+          numeric_payload = [
+              {
+                  "text": line.text,
+                  "bbox_pt": line.bbox_pt,
+                  "confidence": line.confidence,
+              }
+              for line in numeric
+          ]
+
+          result = producer.publish(
+              revision_id=published.revision.revision_id,
+              page_id="228",
+          )
+
+          def overall(value):
+              if value is None:
+                  return None
+              return {
+                  "orientation": value.orientation,
+                  "value_mm": value.value_mm,
+                  "span_pt": value.span_pt,
+                  "endpoints_pt": value.endpoints_pt,
+                  "child_values_mm": value.child_values_mm,
+              }
+
+          bound = [
+              {
+                  "value_mm": item.value_mm,
+                  "orientation": item.orientation,
+                  "span_pt": item.span_pt,
+                  "endpoints_pt": item.endpoints_pt,
+              }
+              for item in result.bound_dimensions
+          ]
+          bound.sort(
+              key=lambda item: (
+                  item["orientation"],
+                  item["endpoints_pt"],
+                  item["value_mm"],
+              )
+          )
+          payload = {
+              "source_sha256": got,
+              "page": 228,
+              "backend": {
+                  "name": producer._backend.name,
+                  "version": producer._backend.version,
+              },
+              "numeric_count": len(numeric_payload),
+              "numeric_observations": numeric_payload[:200],
+              "status": result.status.value,
+              "reason_codes": result.reason_codes,
+              "horizontal": overall(result.horizontal),
+              "vertical": overall(result.vertical),
+              "bound_count": len(bound),
+              "bound_dimensions": bound[:120],
+              "length_m": result.length_m,
+              "width_m": result.width_m,
+              "scale_status": result.scale_status,
+              "scale_px_per_m": result.scale_px_per_m,
+              "quantity_m2": result.quantity_m2,
+          }
+          print(
+              "MURERA_ROTATED_RASTER_V3="
+              + json.dumps(payload, sort_keys=True, default=str),
+              flush=True,
+          )
+          PY
