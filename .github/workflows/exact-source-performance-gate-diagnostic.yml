@@ -42,12 +42,10 @@ jobs:
         run: |
           set -o pipefail
           timeout 900s env PYTHONPATH=/tmp/pr992 python scripts/profile_exact_source_perf_gate.py             --repo /tmp/pr992 --pdf /tmp/lamu.pdf --pages 41-45             --label lamu-pr992 --wall-only | tee /tmp/lamu-pr992.jsonl
-        continue-on-error: true
       - name: Profile #992 Murera 219-238
         run: |
           set -o pipefail
           timeout 1200s env PYTHONPATH=/tmp/pr992 python scripts/profile_exact_source_perf_gate.py             --repo /tmp/pr992 --pdf /tmp/murera.pdf --pages 219-238             --label murera-pr992 --wall-only | tee /tmp/murera-pr992.jsonl
-        continue-on-error: true
       - uses: actions/upload-artifact@v4
         with:
           name: exact-source-performance-gate
@@ -86,12 +84,10 @@ jobs:
         run: |
           set -o pipefail
           timeout 900s env PYTHONPATH=/tmp/main-perf python scripts/profile_exact_source_perf_gate.py             --repo /tmp/main-perf --pdf /tmp/lamu.pdf --pages 41-45             --label lamu-main --wall-only | tee /tmp/lamu-main.jsonl
-        continue-on-error: true
       - name: Profile production main Murera 219-238
         run: |
           set -o pipefail
           timeout 1200s env PYTHONPATH=/tmp/main-perf python scripts/profile_exact_source_perf_gate.py             --repo /tmp/main-perf --pdf /tmp/murera.pdf --pages 219-238             --label murera-main --wall-only | tee /tmp/murera-main.jsonl
-        continue-on-error: true
       - uses: actions/upload-artifact@v4
         with:
           name: exact-source-performance-main
