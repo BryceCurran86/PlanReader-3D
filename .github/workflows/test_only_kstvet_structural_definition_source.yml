@@ -1,0 +1,25 @@
+name: TEST-ONLY KSTVET Structural Definition Source
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download and verify exact KSTVET source
+        run: |
+          curl -L --fail --retry 3 -o /tmp/kstvet.pdf "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          echo "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf" | sha256sum -c -
+      - name: Probe structural definitions and physical support row
+        run: |
+          PYTHONPATH=. python scripts/diag_kstvet_structural_definition_source.py /tmp/kstvet.pdf | tee /tmp/kstvet-structural-definition-source.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kstvet-structural-definition-source
+          path: /tmp/kstvet-structural-definition-source.json
