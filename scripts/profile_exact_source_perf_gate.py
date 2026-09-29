@@ -150,13 +150,10 @@ wrap_method(
     "publish",
     "openings.host_frame_publish",
 )
-for attr in ("_scope_bbox", "_trusted_words", "_visible_segments", "publish_scope"):
-    wrap_method(
-        scale_authority.PhysicalScaleProducer,
-        attr,
-        f"scale.{attr}",
-    )
-for attr in ("_scope_bbox", "_trusted_words", "_visible_segments", "publish_scope"):
+scale_authority.PhysicalScaleProducer._scope_bbox = staticmethod(
+    timed("scale._scope_bbox", scale_authority.PhysicalScaleProducer._scope_bbox)
+)
+for attr in ("_trusted_words", "_visible_segments", "publish_scope"):
     wrap_method(
         scale_authority.PhysicalScaleProducer,
         attr,
