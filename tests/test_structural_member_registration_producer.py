@@ -272,3 +272,99 @@ def test_production_dependency_closure_has_no_benchmark_or_gold_imports() -> Non
         "benchmark" in name.lower() or "gold" in name.lower()
         for name in imported
     )
+
+
+def test_replay_and_input_order_are_deterministic() -> None:
+    observations = (
+        obs("p1", "plan", anchors=(anchor("A|1"),)),
+        obs("p2", "plan", anchors=(anchor("A|2"),)),
+    )
+    views = (view("plan"),)
+    first = build(observations, views)
+    second = build(tuple(reversed(observations)), tuple(reversed(views)))
+    assert first.observations == second.observations
+    assert first.relations == second.relations
+    assert first.resolution == second.resolution
+
+
+def test_source_lineage_changes_structural_observation_ids() -> None:
+    source = (obs("p1", "plan", anchors=(anchor("A|1"),)),)
+    views = (view("plan"),)
+    first = build_structural_member_registration_authority(
+        selector=selector(),
+        source_observations=source,
+        source_views=views,
+    )
+    changed = StructuralMemberSelector(
+        document_id="doc",
+        revision_id="rev-2",
+        source_sha256="b" * 64,
+        snapshot_id="snap-2",
+        decision_scope_id="building-a",
+        member_kind="masonry_pier",
+    )
+    second = build_structural_member_registration_authority(
+        selector=changed,
+        source_observations=source,
+        source_views=views,
+    )
+    assert first.observations[0].observation_id != second.observations[0].observation_id
+    assert first.resolution.members[0].physical_member_id != (
+        second.resolution.members[0].physical_member_id
+    )
+
+
+def test_same_definition_can_bind_many_distinct_members_without_collapsing() -> None:
+    definition = StructuralMemberDefinition(
+        definition_id="def:pier",
+        member_kind="masonry_pier",
+        section_spec="masonry pier",
+        source_evidence_ids=("schedule:def:pier",),
+        page_id="3",
+        view_id="schedule",
+    )
+    observations = tuple(
+        AuthenticatedStructuralMemberObservation(
+            member_kind="masonry_pier",
+            page_id="1",
+            view_id="plan",
+            view_type="plan",
+            source_evidence_ids=(f"source:{index}",),
+            source_primitive_ids=(f"primitive:{index}",),
+            member_proposition_evidence_ids=(f"member-proof:{index}",),
+            definition_id="def:pier",
+            geometry_signature="same-square",
+        )
+        for index in range(4)
+    )
+    result = build(observations, (view("plan"),), definitions=(definition,))
+    assert result.resolution.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.resolution.quantity == 4
+    assert all(
+        member.definition_ids == ("def:pier",)
+        for member in result.resolution.members
+    )
+
+
+def test_other_member_kind_cannot_enter_selector_scope() -> None:
+    result = build(
+        (
+            obs("pier", "plan"),
+            obs("column", "plan", kind="column"),
+        ),
+        (view("plan"),),
+    )
+    assert result.resolution.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.resolution.quantity == 1
+    assert len(result.observations) == 1
+    assert result.observations[0].member_kind == "masonry_pier"
+
+
+def test_registration_producer_is_not_live_wired_before_promotion_review() -> None:
+    module_name = "pb_structural_member_registration_producer"
+    live_files = (
+        Path("pb_planreader_pdf_extractor.py"),
+        Path("pb_planreader_jobhub_publish_contract.py"),
+    )
+    for path in live_files:
+        assert module_name not in path.read_text(encoding="utf-8")
