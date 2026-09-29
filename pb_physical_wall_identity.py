@@ -331,6 +331,7 @@ class _PhysicalWallPairFeatures:
     primitive_set: frozenset[str]
     path: tuple[tuple[float, float], ...]
     segments: tuple[tuple[float, float, float, float], ...]
+    segment_units: tuple[Optional[tuple[float, float]], ...]
     axis_interval: Optional[tuple[str, float, float]]
     level_id: str
 
@@ -339,10 +340,12 @@ def _physical_wall_pair_features(
     identity: PhysicalWallIdentity,
 ) -> _PhysicalWallPairFeatures:
     path = tuple(identity.path_fingerprint or ())
+    segments = _segments(path)
     return _PhysicalWallPairFeatures(
         primitive_set=frozenset(identity.source_primitive_ids),
         path=path,
-        segments=_segments(path),
+        segments=segments,
+        segment_units=tuple(_unit(segment) for segment in segments),
         axis_interval=_axis_interval(path),
         level_id=str(identity.level_id or "").strip(),
     )
@@ -514,19 +517,23 @@ def _paths_share_both_endpoints(
     )
 
 
-def _segments_meet_as_same_wall_candidates(
+def _segments_meet_as_same_wall_candidates_with_units(
     left_segs: Sequence[tuple[float, float, float, float]],
     right_segs: Sequence[tuple[float, float, float, float]],
+    left_units: Sequence[Optional[tuple[float, float]]],
+    right_units: Sequence[Optional[tuple[float, float]]],
     tolerance: float,
 ) -> bool:
     if not left_segs or not right_segs:
         return False
-    for a in left_segs:
-        for b in right_segs:
+    for a, au in zip(left_segs, left_units):
+        for b, bu in zip(right_segs, right_units):
             if (
-                _parallel_overlap_separation(
+                _parallel_overlap_separation_with_units(
                     a,
                     b,
+                    au,
+                    bu,
                     angle_tolerance_deg=_EQUIVALENCE_ANGLE_TOL_DEG,
                 )
                 is None
@@ -535,6 +542,20 @@ def _segments_meet_as_same_wall_candidates(
             if _segments_meet_within(a, b, tolerance):
                 return True
     return False
+
+
+def _segments_meet_as_same_wall_candidates(
+    left_segs: Sequence[tuple[float, float, float, float]],
+    right_segs: Sequence[tuple[float, float, float, float]],
+    tolerance: float,
+) -> bool:
+    return _segments_meet_as_same_wall_candidates_with_units(
+        left_segs,
+        right_segs,
+        tuple(_unit(segment) for segment in left_segs),
+        tuple(_unit(segment) for segment in right_segs),
+        tolerance,
+    )
 
 
 def _paths_meet_as_same_wall_candidates(
@@ -556,19 +577,15 @@ def _paths_meet_as_same_wall_candidates(
     )
 
 
-def _parallel_overlap_separation(
+def _parallel_overlap_separation_with_units(
     left: tuple[float, float, float, float],
     right: tuple[float, float, float, float],
+    lu: Optional[tuple[float, float]],
+    ru: Optional[tuple[float, float]],
     *,
     angle_tolerance_deg: float,
 ) -> Optional[tuple[float, float]]:
-    """Longitudinal overlap and perpendicular separation of a parallel pair.
-
-    Orientation is compared at the W3 collinear angle tolerance, so drafting
-    skew does not hide a genuine face pair.  Returns ``None`` when the pair is
-    not parallel within tolerance.
-    """
-    lu, ru = _unit(left), _unit(right)
+    """Exact geometry predicate with caller-supplied immutable segment units."""
     if lu is None or ru is None:
         return None
     dot = max(-1.0, min(1.0, abs(lu[0] * ru[0] + lu[1] * ru[1])))
@@ -589,10 +606,6 @@ def _parallel_overlap_separation(
 
     liv, riv = interval(left), interval(right)
     overlap = min(liv[1], riv[1]) - max(liv[0], riv[0])
-
-    # Perpendicular offset is measured at the overlapping run rather than at
-    # one endpoint, so a slightly skewed face pair is still measured across
-    # the part they actually share.
     mid = (max(liv[0], riv[0]) + min(liv[1], riv[1])) / 2.0
 
     def offset_at(seg):
@@ -608,6 +621,22 @@ def _parallel_overlap_separation(
 
     separation = abs(offset_at(right) - offset_at(left))
     return overlap, separation
+
+
+def _parallel_overlap_separation(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+    *,
+    angle_tolerance_deg: float,
+) -> Optional[tuple[float, float]]:
+    """Longitudinal overlap and perpendicular separation of a parallel pair."""
+    return _parallel_overlap_separation_with_units(
+        left,
+        right,
+        _unit(left),
+        _unit(right),
+        angle_tolerance_deg=angle_tolerance_deg,
+    )
 
 
 def _physical_wall_pair_identity_candidacy_with_features(
@@ -645,9 +674,11 @@ def _physical_wall_pair_identity_candidacy_with_features(
     ):
         return True, None
 
-    if _segments_meet_as_same_wall_candidates(
+    if _segments_meet_as_same_wall_candidates_with_units(
         left_features.segments,
         right_features.segments,
+        left_features.segment_units,
+        right_features.segment_units,
         _EQUIVALENCE_LATERAL_TOL_PT,
     ):
         return True, None
@@ -655,10 +686,14 @@ def _physical_wall_pair_identity_candidacy_with_features(
     band = max_plausible_wall_body_separation_pt(points_per_mm)
     saw_parallel = False
     saw_overlap = False
-    for a in left_features.segments:
-        for b in right_features.segments:
-            relation = _parallel_overlap_separation(
-                a, b, angle_tolerance_deg=_EQUIVALENCE_ANGLE_TOL_DEG
+    for a, au in zip(left_features.segments, left_features.segment_units):
+        for b, bu in zip(right_features.segments, right_features.segment_units):
+            relation = _parallel_overlap_separation_with_units(
+                a,
+                b,
+                au,
+                bu,
+                angle_tolerance_deg=_EQUIVALENCE_ANGLE_TOL_DEG,
             )
             if relation is None:
                 continue
