@@ -1,11 +1,10 @@
 """tests/benchmarks/test_mutation_structural_pillar_extraction_wiring.py
 
-Mutation/red-team suite for GenericPlanReaderExtractor's wiring of
-pb_structural_bay_pillar_count.py into the real extraction path: a
-structural_columns prediction is only emitted when BOTH a genuine,
-unambiguous repeated-bay dimension pattern AND a support-element keyword
-are present on the same page. Every dimension value is synthetic and
-invented for this test file.
+Mutation/red-team suite for GenericPlanReaderExtractor's structural-support
+authority boundary. Bay arithmetic and explicit count text remain evidence,
+but only producer-owned physical StructuralMemberAuthority may publish live
+support-member quantity. Every dimension/count value is synthetic and invented
+for this test file.
 """
 from __future__ import annotations
 
@@ -38,19 +37,16 @@ def _extract(tmp_path: Path, **kwargs) -> dict:
 
 
 class TestStructuralColumnWiring:
-    def test_keyword_plus_genuine_bay_chain_emits_a_column_count(self, tmp_path: Path) -> None:
-        # 4 near-equal bays of ~3.30m -> 5 supports.
+    def test_keyword_plus_genuine_bay_chain_does_not_mint_member_quantity(
+        self, tmp_path: Path
+    ) -> None:
+        # A real repeated bay pattern is useful evidence, but N+1 arithmetic
+        # alone is not a physical-member census.
         pred_map = _extract(
             tmp_path, include_keyword=True,
             dims=["3,300", "3,350", "3,280", "3,320"],
         )
-        assert "structural_columns" in pred_map
-        pred = pred_map["structural_columns"]
-        assert pred.trade_type == "structure"
-        assert pred.unit == "NO"
-        assert pred.quantity == 5.0
-        assert pred.metadata["bay_count"] == 4
-        assert pred.confidence == 0.7
+        assert "structural_columns" not in pred_map
 
     def test_keyword_without_a_genuine_bay_chain_emits_nothing(self, tmp_path: Path) -> None:
         # A single dimension, or genuinely dissimilar ones, is not a bay
@@ -78,15 +74,12 @@ class TestStructuralColumnWiring:
         )
         assert "structural_columns" not in pred_map
 
-    def test_derivation_metadata_is_fully_traceable(self, tmp_path: Path) -> None:
+    def test_bay_count_evidence_stays_non_authoritative(self, tmp_path: Path) -> None:
         pred_map = _extract(
             tmp_path, include_keyword=True,
             dims=["4,000", "4,000", "4,000"],
         )
-        pred = pred_map["structural_columns"]
-        assert pred.metadata["derivation"] == "bay_count_plus_one_from_repeated_dimension_chain"
-        assert pred.metadata["bay_spans_m"] == [4.0, 4.0, 4.0]
-        assert pred.quantity == 4.0  # 3 bays + 1
+        assert "structural_columns" not in pred_map
 
 
 def _make_physical_verandah_pdf(
@@ -188,3 +181,34 @@ def test_text_only_secondary_support_evidence_cannot_publish_live_quantity(
         for prediction in extractor.extract_from_pdf(pdf_path)
     }
     assert "verandah_pillars" not in pred_map
+
+
+def _make_explicit_structural_count_pdf(tmp_path: Path, text: str) -> Path:
+    doc = fitz.open()
+    page = doc.new_page(width=842, height=595)
+    page.insert_text((72, 72), "GROUND FLOOR PLAN\nSCALE 1:100\n" + text, fontsize=10)
+    pdf_path = tmp_path / "explicit_structural_count.pdf"
+    doc.save(str(pdf_path))
+    doc.close()
+    return pdf_path
+
+
+@pytest.mark.parametrize(
+    ("text", "blocked_tag"),
+    (
+        ("6 Nos CHS pillars to verandah", "verandah_pillars"),
+        ("7 Nos masonry piers", "masonry_piers"),
+    ),
+)
+def test_explicit_structural_count_text_cannot_mint_live_members(
+    tmp_path: Path,
+    text: str,
+    blocked_tag: str,
+) -> None:
+    pdf_path = _make_explicit_structural_count_pdf(tmp_path, text)
+    extractor = GenericPlanReaderExtractor()
+    pred_map = {
+        prediction.tag: prediction
+        for prediction in extractor.extract_from_pdf(pdf_path)
+    }
+    assert blocked_tag not in pred_map
