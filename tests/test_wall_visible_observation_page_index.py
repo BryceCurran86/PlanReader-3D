@@ -210,7 +210,7 @@ def test_wall_candidate_producer_constructs_one_opening_authority_per_revision(
 
 
 
-def test_opening_override_proves_only_wall_relevant_source_primitives(monkeypatch):
+def test_opening_override_proves_every_page_visible_observation_once(monkeypatch):
     source, published, _payload = _source(page_count=1)
     indexed = module._visible_observations_by_page(
         source_producer=source,
@@ -223,17 +223,7 @@ def test_opening_override_proves_only_wall_relevant_source_primitives(monkeypatc
         if str(observation.source_primitive_ref).startswith("visible:segment:")
     ]
     assert len(native) >= 6
-    rows.append(
-        (
-            "irrelevant-visible-observation",
-            SimpleNamespace(
-                page_id="1",
-                source_primitive_ref="visible:segment:unrelated-primitive",
-            ),
-        )
-    )
 
-    selected = native[:6]
     records = tuple(
         SimpleNamespace(
             wall_candidate_id=f"wall-{index}",
@@ -243,7 +233,7 @@ def test_opening_override_proves_only_wall_relevant_source_primitives(monkeypatc
                 )
             ),
         )
-        for index, (_oid, observation) in enumerate(selected)
+        for index, (_oid, observation) in enumerate(native[:6])
     )
 
     calls = []
@@ -268,8 +258,7 @@ def test_opening_override_proves_only_wall_relevant_source_primitives(monkeypatc
     )
 
     assert result == {}
-    assert set(calls) == {oid for oid, _observation in selected}
-    assert len(calls) < len(rows)
+    assert calls == [oid for oid, _observation in rows]
 
 
 def test_fewer_than_six_wall_candidates_skips_opening_proof_entirely(monkeypatch):
