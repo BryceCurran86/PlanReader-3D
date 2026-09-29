@@ -204,6 +204,109 @@ def _point_pairs_to_segment_dicts(
     return attach_lineage_to_split_fragments(pairs, source_segments, id_prefix=id_prefix)
 
 
+def _snap_geometry_indexed(
+    segments: Sequence[Dict[str, Any]],
+    tolerance_pt: float = DEFAULT_GAP_SNAP_TOLERANCE_PT,
+) -> Dict[str, Any]:
+    """Exact Stage-A equivalent of snap_geometry with a local endpoint index.
+
+    Candidate membership is unchanged: a node is eligible iff its current
+    centroid is within tolerance_pt. The same lowest-distance / lowest-existing
+    node index wins because candidates are visited in ascending node id and the
+    historical strict distance comparison is retained. Node centroids still
+    move by the same running mean after every accepted endpoint.
+    """
+    if tolerance_pt <= 0:
+        return snap_geometry(segments, tolerance_pt=tolerance_pt)
+
+    nodes: List[Dict[str, Any]] = []
+    node_for: Dict[Tuple[str, int], int] = {}
+    cell_size = float(tolerance_pt)
+    grid: Dict[Tuple[int, int], set[int]] = {}
+
+    def cell_for(x: float, y: float) -> Tuple[int, int]:
+        return (
+            math.floor(float(x) / cell_size),
+            math.floor(float(y) / cell_size),
+        )
+
+    def add_to_grid(node_idx: int) -> None:
+        node = nodes[node_idx]
+        grid.setdefault(cell_for(node["x"], node["y"]), set()).add(node_idx)
+
+    def move_in_grid(node_idx: int, old_cell: Tuple[int, int]) -> None:
+        new_cell = cell_for(nodes[node_idx]["x"], nodes[node_idx]["y"])
+        if new_cell == old_cell:
+            return
+        members = grid.get(old_cell)
+        if members is not None:
+            members.discard(node_idx)
+            if not members:
+                grid.pop(old_cell, None)
+        grid.setdefault(new_cell, set()).add(node_idx)
+
+    def locate(pt: Tuple[float, float]) -> int:
+        cx, cy = cell_for(pt[0], pt[1])
+        candidate_indexes: set[int] = set()
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                candidate_indexes.update(grid.get((cx + dx, cy + dy), ()))
+
+        best = -1
+        best_d = tolerance_pt + 1.0
+        for idx in sorted(candidate_indexes):
+            node = nodes[idx]
+            d = math.hypot(node["x"] - pt[0], node["y"] - pt[1])
+            if d <= tolerance_pt and d < best_d:
+                best, best_d = idx, d
+
+        if best >= 0:
+            node = nodes[best]
+            old_cell = cell_for(node["x"], node["y"])
+            count = node["samples"] + 1
+            node["x"] = (node["x"] * node["samples"] + pt[0]) / count
+            node["y"] = (node["y"] * node["samples"] + pt[1]) / count
+            node["samples"] = count
+            move_in_grid(best, old_cell)
+            return best
+
+        nodes.append(
+            {"id": len(nodes), "x": pt[0], "y": pt[1], "samples": 1}
+        )
+        add_to_grid(len(nodes) - 1)
+        return len(nodes) - 1
+
+    edges = []
+    for seg in segments:
+        a = locate((float(seg["x1"]), float(seg["y1"])))
+        b = locate((float(seg["x2"]), float(seg["y2"])))
+        if a == b:
+            continue
+        edge = dict(seg)
+        edge.update({"a": a, "b": b})
+        edge["length_pt"] = math.hypot(
+            float(seg["x2"]) - float(seg["x1"]),
+            float(seg["y2"]) - float(seg["y1"]),
+        )
+        edge["angle_deg"] = math.degrees(
+            math.atan2(
+                float(seg["y2"]) - float(seg["y1"]),
+                float(seg["x2"]) - float(seg["x1"]),
+            )
+        ) % 180.0
+        edges.append(edge)
+        node_for[(str(seg.get("id")), 0)] = a
+        node_for[(str(seg.get("id")), 1)] = b
+
+    adjacency: Dict[int, List[int]] = {idx: [] for idx in range(len(nodes))}
+    for edge_index, edge in enumerate(edges):
+        adjacency[edge["a"]].append(edge_index)
+        adjacency[edge["b"]].append(edge_index)
+    for node in nodes:
+        node["degree"] = len(adjacency[node["id"]])
+    return {"nodes": nodes, "edges": edges, "adjacency": adjacency}
+
+
 def merge_collinear_degree_two_nodes(
     graph: Dict[str, Any],
     angle_tolerance_deg: float = DEFAULT_COLLINEAR_ANGLE_TOLERANCE_DEG,
@@ -365,7 +468,10 @@ def build_wall_graph_for_viewport(
     split_segment_dicts = _point_pairs_to_segment_dicts(
         split_pairs, source_segments=structural_segments
     )
-    snapped_graph = snap_geometry(split_segment_dicts, tolerance_pt=gap_snap_tolerance_pt)
+    snapped_graph = _snap_geometry_indexed(
+        split_segment_dicts,
+        tolerance_pt=gap_snap_tolerance_pt,
+    )
     isolate_graph_lineage(snapped_graph)
     snap_collapsed_fragments = observe_snap_collapsed_fragments(
         split_segment_dicts, snapped_graph
