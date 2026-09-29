@@ -1140,47 +1140,93 @@ class GenericPlanReaderExtractor:
             global_resolved_secondary_support is not None
             and global_resolved_secondary_support.zone_type == "verandah"
         ):
+            # Structural support quantity is live only after the producer-owned
+            # physical-member authority resolves the complete source-visible
+            # instance row. Corroborated text/dimension arithmetic may remain
+            # useful evidence, but it cannot itself mint physical members.
+            from hashlib import sha256
+
+            from pb_migration_contracts import EvidenceResolutionStatus
+            from pb_secondary_support_structural_member_adapter import (
+                build_secondary_support_structural_member_authority,
+            )
+
             support_page = global_resolved_secondary_support.source_pages[0]
-            support_sheet_no = self.extract_sheet_number(
-                doc[support_page - 1].get_text("text"), support_page
-            )
-            pred_dict["verandah_pillars"] = ExtractedPrediction(
-                tag="verandah_pillars",
-                trade_type="structure",
-                description=(
-                    (
-                        "Verandah physical supports from "
-                        if global_resolved_secondary_support.evidence_mode == "physical_symbol"
-                        else f"Verandah structural {global_resolved_secondary_support.support_kind}s from "
-                    )
-                    + f"{global_resolved_secondary_support.bay_count} corroborated "
-                    "repeated bay spans"
+            support_view_id = f"page_{support_page}"
+            digest = sha256()
+            with p_path.open("rb") as source_file:
+                for chunk in iter(lambda: source_file.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            structural_source_sha256 = digest.hexdigest()
+
+            structural_support = build_secondary_support_structural_member_authority(
+                evidence=global_resolved_secondary_support,
+                document_id=f"pdf-sha256:{structural_source_sha256}",
+                revision_id=f"source:{structural_source_sha256}",
+                source_sha256=structural_source_sha256,
+                snapshot_id=f"source:{structural_source_sha256}",
+                decision_scope_id=(
+                    f"secondary-area:{global_resolved_secondary_support.zone_type}:"
+                    f"page:{support_page}"
                 ),
-                quantity=float(global_resolved_secondary_support.support_count),
-                unit="NO",
-                confidence=global_resolved_secondary_support.confidence,
-                source_page=support_page,
-                sheet_number=support_sheet_no,
-                metadata={
-                    "derivation": (
-                        "physical_secondary_area_support_instances"
-                        if global_resolved_secondary_support.evidence_mode == "physical_symbol"
-                        else "corroborated_secondary_area_bay_support_count"
+                view_id=support_view_id,
+                # The physical-symbol evidence producer accepts a row only when
+                # the complete N+1 universe is present, uniquely matched and
+                # unambiguous on one source page.
+                view_complete=(
+                    global_resolved_secondary_support.evidence_mode == "physical_symbol"
+                    and bool(global_resolved_secondary_support.support_symbol_ids)
+                ),
+            ).resolution
+
+            if (
+                structural_support.status is EvidenceResolutionStatus.CORROBORATED
+                and structural_support.quantity is not None
+            ):
+                support_sheet_no = self.extract_sheet_number(
+                    doc[support_page - 1].get_text("text"), support_page
+                )
+                pred_dict["verandah_pillars"] = ExtractedPrediction(
+                    tag="verandah_pillars",
+                    trade_type="structure",
+                    description=(
+                        "Verandah physical supports from "
+                        f"{global_resolved_secondary_support.bay_count} corroborated "
+                        "repeated bay spans"
                     ),
-                    "zone_type": global_resolved_secondary_support.zone_type,
-                    "support_kind": global_resolved_secondary_support.support_kind,
-                    "evidence_mode": global_resolved_secondary_support.evidence_mode,
-                    "support_symbol_ids": list(
-                        global_resolved_secondary_support.support_symbol_ids
-                    ),
-                    "bay_count": global_resolved_secondary_support.bay_count,
-                    "bay_spans_m": list(global_resolved_secondary_support.bay_spans_m),
-                    "source_pages": list(global_resolved_secondary_support.source_pages),
-                    "chain_ids": list(global_resolved_secondary_support.chain_ids),
-                    "zone_text": global_resolved_secondary_support.zone_text,
-                    "support_text": global_resolved_secondary_support.support_text,
-                },
-            )
+                    quantity=float(structural_support.quantity),
+                    unit="NO",
+                    confidence=global_resolved_secondary_support.confidence,
+                    source_page=support_page,
+                    sheet_number=support_sheet_no,
+                    metadata={
+                        "derivation": "physical_structural_member_authority",
+                        "structural_member_status": structural_support.status.value,
+                        "physical_member_ids": [
+                            member.physical_member_id
+                            for member in structural_support.members
+                        ],
+                        "source_sha256": structural_source_sha256,
+                        "zone_type": global_resolved_secondary_support.zone_type,
+                        "support_kind": global_resolved_secondary_support.support_kind,
+                        "evidence_mode": global_resolved_secondary_support.evidence_mode,
+                        "support_symbol_ids": list(
+                            global_resolved_secondary_support.support_symbol_ids
+                        ),
+                        "bay_count": global_resolved_secondary_support.bay_count,
+                        "bay_spans_m": list(
+                            global_resolved_secondary_support.bay_spans_m
+                        ),
+                        "source_pages": list(
+                            global_resolved_secondary_support.source_pages
+                        ),
+                        "chain_ids": list(
+                            global_resolved_secondary_support.chain_ids
+                        ),
+                        "zone_text": global_resolved_secondary_support.zone_text,
+                        "support_text": global_resolved_secondary_support.support_text,
+                    },
+                )
 
         for pno in target_pages:
             if pno < 0 or pno >= len(doc):
