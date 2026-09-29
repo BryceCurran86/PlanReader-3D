@@ -326,6 +326,28 @@ PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP = "pair_excluded_no_longitudinal_overlap"
 PAIR_EXCLUDED_SEPARATION_BEYOND_BAND = "pair_excluded_separation_beyond_wall_body_band"
 
 
+@dataclass(frozen=True)
+class _PhysicalWallPairFeatures:
+    primitive_set: frozenset[str]
+    path: tuple[tuple[float, float], ...]
+    segments: tuple[tuple[float, float, float, float], ...]
+    axis_interval: Optional[tuple[str, float, float]]
+    level_id: str
+
+
+def _physical_wall_pair_features(
+    identity: PhysicalWallIdentity,
+) -> _PhysicalWallPairFeatures:
+    path = tuple(identity.path_fingerprint or ())
+    return _PhysicalWallPairFeatures(
+        primitive_set=frozenset(identity.source_primitive_ids),
+        path=path,
+        segments=_segments(path),
+        axis_interval=_axis_interval(path),
+        level_id=str(identity.level_id or "").strip(),
+    )
+
+
 def max_plausible_wall_body_separation_pt(
     points_per_mm: Optional[float] = None,
 ) -> Optional[float]:
@@ -492,19 +514,11 @@ def _paths_share_both_endpoints(
     )
 
 
-def _paths_meet_as_same_wall_candidates(
-    left: Sequence[tuple[float, float]],
-    right: Sequence[tuple[float, float]],
+def _segments_meet_as_same_wall_candidates(
+    left_segs: Sequence[tuple[float, float, float, float]],
+    right_segs: Sequence[tuple[float, float, float, float]],
     tolerance: float,
 ) -> bool:
-    """True only for orientation-compatible contact.
-
-    T/L/X junctions are real wall-network contacts but are not plausible
-    duplicate faces/representations of one physical wall.  Contact therefore
-    enters the equivalence contest only when at least one touching segment
-    pair is parallel within the repository's collinear-angle tolerance.
-    """
-    left_segs, right_segs = _segments(left), _segments(right)
     if not left_segs or not right_segs:
         return False
     for a in left_segs:
@@ -521,6 +535,25 @@ def _paths_meet_as_same_wall_candidates(
             if _segments_meet_within(a, b, tolerance):
                 return True
     return False
+
+
+def _paths_meet_as_same_wall_candidates(
+    left: Sequence[tuple[float, float]],
+    right: Sequence[tuple[float, float]],
+    tolerance: float,
+) -> bool:
+    """True only for orientation-compatible contact.
+
+    T/L/X junctions are real wall-network contacts but are not plausible
+    duplicate faces/representations of one physical wall. Contact therefore
+    enters the equivalence contest only when at least one touching segment
+    pair is parallel within the repository's collinear-angle tolerance.
+    """
+    return _segments_meet_as_same_wall_candidates(
+        _segments(left),
+        _segments(right),
+        tolerance,
+    )
 
 
 def _parallel_overlap_separation(
@@ -577,44 +610,17 @@ def _parallel_overlap_separation(
     return overlap, separation
 
 
-def physical_wall_pair_identity_candidacy(
+def _physical_wall_pair_identity_candidacy_with_features(
     left: PhysicalWallIdentity,
     right: PhysicalWallIdentity,
+    left_features: _PhysicalWallPairFeatures,
+    right_features: _PhysicalWallPairFeatures,
     *,
     points_per_mm: Optional[float] = None,
 ) -> tuple[bool, Optional[str]]:
-    """Could this pair plausibly represent the same physical wall?
-
-    Returns ``(eligible, exclusion_reason)``.  Only eligible pairs take part
-    in equivalence classification at all.  A pair that fails every test has
-    NO equivalence relation: it is neither SAME, nor DISTINCT, nor AMBIGUOUS,
-    and it must not link the two candidates into a shared publication
-    contest.
-
-    Eligibility (any one suffices, all fail-closed):
-
-    1. either identity unusable, or geometry too thin to compare;
-    2. a shared immutable source primitive;
-    3. an identical reconstructed path fingerprint (duplicate geometry);
-    4. a viewport/level scope difference, which may be the same physical wall
-       drawn twice at different coordinates or scale;
-    5. the same two path endpoints within the snap tolerance;
-    6. orientation-compatible geometric contact within the snap tolerance;
-    7. a parallel, longitudinally overlapping sub-segment pair. With
-       producer-owned physical scale, separation beyond the conservative
-       maximum wall body excludes the pair; without scale, separation cannot
-       safely exclude it.
-
-    Rule 7 is a CANDIDATE FILTER ONLY.  Separation never proves
-    SAME_PHYSICAL_WALL; it only admits the pair to normal SAME / DISTINCT /
-    AMBIGUOUS classification, which still requires positive evidence.
-
-    No nearest/first selection, no confidence, no proximity-as-identity, no
-    layer names, and no project-specific constant.
-    """
     if not left.usable or not right.usable:
         return True, None
-    if set(left.source_primitive_ids) & set(right.source_primitive_ids):
+    if left_features.primitive_set & right_features.primitive_set:
         return True, None
     if (
         left.path_fingerprint is not None
@@ -622,32 +628,26 @@ def physical_wall_pair_identity_candidacy(
     ):
         return True, None
 
-    # Cross-scope duplicate safety: the same physical wall may be drawn in a
-    # plan and again in an enlarged plan or repeated detail, at different
-    # coordinates and a different scale. Coordinates cannot rule that out, so
-    # such pairs stay in contest until positive reconciliation exists.
-    left_level = str(left.level_id or "").strip()
-    right_level = str(right.level_id or "").strip()
     if left.viewport_id != right.viewport_id or (
-        bool(left_level) and bool(right_level) and left_level != right_level
+        bool(left_features.level_id)
+        and bool(right_features.level_id)
+        and left_features.level_id != right_features.level_id
     ):
         return True, None
 
-    left_path = tuple(left.path_fingerprint or ())
-    right_path = tuple(right.path_fingerprint or ())
-    if len(left_path) < 2 or len(right_path) < 2:
+    if len(left_features.path) < 2 or len(right_features.path) < 2:
         return True, None
 
     if _paths_share_both_endpoints(
-        left_path,
-        right_path,
+        left_features.path,
+        right_features.path,
         _EQUIVALENCE_LATERAL_TOL_PT,
     ):
         return True, None
 
-    if _paths_meet_as_same_wall_candidates(
-        left_path,
-        right_path,
+    if _segments_meet_as_same_wall_candidates(
+        left_features.segments,
+        right_features.segments,
         _EQUIVALENCE_LATERAL_TOL_PT,
     ):
         return True, None
@@ -655,8 +655,8 @@ def physical_wall_pair_identity_candidacy(
     band = max_plausible_wall_body_separation_pt(points_per_mm)
     saw_parallel = False
     saw_overlap = False
-    for a in _segments(left_path):
-        for b in _segments(right_path):
+    for a in left_features.segments:
+        for b in right_features.segments:
             relation = _parallel_overlap_separation(
                 a, b, angle_tolerance_deg=_EQUIVALENCE_ANGLE_TOL_DEG
             )
@@ -667,10 +667,6 @@ def physical_wall_pair_identity_candidacy(
             if overlap <= _EQUIVALENCE_LATERAL_TOL_PT:
                 continue
             saw_overlap = True
-            # Physical separation may exclude a pair only when the exact
-            # source scope has producer-owned physical scale.  With no scale,
-            # keep every parallel overlapping pair in contest: abstention is
-            # safer than double-publishing two faces of one thick wall.
             if band is None or separation <= band:
                 return True, None
 
@@ -682,6 +678,26 @@ def physical_wall_pair_identity_candidacy(
         return True, None
     return False, PAIR_EXCLUDED_SEPARATION_BEYOND_BAND
 
+
+def physical_wall_pair_identity_candidacy(
+    left: PhysicalWallIdentity,
+    right: PhysicalWallIdentity,
+    *,
+    points_per_mm: Optional[float] = None,
+) -> tuple[bool, Optional[str]]:
+    """Could this pair plausibly represent the same physical wall?
+
+    This public form preserves the historical standalone behavior. The
+    resolver uses the same predicate with one immutable feature record per
+    candidate so pairwise audits do not repeatedly rebuild sets and segments.
+    """
+    return _physical_wall_pair_identity_candidacy_with_features(
+        left,
+        right,
+        _physical_wall_pair_features(left),
+        _physical_wall_pair_features(right),
+        points_per_mm=points_per_mm,
+    )
 
 def physical_wall_pair_is_identity_candidate(
     left: PhysicalWallIdentity,
@@ -696,69 +712,64 @@ def physical_wall_pair_is_identity_candidate(
     return eligible
 
 
-def classify_physical_wall_pair(
+def _classify_physical_wall_pair_with_features(
     left: PhysicalWallIdentity,
     right: PhysicalWallIdentity,
+    left_features: _PhysicalWallPairFeatures,
+    right_features: _PhysicalWallPairFeatures,
 ) -> PhysicalEquivalenceClass:
-    """Classify one pair. Never uses distance, confidence, or first-candidate.
-
-    Absence of SAME proof is not positive DISTINCT proof. A bare label
-    (``viewport_id`` or ``level_id``) difference is likewise not positive
-    DISTINCT proof by itself -- this repository has no authoritative
-    level/scope-identity resolver yet, so two candidates whose only
-    difference is an unvalidated label string cannot be more than
-    AMBIGUOUS. Crossing that same unproven boundary (``cross_scope`` below)
-    also blocks the SAME rule: coordinate/ancestry coincidence across a
-    labelled-but-unverified viewport or level boundary is not proof of
-    physical identity either, only a coincidence. The only rules that may
-    ever return DISTINCT are grounded in proven, positive geometry+provenance
-    facts (disjoint spans under shared ancestry) that do not depend on any
-    label string at all.
-    """
     if not left.usable or not right.usable:
         return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
 
-    left_level = str(left.level_id or "").strip()
-    right_level = str(right.level_id or "").strip()
     cross_scope = (left.viewport_id != right.viewport_id) or (
-        bool(left_level) and bool(right_level) and left_level != right_level
+        bool(left_features.level_id)
+        and bool(right_features.level_id)
+        and left_features.level_id != right_features.level_id
     )
 
-    same_path = left.path_fingerprint is not None and left.path_fingerprint == right.path_fingerprint
-    left_prims = tuple(left.source_primitive_ids)
-    right_prims = tuple(right.source_primitive_ids)
-    shared = set(left_prims) & set(right_prims)
-    equal_ancestry = _ancestry_equal(left_prims, right_prims)
-    coverage_identical = _ancestry_coverage_identical(left_prims, right_prims)
+    same_path = (
+        left.path_fingerprint is not None
+        and left.path_fingerprint == right.path_fingerprint
+    )
+    equal_ancestry = bool(left.source_primitive_ids) and (
+        left_features.primitive_set == right_features.primitive_set
+    )
+    coverage_identical = equal_ancestry
+    shared = left_features.primitive_set & right_features.primitive_set
 
-    # SAME: same complete path + same U1 ancestry / identical coverage, and
-    # not crossing an unproven viewport/level label boundary while doing so.
     if same_path and (equal_ancestry or coverage_identical) and not cross_scope:
         return PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
 
-    # identical path + different primitive IDs, no duplication proof → AMBIGUOUS
     if same_path and not equal_ancestry:
         return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
 
-    left_iv = _axis_interval(left.path_fingerprint or ())
-    right_iv = _axis_interval(right.path_fingerprint or ())
+    left_iv = left_features.axis_interval
+    right_iv = right_features.axis_interval
 
-    # DISTINCT: same ancestry, proven disjoint spans in a common topology
     if equal_ancestry and left_iv is not None and right_iv is not None:
         if _intervals_disjoint(left_iv, right_iv):
             return PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
-        # partial overlap / contained subspan without split provenance
         return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
 
-    # shared ancestry, different paths, overlapping intervals (paired-face etc.)
     if shared and left_iv is not None and right_iv is not None:
         if _intervals_overlap(left_iv, right_iv):
             return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
         return PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
 
-    # different path + independent provenance is NOT positive DISTINCT proof
     return PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
 
+
+def classify_physical_wall_pair(
+    left: PhysicalWallIdentity,
+    right: PhysicalWallIdentity,
+) -> PhysicalEquivalenceClass:
+    """Classify one pair without changing historical semantics."""
+    return _classify_physical_wall_pair_with_features(
+        left,
+        right,
+        _physical_wall_pair_features(left),
+        _physical_wall_pair_features(right),
+    )
 
 def _union_find_groups(pairs: Sequence[tuple[str, str]], members: Sequence[str]) -> list[list[str]]:
     parent = {member: member for member in members}
@@ -819,6 +830,10 @@ def resolve_physical_wall_equivalence(
     scope_viewport = sorted(viewport_ids)[0] if len(viewport_ids) == 1 else "multi"
     member_ids = [identity.wall_candidate_id for identity in usable]
     by_id = {identity.wall_candidate_id: identity for identity in usable}
+    features_by_id = {
+        identity.wall_candidate_id: _physical_wall_pair_features(identity)
+        for identity in usable
+    }
 
     pair_classifications: list[tuple[str, str, str]] = []
     same_links: list[tuple[str, str]] = []
@@ -845,8 +860,14 @@ def resolve_physical_wall_equivalence(
             # is not an identity competitor and gets no relation at all.
             # Absence of a SAME proof between unrelated candidates is not
             # ambiguity, and must not link them into one publication contest.
-            eligible, exclusion_reason = physical_wall_pair_identity_candidacy(
-                left, right, points_per_mm=points_per_mm
+            eligible, exclusion_reason = (
+                _physical_wall_pair_identity_candidacy_with_features(
+                    left,
+                    right,
+                    features_by_id[left.wall_candidate_id],
+                    features_by_id[right.wall_candidate_id],
+                    points_per_mm=points_per_mm,
+                )
             )
             if not eligible:
                 excluded_pairs += 1
@@ -855,7 +876,12 @@ def resolve_physical_wall_equivalence(
                         exclusion_reason_counts.get(exclusion_reason, 0) + 1
                     )
                 continue
-            classification = classify_physical_wall_pair(left, right)
+            classification = _classify_physical_wall_pair_with_features(
+                left,
+                right,
+                features_by_id[left.wall_candidate_id],
+                features_by_id[right.wall_candidate_id],
+            )
             a, b = sorted((left.wall_candidate_id, right.wall_candidate_id))
             pair_classifications.append((a, b, classification.value))
             if classification == PhysicalEquivalenceClass.SAME_PHYSICAL_WALL:
