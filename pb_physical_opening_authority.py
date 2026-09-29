@@ -24,6 +24,10 @@ from pb_plan_opening_detection_v171 import (
     detect_wall_lines,
     detect_window_candidates,
 )
+from pb_plan_opening_detection_indexed_v172 import (
+    detect_door_candidates_indexed,
+    detect_gap_candidates_indexed,
+)
 from pb_source_observation_authority import (
     ObservationSelector,
     SourceObservationAuthority,
@@ -912,10 +916,10 @@ class PhysicalOpeningAuthority:
         walls = detect_wall_lines(segments)
         if not walls:
             return ()
-        doors = detect_door_candidates(
+        doors = detect_door_candidates_indexed(
             segments, walls, (), page_no=int(seed.page_id)
         )
-        gaps = detect_gap_candidates(
+        gaps = detect_gap_candidates_indexed(
             segments, walls, (), page_no=int(seed.page_id)
         )
 
