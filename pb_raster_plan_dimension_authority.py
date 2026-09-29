@@ -71,6 +71,11 @@ _PRODUCTION_BACKENDS = (
     NullOCRBackend,
 )
 
+# OCR backends expose axis-aligned bounding boxes but no reliable text-angle
+# field. Only a strongly elongated box is positive evidence of text
+# orientation. Near-square boxes remain deliberately ambiguous.
+_STRONG_TEXT_ORIENTATION_ASPECT_RATIO = 2.0
+
 
 @dataclass(frozen=True)
 class RasterDimensionTextObservation:
@@ -206,6 +211,36 @@ def _line_parts(segment: _VisibleSegment) -> tuple[float, float, float]:
     return (0.5 * (x0 + x1), min(y0, y1), max(y0, y1))
 
 
+def _text_orientation_candidates(
+    bbox_pt: Sequence[float],
+) -> tuple[str, ...]:
+    """Return source-supported text orientations from an OCR bounding box.
+
+    OCRLine does not carry a text-angle field. A box whose major axis is at
+    least twice its minor axis provides conservative positive orientation
+    evidence; otherwise both orientations remain possible and downstream
+    geometry must disambiguate or abstain.
+    """
+
+    if len(bbox_pt) != 4:
+        return ("horizontal", "vertical")
+    x0, y0, x1, y1 = (float(value) for value in bbox_pt)
+    width = x1 - x0
+    height = y1 - y0
+    if (
+        not math.isfinite(width)
+        or not math.isfinite(height)
+        or width <= 0.0
+        or height <= 0.0
+    ):
+        return ("horizontal", "vertical")
+    if width >= _STRONG_TEXT_ORIENTATION_ASPECT_RATIO * height:
+        return ("horizontal",)
+    if height >= _STRONG_TEXT_ORIENTATION_ASPECT_RATIO * width:
+        return ("vertical",)
+    return ("horizontal", "vertical")
+
+
 def _logical_lines_for_text(
     text: RasterDimensionTextObservation,
     segments: Sequence[_VisibleSegment],
@@ -215,7 +250,7 @@ def _logical_lines_for_text(
     render_point = 72.0 / float(RASTER_RENDER_DPI)
     candidates: dict[tuple[object, ...], _LogicalLine] = {}
 
-    for orientation in ("horizontal", "vertical"):
+    for orientation in _text_orientation_candidates(text.bbox_pt):
         if orientation == "horizontal":
             text_lo, text_hi, cross_lo, cross_hi, center = x0, x1, y0, y1, cx
             minor = max(render_point, y1 - y0)
