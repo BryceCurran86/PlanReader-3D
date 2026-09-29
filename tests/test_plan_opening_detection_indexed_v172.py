@@ -170,3 +170,59 @@ def test_skewed_long_gap_broad_phase_does_not_drop_legacy_candidate():
     assert indexed.detect_gap_candidates_indexed(
         segments, walls, ()
     ) == legacy.detect_gap_candidates(segments, walls, ())
+
+
+def test_indexed_detectors_preserve_input_objects_and_wall_order():
+    segments = _random_segments(4242, count=90)
+    walls = _wall_lines(segments)
+    before_segments = [
+        (s.x1, s.y1, s.x2, s.y2, s.drawing_index)
+        for s in segments
+    ]
+    before_walls = [
+        (w.segment.x1, w.segment.y1, w.segment.x2, w.segment.y2, w.wall_ref)
+        for w in walls
+    ]
+    indexed.detect_door_candidates_indexed(segments, walls, _words(), page_no=7)
+    indexed.detect_gap_candidates_indexed(segments, walls, _words(), page_no=7)
+    assert [
+        (s.x1, s.y1, s.x2, s.y2, s.drawing_index)
+        for s in segments
+    ] == before_segments
+    assert [
+        (w.segment.x1, w.segment.y1, w.segment.x2, w.segment.y2, w.wall_ref)
+        for w in walls
+    ] == before_walls
+
+
+def test_indexed_gap_output_order_matches_legacy_under_wall_permutations():
+    base = [
+        legacy.Segment(0, 0, 220, 0),
+        legacy.Segment(300, 0, 620, 0),
+        legacy.Segment(0, 200, 260, 200),
+        legacy.Segment(340, 200, 700, 200),
+        legacy.Segment(1000, 1000, 1400, 1000),
+    ]
+    import itertools
+    for order in itertools.permutations(range(len(base))):
+        segments = [base[i] for i in order]
+        walls = _wall_lines(segments)
+        expected = legacy.detect_gap_candidates(segments, walls, (), page_no=9)
+        actual = indexed.detect_gap_candidates_indexed(segments, walls, (), page_no=9)
+        assert actual == expected
+
+
+def test_indexed_door_output_order_matches_legacy_under_segment_permutations():
+    wall = legacy.Segment(0, 100, 800, 100)
+    leaves = [
+        legacy.Segment(150, 85, 150, 115),
+        legacy.Segment(350, 85, 350, 115),
+        legacy.Segment(550, 85, 550, 115),
+    ]
+    import itertools
+    for order in itertools.permutations(leaves):
+        segments = [wall, *order]
+        walls = _wall_lines(segments)
+        expected = legacy.detect_door_candidates(segments, walls, (), page_no=11)
+        actual = indexed.detect_door_candidates_indexed(segments, walls, (), page_no=11)
+        assert actual == expected
