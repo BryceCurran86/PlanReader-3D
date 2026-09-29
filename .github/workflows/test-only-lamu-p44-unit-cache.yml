@@ -1,0 +1,49 @@
+name: TEST-ONLY Lamu P44 Unit Cache Gate
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lamu-p44-unit-cache:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download exact Lamu source
+        run: |
+          curl -L --fail --retry 3 -o /tmp/lamu.pdf "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          echo "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  /tmp/lamu.pdf" | sha256sum -c -
+      - name: Prepare #1010 baseline
+        run: |
+          git fetch origin refs/pull/1010/head:refs/remotes/origin/pr1010
+          git worktree add /tmp/pr1010 refs/remotes/origin/pr1010
+          echo "candidate=$(git rev-parse HEAD)"
+          echo "baseline=$(git -C /tmp/pr1010 rev-parse HEAD)"
+      - name: Gate unit-cache differential tests
+        run: |
+          PYTHONPATH=. pytest -q             tests/test_physical_wall_equivalence_feature_cache.py             tests/test_physical_wall_equivalence_unit_cache.py
+      - name: Profile #1016 candidate Lamu p44
+        run: |
+          set -o pipefail
+          timeout 420s env PYTHONPATH=. python scripts/profile_exact_source_perf_gate.py             --repo . --pdf /tmp/lamu.pdf --pages 44             --label lamu-p44-unit-cache --wall-only | tee /tmp/lamu-p44-unit-cache.jsonl
+      - name: Profile #1010 baseline Lamu p44
+        run: |
+          set -o pipefail
+          timeout 420s env PYTHONPATH=/tmp/pr1010 python scripts/profile_exact_source_perf_gate.py             --repo /tmp/pr1010 --pdf /tmp/lamu.pdf --pages 44             --label lamu-p44-feature-cache --wall-only | tee /tmp/lamu-p44-feature-cache.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lamu-p44-unit-cache-gate
+          path: |
+            /tmp/lamu-p44-unit-cache.jsonl
+            /tmp/lamu-p44-feature-cache.jsonl
