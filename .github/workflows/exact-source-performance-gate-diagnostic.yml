@@ -38,6 +38,11 @@ jobs:
         run: |
           cd /tmp/pr992
           PYTHONPATH=. pytest -q             tests/test_plan_opening_detection_indexed_v172.py             tests/test_wall_visible_observation_page_index.py             tests/test_plan_opening_detection_v171.py             tests/test_wall_room_topology_snap_index.py             tests/test_wall_room_topology_collinear_merge_index.py             tests/test_wall_room_topology_stage_a.py
+      - name: Profile #992 Lamu page 44 scale boundary
+        run: |
+          set -o pipefail
+          timeout 180s env PYTHONPATH=/tmp/pr992 python scripts/profile_exact_source_perf_gate.py             --repo /tmp/pr992 --pdf /tmp/lamu.pdf --pages 44             --label lamu-p44-pr992 --wall-only | tee /tmp/lamu-p44-pr992.jsonl
+        continue-on-error: true
       - name: Profile #992 Lamu 41-45
         run: |
           set -o pipefail
@@ -50,6 +55,7 @@ jobs:
         with:
           name: exact-source-performance-gate
           path: |
+            /tmp/lamu-p44-pr992.jsonl
             /tmp/lamu-pr992.jsonl
             /tmp/murera-pr992.jsonl
 
