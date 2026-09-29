@@ -29,8 +29,12 @@ jobs:
       - name: Prepare production main candidate
         run: |
           git fetch origin main
+          git fetch origin refs/pull/1014/head:refs/remotes/origin/pr1014
           git worktree add /tmp/current-main origin/main
+          git worktree add /tmp/pr1014 refs/remotes/origin/pr1014
           echo "main=$(git -C /tmp/current-main rev-parse HEAD)"
+          echo "pr1014=$(git -C /tmp/pr1014 rev-parse HEAD)"
+          git -C /tmp/pr1014 merge-base --is-ancestor "$(git -C /tmp/current-main rev-parse HEAD)" HEAD
       - name: Gate landed performance stack
         run: |
           cd /tmp/current-main
@@ -39,6 +43,15 @@ jobs:
         run: |
           set -o pipefail
           timeout 180s env PYTHONPATH=/tmp/current-main python scripts/profile_exact_source_perf_gate.py             --repo /tmp/current-main --pdf /tmp/lamu.pdf --pages 44             --label lamu-p44-main --wall-only | tee /tmp/lamu-p44-main.jsonl
+        continue-on-error: true
+      - name: Gate #1014 scale cache
+        run: |
+          cd /tmp/pr1014
+          PYTHONPATH=. pytest -q tests/test_physical_scale_authority.py tests/test_physical_scale_retrace_index.py tests/test_scale_authority_hardening.py
+      - name: Profile #1014 Lamu page 44 scale boundary
+        run: |
+          set -o pipefail
+          timeout 180s env PYTHONPATH=/tmp/pr1014 python scripts/profile_exact_source_perf_gate.py             --repo /tmp/pr1014 --pdf /tmp/lamu.pdf --pages 44             --label lamu-p44-pr1014 --wall-only | tee /tmp/lamu-p44-pr1014.jsonl
         continue-on-error: true
       - name: Profile production main Murera 219-238
         run: |
@@ -50,6 +63,7 @@ jobs:
           name: exact-source-performance-gate
           path: |
             /tmp/lamu-p44-main.jsonl
+            /tmp/lamu-p44-pr1014.jsonl
             /tmp/murera-main-after-perf.jsonl
 
 
