@@ -156,6 +156,12 @@ for attr in ("_scope_bbox", "_trusted_words", "_visible_segments", "publish_scop
         attr,
         f"scale.{attr}",
     )
+for attr in ("_scope_bbox", "_trusted_words", "_visible_segments", "publish_scope"):
+    wrap_method(
+        scale_authority.PhysicalScaleProducer,
+        attr,
+        f"scale.{attr}",
+    )
 
 page_ids=tuple(str(p) for p in pagespec(args.pages))
 page_indices=[int(p)-1 for p in page_ids]
