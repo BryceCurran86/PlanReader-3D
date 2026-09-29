@@ -26,38 +26,31 @@ jobs:
           curl -L --fail --retry 3 -o /tmp/murera.pdf "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
           echo "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  /tmp/lamu.pdf" | sha256sum -c -
           echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  /tmp/murera.pdf" | sha256sum -c -
-      - name: Prepare current performance candidate
+      - name: Prepare production main candidate
         run: |
           git fetch origin main
-          git fetch origin refs/pull/992/head:refs/remotes/origin/pr992
-          git worktree add /tmp/pr992 refs/remotes/origin/pr992
-          echo "main=$(git rev-parse origin/main)"
-          echo "pr992=$(git -C /tmp/pr992 rev-parse HEAD)"
-          git -C /tmp/pr992 merge-base --is-ancestor "$(git rev-parse origin/main)" HEAD
-      - name: Gate performance stack
+          git worktree add /tmp/current-main origin/main
+          echo "main=$(git -C /tmp/current-main rev-parse HEAD)"
+      - name: Gate landed performance stack
         run: |
-          cd /tmp/pr992
+          cd /tmp/current-main
           PYTHONPATH=. pytest -q             tests/test_plan_opening_detection_indexed_v172.py             tests/test_wall_visible_observation_page_index.py             tests/test_plan_opening_detection_v171.py             tests/test_wall_room_topology_snap_index.py             tests/test_wall_room_topology_collinear_merge_index.py             tests/test_wall_room_topology_stage_a.py
-      - name: Profile #992 Lamu page 44 scale boundary
+      - name: Profile production main Lamu page 44 scale boundary
         run: |
           set -o pipefail
-          timeout 180s env PYTHONPATH=/tmp/pr992 python scripts/profile_exact_source_perf_gate.py             --repo /tmp/pr992 --pdf /tmp/lamu.pdf --pages 44             --label lamu-p44-pr992 --wall-only | tee /tmp/lamu-p44-pr992.jsonl
+          timeout 180s env PYTHONPATH=/tmp/current-main python scripts/profile_exact_source_perf_gate.py             --repo /tmp/current-main --pdf /tmp/lamu.pdf --pages 44             --label lamu-p44-main --wall-only | tee /tmp/lamu-p44-main.jsonl
         continue-on-error: true
-      - name: Profile #992 Lamu 41-45
+      - name: Profile production main Murera 219-238
         run: |
           set -o pipefail
-          timeout 900s env PYTHONPATH=/tmp/pr992 python scripts/profile_exact_source_perf_gate.py             --repo /tmp/pr992 --pdf /tmp/lamu.pdf --pages 41-45             --label lamu-pr992 --wall-only | tee /tmp/lamu-pr992.jsonl
-      - name: Profile #992 Murera 219-238
-        run: |
-          set -o pipefail
-          timeout 1200s env PYTHONPATH=/tmp/pr992 python scripts/profile_exact_source_perf_gate.py             --repo /tmp/pr992 --pdf /tmp/murera.pdf --pages 219-238             --label murera-pr992 --wall-only | tee /tmp/murera-pr992.jsonl
+          timeout 1200s env PYTHONPATH=/tmp/current-main python scripts/profile_exact_source_perf_gate.py             --repo /tmp/current-main --pdf /tmp/murera.pdf --pages 219-238             --label murera-main-after-perf --wall-only | tee /tmp/murera-main-after-perf.jsonl
+        continue-on-error: true
       - uses: actions/upload-artifact@v4
         with:
           name: exact-source-performance-gate
           path: |
-            /tmp/lamu-p44-pr992.jsonl
-            /tmp/lamu-pr992.jsonl
-            /tmp/murera-pr992.jsonl
+            /tmp/lamu-p44-main.jsonl
+            /tmp/murera-main-after-perf.jsonl
 
 
   exact-source-main-perf:
