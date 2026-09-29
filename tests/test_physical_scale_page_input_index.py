@@ -98,7 +98,7 @@ def test_wall_candidate_build_constructs_one_scale_producer_per_revision(monkeyp
     original = wall_module.PhysicalScaleProducer.from_source_visibility_producer
     constructions = 0
 
-    def counted(source_producer):
+    def counted(cls, source_producer):
         nonlocal constructions
         constructions += 1
         return original(source_producer)
@@ -106,7 +106,7 @@ def test_wall_candidate_build_constructs_one_scale_producer_per_revision(monkeyp
     monkeypatch.setattr(
         wall_module.PhysicalScaleProducer,
         "from_source_visibility_producer",
-        counted,
+        classmethod(counted),
     )
 
     wall_module.PhysicalWallCandidateProducer.from_source_visibility_producer(
