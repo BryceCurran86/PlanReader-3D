@@ -73,12 +73,29 @@ def _regular_file(value: Any) -> Optional[Path]:
         return path if path.is_file() else None
 
 
-def _span_lines(pdf_page: Any) -> List[Dict[str, Any]]:
-    """Return native PDF lines with font/bbox metadata in visual block order."""
+def _native_text_payloads(pdf_page: Any) -> Tuple[Dict[str, Any], List[Any]]:
+    """Read PyMuPDF native text payloads once for all v1.2.28 consumers."""
     try:
-        payload = pdf_page.get_text("dict") or {}
+        text_payload = pdf_page.get_text("dict") or {}
     except Exception:
-        payload = {}
+        text_payload = {}
+    try:
+        word_payload = list(pdf_page.get_text("words") or [])
+    except Exception:
+        word_payload = []
+    return text_payload, word_payload
+
+
+def _span_lines(
+    pdf_page: Any,
+    payload: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """Return native PDF lines with font/bbox metadata in visual block order."""
+    if payload is None:
+        try:
+            payload = pdf_page.get_text("dict") or {}
+        except Exception:
+            payload = {}
     lines: List[Dict[str, Any]] = []
     for block_no, block in enumerate(payload.get("blocks") or []):
         if int(block.get("type", 0) or 0) != 0:
@@ -123,12 +140,18 @@ def _span_lines(pdf_page: Any) -> List[Dict[str, Any]]:
     return lines
 
 
-def _word_rows(pdf_page: Any) -> List[Dict[str, Any]]:
+def _word_rows(
+    pdf_page: Any,
+    words: Optional[Sequence[Any]] = None,
+) -> List[Dict[str, Any]]:
     """Reconstruct table-like visual rows across separate PDF text objects."""
-    try:
-        words = list(pdf_page.get_text("words") or [])
-    except Exception:
-        words = []
+    if words is None:
+        try:
+            words = list(pdf_page.get_text("words") or [])
+        except Exception:
+            words = []
+    else:
+        words = list(words)
     usable = []
     heights = []
     for word in words:
@@ -187,10 +210,16 @@ def _table_like(page: Dict[str, Any], text: str) -> bool:
     return any(token in hay for token in _TABLE_PAGE_WORDS)
 
 
-def reconstruct_page_text(pdf_page: Any, page: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def reconstruct_page_text(
+    pdf_page: Any,
+    page: Optional[Dict[str, Any]] = None,
+    *,
+    text_payload: Optional[Dict[str, Any]] = None,
+    word_payload: Optional[Sequence[Any]] = None,
+) -> Dict[str, Any]:
     page = dict(page or {})
-    span_lines = _span_lines(pdf_page)
-    row_lines = _word_rows(pdf_page)
+    span_lines = _span_lines(pdf_page, text_payload)
+    row_lines = _word_rows(pdf_page, word_payload)
     block_text = "\n".join(line["text"] for line in span_lines if line["text"])
     table_text = "\n".join(row["text"] for row in row_lines if row["text"])
     preferred = table_text if _table_like(page, block_text) and len(table_text) >= 30 else block_text
@@ -208,9 +237,12 @@ def reconstruct_page_text(pdf_page: Any, page: Optional[Dict[str, Any]] = None) 
     }
 
 
-def _title_zone_lines(pdf_page: Any) -> List[Dict[str, Any]]:
+def _title_zone_lines(
+    pdf_page: Any,
+    span_lines: Optional[Sequence[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     width, height = float(pdf_page.rect.width), float(pdf_page.rect.height)
-    lines = _span_lines(pdf_page)
+    lines = list(span_lines) if span_lines is not None else _span_lines(pdf_page)
     selected = []
     for line in lines:
         x0, y0, x1, y1 = line["bbox"]
@@ -255,9 +287,14 @@ def _nearest_value(lines: Sequence[Dict[str, Any]], label_index: int, label_re: 
     return min(candidates, default=(0.0, ""), key=lambda item: item[0])[1]
 
 
-def spatial_title_block_evidence(pdf_page: Any, base_reader) -> Dict[str, Any]:
+def spatial_title_block_evidence(
+    pdf_page: Any,
+    base_reader,
+    *,
+    span_lines: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     base = dict(base_reader(pdf_page) or {})
-    lines = _title_zone_lines(pdf_page)
+    lines = _title_zone_lines(pdf_page, span_lines)
     if not lines:
         return base
     title_text = "\n".join(str(item.get("text") or "") for item in lines if item.get("text"))
@@ -534,7 +571,13 @@ def enhance_document_pages(app: Any, document_id: int, *, visual_budget: int = 4
             if not (1 <= page_no <= len(pdf)):
                 continue
             pdf_page = pdf.load_page(page_no - 1)
-            native = reconstruct_page_text(pdf_page, page)
+            text_payload, word_payload = _native_text_payloads(pdf_page)
+            native = reconstruct_page_text(
+                pdf_page,
+                page,
+                text_payload=text_payload,
+                word_payload=word_payload,
+            )
             text = str(native.get("text") or "")
             visual = {}
             if visual_used < visual_budget and _visual_read_allowed(app, page, native):
@@ -549,7 +592,11 @@ def enhance_document_pages(app: Any, document_id: int, *, visual_budget: int = 4
                 app.lexecute("UPDATE pages SET extracted_text=? WHERE id=?", (text, int(page["id"])))
                 page["extracted_text"] = text; updated += 1
 
-            title = spatial_title_block_evidence(pdf_page, registration._pb_v1228_base_title_reader)
+            title = spatial_title_block_evidence(
+                pdf_page,
+                registration._pb_v1228_base_title_reader,
+                span_lines=native.get("span_lines") or (),
+            )
             manual = str(app.workspace_setting(workspace_id, registration._manual_key(int(page["id"])), "")) == "1"
             if not manual:
                 current_label = str(page.get("page_label") or "")
@@ -574,7 +621,14 @@ def enhance_document_pages(app: Any, document_id: int, *, visual_budget: int = 4
                     "native_word_count": int(native.get("word_count") or 0), "visual_fallback": bool(visual and _num(visual.get("confidence")) >= 80),
                 }
                 try:
-                    analysis = title_authority.analyse_page(pdf_page, page_no)
+                    analysis = title_authority.analyse_page(
+                        pdf_page,
+                        page_no,
+                        spans=title_authority.spans_from_text_dict(
+                            text_payload,
+                            pdf_page,
+                        ),
+                    )
                 except Exception:
                     analysis = title_authority.PageAnalysis(page_no=page_no, width=0.0, height=0.0, source="none")
                 pending.append((page, meta, analysis, visual_title))
