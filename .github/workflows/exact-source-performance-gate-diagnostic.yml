@@ -26,12 +26,20 @@ jobs:
           curl -L --fail --retry 3 -o /tmp/murera.pdf "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf"
           echo "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  /tmp/lamu.pdf" | sha256sum -c -
           echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  /tmp/murera.pdf" | sha256sum -c -
-      - name: Prepare latest #984 candidate
+      - name: Prepare latest performance candidates
         run: |
           git fetch origin refs/pull/984/head:refs/remotes/origin/pr984
+          git fetch origin refs/pull/990/head:refs/remotes/origin/pr990
           git worktree add /tmp/pr984 refs/remotes/origin/pr984
+          git worktree add /tmp/pr990 refs/remotes/origin/pr990
           git -C /tmp/pr984 rev-parse HEAD
+          git -C /tmp/pr990 rev-parse HEAD
           git -C /tmp/pr984 merge-base --is-ancestor 674dbe8948bff2547ca1b65177d9fb5670ad12df HEAD
+      - name: Profile #990 Lamu page 44 first
+        run: |
+          set -o pipefail
+          timeout 420s env PYTHONPATH=/tmp/pr990 python scripts/profile_exact_source_perf_gate.py --repo /tmp/pr990 --pdf /tmp/lamu.pdf --pages 44 --label lamu-p44-pr990 --wall-only | tee /tmp/lamu-p44-pr990.jsonl
+        continue-on-error: true
       - name: Profile #984 Lamu page 44 first
         run: |
           set -o pipefail
@@ -56,6 +64,7 @@ jobs:
         with:
           name: exact-source-performance-gate
           path: |
+            /tmp/lamu-p44-pr990.jsonl
             /tmp/lamu-p44-pr984.jsonl
             /tmp/lamu-p44-main.jsonl
             /tmp/lamu-pr984.jsonl
