@@ -355,6 +355,16 @@ def test_mutated_record_schema_versions_fail_closed() -> None:
     assert observation.schema_version == STRUCTURAL_REGISTRATION_SCHEMA_VERSION
 
 
+def test_mutated_anchor_schema_version_fails_closed() -> None:
+    p = producer()
+    original = obs(p, "a", "plan", anchors=(anchor("A|1"),))
+    mutated_anchor = replace(original.registration_anchors[0], schema_version="1.0.0")
+    mutated_observation = replace(original, registration_anchors=(mutated_anchor,))
+    result = build((mutated_observation,), (view(p, "plan"),))
+    assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
+    assert STRUCTURAL_REGISTRATION_INPUT_UNAUTHENTICATED in result.resolution.reason_codes
+
+
 def test_same_source_proposition_with_different_anchor_claims_conflicts() -> None:
     p = producer()
     common = dict(
