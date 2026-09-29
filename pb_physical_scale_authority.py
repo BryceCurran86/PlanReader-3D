@@ -195,7 +195,7 @@ _TICK_PERPENDICULAR_TOLERANCE_DEG = 5.0
 _TICK_PARAMETER_MIN = 0.15
 _TICK_PARAMETER_MAX = 0.85
 _TICK_MAX_DISTANCE_PT = 0.5
-_TICK_INDEX_ANGLE_BUCKET_DEG = 10.0
+_TICK_INDEX_ANGLE_BUCKET_DEG = 5.0
 
 
 class _TickEndpointIndex:
@@ -304,10 +304,10 @@ class _TickEndpointIndex:
         max_y = endpoint[1] + radius
 
         found: set[int] = set(self._unindexed)
-        # Width is 10 degrees while exact acceptance is +/-5 degrees.
-        # Two buckets on either side are a conservative superset across
-        # bucket boundaries and the 0/180 wrap.
-        for offset in (-2, -1, 0, 1, 2):
+        # Bucket width equals the exact +/-5 degree acceptance tolerance.
+        # The target bucket plus its two neighbors is therefore a complete
+        # superset, including the 0/180 wrap boundary.
+        for offset in (-1, 0, 1):
             bucket = (center_bucket + offset) % self._angle_bucket_count
             rows = self._by_angle.get(bucket, ())
             xs = self._x_by_angle.get(bucket, ())
