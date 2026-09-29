@@ -90,7 +90,9 @@ class StructuralMemberRegistrationShadowResult:
 
 
 def _normalize_text(value: str) -> str:
-    return " ".join(str(value).split()).upper()
+    # Preserve source-owned case exactly; case-folding could collapse two
+    # producer IDs that are distinct in the source namespace.
+    return " ".join(str(value).split())
 
 
 def _anchor_family(
