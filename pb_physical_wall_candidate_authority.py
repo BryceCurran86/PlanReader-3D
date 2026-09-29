@@ -1165,6 +1165,19 @@ def _filter_proven_wall_strip_geometry(
     """
     face_ids = {raw_id for strip in strips for raw_id in strip.face_raw_ids}
     boundary_ids = {raw_id for strip in strips for raw_id in strip.boundary_raw_ids}
+    segment_by_id = {
+        str(segment.get("id") or ""): segment
+        for segment in segments
+        if str(segment.get("id") or "")
+    }
+    strip_face_lines = {
+        strip.path_index: (
+            _segment_geometry(segment_by_id[strip.face_raw_ids[0]])
+            if strip.face_raw_ids[0] in segment_by_id
+            else None
+        )
+        for strip in strips
+    }
     kept: list[dict] = []
     for original in segments:
         segment = dict(original)
@@ -1184,14 +1197,7 @@ def _filter_proven_wall_strip_geometry(
                 excluded = True
                 break
             line = _segment_geometry(segment)
-            face_line = next(
-                (
-                    _segment_geometry(candidate)
-                    for candidate in segments
-                    if str(candidate.get("id") or "") == strip.face_raw_ids[0]
-                ),
-                None,
-            )
+            face_line = strip_face_lines.get(strip.path_index)
             if face_line is not None and not _parallel(line, face_line):
                 excluded = True
                 break
