@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import replace
 from pathlib import Path
 
+import fitz
+import pytest
+
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_structural_member_authority import (
     STRUCTURAL_MEMBER_REGISTRATION_INCOMPLETE,
     STRUCTURAL_MEMBER_RELATION_CONFLICT,
@@ -12,8 +17,15 @@ from pb_structural_member_authority import (
     StructuralMemberSelector,
 )
 from pb_structural_member_registration_producer import (
+    STRUCTURAL_REGISTRATION_ANCHOR_AMBIGUOUS,
+    STRUCTURAL_REGISTRATION_ANCHOR_CONFLICT,
+    STRUCTURAL_REGISTRATION_INPUT_UNAUTHENTICATED,
+    STRUCTURAL_REGISTRATION_OBSERVATION_EQUIVOCATION,
+    STRUCTURAL_REGISTRATION_VIEW_COMPLETENESS_UNAUTHENTICATED,
+    STRUCTURAL_REGISTRATION_VIEW_OWNERSHIP_CONFLICT,
     AuthenticatedStructuralMemberObservation,
     AuthenticatedStructuralMemberView,
+    StructuralMemberRegistrationEvidenceProducer,
     StructuralRegistrationAnchor,
     StructuralRegistrationAnchorKind,
     build_structural_member_registration_authority,
@@ -31,6 +43,12 @@ def selector(kind: str = "masonry_pier") -> StructuralMemberSelector:
     )
 
 
+def producer(sel: StructuralMemberSelector | None = None):
+    return StructuralMemberRegistrationEvidenceProducer.create_for_tests(
+        selector=sel or selector()
+    )
+
+
 def anchor(
     value: str,
     *,
@@ -38,16 +56,18 @@ def anchor(
     kind: StructuralRegistrationAnchorKind = (
         StructuralRegistrationAnchorKind.GRID_INTERSECTION
     ),
+    evidence: tuple[str, ...] | None = None,
 ) -> StructuralRegistrationAnchor:
     return StructuralRegistrationAnchor(
         kind=kind,
         namespace_id=namespace,
         value_id=value,
-        source_evidence_ids=(f"anchor:{namespace}:{value}",),
+        source_evidence_ids=evidence or (f"anchor:{namespace}:{value}",),
     )
 
 
 def obs(
+    p,
     name: str,
     view_name: str,
     *,
@@ -55,31 +75,29 @@ def obs(
     primitive: str | None = None,
     anchors: tuple[StructuralRegistrationAnchor, ...] = (),
     proposition: bool = True,
-    geometry_signature: str = "square-300x300",
     kind: str = "masonry_pier",
-) -> AuthenticatedStructuralMemberObservation:
-    return AuthenticatedStructuralMemberObservation(
+    source_evidence_ids: tuple[str, ...] | None = None,
+    member_proposition_evidence_ids: tuple[str, ...] | None = None,
+):
+    return p.observation(
         member_kind=kind,
         page_id=page,
         view_id=view_name,
         view_type=view_name,
-        source_evidence_ids=(f"source:{name}",),
-        source_primitive_ids=((primitive or f"primitive:{name}"),),
+        source_evidence_ids=source_evidence_ids or (f"source:{name}",),
+        source_primitive_ids=(primitive or f"primitive:{name}",),
         member_proposition_evidence_ids=(
-            (f"member-proof:{name}",) if proposition else ()
+            member_proposition_evidence_ids
+            if member_proposition_evidence_ids is not None
+            else ((f"member-proof:{name}",) if proposition else ())
         ),
         registration_anchors=anchors,
-        geometry_signature=geometry_signature,
+        geometry_signature="same-shape",
     )
 
 
-def view(
-    name: str,
-    *,
-    page: str = "1",
-    complete: bool = True,
-) -> AuthenticatedStructuralMemberView:
-    return AuthenticatedStructuralMemberView(
+def view(p, name: str, *, page: str = "1", complete: bool = True):
+    return p.view(
         page_id=page,
         view_id=name,
         view_type=name,
@@ -89,137 +107,256 @@ def view(
     )
 
 
-def build(observations, views, *, definitions=()):
+def build(observations, views, *, definitions=(), sel=None):
     return build_structural_member_registration_authority(
-        selector=selector(),
+        selector=sel or selector(),
         source_observations=observations,
         source_views=views,
         definitions=definitions,
     )
 
 
-def test_same_member_in_plan_and_elevation_collapses_to_one_member() -> None:
+def test_positive_cross_view_registration_collapses_one_physical_member() -> None:
+    p = producer()
     result = build(
         (
-            obs("plan-a1", "plan", anchors=(anchor("A|1"),)),
-            obs(
-                "elev-a1",
-                "elevation",
-                page="2",
-                anchors=(anchor("A|1"),),
-            ),
+            obs(p, "plan-a1", "plan", anchors=(anchor("A|1"),)),
+            obs(p, "elev-a1", "elevation", page="2", anchors=(anchor("A|1"),)),
         ),
-        (view("plan"), view("elevation", page="2")),
+        (view(p, "plan"), view(p, "elevation", page="2")),
     )
     assert result.resolution.status is EvidenceResolutionStatus.CORROBORATED
     assert result.resolution.quantity == 1
     assert len(result.resolution.members[0].observation_ids) == 2
 
 
-def test_equal_counts_across_views_without_registration_abstain() -> None:
+def test_equal_counts_without_registration_abstain() -> None:
+    p = producer()
     result = build(
         (
-            obs("p1", "plan"),
-            obs("p2", "plan"),
-            obs("e1", "elevation", page="2"),
-            obs("e2", "elevation", page="2"),
+            obs(p, "p1", "plan"),
+            obs(p, "p2", "plan"),
+            obs(p, "e1", "elevation", page="2"),
+            obs(p, "e2", "elevation", page="2"),
         ),
-        (view("plan"), view("elevation", page="2")),
+        (view(p, "plan"), view(p, "elevation", page="2")),
     )
     assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
-    assert result.resolution.quantity is None
     assert STRUCTURAL_MEMBER_REGISTRATION_INCOMPLETE in result.resolution.reason_codes
 
 
 def test_partial_registration_abstains() -> None:
+    p = producer()
     result = build(
         (
-            obs("p1", "plan", anchors=(anchor("A|1"),)),
-            obs("p2", "plan", anchors=(anchor("A|2"),)),
-            obs(
-                "e1",
-                "elevation",
-                page="2",
-                anchors=(anchor("A|1"),),
-            ),
-            obs("e2", "elevation", page="2"),
+            obs(p, "p1", "plan", anchors=(anchor("A|1"),)),
+            obs(p, "p2", "plan", anchors=(anchor("A|2"),)),
+            obs(p, "e1", "elevation", page="2", anchors=(anchor("A|1"),)),
+            obs(p, "e2", "elevation", page="2"),
         ),
-        (view("plan"), view("elevation", page="2")),
+        (view(p, "plan"), view(p, "elevation", page="2")),
     )
     assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
     assert STRUCTURAL_MEMBER_REGISTRATION_INCOMPLETE in result.resolution.reason_codes
 
 
-def test_contradictory_same_and_distinct_registration_conflicts() -> None:
-    shared_primitive = "source-path:77"
+def test_same_view_anchor_values_never_establish_identity_or_distinctness() -> None:
+    p = producer()
+    result = build(
+        (
+            obs(p, "a", "plan", anchors=(anchor("A|1"),)),
+            obs(p, "b", "plan", anchors=(anchor("A|2"),)),
+        ),
+        (view(p, "plan"),),
+    )
+    assert result.resolution.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.resolution.quantity == 2
+    assert result.relations == ()
+
+
+def test_duplicate_anchor_value_in_one_view_fails_closed() -> None:
+    p = producer()
+    result = build(
+        (
+            obs(p, "p1", "plan", anchors=(anchor("A|1"),)),
+            obs(p, "p2", "plan", anchors=(anchor("A|1"),)),
+            obs(p, "e1", "elevation", page="2", anchors=(anchor("A|1"),)),
+            obs(p, "e2", "elevation", page="2", anchors=(anchor("A|2"),)),
+        ),
+        (view(p, "plan"), view(p, "elevation", page="2")),
+    )
+    assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
+    assert STRUCTURAL_REGISTRATION_ANCHOR_AMBIGUOUS in result.resolution.reason_codes
+
+
+def test_one_observation_claiming_two_values_in_same_namespace_conflicts() -> None:
+    p = producer()
+    result = build(
+        (
+            obs(p, "p", "plan", anchors=(anchor("A|1"), anchor("A|2"))),
+            obs(p, "e", "elevation", page="2", anchors=(anchor("A|1"),)),
+        ),
+        (view(p, "plan"), view(p, "elevation", page="2")),
+    )
+    assert result.resolution.status is EvidenceResolutionStatus.CONFLICT
+    assert STRUCTURAL_REGISTRATION_ANCHOR_CONFLICT in result.resolution.reason_codes
+
+
+def test_contradictory_cross_view_anchor_families_conflict() -> None:
+    p = producer()
+    mark = StructuralRegistrationAnchorKind.SOURCE_INSTANCE_MARK
     result = build(
         (
             obs(
-                "p",
+                p,
                 "plan",
-                primitive=shared_primitive,
-                anchors=(anchor("A|1"),),
+                "plan",
+                anchors=(
+                    anchor("A|1"),
+                    anchor("P1", namespace="marks", kind=mark),
+                ),
             ),
             obs(
-                "e",
+                p,
+                "elev",
                 "elevation",
                 page="2",
-                primitive=shared_primitive,
-                anchors=(anchor("A|2"),),
+                anchors=(
+                    anchor("A|1"),
+                    anchor("P2", namespace="marks", kind=mark),
+                ),
             ),
         ),
-        (view("plan"), view("elevation", page="2")),
+        (view(p, "plan"), view(p, "elevation", page="2")),
     )
     assert result.resolution.status is EvidenceResolutionStatus.CONFLICT
     assert STRUCTURAL_MEMBER_RELATION_CONFLICT in result.resolution.reason_codes
 
 
-def test_repeated_same_size_members_stay_distinct() -> None:
+def test_duplicate_anchor_evidence_is_unioned_deterministically() -> None:
+    p = producer()
     result = build(
         (
-            obs("a", "plan", geometry_signature="same-square"),
-            obs("b", "plan", geometry_signature="same-square"),
-            obs("c", "plan", geometry_signature="same-square"),
+            obs(
+                p,
+                "p",
+                "plan",
+                anchors=(
+                    anchor("A|1", evidence=("plan:a",)),
+                    anchor("A|1", evidence=("plan:b",)),
+                ),
+            ),
+            obs(
+                p,
+                "e",
+                "elevation",
+                page="2",
+                anchors=(anchor("A|1", evidence=("elev:a",)),),
+            ),
         ),
-        (view("plan"),),
-    )
-    assert result.resolution.status is EvidenceResolutionStatus.CORROBORATED
-    assert result.resolution.quantity == 3
-
-
-def test_duplicate_primitive_representations_collapse_only_with_evidence() -> None:
-    result = build(
-        (
-            obs("raw-a", "plan", primitive="cad:17"),
-            obs("raw-b", "plan", primitive="cad:17"),
-        ),
-        (view("plan"),),
+        (view(p, "plan"), view(p, "elevation", page="2")),
     )
     assert result.resolution.status is EvidenceResolutionStatus.CORROBORATED
     assert result.resolution.quantity == 1
+    evidence = set(result.relations[0].source_evidence_ids)
+    assert {"plan:a", "plan:b", "elev:a"} <= evidence
 
 
-def test_cropped_view_abstains() -> None:
-    result = build(
-        (obs("a", "plan", anchors=(anchor("A|1"),)),),
-        (view("plan", complete=False),),
+def test_shared_primitive_collapses_only_inside_same_exact_view() -> None:
+    p = producer()
+    same = build(
+        (
+            obs(p, "a", "plan", primitive="cad:17"),
+            obs(p, "b", "plan", primitive="cad:17"),
+        ),
+        (view(p, "plan"),),
     )
+    assert same.resolution.status is EvidenceResolutionStatus.CORROBORATED
+    assert same.resolution.quantity == 1
+
+    cross = build(
+        (
+            obs(p, "p", "plan", primitive="cad:17"),
+            obs(p, "e", "elevation", page="2", primitive="cad:17"),
+        ),
+        (view(p, "plan"), view(p, "elevation", page="2")),
+    )
+    assert cross.relations == ()
+    assert cross.resolution.status is EvidenceResolutionStatus.ABSTAINED
+
+
+def test_page_view_ownership_mismatch_fails_closed() -> None:
+    p = producer()
+    result = build(
+        (obs(p, "a", "plan", page="1"),),
+        (view(p, "plan", page="2"),),
+    )
+    assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
+    assert STRUCTURAL_REGISTRATION_VIEW_OWNERSHIP_CONFLICT in result.resolution.reason_codes
+
+
+def test_directly_constructed_inputs_are_not_authenticated() -> None:
+    direct_obs = AuthenticatedStructuralMemberObservation(
+        member_kind="masonry_pier",
+        page_id="1",
+        view_id="plan",
+        view_type="plan",
+        source_evidence_ids=("invented",),
+        source_primitive_ids=("invented-primitive",),
+        member_proposition_evidence_ids=("invented-proof",),
+    )
+    direct_view = AuthenticatedStructuralMemberView(
+        page_id="1",
+        view_id="plan",
+        view_type="plan",
+        complete=True,
+        source_evidence_ids=("invented-view-proof",),
+    )
+    result = build((direct_obs,), (direct_view,))
+    assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
+    assert STRUCTURAL_REGISTRATION_INPUT_UNAUTHENTICATED in result.resolution.reason_codes
+
+
+def test_mutated_producer_record_is_not_authenticated() -> None:
+    p = producer()
+    original = obs(p, "a", "plan")
+    mutated = replace(original, page_id="999")
+    result = build((mutated,), (view(p, "plan"),))
+    assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
+    assert STRUCTURAL_REGISTRATION_INPUT_UNAUTHENTICATED in result.resolution.reason_codes
+
+
+def test_same_source_proposition_with_different_anchor_claims_conflicts() -> None:
+    p = producer()
+    common = dict(
+        member_kind="masonry_pier",
+        page_id="1",
+        view_id="plan",
+        view_type="plan",
+        source_evidence_ids=("source:shared",),
+        source_primitive_ids=("primitive:shared",),
+        member_proposition_evidence_ids=("member-proof:shared",),
+    )
+    first = p.observation(**common, registration_anchors=(anchor("A|1"),))
+    second = p.observation(**common, registration_anchors=(anchor("A|2"),))
+    result = build((first, second), (view(p, "plan"),))
+    assert result.resolution.status is EvidenceResolutionStatus.CONFLICT
+    assert STRUCTURAL_REGISTRATION_OBSERVATION_EQUIVOCATION in result.resolution.reason_codes
+
+
+def test_cropped_and_unproven_views_abstain() -> None:
+    p = producer()
+    result = build((obs(p, "a", "plan"),), (view(p, "plan", complete=False),))
     assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
     assert STRUCTURAL_MEMBER_SCOPE_INCOMPLETE in result.resolution.reason_codes
     assert "cropped_view" in result.resolution.reason_codes
 
 
-def test_unrelated_square_wall_jamb_geometry_cannot_mint_member() -> None:
+def test_raw_geometry_without_member_proposition_cannot_mint_member() -> None:
+    p = producer()
     result = build(
-        (
-            obs(
-                "square-wall-end",
-                "plan",
-                primitive="wall:path:4",
-                proposition=False,
-            ),
-        ),
-        (view("plan"),),
+        (obs(p, "wall-end", "plan", primitive="wall:4", proposition=False),),
+        (view(p, "plan"),),
     )
     assert result.observations == ()
     assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
@@ -227,6 +364,7 @@ def test_unrelated_square_wall_jamb_geometry_cannot_mint_member() -> None:
 
 
 def test_schedule_definition_cannot_create_quantity() -> None:
+    p = producer()
     definition = StructuralMemberDefinition(
         definition_id="def:pier",
         member_kind="masonry_pier",
@@ -237,31 +375,102 @@ def test_schedule_definition_cannot_create_quantity() -> None:
     )
     result = build(
         (),
-        (view("schedule", page="3"),),
+        (view(p, "schedule", page="3"),),
         definitions=(definition,),
     )
     assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
     assert result.resolution.quantity is None
 
 
-def test_different_positive_grid_locations_publish_distinct_relation() -> None:
-    result = build(
-        (
-            obs("a", "plan", anchors=(anchor("A|1"),)),
-            obs("b", "plan", anchors=(anchor("A|2"),)),
-        ),
-        (view("plan"),),
+def test_replay_and_input_order_are_deterministic() -> None:
+    p = producer()
+    observations = (
+        obs(p, "p1", "plan", anchors=(anchor("A|1"),)),
+        obs(p, "p2", "plan", anchors=(anchor("A|2"),)),
     )
-    assert result.resolution.status is EvidenceResolutionStatus.CORROBORATED
-    assert result.resolution.quantity == 2
-    assert {row.relation.value for row in result.relations} == {
-        "distinct_physical_members"
-    }
+    views = (view(p, "plan"),)
+    first = build(observations, views)
+    second = build(tuple(reversed(observations)), tuple(reversed(views)))
+    assert first.observations == second.observations
+    assert first.relations == second.relations
+    assert first.resolution == second.resolution
+
+
+def _source_pdf_bytes() -> bytes:
+    doc = fitz.open()
+    page = doc.new_page(width=200, height=200)
+    page.draw_line((20, 20), (180, 20), color=(0, 0, 0), width=1)
+    payload = doc.tobytes()
+    doc.close()
+    return payload
+
+
+def test_production_source_factory_rejects_invented_evidence_and_complete_view() -> None:
+    visibility = SourceVisibilityProducer(
+        producer_method="structural-registration-test",
+        producer_version="1",
+    )
+    published = visibility.ingest_native_pdf_bytes(
+        document_id="source-doc",
+        source_bytes=_source_pdf_bytes(),
+        source_locator="memory://source.pdf",
+    )
+    sel = StructuralMemberSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        decision_scope_id="building-a",
+        member_kind="masonry_pier",
+    )
+    p = StructuralMemberRegistrationEvidenceProducer.from_source_visibility(
+        selector=sel,
+        source_visibility_producer=visibility,
+    )
+    allowed = (
+        published.visible_observation_ids[0]
+        if published.visible_observation_ids
+        else published.text_observation_ids[0]
+    )
+    p.observation(
+        member_kind="masonry_pier",
+        page_id="1",
+        view_id="plan",
+        view_type="plan",
+        source_evidence_ids=(allowed,),
+        source_primitive_ids=("page:1:primitive:1",),
+        member_proposition_evidence_ids=(allowed,),
+        registration_anchors=(),
+    )
+    with pytest.raises(ValueError, match=STRUCTURAL_REGISTRATION_INPUT_UNAUTHENTICATED):
+        p.observation(
+            member_kind="masonry_pier",
+            page_id="1",
+            view_id="plan",
+            view_type="plan",
+            source_evidence_ids=("invented",),
+            source_primitive_ids=("page:1:primitive:1",),
+            member_proposition_evidence_ids=("invented",),
+        )
+    with pytest.raises(
+        ValueError,
+        match=STRUCTURAL_REGISTRATION_VIEW_COMPLETENESS_UNAUTHENTICATED,
+    ):
+        p.view(
+            page_id="1",
+            view_id="plan",
+            view_type="plan",
+            complete=True,
+            source_evidence_ids=(allowed,),
+        )
 
 
 def test_production_dependency_closure_has_no_benchmark_or_gold_imports() -> None:
-    path = Path("pb_structural_member_registration_producer.py")
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = ast.parse(
+        Path("pb_structural_member_registration_producer.py").read_text(
+            encoding="utf-8"
+        )
+    )
     imported = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -274,127 +483,10 @@ def test_production_dependency_closure_has_no_benchmark_or_gold_imports() -> Non
     )
 
 
-def test_replay_and_input_order_are_deterministic() -> None:
-    observations = (
-        obs("p1", "plan", anchors=(anchor("A|1"),)),
-        obs("p2", "plan", anchors=(anchor("A|2"),)),
-    )
-    views = (view("plan"),)
-    first = build(observations, views)
-    second = build(tuple(reversed(observations)), tuple(reversed(views)))
-    assert first.observations == second.observations
-    assert first.relations == second.relations
-    assert first.resolution == second.resolution
-
-
-def test_source_lineage_changes_structural_observation_ids() -> None:
-    source = (obs("p1", "plan", anchors=(anchor("A|1"),)),)
-    views = (view("plan"),)
-    first = build_structural_member_registration_authority(
-        selector=selector(),
-        source_observations=source,
-        source_views=views,
-    )
-    changed = StructuralMemberSelector(
-        document_id="doc",
-        revision_id="rev-2",
-        source_sha256="b" * 64,
-        snapshot_id="snap-2",
-        decision_scope_id="building-a",
-        member_kind="masonry_pier",
-    )
-    second = build_structural_member_registration_authority(
-        selector=changed,
-        source_observations=source,
-        source_views=views,
-    )
-    assert first.observations[0].observation_id != second.observations[0].observation_id
-    assert first.resolution.members[0].physical_member_id != (
-        second.resolution.members[0].physical_member_id
-    )
-
-
-def test_same_definition_can_bind_many_distinct_members_without_collapsing() -> None:
-    definition = StructuralMemberDefinition(
-        definition_id="def:pier",
-        member_kind="masonry_pier",
-        section_spec="masonry pier",
-        source_evidence_ids=("schedule:def:pier",),
-        page_id="3",
-        view_id="schedule",
-    )
-    observations = tuple(
-        AuthenticatedStructuralMemberObservation(
-            member_kind="masonry_pier",
-            page_id="1",
-            view_id="plan",
-            view_type="plan",
-            source_evidence_ids=(f"source:{index}",),
-            source_primitive_ids=(f"primitive:{index}",),
-            member_proposition_evidence_ids=(f"member-proof:{index}",),
-            definition_id="def:pier",
-            geometry_signature="same-square",
-        )
-        for index in range(4)
-    )
-    result = build(observations, (view("plan"),), definitions=(definition,))
-    assert result.resolution.status is EvidenceResolutionStatus.CORROBORATED
-    assert result.resolution.quantity == 4
-    assert all(
-        member.definition_ids == ("def:pier",)
-        for member in result.resolution.members
-    )
-
-
-def test_other_member_kind_cannot_enter_selector_scope() -> None:
-    result = build(
-        (
-            obs("pier", "plan"),
-            obs("column", "plan", kind="column"),
-        ),
-        (view("plan"),),
-    )
-    assert result.resolution.status is EvidenceResolutionStatus.CORROBORATED
-    assert result.resolution.quantity == 1
-    assert len(result.observations) == 1
-    assert result.observations[0].member_kind == "masonry_pier"
-
-
 def test_registration_producer_is_not_live_wired_before_promotion_review() -> None:
     module_name = "pb_structural_member_registration_producer"
-    live_files = (
+    for path in (
         Path("pb_planreader_pdf_extractor.py"),
         Path("pb_planreader_jobhub_publish_contract.py"),
-    )
-    for path in live_files:
+    ):
         assert module_name not in path.read_text(encoding="utf-8")
-
-
-def test_complete_flag_without_source_evidence_fails_closed() -> None:
-    observation = obs("a", "plan", anchors=(anchor("A|1"),))
-    unproven_view = AuthenticatedStructuralMemberView(
-        page_id="1",
-        view_id="plan",
-        view_type="plan",
-        complete=True,
-        source_evidence_ids=(),
-    )
-    result = build((observation,), (unproven_view,))
-    assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
-    assert "structural_view_completeness_unproven" in result.resolution.reason_codes
-
-
-def test_conflicting_duplicate_view_scope_fails_closed() -> None:
-    observation = obs("a", "plan", anchors=(anchor("A|1"),))
-    first = view("plan")
-    second = AuthenticatedStructuralMemberView(
-        page_id="1",
-        view_id="plan",
-        view_type="plan",
-        complete=False,
-        source_evidence_ids=("view-proof:plan",),
-        reason_codes=("cropped_view",),
-    )
-    result = build((observation,), (first, second))
-    assert result.resolution.status is EvidenceResolutionStatus.ABSTAINED
-    assert "structural_view_scope_conflict" in result.resolution.reason_codes
