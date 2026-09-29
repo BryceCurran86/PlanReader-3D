@@ -7,6 +7,7 @@ are editable metadata and manual edits are never overwritten automatically.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -19,6 +20,11 @@ import pb_page_title_authority as title_authority
 
 VERSION = "1.2.25"
 SETTING_PREFIX = "page_registration_v1225_"
+
+# Process-local only: Streamlit reruns reuse this module, but a process restart
+# intentionally discards the cache so deployment/code changes always force a
+# fresh registration pass.
+_REGISTRATION_CACHE: Dict[Tuple[int, int], str] = {}
 
 _DRAWING_CODE_RE = re.compile(r"\b([A-Z]{1,5}(?:[-_.]?[A-Z]{0,3})?[-_.]?\d{2,4}(?:[-_.][A-Z0-9]{1,4})?)\b", re.I)
 _SCALE_RE = re.compile(r"(?<!\d)1\s*:\s*(\d{2,4})(?!\d)", re.I)
@@ -67,6 +73,61 @@ def _manual_key(page_id: int) -> str:
 
 def _meta_key(page_id: int) -> str:
     return f"{SETTING_PREFIX}{int(page_id)}_meta"
+
+
+def _registration_input_signature(
+    app: Any,
+    *,
+    workspace_id: int,
+    document_id: int,
+    path: Path,
+    file_name: str,
+    rows: Sequence[Dict[str, Any]],
+) -> str:
+    """Fingerprint only inputs that can change automatic registration output."""
+    try:
+        stat = path.stat()
+        source = {
+            "path": str(path.resolve()),
+            "size": int(stat.st_size),
+            "mtime_ns": int(stat.st_mtime_ns),
+        }
+    except OSError:
+        source = {"path": str(path), "size": None, "mtime_ns": None}
+
+    pages = []
+    for raw in rows:
+        row = dict(raw)
+        page_id = int(row.get("id") or 0)
+        manual = str(app.workspace_setting(
+            int(workspace_id), _manual_key(page_id), ""
+        )) == "1"
+        pages.append({
+            "id": page_id,
+            "page_no": int(row.get("page_no") or 0),
+            "page_label": str(row.get("page_label") or ""),
+            "page_type": str(row.get("page_type") or ""),
+            "scale_text": str(row.get("scale_text") or ""),
+            "extracted_text_sha1": hashlib.sha1(
+                str(row.get("extracted_text") or "").encode()
+            ).hexdigest(),
+            "manual": manual,
+        })
+
+    payload = {
+        "version": VERSION,
+        "title_authority_version": str(getattr(title_authority, "VERSION", "")),
+        "title_reader_module": str(getattr(title_block_evidence, "__module__", "")),
+        "title_reader_name": str(getattr(title_block_evidence, "__qualname__", "")),
+        "workspace_id": int(workspace_id),
+        "document_id": int(document_id),
+        "file_name": str(file_name or ""),
+        "source": source,
+        "pages": pages,
+    }
+    return hashlib.sha1(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _candidate_code(text: Any) -> str:
@@ -283,6 +344,24 @@ def repair_document_registration(app: Any, document_id: int) -> Dict[str, Any]:
     doc = docs[0]
     path = Path(str(doc.get("path") or ""))
     rows = app.lquery("SELECT * FROM pages WHERE document_id=? ORDER BY page_no,id", (int(document_id),))
+    workspace_id = int(doc["workspace_id"])
+    cache_key = (workspace_id, int(document_id))
+    signature = _registration_input_signature(
+        app,
+        workspace_id=workspace_id,
+        document_id=int(document_id),
+        path=path,
+        file_name=str(doc.get("file_name") or ""),
+        rows=rows,
+    )
+    if rows and _REGISTRATION_CACHE.get(cache_key) == signature:
+        return {
+            "updated": 0,
+            "pages": [],
+            "workspace_id": workspace_id,
+            "cached": len(rows),
+        }
+
     by_no = {int(row.get("page_no") or 0): dict(row) for row in rows}
     updated: List[Dict[str, Any]] = []
     pending: List[Tuple[Dict[str, Any], Dict[str, Any], Any, str]] = []
@@ -347,8 +426,23 @@ def repair_document_registration(app: Any, document_id: int) -> Dict[str, Any]:
         auto.auto_select_document_pages(app, int(document_id))
     except Exception:
         pass
-    sync_drawing_register(app, int(doc["workspace_id"]))
-    return {"updated": len(updated), "pages": updated, "workspace_id": int(doc["workspace_id"])}
+    sync_drawing_register(app, workspace_id)
+    # Re-read the rows after registration because page labels/types/scales may
+    # have changed. Caching the post-write state avoids a guaranteed miss on
+    # the next Streamlit rerun while preserving exact invalidation semantics.
+    final_rows = app.lquery(
+        "SELECT * FROM pages WHERE document_id=? ORDER BY page_no,id",
+        (int(document_id),),
+    )
+    _REGISTRATION_CACHE[cache_key] = _registration_input_signature(
+        app,
+        workspace_id=workspace_id,
+        document_id=int(document_id),
+        path=path,
+        file_name=str(doc.get("file_name") or ""),
+        rows=final_rows,
+    )
+    return {"updated": len(updated), "pages": updated, "workspace_id": workspace_id}
 
 
 def _meta_for_pages(app: Any, workspace_id: int, pages) -> Dict[int, Dict[str, Any]]:
