@@ -1,0 +1,37 @@
+name: Lamu Wall Opening Substage Diagnostic
+
+on:
+  pull_request:
+    paths:
+      - "scripts/profile_lamu_wall_opening_substages.py"
+      - ".github/workflows/lamu-wall-opening-substage-diagnostic.yml"
+      - "pb_physical_wall_candidate_authority.py"
+      - "pb_physical_opening_authority.py"
+      - "pb_live_wall_opening_authority_composition.py"
+      - "pb_wall_room_topology_stage_a.py"
+
+jobs:
+  profile-lamu-page44:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Download exact Lamu source
+        run: |
+          curl -L --fail --retry 3 -o /tmp/lamu.pdf "https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf"
+          echo "fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2  /tmp/lamu.pdf" | sha256sum -c -
+      - name: Profile exact Lamu page 44 wall/opening substages
+        run: |
+          set -o pipefail
+          timeout 1800s env PYTHONPATH=$GITHUB_WORKSPACE python scripts/profile_lamu_wall_opening_substages.py --repo $GITHUB_WORKSPACE --pdf /tmp/lamu.pdf --page 44 | tee /tmp/lamu-wall-opening-substages.jsonl
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lamu-wall-opening-substages
+          path: /tmp/lamu-wall-opening-substages.jsonl
