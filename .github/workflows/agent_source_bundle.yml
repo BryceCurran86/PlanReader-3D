@@ -1,0 +1,38 @@
+name: Agent source bundle
+
+on:
+  push:
+    branches:
+      - agent/takeoff-coverage-coldrun-source
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Bundle repository source
+        run: |
+          python - <<'PY'
+          import os, zipfile
+          root='.'
+          out='planreader-source.zip'
+          skip_prefixes=('.git/',)
+          skip_exact={out}
+          with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
+              for base, dirs, files in os.walk(root):
+                  dirs[:] = [d for d in dirs if d != '.git']
+                  for fn in files:
+                      p=os.path.join(base,fn)
+                      rel=os.path.relpath(p,root).replace('\\','/')
+                      if rel in skip_exact or any(rel.startswith(x) for x in skip_prefixes):
+                          continue
+                      z.write(p,rel)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-source
+          path: planreader-source.zip
+          if-no-files-found: error
+          retention-days: 1
