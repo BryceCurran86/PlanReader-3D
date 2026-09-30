@@ -110,7 +110,7 @@ jobs:
                   )
               )
               receipt = result.receipt
-              if receipt is not None and receipt.block_no in {11, 12}:
+              if receipt is not None and receipt.block_no in {0, 11, 12}:
                   target_block_rows.append({
                       "observation_id": observation_id,
                       "raw_text": receipt.raw_text,
