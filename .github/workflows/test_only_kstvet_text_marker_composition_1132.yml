@@ -98,6 +98,7 @@ jobs:
           # on the page, are reported but cannot mint quantity.
           authority = source.text_integrity_authority()
           marker_rows = []
+          target_block_rows = []
           for observation_id in published.text_observation_ids:
               result = authority.resolve_text(
                   ObservationSelector(
@@ -109,6 +110,21 @@ jobs:
                   )
               )
               receipt = result.receipt
+              if receipt is not None and receipt.block_no in {11, 12}:
+                  target_block_rows.append({
+                      "observation_id": observation_id,
+                      "raw_text": receipt.raw_text,
+                      "trusted_text": result.trusted_text,
+                      "status": result.status.value,
+                      "reason_codes": list(result.reason_codes),
+                      "decode_status": receipt.decode_status,
+                      "visibility_status": receipt.visibility_status,
+                      "block_no": receipt.block_no,
+                      "line_no": receipt.line_no,
+                      "word_no": receipt.word_no,
+                      "geometry": list(receipt.geometry),
+                      "seqnos": list(receipt.trace_sequence_numbers),
+                  })
               if receipt is not None and str(receipt.raw_text or "").strip() in {"-", "–", "—", "•", "·", "▪", "◦"}:
                   marker_rows.append({
                       "observation_id": observation_id,
@@ -154,6 +170,7 @@ jobs:
                   }
                   for block in shadow.blocks
               ],
+              "target_block_rows": target_block_rows,
               "decorative_marker_rows": marker_rows,
               "authority_without_instances": {
                   "status": resolution.status.value,
