@@ -533,6 +533,15 @@ def test_disjoint_sibling_exclusion_requires_exact_native_word_geometry() -> Non
     assert not _native_word_bbox_present(doc[0], shifted)
 
 
+def test_partially_overlapping_possible_clip_stays_unresolved() -> None:
+    # Native visibility cannot exclude a possible clip that intersects the word.
+    # Even a small positive overlap remains fail-closed.
+    pdf = _pdf(f"{_DOT} q 30 100 20 40 re W n {_TXT} Q {_DOT}")
+    decision = _classify(pdf)
+    assert not decision.trusted
+    assert TEXT_CLIP_STATE_UNRESOLVED in decision.reason_codes
+
+
 def test_clip_between_neighbouring_paints_that_contains_text_cannot_hide_it() -> None:
     pdf = _pdf(f"{_DOT} q 20 100 100 40 re W n {_TXT} Q {_DOT}")
     assert _classify(pdf).trusted
