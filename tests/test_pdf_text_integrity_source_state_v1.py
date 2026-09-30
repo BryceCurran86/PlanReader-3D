@@ -153,6 +153,52 @@ def test_two_single_spans_with_unequal_overlap_are_ambiguous_not_ranked() -> Non
     assert TEXT_TRACE_AMBIGUOUS in decision.reason_codes
 
 
+
+def test_exact_complementary_fill_stroke_pair_is_trusted() -> None:
+    pdf = _pdf(
+        "0 g 0 G "
+        "BT /F1 12 Tf 0 Tr 40 120 Td (PAIR) Tj ET "
+        "BT /F1 12 Tf 1 Tr 40 120 Td (PAIR) Tj ET"
+    )
+    decision = _classify(pdf)
+    assert decision.trusted, decision.reason_codes
+    assert decision.reason_codes == ()
+    assert len(decision.trace_sequence_numbers) == 2
+    assert decision.trace_sequence_numbers[1] == decision.trace_sequence_numbers[0] + 1
+
+
+def test_fill_fill_duplicate_remains_ambiguous() -> None:
+    pdf = _pdf(
+        "BT /F1 12 Tf 0 Tr 40 120 Td (PAIR) Tj ET "
+        "BT /F1 12 Tf 0 Tr 40 120 Td (PAIR) Tj ET"
+    )
+    decision = _classify(pdf)
+    assert not decision.trusted
+    assert TEXT_TRACE_AMBIGUOUS in decision.reason_codes
+
+
+def test_nonconsecutive_fill_stroke_duplicate_remains_ambiguous() -> None:
+    pdf = _pdf(
+        "BT /F1 12 Tf 0 Tr 40 120 Td (PAIR) Tj ET "
+        "0 0 1 rg 200 10 5 5 re f "
+        "BT /F1 12 Tf 1 Tr 40 120 Td (PAIR) Tj ET"
+    )
+    decision = _classify(pdf)
+    assert not decision.trusted
+    assert TEXT_TRACE_AMBIGUOUS in decision.reason_codes
+
+
+def test_third_competing_trace_blocks_fill_stroke_promotion() -> None:
+    pdf = _pdf(
+        "BT /F1 12 Tf 0 Tr 40 120 Td (PAIR) Tj ET "
+        "BT /F1 12 Tf 1 Tr 40 120 Td (PAIR) Tj ET "
+        "BT /F1 12 Tf 0 Tr 40 120 Td (PAIR) Tj ET"
+    )
+    decision = _classify(pdf)
+    assert not decision.trusted
+    assert TEXT_TRACE_AMBIGUOUS in decision.reason_codes
+
+
 def test_split_word_is_not_owned_when_foreign_paint_separates_its_spans() -> None:
     pdf = _pdf(
         "BT /F1 12 Tf 40 120 Td (Note) Tj ET 0 0 1 rg 200 10 5 5 re f 0 g "
