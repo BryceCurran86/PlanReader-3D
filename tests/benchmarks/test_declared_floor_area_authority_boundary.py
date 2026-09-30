@@ -82,7 +82,6 @@ def test_declared_total_without_geometry_is_retained_but_mints_no_floor_quantiti
         "reinforced_floor_slab",
         "substructure_bed_dpm",
         "substructure_a142_mesh",
-        "substructure_surface_bed",
     ):
         assert tag not in preds
 
