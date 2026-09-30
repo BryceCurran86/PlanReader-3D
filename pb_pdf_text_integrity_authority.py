@@ -837,13 +837,12 @@ def _rect_contains(
 def _rects_intersect(
     left: Sequence[float],
     right: Sequence[float],
-    tolerance: float = _CLIP_TOLERANCE_PT,
 ) -> bool:
     return (
         min(float(left[2]), float(right[2]))
-        > max(float(left[0]), float(right[0])) + tolerance
+        > max(float(left[0]), float(right[0]))
         and min(float(left[3]), float(right[3]))
-        > max(float(left[1]), float(right[1])) + tolerance
+        > max(float(left[1]), float(right[1]))
     )
 
 
