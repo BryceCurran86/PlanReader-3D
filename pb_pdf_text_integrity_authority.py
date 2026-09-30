@@ -454,6 +454,34 @@ def _decode_status(
         return "validated_tounicode", (), xref, subtype, base_font
     if _known_standard_simple_font(font, raw_text):
         return "known_standard_encoding", (), xref, subtype, base_font
+    # A simple TrueType font with an explicit WinAnsi encoding can prove
+    # printable ASCII without a /ToUnicode map only when the embedded font
+    # independently maps every decoded Unicode codepoint to the exact glyph id
+    # that the PDF renderer used. This is deliberately narrower than trusting
+    # TrueType or WinAnsi generically: non-ASCII, missing/unreconstructable
+    # embedded fonts, and any glyph mismatch remain fail-closed.
+    if (
+        len(font) >= 6
+        and subtype == "TrueType"
+        and str(font[5] or "") == "WinAnsiEncoding"
+        and str(raw_text)
+        and all(0x20 <= ord(char) <= 0x7E for char in str(raw_text))
+    ):
+        glyph_reasons = _glyph_unicode_consistency_reasons(page, span, font)
+        if glyph_reasons:
+            decode_status = (
+                "truetype_winansi_glyph_mismatch"
+                if TEXT_GLYPH_UNICODE_MISMATCH in glyph_reasons
+                else "truetype_winansi_glyph_unverified"
+            )
+            return decode_status, glyph_reasons, xref, subtype, base_font
+        return (
+            "validated_truetype_winansi_glyph_mapping",
+            (),
+            xref,
+            subtype,
+            base_font,
+        )
     if len(font) >= 6 and str(font[2] or "") == "Type1" and _normalise_font_name(font[3]) in _BASE14_SIMPLE_FONTS:
         return (
             "standard_encoding_non_ascii_untrusted",
