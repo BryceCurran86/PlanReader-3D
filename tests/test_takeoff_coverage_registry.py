@@ -662,3 +662,34 @@ def test_conflicting_exact_object_links_are_conflicting_lineage_in_reverse_censu
     assert record_for(summary, "wall-2").coverage_state == COVERAGE_PARTIAL
     assert summary.quantity_ids_by_census_state[CENSUS_CONFLICTING_LINEAGE] == ("q-1",)
     assert summary.quantity_ids_by_census_state[CENSUS_LINKED] == ()
+
+
+def test_abstained_dependency_with_clean_downstream_row_is_partial_not_pure_abstained():
+    summary = build(
+        qes=[quantity(abstained=True)],
+        rows=[row("q-1", geometry_ref="wall-1")],
+        qe_snaps=[qe_snapshot(("q-1",))],
+        row_snaps=[row_snapshot(("q-1",))],
+    )
+    record = record_for(summary)
+    assert record.coverage_state == COVERAGE_PARTIAL
+    assert "quantity_abstained:q-1" in record.reason_codes
+
+
+def test_conflicting_exact_object_link_poison_applies_to_all_linked_object_records():
+    m = manifest(object_keys=(("physical_wall", "wall"),))
+    snap = object_snapshot(("wall-1", "wall-2"))
+    q = quantity("q-1", object_ids=("wall-1",))
+    summary = build(
+        m=m,
+        qes=[q],
+        rows=[row("q-1", geometry_ref="wall-1")],
+        object_snaps=[snap],
+        qe_snaps=[qe_snapshot(("q-1",))],
+        row_snaps=[row_snapshot(("q-1",))],
+        editables=[editable("wall-2", deps=("q-1",), geometry_ref="wall-2", original_geometry_ref="wall-2")],
+    )
+    assert record_for(summary, "wall-1").coverage_state == COVERAGE_PARTIAL
+    assert record_for(summary, "wall-2").coverage_state == COVERAGE_PARTIAL
+    assert "quantity_evidence_object_link_conflict:q-1" in record_for(summary, "wall-1").reason_codes
+    assert summary.quantity_ids_by_census_state[CENSUS_CONFLICTING_LINEAGE] == ("q-1",)

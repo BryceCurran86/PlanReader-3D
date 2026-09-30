@@ -762,6 +762,7 @@ def _coverage_state(
     explicit_quantity_ids: Sequence[str],
     abstained_quantity_ids: set[str],
     defective_quantity_ids: set[str],
+    resolved_row_quantity_ids: set[str],
 ) -> str:
     # Frozen precedence from approved architecture:
     # 1) no explicit relation -> UNACCOUNTED
@@ -772,7 +773,7 @@ def _coverage_state(
     explicit = tuple(explicit_quantity_ids)
     if not explicit:
         return COVERAGE_UNACCOUNTED
-    if set(explicit) == abstained_quantity_ids:
+    if set(explicit) == abstained_quantity_ids and not resolved_row_quantity_ids:
         return COVERAGE_ABSTAINED
     if defective_quantity_ids:
         return COVERAGE_PARTIAL
@@ -981,6 +982,7 @@ def build_coverage_registry_v1(
         abstained_quantity_ids: set[str] = set()
         defective_quantity_ids: set[str] = set()
         row_ids: set[str] = set()
+        resolved_row_quantity_ids: set[str] = set()
         contributions: dict[str, Optional[float]] = {}
         units: dict[str, str] = {}
 
@@ -996,6 +998,8 @@ def build_coverage_registry_v1(
                 dependency_reasons.add("duplicate_or_conflicting_quantity_evidence_id")
             if quantity_id in duplicate_row_ids:
                 dependency_reasons.add("duplicate_or_conflicting_takeoff_row_quantity_id")
+            if quantity_id in object_link_conflict_ids:
+                dependency_reasons.add("quantity_evidence_object_link_conflict")
             if quantity_id in missing_qe_record_ids:
                 dependency_reasons.add("quantity_evidence_record_missing")
             dependency_reasons.update(qe_lineage_reasons.get(quantity_id, ()))
@@ -1018,6 +1022,12 @@ def build_coverage_registry_v1(
 
             if row is not None:
                 row_ids.add(quantity_id)
+                if (
+                    quantity_id not in duplicate_row_ids
+                    and not row_lineage_reasons.get(quantity_id)
+                    and quantity_id not in missing_row_record_ids
+                ):
+                    resolved_row_quantity_ids.add(quantity_id)
             elif quantity is None or not quantity.abstained:
                 dependency_reasons.add("takeoff_row_missing")
             if quantity_id in missing_row_record_ids and not (
@@ -1047,6 +1057,7 @@ def build_coverage_registry_v1(
             explicit_quantity_ids,
             abstained_quantity_ids,
             defective_quantity_ids,
+            resolved_row_quantity_ids,
         )
 
         source_pages = set(_source_pages(metadata))
