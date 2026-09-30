@@ -619,6 +619,171 @@ def _owned_span_chain(
     return hits[0], ()
 
 
+def _trace_char_identity_signature(
+    span: Mapping[str, object],
+) -> Optional[tuple[tuple[object, ...], ...]]:
+    """Return complete source-owned character identity for exact overprint proof."""
+
+    out: list[tuple[object, ...]] = []
+    for char in span.get("chars") or ():  # type: ignore[assignment]
+        try:
+            codepoint = int(char[0])  # type: ignore[index]
+            glyph_id = int(char[1])  # type: ignore[index]
+            origin = char[2]  # type: ignore[index]
+            if hasattr(origin, "x") and hasattr(origin, "y"):
+                origin_xy = (float(origin.x), float(origin.y))
+            else:
+                origin_xy = (float(origin[0]), float(origin[1]))
+            char_bbox = _rect_tuple(char[3])  # type: ignore[index]
+        except (IndexError, TypeError, ValueError, AttributeError):
+            return None
+        if not all(math.isfinite(v) for v in (*origin_xy, *char_bbox)):
+            return None
+        out.append((codepoint, glyph_id, origin_xy, char_bbox))
+    return tuple(out) if out else None
+
+
+def _owned_word_run_in_span(
+    span: Mapping[str, object],
+    raw_text: str,
+    word_bbox: Sequence[object],
+) -> Optional[tuple[int, int]]:
+    """Return the unique character run geometrically owned by one native word."""
+
+    chars = span.get("chars") or ()
+    trace_text = _trace_text(span)
+    if not raw_text or not chars or raw_text not in trace_text:
+        return None
+    if len(chars) != len(trace_text):
+        return None
+
+    hits: list[tuple[int, int]] = []
+    start = trace_text.find(raw_text)
+    while start >= 0:
+        end = start + len(raw_text)
+        window = chars[start:end]
+        if len(window) == len(raw_text):
+            contained = True
+            for char in window:
+                try:
+                    char_bbox = char[3]  # type: ignore[index]
+                except (IndexError, TypeError):
+                    contained = False
+                    break
+                if _intersection_ratio(char_bbox, word_bbox) < 0.99:
+                    contained = False
+                    break
+            if contained:
+                hits.append((start, end))
+        start = trace_text.find(raw_text, start + 1)
+
+    return hits[0] if len(hits) == 1 else None
+
+
+def _exact_fill_stroke_overprint_pair(
+    page: object,
+    word: Mapping[str, object],
+    candidates: Sequence[Mapping[str, object]],
+) -> Optional[tuple[Mapping[str, object], Mapping[str, object]]]:
+    """Prove two ambiguous traces are one exact complementary overprint.
+
+    This removes only trace ownership ambiguity. Decode, Unicode, clipping,
+    optional-content, render eligibility, occlusion and every other visibility
+    check are still applied independently to both returned spans by
+    classify_native_word_integrity().
+    """
+
+    if len(candidates) != 2:
+        return None
+    raw_text = str(word.get("text") or "")
+    word_bbox = word.get("bbox") or ()
+
+    first, second = candidates
+    seq_first = _span_seqno(first)
+    seq_second = _span_seqno(second)
+    if seq_first is None or seq_second is None or seq_first == seq_second:
+        return None
+
+    ordered = sorted(
+        ((seq_first, first), (seq_second, second)),
+        key=lambda item: item[0],
+    )
+    if ordered[1][0] != ordered[0][0] + 1:
+        return None
+    spans = (ordered[0][1], ordered[1][1])
+
+    try:
+        left_bbox = _rect_tuple(spans[0].get("bbox") or ())
+        right_bbox = _rect_tuple(spans[1].get("bbox") or ())
+    except (TypeError, ValueError):
+        return None
+    if any(abs(a - b) > 1e-6 for a, b in zip(left_bbox, right_bbox)):
+        return None
+
+    trace_texts = (_trace_text(spans[0]), _trace_text(spans[1]))
+    if not trace_texts[0] or trace_texts[0] != trace_texts[1]:
+        return None
+
+    runs = (
+        _owned_word_run_in_span(spans[0], raw_text, word_bbox),
+        _owned_word_run_in_span(spans[1], raw_text, word_bbox),
+    )
+    if runs[0] is None or runs[0] != runs[1]:
+        return None
+
+    signatures = (
+        _trace_char_identity_signature(spans[0]),
+        _trace_char_identity_signature(spans[1]),
+    )
+    if signatures[0] is None or signatures[0] != signatures[1]:
+        return None
+
+    font_names = tuple(str(span.get("font") or "") for span in spans)
+    if not font_names[0] or font_names[0] != font_names[1]:
+        return None
+    if str(spans[0].get("layer") or "") != str(spans[1].get("layer") or ""):
+        return None
+    try:
+        opacity_left = float(spans[0].get("opacity", 1.0))
+        opacity_right = float(spans[1].get("opacity", 1.0))
+    except (TypeError, ValueError):
+        return None
+    if (
+        not math.isfinite(opacity_left)
+        or not math.isfinite(opacity_right)
+        or abs(opacity_left - opacity_right) > 1e-9
+    ):
+        return None
+
+    try:
+        render_modes = tuple(int(span.get("type")) for span in spans)
+    except (TypeError, ValueError):
+        return None
+    if set(render_modes) != {0, 1}:
+        return None
+
+    try:
+        bboxlog = list(page.get_bboxlog() or ())  # type: ignore[attr-defined]
+    except Exception:
+        return None
+    sequence_numbers = (ordered[0][0], ordered[1][0])
+    if any(seqno < 0 or seqno >= len(bboxlog) for seqno in sequence_numbers):
+        return None
+    try:
+        bboxlog_kinds = tuple(str(bboxlog[seqno][0]) for seqno in sequence_numbers)
+    except (IndexError, TypeError):
+        return None
+    if set(bboxlog_kinds) != {"fill-text", "stroke-text"}:
+        return None
+
+    for render_mode, kind in zip(render_modes, bboxlog_kinds):
+        expected = "fill-text" if render_mode == 0 else "stroke-text"
+        if kind != expected:
+            return None
+
+    return spans
+
+
 def _matching_trace_spans(
     page: object,
     word: Mapping[str, object],
@@ -640,9 +805,17 @@ def _matching_trace_spans(
     if len(candidates) == 1:
         return (candidates[0][0],), candidates[0][1], ()
     if len(candidates) > 1:
-        # Multiple source trace spans can each explain the same native word.
-        # Do not rank by overlap, exact-text bonus, geometry, sequence number,
-        # or any other preference: ownership is ambiguous unless unique.
+        # Multiple source trace spans are normally ambiguous. The sole
+        # exception is an exact complementary fill/stroke overprint whose
+        # complete source identity proves both paints are the same logical
+        # word. This is not a ranking or geometric preference.
+        pair = _exact_fill_stroke_overprint_pair(
+            page,
+            word,
+            tuple(span for span, _text in candidates),
+        )
+        if pair is not None:
+            return pair, _trace_text(pair[0]), ()
         return (), "", (TEXT_TRACE_AMBIGUOUS,)
 
     chain, reasons = _owned_span_chain(spans, raw_text, bbox)
