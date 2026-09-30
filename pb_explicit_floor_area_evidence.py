@@ -65,6 +65,8 @@ class ExplicitFloorAreaEvidence:
     raw_evidence: Tuple[str, ...]
     authority: str = DECLARED_FLOOR_AREA_AUTHORITY
     binding: str = DECLARED_FLOOR_AREA_BINDING
+    source_sha256: Optional[str] = None
+    revision_id: Optional[str] = None
 
 
 def _normalise_text(text: str) -> str:
@@ -75,6 +77,8 @@ def extract_explicit_floor_area_evidence(
     page_text: str,
     *,
     source_page: int,
+    source_sha256: Optional[str] = None,
+    revision_id: Optional[str] = None,
 ) -> Optional[ExplicitFloorAreaEvidence]:
     """Extract one unambiguous declared floor-area claim from a plan page."""
 
@@ -107,6 +111,8 @@ def extract_explicit_floor_area_evidence(
         area_m2=area,
         source_pages=(int(source_page),),
         raw_evidence=raw,
+        source_sha256=source_sha256,
+        revision_id=revision_id,
     )
 
 
@@ -128,10 +134,17 @@ def resolve_explicit_floor_area_evidence(
     if len(distinct) != 1:
         return None
 
+    source_hashes = {item.source_sha256 for item in items if item.source_sha256}
+    revisions = {item.revision_id for item in items if item.revision_id}
+    if len(source_hashes) > 1 or len(revisions) > 1:
+        return None
+
     pages = tuple(sorted({p for item in items for p in item.source_pages}))
     raw = tuple(dict.fromkeys(raw for item in items for raw in item.raw_evidence))
     return ExplicitFloorAreaEvidence(
         area_m2=next(iter(distinct)),
         source_pages=pages,
         raw_evidence=raw,
+        source_sha256=next(iter(source_hashes)) if source_hashes else None,
+        revision_id=next(iter(revisions)) if revisions else None,
     )
