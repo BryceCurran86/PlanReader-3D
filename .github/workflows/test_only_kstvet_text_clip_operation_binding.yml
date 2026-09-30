@@ -181,6 +181,43 @@ jobs:
               })
               xobjects.append(row)
 
+          # Operator-level contexts: target strings are font-encoded, so bind by
+          # source graphics/text state and geometry rather than decoded literals.
+          w_contexts = []
+          for match in re.finditer(rb"(?<!\\S)(W\\*?|W)(?!\\S)", content):
+              start = max(0, match.start() - 900)
+              end = min(len(content), match.end() + 1800)
+              window = content[start:end]
+              w_contexts.append({
+                  "offset": match.start(),
+                  "clip_op": match.group(1).decode("ascii"),
+                  "context": window.decode("latin1", errors="replace"),
+                  "bt_count": len(re.findall(rb"(?<!\\S)BT(?!\\S)", window)),
+                  "et_count": len(re.findall(rb"(?<!\\S)ET(?!\\S)", window)),
+                  "tj_count": len(re.findall(rb"(?<!\\S)Tj(?!\\S)", window)),
+                  "tj_array_count": len(re.findall(rb"(?<!\\S)TJ(?!\\S)", window)),
+                  "tm_count": len(re.findall(rb"(?<!\\S)Tm(?!\\S)", window)),
+                  "td_count": len(re.findall(rb"(?<!\\S)Td(?!\\S)", window)),
+                  "TD_count": len(re.findall(rb"(?<!\\S)TD(?!\\S)", window)),
+              })
+
+          text_position_contexts = []
+          pos_pattern = re.compile(
+              rb"([-+]?\\d*\\.?\\d+)\\s+([-+]?\\d*\\.?\\d+)\\s+"
+              rb"(Td|TD)"
+          )
+          for match in pos_pattern.finditer(content):
+              vals = [float(match.group(1)), float(match.group(2))]
+              op = match.group(3).decode("ascii")
+              text_position_contexts.append({
+                  "offset": match.start(),
+                  "operator": op,
+                  "values": vals,
+                  "context": content[
+                      max(0, match.start()-500):min(len(content),match.end()+900)
+                  ].decode("latin1", errors="replace"),
+              })
+
           report = {
               "source_sha256": digest,
               "page_id": "47",
