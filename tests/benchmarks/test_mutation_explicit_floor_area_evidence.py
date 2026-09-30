@@ -137,3 +137,14 @@ def test_numerically_equal_claims_remain_unbound_declarations():
     assert resolved.binding == "unbound"
     assert resolved.evidence_role == "declared_source_area_claim"
 
+def test_summary_total_with_component_rows_remains_one_unbound_claim():
+    ev = extract_explicit_floor_area_evidence(
+        "GROUND FLOOR PLAN MAIN LIVING AREA 60.0m2 GARAGE AREA 20.0m2 "
+        "PORCH AREA 5.0m2 TOTAL FLOOR AREA 85.0m2",
+        source_page=4,
+    )
+    assert ev is not None
+    assert ev.area_m2 == 85.0
+    assert ev.binding == "unbound"
+    assert ev.evidence_role == "declared_source_area_claim"
+
