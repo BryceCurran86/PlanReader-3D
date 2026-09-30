@@ -131,6 +131,61 @@ def test_exact_fill_stroke_pair_resolves_without_text_authority_promotion(
     assert word == before
 
 
+def test_native_word_inside_longer_identical_trace_span_is_owned(
+    monkeypatch,
+):
+    _visible(monkeypatch)
+    phrase = "Circular hollow sections"
+    chars = _chars(phrase)
+    span_bbox = (
+        chars[0][3][0],
+        chars[0][3][1],
+        chars[-1][3][2],
+        chars[-1][3][3],
+    )
+    fill = _span(
+        text=phrase,
+        seqno=10,
+        render_mode=0,
+        bbox=span_bbox,
+    )
+    stroke = _span(
+        text=phrase,
+        seqno=11,
+        render_mode=1,
+        bbox=span_bbox,
+    )
+
+    start = phrase.index("hollow")
+    end = start + len("hollow")
+    word_bbox = (
+        chars[start][3][0],
+        chars[start][3][1],
+        chars[end - 1][3][2],
+        chars[end - 1][3][3],
+    )
+    page = _FakePage(
+        (fill, stroke),
+        [
+            ("ignore", (0.0, 0.0, 0.0, 0.0))
+            for _ in range(10)
+        ]
+        + [
+            ("fill-text", span_bbox),
+            ("stroke-text", span_bbox),
+        ],
+    )
+
+    result = classify_fill_stroke_text_pair_shadow(
+        page,
+        {"text": "hollow", "bbox": word_bbox},
+    )
+
+    assert result.equivalent
+    assert result.sequence_numbers == (10, 11)
+    assert result.render_modes == (0, 1)
+
+
 def test_input_order_does_not_change_exact_pair(monkeypatch):
     _visible(monkeypatch)
     base = _pair_page()
