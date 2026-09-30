@@ -158,7 +158,7 @@ def test_neutral_candidate_classes_are_source_visible_and_semantics_free():
         assert set(candidate.source_observation_ids) <= visible_ids
         assert candidate.source_primitive_refs
         for observation_id in candidate.source_observation_ids:
-            resolution = authority.resolve(
+            resolution = authority.resolve_visible(
                 ObservationSelector(
                     document_id=published.revision.document_id,
                     revision_id=published.revision.revision_id,
