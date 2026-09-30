@@ -1,0 +1,80 @@
+name: TEST-ONLY KSTVET C36A Live Net-Wall Current Main
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'test-only/kstvet-c36a-live-net-wall-current-main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 1e5e9f78a390b5fbb762e4ef861cb4639a4aa191
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and verify exact KSTVET source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  kstvet.pdf' | sha256sum -c -
+
+      - name: Diagnose source-owned live physical net wall
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          from pb_live_physical_net_wall_integration import (
+              collect_live_physical_net_wall_claim,
+          )
+
+          TESTED_HEAD = "1e5e9f78a390b5fbb762e4ef861cb4639a4aa191"
+          SOURCE_SHA = "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          path = Path("kstvet.pdf")
+          actual = hashlib.sha256(path.read_bytes()).hexdigest()
+          assert actual == SOURCE_SHA
+
+          claim = collect_live_physical_net_wall_claim(path, pages=[53, 54])
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "tested_production_head": TESTED_HEAD,
+              "source_sha256": actual,
+              "pages_zero_based": [53, 54],
+              "status": claim.status.value,
+              "reason_codes": list(claim.reason_codes),
+              "quantity_m2": claim.quantity_m2,
+              "source_pages": list(claim.source_pages),
+              "external_wall_ids": list(claim.external_wall_ids),
+              "evidence_ids": list(claim.evidence_ids),
+              "quantity_id": claim.quantity_id,
+              "confidence": claim.confidence,
+          }
+          Path("kstvet-c36a-live-net-wall-current-main.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print("KSTVET_C36A_LIVE_NET_WALL=" + json.dumps(report, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kstvet-c36a-live-net-wall-current-main
+          path: kstvet-c36a-live-net-wall-current-main.json
+          if-no-files-found: error
