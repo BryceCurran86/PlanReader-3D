@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
 
 import fitz
 
@@ -16,6 +17,7 @@ from pb_structural_member_definition_source_shadow import (
     STRUCTURAL_DEFINITION_SOURCE_SHADOW_PAGE_UNAVAILABLE,
     STRUCTURAL_DEFINITION_SOURCE_SHADOW_RESOLVED,
     STRUCTURAL_DEFINITION_SOURCE_SHADOW_SCOPE_MISMATCH,
+    _is_ignorable_standalone_untrusted_marker,
     compile_structural_definition_source_shadow,
 )
 
@@ -196,4 +198,50 @@ def test_shadow_module_has_no_benchmark_or_commercial_imports():
     assert not any(
         any(token in name.lower() for token in forbidden)
         for name in names
+    )
+
+
+
+def _marker_receipt(
+    *,
+    raw_text="-",
+    page_id="47",
+    block_no=11,
+    line_no=0,
+    word_no=0,
+):
+    return SimpleNamespace(
+        raw_text=raw_text,
+        page_id=page_id,
+        block_no=block_no,
+        line_no=line_no,
+        word_no=word_no,
+    )
+
+
+def test_only_source_isolated_decorative_marker_line_can_be_omitted():
+    receipt = _marker_receipt()
+    counts = {("47", 11, 0): 1}
+    assert _is_ignorable_standalone_untrusted_marker(receipt, counts)
+
+
+def test_marker_sharing_a_semantic_line_still_blocks_completeness():
+    receipt = _marker_receipt()
+    counts = {("47", 11, 0): 2}
+    assert not _is_ignorable_standalone_untrusted_marker(receipt, counts)
+
+
+def test_semantic_or_nonleading_untrusted_tokens_still_block_completeness():
+    counts = {("47", 11, 0): 1}
+    assert not _is_ignorable_standalone_untrusted_marker(
+        _marker_receipt(raw_text="CHS"),
+        counts,
+    )
+    assert not _is_ignorable_standalone_untrusted_marker(
+        _marker_receipt(word_no=1),
+        counts,
+    )
+    assert not _is_ignorable_standalone_untrusted_marker(
+        _marker_receipt(line_no=None),
+        counts,
     )
