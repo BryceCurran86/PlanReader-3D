@@ -201,7 +201,10 @@ def _candidate_spans(
             continue
         if _trace_text(span) != raw_text:
             continue
-        if _intersection_ratio(bbox, span.get("bbox") or ()) <= 0.0:
+        # Native word boxes and texttrace boxes use different vertical font
+        # metrics. Require substantial ownership overlap, then compare the two
+        # trace boxes directly for exact pair equivalence below.
+        if _intersection_ratio(bbox, span.get("bbox") or ()) < 0.5:
             continue
         out.append(span)
     return tuple(out)
@@ -264,14 +267,6 @@ def classify_fill_stroke_text_pair_shadow(
             sequence_numbers=sequence_numbers,
         )
 
-    if not all(_bbox_equal(span.get("bbox") or (), bbox) for span in spans):
-        return FillStrokeTextPairClassification(
-            equivalent=False,
-            reason_codes=(FILL_STROKE_SHADOW_PAIR_CONFLICT,),
-            raw_text=raw_text,
-            bbox=bbox,
-            sequence_numbers=sequence_numbers,
-        )
     if not _bbox_equal(
         spans[0].get("bbox") or (),
         spans[1].get("bbox") or (),
