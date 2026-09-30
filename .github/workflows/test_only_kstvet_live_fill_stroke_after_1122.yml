@@ -1,0 +1,160 @@
+name: TEST-ONLY KSTVET Live Fill-Stroke Promotion After 1122
+
+on:
+  pull_request:
+    branches:
+      - 'fix/pdf-text-exact-fill-stroke-promotion-v1'
+
+jobs:
+  validate:
+    if: github.head_ref == 'test-only/kstvet-live-fill-stroke-after-1122'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 6b11dd7c9eb901e6778189a7aba29db4583a49f1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and verify KSTVET source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  kstvet.pdf' | sha256sum -c -
+
+      - name: Validate live exact fill-stroke promotion on source page 47
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          import fitz
+
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_pdf_text_fill_stroke_equivalence_shadow import (
+              classify_fill_stroke_text_pair_shadow,
+          )
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          TESTED_HEAD = "6b11dd7c9eb901e6778189a7aba29db4583a49f1"
+          SOURCE_SHA = "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+
+          payload = Path("kstvet.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == SOURCE_SHA
+
+          doc = fitz.open(stream=payload, filetype="pdf")
+          page = doc.load_page(46)
+
+          producer = SourceVisibilityProducer(
+              producer_method="kstvet-live-fill-stroke-after-1122",
+              producer_version="1.0",
+          )
+          published = producer.ingest_native_pdf_bytes(
+              document_id=f"kstvet-fill-stroke-live:{digest[:16]}",
+              source_bytes=payload,
+              source_locator="sha256-verified-kstvet-source",
+              page_ids=("47",),
+          )
+          authority = producer.text_integrity_authority()
+
+          rows = []
+          pair_rows = []
+          for observation_id in published.text_observation_ids:
+              selector = ObservationSelector(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  observation_id=observation_id,
+              )
+              result = authority.resolve_text(selector)
+              receipt = result.receipt
+              if receipt is None:
+                  continue
+
+              classification = classify_fill_stroke_text_pair_shadow(
+                  page,
+                  {
+                      "text": receipt.raw_text,
+                      "bbox": tuple(receipt.geometry),
+                  },
+              )
+              if not classification.equivalent:
+                  continue
+
+              row = {
+                  "observation_id": observation_id,
+                  "text": receipt.raw_text,
+                  "bbox": list(receipt.geometry),
+                  "sequence_numbers": list(classification.sequence_numbers),
+                  "render_modes": list(classification.render_modes),
+                  "bboxlog_kinds": list(classification.bboxlog_kinds),
+                  "font_name": classification.font_name,
+                  "decode_status": receipt.decode_status,
+                  "visibility_status": receipt.visibility_status,
+                  "receipt_trusted": receipt.trusted,
+                  "live_status": result.status.value,
+                  "trusted_text": result.trusted_text,
+                  "live_reason_codes": list(result.reason_codes),
+              }
+              pair_rows.append(row)
+              if set(classification.sequence_numbers) == {108, 109}:
+                  rows.append(row)
+
+          # Source-state assertions only. The 108/109 pair was established by
+          # prior exact-source diagnostics; no benchmark row or expected
+          # quantity is consulted here.
+          assert pair_rows, "no exact complementary fill/stroke native words found"
+          assert rows, "source pair 108/109 was not represented by native words"
+
+          for row in rows:
+              assert row["render_modes"] in ([0, 1], [1, 0])
+              assert set(row["bboxlog_kinds"]) == {"fill-text", "stroke-text"}
+              assert row["decode_status"] == "validated_truetype_winansi_glyph_mapping"
+              assert row["visibility_status"] == "proven_visible"
+              assert row["receipt_trusted"] is True
+              assert row["live_status"] == EvidenceResolutionStatus.CORROBORATED.value
+              assert row["trusted_text"] == row["text"]
+              assert row["live_reason_codes"] == [
+                  "producer_owned_pdf_text_integrity_resolved"
+              ]
+
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "tested_production_head": TESTED_HEAD,
+              "source_sha256": digest,
+              "page_id": "47",
+              "exact_pair_word_count": len(pair_rows),
+              "source_pair_108_109_word_count": len(rows),
+              "source_pair_108_109_words": rows,
+              "live_promotion_validated": True,
+          }
+          Path("kstvet-live-fill-stroke-after-1122.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          doc.close()
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kstvet-live-fill-stroke-after-1122
+          path: kstvet-live-fill-stroke-after-1122.json
+          if-no-files-found: error
