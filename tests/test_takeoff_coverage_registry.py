@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import copy
+import json
 from dataclasses import fields
 
 import pytest
 
 from pb_editable_3d_correction_model import EditableGeometryObject
 from pb_migration_contracts import QuantityEvidence
-from pb_takeoff_output_authority import TakeoffOutputRow
 from pb_takeoff_coverage_registry import (
     CENSUS_CONFLICTING_LINEAGE,
     CENSUS_DANGLING,
@@ -15,22 +15,23 @@ from pb_takeoff_coverage_registry import (
     CENSUS_ORPHAN_UNBOUND,
     COVERAGE_ABSTAINED,
     COVERAGE_ACCOUNTED,
+    COVERAGE_BASIS_EXPLICIT_DEPENDENCIES_ONLY,
     COVERAGE_PARTIAL,
     COVERAGE_UNACCOUNTED,
     ENUMERATION_COMPLETE,
     ENUMERATION_INCOMPLETE,
     ENUMERATION_NOT_ENUMERATED,
     EXPECTED_FAMILY_COMPLETENESS_UNKNOWN,
-    COVERAGE_BASIS_EXPLICIT_DEPENDENCIES_ONLY,
     CoverageObjectRecordV1,
     CoverageRegistryContractError,
     CoverageRegistryRunManifestV1,
+    CoverageRegistrySummaryV1,
     ProducerObjectUniverseSnapshotV1,
     QuantityEvidenceUniverseSnapshotV1,
     TakeoffOutputRowUniverseSnapshotV1,
     build_coverage_registry_v1,
 )
-
+from pb_takeoff_output_authority import TakeoffOutputRow
 
 SHA = "a" * 64
 OBJECT_KEY = ("physical_wall", "wall")
@@ -730,3 +731,54 @@ def test_incomplete_object_universe_makes_reverse_census_nonconclusive():
     assert not summary.object_universe_complete
     assert not summary.quantity_census_conclusive
     assert "quantity_census_not_conclusive" in summary.reason_codes
+
+def test_summary_to_dict_is_plain_json_serializable():
+    payload = build().to_dict()
+    json.dumps(payload)
+    assert isinstance(payload["manifest"], dict)
+    assert isinstance(payload["object_records"], list)
+    assert isinstance(payload["object_records"][0], dict)
+
+
+def test_summary_snapshots_mutable_sequence_inputs_on_construction():
+    base = build()
+    object_snapshots = list(base.object_universe_snapshots)
+    object_records = list(base.object_records)
+    summary = CoverageRegistrySummaryV1(
+        manifest=base.manifest,
+        object_universe_snapshots=object_snapshots,
+        quantity_evidence_universe_snapshots=list(base.quantity_evidence_universe_snapshots),
+        takeoff_output_row_universe_snapshots=list(base.takeoff_output_row_universe_snapshots),
+        object_records=object_records,
+        object_counts_by_coverage_state=dict(base.object_counts_by_coverage_state),
+        object_ids_by_coverage_state=dict(base.object_ids_by_coverage_state),
+        quantity_counts_by_census_state=dict(base.quantity_counts_by_census_state),
+        quantity_ids_by_census_state=dict(base.quantity_ids_by_census_state),
+        object_universe_complete=base.object_universe_complete,
+        quantity_evidence_universe_complete=base.quantity_evidence_universe_complete,
+        takeoff_output_row_universe_complete=base.takeoff_output_row_universe_complete,
+        quantity_census_conclusive=base.quantity_census_conclusive,
+        reason_codes=base.reason_codes,
+    )
+    object_snapshots.clear()
+    object_records.clear()
+    assert len(summary.object_universe_snapshots) == 1
+    assert len(summary.object_records) == 1
+    assert isinstance(summary.object_universe_snapshots, tuple)
+    assert isinstance(summary.object_records, tuple)
+
+
+def test_stale_row_revision_from_producer_metadata_without_editable_is_partial():
+    summary = build(
+        rows=[row(revision_hash="old-rev")],
+        metadata={"wall-1": {"revision_hash": "new-rev"}},
+    )
+    record = record_for(summary)
+    assert record.coverage_state == COVERAGE_PARTIAL
+    assert "takeoff_row_revision_stale:q-1" in record.reason_codes
+    assert summary.quantity_ids_by_census_state[CENSUS_CONFLICTING_LINEAGE] == ("q-1",)
+
+
+def test_document_id_alias_lineage_conflict_fails_closed():
+    with pytest.raises(CoverageRegistryContractError, match="admitted_object_metadata_lineage_conflict"):
+        build(metadata={"wall-1": {"document_id": "doc-other"}})

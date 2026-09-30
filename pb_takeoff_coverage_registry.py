@@ -10,16 +10,16 @@ manifest.  All object/quantity joins are exact identity joins.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, is_dataclass, replace
 import math
 import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, fields, is_dataclass
 from types import MappingProxyType
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any
 
 from pb_editable_3d_correction_model import EditableGeometryObject
 from pb_migration_contracts import QuantityEvidence
 from pb_takeoff_output_authority import TakeoffOutputRow
-
 
 COVERAGE_ACCOUNTED = "ACCOUNTED"
 COVERAGE_PARTIAL = "PARTIAL"
@@ -122,6 +122,8 @@ def _freeze(value: Any) -> Any:
 
 
 def _thaw(value: Any) -> Any:
+    if is_dataclass(value):
+        return {field.name: _thaw(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, Mapping):
         return {str(k): _thaw(v) for k, v in value.items()}
     if isinstance(value, tuple):
@@ -146,7 +148,7 @@ def _field(value: Any, name: str, default: Any = None) -> Any:
     return getattr(value, name, default)
 
 
-def _optional_string(value: Any) -> Optional[str]:
+def _optional_string(value: Any) -> str | None:
     if value is None:
         return None
     clean = str(value).strip()
@@ -178,9 +180,7 @@ def _metadata_strings(metadata: Mapping[str, Any], *names: str) -> tuple[str, ..
         raw = metadata.get(name)
         if raw is None:
             continue
-        if isinstance(raw, (str, bytes)):
-            raw = (raw,)
-        elif not isinstance(raw, Sequence):
+        if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
             raw = (raw,)
         for value in raw:
             clean = _optional_string(value)
@@ -349,7 +349,7 @@ class CoverageObjectRecordV1:
     takeoff_row_ids: tuple[str, ...]
     coverage_state: str
     reason_codes: tuple[str, ...]
-    quantity_contribution: Mapping[str, Optional[float]]
+    quantity_contribution: Mapping[str, float | None]
     unit: Mapping[str, str]
     provenance: Mapping[str, Any]
     coverage_basis: str = COVERAGE_BASIS_EXPLICIT_DEPENDENCIES_ONLY
@@ -378,7 +378,7 @@ class CoverageObjectRecordV1:
             raise ValueError("coverage_basis is frozen to EXPLICIT_DEPENDENCIES_ONLY")
         if self.expected_family_completeness != EXPECTED_FAMILY_COMPLETENESS_UNKNOWN:
             raise ValueError("expected_family_completeness is frozen to UNKNOWN")
-        contributions: dict[str, Optional[float]] = {}
+        contributions: dict[str, float | None] = {}
         for quantity_id, value in self.quantity_contribution.items():
             qid = _required(quantity_id, "quantity_contribution key")
             if qid not in self.quantity_ids:
@@ -426,6 +426,17 @@ class CoverageRegistrySummaryV1:
     def __post_init__(self) -> None:
         if not isinstance(self.manifest, CoverageRegistryRunManifestV1):
             raise TypeError("manifest must be CoverageRegistryRunManifestV1")
+        sequence_fields = (
+            ("object_universe_snapshots", ProducerObjectUniverseSnapshotV1),
+            ("quantity_evidence_universe_snapshots", QuantityEvidenceUniverseSnapshotV1),
+            ("takeoff_output_row_universe_snapshots", TakeoffOutputRowUniverseSnapshotV1),
+            ("object_records", CoverageObjectRecordV1),
+        )
+        for name, expected_type in sequence_fields:
+            values = tuple(getattr(self, name))
+            if any(not isinstance(value, expected_type) for value in values):
+                raise TypeError(f"{name} must contain only {expected_type.__name__}")
+            object.__setattr__(self, name, values)
         if self.coverage_basis != COVERAGE_BASIS_EXPLICIT_DEPENDENCIES_ONLY:
             raise ValueError("coverage_basis is frozen to EXPLICIT_DEPENDENCIES_ONLY")
         if self.expected_family_completeness != EXPECTED_FAMILY_COMPLETENESS_UNKNOWN:
@@ -578,7 +589,7 @@ def _resolve_takeoff_row_snapshots(
 
 
 def _normalize_universe_data(
-    supplied: Optional[Mapping[tuple[str, str], Sequence[Any]]],
+    supplied: Mapping[tuple[str, str], Sequence[Any]] | None,
     expected_keys: Sequence[tuple[str, str]],
     label: str,
 ) -> dict[tuple[str, str], tuple[Any, ...]]:
@@ -681,6 +692,7 @@ def _object_metadata(
         )
     for key, expected in (
         ("source_document_id", snapshot.source_document_id),
+        ("document_id", snapshot.source_document_id),
         ("revision_id", snapshot.revision_id),
         ("source_sha256", snapshot.source_sha256),
         ("registry_run_id", snapshot.registry_run_id),
@@ -697,7 +709,7 @@ def _object_metadata(
 
 def _editable_join(
     metadata: Mapping[str, Any],
-    editable: Optional[EditableGeometryObject],
+    editable: EditableGeometryObject | None,
 ) -> tuple[bool, tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     if editable is None:
         return True, (), (), ()
@@ -738,6 +750,7 @@ def _row_lineage_reasons(
     linked_object_ids: Sequence[str],
     object_geometry_ids: Mapping[str, tuple[str, ...]],
     editable_by_id: Mapping[str, EditableGeometryObject],
+    object_metadata_by_id: Mapping[str, Mapping[str, Any]],
 ) -> tuple[str, ...]:
     reasons: list[str] = []
     allowed_geometry_refs: set[str] = set(linked_object_ids)
@@ -748,6 +761,11 @@ def _row_lineage_reasons(
         if geometry_ref and geometry_ref not in allowed_geometry_refs:
             reasons.append("takeoff_row_geometry_lineage_conflict")
     for object_id in linked_object_ids:
+        metadata_revision = _optional_string(
+            object_metadata_by_id.get(object_id, {}).get("revision_hash")
+        )
+        if metadata_revision and row.revision_hash and metadata_revision != row.revision_hash:
+            reasons.append("takeoff_row_revision_stale")
         editable = editable_by_id.get(object_id)
         if editable is None or not editable.revision_hash or not row.revision_hash:
             continue
@@ -786,14 +804,10 @@ def build_coverage_registry_v1(
     object_universe_snapshots: Sequence[ProducerObjectUniverseSnapshotV1] = (),
     quantity_evidence_universe_snapshots: Sequence[QuantityEvidenceUniverseSnapshotV1] = (),
     takeoff_output_row_universe_snapshots: Sequence[TakeoffOutputRowUniverseSnapshotV1] = (),
-    quantity_evidence_by_universe: Optional[
-        Mapping[tuple[str, str], Sequence[QuantityEvidence]]
-    ] = None,
-    takeoff_rows_by_universe: Optional[
-        Mapping[tuple[str, str], Sequence[TakeoffOutputRow]]
-    ] = None,
+    quantity_evidence_by_universe: Mapping[tuple[str, str], Sequence[QuantityEvidence]] | None = None,
+    takeoff_rows_by_universe: Mapping[tuple[str, str], Sequence[TakeoffOutputRow]] | None = None,
     editable_objects: Sequence[EditableGeometryObject] = (),
-    object_metadata_by_id: Optional[Mapping[str, Any]] = None,
+    object_metadata_by_id: Mapping[str, Any] | None = None,
 ) -> CoverageRegistrySummaryV1:
     """Build one fail-closed, read-only coverage registry run.
 
@@ -964,6 +978,7 @@ def build_coverage_registry_v1(
                     linked_object_ids,
                     geometry_by_id,
                     editable_by_id,
+                    metadata_by_id,
                 )
             )
         row_lineage_reasons[quantity_id] = tuple(sorted(reasons))
@@ -983,7 +998,7 @@ def build_coverage_registry_v1(
         defective_quantity_ids: set[str] = set()
         row_ids: set[str] = set()
         resolved_row_quantity_ids: set[str] = set()
-        contributions: dict[str, Optional[float]] = {}
+        contributions: dict[str, float | None] = {}
         units: dict[str, str] = {}
 
         if not explicit_quantity_ids:
@@ -1009,12 +1024,13 @@ def build_coverage_registry_v1(
 
             quantity = quantities[0] if len(quantities) == 1 else None
             row = rows[0] if len(rows) == 1 else None
-            if quantity is not None and quantity.input_entity_ids:
-                if (
-                    object_id not in quantity.input_entity_ids
-                    and quantity_id in editable_dependency_ids.get(object_id, ())
-                ):
-                    dependency_reasons.add("quantity_evidence_object_link_conflict")
+            if (
+                quantity is not None
+                and quantity.input_entity_ids
+                and object_id not in quantity.input_entity_ids
+                and quantity_id in editable_dependency_ids.get(object_id, ())
+            ):
+                dependency_reasons.add("quantity_evidence_object_link_conflict")
 
             if quantity is not None and quantity.abstained:
                 abstained_quantity_ids.add(quantity_id)
@@ -1155,10 +1171,11 @@ def build_coverage_registry_v1(
         if quantity_id in missing_qe_record_ids:
             census[CENSUS_DANGLING].append(quantity_id)
             continue
-        if quantity_id in missing_row_record_ids:
-            if quantity is None or not quantity.abstained:
-                census[CENSUS_DANGLING].append(quantity_id)
-                continue
+        if quantity_id in missing_row_record_ids and (
+            quantity is None or not quantity.abstained
+        ):
+            census[CENSUS_DANGLING].append(quantity_id)
+            continue
         if not rows and (quantity is None or not quantity.abstained):
             census[CENSUS_DANGLING].append(quantity_id)
             continue
@@ -1216,26 +1233,26 @@ def build_coverage_registry_v1(
 
 
 __all__ = [
+    "CENSUS_CONFLICTING_LINEAGE",
+    "CENSUS_DANGLING",
+    "CENSUS_LINKED",
+    "CENSUS_ORPHAN_UNBOUND",
+    "COVERAGE_ABSTAINED",
     "COVERAGE_ACCOUNTED",
+    "COVERAGE_BASIS_EXPLICIT_DEPENDENCIES_ONLY",
     "COVERAGE_PARTIAL",
     "COVERAGE_UNACCOUNTED",
-    "COVERAGE_ABSTAINED",
-    "CENSUS_LINKED",
-    "CENSUS_DANGLING",
-    "CENSUS_ORPHAN_UNBOUND",
-    "CENSUS_CONFLICTING_LINEAGE",
     "ENUMERATION_COMPLETE",
     "ENUMERATION_INCOMPLETE",
-    "ENUMERATION_UNAVAILABLE",
     "ENUMERATION_NOT_ENUMERATED",
-    "COVERAGE_BASIS_EXPLICIT_DEPENDENCIES_ONLY",
+    "ENUMERATION_UNAVAILABLE",
     "EXPECTED_FAMILY_COMPLETENESS_UNKNOWN",
+    "CoverageObjectRecordV1",
     "CoverageRegistryContractError",
     "CoverageRegistryRunManifestV1",
+    "CoverageRegistrySummaryV1",
     "ProducerObjectUniverseSnapshotV1",
     "QuantityEvidenceUniverseSnapshotV1",
     "TakeoffOutputRowUniverseSnapshotV1",
-    "CoverageObjectRecordV1",
-    "CoverageRegistrySummaryV1",
     "build_coverage_registry_v1",
 ]
