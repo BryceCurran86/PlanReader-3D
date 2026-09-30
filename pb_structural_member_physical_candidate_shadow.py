@@ -172,52 +172,79 @@ def _graphic_tuple(
     return result
 
 
+def _intervals_cover(
+    intervals: Sequence[tuple[float, float]],
+    start: float,
+    end: float,
+    tolerance: float,
+) -> bool:
+    if not intervals:
+        return False
+    ordered = sorted((min(a, b), max(a, b)) for a, b in intervals)
+    cursor = start
+    for left, right in ordered:
+        if right < cursor - tolerance:
+            continue
+        if left > cursor + tolerance:
+            return False
+        cursor = max(cursor, right)
+        if cursor >= end - tolerance:
+            return True
+    return cursor >= end - tolerance
+
+
 def _line_path_is_axis_aligned_rectangle(
     segments: Sequence[Mapping[str, object]],
 ) -> bool:
-    if len(segments) != 4:
+    if len(segments) < 4:
         return False
     bbox = _bbox_from_segments(segments)
     if bbox is None:
         return False
     x0, y0, x1, y1 = bbox
     tolerance = max(1e-6, max(x1 - x0, y1 - y0) * 1e-7)
-    expected = {
-        ("h", round(y0 / tolerance), round(x0 / tolerance), round(x1 / tolerance)),
-        ("h", round(y1 / tolerance), round(x0 / tolerance), round(x1 / tolerance)),
-        ("v", round(x0 / tolerance), round(y0 / tolerance), round(y1 / tolerance)),
-        ("v", round(x1 / tolerance), round(y0 / tolerance), round(y1 / tolerance)),
+    horizontal: dict[str, list[tuple[float, float]]] = {
+        "top": [],
+        "bottom": [],
     }
-    actual = set()
+    vertical: dict[str, list[tuple[float, float]]] = {
+        "left": [],
+        "right": [],
+    }
+
     for segment in segments:
         x_start = float(segment["x1"])
         y_start = float(segment["y1"])
         x_end = float(segment["x2"])
         y_end = float(segment["y2"])
+
         if abs(y_start - y_end) <= tolerance:
-            left, right = sorted((x_start, x_end))
-            actual.add(
-                (
-                    "h",
-                    round(((y_start + y_end) / 2.0) / tolerance),
-                    round(left / tolerance),
-                    round(right / tolerance),
-                )
-            )
+            y = (y_start + y_end) / 2.0
+            interval = tuple(sorted((x_start, x_end)))
+            if abs(y - y0) <= tolerance:
+                horizontal["top"].append(interval)
+            elif abs(y - y1) <= tolerance:
+                horizontal["bottom"].append(interval)
+            else:
+                return False
         elif abs(x_start - x_end) <= tolerance:
-            top, bottom = sorted((y_start, y_end))
-            actual.add(
-                (
-                    "v",
-                    round(((x_start + x_end) / 2.0) / tolerance),
-                    round(top / tolerance),
-                    round(bottom / tolerance),
-                )
-            )
+            x = (x_start + x_end) / 2.0
+            interval = tuple(sorted((y_start, y_end)))
+            if abs(x - x0) <= tolerance:
+                vertical["left"].append(interval)
+            elif abs(x - x1) <= tolerance:
+                vertical["right"].append(interval)
+            else:
+                return False
         else:
             return False
-    return actual == expected
 
+    return (
+        _intervals_cover(horizontal["top"], x0, x1, tolerance)
+        and _intervals_cover(horizontal["bottom"], x0, x1, tolerance)
+        and _intervals_cover(vertical["left"], y0, y1, tolerance)
+        and _intervals_cover(vertical["right"], y0, y1, tolerance)
+    )
 
 def _candidate_class(
     *,
