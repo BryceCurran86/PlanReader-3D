@@ -29,6 +29,7 @@ from pb_pdf_text_integrity_authority import (
     TEXT_TOUNICODE_MALFORMED,
     TEXT_TRACE_AMBIGUOUS,
     TEXT_TRACE_UNAVAILABLE,
+    _build_clip_model,
     _optional_content_reasons,
     _valid_tounicode_cmap,
     classify_native_word_integrity,
@@ -411,6 +412,74 @@ def test_text_outside_any_optional_content_is_not_affected_by_ocg_machinery() ->
 
 _TXT = "BT /F1 12 Tf 40 120 Td (900) Tj ET"
 _DOT = "0 0 5 5 re f"
+
+
+class _ExtendedDrawingsPage:
+    def __init__(self, drawings):
+        self._drawings = list(drawings)
+
+    def get_drawings(self, *, extended=False):
+        assert extended is True
+        return list(self._drawings)
+
+
+def _clip_entry(level: int, rect: fitz.Rect):
+    return {
+        "type": "clip",
+        "level": level,
+        "scissor": rect,
+        "items": (("re", rect, 1),),
+    }
+
+
+def test_clip_model_levels_include_non_clip_group_hierarchy() -> None:
+    clip = fitz.Rect(20, 100, 120, 140)
+    model = _build_clip_model(
+        _ExtendedDrawingsPage(
+            (
+                {"type": "group", "level": 0},
+                _clip_entry(1, clip),
+                {"type": "f", "level": 2, "seqno": 10},
+                {"type": "f", "level": 1, "seqno": 11},
+            )
+        )
+    )
+
+    assert model is not None
+    assert model.consistent
+    assert len(model.clips) == 1
+    assert model.clips[0].exact_rectangle
+    assert model.pushes == ((1, 0),)
+    assert model.paths == (
+        (10, 2, (0,), 2),
+        (11, 1, (), 3),
+    )
+
+
+def test_clip_model_nested_levels_pop_only_closed_clip_scopes() -> None:
+    outer = fitz.Rect(10, 90, 210, 190)
+    inner = fitz.Rect(20, 100, 120, 140)
+    model = _build_clip_model(
+        _ExtendedDrawingsPage(
+            (
+                {"type": "group", "level": 0},
+                _clip_entry(1, outer),
+                _clip_entry(2, inner),
+                {"type": "f", "level": 3, "seqno": 20},
+                {"type": "f", "level": 2, "seqno": 21},
+                {"type": "f", "level": 1, "seqno": 22},
+            )
+        )
+    )
+
+    assert model is not None
+    assert model.consistent
+    assert len(model.clips) == 2
+    assert model.paths == (
+        (20, 3, (0, 1), 3),
+        (21, 2, (0,), 4),
+        (22, 1, (), 5),
+    )
 
 
 def test_text_wholly_inside_an_exact_rectangular_clip_is_trusted() -> None:

@@ -639,11 +639,14 @@ def _near_white(span: Mapping[str, object]) -> bool:
 # ---------------------------------------------------------------------------
 #
 # The former rule vetoed every text on any page containing a ``W`` operator.
-# Extended drawings expose the clip stack (each clip's exact ``scissor`` and
-# nesting ``level``) and every painted path's ``seqno``/``level``; text spans
-# share the same sequence counter. That is enough to prove, for a given text,
-# which clips *may* apply and which *must* apply -- but only where the PDF's
-# own structure proves it:
+# Extended drawings expose each clip's exact ``scissor``, every entry's
+# graphics hierarchy ``level``, and painted paths' ``seqno``; text spans share
+# the same sequence counter. PyMuPDF's level is the full hierarchy depth
+# (groups and clips), not a count of active clips. A clip at level L governs
+# following descendants whose level is greater than L until the hierarchy
+# returns to L or above. That is enough to prove, for a given text, which clips
+# *may* apply and which *must* apply -- but only where the PDF's own structure
+# proves it:
 #
 # * the clips that may be active at a text are those on the stack at the path
 #   painted immediately before it, those on the stack at the path painted
@@ -657,7 +660,7 @@ def _near_white(span: Mapping[str, object]) -> bool:
 #   inactive); one that is provably active and does not contain it clips the
 #   text; a non-rectangular clip is never treated as its bounding box.
 #
-# Anything the model cannot reconcile (level bookkeeping mismatch, rotated
+# Anything the model cannot reconcile (malformed hierarchy levels, rotated
 # pages, clips reported without extended drawings) fails closed.
 
 _CLIP_TOLERANCE_PT = 0.5
@@ -732,49 +735,70 @@ def _build_clip_model(page: object) -> Optional[_ClipModel]:
     clips: list[_ClipRecord] = []
     pushes: list[tuple[int, int]] = []
     paths: list[tuple[int, int, tuple[int, ...], int]] = []
-    stack: list[int] = []
+    # (hierarchy level, clip id). PyMuPDF levels include non-clip group nodes,
+    # so clip-stack length is never a valid substitute for hierarchy depth.
+    stack: list[tuple[int, int]] = []
     consistent = True
     for position, entry in enumerate(drawings):
         kind = entry.get("type")
+        seqno = entry.get("seqno")
+        raw_level = entry.get("level")
+        if raw_level is None:
+            if kind == "clip" or seqno is not None:
+                consistent = False
+            continue
+        try:
+            level = int(raw_level)
+        except (TypeError, ValueError):
+            consistent = False
+            continue
+        if level < 0:
+            consistent = False
+            continue
+
+        # Every extended-drawing entry participates in one hierarchy. Returning
+        # to the same or a shallower level closes clips opened at that level or
+        # deeper, including when the boundary is a non-clip ``group`` entry.
+        while stack and stack[-1][0] >= level:
+            stack.pop()
+
         if kind == "clip":
             try:
-                level = int(entry.get("level"))
                 scissor = fitz.Rect(entry.get("scissor"))
             except (TypeError, ValueError):
                 consistent = False
                 continue
-            if level < 0 or level > len(stack):
-                consistent = False
-                continue
-            del stack[level:]
             clip_id = len(clips)
             clips.append(
                 _ClipRecord(
-                    scissor=(float(scissor.x0), float(scissor.y0), float(scissor.x1), float(scissor.y1)),
+                    scissor=(
+                        float(scissor.x0),
+                        float(scissor.y0),
+                        float(scissor.x1),
+                        float(scissor.y1),
+                    ),
                     exact_rectangle=_clip_is_exact_rectangle(entry, scissor),
                 )
             )
-            stack.append(clip_id)
+            stack.append((level, clip_id))
             pushes.append((position, clip_id))
             continue
-        seqno = entry.get("seqno")
+
         if seqno is None:
             continue
         try:
-            level = int(entry.get("level"))
             seq = int(seqno)
         except (TypeError, ValueError):
             consistent = False
             continue
-        # Pops are not reported as entries: a painted path's ``level`` is the
-        # authoritative number of clips active at that path, so a lower level
-        # than the tracked stack means the innermost clips were popped. A
-        # higher level would mean an unreported push and cannot be reconciled.
-        if level > len(stack):
-            consistent = False
-        else:
-            del stack[level:]
-        paths.append((seq, level, tuple(stack), position))
+        paths.append(
+            (
+                seq,
+                level,
+                tuple(clip_id for _clip_level, clip_id in stack),
+                position,
+            )
+        )
     paths.sort(key=lambda item: item[0])
     return _ClipModel(
         consistent=consistent,
