@@ -837,7 +837,12 @@ def test_no_production_module_imports_the_join():
     offenders = []
     for path in sorted(REPO.rglob("*.py")):
         relative = path.relative_to(REPO)
-        if relative.parts[0] in {"tests", "scripts", ".git"} or path.name == f"{MODULE}.py":
+        # pb_native_graphic_state_stratified is the Phase-2b shadow diagnostic stacked on this
+        # join; it reuses only the public rows seam and is itself production-isolated.
+        if relative.parts[0] in {"tests", "scripts", ".git"} or path.name in {
+            f"{MODULE}.py",
+            "pb_native_graphic_state_stratified.py",
+        }:
             continue
         if MODULE in path.read_text(encoding="utf-8", errors="ignore"):
             offenders.append(str(relative))

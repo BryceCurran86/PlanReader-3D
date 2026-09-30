@@ -54,6 +54,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Optional
 
 import fitz
@@ -670,14 +671,61 @@ def _header(
     }
 
 
-def build_native_graphic_state_join(
+def digest_of_rows(rows: Mapping[str, JoinRow]) -> str:
+    """Order-free digest binding every row's identity, join status and graphic state."""
+    return hashlib.sha256(
+        json.dumps(
+            [[oid, row.status, row.digest()] for oid, row in sorted(rows.items())],
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+@dataclass(frozen=True)
+class NativeJoinRows:
+    """Immutable per-primitive join rows and group memberships of one semantic scope.
+
+    This is exactly what ``build_native_graphic_state_join`` aggregates, exposed
+    before aggregation so a downstream diagnostic can work on the identical rows
+    instead of re-deriving them.  The row and group containers are immutable
+    (mapping proxies, frozensets, tuples, frozen rows); ``record``, ``published``
+    and ``semantic_result`` are the producer-owned objects that were passed in, not
+    copies.  ``status`` is not ``ok`` (rows and groups empty) when the source hash
+    did not match or the semantic record is absent.
+    """
+
+    status: str
+    record: Any
+    published: Any
+    computed_sha: str
+    semantic_result: SemanticOpeningEnumerationResult
+    rows: Mapping[str, JoinRow]
+    candidate_pages: frozenset[str]
+    candidates_total: int
+    participating_candidates: int
+    unavailable_pages: tuple[Mapping[str, Any], ...]
+    participating_weight: Mapping[str, int]
+    ambiguous: frozenset[str]
+    control_members: frozenset[str]
+    missing_rows: tuple[str, ...]
+    populations: Mapping[str, Mapping[str, int]]
+    path_sizes: Mapping[tuple[str, int], int]
+    pages_replayed: int
+    pages_unavailable: tuple[str, ...]
+    duplicate_replay_identities: int
+
+    @property
+    def ok(self) -> bool:
+        return self.status == SCOPE_STATUS_OK
+
+
+def build_native_graphic_state_join_rows(
     *,
     source_visibility_producer: SourceVisibilityProducer,
     semantic_result: SemanticOpeningEnumerationResult,
     source_bytes: bytes,
-    reference_structure: Optional[CandidateStructureSummary] = None,
-) -> NativeGraphicStateJoin:
-    """Join producer graphic state to the visible primitives of one semantic scope.
+) -> NativeJoinRows:
+    """Join producer graphic state to every visible primitive of one semantic scope.
 
     Read-only.  ``source_bytes`` are caller-supplied and must hash to the source
     SHA-256 already bound to the scope, otherwise nothing is extracted or joined.
@@ -688,23 +736,35 @@ def build_native_graphic_state_join(
         raise TypeError("semantic_result must be a SemanticOpeningEnumerationResult")
     if not isinstance(source_bytes, (bytes, bytearray)):
         raise TypeError("source_bytes must be bytes")
-    if reference_structure is not None and not isinstance(
-        reference_structure, CandidateStructureSummary
-    ):
-        raise TypeError("reference_structure must be a CandidateStructureSummary")
 
     record = semantic_result.record
     computed_sha = hashlib.sha256(bytes(source_bytes)).hexdigest()
-    if record is None:
-        payload = _header(
-            status=SCOPE_STATUS_ABSENT,
-            record=None,
-            semantic_result=semantic_result,
+
+    def no_rows(status: str, published: Any) -> NativeJoinRows:
+        return NativeJoinRows(
+            status=status,
+            record=record,
+            published=published,
             computed_sha=computed_sha,
-            published=None,
+            semantic_result=semantic_result,
+            rows=MappingProxyType({}),
+            candidate_pages=frozenset(),
+            candidates_total=0,
+            participating_candidates=0,
+            unavailable_pages=(),
+            participating_weight=MappingProxyType({}),
+            ambiguous=frozenset(),
+            control_members=frozenset(),
+            missing_rows=(),
+            populations=MappingProxyType({}),
+            path_sizes=MappingProxyType({}),
+            pages_replayed=0,
+            pages_unavailable=(),
+            duplicate_replay_identities=0,
         )
-        payload["semantic_reason_codes"] = sorted(str(c) for c in semantic_result.reason_codes)
-        return _seal(payload)
+
+    if record is None:
+        return no_rows(SCOPE_STATUS_ABSENT, None)
     published = source_visibility_producer.published_snapshot_for_revision(record.revision_id)
     if (
         published is None
@@ -716,15 +776,7 @@ def build_native_graphic_state_join(
             "semantic record does not belong to this producer's authenticated snapshot"
         )
     if computed_sha != record.source_sha256:
-        return _seal(
-            _header(
-                status=SCOPE_STATUS_SHA_MISMATCH,
-                record=record,
-                semantic_result=semantic_result,
-                computed_sha=computed_sha,
-                published=published,
-            )
-        )
+        return no_rows(SCOPE_STATUS_SHA_MISMATCH, published)
 
     visibility = source_visibility_producer.authority()
     physical = PhysicalOpeningAuthority(visibility)  # private; only its memo caches fill
@@ -811,6 +863,99 @@ def build_native_graphic_state_join(
         for oid in populations[G_UNIVERSE_CAND_PAGES]
         if oid not in participating_weight
     }
+    path_sizes: Counter = Counter(
+        row.path_key for row in rows.values() if row.ref_class in CLASSES and row.path_key is not None
+    )
+    return NativeJoinRows(
+        status=SCOPE_STATUS_OK,
+        record=record,
+        published=published,
+        computed_sha=computed_sha,
+        semantic_result=semantic_result,
+        rows=MappingProxyType(rows),
+        candidate_pages=frozenset(candidate_pages),
+        candidates_total=candidate_count,
+        participating_candidates=participating_candidates,
+        unavailable_pages=tuple(
+            MappingProxyType({**entry, "reason_codes": tuple(entry["reason_codes"])})
+            for entry in unavailable_pages
+        ),
+        participating_weight=MappingProxyType(dict(participating_weight)),
+        ambiguous=frozenset(ambiguous),
+        control_members=frozenset(control_members),
+        missing_rows=tuple(missing_rows),
+        populations=MappingProxyType(
+            {group: MappingProxyType(members) for group, members in populations.items()}
+        ),
+        path_sizes=MappingProxyType(dict(path_sizes)),
+        pages_replayed=len(replays),
+        pages_unavailable=tuple(
+            sorted((p for p, r in replays.items() if not r.available), key=_page_order)
+        ),
+        duplicate_replay_identities=sum(len(r.duplicate_keys) for r in replays.values()),
+    )
+
+
+def build_native_graphic_state_join(
+    *,
+    source_visibility_producer: SourceVisibilityProducer,
+    semantic_result: SemanticOpeningEnumerationResult,
+    source_bytes: bytes,
+    reference_structure: Optional[CandidateStructureSummary] = None,
+) -> NativeGraphicStateJoin:
+    """Aggregate the per-primitive join rows of one semantic scope into the sealed record."""
+    if type(source_visibility_producer) is not SourceVisibilityProducer:
+        raise TypeError("source_visibility_producer must be producer-owned")
+    if not isinstance(semantic_result, SemanticOpeningEnumerationResult):
+        raise TypeError("semantic_result must be a SemanticOpeningEnumerationResult")
+    if not isinstance(source_bytes, (bytes, bytearray)):
+        raise TypeError("source_bytes must be bytes")
+    if reference_structure is not None and not isinstance(
+        reference_structure, CandidateStructureSummary
+    ):
+        raise TypeError("reference_structure must be a CandidateStructureSummary")
+
+    bundle = build_native_graphic_state_join_rows(
+        source_visibility_producer=source_visibility_producer,
+        semantic_result=semantic_result,
+        source_bytes=source_bytes,
+    )
+    record = bundle.record
+    computed_sha = bundle.computed_sha
+    published = bundle.published
+    if bundle.status == SCOPE_STATUS_ABSENT:
+        payload = _header(
+            status=SCOPE_STATUS_ABSENT,
+            record=None,
+            semantic_result=semantic_result,
+            computed_sha=computed_sha,
+            published=None,
+        )
+        payload["semantic_reason_codes"] = sorted(str(c) for c in semantic_result.reason_codes)
+        return _seal(payload)
+    if bundle.status == SCOPE_STATUS_SHA_MISMATCH:
+        return _seal(
+            _header(
+                status=SCOPE_STATUS_SHA_MISMATCH,
+                record=record,
+                semantic_result=semantic_result,
+                computed_sha=computed_sha,
+                published=published,
+            )
+        )
+    rows = bundle.rows
+    candidate_pages = bundle.candidate_pages
+    candidate_count = bundle.candidates_total
+    participating_candidates = bundle.participating_candidates
+    unavailable_pages = [
+        {**entry, "reason_codes": list(entry["reason_codes"])} for entry in bundle.unavailable_pages
+    ]
+    participating_weight = bundle.participating_weight
+    ambiguous = bundle.ambiguous
+    control_members = bundle.control_members
+    missing_rows = list(bundle.missing_rows)
+    populations = bundle.populations
+    path_sizes = bundle.path_sizes
 
     def cells_for(group: str) -> dict[str, dict[str, _Cell]]:
         by_class: dict[str, dict[str, _Cell]] = {c: {} for c in CLASSES}
@@ -826,9 +971,6 @@ def build_native_graphic_state_join(
         by_class["unclassified"] = {"*": unclassed} if unclassed.rows else {}
         return by_class
 
-    path_sizes: Counter = Counter(
-        row.path_key for row in rows.values() if row.ref_class in CLASSES and row.path_key is not None
-    )
     cells = {group: cells_for(group) for group in GROUPS}
     doc_groups: dict[str, Any] = {}
     page_groups: dict[str, Any] = {}
@@ -873,20 +1015,13 @@ def build_native_graphic_state_join(
     # ---- status counts over EVERY row (nothing silently dropped)
     all_status = Counter(row.status for row in rows.values())
     replay_summary = {
-        "pages_replayed": len(replays),
-        "pages_unavailable": sorted(
-            (p for p, r in replays.items() if not r.available), key=_page_order
-        ),
-        "duplicate_replay_identities": sum(len(r.duplicate_keys) for r in replays.values()),
+        "pages_replayed": bundle.pages_replayed,
+        "pages_unavailable": list(bundle.pages_unavailable),
+        "duplicate_replay_identities": bundle.duplicate_replay_identities,
         "joined_rows": all_status[STATUS_JOINED],
         "rows_total": len(rows),
     }
-    rows_digest = hashlib.sha256(
-        json.dumps(
-            [[oid, row.status, row.digest()] for oid, row in sorted(rows.items())],
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
+    rows_digest = digest_of_rows(rows)
 
     examples: dict[str, list[dict[str, Any]]] = {}
     for group in (G_PARTICIPATING, G_UNIVERSE_CAND_PAGES):

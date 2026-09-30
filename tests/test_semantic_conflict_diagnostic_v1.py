@@ -76,6 +76,7 @@ DIAGNOSTIC_MODULES = {
     f"{MODULE}.py",
     "pb_candidate_provenance_census.py",
     "pb_native_graphic_state_join.py",
+    "pb_native_graphic_state_stratified.py",
 }
 DOC = "conflict-test"
 
