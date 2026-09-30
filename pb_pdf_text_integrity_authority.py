@@ -651,6 +651,229 @@ def _matching_trace_spans(
     return chain, "".join(_trace_text(span) for span in chain), ()
 
 
+
+_PAIR_BBOX_TOLERANCE_PT = 1e-6
+_PAIR_FLOAT_TOLERANCE = 1e-9
+
+
+def _pair_bbox_equal(
+    left: Sequence[object],
+    right: Sequence[object],
+) -> bool:
+    try:
+        a = _rect_tuple(left)
+        b = _rect_tuple(right)
+    except (TypeError, ValueError):
+        return False
+    return all(
+        abs(left_value - right_value) <= _PAIR_BBOX_TOLERANCE_PT
+        for left_value, right_value in zip(a, b)
+    )
+
+
+def _pair_float_equal(left: object, right: object) -> bool:
+    try:
+        a = float(left)
+        b = float(right)
+    except (TypeError, ValueError):
+        return False
+    return (
+        math.isfinite(a)
+        and math.isfinite(b)
+        and abs(a - b) <= _PAIR_FLOAT_TOLERANCE
+    )
+
+
+def _pair_point_signature(value: object) -> Optional[tuple[float, float]]:
+    try:
+        if hasattr(value, "x") and hasattr(value, "y"):
+            x = float(value.x)  # type: ignore[attr-defined]
+            y = float(value.y)  # type: ignore[attr-defined]
+        else:
+            x = float(value[0])  # type: ignore[index]
+            y = float(value[1])  # type: ignore[index]
+    except (IndexError, TypeError, ValueError, AttributeError):
+        return None
+    if not math.isfinite(x) or not math.isfinite(y):
+        return None
+    return x, y
+
+
+def _pair_char_signature(
+    span: Mapping[str, object],
+) -> Optional[tuple[tuple[object, ...], ...]]:
+    signatures: list[tuple[object, ...]] = []
+    for char in span.get("chars") or ():  # type: ignore[assignment]
+        try:
+            unicode_codepoint = int(char[0])  # type: ignore[index]
+            glyph_id = int(char[1])  # type: ignore[index]
+            origin = _pair_point_signature(char[2])  # type: ignore[index]
+            bbox = _rect_tuple(char[3])  # type: ignore[index]
+        except (IndexError, TypeError, ValueError):
+            return None
+        if origin is None:
+            return None
+        signatures.append((unicode_codepoint, glyph_id, origin, bbox))
+    return tuple(signatures) if signatures else None
+
+
+def _pair_owned_word_run(
+    span: Mapping[str, object],
+    raw_text: str,
+    word_bbox: Sequence[object],
+) -> Optional[tuple[int, int]]:
+    chars = span.get("chars") or ()
+    trace_text = _trace_text(span)
+    if not raw_text or not chars or raw_text not in trace_text:
+        return None
+    if len(chars) != len(trace_text):
+        return None
+
+    hits: list[tuple[int, int]] = []
+    start = trace_text.find(raw_text)
+    while start >= 0:
+        end = start + len(raw_text)
+        window = chars[start:end]
+        if len(window) == len(raw_text):
+            contained = True
+            for char in window:
+                try:
+                    char_bbox = char[3]  # type: ignore[index]
+                except (IndexError, TypeError):
+                    contained = False
+                    break
+                if _intersection_ratio(char_bbox, word_bbox) < 0.99:
+                    contained = False
+                    break
+            if contained:
+                hits.append((start, end))
+        start = trace_text.find(raw_text, start + 1)
+
+    return hits[0] if len(hits) == 1 else None
+
+
+def _exact_fill_stroke_pair_spans(
+    page: object,
+    word: Mapping[str, object],
+) -> tuple[Mapping[str, object], ...]:
+    """Resolve only an exact complementary fill/stroke duplicate paint pair.
+
+    This is a positive source-identity proof, not geometric ranking. Two trace
+    spans qualify only when they are identical in text, glyphs, geometry,
+    font, layer and opacity, are consecutive in source paint order, and differ
+    only by the complementary fill/stroke render operation. Both traces must
+    independently pass the existing visibility checks.
+    """
+
+    raw_text = str(word.get("text") or "")
+    try:
+        bbox = _rect_tuple(word.get("bbox") or ())
+    except (TypeError, ValueError):
+        return ()
+
+    all_spans = _texttrace_spans(page)
+    if all_spans is None:
+        return ()
+
+    candidates: list[Mapping[str, object]] = []
+    for span in all_spans:
+        if not isinstance(span, Mapping):
+            continue
+        if raw_text not in _trace_text(span):
+            continue
+        if _intersection_ratio(bbox, span.get("bbox") or ()) < 0.5:
+            continue
+        if _pair_owned_word_run(span, raw_text, bbox) is None:
+            continue
+        candidates.append(span)
+    if len(candidates) != 2:
+        return ()
+
+    seq_first = _span_seqno(candidates[0])
+    seq_second = _span_seqno(candidates[1])
+    if seq_first is None or seq_second is None or seq_first == seq_second:
+        return ()
+
+    ordered = sorted(
+        ((seq_first, candidates[0]), (seq_second, candidates[1])),
+        key=lambda item: item[0],
+    )
+    sequence_numbers = (ordered[0][0], ordered[1][0])
+    spans = (ordered[0][1], ordered[1][1])
+    if sequence_numbers[1] != sequence_numbers[0] + 1:
+        return ()
+
+    if not _pair_bbox_equal(
+        spans[0].get("bbox") or (),
+        spans[1].get("bbox") or (),
+    ):
+        return ()
+
+    trace_texts = (_trace_text(spans[0]), _trace_text(spans[1]))
+    if not trace_texts[0] or trace_texts[0] != trace_texts[1]:
+        return ()
+
+    owned_runs = (
+        _pair_owned_word_run(spans[0], raw_text, bbox),
+        _pair_owned_word_run(spans[1], raw_text, bbox),
+    )
+    if owned_runs[0] is None or owned_runs[0] != owned_runs[1]:
+        return ()
+
+    signatures = (
+        _pair_char_signature(spans[0]),
+        _pair_char_signature(spans[1]),
+    )
+    if signatures[0] is None or signatures[0] != signatures[1]:
+        return ()
+
+    font_names = tuple(str(span.get("font") or "") for span in spans)
+    if not font_names[0] or font_names[0] != font_names[1]:
+        return ()
+
+    layer_names = tuple(str(span.get("layer") or "") for span in spans)
+    if layer_names[0] != layer_names[1]:
+        return ()
+
+    if not _pair_float_equal(
+        spans[0].get("opacity", 1.0),
+        spans[1].get("opacity", 1.0),
+    ):
+        return ()
+
+    try:
+        render_modes = tuple(int(span.get("type")) for span in spans)
+    except (TypeError, ValueError):
+        return ()
+    if set(render_modes) != {0, 1}:
+        return ()
+
+    try:
+        bboxlog = list(page.get_bboxlog() or ())  # type: ignore[attr-defined]
+    except Exception:
+        return ()
+    if any(seqno < 0 or seqno >= len(bboxlog) for seqno in sequence_numbers):
+        return ()
+
+    bboxlog_kinds = tuple(str(bboxlog[seqno][0]) for seqno in sequence_numbers)
+    if set(bboxlog_kinds) != {"fill-text", "stroke-text"}:
+        return ()
+
+    for span, kind, render_mode in zip(spans, bboxlog_kinds, render_modes):
+        expected_kind = "fill-text" if render_mode == 0 else "stroke-text"
+        if kind != expected_kind:
+            return ()
+        _status, visibility_reasons, resolved_seqno = _visibility_status(
+            page,
+            bbox,
+            span,
+            native_word={"text": raw_text, "bbox": bbox},
+        )
+        if visibility_reasons or resolved_seqno != _span_seqno(span):
+            return ()
+
+    return spans
+
 def _near_white(span: Mapping[str, object]) -> bool:
     color = span.get("color")
     if not isinstance(color, (tuple, list)) or not color:
@@ -1438,6 +1661,12 @@ def classify_native_word_integrity(
     raw_text = str(word.get("text") or "")
     reasons: list[str] = []
     spans, trace_text, trace_reasons = _matching_trace_spans(page, word)
+    if not spans and TEXT_TRACE_AMBIGUOUS in trace_reasons:
+        exact_pair = _exact_fill_stroke_pair_spans(page, word)
+        if exact_pair:
+            spans = exact_pair
+            trace_text = _trace_text(exact_pair[0])
+            trace_reasons = ()
     reasons.extend(trace_reasons)
     if not spans:
         return NativeTextIntegrityDecision(

@@ -390,53 +390,43 @@ def _selectors(published):
     ]
 
 
-def test_live_authority_stays_ambiguous_while_shadow_can_resolve_pair():
+def test_live_authority_promotes_exact_pair_and_shadow_is_not_applicable():
     payload, producer, published = _ingest_pair_pdf()
     authority = producer.text_integrity_authority()
     selectors = _selectors(published)
     assert selectors
 
-    live_results = [authority.resolve_text(selector) for selector in selectors]
-    ambiguous = [
-        (selector, result)
-        for selector, result in zip(selectors, live_results)
-        if TEXT_TRACE_AMBIGUOUS in result.reason_codes
+    resolved = [
+        (selector, authority.resolve_text(selector))
+        for selector in selectors
+        if authority.resolve_text(selector).status
+        is EvidenceResolutionStatus.CORROBORATED
     ]
-    assert ambiguous
+    assert resolved
 
-    selector, live = ambiguous[0]
-    assert live.status is not EvidenceResolutionStatus.CORROBORATED
-    assert live.trusted_text is None
+    selector, live = resolved[0]
+    assert live.trusted_text == "PAIR"
+    assert live.receipt is not None
+    assert len(live.receipt.trace_sequence_numbers) == 2
+    assert (
+        live.receipt.trace_sequence_numbers[1]
+        == live.receipt.trace_sequence_numbers[0] + 1
+    )
 
     shadow = resolve_fill_stroke_text_pair_shadow(
         source_visibility_producer=producer,
         selector=selector,
         source_bytes=payload,
     )
-    assert shadow.status is EvidenceResolutionStatus.CORROBORATED
-    assert shadow.proposition == PDF_TEXT_FILL_STROKE_EQUIVALENT
-    assert shadow.pair_id
-    assert shadow.raw_text == "PAIR"
-    assert shadow.sequence_numbers[1] == shadow.sequence_numbers[0] + 1
-    assert set(shadow.render_modes) == {0, 1}
-    assert set(shadow.bboxlog_kinds) == {"fill-text", "stroke-text"}
-    assert TEXT_TRACE_AMBIGUOUS in shadow.live_text_reason_codes
-
-    live_again = authority.resolve_text(selector)
-    assert live_again == live
-    assert live_again.trusted_text is None
+    assert shadow.status is EvidenceResolutionStatus.ABSTAINED
+    assert shadow.proposition is None
+    assert shadow.pair_id is None
+    assert shadow.reason_codes == (FILL_STROKE_SHADOW_NOT_APPLICABLE,)
 
 
-def test_shadow_pair_id_is_deterministic_and_lineage_bound():
+def test_shadow_not_applicable_result_is_deterministic_after_live_promotion():
     payload, producer, published = _ingest_pair_pdf()
-    selector = next(
-        selector
-        for selector in _selectors(published)
-        if TEXT_TRACE_AMBIGUOUS
-        in producer.text_integrity_authority()
-        .resolve_text(selector)
-        .reason_codes
-    )
+    selector = _selectors(published)[0]
 
     first = resolve_fill_stroke_text_pair_shadow(
         source_visibility_producer=producer,
@@ -450,7 +440,9 @@ def test_shadow_pair_id_is_deterministic_and_lineage_bound():
     )
 
     assert first == second
-    assert first.pair_id
+    assert first.status is EvidenceResolutionStatus.ABSTAINED
+    assert first.reason_codes == (FILL_STROKE_SHADOW_NOT_APPLICABLE,)
+    assert first.pair_id is None
 
 
 def test_source_hash_mismatch_fails_closed():
