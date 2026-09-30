@@ -13,7 +13,9 @@ def test_extracts_labelled_floor_area_on_floor_plan():
     assert ev is not None
     assert ev.area_m2 == 162.69
     assert ev.source_pages == (7,)
-    assert ev.authority == "explicit_drawing_floor_area"
+    assert ev.evidence_role == "declared_source_area_claim"
+    assert ev.authority == "declared_source_area_claim"
+    assert ev.binding == "unbound"
 
 
 def test_accepts_common_square_metre_unit_spellings():
