@@ -20,6 +20,11 @@ from typing import Mapping, Optional, Sequence
 import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_pdf_exact_fill_geometry import (
+    EXACT_FILL_GEOMETRY_RESOLVED,
+    exact_disjoint_rectangle_fill_coverage,
+    index_drawings_by_seqno,
+)
 from pb_source_observation_authority import (
     PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
     ObservationSelector,
@@ -1146,6 +1151,89 @@ def _cached_bboxlog(page: object) -> list:
     return cache["bboxlog"]
 
 
+def _cached_extended_drawings_by_seqno(
+    page: object,
+) -> Optional[dict[int, tuple[Mapping[str, object], ...]]]:
+    cache = _page_cache(page)
+    if "extended_drawings_by_seqno" not in cache:
+        try:
+            drawings = list(  # type: ignore[attr-defined]
+                page.get_drawings(extended=True) or ()
+            )
+        except Exception:
+            cache["extended_drawings_by_seqno"] = None
+        else:
+            cache["extended_drawings_by_seqno"] = (
+                index_drawings_by_seqno(drawings)
+            )
+    return cache["extended_drawings_by_seqno"]
+
+
+def _exact_fill_path_coverage(
+    page: object,
+    subject_bbox: Sequence[object],
+    paint_sequence_number: int,
+) -> Optional[float]:
+    by_seqno = _cached_extended_drawings_by_seqno(page)
+    if by_seqno is None:
+        return None
+    owned = by_seqno.get(int(paint_sequence_number), ())
+    if len(owned) != 1:
+        return None
+    result = exact_disjoint_rectangle_fill_coverage(
+        owned[0],
+        subject_bbox,
+    )
+    if (
+        result.status != EXACT_FILL_GEOMETRY_RESOLVED
+        or result.coverage_ratio is None
+    ):
+        return None
+    return float(result.coverage_ratio)
+
+
+def _later_paint_occlusion_reasons(
+    page: object,
+    subject_bbox: Sequence[object],
+    text_sequence_number: int,
+    bboxlog: Sequence[object],
+    *,
+    threshold: float = 0.65,
+) -> tuple[str, ...]:
+    for paint_seqno, item in enumerate(
+        bboxlog[text_sequence_number + 1 :],
+        start=text_sequence_number + 1,
+    ):
+        try:
+            paint_kind, paint_bbox = str(item[0]), item[1]  # type: ignore[index]
+        except (IndexError, TypeError):
+            continue
+        if paint_kind not in {
+            "fill-path",
+            "fill-image",
+            "fill-shade",
+            "fill-text",
+        }:
+            continue
+        if _intersection_ratio(subject_bbox, paint_bbox) < threshold:
+            continue
+
+        if paint_kind == "fill-path":
+            exact_coverage = _exact_fill_path_coverage(
+                page,
+                subject_bbox,
+                paint_seqno,
+            )
+            if (
+                exact_coverage is not None
+                and exact_coverage < threshold
+            ):
+                continue
+
+        return (TEXT_OCCLUDED_BY_LATER_PAINT,)
+    return ()
+
+
 def _visibility_status(
     page: object,
     subject_bbox: Sequence[object],
@@ -1186,16 +1274,14 @@ def _visibility_status(
             reasons.append(TEXT_RENDER_MODE_UNTRUSTED)
         elif current_kind not in {"fill-text", "stroke-text"}:
             reasons.append(TEXT_TRACE_UNAVAILABLE)
-        for item in bboxlog[seqno + 1 :]:
-            try:
-                paint_kind, paint_bbox = str(item[0]), item[1]
-            except (IndexError, TypeError):
-                continue
-            if paint_kind not in {"fill-path", "fill-image", "fill-shade", "fill-text"}:
-                continue
-            if _intersection_ratio(subject_bbox, paint_bbox) >= 0.65:
-                reasons.append(TEXT_OCCLUDED_BY_LATER_PAINT)
-                break
+        reasons.extend(
+            _later_paint_occlusion_reasons(
+                page,
+                subject_bbox,
+                seqno,
+                bboxlog,
+            )
+        )
 
     unique = _ordered_unique(reasons)
     return ("proven_visible" if not unique else "unresolved_or_blocked"), unique, seqno
