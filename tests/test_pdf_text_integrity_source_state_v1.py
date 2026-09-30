@@ -509,11 +509,31 @@ def test_text_wholly_outside_its_active_clip_stays_blocked() -> None:
     assert TEXT_CLIPPED_BY_CLIP_REGION in decision.reason_codes
 
 
-def test_clip_between_neighbouring_paints_that_may_apply_and_excludes_text_is_unresolved() -> None:
-    # Clip sits between the neighbouring paths; PDF structure alone cannot say
-    # whether the text is inside it. May-apply + does-not-contain => not proven.
-    pdf = _pdf(f"{_DOT} q 30 100 20 40 re W n {_TXT} Q {_DOT}")
+def test_disjoint_possible_sibling_clip_cannot_own_a_visible_native_word() -> None:
+    # The clip is only possibly active from neighbour-path evidence, but it is
+    # an exact rectangle fully disjoint from the native word. MuPDF still
+    # exposes the exact native word bbox, so this sibling clip cannot own it.
+    pdf = _pdf(f"{_DOT} q 30 100 5 40 re W n {_TXT} Q {_DOT}")
     decision = _classify(pdf)
+    assert decision.trusted, decision.reason_codes
+
+
+def test_possible_disjoint_clip_without_native_word_proof_stays_unresolved() -> None:
+    clipped_state = _pdf(f"{_DOT} q 30 100 5 40 re W n {_TXT} Q {_DOT}")
+    visible_state = _pdf(_TXT)
+    doc = fitz.open(stream=clipped_state, filetype="pdf")
+    visible_doc = fitz.open(stream=visible_state, filetype="pdf")
+    visible_word = visible_doc[0].get_text("words")[0]
+    supplied = {"text": visible_word[4], "bbox": tuple(visible_word[:4])}
+
+    # Move the supplied geometry so it is not one of this page's producer-owned
+    # native word boxes. Geometry alone must not activate the sibling exclusion.
+    shifted = dict(supplied)
+    shifted["bbox"] = tuple(
+        value + (0.25 if index in (0, 2) else 0.0)
+        for index, value in enumerate(supplied["bbox"])
+    )
+    decision = classify_native_word_integrity(doc[0], shifted)
     assert not decision.trusted
     assert TEXT_CLIP_STATE_UNRESOLVED in decision.reason_codes
 
