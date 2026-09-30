@@ -163,6 +163,78 @@ jobs:
           }, indent=2, sort_keys=True))
           PY
 
+      - name: Diagnose page 221 tall native path kinds
+        if: always()
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          import fitz
+
+          from pb_vector_geometry_v130 import extract_native_page
+
+          doc = fitz.open("murera.pdf")
+          page = doc.load_page(220)
+          drawings = list(page.get_drawings() or ())
+          native = extract_native_page(page)
+
+          tall = []
+          for index, drawing in enumerate(drawings):
+              rect = drawing.get("rect")
+              if rect is None:
+                  continue
+              width = float(rect.width)
+              height = float(rect.height)
+              if width <= 0 or height <= 0 or height / width < 3.0:
+                  continue
+              tall.append({
+                  "drawing_index": index,
+                  "seqno": drawing.get("seqno"),
+                  "bbox": [
+                      float(rect.x0), float(rect.y0),
+                      float(rect.x1), float(rect.y1),
+                  ],
+                  "width": width,
+                  "height": height,
+                  "fill": drawing.get("fill"),
+                  "color": drawing.get("color"),
+                  "stroke_width": drawing.get("width"),
+                  "item_kinds": [
+                      str(item[0])
+                      for item in (drawing.get("items") or ())
+                      if item
+                  ],
+                  "item_count": len(tuple(drawing.get("items") or ())),
+              })
+
+          native_paths = {}
+          for segment in native.get("segments") or ():
+              path_index = int(segment.get("path_index"))
+              native_paths.setdefault(path_index, []).append({
+                  "id": segment.get("id"),
+                  "kind": segment.get("kind"),
+                  "item_index": segment.get("item_index"),
+                  "edge_index": segment.get("edge_index"),
+                  "geometry": [
+                      segment.get("x1"), segment.get("y1"),
+                      segment.get("x2"), segment.get("y2"),
+                  ],
+                  "clip_known": segment.get("clip_known"),
+                  "clip_present": segment.get("clip_present"),
+              })
+
+          print(json.dumps({
+              "page_id": 221,
+              "tall_drawings": tall,
+              "native_segments_for_tall_paths": {
+                  str(row["drawing_index"]): native_paths.get(
+                      row["drawing_index"], []
+                  )
+                  for row in tall
+              },
+          }, indent=2, sort_keys=True))
+          doc.close()
+          PY
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
