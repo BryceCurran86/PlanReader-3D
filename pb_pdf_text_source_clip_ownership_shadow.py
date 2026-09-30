@@ -417,94 +417,43 @@ def _normalise_rect(
     return x0, y0, x1, y1
 
 
-def _intersect_rects(
-    first: tuple[float, float, float, float],
-    second: tuple[float, float, float, float],
-) -> Optional[tuple[float, float, float, float]]:
-    x0 = max(first[0], second[0])
-    y0 = max(first[1], second[1])
-    x1 = min(first[2], second[2])
-    y1 = min(first[3], second[3])
-    if x1 <= x0 or y1 <= y0:
-        return None
-    return x0, y0, x1, y1
-
-
-@dataclass
-class _GraphicsState:
-    clip_rect: Optional[tuple[float, float, float, float]] = None
-    clip_count: int = 0
-    clip_known: bool = True
-    ctm_identity: bool = True
-
-    def clone(self) -> "_GraphicsState":
-        return _GraphicsState(
-            clip_rect=self.clip_rect,
-            clip_count=self.clip_count,
-            clip_known=self.clip_known,
-            ctm_identity=self.ctm_identity,
-        )
-
-
 def _raw_text_shows(data: bytes) -> Optional[tuple[_RawTextShow, ...]]:
+    """Return every raw text-show op plus any independently strict clip proof.
+
+    Positive clip ownership is deliberately narrower than general PDF graphics
+    state interpretation.  A show receives a clip only from this exact local
+    operation structure in one balanced q/Q scope:
+
+        q  x y w h re  W|W*  n  BT  ... exactly one text-show ... ET  Q
+
+    No page-level non-identity cm, XObject invocation, nested q/Q inside that
+    scope, extra path construction or additional text-show is accepted.
+    """
+
     operations = _operations(data)
     if operations is None:
         return None
 
-    graphics = _GraphicsState()
-    stack: list[_GraphicsState] = []
-    path_rect: Optional[tuple[float, float, float, float]] = None
-    path_exact = True
-    pending_clip = False
-    pending_clip_exact = False
     render_mode = 0
     in_text = False
+    q_depth = 0
     shows: list[_RawTextShow] = []
+    show_by_operation: dict[int, int] = {}
 
-    def clear_path_and_commit() -> None:
-        nonlocal path_rect, path_exact, pending_clip, pending_clip_exact
-        if pending_clip:
-            if (
-                not pending_clip_exact
-                or path_rect is None
-                or not graphics.ctm_identity
-            ):
-                graphics.clip_known = False
-            elif graphics.clip_known:
-                if graphics.clip_rect is None:
-                    graphics.clip_rect = path_rect
-                else:
-                    intersected = _intersect_rects(
-                        graphics.clip_rect,
-                        path_rect,
-                    )
-                    if intersected is None:
-                        graphics.clip_known = False
-                    else:
-                        graphics.clip_rect = intersected
-                graphics.clip_count += 1
-        path_rect = None
-        path_exact = True
-        pending_clip = False
-        pending_clip_exact = False
-
-    for operation in operations:
+    for index, operation in enumerate(operations):
         name = operation.name
 
         if name == "q":
-            if operation.operands:
+            if operation.operands or in_text:
                 return None
-            stack.append(graphics.clone())
+            q_depth += 1
             continue
         if name == "Q":
-            if operation.operands or not stack:
+            if operation.operands or in_text or q_depth <= 0:
                 return None
-            graphics = stack.pop()
-            path_rect = None
-            path_exact = True
-            pending_clip = False
-            pending_clip_exact = False
+            q_depth -= 1
             continue
+
         if name == "cm":
             values = _numbers(operation, 6)
             if values is None:
@@ -516,37 +465,15 @@ def _raw_text_shows(data: bytes) -> Optional[tuple[_RawTextShow, ...]]:
                     (1.0, 0.0, 0.0, 1.0, 0.0, 0.0),
                 )
             ):
-                graphics.ctm_identity = False
-            continue
-        if name == "Do":
-            return None
-
-        if name in _PATH_BUILDERS:
-            if name == "re":
-                values = _numbers(operation, 4)
-                rect = None if values is None else _normalise_rect(*values)
-                if (
-                    rect is None
-                    or path_rect is not None
-                    or not path_exact
-                ):
-                    path_exact = False
-                    path_rect = None
-                else:
-                    path_rect = rect
-            else:
-                path_exact = False
-                path_rect = None
-            continue
-        if name in {"W", "W*"}:
-            if operation.operands:
+                # A transformed clipping rectangle would need the complete
+                # graphics-state CTM. This v1 shadow does not infer it.
                 return None
-            pending_clip = True
-            pending_clip_exact = path_exact and path_rect is not None
             continue
-        if name in _PATH_ENDERS:
-            clear_path_and_commit()
-            continue
+
+        if name == "Do":
+            # Invoked form content has its own stream and transform. Do not
+            # pretend a top-level operation sequence owns its text.
+            return None
 
         if name == "BT":
             if operation.operands or in_text:
@@ -566,28 +493,110 @@ def _raw_text_shows(data: bytes) -> Optional[tuple[_RawTextShow, ...]]:
             if render_mode not in (0, 1, 2):
                 return None
             continue
+
         if name in _SHOW_OPERATORS:
             if not in_text:
                 return None
+            show_by_operation[index] = len(shows)
             shows.append(
                 _RawTextShow(
                     ordinal=len(shows),
                     render_mode=render_mode,
-                    clip_rect_pdf=graphics.clip_rect,
-                    clip_known=(
-                        graphics.clip_known
-                        and graphics.ctm_identity
-                    ),
-                    active_clip_count=graphics.clip_count,
+                    clip_rect_pdf=None,
+                    clip_known=False,
+                    active_clip_count=0,
                     operation_start=operation.start,
                 )
             )
+
+    if in_text or q_depth != 0:
+        return None
+
+    strict_text_body = {
+        "Tc", "Tw", "Tz", "TL", "Tf", "Tr", "Ts",
+        "Td", "TD", "Tm", "T*",
+        "w", "J", "j", "M", "d", "ri", "i", "gs",
+        "CS", "cs", "SC", "SCN", "sc", "scn",
+        "G", "g", "RG", "rg", "K", "k",
+        *_SHOW_OPERATORS,
+    }
+
+    # Second pass: recognise only the exact local clip/text scope described in
+    # the module contract. All other shows remain clip_known=False.
+    for index, operation in enumerate(operations):
+        if operation.name != "q" or operation.operands:
+            continue
+        if index + 5 >= len(operations):
             continue
 
-    if stack or in_text or pending_clip:
-        return None
-    return tuple(shows)
+        rect_op = operations[index + 1]
+        clip_op = operations[index + 2]
+        end_path_op = operations[index + 3]
+        bt_op = operations[index + 4]
 
+        if rect_op.name != "re":
+            continue
+        rect_values = _numbers(rect_op, 4)
+        rect = (
+            None
+            if rect_values is None
+            else _normalise_rect(*rect_values)
+        )
+        if rect is None:
+            continue
+        if clip_op.name not in {"W", "W*"} or clip_op.operands:
+            continue
+        if end_path_op.name != "n" or end_path_op.operands:
+            continue
+        if bt_op.name != "BT" or bt_op.operands:
+            continue
+
+        cursor = index + 5
+        show_operation_indices: list[int] = []
+        valid = True
+        while cursor < len(operations):
+            current = operations[cursor]
+            if current.name == "ET":
+                break
+            if current.name not in strict_text_body:
+                valid = False
+                break
+            if current.name in _SHOW_OPERATORS:
+                show_operation_indices.append(cursor)
+                if len(show_operation_indices) > 1:
+                    valid = False
+                    break
+            cursor += 1
+
+        if (
+            not valid
+            or cursor >= len(operations)
+            or operations[cursor].name != "ET"
+            or operations[cursor].operands
+            or len(show_operation_indices) != 1
+            or cursor + 1 >= len(operations)
+            or operations[cursor + 1].name != "Q"
+            or operations[cursor + 1].operands
+        ):
+            continue
+
+        show_ordinal = show_by_operation.get(show_operation_indices[0])
+        if show_ordinal is None:
+            continue
+        prior = shows[show_ordinal]
+        # A show cannot be positively owned by two strict local scopes.
+        if prior.clip_known:
+            return None
+        shows[show_ordinal] = _RawTextShow(
+            ordinal=prior.ordinal,
+            render_mode=prior.render_mode,
+            clip_rect_pdf=rect,
+            clip_known=True,
+            active_clip_count=1,
+            operation_start=prior.operation_start,
+        )
+
+    return tuple(shows)
 
 def _point_tuple(value: object) -> Optional[tuple[float, float]]:
     try:
