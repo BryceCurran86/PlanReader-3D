@@ -1,0 +1,171 @@
+name: TEST-ONLY Murera Physical Candidate Shadow
+
+on:
+  pull_request:
+    branches:
+      - 'feat/structural-physical-candidate-shadow-v1'
+
+jobs:
+  probe:
+    if: github.head_ref == 'test-only/murera-physical-candidate-shadow-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and SHA-256 verify Murera source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf' \
+            -o murera.pdf
+          echo '84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  murera.pdf' | sha256sum -c -
+
+      - name: Run neutral physical candidate shadow
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          from collections import Counter, defaultdict
+          from pathlib import Path
+
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_structural_member_authority import (
+              StructuralMemberProducer,
+              StructuralMemberSelector,
+          )
+          from pb_structural_member_physical_candidate_shadow import (
+              compile_structural_physical_candidate_shadow,
+          )
+
+          payload = Path("murera.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+
+          source = SourceVisibilityProducer(
+              producer_method="murera-physical-candidate-shadow-v1",
+              producer_version="1.0",
+          )
+          published = source.ingest_native_pdf_bytes(
+              document_id=f"murera-physical-candidates:{digest[:16]}",
+              source_bytes=payload,
+              source_locator="sha256-verified-murera-source",
+              page_ids=(220, 221),
+          )
+          shadow = compile_structural_physical_candidate_shadow(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              source_bytes=payload,
+              page_ids=("220", "221"),
+          )
+
+          by_page = defaultdict(Counter)
+          rows = []
+          for candidate in shadow.candidates:
+              by_page[candidate.page_id][candidate.candidate_class] += 1
+              rows.append({
+                  "candidate_id": candidate.candidate_id,
+                  "candidate_class": candidate.candidate_class,
+                  "page_id": candidate.page_id,
+                  "view_id": candidate.view_id,
+                  "geometry_kind": candidate.geometry_kind,
+                  "path_index": candidate.path_index,
+                  "item_indices": list(candidate.item_indices),
+                  "bbox": list(candidate.bbox),
+                  "width": candidate.width,
+                  "height": candidate.height,
+                  "orientation": candidate.orientation,
+                  "fill_present": candidate.fill_present,
+                  "stroke_present": candidate.stroke_present,
+                  "stroke_width": candidate.stroke_width,
+                  "layer_present": candidate.layer_present,
+                  "dashes_present": candidate.dashes_present,
+                  "source_primitive_refs": list(
+                      candidate.source_primitive_refs
+                  ),
+                  "source_observation_ids": list(
+                      candidate.source_observation_ids
+                  ),
+              })
+
+          selector = StructuralMemberSelector(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              decision_scope_id="source-pages:220-221:unscoped",
+              member_kind="structural_support",
+          )
+          resolution = StructuralMemberProducer.from_authenticated_evidence(
+              selector=selector,
+              definitions=(),
+              observations=(),
+              relations=(),
+              view_scopes=(),
+          ).publish()
+
+          assert resolution.status is EvidenceResolutionStatus.ABSTAINED
+          assert resolution.quantity is None
+          assert resolution.members == ()
+
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "source_sha256": digest,
+              "pages": ["220", "221"],
+              "shadow_status": shadow.status.value,
+              "reason_codes": list(shadow.reason_codes),
+              "candidate_count": len(shadow.candidates),
+              "candidate_classes": dict(
+                  sorted(Counter(
+                      row.candidate_class
+                      for row in shadow.candidates
+                  ).items())
+              ),
+              "candidate_classes_by_page": {
+                  page: dict(sorted(counts.items()))
+                  for page, counts in sorted(by_page.items())
+              },
+              "candidates": rows,
+              "authority_without_instances": {
+                  "status": resolution.status.value,
+                  "quantity": resolution.quantity,
+                  "member_count": len(resolution.members),
+              },
+          }
+          Path("murera-physical-candidate-shadow.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(json.dumps({
+              "source_sha256": digest,
+              "shadow_status": shadow.status.value,
+              "candidate_count": len(shadow.candidates),
+              "candidate_classes": report["candidate_classes"],
+              "candidate_classes_by_page": report[
+                  "candidate_classes_by_page"
+              ],
+              "authority_without_instances": report[
+                  "authority_without_instances"
+              ],
+              "candidates": rows,
+          }, indent=2, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: murera-physical-candidate-shadow
+          path: murera-physical-candidate-shadow.json
+          if-no-files-found: warn
