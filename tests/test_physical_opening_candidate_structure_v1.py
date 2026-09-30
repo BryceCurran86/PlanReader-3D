@@ -378,5 +378,10 @@ def test_only_the_diagnostics_call_the_accessor():
             for node in ast.walk(tree)
         ):
             callers.append(path.name)
-    # Only the diagnostics call it: the conflict diagnostic and the provenance census.
-    assert callers == ["pb_candidate_provenance_census.py", "pb_semantic_conflict_diagnostic.py"]
+    # Only the diagnostics call it: the conflict diagnostic, the provenance census and the
+    # Phase-2 graphic-state join stacked on it.
+    assert callers == [
+        "pb_candidate_provenance_census.py",
+        "pb_native_graphic_state_join.py",
+        "pb_semantic_conflict_diagnostic.py",
+    ]

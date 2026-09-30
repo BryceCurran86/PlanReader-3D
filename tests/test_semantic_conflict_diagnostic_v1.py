@@ -72,7 +72,11 @@ from scripts import semantic_conflict_report as report_script
 REPO = Path(__file__).resolve().parents[1]
 MODULE = "pb_semantic_conflict_diagnostic"
 # Diagnostic modules (never production) that may build on this one.
-DIAGNOSTIC_MODULES = {f"{MODULE}.py", "pb_candidate_provenance_census.py"}
+DIAGNOSTIC_MODULES = {
+    f"{MODULE}.py",
+    "pb_candidate_provenance_census.py",
+    "pb_native_graphic_state_join.py",
+}
 DOC = "conflict-test"
 
 
