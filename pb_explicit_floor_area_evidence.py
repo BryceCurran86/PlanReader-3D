@@ -133,7 +133,7 @@ def resolve_explicit_floor_area_evidence(
         return None
 
     pages = tuple(sorted({p for item in items for p in item.source_pages}))
-    raw = tuple(dict.fromkeys(raw for item in items for raw in item.raw_evidence))
+    raw = tuple(sorted({raw for item in items for raw in item.raw_evidence}))
     return ExplicitFloorAreaEvidence(
         area_m2=next(iter(distinct)),
         source_pages=pages,
