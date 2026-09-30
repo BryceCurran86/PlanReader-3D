@@ -6,8 +6,9 @@ a structural quantity.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_source_observation_authority import ObservationSelector
@@ -72,6 +73,39 @@ def _selector_matches_snapshot(selector: StructuralMemberSelector, published) ->
     )
 
 
+
+_STANDALONE_DECORATIVE_MARKERS = frozenset({"-", "–", "—", "•", "·", "▪", "◦"})
+
+
+def _is_ignorable_standalone_untrusted_marker(
+    receipt,
+    line_counts: Mapping[tuple[str, int, int], int],
+) -> bool:
+    """Allow omission only for a source-isolated decorative marker line.
+
+    Structural definition parsing consumes semantic words. A marker can be
+    omitted without inventing text only when the producer proves it is a
+    standalone first token on its own line. Any token sharing a line, any
+    alphanumeric token, or any receipt without complete line coordinates
+    remains completeness-blocking.
+    """
+
+    if (
+        receipt.block_no is None
+        or receipt.line_no is None
+        or receipt.word_no is None
+        or int(receipt.word_no) != 0
+        or str(receipt.raw_text or "").strip() not in _STANDALONE_DECORATIVE_MARKERS
+    ):
+        return False
+    key = (
+        str(receipt.page_id),
+        int(receipt.block_no),
+        int(receipt.line_no),
+    )
+    return int(line_counts.get(key, 0)) == 1
+
+
 def compile_structural_definition_source_shadow(
     *,
     selector: StructuralMemberSelector,
@@ -132,6 +166,7 @@ def compile_structural_definition_source_shadow(
     blocked_blocks: set[tuple[str, int]] = set()
     incomplete_block = False
 
+    resolved_rows = []
     for observation_id in published.text_observation_ids:
         result = text_authority.resolve_text(
             ObservationSelector(
@@ -145,6 +180,21 @@ def compile_structural_definition_source_shadow(
         receipt = result.receipt
         if receipt is None or str(receipt.page_id) not in selected_pages:
             continue
+        resolved_rows.append((str(observation_id), result, receipt))
+
+    line_counts: Counter[tuple[str, int, int]] = Counter()
+    for _observation_id, _result, receipt in resolved_rows:
+        if receipt.block_no is None or receipt.line_no is None:
+            continue
+        line_counts[
+            (
+                str(receipt.page_id),
+                int(receipt.block_no),
+                int(receipt.line_no),
+            )
+        ] += 1
+
+    for observation_id, result, receipt in resolved_rows:
         if receipt.block_no is None:
             incomplete_block = True
             continue
@@ -156,6 +206,8 @@ def compile_structural_definition_source_shadow(
             or receipt.word_no is None
             or len(receipt.geometry) < 4
         ):
+            if _is_ignorable_standalone_untrusted_marker(receipt, line_counts):
+                continue
             incomplete_block = True
             blocked_blocks.add(block_key)
             continue
@@ -166,12 +218,12 @@ def compile_structural_definition_source_shadow(
             (
                 int(receipt.line_no),
                 int(receipt.word_no),
-                str(observation_id),
+                observation_id,
                 str(result.trusted_text),
                 tuple(float(value) for value in receipt.geometry[:4]),
             )
         )
-        trusted_ids.append(str(observation_id))
+        trusted_ids.append(observation_id)
 
     blocks: list[SourceStructuralTextBlock] = []
     for (page_id, block_no), rows in sorted(groups.items()):
@@ -246,5 +298,6 @@ __all__ = [
     "STRUCTURAL_DEFINITION_SOURCE_SHADOW_PAGE_UNAVAILABLE",
     "STRUCTURAL_DEFINITION_SOURCE_SHADOW_TEXT_INCOMPLETE",
     "StructuralDefinitionSourceShadowResult",
+    "_is_ignorable_standalone_untrusted_marker",
     "compile_structural_definition_source_shadow",
 ]
