@@ -75,10 +75,15 @@ jobs:
                   "seqnos":list(receipt.trace_sequence_numbers),
                   "decode_status":receipt.decode_status,
                   "visibility_status":receipt.visibility_status,
+                  "block_no":receipt.block_no,
+                  "line_no":receipt.line_no,
+                  "word_no":receipt.word_no,
               })
 
           target={"Circular","hollow","sections"}
           target_rows=[row for row in rows if row["raw_text"] in target]
+          target_blocks=sorted({row["block_no"] for row in target_rows if row["block_no"] is not None})
+          target_block_rows=[row for row in rows if row["block_no"] in target_blocks]
           seen={row["raw_text"] for row in target_rows}
           assert target <= seen, (target, seen)
           assert all(row["status"]=="corroborated" for row in target_rows), target_rows
@@ -114,6 +119,8 @@ jobs:
               "source_sha256":digest,
               "production_head":"556d9ecfddc2b81c9f10b710262a371aba206964",
               "target_rows":target_rows,
+              "target_blocks":target_blocks,
+              "target_block_rows":target_block_rows,
               "structural_definition_status":definitions.status.value,
               "structural_definition_reasons":list(definitions.reason_codes),
               "structural_definitions":definition_rows,
