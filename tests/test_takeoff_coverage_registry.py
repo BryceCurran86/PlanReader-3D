@@ -644,3 +644,21 @@ def test_duplicate_takeoff_row_quantity_id_fails_closed_as_conflicting():
         for reason in record.reason_codes
     )
     assert summary.quantity_ids_by_census_state[CENSUS_CONFLICTING_LINEAGE] == ("q-1",)
+
+
+def test_conflicting_exact_object_links_are_conflicting_lineage_in_reverse_census():
+    m = manifest(object_keys=(("physical_wall", "wall"),))
+    snap = object_snapshot(("wall-1", "wall-2"))
+    q = quantity("q-1", object_ids=("wall-1",))
+    summary = build(
+        m=m,
+        qes=[q],
+        rows=[row("q-1", geometry_ref="wall-1")],
+        object_snaps=[snap],
+        qe_snaps=[qe_snapshot(("q-1",))],
+        row_snaps=[row_snapshot(("q-1",))],
+        editables=[editable("wall-2", deps=("q-1",), geometry_ref="wall-2", original_geometry_ref="wall-2")],
+    )
+    assert record_for(summary, "wall-2").coverage_state == COVERAGE_PARTIAL
+    assert summary.quantity_ids_by_census_state[CENSUS_CONFLICTING_LINEAGE] == ("q-1",)
+    assert summary.quantity_ids_by_census_state[CENSUS_LINKED] == ()

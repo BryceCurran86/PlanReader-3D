@@ -943,8 +943,14 @@ def build_coverage_registry_v1(
     for object_id, quantity_ids in qe_links_by_object.items():
         for quantity_id in quantity_ids:
             exact_links_by_quantity.setdefault(quantity_id, set()).add(object_id)
+    object_link_conflict_ids: set[str] = set()
     for quantity_id, object_ids in editable_links_by_quantity.items():
         exact_links_by_quantity.setdefault(quantity_id, set()).update(object_ids)
+        quantities = qe_records_by_id.get(quantity_id, ())
+        if len(quantities) == 1 and quantities[0].input_entity_ids:
+            qe_targets = set(quantities[0].input_entity_ids)
+            if any(object_id not in qe_targets for object_id in object_ids):
+                object_link_conflict_ids.add(quantity_id)
 
     row_lineage_reasons: dict[str, tuple[str, ...]] = {}
     for quantity_id, rows in row_records_by_id.items():
@@ -1111,6 +1117,7 @@ def build_coverage_registry_v1(
         conflicting = (
             quantity_id in duplicate_qe_ids
             or quantity_id in duplicate_row_ids
+            or quantity_id in object_link_conflict_ids
             or bool(qe_lineage_reasons.get(quantity_id))
             or bool(row_lineage_reasons.get(quantity_id))
         )
