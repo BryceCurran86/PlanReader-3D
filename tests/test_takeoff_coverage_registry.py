@@ -693,3 +693,40 @@ def test_conflicting_exact_object_link_poison_applies_to_all_linked_object_recor
     assert record_for(summary, "wall-2").coverage_state == COVERAGE_PARTIAL
     assert "quantity_evidence_object_link_conflict:q-1" in record_for(summary, "wall-1").reason_codes
     assert summary.quantity_ids_by_census_state[CENSUS_CONFLICTING_LINEAGE] == ("q-1",)
+
+
+def test_frozen_record_allows_any_finite_numeric_quantity_contribution():
+    record = CoverageObjectRecordV1(
+        object_id="obj-1",
+        object_type="wall",
+        producer="producer",
+        owning_authority="authority",
+        source_document_id="doc-1",
+        revision_id="rev-1",
+        source_sha256=SHA,
+        source_pages=(),
+        evidence_ids=(),
+        geometry_ids=(),
+        parent_host_ids=(),
+        quantity_ids=("q-adjustment",),
+        takeoff_row_ids=(),
+        coverage_state=COVERAGE_PARTIAL,
+        reason_codes=("synthetic_contract_probe",),
+        quantity_contribution={"q-adjustment": -1.0},
+        unit={"q-adjustment": "M"},
+        provenance={},
+    )
+    assert record.quantity_contribution["q-adjustment"] == -1.0
+
+
+def test_incomplete_object_universe_makes_reverse_census_nonconclusive():
+    summary = build(
+        qes=[],
+        rows=[],
+        object_snaps=[],
+        qe_snaps=[qe_snapshot(())],
+        row_snaps=[row_snapshot(())],
+    )
+    assert not summary.object_universe_complete
+    assert not summary.quantity_census_conclusive
+    assert "quantity_census_not_conclusive" in summary.reason_codes

@@ -387,8 +387,8 @@ class CoverageObjectRecordV1:
                 contributions[qid] = None
                 continue
             numeric = float(value)
-            if not math.isfinite(numeric) or numeric < 0.0:
-                raise ValueError("quantity_contribution values must be finite and non-negative")
+            if not math.isfinite(numeric):
+                raise ValueError("quantity_contribution values must be finite")
             contributions[qid] = numeric
         units: dict[str, str] = {}
         for quantity_id, unit in self.unit.items():
@@ -1190,7 +1190,7 @@ def build_coverage_registry_v1(
         summary_reasons.add("quantity_evidence_universe_not_complete")
     if not row_complete:
         summary_reasons.add("takeoff_output_row_universe_not_complete")
-    if not (qe_complete and row_complete):
+    if not (object_complete and qe_complete and row_complete):
         summary_reasons.add("quantity_census_not_conclusive")
 
     return CoverageRegistrySummaryV1(
@@ -1210,7 +1210,7 @@ def build_coverage_registry_v1(
         object_universe_complete=object_complete,
         quantity_evidence_universe_complete=qe_complete,
         takeoff_output_row_universe_complete=row_complete,
-        quantity_census_conclusive=qe_complete and row_complete,
+        quantity_census_conclusive=object_complete and qe_complete and row_complete,
         reason_codes=tuple(sorted(summary_reasons)),
     )
 
