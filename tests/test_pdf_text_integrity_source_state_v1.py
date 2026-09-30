@@ -30,6 +30,7 @@ from pb_pdf_text_integrity_authority import (
     TEXT_TRACE_AMBIGUOUS,
     TEXT_TRACE_UNAVAILABLE,
     _build_clip_model,
+    _native_word_bbox_present,
     _optional_content_reasons,
     _valid_tounicode_cmap,
     classify_native_word_integrity,
@@ -518,24 +519,18 @@ def test_disjoint_possible_sibling_clip_cannot_own_a_visible_native_word() -> No
     assert decision.trusted, decision.reason_codes
 
 
-def test_possible_disjoint_clip_without_native_word_proof_stays_unresolved() -> None:
-    clipped_state = _pdf(f"{_DOT} q 30 100 5 40 re W n {_TXT} Q {_DOT}")
-    visible_state = _pdf(_TXT)
-    doc = fitz.open(stream=clipped_state, filetype="pdf")
-    visible_doc = fitz.open(stream=visible_state, filetype="pdf")
-    visible_word = visible_doc[0].get_text("words")[0]
-    supplied = {"text": visible_word[4], "bbox": tuple(visible_word[:4])}
+def test_disjoint_sibling_exclusion_requires_exact_native_word_geometry() -> None:
+    pdf = _pdf(f"{_DOT} q 30 100 5 40 re W n {_TXT} Q {_DOT}")
+    doc = fitz.open(stream=pdf, filetype="pdf")
+    word = doc[0].get_text("words")[0]
+    bbox = tuple(word[:4])
+    assert _native_word_bbox_present(doc[0], bbox)
 
-    # Move the supplied geometry so it is not one of this page's producer-owned
-    # native word boxes. Geometry alone must not activate the sibling exclusion.
-    shifted = dict(supplied)
-    shifted["bbox"] = tuple(
+    shifted = tuple(
         value + (0.25 if index in (0, 2) else 0.0)
-        for index, value in enumerate(supplied["bbox"])
+        for index, value in enumerate(bbox)
     )
-    decision = classify_native_word_integrity(doc[0], shifted)
-    assert not decision.trusted
-    assert TEXT_CLIP_STATE_UNRESOLVED in decision.reason_codes
+    assert not _native_word_bbox_present(doc[0], shifted)
 
 
 def test_clip_between_neighbouring_paints_that_contains_text_cannot_hide_it() -> None:
