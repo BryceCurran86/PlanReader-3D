@@ -1,24 +1,12 @@
-"""Resolve a rectangular plan envelope from orthogonal figured dimensions.
+"""Reconcile independently established orthogonal geometry with a declared area.
 
-This is a source-evidence layer, not a generic "pick the biggest numbers"
-heuristic. A candidate envelope is accepted only when:
+This module must never use a printed area claim to choose physical dimensions.
+The caller must first supply an independently established length and width.
+Native oriented dimension text is then used only to confirm that those supplied
+axes exist on the page, and the declared area may be compared for reconciliation.
 
-* horizontal and vertical dimension text directions are explicit in native PDF
-  text geometry;
-* each dimension line is itself only a figured dimension (not a number found
-  inside prose, a standard reference, drawing number, or date); and
-* the resulting footprint is independently corroborated by an explicit drawing
-  floor-area annotation.
-
-A named secondary strip such as a ``VERANDAH`` can contribute to that area only
-when its width is independently evidenced. A supplied width is accepted as an
-already-resolved upstream observation. Otherwise, this module can bind a small
-figured dimension to one unique ``VERANDAH`` / ``VERANDA`` label by spatial
-band, and the complete compound footprint must still agree with the independent
-explicit floor-area annotation. No area agreement means no envelope.
-
-Ambiguity fails closed. The module knows nothing about benchmark identities,
-BOQ quantities, project names, or expected answers.
+A successful result is reconciliation evidence only. It is not permission to
+manufacture a footprint, replace geometry, or publish a physical quantity.
 """
 from __future__ import annotations
 
@@ -34,39 +22,33 @@ _DIMENSION_LINE_RE = re.compile(
     r"^\s*(?P<major>\d{1,2})[,.]?(?P<minor>\d{3})\s*(?:mm)?\s*$",
     re.IGNORECASE,
 )
-_SECONDARY_LABELS = frozenset({"verandah", "veranda"})
 
 
 @dataclass(frozen=True)
 class OrientedDimensionObservation:
     value_m: float
-    orientation: str  # "horizontal" or "vertical"
+    orientation: str
     raw_text: str
     bbox: Tuple[float, float, float, float]
     direction: Tuple[float, float]
 
 
 @dataclass(frozen=True)
-class SecondaryAreaLabelEvidence:
-    text: str
-    bbox: Tuple[float, float, float, float]
-
-
-@dataclass(frozen=True)
 class OrthogonalEnvelopeEvidence:
+    """Validation-only reconciliation of already-owned dimensions."""
+
     length_m: float
     width_m: float
     horizontal_m: float
     vertical_m: float
-    explicit_floor_area_m2: float
+    declared_floor_area_m2: float
     corroborated_area_m2: float
     relative_area_error: float
     secondary_width_m: Optional[float]
     horizontal_evidence: OrientedDimensionObservation
     vertical_evidence: OrientedDimensionObservation
-    secondary_width_evidence: Optional[OrientedDimensionObservation] = None
-    secondary_label_evidence: Optional[SecondaryAreaLabelEvidence] = None
-    authority: str = "orthogonal_figured_dimensions_corroborated_by_explicit_floor_area"
+    authority: str = "orthogonal_dimensions_reconciled_with_declared_area"
+    geometry_authority: bool = False
 
 
 def _parse_standalone_dimension(text: str) -> Optional[float]:
@@ -74,9 +56,6 @@ def _parse_standalone_dimension(text: str) -> Optional[float]:
     if match is None:
         return None
     value = float(match.group("major")) + float(match.group("minor")) / 1000.0
-    # Small standalone figured dimensions are retained because they may be the
-    # width of a named secondary strip. Main-envelope candidates are filtered
-    # more strictly later.
     if not math.isfinite(value) or not (0.75 <= value <= 35.0):
         return None
     return round(value, 3)
@@ -85,13 +64,7 @@ def _parse_standalone_dimension(text: str) -> Optional[float]:
 def extract_oriented_dimension_observations(
     page: fitz.Page,
 ) -> list[OrientedDimensionObservation]:
-    """Extract standalone native figured dimensions with text orientation.
-
-    PyMuPDF exposes each native text line's direction vector. Horizontal and
-    90-degree rotated dimension strings therefore remain distinct even on a
-    dense sheet containing many dimension chains. Diagonal / uncertain text
-    directions are ignored.
-    """
+    """Extract standalone native figured dimensions with source text direction."""
     observations: list[OrientedDimensionObservation] = []
     try:
         payload = page.get_text("dict") or {}
@@ -131,7 +104,7 @@ def extract_oriented_dimension_observations(
                     value_m=value,
                     orientation=orientation,
                     raw_text=text,
-                    bbox=bbox,  # type: ignore[arg-type]
+                    bbox=bbox,
                     direction=(dx, dy),
                 )
             )
@@ -141,7 +114,6 @@ def extract_oriented_dimension_observations(
 def _unique_by_value(
     observations: Iterable[OrientedDimensionObservation],
 ) -> list[OrientedDimensionObservation]:
-    """Keep one deterministic observation for each figured value."""
     selected: dict[float, OrientedDimensionObservation] = {}
     for obs in observations:
         current = selected.get(obs.value_m)
@@ -150,181 +122,98 @@ def _unique_by_value(
     return [selected[value] for value in sorted(selected, reverse=True)]
 
 
-def _centre(bbox: Tuple[float, float, float, float]) -> tuple[float, float]:
-    return ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
-
-
-def _find_unique_secondary_label(page: fitz.Page) -> Optional[SecondaryAreaLabelEvidence]:
-    """Return one unique native secondary-area label, otherwise fail closed."""
+def _as_positive_finite(value: object) -> Optional[float]:
     try:
-        words = page.get_text("words") or []
-    except Exception:
+        numeric = float(value)
+    except (TypeError, ValueError):
         return None
+    if not math.isfinite(numeric) or numeric <= 0.0:
+        return None
+    return numeric
 
-    matches: list[SecondaryAreaLabelEvidence] = []
-    for word in words:
-        token = re.sub(r"[^a-z]", "", str(word[4]).lower())
-        if token not in _SECONDARY_LABELS:
-            continue
-        bbox = tuple(float(v) for v in word[:4])
-        if not all(math.isfinite(v) for v in bbox):
-            continue
-        matches.append(SecondaryAreaLabelEvidence(text=str(word[4]), bbox=bbox))  # type: ignore[arg-type]
 
+def _axis_pair_for_candidates(
+    observations: Iterable[OrientedDimensionObservation],
+    *,
+    length_m: float,
+    width_m: float,
+) -> Optional[tuple[OrientedDimensionObservation, OrientedDimensionObservation]]:
+    """Find the supplied independent dimensions on opposite source-text axes.
+
+    The declared area is deliberately absent from this function.
+    """
+    horizontal = _unique_by_value(o for o in observations if o.orientation == "horizontal")
+    vertical = _unique_by_value(o for o in observations if o.orientation == "vertical")
+    matches: list[tuple[OrientedDimensionObservation, OrientedDimensionObservation]] = []
+    for h in horizontal:
+        for v in vertical:
+            if (
+                math.isclose(h.value_m, length_m, abs_tol=1e-6)
+                and math.isclose(v.value_m, width_m, abs_tol=1e-6)
+            ) or (
+                math.isclose(h.value_m, width_m, abs_tol=1e-6)
+                and math.isclose(v.value_m, length_m, abs_tol=1e-6)
+            ):
+                matches.append((h, v))
     if len(matches) != 1:
         return None
     return matches[0]
 
 
-def _bound_secondary_width_candidates(
-    page: fitz.Page,
-    observations: Iterable[OrientedDimensionObservation],
-    label: SecondaryAreaLabelEvidence,
-) -> list[OrientedDimensionObservation]:
-    """Bind small figured widths to the same spatial band as a secondary label.
-
-    A rotated vertical dimension owns a horizontal page band, so its y-centre
-    must align with the label's y-centre. A horizontal dimension owns a vertical
-    page band, so x-centres must align. The tolerance scales with the page rather
-    than using a benchmark coordinate or fixed pixel constant.
-    """
-    try:
-        page_short_side = min(float(page.rect.width), float(page.rect.height))
-    except Exception:
-        return []
-    if not math.isfinite(page_short_side) or page_short_side <= 0:
-        return []
-
-    band_tolerance = max(4.0, page_short_side * 0.02)
-    label_x, label_y = _centre(label.bbox)
-    candidates: list[OrientedDimensionObservation] = []
-    for obs in observations:
-        if not (0.75 <= obs.value_m <= 5.0):
-            continue
-        obs_x, obs_y = _centre(obs.bbox)
-        distance = (
-            abs(obs_y - label_y)
-            if obs.orientation == "vertical"
-            else abs(obs_x - label_x)
-        )
-        if distance <= band_tolerance:
-            candidates.append(obs)
-    return _unique_by_value(candidates)
-
-
 def resolve_orthogonal_envelope_evidence(
     page: fitz.Page,
     *,
-    explicit_floor_area_m2: float,
+    candidate_length_m: float,
+    candidate_width_m: float,
+    declared_floor_area_m2: float,
     secondary_width_m: Optional[float] = None,
     relative_area_tolerance: float = 0.015,
 ) -> Optional[OrthogonalEnvelopeEvidence]:
-    """Resolve one orthogonal envelope independently corroborated by floor area.
+    """Reconcile independent geometry with a declared source area.
 
-    The existing PlanReader compound-footprint convention treats an evidenced
-    secondary strip (such as an open verandah) as running along the main
-    envelope length. The independent area check is therefore::
-
-        main_length * main_width + main_length * secondary_width
-
-    A caller-supplied secondary width is treated as already evidenced upstream.
-    When no width is supplied and exactly one secondary label exists, this
-    resolver may derive candidate widths only from standalone dimensions bound
-    to the label's own spatial band. If a secondary label exists but its width
-    cannot be uniquely corroborated by the final area relationship, resolution
-    fails closed rather than ignoring the named component.
+    candidate_length_m and candidate_width_m are mandatory independent inputs.
+    This function never searches dimension combinations using the declared area.
+    A missing/ambiguous candidate axis fails closed.
     """
-    try:
-        explicit_area = float(explicit_floor_area_m2)
-    except (TypeError, ValueError):
+    length = _as_positive_finite(candidate_length_m)
+    width = _as_positive_finite(candidate_width_m)
+    declared = _as_positive_finite(declared_floor_area_m2)
+    if length is None or width is None or declared is None:
         return None
-    if not math.isfinite(explicit_area) or explicit_area <= 0:
-        return None
-
     if not math.isfinite(relative_area_tolerance) or not (0 < relative_area_tolerance <= 0.05):
         return None
 
-    observations = extract_oriented_dimension_observations(page)
-    horizontal = _unique_by_value(
-        obs for obs in observations
-        if obs.orientation == "horizontal" and obs.value_m >= 3.0
-    )
-    vertical = _unique_by_value(
-        obs for obs in observations
-        if obs.orientation == "vertical" and obs.value_m >= 3.0
-    )
-    if not horizontal or not vertical:
-        return None
-
-    supplied_secondary: Optional[float] = None
+    secondary: Optional[float] = None
     if secondary_width_m is not None:
-        try:
-            supplied_secondary = float(secondary_width_m)
-        except (TypeError, ValueError):
-            return None
-        if (
-            not math.isfinite(supplied_secondary)
-            or supplied_secondary <= 0
-            or supplied_secondary > 10.0
-        ):
+        secondary = _as_positive_finite(secondary_width_m)
+        if secondary is None or secondary > 10.0:
             return None
 
-    secondary_label: Optional[SecondaryAreaLabelEvidence] = None
-    secondary_options: list[tuple[Optional[float], Optional[OrientedDimensionObservation]]]
-    if supplied_secondary is not None:
-        secondary_options = [(supplied_secondary, None)]
-    else:
-        secondary_label = _find_unique_secondary_label(page)
-        if secondary_label is not None:
-            inferred = _bound_secondary_width_candidates(page, observations, secondary_label)
-            if not inferred:
-                return None
-            secondary_options = [(obs.value_m, obs) for obs in inferred]
-        else:
-            # If the page contains no secondary-area label at all, a plain
-            # rectangular envelope remains a valid candidate.
-            secondary_options = [(None, None)]
-
-    matches: dict[tuple[float, float, Optional[float]], OrthogonalEnvelopeEvidence] = {}
-    for h_obs in horizontal:
-        for v_obs in vertical:
-            length_m = max(h_obs.value_m, v_obs.value_m)
-            width_m = min(h_obs.value_m, v_obs.value_m)
-            main_area = length_m * width_m
-            if not (15.0 <= main_area <= 600.0):
-                continue
-
-            for secondary, secondary_obs in secondary_options:
-                corroborated_area = main_area
-                if secondary is not None:
-                    corroborated_area += length_m * secondary
-
-                relative_error = abs(corroborated_area - explicit_area) / explicit_area
-                if relative_error > relative_area_tolerance:
-                    continue
-
-                key = (
-                    round(length_m, 3),
-                    round(width_m, 3),
-                    round(secondary, 4) if secondary is not None else None,
-                )
-                matches[key] = OrthogonalEnvelopeEvidence(
-                    length_m=key[0],
-                    width_m=key[1],
-                    horizontal_m=h_obs.value_m,
-                    vertical_m=v_obs.value_m,
-                    explicit_floor_area_m2=round(explicit_area, 4),
-                    corroborated_area_m2=round(corroborated_area, 4),
-                    relative_area_error=round(relative_error, 6),
-                    secondary_width_m=key[2],
-                    horizontal_evidence=h_obs,
-                    vertical_evidence=v_obs,
-                    secondary_width_evidence=secondary_obs,
-                    secondary_label_evidence=(
-                        secondary_label if secondary_obs is not None else None
-                    ),
-                )
-
-    if len(matches) != 1:
+    axis_pair = _axis_pair_for_candidates(
+        extract_oriented_dimension_observations(page),
+        length_m=length,
+        width_m=width,
+    )
+    if axis_pair is None:
         return None
-    return next(iter(matches.values()))
+    horizontal_evidence, vertical_evidence = axis_pair
+
+    reconciled = length * width
+    if secondary is not None:
+        reconciled += length * secondary
+    relative_error = abs(reconciled - declared) / declared
+    if relative_error > relative_area_tolerance:
+        return None
+
+    return OrthogonalEnvelopeEvidence(
+        length_m=round(max(length, width), 3),
+        width_m=round(min(length, width), 3),
+        horizontal_m=horizontal_evidence.value_m,
+        vertical_m=vertical_evidence.value_m,
+        declared_floor_area_m2=round(declared, 4),
+        corroborated_area_m2=round(reconciled, 4),
+        relative_area_error=round(relative_error, 6),
+        secondary_width_m=None if secondary is None else round(secondary, 4),
+        horizontal_evidence=horizontal_evidence,
+        vertical_evidence=vertical_evidence,
+    )
