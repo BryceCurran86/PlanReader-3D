@@ -1,4 +1,4 @@
-"""End-to-end synthetic wiring tests for F.30 orthogonal envelope evidence."""
+"""End-to-end synthetic tests for declared-area / physical-geometry separation."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -48,31 +48,38 @@ def _save_uncorroborated_plain_plan(path: Path) -> Path:
     return path
 
 
-def test_corroborated_orthogonal_envelope_drives_wall_and_floor_geometry(tmp_path: Path):
+def test_declared_area_does_not_select_wall_or_floor_geometry(tmp_path: Path):
     pdf = _save_corroborated_compound_plan(tmp_path / "compound.pdf")
-    predictions = GenericPlanReaderExtractor().extract_from_pdf(pdf)
+    extractor = GenericPlanReaderExtractor()
+    predictions = extractor.extract_from_pdf(pdf)
     by_tag = {prediction.tag: prediction for prediction in predictions}
 
     floor = by_tag["floor_screed"]
     wall = by_tag["perimeter_walling"]
 
-    assert floor.quantity == pytest.approx(162.69)
-    assert floor.dimensions == pytest.approx([15.95, 8.2])
-    assert floor.metadata["derived_footprint_area_m2"] == pytest.approx(162.69)
-    assert floor.metadata["envelope_authority"] == (
-        "orthogonal_figured_dimensions_corroborated_by_explicit_floor_area"
-    )
-    assert floor.metadata["secondary_width_m"] == pytest.approx(2.0)
-    assert floor.metadata["secondary_width_source"] == "spatial_label_dimension"
+    # The legacy independent geometry heuristic sees 15.95 and 11.05 first.
+    # The printed 162.69 m2 claim must not use its numerical agreement to
+    # select the alternative 15.95 x 8.2 physical shape.
+    assert floor.dimensions == pytest.approx([15.95, 11.05])
+    assert floor.quantity == pytest.approx(176.25)
+    assert floor.metadata["derived_footprint_area_m2"] == pytest.approx(176.25)
+    assert floor.metadata["declared_floor_area_m2"] == pytest.approx(162.69)
+    assert floor.metadata["declared_floor_area_binding"] == "unbound"
+    assert floor.metadata["declared_floor_area_evidence_role"] == "declared_source_area_claim"
+    assert "envelope_authority" not in floor.metadata
+    assert "area_authority" not in floor.metadata
 
-    assert wall.dimensions[0] == pytest.approx(48.3)
+    # Wall geometry follows the same independently selected physical axes.
+    assert wall.dimensions[0] == pytest.approx(54.0)
     # No opening was detected on this synthetic plan, so the fail-closed
-    # opening-deduction gate blocks final publication (an empty opening
-    # list is not evidence of zero openings); the envelope-wiring result
-    # is still visible via the gross_area_m2 diagnostic.
+    # opening-deduction gate may block final publication. The physical gross
+    # geometry remains diagnostic and, crucially, independent of the 162.69 claim.
     assert wall.quantity is None
-    assert wall.metadata["gross_area_m2"] == pytest.approx(48.3 * 2.8)
-    assert wall.metadata["envelope_authority"] == floor.metadata["envelope_authority"]
+    assert wall.metadata["gross_area_m2"] == pytest.approx(54.0 * 2.8)
+    assert "envelope_authority" not in wall.metadata
+
+    assert extractor.declared_floor_area_claims[0]["declared_floor_area_m2"] == pytest.approx(162.69)
+    assert extractor.declared_floor_area_claims[0]["declared_floor_area_binding"] == "unbound"
 
 
 def test_no_explicit_floor_area_preserves_legacy_envelope_path(tmp_path: Path):
