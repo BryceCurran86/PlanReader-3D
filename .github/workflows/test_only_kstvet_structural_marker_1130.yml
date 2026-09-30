@@ -87,11 +87,11 @@ jobs:
               "member_role": "pillar",
               "section_spec": "circular hollow section; 50mm dia x 1.5mm thick; pillar",
           }
-          assert any(
+          definition_recovered = any(
               row["member_role"] == expected_definition["member_role"]
               and row["section_spec"] == expected_definition["section_spec"]
               for row in definitions
-          ), definitions
+          )
 
           # The isolated decorative marker must no longer poison definition
           # completeness. Other incomplete source blocks, if present elsewhere
@@ -143,6 +143,17 @@ jobs:
                   in shadow.reason_codes
               ),
               "definitions": definitions,
+              "definition_recovered": definition_recovered,
+              "source_blocks": [
+                  {
+                      "page_id": block.page_id,
+                      "reading_order": block.reading_order,
+                      "bbox": list(block.bbox),
+                      "text": block.text,
+                      "block_id": block.block_id,
+                  }
+                  for block in shadow.blocks
+              ],
               "decorative_marker_rows": marker_rows,
               "authority_without_instances": {
                   "status": resolution.status.value,
@@ -155,6 +166,7 @@ jobs:
               encoding="utf-8",
           )
           print(json.dumps(report, indent=2, sort_keys=True))
+          assert definition_recovered, report
           PY
 
       - uses: actions/upload-artifact@v4
