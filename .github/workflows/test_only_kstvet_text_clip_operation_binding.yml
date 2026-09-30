@@ -115,6 +115,43 @@ jobs:
                       "text_block": text_block.decode("latin1", errors="replace"),
                   })
 
+          tm_pattern = re.compile(
+              rb"([-+]?\\d*\\.?\\d+)\\s+([-+]?\\d*\\.?\\d+)\\s+"
+              rb"([-+]?\\d*\\.?\\d+)\\s+([-+]?\\d*\\.?\\d+)\\s+"
+              rb"([-+]?\\d*\\.?\\d+)\\s+([-+]?\\d*\\.?\\d+)\\s+Tm"
+          )
+          tm_rows = []
+          page_tm = page.transformation_matrix
+          for match in tm_pattern.finditer(content):
+              vals = [float(match.group(i)) for i in range(1, 7)]
+              raw_origin = fitz.Point(vals[4], vals[5])
+              page_origin = raw_origin * page_tm
+              hits = []
+              for row in trace_rows:
+                  origin = row["first_origin"]
+                  if origin is None:
+                      continue
+                  if (
+                      abs(page_origin.x - origin[0]) <= 0.02
+                      and abs(page_origin.y - origin[1]) <= 0.02
+                  ):
+                      hits.append({
+                          "seqno": row["seqno"],
+                          "text": row["text"],
+                          "type": row["type"],
+                      })
+              if hits:
+                  tm_rows.append({
+                      "offset": match.start(),
+                      "matrix": vals,
+                      "raw_origin": [float(raw_origin.x), float(raw_origin.y)],
+                      "page_origin": [float(page_origin.x), float(page_origin.y)],
+                      "trace_hits": hits,
+                      "context": content[
+                          max(0, match.start()-700):min(len(content),match.end()+1200)
+                      ].decode("latin1", errors="replace"),
+                  })
+
           report = {
               "source_sha256": digest,
               "page_id": "47",
@@ -123,6 +160,7 @@ jobs:
               "trace_rows": trace_rows,
               "raw_contexts": raw_contexts,
               "clip_text_contexts": clip_text_contexts,
+              "tm_trace_bindings": tm_rows,
           }
           Path("kstvet-text-clip-operation-binding.json").write_text(
               json.dumps(report, indent=2, sort_keys=True),
