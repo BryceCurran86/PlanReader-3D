@@ -138,3 +138,8 @@ jobs:
         with:
           name: murera-pier-candidate-pages
           path: /tmp/murera-pier-pages
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: murera-exact-source-pdf
+          path: /tmp/murera.pdf
