@@ -1,6 +1,8 @@
 # Murera masonry_piers production closure review
 
-Status: production authority reviewed; publication remains fail-closed.
+Status: production authority reviewed; native candidate lead closed as unsupported.
+Physical-instance and complete-view evidence remain unavailable; publication
+continues to abstain. No benchmark row is claimed recovered.
 
 ## Scope
 
@@ -142,3 +144,82 @@ PDF fails. The fixture's source hash and page selection are test inputs only.
 
 No project name, source page, filename, source SHA, or expected quantity is used
 as a production prediction input.
+
+## Final native-source candidate check — 30 September 2026
+
+Source evidence was inspected at production main
+`b274e1782c3f6ec8416b201e484eb35c5d603b65` using the same SHA-locked
+official PDF. This documentation update is based on freshly fetched main
+`1e5e9f78a390b5fbb762e4ef861cb4639a4aa191`. This completes the outstanding check of the three neutral
+page-223 candidates; it does not promote the diagnostic probes.
+
+### Observed source evidence
+
+- Closed, unmerged TEST-ONLY #1120 / run `36677794416` reports three
+  `vertical_profile_candidate` records on page 223 and none on page 225.
+  The page-title and sheet-number authorities did not resolve those views.
+- The source-backed paths are indices 10, 11 and 16. Their bounding boxes
+  are respectively `(317.40, 559.32, 321.36, 571.56)`,
+  `(319.44, 550.44, 321.36, 558.12)` and
+  `(345.36, 557.16, 348.72, 573.72)` in page points.
+- Direct inspection of an exact-PDF render, including a crop
+  `(255, 525, 390, 603)`, shows those shapes are filled outline lettering
+  in the source label **LPG storage door**. This is visual source evidence,
+  not a new automated glyph classifier or a rule that deletes candidates.
+- Closed, unmerged TEST-ONLY #1121 / run `36678276527` inspected all
+  238 pages. Its text census found the masonry-pier specification on
+  page 183, but no drawing-text pier/pillar instance proposition. Absence
+  from that text census alone does not prove that no physical pier exists.
+
+The evidence artifacts are `murera-pier-bounded-view-census`
+(`11079853876`) and `murera-full-document-pier-source-census`
+(`11080817114`). Both are diagnostics only, with the exact source hash
+recorded in their JSON. No expected quantities or scorer output were used.
+
+### Authority decision
+
+The verified boundaries are:
+
+- `SourceVisibilityProducer.ingest_native_pdf_bytes()` supplies the
+  receipted immutable source snapshot.
+- `compile_structural_physical_candidate_shadow()` returns neutral
+  candidates; it does not call member registration or the live extractor.
+- `build_structural_member_registration_authority()` rejects those
+  candidate records as unauthenticated member inputs.
+- `StructuralMemberProducer.publish()` and
+  `StructuralMemberAuthority.resolve()` preserve the incomplete-scope
+  abstention. There is no live physical-instance bridge from this shadow.
+
+Source visibility authenticates the three paths' provenance; it does not
+turn vector lettering into physical structural members. The page-183
+definition also supplies no explicit instance binding or complete member
+view. `StructuralMemberRegistrationEvidenceProducer.view()` rejects a
+production caller's unsupported `complete=True` claim. The public
+registration builder rejects neutral candidate records as member inputs.
+
+No positive member observation or completeness proof can be minted from
+this lead. The missing upstream producer remains a real capability gap;
+wiring these diagnostic records into it would fabricate evidence. The
+permitted outcome is `ABSTAINED`, no physical members and no quantity.
+Do not describe this as masonry-pier recovery or current-head accuracy.
+
+### Stop/reopen condition
+
+Do not repeat the page-223 candidate probe or treat these three shapes as
+piers. Reopen instance production only with new source-owned evidence
+that proves individual physical masonry-pier propositions, exact view
+ownership and completeness of the relevant member universe. A successful
+definition parse, a count string, a grid/bay pattern, or these diagnostic
+candidates cannot discharge those requirements.
+
+### Validation
+
+The exact-source regression suite must run with
+`PLANREADER_MURERA_SOURCE_PDF` configured to the SHA-verified official
+PDF; skipped exact-source tests are not a pass. The existing tests exercise
+trusted definitions, neutral-candidate rejection, unsupported complete-view
+claims and full-document extraction through production APIs.
+
+This addendum changes documentation only. All production code, opening
+identity/closure, Item 35, KSTVET work, benchmark files, scoring and commercial
+publication remain untouched.
