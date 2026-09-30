@@ -1,0 +1,109 @@
+name: TEST-ONLY Murera Pier Instance Completeness Source Probe
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/test_only_murera_pier_instance_completeness_source.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  murera-pier-source-proof:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install probe dependency
+        run: pip install PyMuPDF==1.28.0
+      - name: Download and verify exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL --retry 4 --retry-delay 2 \
+            "https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf" \
+            -o /tmp/murera.pdf
+          echo "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  /tmp/murera.pdf" | sha256sum -c -
+      - name: Probe source-owned pier semantics, symbols and view boundaries
+        shell: bash
+        run: |
+          python - <<'PY'
+          import fitz, json, math, re
+          path="/tmp/murera.pdf"
+          doc=fitz.open(path)
+          role_re=re.compile(r"(masonry|pier|stanchion|column|post|support|verandah|300\s*[xX×]\s*300|300mm)", re.I)
+          title_re=re.compile(r"(floor plan|ground floor|plan|elevation|section|layout|laborator|architectural|structural)", re.I)
+
+          def rect_tuple(r):
+              try:
+                  rr=fitz.Rect(r)
+                  return [round(rr.x0,3),round(rr.y0,3),round(rr.x1,3),round(rr.y1,3)]
+              except Exception:
+                  return None
+
+          def dist(a,b):
+              ax=(a[0]+a[2])/2; ay=(a[1]+a[3])/2
+              bx=(b[0]+b[2])/2; by=(b[1]+b[3])/2
+              return math.hypot(ax-bx, ay-by)
+
+          pages=[]
+          for pno in range(219,239):
+              page=doc[pno-1]
+              words=page.get_text("words") or []
+              blocks=page.get_text("blocks") or []
+              drawings=page.get_drawings() or []
+              relevant_blocks=[]
+              title_blocks=[]
+              for b in blocks:
+                  text=" ".join(str(b[4]).split())
+                  row={"bbox":[round(float(x),3) for x in b[:4]],"text":text}
+                  if role_re.search(text):
+                      relevant_blocks.append(row)
+                  if title_re.search(text):
+                      title_blocks.append(row)
+              shapes=[]
+              for di,d in enumerate(drawings):
+                  rb=rect_tuple(d.get("rect"))
+                  if not rb: continue
+                  w=rb[2]-rb[0]; h=rb[3]-rb[1]
+                  if w<=0 or h<=0: continue
+                  aspect=max(w,h)/min(w,h)
+                  # Compact member-like mark only; retain broad range for evidence review.
+                  if aspect>1.35 or min(w,h)<1.0 or max(w,h)>40.0:
+                      continue
+                  near=[]
+                  for wi,wrow in enumerate(words):
+                      wb=[float(wrow[0]),float(wrow[1]),float(wrow[2]),float(wrow[3])]
+                      dd=dist(rb,wb)
+                      if dd<=80:
+                          near.append({"i":wi,"text":str(wrow[4]),"bbox":[round(x,3) for x in wb],"distance":round(dd,3)})
+                  near=sorted(near,key=lambda x:(x["distance"],x["i"]))[:20]
+                  shapes.append({
+                      "drawing_index":di,
+                      "bbox":rb,
+                      "width":round(w,3),"height":round(h,3),"aspect":round(aspect,4),
+                      "fill":d.get("fill"),"color":d.get("color"),"line_width":d.get("width"),
+                      "items":[str(item[0]) if item else "" for item in (d.get("items") or [])],
+                      "nearby_words":near,
+                  })
+              # Repetition signature is source geometry only, not a member claim.
+              sigs={}
+              for s in shapes:
+                  sig=(round(s["width"],1),round(s["height"],1),str(s["fill"]),str(s["color"]))
+                  sigs[sig]=sigs.get(sig,0)+1
+              pages.append({
+                  "page":pno,
+                  "page_rect":[round(page.rect.width,3),round(page.rect.height,3)],
+                  "relevant_blocks":relevant_blocks,
+                  "title_blocks":title_blocks[:20],
+                  "compact_shapes":shapes,
+                  "compact_shape_signature_counts":[{"signature":list(k),"count":v} for k,v in sorted(sigs.items(),key=lambda kv:(-kv[1],str(kv[0])))],
+                  "full_text":page.get_text("text") if pno in (222,223,224,225,226,227) else "",
+              })
+          print("MURERA_PIER_SOURCE_PROBE_BEGIN")
+          print(json.dumps({"source_sha256":"84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b","pages":pages}, indent=2, default=str))
+          print("MURERA_PIER_SOURCE_PROBE_END")
+          doc.close()
+          PY
