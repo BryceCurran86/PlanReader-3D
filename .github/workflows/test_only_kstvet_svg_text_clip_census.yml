@@ -1,0 +1,149 @@
+name: TEST-ONLY KSTVET SVG Text Clip Census
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  probe:
+    if: github.head_ref == 'test-only/kstvet-svg-text-clip-census-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install production dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and SHA-256 verify KSTVET source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  kstvet.pdf' | sha256sum -c -
+
+      - name: Census page 47 SVG text clip ownership
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import collections
+          import hashlib
+          import json
+          import re
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          import fitz
+
+          payload = Path("kstvet.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+
+          doc = fitz.open(stream=payload, filetype="pdf")
+          page = doc.load_page(46)
+          svg = page.get_svg_image(text_as_path=False)
+          root = ET.fromstring(svg)
+
+          def local(tag):
+              return tag.rsplit("}", 1)[-1]
+
+          clip_defs = {}
+          for node in root.iter():
+              if local(node.tag) != "clipPath":
+                  continue
+              clip_id = node.attrib.get("id", "")
+              clip_defs[clip_id] = [
+                  {
+                      "tag": local(child.tag),
+                      "attributes": dict(sorted(child.attrib.items())),
+                  }
+                  for child in list(node)
+              ]
+
+          text_rows = []
+          def walk(node, active_clips=()):
+              chain = list(active_clips)
+              clip_attr = node.attrib.get("clip-path", "")
+              match = re.fullmatch(r"url\(#([^\)]+)\)", clip_attr)
+              if match:
+                  chain.append(match.group(1))
+
+              if local(node.tag) == "text":
+                  text_rows.append({
+                      "text": "".join(node.itertext()),
+                      "clip_ids": list(chain),
+                      "attributes": dict(sorted(node.attrib.items())),
+                      "tspans": [
+                          {
+                              "text": "".join(child.itertext()),
+                              "attributes": dict(sorted(child.attrib.items())),
+                          }
+                          for child in list(node)
+                          if local(child.tag) == "tspan"
+                      ],
+                  })
+              for child in list(node):
+                  walk(child, tuple(chain))
+
+          walk(root)
+
+          drawings = list(page.get_drawings(extended=True) or ())
+          drawing_type_counts = collections.Counter(
+              str(row.get("type")) for row in drawings
+          )
+          drawing_level_counts = collections.Counter(
+              str(row.get("level")) for row in drawings
+          )
+          content = bytes(page.read_contents() or b"")
+
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "source_sha256": digest,
+              "page_id": "47",
+              "pymupdf_version": getattr(fitz, "__version__", None),
+              "page_rotation": int(page.rotation),
+              "page_rect": [
+                  float(page.rect.x0), float(page.rect.y0),
+                  float(page.rect.x1), float(page.rect.y1),
+              ],
+              "raw_clip_operator_count": len(
+                  re.findall(rb"(?<!\\S)W\\*?(?!\\S)", content)
+              ),
+              "extended_drawing_count": len(drawings),
+              "extended_drawing_type_counts": dict(sorted(drawing_type_counts.items())),
+              "extended_drawing_level_counts": dict(sorted(drawing_level_counts.items())),
+              "svg_length": len(svg),
+              "svg_clip_definition_count": len(clip_defs),
+              "svg_clip_definitions": clip_defs,
+              "svg_text_node_count": len(text_rows),
+              "svg_clipped_text_node_count": sum(
+                  1 for row in text_rows if row["clip_ids"]
+              ),
+              "svg_unclipped_text_node_count": sum(
+                  1 for row in text_rows if not row["clip_ids"]
+              ),
+              "svg_text_rows": text_rows,
+          }
+          Path("kstvet-svg-text-clip-census.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          doc.close()
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kstvet-svg-text-clip-census
+          path: kstvet-svg-text-clip-census.json
+          if-no-files-found: warn
