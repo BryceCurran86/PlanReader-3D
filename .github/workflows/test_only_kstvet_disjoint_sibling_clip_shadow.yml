@@ -1,0 +1,248 @@
+name: TEST-ONLY KSTVET Disjoint Sibling Clip Shadow
+
+on:
+  pull_request:
+    branches:
+      - 'fix/pdf-text-clip-hierarchy-levels-v1'
+
+jobs:
+  probe:
+    if: github.head_ref == 'test-only/kstvet-disjoint-sibling-clip-shadow-1102'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and SHA-256 verify KSTVET source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  kstvet.pdf' | sha256sum -c -
+
+      - name: Run disjoint sibling clip exclusion shadow
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          from collections import Counter, defaultdict
+          from pathlib import Path
+
+          import fitz
+
+          from pb_pdf_text_fill_stroke_equivalence_shadow import (
+              classify_fill_stroke_text_pair_shadow,
+          )
+          from pb_pdf_text_integrity_authority import (
+              TEXT_TRACE_AMBIGUOUS,
+              _clip_model,
+              _rect_contains,
+          )
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          payload = Path("kstvet.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+
+          producer = SourceVisibilityProducer(
+              producer_method="kstvet-disjoint-sibling-clip-shadow-1102",
+              producer_version="1.0",
+          )
+          published = producer.ingest_native_pdf_bytes(
+              document_id=f"kstvet-disjoint-sibling-shadow:{digest[:16]}",
+              source_bytes=payload,
+              source_locator="sha256-verified-kstvet-source",
+              page_ids=("47",),
+          )
+          authority = producer.text_integrity_authority()
+
+          doc = fitz.open(stream=payload, filetype="pdf")
+          page = doc.load_page(46)
+          model = _clip_model(page)
+          assert model is not None and model.consistent
+          assert len(model.clips) == 92
+
+          native_words = [
+              {
+                  "text": str(row[4]),
+                  "bbox": tuple(float(v) for v in row[:4]),
+              }
+              for row in (page.get_text("words") or ())
+          ]
+
+          def same_bbox(a, b, tol=1e-6):
+              return all(abs(float(x) - float(y)) <= tol for x, y in zip(a, b))
+
+          def visible_native_word(text, bbox):
+              return any(
+                  row["text"] == text and same_bbox(row["bbox"], bbox)
+                  for row in native_words
+              )
+
+          def rect_intersects(a, b):
+              return (
+                  min(float(a[2]), float(b[2])) > max(float(a[0]), float(b[0]))
+                  and min(float(a[3]), float(b[3])) > max(float(a[1]), float(b[1]))
+              )
+
+          pair_words = defaultdict(list)
+          for observation_id in published.text_observation_ids:
+              selector = ObservationSelector(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  observation_id=observation_id,
+              )
+              live = authority.resolve_text(selector)
+              receipt = live.receipt
+              if receipt is None or TEXT_TRACE_AMBIGUOUS not in live.reason_codes:
+                  continue
+              classified = classify_fill_stroke_text_pair_shadow(
+                  page,
+                  {"text": receipt.raw_text, "bbox": tuple(receipt.geometry)},
+              )
+              if len(classified.sequence_numbers) != 2:
+                  continue
+              pair_words[classified.sequence_numbers].append({
+                  "text": receipt.raw_text,
+                  "bbox": tuple(float(v) for v in receipt.geometry),
+                  "current_shadow_reasons": list(classified.reason_codes),
+              })
+
+          paths = list(model.paths)
+          pushes = list(model.pushes)
+          clips = list(model.clips)
+          rows = []
+          counts = Counter()
+
+          for pair in sorted(pair_words):
+              per_seq = {}
+              for seqno in pair:
+                  before = None
+                  after = None
+                  for path in paths:
+                      if path[0] < seqno:
+                          before = path
+                      elif path[0] > seqno:
+                          after = path
+                          break
+                  lo_position = before[3] if before is not None else -1
+                  hi_position = after[3] if after is not None else None
+                  stack_before = set(before[2]) if before is not None else set()
+                  stack_after = set(after[2]) if after is not None else None
+                  between = {
+                      clip_id
+                      for position, clip_id in pushes
+                      if position > lo_position
+                      and (hi_position is None or position < hi_position)
+                  }
+                  if (
+                      before is not None
+                      and after is not None
+                      and not between
+                      and before[1] == after[1]
+                      and before[2] == after[2]
+                  ):
+                      may_apply = set(before[2])
+                      must_apply = set(before[2])
+                  else:
+                      may_apply = stack_before | between | (stack_after or set())
+                      must_apply = (
+                          stack_before & stack_after
+                          if stack_after is not None
+                          else set()
+                      )
+
+                  word_results = []
+                  for word in pair_words[pair]:
+                      bbox = word["bbox"]
+                      native_visible = visible_native_word(word["text"], bbox)
+                      excluded_disjoint = []
+                      containing = []
+                      unresolved = []
+                      clipped = []
+                      for clip_id in sorted(may_apply):
+                          clip = clips[clip_id]
+                          contains = _rect_contains(clip.scissor, bbox)
+                          intersects = rect_intersects(clip.scissor, bbox)
+                          if contains and clip.exact_rectangle:
+                              containing.append(clip_id)
+                          elif clip_id in must_apply:
+                              clipped.append(clip_id)
+                          elif (
+                              native_visible
+                              and clip.exact_rectangle
+                              and not intersects
+                          ):
+                              excluded_disjoint.append(clip_id)
+                          else:
+                              unresolved.append(clip_id)
+                      would_clear = not clipped and not unresolved
+                      counts["word_checks"] += 1
+                      counts["would_clear"] += int(would_clear)
+                      counts["would_stay_unresolved"] += int(bool(unresolved))
+                      counts["would_be_clipped"] += int(bool(clipped))
+                      word_results.append({
+                          "text": word["text"],
+                          "bbox": list(bbox),
+                          "native_visible": native_visible,
+                          "may_apply_clip_ids": sorted(may_apply),
+                          "must_apply_clip_ids": sorted(must_apply),
+                          "containing_clip_ids": containing,
+                          "excluded_disjoint_clip_ids": excluded_disjoint,
+                          "unresolved_clip_ids": unresolved,
+                          "clipped_clip_ids": clipped,
+                          "would_clear_clip_state": would_clear,
+                      })
+                  per_seq[str(seqno)] = word_results
+              pair_clear = all(
+                  row["would_clear_clip_state"]
+                  for seq_rows in per_seq.values()
+                  for row in seq_rows
+              )
+              counts["pair_groups"] += 1
+              counts["pair_groups_would_clear"] += int(pair_clear)
+              rows.append({
+                  "sequence_numbers": list(pair),
+                  "words": [w["text"] for w in pair_words[pair]],
+                  "pair_would_clear_clip_state": pair_clear,
+                  "seq_details": per_seq,
+              })
+
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "source_sha256": digest,
+              "page_id": "47",
+              "clip_count": len(model.clips),
+              "clip_model_consistent": model.consistent,
+              "counts": dict(sorted(counts.items())),
+              "rows": rows,
+          }
+          Path("kstvet-disjoint-sibling-clip-shadow.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          doc.close()
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kstvet-disjoint-sibling-clip-shadow
+          path: kstvet-disjoint-sibling-clip-shadow.json
+          if-no-files-found: warn
