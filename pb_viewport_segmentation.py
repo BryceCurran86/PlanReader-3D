@@ -35,6 +35,7 @@ import statistics
 from typing import Any, Iterable, Optional, Sequence
 
 from pb_drawing_evidence_binding import DrawingViewClassifier, DrawingViewRegion, DrawingViewType
+import pb_page_title_authority as _title_authority
 
 
 class ViewportSegmentationStatus(str, Enum):
@@ -507,14 +508,169 @@ def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
     )
 
 
+def _title_field_owned_regions(page: Any) -> list[tuple[float, float, float, float]]:
+    """Regions ``pb_page_title_authority`` positively shows as title-field values.
+
+    Reuses the page-title authority (native text only, no OCR) and nothing else:
+
+    - the value box of a drawing-title field bound by an *explicit* title label
+      ("Drawing name", "Drawing title", "Sheet title", ...), whether or not a
+      title-block region is demonstrated;
+    - when a title block *is* demonstrated (a cluster of drawing title-block
+      field labels): that region and the bound values of fields inside it.
+
+    A bare ``TITLE`` label, a weak label cluster, or an absent title block
+    contribute nothing.  Regions are in the page's visual orientation, in page
+    points.
+    """
+    try:
+        rect = page.rect
+        width = float(rect.width); height = float(rect.height)
+        analysis = _title_authority.analyse_cells(
+            _title_authority.page_cells(page), width, height, 0, "native"
+        )
+    except Exception:
+        return []
+    if width <= 0 or height <= 0:
+        return []
+    regions: list[tuple[float, float, float, float]] = []
+    block = analysis.title_block
+    if block is not None:
+        regions.append(tuple(float(v) for v in block))
+    for candidate in analysis.candidates:
+        if candidate.kind != "label" or candidate.rejected or not candidate.text:
+            continue
+        explicit = candidate.label_strength == "title_explicit"
+        in_block = block is not None and candidate.region == "title block"
+        if not (explicit or in_block):
+            continue
+        box = candidate.box
+        regions.append((box[0] * width, box[1] * height, box[2] * width, box[3] * height))
+    return regions
+
+
+@dataclass(frozen=True)
+class _NativeLine:
+    bbox: tuple[float, float, float, float]
+    text: str
+    size: float
+    bold: bool
+    horizontal: bool
+
+
+_WRAP_MAX_GAP_SIZE_FRACTION = 0.6
+_WRAP_MAX_OVERLAP_INTRUSION = 0.3
+_WRAP_SIZE_TOLERANCE = 0.1
+_WRAP_MIN_ALIGNED_OVERLAP = 0.4
+_PDF_BOLD_FLAG = 16
+
+
+def _native_line(line: dict[str, Any]) -> Optional[_NativeLine]:
+    spans = line.get("spans", []) or []
+    bbox = line.get("bbox")
+    if not spans or not bbox or len(bbox) < 4:
+        return None
+    text = _normalise_text(" ".join(str(span.get("text", "")) for span in spans))
+    if not text:
+        return None
+    direction = list(line.get("dir") or (1.0, 0.0)) + [0.0, 0.0]
+    horizontal = abs(direction[1]) <= 0.2 * max(abs(direction[0]), 1e-9)
+    return _NativeLine(
+        bbox=(float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])),
+        text=text,
+        size=max(float(span.get("size", 0.0) or 0.0) for span in spans),
+        bold=all(int(span.get("flags", 0) or 0) & _PDF_BOLD_FLAG for span in spans),
+        horizontal=horizontal,
+    )
+
+
+def _wrapped_continuation(previous: _NativeLine, current: _NativeLine) -> bool:
+    """``current`` continues ``previous`` as a wrapped line of the same text.
+
+    Contiguous (leading within a fraction of the type size), aligned
+    (horizontal overlap), of comparable type size, and not independently
+    dominant (not bold where the previous line is not).
+    """
+    if not (previous.horizontal and current.horizontal) or previous.size <= 0 or current.size <= 0:
+        return False
+    gap = current.bbox[1] - previous.bbox[3]
+    previous_height = previous.bbox[3] - previous.bbox[1]
+    if gap > _WRAP_MAX_GAP_SIZE_FRACTION * previous.size or gap < -_WRAP_MAX_OVERLAP_INTRUSION * previous_height:
+        return False
+    if abs(current.size - previous.size) > _WRAP_SIZE_TOLERANCE * previous.size:
+        return False
+    if current.bold and not previous.bold:
+        return False
+    overlap = min(current.bbox[2], previous.bbox[2]) - max(current.bbox[0], previous.bbox[0])
+    smaller = min(current.bbox[2] - current.bbox[0], previous.bbox[2] - previous.bbox[0])
+    return smaller > 0 and overlap >= _WRAP_MIN_ALIGNED_OVERLAP * smaller
+
+
+def _wrapped_note_tail_lines(page: Any) -> list[tuple[tuple[float, float, float, float], str]]:
+    """Lines (box, text) that are the wrapped tail of a note in the same native text block.
+
+    A run of contiguous, aligned, comparably typeset lines inside one native
+    PDF text block whose merged text the page-title authority rejects as a
+    title (a sentence, too long, a list item, ...) owns its non-first lines:
+    they are the tail of that note, never a standalone drawing title.  A
+    stacked multi-line heading merges to a title-shaped text and is untouched;
+    so is any first line of a run, and any line with independent typographic
+    dominance (larger, or bold where the run is not).
+    """
+    try:
+        data = page.get_text("dict") or {}
+    except Exception:
+        return []
+    tails: list[tuple[tuple[float, float, float, float], str]] = []
+    for block in data.get("blocks", []) or []:
+        if int(block.get("type", 0)) != 0:
+            continue
+        lines = [ln for ln in (_native_line(line) for line in block.get("lines", []) or []) if ln is not None]
+        runs: list[list[int]] = []
+        for index, line in enumerate(lines):
+            if index and _wrapped_continuation(lines[index - 1], line):
+                runs[-1].append(index)
+            else:
+                runs.append([index])
+        for run in runs:
+            if len(run) < 2:
+                continue
+            merged = _normalise_text(" ".join(lines[i].text for i in run))
+            if _title_authority.title_shape(merged, bound=False)[0] == 0.0:
+                tails.extend((lines[i].bbox, lines[i].text) for i in run[1:])
+    return tails
+
+
+def _to_visual_bbox(page: Any, bbox: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    """Express a text-dict bbox in the page's visual orientation."""
+    if not int(getattr(page, "rotation", 0) or 0):
+        return bbox
+    try:
+        import fitz  # a rotated page object implies PyMuPDF is present
+        rotated = fitz.Rect(bbox) * page.rotation_matrix
+        return (float(rotated.x0), float(rotated.y0), float(rotated.x1), float(rotated.y1))
+    except Exception:
+        return bbox
+
+
 def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
     candidates: list[_TitleAnchor] = []
+    owned: Optional[list[tuple[float, float, float, float]]] = None
+    tails: Optional[list[tuple[tuple[float, float, float, float], str]]] = None
     for bbox, text in _text_fragments(page):
         if not _TITLE_SHAPE_RE.match(text):
             continue
         view_type = DrawingViewClassifier.classify_text(_strip_scale_suffix(text)).value
         if view_type == DrawingViewType.UNKNOWN.value:
             continue
+        if owned is None:
+            owned = _title_field_owned_regions(page)
+        if owned and any(_point_in_bbox(_bbox_center(_to_visual_bbox(page, bbox)), region) for region in owned):
+            continue  # a title-field value, not a drawing-view title
+        if tails is None:
+            tails = _wrapped_note_tail_lines(page)
+        if tails and any(text in tail_text and _point_in_bbox(_bbox_center(bbox), tail_bbox) for tail_bbox, tail_text in tails):
+            continue  # the wrapped tail of a note, not a drawing-view title
         candidates.append(_TitleAnchor(text=text, bbox=bbox, view_type=view_type))
 
     # Prefer the tighter span when a line-level fragment duplicates it.
@@ -966,7 +1122,8 @@ def _derived_partitions(
     axis = 0 if x_spread / max(calibration.page_width_pt, 1.0) >= y_spread / max(calibration.page_height_pt, 1.0) else 1
     ordered = sorted(unresolved_indices, key=lambda i: (anchors[i].center[axis], anchors[i].center[1 - axis]))
     coords = [anchors[i].center[axis] for i in ordered]
-    if any(abs(coords[i + 1] - coords[i]) < calibration.title_separation_pt for i in range(len(coords) - 1)):
+    close = any(abs(coords[i + 1] - coords[i]) < calibration.title_separation_pt for i in range(len(coords) - 1))
+    if close:
         grid = _columnar_title_grid_partitions(
             page,
             anchors,
@@ -976,6 +1133,32 @@ def _derived_partitions(
         )
         if grid is not None:
             return grid
+
+    # The same title text and view type more than once, unframed and not a
+    # validated title grid: nothing positively separates that group into
+    # independent drawing views, so no partition is manufactured for it.  Only
+    # the duplicate group is quarantined; unrelated anchors go on through their
+    # own evidence path.
+    identity_counts: dict[tuple[str, str], int] = {}
+    for index in unresolved_indices:
+        identity = _title_identity(anchors[index])
+        identity_counts[identity] = identity_counts.get(identity, 0) + 1
+    duplicated = [i for i in unresolved_indices if identity_counts[_title_identity(anchors[i])] > 1]
+    if duplicated:
+        quarantined = [SegmentedViewport(
+            view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
+            view_type=anchors[index].view_type, label=anchors[index].text,
+            title_bbox=anchors[index].bbox, bounding_box=None,
+            status=ViewportSegmentationStatus.AMBIGUOUS.value,
+            boundary_source=ViewportBoundarySource.NONE.value, confidence=0.0,
+            notes=["unframed same-identity titles are not proven independent views"],
+        ) for index in duplicated]
+        remaining = [i for i in unresolved_indices if i not in set(duplicated)]
+        return quarantined + _derived_partitions(
+            page, anchors, remaining, calibration, page_number=page_number,
+        )
+
+    if close:
         return [SegmentedViewport(
             view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
             view_type=anchors[index].view_type, label=anchors[index].text,
