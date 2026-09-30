@@ -1333,7 +1333,10 @@ def _visibility_status(
         seqno = int(span.get("seqno"))
     except (TypeError, ValueError):
         seqno = None
-    reasons.extend(_text_clip_reasons(page, span.get("bbox") or subject_bbox, seqno))
+    # Clip visibility belongs to the caller's subject geometry. For a native
+    # word this is the producer-owned word bbox; multi-span ownership callers
+    # deliberately pass the owned span bbox and therefore remain conservative.
+    reasons.extend(_text_clip_reasons(page, subject_bbox, seqno))
     try:
         bboxlog = _cached_bboxlog(page)
     except Exception:
