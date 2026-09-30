@@ -20,9 +20,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Mapping, Optional, Sequence
+from typing import Optional, Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_pdf_exact_fill_geometry import (
+    EXACT_FILL_GEOMETRY_OVERLAPPING,
+    EXACT_FILL_GEOMETRY_RESOLVED,
+    exact_disjoint_rectangle_fill_coverage,
+    index_drawings_by_seqno,
+)
 from pb_pdf_text_integrity_authority import TEXT_OCCLUDED_BY_LATER_PAINT
 
 
@@ -114,60 +120,6 @@ def _intersection_ratio(
         return 0.0
     area = (x1 - x0) * (y1 - y0)
     return _intersection_area(subject, other) / area
-
-
-def _rectangles_from_exact_fill(
-    drawing: Mapping[str, object],
-) -> tuple[
-    Optional[tuple[tuple[float, float, float, float], ...]],
-    tuple[str, ...],
-]:
-    if str(drawing.get("type") or "") not in {"f", "fs"}:
-        return None, (SHADOW_UNSUPPORTED_FILL_GEOMETRY,)
-    if drawing.get("fill") is None:
-        return None, (SHADOW_UNSUPPORTED_FILL_GEOMETRY,)
-
-    items = tuple(drawing.get("items") or ())
-    if not items:
-        return None, (SHADOW_UNSUPPORTED_FILL_GEOMETRY,)
-
-    rectangles: list[tuple[float, float, float, float]] = []
-    for item in items:
-        if (
-            not isinstance(item, (tuple, list))
-            or len(item) < 2
-            or item[0] != "re"
-        ):
-            return None, (SHADOW_UNSUPPORTED_FILL_GEOMETRY,)
-        try:
-            rectangles.append(_rect_tuple(item[1]))
-        except (TypeError, ValueError):
-            return None, (SHADOW_UNSUPPORTED_FILL_GEOMETRY,)
-
-    # If rectangle interiors overlap, winding / even-odd rules and rectangle
-    # orientation can create cancellations or holes. Do not infer through that.
-    # Disjoint interiors are exact under either fill rule.
-    for index, first in enumerate(rectangles):
-        for second in rectangles[index + 1 :]:
-            if _intersection_area(first, second) > 1e-9:
-                return None, (SHADOW_OVERLAPPING_RECTANGLES,)
-
-    return tuple(rectangles), ()
-
-
-def _coverage_ratio(
-    subject_bbox: Sequence[object],
-    rectangles: Sequence[Sequence[object]],
-) -> float:
-    x0, y0, x1, y1 = _rect_tuple(subject_bbox)
-    area = (x1 - x0) * (y1 - y0)
-    # Rectangle interiors were proven disjoint, so the sum of intersections is
-    # the exact union coverage of the subject.
-    covered = sum(
-        _intersection_area(subject_bbox, rectangle)
-        for rectangle in rectangles
-    )
-    return min(1.0, max(0.0, covered / area))
 
 
 def _result(
@@ -291,15 +243,7 @@ def resolve_later_paint_occlusion_shadow(
             evaluated_fill_sequence_numbers=(),
         )
 
-    by_seqno: dict[int, list[Mapping[str, object]]] = {}
-    for drawing in drawings:
-        if not isinstance(drawing, Mapping):
-            continue
-        try:
-            drawing_seqno = int(drawing.get("seqno"))  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            continue
-        by_seqno.setdefault(drawing_seqno, []).append(drawing)
+    by_seqno = index_drawings_by_seqno(drawings)
 
     current_candidates = 0
     exact_paths = 0
@@ -338,14 +282,23 @@ def resolve_later_paint_occlusion_shadow(
             )
             continue
 
-        rectangles, geometry_reasons = _rectangles_from_exact_fill(owned[0])
-        if rectangles is None:
-            unresolved_reasons.extend(geometry_reasons)
+        geometry = exact_disjoint_rectangle_fill_coverage(
+            owned[0],
+            bbox,
+        )
+        if geometry.status == EXACT_FILL_GEOMETRY_OVERLAPPING:
+            unresolved_reasons.append(SHADOW_OVERLAPPING_RECTANGLES)
+            continue
+        if (
+            geometry.status != EXACT_FILL_GEOMETRY_RESOLVED
+            or geometry.coverage_ratio is None
+        ):
+            unresolved_reasons.append(SHADOW_UNSUPPORTED_FILL_GEOMETRY)
             continue
 
         exact_paths += 1
         evaluated_seqnos.append(paint_seqno)
-        coverage = _coverage_ratio(bbox, rectangles)
+        coverage = geometry.coverage_ratio
         max_coverage = (
             coverage
             if max_coverage is None
