@@ -1,0 +1,322 @@
+name: TEST-ONLY KSTVET Text Clip State After 1102
+
+on:
+  pull_request:
+    branches:
+      - 'fix/pdf-text-clip-hierarchy-levels-v1'
+
+jobs:
+  probe:
+    if: github.head_ref == 'test-only/kstvet-text-clip-state-after-1102'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and SHA-256 verify KSTVET source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  kstvet.pdf' | sha256sum -c -
+
+      - name: Probe page 47 clip ownership state
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          import re
+          from collections import Counter, defaultdict
+          from pathlib import Path
+
+          import fitz
+
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_pdf_text_fill_stroke_equivalence_shadow import (
+              classify_fill_stroke_text_pair_shadow,
+          )
+          from pb_pdf_text_integrity_authority import (
+              TEXT_TRACE_AMBIGUOUS,
+              _clip_model,
+              _page_content_has_clip_operator,
+              _rect_contains,
+              _text_clip_reasons,
+          )
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_vector_geometry_v130 import extract_native_page
+
+          payload = Path("kstvet.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+
+          producer = SourceVisibilityProducer(
+              producer_method="kstvet-text-clip-state-after-1102",
+              producer_version="1.0",
+          )
+          published = producer.ingest_native_pdf_bytes(
+              document_id=f"kstvet-text-clip-state-after-1102:{digest[:16]}",
+              source_bytes=payload,
+              source_locator="sha256-verified-kstvet-source",
+              page_ids=("47",),
+          )
+          authority = producer.text_integrity_authority()
+
+          doc = fitz.open(stream=payload, filetype="pdf")
+          page = doc.load_page(46)
+          model = _clip_model(page)
+          has_clip_operator = _page_content_has_clip_operator(page)
+          native = extract_native_page(page)
+
+          # Producer-owned ambiguous native words, grouped by exact fill/stroke
+          # sequence pair when the shadow can structurally identify the pair.
+          pair_words = defaultdict(list)
+          pair_reason_counts = Counter()
+          for observation_id in published.text_observation_ids:
+              selector = ObservationSelector(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  observation_id=observation_id,
+              )
+              live = authority.resolve_text(selector)
+              receipt = live.receipt
+              if (
+                  receipt is None
+                  or TEXT_TRACE_AMBIGUOUS not in live.reason_codes
+              ):
+                  continue
+              result = classify_fill_stroke_text_pair_shadow(
+                  page,
+                  {
+                      "text": receipt.raw_text,
+                      "bbox": tuple(receipt.geometry),
+                  },
+              )
+              pair_reason_counts.update(result.reason_codes)
+              if len(result.sequence_numbers) == 2:
+                  pair_words[result.sequence_numbers].append(
+                      {
+                          "text": receipt.raw_text,
+                          "bbox": list(receipt.geometry),
+                          "shadow_reason_codes": list(result.reason_codes),
+                          "render_modes": list(result.render_modes),
+                          "bboxlog_kinds": list(result.bboxlog_kinds),
+                      }
+                  )
+
+          def drawing_summary(entry, position):
+              rect = entry.get("rect")
+              scissor = entry.get("scissor")
+              return {
+                  "position": position,
+                  "type": str(entry.get("type")),
+                  "seqno": entry.get("seqno"),
+                  "level": entry.get("level"),
+                  "rect": (
+                      None if rect is None else
+                      [float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)]
+                  ),
+                  "scissor": (
+                      None if scissor is None else
+                      [float(scissor.x0), float(scissor.y0), float(scissor.x1), float(scissor.y1)]
+                  ),
+                  "item_kinds": [
+                      str(item[0])
+                      for item in (entry.get("items") or ())
+                      if item
+                  ],
+              }
+
+          drawings = list(page.get_drawings(extended=True) or ())
+          path_rows = [] if model is None else list(model.paths)
+          clip_rows = [] if model is None else list(model.clips)
+          push_rows = [] if model is None else list(model.pushes)
+
+          pair_details = {}
+          for pair in sorted(pair_words):
+              first_seq, second_seq = pair
+              # The two text paints share the same source clip context. Probe
+              # both seqnos separately because the existing authority does.
+              seq_details = {}
+              for seqno in pair:
+                  before = None
+                  after = None
+                  for path in path_rows:
+                      if path[0] < seqno:
+                          before = path
+                      elif path[0] > seqno:
+                          after = path
+                          break
+
+                  lo_position = before[3] if before is not None else -1
+                  hi_position = after[3] if after is not None else None
+                  stack_before = set(before[2]) if before is not None else set()
+                  stack_after = set(after[2]) if after is not None else None
+                  between = {
+                      clip_id
+                      for position, clip_id in push_rows
+                      if position > lo_position
+                      and (hi_position is None or position < hi_position)
+                  }
+
+                  if (
+                      before is not None
+                      and after is not None
+                      and not between
+                      and before[1] == after[1]
+                      and before[2] == after[2]
+                  ):
+                      may_apply = set(before[2])
+                      must_apply = set(before[2])
+                      branch = "stable_neighbor_stack"
+                  else:
+                      may_apply = (
+                          stack_before
+                          | between
+                          | (stack_after or set())
+                      )
+                      must_apply = (
+                          stack_before & stack_after
+                          if stack_after is not None
+                          else set()
+                      )
+                      branch = "conservative_union"
+
+                  # Every word in one pair is inside the same full trace span,
+                  # but native words have individual bboxes. Report clip
+                  # containment for every word bbox rather than choosing one.
+                  word_clip_checks = []
+                  for word in pair_words[pair]:
+                      bbox = tuple(word["bbox"])
+                      checks = []
+                      for clip_id in sorted(may_apply):
+                          clip = clip_rows[clip_id]
+                          checks.append({
+                              "clip_id": clip_id,
+                              "scissor": list(clip.scissor),
+                              "exact_rectangle": bool(clip.exact_rectangle),
+                              "contained": bool(_rect_contains(clip.scissor, bbox)),
+                              "must_apply": clip_id in must_apply,
+                          })
+                      word_clip_checks.append({
+                          "text": word["text"],
+                          "bbox": word["bbox"],
+                          "clip_reasons": list(_text_clip_reasons(page, bbox, seqno)),
+                          "clips": checks,
+                      })
+
+                  relevant_positions = set()
+                  if before is not None:
+                      relevant_positions.add(before[3])
+                  if after is not None:
+                      relevant_positions.add(after[3])
+                  for position, _clip_id in push_rows:
+                      if position > lo_position and (
+                          hi_position is None or position < hi_position
+                      ):
+                          relevant_positions.add(position)
+
+                  seq_details[str(seqno)] = {
+                      "branch": branch,
+                      "before": None if before is None else {
+                          "seqno": before[0],
+                          "level": before[1],
+                          "clip_stack": list(before[2]),
+                          "drawing_position": before[3],
+                      },
+                      "after": None if after is None else {
+                          "seqno": after[0],
+                          "level": after[1],
+                          "clip_stack": list(after[2]),
+                          "drawing_position": after[3],
+                      },
+                      "between_clip_ids": sorted(between),
+                      "may_apply_clip_ids": sorted(may_apply),
+                      "must_apply_clip_ids": sorted(must_apply),
+                      "relevant_extended_drawings": [
+                          drawing_summary(drawings[position], position)
+                          for position in sorted(relevant_positions)
+                          if 0 <= position < len(drawings)
+                      ],
+                      "word_clip_checks": word_clip_checks,
+                  }
+
+              pair_details[f"{first_seq}:{second_seq}"] = {
+                  "words": pair_words[pair],
+                  "seq_details": seq_details,
+              }
+
+          content = bytes(page.read_contents() or b"")
+          clip_operator_contexts = []
+          for match in re.finditer(rb"(?<!\S)W\*?(?!\S)", content):
+              left = max(0, match.start() - 120)
+              right = min(len(content), match.end() + 120)
+              clip_operator_contexts.append(
+                  content[left:right].decode("latin1", errors="replace")
+              )
+
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "source_sha256": digest,
+              "page_id": "47",
+              "page_rotation": int(page.rotation),
+              "page_rect": [
+                  float(page.rect.x0), float(page.rect.y0),
+                  float(page.rect.x1), float(page.rect.y1),
+              ],
+              "has_clip_operator": has_clip_operator,
+              "raw_clip_operator_count": len(clip_operator_contexts),
+              "clip_operator_contexts": clip_operator_contexts,
+              "extended_drawing_count": len(drawings),
+              "clip_model": (
+                  None if model is None else {
+                      "consistent": bool(model.consistent),
+                      "clip_count": len(model.clips),
+                      "path_count": len(model.paths),
+                      "push_count": len(model.pushes),
+                      "clips": [
+                          {
+                              "clip_id": index,
+                              "scissor": list(clip.scissor),
+                              "exact_rectangle": bool(clip.exact_rectangle),
+                          }
+                          for index, clip in enumerate(model.clips)
+                      ],
+                      "pushes": [
+                          {"drawing_position": p, "clip_id": cid}
+                          for p, cid in model.pushes
+                      ],
+                  }
+              ),
+              "ambiguous_pair_group_count": len(pair_words),
+              "pair_reason_counts": dict(sorted(pair_reason_counts.items())),
+              "pair_details": pair_details,
+          }
+          Path("kstvet-text-clip-state-after-1102.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          doc.close()
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kstvet-text-clip-state-after-1102
+          path: kstvet-text-clip-state-after-1102.json
+          if-no-files-found: warn
