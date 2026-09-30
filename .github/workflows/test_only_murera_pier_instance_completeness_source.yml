@@ -120,3 +120,21 @@ jobs:
           print("MURERA_PIER_SOURCE_PROBE_END")
           doc.close()
           PY
+
+      - name: Render candidate source pages
+        shell: bash
+        run: |
+          mkdir -p /tmp/murera-pier-pages
+          python - <<'PY'
+          import fitz
+          doc=fitz.open("/tmp/murera.pdf")
+          for pno in (219,220,221):
+              page=doc[pno-1]
+              pix=page.get_pixmap(matrix=fitz.Matrix(2.0,2.0), alpha=False)
+              pix.save(f"/tmp/murera-pier-pages/page-{pno}.png")
+          doc.close()
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: murera-pier-candidate-pages
+          path: /tmp/murera-pier-pages
