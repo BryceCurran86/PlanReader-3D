@@ -1,0 +1,128 @@
+name: TEST-ONLY Murera Pier Bounded View Census
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download exact official Murera source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf' \
+            -o murera.pdf
+          echo '84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  murera.pdf' | sha256sum -c -
+      - name: Inspect source-owned bounded-view evidence on pages 223 and 225
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib, json, re
+          from pathlib import Path
+          import fitz
+          from pb_page_title_authority import analyse_page, resolve_document
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_structural_member_physical_candidate_shadow import compile_structural_physical_candidate_shadow
+
+          payload=Path("murera.pdf").read_bytes()
+          digest=hashlib.sha256(payload).hexdigest()
+          assert digest=="84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          doc=fitz.open(stream=payload,filetype="pdf")
+          page_numbers=[223,225]
+          analyses=[analyse_page(doc[n-1],n) for n in page_numbers]
+          resolved={r.page_no:r for r in resolve_document(analyses)}
+
+          src=SourceVisibilityProducer(producer_method="murera-pier-bounded-view-census",producer_version="1.0")
+          pub=src.ingest_native_pdf_bytes(
+              document_id="murera-pier-bounded-view-census",
+              source_bytes=payload,
+              source_locator="sha256-verified-murera-source",
+              page_ids=tuple(page_numbers),
+          )
+          shadow=compile_structural_physical_candidate_shadow(
+              source_visibility_producer=src,
+              revision_id=pub.revision.revision_id,
+              source_bytes=payload,
+              page_ids=tuple(str(n) for n in page_numbers),
+          )
+
+          pages=[]
+          for n in page_numbers:
+              p=doc[n-1]
+              words=[w for w in (p.get_text("words") or ()) if len(w)>=5]
+              text=p.get_text("text")
+              blocks=[]
+              for i,b in enumerate(p.get_text("blocks") or ()):
+                  t=" ".join(str(b[4]).split()).strip()
+                  if t:
+                      blocks.append({"index":i,"bbox":[round(float(v),2) for v in b[:4]],"text":t[:500]})
+              drawings=[]
+              for i,d in enumerate(p.get_drawings() or ()):
+                  rect=d.get("rect")
+                  if rect is None: continue
+                  drawings.append({
+                    "index":i,
+                    "bbox":[round(float(rect.x0),2),round(float(rect.y0),2),round(float(rect.x1),2),round(float(rect.y1),2)],
+                    "width":round(float(rect.width),3),
+                    "height":round(float(rect.height),3),
+                    "fill":d.get("fill") is not None,
+                    "stroke":d.get("color") is not None,
+                    "stroke_width":d.get("width"),
+                    "item_kinds":[str(x[0]) for x in (d.get("items") or ()) if x],
+                  })
+              pages.append({
+                "page":n,
+                "title":getattr(resolved.get(n),"title",""),
+                "sheet_number":getattr(resolved.get(n),"sheet_number",""),
+                "text":text[:12000],
+                "blocks":blocks,
+                "word_count":len(words),
+                "drawing_count":len(drawings),
+                "drawings":drawings[:500],
+              })
+
+          candidates=[{
+              "candidate_id":c.candidate_id,
+              "class":c.candidate_class,
+              "page":c.page_id,
+              "bbox":list(c.bbox),
+              "width":c.width,
+              "height":c.height,
+              "geometry_kind":c.geometry_kind,
+              "path_index":c.path_index,
+              "item_indices":list(c.item_indices),
+              "fill_present":c.fill_present,
+              "stroke_present":c.stroke_present,
+              "stroke_width":c.stroke_width,
+              "source_observation_ids":list(c.source_observation_ids),
+              "source_primitive_refs":list(c.source_primitive_refs),
+          } for c in shadow.candidates]
+
+          report={
+            "diagnostic_only":True,
+            "do_not_merge":True,
+            "source_sha256":digest,
+            "pages":pages,
+            "candidate_shadow_status":shadow.status.value,
+            "candidate_reason_codes":list(shadow.reason_codes),
+            "candidate_count":len(candidates),
+            "candidates":candidates,
+          }
+          Path("murera-pier-bounded-view-census.json").write_text(json.dumps(report,indent=2,sort_keys=True),encoding="utf-8")
+          print(json.dumps(report,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: murera-pier-bounded-view-census
+          path: murera-pier-bounded-view-census.json
