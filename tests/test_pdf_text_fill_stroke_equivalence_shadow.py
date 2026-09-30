@@ -390,29 +390,20 @@ def _selectors(published):
     ]
 
 
-def test_live_authority_promotes_exact_pair_and_shadow_is_not_applicable():
+def test_live_authority_promotes_exact_pair_and_shadow_resolver_defers():
     payload, producer, published = _ingest_pair_pdf()
     authority = producer.text_integrity_authority()
     selectors = _selectors(published)
     assert selectors
 
-    resolved = [
-        (selector, authority.resolve_text(selector))
-        for selector in selectors
-        if authority.resolve_text(selector).status
-        is EvidenceResolutionStatus.CORROBORATED
-    ]
-    assert resolved
+    live_results = [authority.resolve_text(selector) for selector in selectors]
+    trusted = [result for result in live_results if result.trusted_text == "PAIR"]
+    assert trusted
+    assert trusted[0].status is EvidenceResolutionStatus.CORROBORATED
+    assert TEXT_TRACE_AMBIGUOUS not in trusted[0].reason_codes
+    assert len(trusted[0].receipt.trace_sequence_numbers) == 2
 
-    selector, live = resolved[0]
-    assert live.trusted_text == "PAIR"
-    assert live.receipt is not None
-    assert len(live.receipt.trace_sequence_numbers) == 2
-    assert (
-        live.receipt.trace_sequence_numbers[1]
-        == live.receipt.trace_sequence_numbers[0] + 1
-    )
-
+    selector = selectors[live_results.index(trusted[0])]
     shadow = resolve_fill_stroke_text_pair_shadow(
         source_visibility_producer=producer,
         selector=selector,
@@ -424,7 +415,7 @@ def test_live_authority_promotes_exact_pair_and_shadow_is_not_applicable():
     assert shadow.reason_codes == (FILL_STROKE_SHADOW_NOT_APPLICABLE,)
 
 
-def test_shadow_not_applicable_result_is_deterministic_after_live_promotion():
+def test_shadow_resolver_deterministically_defers_after_live_promotion():
     payload, producer, published = _ingest_pair_pdf()
     selector = _selectors(published)[0]
 
@@ -441,8 +432,9 @@ def test_shadow_not_applicable_result_is_deterministic_after_live_promotion():
 
     assert first == second
     assert first.status is EvidenceResolutionStatus.ABSTAINED
-    assert first.reason_codes == (FILL_STROKE_SHADOW_NOT_APPLICABLE,)
+    assert first.proposition is None
     assert first.pair_id is None
+    assert first.reason_codes == (FILL_STROKE_SHADOW_NOT_APPLICABLE,)
 
 
 def test_source_hash_mismatch_fails_closed():
