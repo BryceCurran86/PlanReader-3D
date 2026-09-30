@@ -187,6 +187,51 @@ def _span_render_mode(span: Mapping[str, object]) -> Optional[int]:
         return None
 
 
+def _owned_word_run(
+    span: Mapping[str, object],
+    raw_text: str,
+    word_bbox: Sequence[object],
+) -> Optional[tuple[int, int]]:
+    """Return the unique character run owned by the native word.
+
+    Native word extraction may split one text-showing span into several words.
+    Ownership is therefore tied to the span's own character boxes, not to
+    whole-span text equality with the native word. Exactly one contiguous
+    occurrence must be geometrically contained by the native word box.
+    """
+
+    chars = span.get("chars") or ()
+    trace_text = _trace_text(span)
+    if not raw_text or not chars or raw_text not in trace_text:
+        return None
+    if len(chars) != len(trace_text):
+        return None
+
+    hits: list[tuple[int, int]] = []
+    start = trace_text.find(raw_text)
+    while start >= 0:
+        end = start + len(raw_text)
+        window = chars[start:end]
+        if len(window) == len(raw_text):
+            contained = True
+            for char in window:
+                try:
+                    char_bbox = char[3]  # type: ignore[index]
+                except (IndexError, TypeError):
+                    contained = False
+                    break
+                if _intersection_ratio(char_bbox, word_bbox) < 0.99:
+                    contained = False
+                    break
+            if contained:
+                hits.append((start, end))
+        start = trace_text.find(raw_text, start + 1)
+
+    if len(hits) != 1:
+        return None
+    return hits[0]
+
+
 def _candidate_spans(
     page: object,
     raw_text: str,
@@ -199,12 +244,14 @@ def _candidate_spans(
     for span in spans:
         if not isinstance(span, Mapping):
             continue
-        if _trace_text(span) != raw_text:
+        if raw_text not in _trace_text(span):
             continue
         # Native word boxes and texttrace boxes use different vertical font
-        # metrics. Require substantial ownership overlap, then compare the two
-        # trace boxes directly for exact pair equivalence below.
+        # metrics. Require substantial ownership overlap, then prove the exact
+        # native-word character run below.
         if _intersection_ratio(bbox, span.get("bbox") or ()) < 0.5:
+            continue
+        if _owned_word_run(span, raw_text, bbox) is None:
             continue
         out.append(span)
     return tuple(out)
@@ -270,6 +317,31 @@ def classify_fill_stroke_text_pair_shadow(
     if not _bbox_equal(
         spans[0].get("bbox") or (),
         spans[1].get("bbox") or (),
+    ):
+        return FillStrokeTextPairClassification(
+            equivalent=False,
+            reason_codes=(FILL_STROKE_SHADOW_PAIR_CONFLICT,),
+            raw_text=raw_text,
+            bbox=bbox,
+            sequence_numbers=sequence_numbers,
+        )
+
+    trace_texts = (_trace_text(spans[0]), _trace_text(spans[1]))
+    if not trace_texts[0] or trace_texts[0] != trace_texts[1]:
+        return FillStrokeTextPairClassification(
+            equivalent=False,
+            reason_codes=(FILL_STROKE_SHADOW_PAIR_CONFLICT,),
+            raw_text=raw_text,
+            bbox=bbox,
+            sequence_numbers=sequence_numbers,
+        )
+    owned_runs = (
+        _owned_word_run(spans[0], raw_text, bbox),
+        _owned_word_run(spans[1], raw_text, bbox),
+    )
+    if (
+        owned_runs[0] is None
+        or owned_runs[0] != owned_runs[1]
     ):
         return FillStrokeTextPairClassification(
             equivalent=False,
