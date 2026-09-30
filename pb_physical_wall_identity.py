@@ -645,13 +645,12 @@ def _physical_wall_pair_identity_candidacy_with_features(
     ):
         return True, None
 
-    if _segments_meet_as_same_wall_candidates(
-        left_features.segments,
-        right_features.segments,
-        _EQUIVALENCE_LATERAL_TOL_PT,
-    ):
-        return True, None
-
+    # The historical implementation made two complete nested segment-pair
+    # passes: first to find orientation-compatible contact, then again to
+    # derive parallel overlap/separation. Both passes call the same expensive
+    # _parallel_overlap_separation predicate. Compute that relation once per
+    # segment pair and apply the unchanged contact and overlap gates in one
+    # pass. This changes no candidate decision or exclusion reason.
     band = max_plausible_wall_body_separation_pt(points_per_mm)
     saw_parallel = False
     saw_overlap = False
@@ -663,6 +662,8 @@ def _physical_wall_pair_identity_candidacy_with_features(
             if relation is None:
                 continue
             saw_parallel = True
+            if _segments_meet_within(a, b, _EQUIVALENCE_LATERAL_TOL_PT):
+                return True, None
             overlap, separation = relation
             if overlap <= _EQUIVALENCE_LATERAL_TOL_PT:
                 continue

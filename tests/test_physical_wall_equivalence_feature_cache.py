@@ -253,6 +253,35 @@ def test_cached_pair_functions_match_adversarial_explicit_cases():
             )
 
 
+
+def test_candidacy_computes_each_segment_pair_relation_once(monkeypatch):
+    left = _identity(
+        "left",
+        path=((0.0, 0.0), (10.0, 0.0), (20.0, 0.0)),
+        primitives=("left-source",),
+    )
+    right = _identity(
+        "right",
+        path=((100.0, 5.0), (110.0, 5.0), (120.0, 5.0)),
+        primitives=("right-source",),
+    )
+
+    original = module._parallel_overlap_separation
+    calls = 0
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, "_parallel_overlap_separation", counted)
+    result = physical_wall_pair_identity_candidacy(
+        left, right, points_per_mm=0.1
+    )
+
+    assert result == (False, PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP)
+    assert calls == 4
+
 def test_resolver_extracts_pair_features_once_per_usable_wall(monkeypatch):
     identities = [
         _identity(
