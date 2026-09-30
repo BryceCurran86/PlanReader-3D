@@ -35,6 +35,7 @@ def _build_pdf(
         lines.extend([
             "DAMP PROOF MEMBRANE TO SURFACE BED",
             "T12@200 EW MESH A142 TOP",
+            "100mm R.C. surface bed on compacted hardcore",
         ])
     if include_slab:
         lines.append("150mm THICK RC SLAB")
