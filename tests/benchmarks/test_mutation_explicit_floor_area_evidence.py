@@ -1,4 +1,7 @@
 from pb_explicit_floor_area_evidence import (
+    DECLARED_FLOOR_AREA_AUTHORITY,
+    DECLARED_FLOOR_AREA_BINDING,
+    ExplicitFloorAreaEvidence,
     extract_explicit_floor_area_evidence,
     resolve_explicit_floor_area_evidence,
 )
@@ -13,7 +16,8 @@ def test_extracts_labelled_floor_area_on_floor_plan():
     assert ev is not None
     assert ev.area_m2 == 162.69
     assert ev.source_pages == (7,)
-    assert ev.authority == "explicit_drawing_floor_area"
+    assert ev.authority == DECLARED_FLOOR_AREA_AUTHORITY
+    assert ev.binding == DECLARED_FLOOR_AREA_BINDING
 
 
 def test_accepts_common_square_metre_unit_spellings():
@@ -101,3 +105,49 @@ def test_cross_page_disagreement_fails_closed():
 
 def test_empty_evidence_fails_closed():
     assert resolve_explicit_floor_area_evidence([]) is None
+
+
+def test_declared_claim_has_no_physical_authority_by_default():
+    ev = extract_explicit_floor_area_evidence(
+        "GROUND FLOOR PLAN TOTAL FLOOR AREA: 222.5m2", source_page=3
+    )
+    assert ev is not None
+    assert ev.binding == "unbound"
+    assert ev.authority == "declared_floor_area_reconciliation_only"
+    assert "explicit_drawing_floor_area" not in ev.authority
+
+
+def test_revision_mismatched_declared_claims_do_not_resolve_together():
+    first = ExplicitFloorAreaEvidence(
+        area_m2=100.0,
+        source_pages=(1,),
+        raw_evidence=("FLOOR AREA 100.0m2",),
+        source_sha256="a" * 64,
+        revision_id="R1",
+    )
+    stale = ExplicitFloorAreaEvidence(
+        area_m2=100.0,
+        source_pages=(2,),
+        raw_evidence=("FLOOR AREA 100.0m2",),
+        source_sha256="a" * 64,
+        revision_id="R0",
+    )
+    assert resolve_explicit_floor_area_evidence((first, stale)) is None
+
+
+def test_source_hash_mismatched_declared_claims_do_not_resolve_together():
+    first = ExplicitFloorAreaEvidence(
+        area_m2=100.0,
+        source_pages=(1,),
+        raw_evidence=("FLOOR AREA 100.0m2",),
+        source_sha256="a" * 64,
+        revision_id="R1",
+    )
+    other = ExplicitFloorAreaEvidence(
+        area_m2=100.0,
+        source_pages=(2,),
+        raw_evidence=("FLOOR AREA 100.0m2",),
+        source_sha256="b" * 64,
+        revision_id="R1",
+    )
+    assert resolve_explicit_floor_area_evidence((first, other)) is None
