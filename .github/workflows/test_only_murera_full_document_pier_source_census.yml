@@ -67,10 +67,9 @@ jobs:
               analysis=analyse_page(p,page_no)
               pages.append({
                   "page":page_no,
-                  "title":analysis.title,
-                  "title_confidence":analysis.confidence,
-                  "sheet_number":analysis.sheet_number,
-                  "sheet_number_source":analysis.sheet_number_source,
+                  "analysis_repr":repr(analysis),
+                  "sheet_number":getattr(analysis,"sheet_number",""),
+                  "sheet_number_source":getattr(analysis,"sheet_number_source",""),
                   "is_drawing_like":bool(p.get_drawings()),
                   "drawing_count":len(p.get_drawings() or ()),
                   "role_hits":role_hits,
