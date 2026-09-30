@@ -79,6 +79,34 @@ jobs:
           fonts = list(page.get_fonts(full=True) or ())
           extended = list(page.get_drawings(extended=True) or ())
 
+          def drawing_state_at_seqno(seqno):
+              rows = []
+              for entry in extended:
+                  try:
+                      if int(entry.get("seqno")) != int(seqno):
+                          continue
+                  except Exception:
+                      continue
+                  rows.append({
+                      "type": entry.get("type"),
+                      "seqno": entry.get("seqno"),
+                      "level": entry.get("level"),
+                      "fill": entry.get("fill"),
+                      "fill_opacity": entry.get("fill_opacity"),
+                      "color": entry.get("color"),
+                      "stroke_opacity": entry.get("stroke_opacity"),
+                      "width": entry.get("width"),
+                      "dashes": entry.get("dashes"),
+                      "layer": entry.get("layer"),
+                      "closePath": entry.get("closePath"),
+                      "rect": rect(entry.get("rect") or ()),
+                      "scissor": rect(entry.get("scissor") or ()),
+                      "item_kinds": [
+                          str(item[0]) for item in (entry.get("items") or ()) if item
+                      ][:40],
+                  })
+              return rows
+
           term_re = re.compile(
               r"^(?:masonry|pier[s,]*|pillar[s,]*|column[s,]*|post[s,]*|"
               r"stanchion[s,]*|circular|hollow|sections?|50mm|300|x)$",
@@ -153,6 +181,20 @@ jobs:
                       "type": span.get("type"),
                       "opacity": span.get("opacity"),
                       "overlap_subject_ratio": round(float(overlap), 6),
+                      "bboxlog_at_seqno": (
+                          {
+                              "kind": str(bboxlog[int(span.get("seqno"))][0]),
+                              "bbox": rect(bboxlog[int(span.get("seqno"))][1]),
+                          }
+                          if span.get("seqno") is not None
+                          and 0 <= int(span.get("seqno")) < len(bboxlog)
+                          else None
+                      ),
+                      "drawing_state_at_seqno": (
+                          drawing_state_at_seqno(int(span.get("seqno")))
+                          if span.get("seqno") is not None
+                          else []
+                      ),
                   })
 
               owned = []
@@ -203,6 +245,7 @@ jobs:
                               "bbox": rect(paint_bbox),
                               "overlap_subject_ratio": round(float(ratio), 6),
                               "trace_at_same_seqno": same_seq_traces,
+                              "drawing_state_at_seqno": drawing_state_at_seqno(paint_index),
                           })
 
                   owned.append({
