@@ -35,6 +35,7 @@ import statistics
 from typing import Any, Iterable, Optional, Sequence
 
 from pb_drawing_evidence_binding import DrawingViewClassifier, DrawingViewRegion, DrawingViewType
+import pb_page_title_authority as _title_authority
 
 
 class ViewportSegmentationStatus(str, Enum):
@@ -507,14 +508,61 @@ def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
     )
 
 
+def _title_block_owned_regions(page: Any) -> list[tuple[float, float, float, float]]:
+    """Regions the page-title authority positively demonstrates as title-block owned.
+
+    Reuses ``pb_page_title_authority`` (native text only, no OCR): the
+    demonstrated title-block region (a cluster of drawing title-block field
+    labels) plus the bound value boxes of title-block fields.  Nothing is
+    returned unless a title block is demonstrated, so a weak or absent
+    title block can never suppress a title.  Regions are in the page's visual
+    orientation, page points.
+    """
+    try:
+        rect = page.rect
+        width = float(rect.width); height = float(rect.height)
+        analysis = _title_authority.analyse_cells(
+            _title_authority.page_cells(page), width, height, 0, "native"
+        )
+    except Exception:
+        return []
+    block = analysis.title_block
+    if block is None or width <= 0 or height <= 0:
+        return []
+    regions = [tuple(float(v) for v in block)]
+    for candidate in analysis.candidates:
+        if candidate.region != "title block" or not candidate.text:
+            continue
+        box = candidate.box
+        regions.append((box[0] * width, box[1] * height, box[2] * width, box[3] * height))
+    return regions
+
+
+def _to_visual_bbox(page: Any, bbox: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    """Express a text-dict bbox in the page's visual orientation."""
+    if not int(getattr(page, "rotation", 0) or 0):
+        return bbox
+    try:
+        import fitz  # a rotated page object implies PyMuPDF is present
+        rotated = fitz.Rect(bbox) * page.rotation_matrix
+        return (float(rotated.x0), float(rotated.y0), float(rotated.x1), float(rotated.y1))
+    except Exception:
+        return bbox
+
+
 def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
     candidates: list[_TitleAnchor] = []
+    owned: Optional[list[tuple[float, float, float, float]]] = None
     for bbox, text in _text_fragments(page):
         if not _TITLE_SHAPE_RE.match(text):
             continue
         view_type = DrawingViewClassifier.classify_text(_strip_scale_suffix(text)).value
         if view_type == DrawingViewType.UNKNOWN.value:
             continue
+        if owned is None:
+            owned = _title_block_owned_regions(page)
+        if owned and any(_point_in_bbox(_bbox_center(_to_visual_bbox(page, bbox)), region) for region in owned):
+            continue  # a title-block field value, not a drawing-view title
         candidates.append(_TitleAnchor(text=text, bbox=bbox, view_type=view_type))
 
     # Prefer the tighter span when a line-level fragment duplicates it.
@@ -983,6 +1031,20 @@ def _derived_partitions(
             status=ViewportSegmentationStatus.AMBIGUOUS.value,
             boundary_source=ViewportBoundarySource.NONE.value, confidence=0.0,
             notes=["unframed title anchors are not spatially separable"],
+        ) for index in unresolved_indices]
+
+    identities = [_title_identity(anchors[i]) for i in ordered]
+    if len(set(identities)) < len(identities):
+        # The same title text and view type more than once, unframed and not a
+        # validated title grid: nothing positively separates them into
+        # independent drawing views, so no partition is manufactured.
+        return [SegmentedViewport(
+            view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
+            view_type=anchors[index].view_type, label=anchors[index].text,
+            title_bbox=anchors[index].bbox, bounding_box=None,
+            status=ViewportSegmentationStatus.AMBIGUOUS.value,
+            boundary_source=ViewportBoundarySource.NONE.value, confidence=0.0,
+            notes=["unframed same-identity titles are not proven independent views"],
         ) for index in unresolved_indices]
 
     bounds = [0.0]
