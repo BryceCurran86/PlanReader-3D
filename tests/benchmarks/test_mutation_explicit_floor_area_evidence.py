@@ -103,3 +103,37 @@ def test_cross_page_disagreement_fails_closed():
 
 def test_empty_evidence_fails_closed():
     assert resolve_explicit_floor_area_evidence([]) is None
+
+def test_resolution_is_input_order_deterministic_and_does_not_mutate_inputs():
+    first = extract_explicit_floor_area_evidence(
+        "GROUND FLOOR PLAN FLOOR AREA 80.00M2", source_page=1
+    )
+    second = extract_explicit_floor_area_evidence(
+        "GROUND FLOOR PLAN FLOOR AREA 80.00M2", source_page=2
+    )
+    assert first is not None and second is not None
+    items = [first, second]
+    snapshot = list(items)
+
+    forward = resolve_explicit_floor_area_evidence(items)
+    reverse = resolve_explicit_floor_area_evidence(reversed(items))
+
+    assert items == snapshot
+    assert forward == reverse
+    assert forward is not None
+    assert forward.source_pages == (1, 2)
+
+
+def test_numerically_equal_claims_remain_unbound_declarations():
+    first = extract_explicit_floor_area_evidence(
+        "GROUND FLOOR PLAN FLOOR AREA 80.00M2", source_page=1
+    )
+    second = extract_explicit_floor_area_evidence(
+        "GROUND FLOOR PLAN FLOOR AREA 80.00M2", source_page=2
+    )
+    resolved = resolve_explicit_floor_area_evidence([first, second])
+    assert resolved is not None
+    assert resolved.area_m2 == 80.0
+    assert resolved.binding == "unbound"
+    assert resolved.evidence_role == "declared_source_area_claim"
+
