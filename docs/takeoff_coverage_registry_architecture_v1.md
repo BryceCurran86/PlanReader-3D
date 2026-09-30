@@ -156,13 +156,14 @@ The registry summary must report counts and ids for these four quantity-census s
 CoverageObjectRecordV1 classification is ordered and must apply the following precedence exactly:
 
 1. **UNACCOUNTED** - no explicit object-to-quantity relationship exists in the approved v1 seams.
-2. **ABSTAINED** - one or more explicit downstream abstention/refusal records exist and no resolved non-abstained row accounts for the object.
-3. **PARTIAL** - at least one explicit dependency resolves successfully and at least one other explicit dependency is dangling, conflicting, stale, lineage-incompatible, unresolved, or abstained.
+2. **ABSTAINED** - one or more explicit downstream abstention/refusal records exist, every explicit dependency is an abstention/refusal, and no resolved non-abstained row accounts for the object.
+3. **PARTIAL** - one or more explicit dependencies exist, the object is not classified by rule 2, and at least one explicit dependency is dangling, conflicting, stale, lineage-incompatible, unresolved, or abstained. A resolved dependency is not required for PARTIAL.
 4. **ACCOUNTED** - one or more explicit dependencies exist and every explicit dependency known to v1 resolves lineage-cleanly.
 
 The ordering is normative. In particular, zero explicit dependencies can never satisfy ACCOUNTED through vacuous all-resolved logic; rule 1 classifies that object UNACCOUNTED first.
 An object with only explicit abstentions and no resolved non-abstained row is ABSTAINED, not PARTIAL.
-A mixed object with at least one resolved explicit dependency plus any abstained or otherwise defective explicit dependency is PARTIAL.
+An object with one or more explicit dependencies that are all dangling/unresolved is PARTIAL, because an explicit dependency is known but closure has not been achieved.
+A mixed object with at least one resolved explicit dependency plus any abstained or otherwise defective explicit dependency is also PARTIAL.
 
 ACCOUNTED means only explicit-dependency closure. It does NOT mean all quantity families that ought to exist for the object are present.
 Commercial publishability is reported separately and does not by itself demote coverage.
@@ -310,7 +311,7 @@ They must prove omitted expected QuantityEvidence and TakeoffOutputRow universes
 They must prove document, revision, source SHA, registry run id, and snapshot id conflicts between manifest and any supplied universe fail the run closed before joins.
 They must prove exactly one enumeration result per expected manifest key, reject duplicate supplied results for the same key, and fail closed on any supplied universe key absent from the manifest's complete expected sets.
 They must prove the reverse quantity census classifies linked, dangling, orphan/unbound and conflicting-lineage quantities without inventing links, including roof-covering and structural-member generic-link gaps.
-They must prove the frozen coverage precedence: zero explicit links -> UNACCOUNTED; abstentions only -> ABSTAINED; resolved plus defective/abstained -> PARTIAL; one-or-more all-clean explicit dependencies -> ACCOUNTED.
+They must prove the frozen coverage precedence: zero explicit links -> UNACCOUNTED; abstentions only -> ABSTAINED; any remaining one-or-more explicit dependencies with at least one defective/dangling/unresolved/abstained dependency -> PARTIAL (including dangling-only); one-or-more all-clean explicit dependencies -> ACCOUNTED.
 They must prove ACCOUNTED always retains coverage_basis=EXPLICIT_DEPENDENCIES_ONLY and expected_family_completeness=UNKNOWN through the renderer adapter.
 Adversarial tests must prove equal labels, equal values, nearest geometry and page coincidence cannot create links.
 W10 authority flags, commercial rows and JobHub preflight results must remain unchanged.
