@@ -1,0 +1,217 @@
+name: TEST-ONLY KSTVET TrueType CMap Proof
+
+on:
+  pull_request:
+    branches:
+      - 'fix/pdf-text-disjoint-sibling-clip-exclusion-v1'
+
+jobs:
+  probe:
+    if: github.head_ref == 'test-only/kstvet-truetype-cmap-proof-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 7d003ba697e81ab279ca0b381429503bc135efc9
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and verify KSTVET source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  kstvet.pdf' | sha256sum -c -
+
+      - name: Probe embedded TrueType cmap against exact source glyph ids
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          import re
+          import struct
+          from pathlib import Path
+          import fitz
+
+          payload = Path("kstvet.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+
+          doc = fitz.open(stream=payload, filetype="pdf")
+          page = doc.load_page(46)
+          font_xref = 59
+          font_obj = doc.xref_object(font_xref, compressed=False)
+          extracted = doc.extract_font(font_xref)
+          assert extracted and len(extracted) >= 4
+          font_name, ext, font_type, font_bytes = extracted[:4]
+          assert font_bytes
+          font_sha = hashlib.sha256(font_bytes).hexdigest()
+
+          def u16(b, o): return struct.unpack_from(">H", b, o)[0]
+          def s16(b, o): return struct.unpack_from(">h", b, o)[0]
+          def u32(b, o): return struct.unpack_from(">I", b, o)[0]
+
+          def table_directory(data):
+              num = u16(data, 4)
+              out = {}
+              pos = 12
+              for _ in range(num):
+                  tag = data[pos:pos+4].decode("latin1")
+                  checksum, off, length = struct.unpack_from(">III", data, pos+4)
+                  out[tag] = {"offset": off, "length": length, "checksum": checksum}
+                  pos += 16
+              return out
+
+          def parse_format4(data, base):
+              seg_count = u16(data, base + 6) // 2
+              end_off = base + 14
+              end_codes = [u16(data, end_off + 2*i) for i in range(seg_count)]
+              start_off = end_off + 2*seg_count + 2
+              start_codes = [u16(data, start_off + 2*i) for i in range(seg_count)]
+              delta_off = start_off + 2*seg_count
+              deltas = [s16(data, delta_off + 2*i) for i in range(seg_count)]
+              range_off = delta_off + 2*seg_count
+              offsets = [u16(data, range_off + 2*i) for i in range(seg_count)]
+              mapping = {}
+              for i, (start, end) in enumerate(zip(start_codes, end_codes)):
+                  if start == 0xFFFF and end == 0xFFFF:
+                      continue
+                  for cp in range(start, end + 1):
+                      ro = offsets[i]
+                      if ro == 0:
+                          gid = (cp + deltas[i]) & 0xFFFF
+                      else:
+                          glyph_addr = range_off + 2*i + ro + 2*(cp - start)
+                          if glyph_addr + 2 > len(data):
+                              continue
+                          gid = u16(data, glyph_addr)
+                          if gid:
+                              gid = (gid + deltas[i]) & 0xFFFF
+                      if gid:
+                          mapping[cp] = gid
+              return mapping
+
+          def parse_format12(data, base):
+              groups = u32(data, base + 12)
+              mapping = {}
+              pos = base + 16
+              for _ in range(groups):
+                  start, end, start_gid = struct.unpack_from(">III", data, pos)
+                  for cp in range(start, end + 1):
+                      mapping[cp] = start_gid + (cp - start)
+                  pos += 12
+              return mapping
+
+          tables = table_directory(font_bytes)
+          cmap_meta = []
+          cmap_maps = []
+          if "cmap" in tables:
+              cmap_base = tables["cmap"]["offset"]
+              version = u16(font_bytes, cmap_base)
+              count = u16(font_bytes, cmap_base + 2)
+              assert version == 0
+              for i in range(count):
+                  platform, encoding, suboff = struct.unpack_from(">HHI", font_bytes, cmap_base + 4 + 8*i)
+                  subbase = cmap_base + suboff
+                  fmt = u16(font_bytes, subbase)
+                  row = {"platform_id": platform, "encoding_id": encoding, "format": fmt}
+                  try:
+                      if fmt == 4:
+                          mp = parse_format4(font_bytes, subbase)
+                      elif fmt == 12:
+                          mp = parse_format12(font_bytes, subbase)
+                      else:
+                          mp = {}
+                  except Exception as exc:
+                      row["parse_error"] = type(exc).__name__
+                      mp = {}
+                  row["mapped_codepoint_count"] = len(mp)
+                  cmap_meta.append(row)
+                  if mp:
+                      cmap_maps.append((row, mp))
+
+          traces = list(page.get_texttrace() or ())
+          target = []
+          for span in traces:
+              if int(span.get("seqno", -1)) not in (108, 109):
+                  continue
+              chars = []
+              for ch in span.get("chars") or ():
+                  cp = int(ch[0]); gid = int(ch[1])
+                  hits = []
+                  for meta, mp in cmap_maps:
+                      if cp in mp:
+                          hits.append({
+                              "platform_id": meta["platform_id"],
+                              "encoding_id": meta["encoding_id"],
+                              "format": meta["format"],
+                              "mapped_gid": mp[cp],
+                              "glyph_id_matches": mp[cp] == gid,
+                          })
+                  chars.append({
+                      "unicode": cp,
+                      "char": chr(cp),
+                      "trace_glyph_id": gid,
+                      "cmap_hits": hits,
+                      "any_exact_cmap_gid_match": any(h["glyph_id_matches"] for h in hits),
+                  })
+              target.append({
+                  "seqno": int(span.get("seqno")),
+                  "font": str(span.get("font") or ""),
+                  "render_mode": int(span.get("type")),
+                  "text": "".join(chr(int(ch[0])) for ch in span.get("chars") or ()),
+                  "chars": chars,
+              })
+
+          all_target_chars = [c for row in target for c in row["chars"]]
+          result = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "tested_production_head": "7d003ba697e81ab279ca0b381429503bc135efc9",
+              "source_sha256": digest,
+              "page_id": "47",
+              "font_xref": font_xref,
+              "font_name": font_name,
+              "font_extension": ext,
+              "font_type": font_type,
+              "font_program_sha256": font_sha,
+              "font_program_bytes": len(font_bytes),
+              "font_dictionary": font_obj,
+              "pdf_has_tounicode": bool(re.search(r"/ToUnicode\b", font_obj)),
+              "pdf_encoding_value": (
+                  re.search(r"/Encoding\s+([^\s<>\[\]()]+|\d+\s+\d+\s+R)", font_obj).group(1)
+                  if re.search(r"/Encoding\s+([^\s<>\[\]()]+|\d+\s+\d+\s+R)", font_obj)
+                  else None
+              ),
+              "sfnt_tables": sorted(tables),
+              "cmap_subtables": cmap_meta,
+              "target_trace_spans": target,
+              "target_char_count": len(all_target_chars),
+              "target_chars_with_exact_cmap_gid_match": sum(
+                  1 for c in all_target_chars if c["any_exact_cmap_gid_match"]
+              ),
+              "all_target_chars_exactly_mapped_by_embedded_cmap": bool(all_target_chars) and all(
+                  c["any_exact_cmap_gid_match"] for c in all_target_chars
+              ),
+          }
+          Path("kstvet-truetype-cmap-proof.json").write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+          print(json.dumps(result, indent=2, sort_keys=True))
+          doc.close()
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kstvet-truetype-cmap-proof
+          path: kstvet-truetype-cmap-proof.json
+          if-no-files-found: warn
