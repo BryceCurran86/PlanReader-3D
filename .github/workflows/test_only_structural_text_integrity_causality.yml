@@ -1,0 +1,298 @@
+name: TEST-ONLY Structural Text-Integrity Causality
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  probe:
+    if: github.head_ref == 'test-only/structural-text-integrity-causality-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: murera
+            page: '183'
+            url: 'https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf'
+            sha256: '84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b'
+          - label: kstvet
+            page: '47'
+            url: 'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf'
+            sha256: '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download and verify exact source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            "${{ matrix.url }}" -o source.pdf
+          echo "${{ matrix.sha256 }}  source.pdf" | sha256sum -c -
+      - name: Probe source-owned text-integrity causality
+        env:
+          LABEL: ${{ matrix.label }}
+          PAGE_ID: ${{ matrix.page }}
+          EXPECTED_SHA256: ${{ matrix.sha256 }}
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          from collections import Counter
+          from pathlib import Path
+
+          import fitz
+
+          from pb_pdf_text_integrity_authority import (
+              _build_clip_model,
+              _font_binding,
+              _intersection_ratio,
+              _matching_trace_spans,
+              _text_clip_reasons,
+              _trace_text,
+              classify_native_word_integrity,
+          )
+          from pb_vector_geometry_v130 import extract_native_page
+
+          payload = Path("source.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == os.environ["EXPECTED_SHA256"]
+          page_id = os.environ["PAGE_ID"]
+          label = os.environ["LABEL"]
+
+          doc = fitz.open(stream=payload, filetype="pdf")
+          page = doc.load_page(int(page_id) - 1)
+          native = extract_native_page(page)
+          words = list(native.get("words") or ())
+          traces = list(page.get_texttrace() or ())
+          bboxlog = list(page.get_bboxlog() or ())
+          fonts = list(page.get_fonts(full=True) or ())
+          extended = list(page.get_drawings(extended=True) or ())
+
+          term_re = re.compile(
+              r"^(?:masonry|pier[s,]*|pillar[s,]*|column[s,]*|post[s,]*|"
+              r"stanchion[s,]*|circular|hollow|sections?|50mm|300|x)$",
+              re.I,
+          )
+
+          def rect(value):
+              try:
+                  return [round(float(value[i]), 4) for i in range(4)]
+              except Exception:
+                  return None
+
+          def trace_text(span):
+              try:
+                  return _trace_text(span)
+              except Exception:
+                  return ""
+
+          def font_keys(xref):
+              if xref is None:
+                  return {}
+              out = {}
+              for key in ("Subtype", "BaseFont", "Encoding", "ToUnicode", "FontDescriptor", "DescendantFonts"):
+                  try:
+                      out[key] = list(doc.xref_get_key(int(xref), key))
+                  except Exception as exc:
+                      out[key] = ["error", type(exc).__name__]
+              return out
+
+          clip_model = _build_clip_model(page)
+          clip_summary = None
+          if clip_model is not None:
+              clip_summary = {
+                  "consistent": clip_model.consistent,
+                  "clip_count": len(clip_model.clips),
+                  "path_count": len(clip_model.paths),
+                  "push_count": len(clip_model.pushes),
+                  "clips": [
+                      {
+                          "scissor": [round(float(v), 4) for v in item.scissor],
+                          "exact_rectangle": bool(item.exact_rectangle),
+                      }
+                      for item in clip_model.clips[:50]
+                  ],
+              }
+
+          rows = []
+          reason_counts = Counter()
+          for word in words:
+              raw = str(word.get("text") or "")
+              if not term_re.match(raw.strip()):
+                  continue
+
+              decision = classify_native_word_integrity(page, word)
+              reason_counts.update(decision.reason_codes)
+              spans, trace_joined, trace_reasons = _matching_trace_spans(page, word)
+              word_bbox = tuple(float(v) for v in (word.get("bbox") or ()))
+
+              trace_candidates = []
+              for span in traces:
+                  if not isinstance(span, dict):
+                      continue
+                  text = trace_text(span)
+                  overlap = _intersection_ratio(word_bbox, span.get("bbox") or ())
+                  if overlap <= 0.0 or raw not in text:
+                      continue
+                  trace_candidates.append({
+                      "seqno": span.get("seqno"),
+                      "bbox": rect(span.get("bbox") or ()),
+                      "text": text[:300],
+                      "font": str(span.get("font") or ""),
+                      "type": span.get("type"),
+                      "opacity": span.get("opacity"),
+                      "overlap_subject_ratio": round(float(overlap), 6),
+                  })
+
+              owned = []
+              for span in spans:
+                  xref = None
+                  binding_reasons = ()
+                  try:
+                      font, binding_reasons = _font_binding(page, span)
+                      if font is not None:
+                          xref = int(font[0])
+                  except Exception as exc:
+                      binding_reasons = (f"diagnostic_font_binding_error:{type(exc).__name__}",)
+                  seqno = span.get("seqno")
+                  try:
+                      seq_index = int(seqno)
+                  except Exception:
+                      seq_index = None
+
+                  later_paints = []
+                  if seq_index is not None and 0 <= seq_index < len(bboxlog):
+                      for paint_index, item in enumerate(bboxlog[seq_index + 1:], start=seq_index + 1):
+                          try:
+                              kind, paint_bbox = str(item[0]), item[1]
+                          except Exception:
+                              continue
+                          if kind not in {"fill-path", "fill-image", "fill-shade", "fill-text"}:
+                              continue
+                          ratio = _intersection_ratio(word_bbox, paint_bbox)
+                          if ratio < 0.65:
+                              continue
+                          same_seq_traces = []
+                          if kind == "fill-text":
+                              for candidate in traces:
+                                  try:
+                                      if int(candidate.get("seqno")) == paint_index:
+                                          same_seq_traces.append({
+                                              "text": trace_text(candidate)[:300],
+                                              "bbox": rect(candidate.get("bbox") or ()),
+                                              "font": str(candidate.get("font") or ""),
+                                              "opacity": candidate.get("opacity"),
+                                              "type": candidate.get("type"),
+                                          })
+                                  except Exception:
+                                      continue
+                          later_paints.append({
+                              "bboxlog_index": paint_index,
+                              "kind": kind,
+                              "bbox": rect(paint_bbox),
+                              "overlap_subject_ratio": round(float(ratio), 6),
+                              "trace_at_same_seqno": same_seq_traces,
+                          })
+
+                  owned.append({
+                      "seqno": seqno,
+                      "bbox": rect(span.get("bbox") or ()),
+                      "text": trace_text(span)[:300],
+                      "font": str(span.get("font") or ""),
+                      "type": span.get("type"),
+                      "opacity": span.get("opacity"),
+                      "font_xref": xref,
+                      "font_binding_reasons": list(binding_reasons),
+                      "font_keys": font_keys(xref),
+                      "clip_reasons": list(
+                          _text_clip_reasons(
+                              page,
+                              span.get("bbox") or word_bbox,
+                              seq_index,
+                          )
+                      ),
+                      "bboxlog_current": (
+                          {
+                              "kind": str(bboxlog[seq_index][0]),
+                              "bbox": rect(bboxlog[seq_index][1]),
+                          }
+                          if seq_index is not None and 0 <= seq_index < len(bboxlog)
+                          else None
+                      ),
+                      "later_occluding_paints": later_paints,
+                  })
+
+              rows.append({
+                  "raw_text": raw,
+                  "block_no": word.get("block_no"),
+                  "line_no": word.get("line_no"),
+                  "word_no": word.get("word_no"),
+                  "bbox": rect(word_bbox),
+                  "decision": {
+                      "trusted": decision.trusted,
+                      "decode_status": decision.decode_status,
+                      "visibility_status": decision.visibility_status,
+                      "reason_codes": list(decision.reason_codes),
+                      "font_xref": decision.font_xref,
+                      "font_subtype": decision.font_subtype,
+                      "font_name": decision.font_name,
+                      "sequence_number": decision.sequence_number,
+                      "trace_sequence_numbers": list(decision.trace_sequence_numbers),
+                  },
+                  "trace_resolution": {
+                      "joined_text": trace_joined[:500],
+                      "reason_codes": list(trace_reasons),
+                      "candidate_count": len(trace_candidates),
+                      "candidates": trace_candidates,
+                      "owned_span_count": len(owned),
+                      "owned_spans": owned,
+                  },
+              })
+
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "label": label,
+              "page_id": page_id,
+              "source_sha256": digest,
+              "producer_counts": {
+                  "native_words": len(words),
+                  "texttrace_spans": len(traces),
+                  "bboxlog_entries": len(bboxlog),
+                  "fonts": len(fonts),
+                  "extended_drawings": len(extended),
+              },
+              "clip_model": clip_summary,
+              "target_reason_counts": dict(sorted(reason_counts.items())),
+              "target_rows": rows,
+          }
+          Path(f"{label}-structural-text-causality.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(json.dumps({
+              "label": label,
+              "page_id": page_id,
+              "source_sha256": digest,
+              "target_reason_counts": report["target_reason_counts"],
+              "target_rows": rows,
+          }, indent=2, sort_keys=True))
+          doc.close()
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: structural-text-causality-${{ matrix.label }}
+          path: ${{ matrix.label }}-structural-text-causality.json
+          if-no-files-found: warn
