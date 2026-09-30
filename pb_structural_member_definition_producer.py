@@ -197,20 +197,24 @@ def bind_structural_member_definitions(
     observations: Sequence[StructuralMemberObservation],
     links: Sequence[AuthenticatedStructuralDefinitionLink],
 ) -> StructuralDefinitionBinding:
-    """Attach only uniquely proven links; never add, remove, or merge members."""
+    """Attach uniquely proven links to uniquely identified input observations.
+
+    Duplicate definition or observation IDs are invalid; never add, remove,
+    or merge members to repair an ambiguous input identity.
+    """
     if type(selector) is not StructuralMemberSelector:
         raise TypeError("selector must be StructuralMemberSelector")
     current = tuple(row for row in definitions if row.selector == selector)
     by_id = {row.definition.definition_id: row for row in current}
     if len(by_id) != len(current):
         raise ValueError("duplicate structural definition id")
+    by_observation_id = {row.observation_id: row for row in observations}
+    if len(by_observation_id) != len(observations):
+        raise ValueError("duplicate structural observation id")
     accepted: dict[str, set[str]] = {}
     for link in links:
         parsed = by_id.get(link.definition_id)
-        observation = next(
-            (row for row in observations if row.observation_id == link.observation_id),
-            None,
-        )
+        observation = by_observation_id.get(link.observation_id)
         if (
             parsed is None or observation is None or link.selector != selector
             or not parsed.scope_id or parsed.scope_id != link.scope_id
