@@ -69,6 +69,10 @@ def test_disconnected_rectangles_do_not_occlude_via_aggregate_bbox():
     assert result.exact_fill_path_count == 1
     assert result.max_exact_coverage_ratio == 0.0
     assert result.evaluated_fill_sequence_numbers == (1,)
+    assert result.shadow_id == (
+        "pdf_text_exact_fill_occlusion_shadow_"
+        "52fcf2ab2190e743e62f3e66d99aadd6"
+    )
 
 
 def test_actual_rectangle_union_covering_threshold_remains_occlusion():
