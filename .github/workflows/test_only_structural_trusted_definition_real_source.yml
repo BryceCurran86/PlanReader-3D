@@ -138,9 +138,106 @@ jobs:
           print(json.dumps(report, indent=2, sort_keys=True))
           PY
 
+      - name: Diagnose text-integrity authority on structural source terms
+        if: always()
+        env:
+          LABEL: ${{ matrix.label }}
+          PAGE_ID: ${{ matrix.page }}
+          EXPECTED_SHA256: ${{ matrix.sha256 }}
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          from collections import Counter
+          from pathlib import Path
+
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          payload = Path("source.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == os.environ["EXPECTED_SHA256"]
+          page_id = os.environ["PAGE_ID"]
+          label = os.environ["LABEL"]
+
+          source = SourceVisibilityProducer(
+              producer_method="structural-text-integrity-real-source-v1",
+              producer_version="1.0",
+          )
+          published = source.ingest_native_pdf_bytes(
+              document_id=f"structural-integrity:{digest[:16]}",
+              source_bytes=payload,
+              source_locator="sha256-verified-real-source",
+              page_ids=(page_id,),
+          )
+          authority = source.text_integrity_authority()
+          reasons = Counter()
+          statuses = Counter()
+          matching = []
+          all_samples = []
+          term_re = re.compile(
+              r"masonry|piers?|pillars?|columns?|posts?|stanchions?|"
+              r"\bCHS\b|circular|hollow|50\s*mm|300\s*x\s*300",
+              re.I,
+          )
+          for observation_id in published.text_observation_ids:
+              result = authority.resolve_text(
+                  ObservationSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=published.revision.source_sha256,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      observation_id=observation_id,
+                  )
+              )
+              statuses[result.status.value] += 1
+              reasons.update(result.reason_codes)
+              receipt = result.receipt
+              row = {
+                  "observation_id": observation_id,
+                  "status": result.status.value,
+                  "trusted_text": result.trusted_text,
+                  "raw_text": None if receipt is None else receipt.raw_text,
+                  "reason_codes": list(result.reason_codes),
+                  "decode_status": None if receipt is None else receipt.decode_status,
+                  "visibility_status": None if receipt is None else receipt.visibility_status,
+                  "font_subtype": None if receipt is None else receipt.font_subtype,
+                  "font_name": None if receipt is None else receipt.font_name,
+                  "block_no": None if receipt is None else receipt.block_no,
+                  "line_no": None if receipt is None else receipt.line_no,
+                  "word_no": None if receipt is None else receipt.word_no,
+              }
+              if len(all_samples) < 40:
+                  all_samples.append(row)
+              if receipt is not None and term_re.search(receipt.raw_text or ""):
+                  matching.append(row)
+
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "label": label,
+              "page_id": page_id,
+              "source_sha256": digest,
+              "text_observation_count": len(published.text_observation_ids),
+              "status_counts": dict(sorted(statuses.items())),
+              "reason_counts": dict(sorted(reasons.items())),
+              "structural_term_rows": matching,
+              "first_rows": all_samples,
+          }
+          Path(f"{label}-text-integrity-diagnostic.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: structural-trusted-definition-${{ matrix.label }}
-          path: ${{ matrix.label }}-trusted-definition-shadow.json
+          path: |
+            ${{ matrix.label }}-trusted-definition-shadow.json
+            ${{ matrix.label }}-text-integrity-diagnostic.json
           if-no-files-found: warn
