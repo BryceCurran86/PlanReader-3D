@@ -1,0 +1,169 @@
+name: TEST-ONLY Murera Exact Fill Occlusion Shadow
+
+on:
+  pull_request:
+    branches:
+      - 'feat/pdf-text-exact-fill-occlusion-shadow-v1'
+
+jobs:
+  probe:
+    if: github.head_ref == 'test-only/murera-exact-fill-occlusion-shadow-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and SHA-256 verify Murera source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf' \
+            -o murera.pdf
+          echo '84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  murera.pdf' | sha256sum -c -
+
+      - name: Compare live occlusion vs exact-fill shadow on page 183
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          import re
+          from collections import Counter
+          from pathlib import Path
+
+          import fitz
+
+          from pb_pdf_text_exact_fill_occlusion_shadow import (
+              TEXT_NOT_OCCLUDED_BY_LATER_PAINT,
+              resolve_later_paint_occlusion_shadow,
+          )
+          from pb_pdf_text_integrity_authority import (
+              TEXT_OCCLUDED_BY_LATER_PAINT,
+              classify_native_word_integrity,
+          )
+          from pb_vector_geometry_v130 import extract_native_page
+
+          payload = Path("murera.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+
+          doc = fitz.open(stream=payload, filetype="pdf")
+          page = doc.load_page(182)
+          native = extract_native_page(page)
+          words = list(native.get("words") or ())
+          structural_re = re.compile(
+              r"masonry|piers?|300|4,500|1,200",
+              re.I,
+          )
+
+          live_statuses = Counter()
+          shadow_statuses = Counter()
+          occluded_rows = []
+          structural_rows = []
+
+          for word in words:
+              raw = str(word.get("text") or "")
+              decision = classify_native_word_integrity(page, word)
+              live_statuses[decision.visibility_status] += 1
+
+              row = {
+                  "text": raw,
+                  "bbox": list(word.get("bbox") or ()),
+                  "block_no": word.get("block_no"),
+                  "line_no": word.get("line_no"),
+                  "word_no": word.get("word_no"),
+                  "trusted": decision.trusted,
+                  "decode_status": decision.decode_status,
+                  "visibility_status": decision.visibility_status,
+                  "reason_codes": list(decision.reason_codes),
+                  "sequence_number": decision.sequence_number,
+              }
+
+              if TEXT_OCCLUDED_BY_LATER_PAINT in decision.reason_codes:
+                  if decision.sequence_number is None:
+                      row["shadow"] = {
+                          "status": "not_run_missing_seqno",
+                          "proposition": None,
+                      }
+                      shadow_statuses["not_run_missing_seqno"] += 1
+                  else:
+                      shadow = resolve_later_paint_occlusion_shadow(
+                          page,
+                          word.get("bbox") or (),
+                          decision.sequence_number,
+                      )
+                      row["shadow"] = {
+                          "shadow_id": shadow.shadow_id,
+                          "status": shadow.status.value,
+                          "proposition": shadow.proposition,
+                          "reason_codes": list(shadow.reason_codes),
+                          "current_bbox_candidate_count": shadow.current_bbox_candidate_count,
+                          "exact_fill_path_count": shadow.exact_fill_path_count,
+                          "max_exact_coverage_ratio": shadow.max_exact_coverage_ratio,
+                          "evaluated_fill_sequence_numbers": list(
+                              shadow.evaluated_fill_sequence_numbers
+                          ),
+                      }
+                      shadow_statuses[
+                          shadow.proposition or shadow.status.value
+                      ] += 1
+                  occluded_rows.append(row)
+
+              if structural_re.search(raw):
+                  structural_rows.append(row)
+
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "source_sha256": digest,
+              "page_id": "183",
+              "native_word_count": len(words),
+              "live_visibility_status_counts": dict(sorted(live_statuses.items())),
+              "live_occluded_word_count": len(occluded_rows),
+              "shadow_outcome_counts_for_live_occluded": dict(
+                  sorted(shadow_statuses.items())
+              ),
+              "shadow_cleared_live_occlusion_count": sum(
+                  1
+                  for row in occluded_rows
+                  if (row.get("shadow") or {}).get("proposition")
+                  == TEXT_NOT_OCCLUDED_BY_LATER_PAINT
+              ),
+              "live_occluded_rows": occluded_rows,
+              "structural_term_rows": structural_rows,
+          }
+          Path("murera-exact-fill-occlusion-shadow.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(json.dumps({
+              "source_sha256": digest,
+              "page_id": "183",
+              "native_word_count": len(words),
+              "live_occluded_word_count": len(occluded_rows),
+              "shadow_outcome_counts_for_live_occluded": report[
+                  "shadow_outcome_counts_for_live_occluded"
+              ],
+              "shadow_cleared_live_occlusion_count": report[
+                  "shadow_cleared_live_occlusion_count"
+              ],
+              "structural_term_rows": structural_rows,
+          }, indent=2, sort_keys=True))
+          doc.close()
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: murera-exact-fill-occlusion-shadow
+          path: murera-exact-fill-occlusion-shadow.json
+          if-no-files-found: warn
