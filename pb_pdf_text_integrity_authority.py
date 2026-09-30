@@ -654,11 +654,12 @@ def _near_white(span: Mapping[str, object]) -> bool:
 # * when both neighbours sit at the same level with no clip pushed between
 #   them the stack is provably unchanged, so the text's active clips are
 #   exactly that stack;
-# * a text is proven unclipped only if EVERY clip that may apply is an exact
-#   axis-aligned rectangle that contains the text. A clip that does not
-#   contain the text, but is only possibly active, is unresolved (not assumed
-#   inactive); one that is provably active and does not contain it clips the
-#   text; a non-rectangular clip is never treated as its bounding box.
+# * a text is proven unclipped when every relevant clip is either an exact
+#   axis-aligned rectangle that contains the text, or a MAY-only exact
+#   rectangle proven wholly disjoint from an independently extracted native
+#   word. Partial overlap stays unresolved. A provably active clip that does
+#   not contain the text clips it, and a non-rectangular clip is never treated
+#   as its bounding box.
 #
 # Anything the model cannot reconcile (malformed hierarchy levels, rotated
 # pages, clips reported without extended drawings) fails closed.
@@ -834,10 +835,71 @@ def _rect_contains(
     )
 
 
+def _rects_provably_disjoint(
+    left: Sequence[float],
+    right: Sequence[float],
+    tolerance: float = _CLIP_TOLERANCE_PT,
+) -> bool:
+    """Return True only when two boxes have a positive gap beyond tolerance."""
+
+    return (
+        float(left[2]) < float(right[0]) - tolerance
+        or float(right[2]) < float(left[0]) - tolerance
+        or float(left[3]) < float(right[1]) - tolerance
+        or float(right[3]) < float(left[1]) - tolerance
+    )
+
+
+def _native_word_is_present(
+    page: object,
+    native_word: Optional[Mapping[str, object]],
+) -> bool:
+    """Independently prove that the candidate is a renderer-extracted word.
+
+    Caller-supplied text is never enough. Text and all four bbox coordinates
+    must exactly match one word from this same page's native extraction.
+    """
+
+    if not native_word:
+        return False
+    raw_text = str(native_word.get("text") or "")
+    if not raw_text:
+        return False
+    try:
+        bbox = _rect_tuple(native_word.get("bbox") or ())
+    except (TypeError, ValueError):
+        return False
+
+    cache = _page_cache(page)
+    if "native_words" not in cache:
+        try:
+            cache["native_words"] = list(
+                page.get_text("words") or []
+            )
+        except Exception:
+            cache["native_words"] = None
+    words = cache.get("native_words")
+    if words is None:
+        return False
+
+    for row in words:
+        try:
+            if str(row[4]) != raw_text:
+                continue
+            row_bbox = _rect_tuple(row[:4])
+        except (IndexError, TypeError, ValueError):
+            continue
+        if all(abs(left - right) <= 1e-6 for left, right in zip(row_bbox, bbox)):
+            return True
+    return False
+
+
 def _text_clip_reasons(
     page: object,
     subject_bbox: Sequence[object],
     seqno: Optional[int],
+    *,
+    native_word: Optional[Mapping[str, object]] = None,
 ) -> tuple[str, ...]:
     model = _clip_model(page)
     has_clip_operator = _page_content_has_clip_operator(page)
@@ -883,6 +945,7 @@ def _text_clip_reasons(
         may_apply = stack_before | between | (stack_after or set())
         must_apply = (stack_before & stack_after) if stack_after is not None else set()
 
+    native_word_present = _native_word_is_present(page, native_word)
     reasons: list[str] = []
     for clip_id in sorted(may_apply):
         clip = model.clips[clip_id]
@@ -891,8 +954,19 @@ def _text_clip_reasons(
             continue
         if not contained and clip_id in must_apply:
             reasons.append(TEXT_CLIPPED_BY_CLIP_REGION)
-        else:
-            reasons.append(TEXT_CLIP_STATE_UNRESOLVED)
+            continue
+        # A MAY-only sibling clip cannot govern this text when the renderer
+        # independently exposes this exact native word and the clip is an exact
+        # rectangle with a positive geometric gap from the subject. Partial
+        # overlap remains unresolved, and this exception is unavailable to
+        # caller-supplied or non-native words.
+        if (
+            native_word_present
+            and clip.exact_rectangle
+            and _rects_provably_disjoint(clip.scissor, bbox)
+        ):
+            continue
+        reasons.append(TEXT_CLIP_STATE_UNRESOLVED)
     return _ordered_unique(reasons)
 
 
@@ -1262,6 +1336,8 @@ def _visibility_status(
     page: object,
     subject_bbox: Sequence[object],
     span: Mapping[str, object],
+    *,
+    native_word: Optional[Mapping[str, object]] = None,
 ) -> tuple[str, tuple[str, ...], Optional[int]]:
     reasons: list[str] = []
     try:
@@ -1284,7 +1360,14 @@ def _visibility_status(
         seqno = int(span.get("seqno"))
     except (TypeError, ValueError):
         seqno = None
-    reasons.extend(_text_clip_reasons(page, span.get("bbox") or subject_bbox, seqno))
+    reasons.extend(
+        _text_clip_reasons(
+            page,
+            span.get("bbox") or subject_bbox,
+            seqno,
+            native_word=native_word,
+        )
+    )
     try:
         bboxlog = _cached_bboxlog(page)
     except Exception:
@@ -1357,7 +1440,12 @@ def classify_native_word_integrity(
         span_decode, decode_reasons, xref, subtype, base_font = _decode_status(page, span, span_text)
         reasons.extend(decode_reasons)
         subject = (span.get("bbox") or word_bbox) if chain else word_bbox
-        _span_visibility, visibility_reasons, seqno = _visibility_status(page, subject, span)
+        _span_visibility, visibility_reasons, seqno = _visibility_status(
+            page,
+            subject,
+            span,
+            native_word=word,
+        )
         reasons.extend(visibility_reasons)
         if index == 0:
             first_decode, font_xref, font_subtype, font_name = span_decode, xref, subtype, base_font

@@ -462,6 +462,10 @@ def classify_fill_stroke_text_pair_shadow(
             page,
             bbox,
             span,
+            native_word={
+                "text": raw_text,
+                "bbox": bbox,
+            },
         )
         if visibility_reasons or resolved_seqno != _span_seqno(span):
             return FillStrokeTextPairClassification(

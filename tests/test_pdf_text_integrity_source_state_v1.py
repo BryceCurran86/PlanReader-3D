@@ -31,6 +31,7 @@ from pb_pdf_text_integrity_authority import (
     TEXT_TRACE_UNAVAILABLE,
     _build_clip_model,
     _optional_content_reasons,
+    _text_clip_reasons,
     _valid_tounicode_cmap,
     classify_native_word_integrity,
 )
@@ -423,6 +424,21 @@ class _ExtendedDrawingsPage:
         return list(self._drawings)
 
 
+class _ClipReasonPage(_ExtendedDrawingsPage):
+    rotation = 0
+
+    def __init__(self, drawings, words):
+        super().__init__(drawings)
+        self._words = list(words)
+
+    def read_contents(self):
+        return b"0 0 10 10 re W n"
+
+    def get_text(self, kind):
+        assert kind == "words"
+        return list(self._words)
+
+
 def _clip_entry(level: int, rect: fitz.Rect):
     return {
         "type": "clip",
@@ -479,6 +495,89 @@ def test_clip_model_nested_levels_pop_only_closed_clip_scopes() -> None:
         (20, 3, (0, 1), 3),
         (21, 2, (0,), 4),
         (22, 1, (), 5),
+    )
+
+
+def test_disjoint_may_only_sibling_clip_is_excluded_only_for_exact_native_word() -> None:
+    bbox = (40.0, 110.0, 60.0, 130.0)
+    disjoint = fitz.Rect(200.0, 10.0, 250.0, 30.0)
+    containing = fitz.Rect(20.0, 100.0, 100.0, 140.0)
+    page = _ClipReasonPage(
+        (
+            {"type": "f", "level": 0, "seqno": 1},
+            _clip_entry(0, disjoint),
+            _clip_entry(0, containing),
+            {"type": "f", "level": 1, "seqno": 10},
+        ),
+        ((40.0, 110.0, 60.0, 130.0, "900"),),
+    )
+    native_word = {"text": "900", "bbox": bbox}
+
+    assert _text_clip_reasons(
+        page,
+        bbox,
+        5,
+        native_word=native_word,
+    ) == ()
+
+    # The same geometry without independent native-word proof remains
+    # unresolved: caller-supplied text cannot activate this exception.
+    page_without_native_word = _ClipReasonPage(
+        (
+            {"type": "f", "level": 0, "seqno": 1},
+            _clip_entry(0, disjoint),
+            _clip_entry(0, containing),
+            {"type": "f", "level": 1, "seqno": 10},
+        ),
+        (),
+    )
+    assert TEXT_CLIP_STATE_UNRESOLVED in _text_clip_reasons(
+        page_without_native_word,
+        bbox,
+        5,
+        native_word=native_word,
+    )
+
+
+def test_partial_overlap_may_only_clip_stays_unresolved_with_native_word_proof() -> None:
+    bbox = (40.0, 110.0, 60.0, 130.0)
+    overlap = fitz.Rect(30.0, 100.0, 50.0, 140.0)
+    containing = fitz.Rect(20.0, 100.0, 100.0, 140.0)
+    page = _ClipReasonPage(
+        (
+            {"type": "f", "level": 0, "seqno": 1},
+            _clip_entry(0, overlap),
+            _clip_entry(0, containing),
+            {"type": "f", "level": 1, "seqno": 10},
+        ),
+        ((40.0, 110.0, 60.0, 130.0, "900"),),
+    )
+
+    assert TEXT_CLIP_STATE_UNRESOLVED in _text_clip_reasons(
+        page,
+        bbox,
+        5,
+        native_word={"text": "900", "bbox": bbox},
+    )
+
+
+def test_must_apply_disjoint_clip_stays_clipped_even_with_native_word_proof() -> None:
+    bbox = (40.0, 110.0, 60.0, 130.0)
+    disjoint = fitz.Rect(200.0, 10.0, 250.0, 30.0)
+    page = _ClipReasonPage(
+        (
+            _clip_entry(0, disjoint),
+            {"type": "f", "level": 1, "seqno": 1},
+            {"type": "f", "level": 1, "seqno": 10},
+        ),
+        ((40.0, 110.0, 60.0, 130.0, "900"),),
+    )
+
+    assert TEXT_CLIPPED_BY_CLIP_REGION in _text_clip_reasons(
+        page,
+        bbox,
+        5,
+        native_word={"text": "900", "bbox": bbox},
     )
 
 
