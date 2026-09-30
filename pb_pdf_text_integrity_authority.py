@@ -834,6 +834,42 @@ def _rect_contains(
     )
 
 
+def _rects_intersect(
+    left: Sequence[float],
+    right: Sequence[float],
+    tolerance: float = _CLIP_TOLERANCE_PT,
+) -> bool:
+    return (
+        min(float(left[2]), float(right[2]))
+        > max(float(left[0]), float(right[0])) + tolerance
+        and min(float(left[3]), float(right[3]))
+        > max(float(left[1]), float(right[1])) + tolerance
+    )
+
+
+def _native_word_bbox_present(
+    page: object,
+    subject_bbox: Sequence[float],
+    tolerance: float = 1e-6,
+) -> bool:
+    cache = _page_cache(page)
+    if "native_word_bboxes" not in cache:
+        try:
+            cache["native_word_bboxes"] = tuple(
+                _rect_tuple(row[:4])
+                for row in (page.get_text("words") or [])  # type: ignore[attr-defined]
+            )
+        except Exception:
+            cache["native_word_bboxes"] = None
+    rows = cache["native_word_bboxes"]
+    if rows is None:
+        return False
+    return any(
+        all(abs(float(a) - float(b)) <= tolerance for a, b in zip(row, subject_bbox))
+        for row in rows
+    )
+
+
 def _text_clip_reasons(
     page: object,
     subject_bbox: Sequence[object],
@@ -883,6 +919,7 @@ def _text_clip_reasons(
         may_apply = stack_before | between | (stack_after or set())
         must_apply = (stack_before & stack_after) if stack_after is not None else set()
 
+    native_word_present: Optional[bool] = None
     reasons: list[str] = []
     for clip_id in sorted(may_apply):
         clip = model.clips[clip_id]
@@ -891,8 +928,21 @@ def _text_clip_reasons(
             continue
         if not contained and clip_id in must_apply:
             reasons.append(TEXT_CLIPPED_BY_CLIP_REGION)
-        else:
-            reasons.append(TEXT_CLIP_STATE_UNRESOLVED)
+            continue
+        if (
+            clip.exact_rectangle
+            and not _rects_intersect(clip.scissor, bbox)
+        ):
+            if native_word_present is None:
+                native_word_present = _native_word_bbox_present(page, bbox)
+            if native_word_present:
+                # A merely-possible sibling clip that is fully disjoint from a
+                # producer-owned native word cannot be the word's active clip:
+                # if it were active, MuPDF's native word extraction would not
+                # contain this exact word geometry. Partial overlap and every
+                # must-apply clip remain fail-closed above.
+                continue
+        reasons.append(TEXT_CLIP_STATE_UNRESOLVED)
     return _ordered_unique(reasons)
 
 
