@@ -103,7 +103,7 @@ def _visible(monkeypatch):
     monkeypatch.setattr(
         shadow,
         "_visibility_status",
-        lambda _page, _bbox, span: (
+        lambda _page, _bbox, span, **_kwargs: (
             "proven_visible",
             (),
             int(span["seqno"]),
@@ -282,7 +282,7 @@ def test_three_competing_traces_remain_ambiguous(monkeypatch):
 def test_visibility_failure_on_either_trace_blocks_pair(monkeypatch):
     import pb_pdf_text_fill_stroke_equivalence_shadow as shadow
 
-    def visibility(_page, _bbox, span):
+    def visibility(_page, _bbox, span, **_kwargs):
         if int(span["type"]) == 1:
             return (
                 "unresolved_or_blocked",
