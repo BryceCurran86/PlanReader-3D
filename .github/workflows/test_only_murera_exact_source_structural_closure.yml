@@ -1,0 +1,92 @@
+name: TEST-ONLY Murera Exact-Source Structural Closure
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  murera-exact-source-closure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 6371f50ef9cac06d4afaba2c6bb75c9d245169bf
+
+      - name: Verify the tested production PR head
+        run: test "$(git rev-parse HEAD)" = "6371f50ef9cac06d4afaba2c6bb75c9d245169bf"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install unchanged production dependencies
+        run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and SHA-256 verify exact official Murera source
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf' \
+            -o /tmp/murera.pdf
+          echo '84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  /tmp/murera.pdf' | sha256sum -c -
+
+      - name: Run structural authority and full live extraction integration
+        env:
+          PLANREADER_MURERA_SOURCE_PDF: /tmp/murera.pdf
+          PYTHONPATH: .
+        run: |
+          timeout 1200 python -m pytest -q \
+            tests/test_murera_masonry_pier_authority_boundary.py \
+            tests/test_murera_masonry_pier_exact_source_integration.py \
+            --durations=10 --junitxml=/tmp/murera-authority-tests.xml
+
+      - name: Require complete integration coverage with zero skips
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import subprocess
+          import xml.etree.ElementTree as ET
+
+          expected_head = "6371f50ef9cac06d4afaba2c6bb75c9d245169bf"
+          tested_head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          assert tested_head == expected_head
+          source_sha = hashlib.sha256(Path("/tmp/murera.pdf").read_bytes()).hexdigest()
+          assert source_sha == "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+          root = ET.parse("/tmp/murera-authority-tests.xml").getroot()
+          suites = list(root.iter("testsuite"))
+          totals = {key: sum(int(row.get(key, "0")) for row in suites)
+                    for key in ("tests", "failures", "errors", "skipped")}
+          assert totals == {"tests": 11, "failures": 0, "errors": 0, "skipped": 0}, totals
+          cases = list(root.iter("testcase"))
+          full = [row for row in cases if row.get("name") ==
+                  "test_exact_full_pdf_extraction_does_not_publish_unproven_masonry_piers"]
+          assert len(full) == 1
+          result = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "tested_production_pr": 1093,
+              "tested_head_sha": tested_head,
+              "production_base_sha": "f1653a4d7046592c532abbcaaf2b3fced9aa843e",
+              "source_sha256": source_sha,
+              "test_totals": totals,
+              "full_live_extraction_seconds": float(full[0].get("time", "0")),
+              "complete_exact_source_validation": True,
+          }
+          Path("/tmp/murera-authority-validation.json").write_text(
+              json.dumps(result, indent=2) + "\n"
+          )
+          print("MURERA_EXACT_SOURCE_VALID=1")
+          print("MURERA_EXACT_SOURCE_JSON=" + json.dumps(result, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: murera-exact-source-authority-validation
+          path: |
+            /tmp/murera-authority-tests.xml
+            /tmp/murera-authority-validation.json
