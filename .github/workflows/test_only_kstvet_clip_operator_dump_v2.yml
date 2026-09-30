@@ -1,0 +1,144 @@
+name: TEST-ONLY KSTVET Clip Operator Dump V2
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  probe:
+    if: github.head_ref == 'test-only/kstvet-clip-operator-dump-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and verify KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  kstvet.pdf' | sha256sum -c -
+
+      - name: Dump clip operator neighborhoods
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib, json, re
+          from pathlib import Path
+          import fitz
+
+          payload = Path("kstvet.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+
+          doc = fitz.open(stream=payload, filetype="pdf")
+          page = doc.load_page(46)
+          content = bytes(page.read_contents() or b"")
+          trace = list(page.get_texttrace() or ())
+          bboxlog = list(page.get_bboxlog() or ())
+
+          targets = []
+          for span in trace:
+              text = "".join(chr(int(ch[0])) for ch in (span.get("chars") or ()))
+              if not any(term in text for term in ("Circular","hollow","sections","50mm","pillars")):
+                  continue
+              chars = tuple(span.get("chars") or ())
+              origin = None
+              if chars:
+                  p = chars[0][2]
+                  origin = [float(p.x), float(p.y)] if hasattr(p,"x") else [float(p[0]),float(p[1])]
+              seqno = int(span.get("seqno"))
+              targets.append({
+                  "seqno":seqno,
+                  "type":int(span.get("type")),
+                  "font":str(span.get("font")),
+                  "size":float(span.get("size")),
+                  "bbox":[float(v) for v in span.get("bbox")],
+                  "first_origin":origin,
+                  "text":text,
+                  "bboxlog_kind": None if seqno<0 or seqno>=len(bboxlog) else str(bboxlog[seqno][0]),
+              })
+
+          w_rows=[]
+          for match in re.finditer(rb"(?<!\S)(W\*?|W)(?!\S)", content):
+              start=max(0,match.start()-1000)
+              end=min(len(content),match.end()+2200)
+              window=content[start:end]
+              w_rows.append({
+                  "offset":match.start(),
+                  "clip_op":match.group(1).decode("ascii"),
+                  "context":window.decode("latin1",errors="replace"),
+                  "counts":{
+                      "q":len(re.findall(rb"(?<!\S)q(?!\S)",window)),
+                      "Q":len(re.findall(rb"(?<!\S)Q(?!\S)",window)),
+                      "re":len(re.findall(rb"(?<!\S)re(?!\S)",window)),
+                      "BT":len(re.findall(rb"(?<!\S)BT(?!\S)",window)),
+                      "ET":len(re.findall(rb"(?<!\S)ET(?!\S)",window)),
+                      "Tj":len(re.findall(rb"(?<!\S)Tj(?!\S)",window)),
+                      "TJ":len(re.findall(rb"(?<!\S)TJ(?!\S)",window)),
+                      "Tm":len(re.findall(rb"(?<!\S)Tm(?!\S)",window)),
+                      "Td":len(re.findall(rb"(?<!\S)Td(?!\S)",window)),
+                      "TD":len(re.findall(rb"(?<!\S)TD(?!\S)",window)),
+                  },
+              })
+
+          positions=[]
+          for op in (b"Tm", b"Td", b"TD"):
+              pat=re.compile(
+                  rb"([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)\s+"
+                  + re.escape(op)
+              )
+              if op==b"Tm":
+                  pat=re.compile(
+                      rb"([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)\s+"
+                      rb"([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)\s+"
+                      rb"([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)\s+Tm"
+                  )
+              for match in pat.finditer(content):
+                  positions.append({
+                      "offset":match.start(),
+                      "op":op.decode("ascii"),
+                      "raw":match.group(0).decode("latin1",errors="replace"),
+                      "context":content[max(0,match.start()-350):min(len(content),match.end()+700)].decode("latin1",errors="replace"),
+                  })
+          positions.sort(key=lambda row:row["offset"])
+
+          report={
+              "source_sha256":digest,
+              "page_id":"47",
+              "content_len":len(content),
+              "clip_operator_count":len(w_rows),
+              "page_cm_count":len(re.findall(rb"(?<!\S)cm(?!\S)",content)),
+              "target_traces":targets,
+              "w_contexts":w_rows,
+              "text_positions":positions,
+              "content_prefix":content[:4000].decode("latin1",errors="replace"),
+          }
+          Path("kstvet-clip-operator-dump-v2.json").write_text(json.dumps(report,indent=2,sort_keys=True),encoding="utf-8")
+          print(json.dumps({
+              "source_sha256":digest,
+              "content_len":len(content),
+              "clip_operator_count":len(w_rows),
+              "page_cm_count":report["page_cm_count"],
+              "target_traces":targets,
+              "w_contexts":w_rows[:12],
+              "text_positions":positions[:40],
+          },indent=2,sort_keys=True))
+          doc.close()
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kstvet-clip-operator-dump-v2
+          path: kstvet-clip-operator-dump-v2.json
+          if-no-files-found: warn
