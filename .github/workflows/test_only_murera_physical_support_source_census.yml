@@ -1,0 +1,247 @@
+name: TEST-ONLY Murera Physical Support Source Census
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  census:
+    if: github.head_ref == 'test-only/murera-physical-support-source-census-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and SHA-256 verify Murera source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf' \
+            -o murera.pdf
+          echo '84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  murera.pdf' | sha256sum -c -
+
+      - name: Census existing physical-support producer on pages 219-226
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          import fitz
+
+          from pb_dimension_chain_evidence_extractor import (
+              extract_dimension_chains_from_page,
+          )
+          from pb_secondary_area_support_evidence import (
+              _bay_chains,
+              _physical_support_glyphs,
+              _support_kind,
+              _text_blocks,
+              _zone_type,
+              extract_secondary_area_support_evidence_from_page,
+          )
+
+          payload = Path("murera.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+
+          doc = fitz.open(stream=payload, filetype="pdf")
+          page_reports = []
+
+          for page_id in range(219, 227):
+              page = doc.load_page(page_id - 1)
+              blocks = _text_blocks(page)
+              zones = [
+                  {
+                      "text": block.text,
+                      "bbox": list(block.bbox),
+                      "zone_type": zone_type,
+                  }
+                  for block in blocks
+                  if (zone_type := _zone_type(block.text)) is not None
+              ]
+              support_specs = [
+                  {
+                      "text": block.text,
+                      "bbox": list(block.bbox),
+                      "support_kind": support_kind,
+                  }
+                  for block in blocks
+                  if (support_kind := _support_kind(block.text)) is not None
+              ]
+
+              chains = extract_dimension_chains_from_page(
+                  page,
+                  page_num=page_id,
+                  view_id=f"page_{page_id}",
+              )
+              bays = _bay_chains(chains)
+              glyphs = _physical_support_glyphs(
+                  page,
+                  source_page=page_id,
+              )
+              evidence = extract_secondary_area_support_evidence_from_page(
+                  page,
+                  source_page=page_id,
+                  dimension_chains=chains,
+              )
+
+              chain_rows = []
+              for chain in chains:
+                  observations = list(
+                      getattr(chain, "observations", ()) or ()
+                  )
+                  chain_rows.append({
+                      "chain_id": str(getattr(chain, "chain_id", "")),
+                      "orientation": str(
+                          getattr(chain, "orientation", "")
+                      ),
+                      "observation_count": len(observations),
+                      "values_m": [
+                          float(getattr(obs, "value_m", 0.0) or 0.0)
+                          for obs in observations
+                      ],
+                      "observation_bboxes": [
+                          (
+                              list(obs.bbox)
+                              if getattr(obs, "bbox", None) is not None
+                              else None
+                          )
+                          for obs in observations
+                      ],
+                  })
+
+              bay_rows = [
+                  {
+                      "chain_id": bay.chain_id,
+                      "support_count": bay.support_count,
+                      "bay_count": bay.bay_count,
+                      "bay_spans_m": list(bay.bay_spans_m),
+                      "bbox": list(bay.bbox),
+                  }
+                  for bay in bays
+              ]
+              glyph_rows = [
+                  {
+                      "glyph_id": glyph.glyph_id,
+                      "bbox": list(glyph.bbox),
+                      "center_x": glyph.center_x,
+                      "center_y": glyph.center_y,
+                      "width": glyph.width,
+                      "height": glyph.height,
+                  }
+                  for glyph in glyphs
+              ]
+              resolved = None
+              if evidence is not None:
+                  resolved = {
+                      "zone_type": evidence.zone_type,
+                      "support_kind": evidence.support_kind,
+                      "support_count": evidence.support_count,
+                      "bay_count": evidence.bay_count,
+                      "bay_spans_m": list(evidence.bay_spans_m),
+                      "source_pages": list(evidence.source_pages),
+                      "chain_ids": list(evidence.chain_ids),
+                      "zone_bbox": list(evidence.zone_bbox),
+                      "support_bbox": list(evidence.support_bbox),
+                      "zone_text": evidence.zone_text,
+                      "support_text": evidence.support_text,
+                      "support_symbol_ids": list(
+                          evidence.support_symbol_ids
+                      ),
+                      "evidence_mode": evidence.evidence_mode,
+                      "confidence": evidence.confidence,
+                  }
+
+              page_reports.append({
+                  "page_id": page_id,
+                  "page_width": float(page.rect.width),
+                  "page_height": float(page.rect.height),
+                  "text_block_count": len(blocks),
+                  "zone_candidates": zones,
+                  "explicit_support_specs": support_specs,
+                  "dimension_chain_count": len(chains),
+                  "dimension_chains": chain_rows,
+                  "qualified_bay_chain_count": len(bays),
+                  "qualified_bay_chains": bay_rows,
+                  "physical_glyph_candidate_count": len(glyphs),
+                  "physical_glyph_candidates": glyph_rows,
+                  "resolved_support_evidence": resolved,
+              })
+
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "source_sha256": digest,
+              "pages": page_reports,
+              "summary": {
+                  "pages_scanned": [row["page_id"] for row in page_reports],
+                  "pages_with_named_zone": [
+                      row["page_id"]
+                      for row in page_reports
+                      if row["zone_candidates"]
+                  ],
+                  "pages_with_qualified_bay_chain": [
+                      row["page_id"]
+                      for row in page_reports
+                      if row["qualified_bay_chain_count"] > 0
+                  ],
+                  "pages_with_physical_glyph_candidates": [
+                      row["page_id"]
+                      for row in page_reports
+                      if row["physical_glyph_candidate_count"] > 0
+                  ],
+                  "pages_with_resolved_support_evidence": [
+                      row["page_id"]
+                      for row in page_reports
+                      if row["resolved_support_evidence"] is not None
+                  ],
+              },
+          }
+
+          Path("murera-physical-support-source-census.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(json.dumps(report["summary"], indent=2, sort_keys=True))
+          for row in page_reports:
+              if (
+                  row["zone_candidates"]
+                  or row["qualified_bay_chain_count"]
+                  or row["resolved_support_evidence"] is not None
+              ):
+                  print(json.dumps({
+                      "page_id": row["page_id"],
+                      "zone_candidates": row["zone_candidates"],
+                      "explicit_support_specs": row[
+                          "explicit_support_specs"
+                      ],
+                      "qualified_bay_chains": row[
+                          "qualified_bay_chains"
+                      ],
+                      "physical_glyph_candidate_count": row[
+                          "physical_glyph_candidate_count"
+                      ],
+                      "resolved_support_evidence": row[
+                          "resolved_support_evidence"
+                      ],
+                  }, indent=2, sort_keys=True))
+          doc.close()
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: murera-physical-support-source-census
+          path: murera-physical-support-source-census.json
+          if-no-files-found: warn
