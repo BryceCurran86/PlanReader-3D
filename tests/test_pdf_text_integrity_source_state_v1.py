@@ -514,13 +514,13 @@ def test_disjoint_possible_sibling_clip_cannot_own_a_visible_native_word() -> No
     # The clip is only possibly active from neighbour-path evidence, but it is
     # an exact rectangle fully disjoint from the native word. MuPDF still
     # exposes the exact native word bbox, so this sibling clip cannot own it.
-    pdf = _pdf(f"{_DOT} q 30 100 5 40 re W n {_TXT} Q {_DOT}")
+    pdf = _pdf(f"{_DOT} q 30 100 5 40 re W n Q {_TXT} {_DOT}")
     decision = _classify(pdf)
     assert decision.trusted, decision.reason_codes
 
 
 def test_disjoint_sibling_exclusion_requires_exact_native_word_geometry() -> None:
-    pdf = _pdf(f"{_DOT} q 30 100 5 40 re W n {_TXT} Q {_DOT}")
+    pdf = _pdf(f"{_DOT} q 30 100 5 40 re W n Q {_TXT} {_DOT}")
     doc = fitz.open(stream=pdf, filetype="pdf")
     word = doc[0].get_text("words")[0]
     bbox = tuple(word[:4])
@@ -536,7 +536,7 @@ def test_disjoint_sibling_exclusion_requires_exact_native_word_geometry() -> Non
 def test_partially_overlapping_possible_clip_stays_unresolved() -> None:
     # Native visibility cannot exclude a possible clip that intersects the word.
     # Even a small positive overlap remains fail-closed.
-    pdf = _pdf(f"{_DOT} q 30 100 20 40 re W n {_TXT} Q {_DOT}")
+    pdf = _pdf(f"{_DOT} q 30 100 20 40 re W n Q {_TXT} {_DOT}")
     decision = _classify(pdf)
     assert not decision.trusted
     assert TEXT_CLIP_STATE_UNRESOLVED in decision.reason_codes
