@@ -1,0 +1,136 @@
+name: TEST-ONLY KSTVET Live Fill Stroke Final 1123
+
+on:
+  pull_request:
+    branches:
+      - 'fix/pdf-text-exact-fill-stroke-live-promotion-v1'
+
+jobs:
+  validate:
+    if: github.head_ref == 'test-only/kstvet-live-fill-stroke-final-1123'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download and SHA-256 verify KSTVET source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  kstvet.pdf' | sha256sum -c -
+      - name: Validate live page-47 exact-pair promotion and structural-definition integration
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_pdf_text_integrity_authority import TEXT_TRACE_AMBIGUOUS
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_structural_member_authority import StructuralMemberSelector
+          from pb_structural_member_definition_source_shadow import compile_structural_definition_source_shadow
+
+          payload=Path("kstvet.pdf").read_bytes()
+          digest=hashlib.sha256(payload).hexdigest()
+          assert digest=="6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+
+          producer=SourceVisibilityProducer(
+              producer_method="kstvet-live-fill-stroke-after-1123",
+              producer_version="1.0",
+          )
+          published=producer.ingest_native_pdf_bytes(
+              document_id=f"kstvet-live-fill-stroke:{digest[:16]}",
+              source_bytes=payload,
+              source_locator="sha256-verified-kstvet-source",
+              page_ids=("47",),
+          )
+          text_authority=producer.text_integrity_authority()
+          rows=[]
+          for observation_id in published.text_observation_ids:
+              selector=ObservationSelector(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  observation_id=observation_id,
+              )
+              result=text_authority.resolve_text(selector)
+              receipt=result.receipt
+              if receipt is None:
+                  continue
+              rows.append({
+                  "observation_id":observation_id,
+                  "raw_text":receipt.raw_text,
+                  "status":result.status.value,
+                  "trusted_text":result.trusted_text,
+                  "reasons":list(result.reason_codes),
+                  "seqnos":list(receipt.trace_sequence_numbers),
+                  "decode_status":receipt.decode_status,
+                  "visibility_status":receipt.visibility_status,
+                  "block_no":receipt.block_no,
+                  "line_no":receipt.line_no,
+                  "word_no":receipt.word_no,
+              })
+
+          target={"Circular","hollow","sections"}
+          target_rows=[row for row in rows if row["raw_text"] in target]
+          target_blocks=sorted({row["block_no"] for row in target_rows if row["block_no"] is not None})
+          target_block_rows=[row for row in rows if row["block_no"] in target_blocks]
+          seen={row["raw_text"] for row in target_rows}
+          assert target <= seen, (target, seen)
+          assert all(row["status"]=="corroborated" for row in target_rows), target_rows
+          assert all(row["trusted_text"]==row["raw_text"] for row in target_rows), target_rows
+          assert all(TEXT_TRACE_AMBIGUOUS not in row["reasons"] for row in target_rows), target_rows
+          assert all(len(row["seqnos"])==2 for row in target_rows), target_rows
+          assert all(row["visibility_status"]=="proven_visible" for row in target_rows), target_rows
+
+          structural_selector=StructuralMemberSelector(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              decision_scope_id="source-page:47:unscoped",
+              member_kind="structural_support",
+          )
+          definitions=compile_structural_definition_source_shadow(
+              selector=structural_selector,
+              source_visibility_producer=producer,
+              page_ids=("47",),
+          )
+          definition_rows=[{
+              "definition_id":item.definition.definition_id,
+              "member_kind":item.definition.member_kind,
+              "section_spec":item.definition.section_spec,
+              "member_role":item.member_role,
+              "source_block_ids":list(item.source_block_ids),
+          } for item in definitions.definitions]
+
+          report={
+              "diagnostic_only":True,
+              "do_not_merge":True,
+              "source_sha256":digest,
+              "production_head":"790b0c35c6aa4ba27f981ab02f34a4d40300c6e4",
+              "target_rows":target_rows,
+              "target_blocks":target_blocks,
+              "target_block_rows":target_block_rows,
+              "structural_definition_status":definitions.status.value,
+              "structural_definition_reasons":list(definitions.reason_codes),
+              "structural_definitions":definition_rows,
+          }
+          Path("kstvet-live-fill-stroke-after-1123.json").write_text(json.dumps(report,indent=2,sort_keys=True),encoding="utf-8")
+          print(json.dumps(report,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kstvet-live-fill-stroke-after-1123
+          path: kstvet-live-fill-stroke-after-1123.json
+          if-no-files-found: warn
