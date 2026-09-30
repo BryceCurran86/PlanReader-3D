@@ -22,6 +22,7 @@ from pb_structural_member_physical_candidate_shadow import (
     STRUCTURAL_PHYSICAL_CANDIDATE_SHADOW_PAGE_UNAVAILABLE,
     VERTICAL_PROFILE_CANDIDATE,
     StructuralPhysicalGeometryCandidate,
+    _line_path_is_axis_aligned_rectangle,
     compile_structural_physical_candidate_shadow,
 )
 
@@ -32,7 +33,6 @@ def _pdf_bytes(
     scale=1.0,
     rotate_180=False,
     extra_wide=False,
-    split_line_outline=False,
 ):
     doc = fitz.open()
     page = doc.new_page(width=400, height=400)
@@ -73,37 +73,6 @@ def _pdf_bytes(
         color=(0, 0, 0),
     )
 
-    a = point(320, 30)
-    b = point(330, 30)
-    c_pt = point(330, 150)
-    d = point(320, 150)
-    shape = page.new_shape()
-    if split_line_outline:
-        top_mid = point(325, 30)
-        right_mid = point(330, 90)
-        bottom_mid = point(325, 150)
-        left_mid = point(320, 90)
-        for start, end in (
-            (a, top_mid),
-            (top_mid, b),
-            (b, right_mid),
-            (right_mid, c_pt),
-            (c_pt, bottom_mid),
-            (bottom_mid, d),
-            (d, left_mid),
-            (left_mid, a),
-        ):
-            shape.draw_line(fitz.Point(*start), fitz.Point(*end))
-    else:
-        for start, end in (
-            (a, b),
-            (b, c_pt),
-            (c_pt, d),
-            (d, a),
-        ):
-            shape.draw_line(fitz.Point(*start), fitz.Point(*end))
-    shape.finish(color=(0, 0, 0))
-    shape.commit()
     if extra_wide:
         page.draw_rect(
             rect(40, 300, 300, 310),
@@ -148,7 +117,7 @@ def test_neutral_candidate_classes_are_source_visible_and_semantics_free():
     assert COMPACT_MEMBER_SYMBOL_CANDIDATE in classes
     assert OUTLINED_VERTICAL_PROFILE_CANDIDATE in classes
     assert VERTICAL_PROFILE_CANDIDATE in classes
-    assert len(result.candidates) == 4
+    assert len(result.candidates) == 3
 
     visible_ids = set(published.visible_observation_ids)
     authority = producer.authority()
@@ -259,29 +228,37 @@ def test_translation_scale_and_180_rotation_preserve_geometry_classes():
         (
             COMPACT_MEMBER_SYMBOL_CANDIDATE,
             OUTLINED_VERTICAL_PROFILE_CANDIDATE,
-            OUTLINED_VERTICAL_PROFILE_CANDIDATE,
             VERTICAL_PROFILE_CANDIDATE,
         )
     )
 
 
-def test_line_outline_segment_splitting_preserves_candidate_class():
-    unsplit = _pdf_bytes()
-    split = _pdf_bytes(split_line_outline=True)
+def test_line_outline_segment_splitting_and_order_are_invariant():
+    unsplit = (
+        {"x1": 10.0, "y1": 10.0, "x2": 20.0, "y2": 10.0},
+        {"x1": 20.0, "y1": 10.0, "x2": 20.0, "y2": 100.0},
+        {"x1": 20.0, "y1": 100.0, "x2": 10.0, "y2": 100.0},
+        {"x1": 10.0, "y1": 100.0, "x2": 10.0, "y2": 10.0},
+    )
+    split = (
+        {"x1": 10.0, "y1": 10.0, "x2": 15.0, "y2": 10.0},
+        {"x1": 15.0, "y1": 10.0, "x2": 20.0, "y2": 10.0},
+        {"x1": 20.0, "y1": 10.0, "x2": 20.0, "y2": 55.0},
+        {"x1": 20.0, "y1": 55.0, "x2": 20.0, "y2": 100.0},
+        {"x1": 20.0, "y1": 100.0, "x2": 15.0, "y2": 100.0},
+        {"x1": 15.0, "y1": 100.0, "x2": 10.0, "y2": 100.0},
+        {"x1": 10.0, "y1": 100.0, "x2": 10.0, "y2": 55.0},
+        {"x1": 10.0, "y1": 55.0, "x2": 10.0, "y2": 10.0},
+    )
+    diagonal = unsplit[:-1] + (
+        {"x1": 10.0, "y1": 100.0, "x2": 11.0, "y2": 10.0},
+    )
 
-    _producer_a, _published_a, result_a = _compile(unsplit)
-    _producer_b, _published_b, result_b = _compile(split)
-
-    def outlined_line_candidates(result):
-        return [
-            row
-            for row in result.candidates
-            if row.geometry_kind == "native_line_rectangle_path"
-            and row.candidate_class == OUTLINED_VERTICAL_PROFILE_CANDIDATE
-        ]
-
-    assert len(outlined_line_candidates(result_a)) == 1
-    assert len(outlined_line_candidates(result_b)) == 1
+    assert _line_path_is_axis_aligned_rectangle(unsplit)
+    assert _line_path_is_axis_aligned_rectangle(tuple(reversed(unsplit)))
+    assert _line_path_is_axis_aligned_rectangle(split)
+    assert _line_path_is_axis_aligned_rectangle(tuple(reversed(split)))
+    assert not _line_path_is_axis_aligned_rectangle(diagonal)
 
 
 def test_candidates_do_not_create_members_completeness_or_quantity():
