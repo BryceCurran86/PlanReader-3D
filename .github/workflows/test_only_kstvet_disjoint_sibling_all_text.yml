@@ -1,0 +1,241 @@
+name: TEST-ONLY KSTVET Disjoint Sibling All Text
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  probe:
+    if: github.head_ref == 'test-only/kstvet-disjoint-sibling-all-text-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and verify KSTVET
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  kstvet.pdf' | sha256sum -c -
+
+      - name: Evaluate rule on every clip-unresolved text observation
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib, json, re
+          from collections import Counter
+          from pathlib import Path
+
+          import fitz
+
+          from pb_pdf_text_fill_stroke_equivalence_shadow import (
+              classify_fill_stroke_text_pair_shadow,
+          )
+          from pb_pdf_text_integrity_authority import (
+              TEXT_CLIP_STATE_UNRESOLVED,
+              TEXT_TRACE_AMBIGUOUS,
+              _clip_model,
+              _rect_contains,
+          )
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          payload = Path("kstvet.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+
+          producer = SourceVisibilityProducer(
+              producer_method="kstvet-disjoint-sibling-all-text-v1",
+              producer_version="1.0",
+          )
+          published = producer.ingest_native_pdf_bytes(
+              document_id=f"kstvet-disjoint-all-text:{digest[:16]}",
+              source_bytes=payload,
+              source_locator="sha256-verified-kstvet-source",
+              page_ids=("47",),
+          )
+          authority = producer.text_integrity_authority()
+
+          doc = fitz.open(stream=payload, filetype="pdf")
+          page = doc.load_page(46)
+          model = _clip_model(page)
+          assert model is not None and model.consistent
+          assert len(model.clips) == 92
+
+          native_words = [
+              {"text": str(row[4]), "bbox": tuple(float(v) for v in row[:4])}
+              for row in (page.get_text("words") or ())
+          ]
+
+          def same_bbox(a, b, tol=1e-6):
+              return all(abs(float(x)-float(y)) <= tol for x,y in zip(a,b))
+
+          def native_visible(text, bbox):
+              return any(
+                  row["text"] == text and same_bbox(row["bbox"], bbox)
+                  for row in native_words
+              )
+
+          def rect_intersects(a, b):
+              return (
+                  min(float(a[2]), float(b[2])) > max(float(a[0]), float(b[0]))
+                  and min(float(a[3]), float(b[3])) > max(float(a[1]), float(b[1]))
+              )
+
+          def may_must(seqno):
+              before = None
+              after = None
+              for path in model.paths:
+                  if path[0] < seqno:
+                      before = path
+                  elif path[0] > seqno:
+                      after = path
+                      break
+              lo = before[3] if before is not None else -1
+              hi = after[3] if after is not None else None
+              stack_before = set(before[2]) if before is not None else set()
+              stack_after = set(after[2]) if after is not None else None
+              between = {
+                  clip_id for position, clip_id in model.pushes
+                  if position > lo and (hi is None or position < hi)
+              }
+              if (
+                  before is not None and after is not None and not between
+                  and before[1] == after[1] and before[2] == after[2]
+              ):
+                  return set(before[2]), set(before[2])
+              may = stack_before | between | (stack_after or set())
+              must = (stack_before & stack_after) if stack_after is not None else set()
+              return may, must
+
+          counts = Counter()
+          reason_counts = Counter()
+          rows = []
+          structural = re.compile(r"circular|hollow|sections|50mm|pillars", re.I)
+
+          for observation_id in published.text_observation_ids:
+              selector = ObservationSelector(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  observation_id=observation_id,
+              )
+              live = authority.resolve_text(selector)
+              receipt = live.receipt
+              if receipt is None:
+                  continue
+              reason_counts.update(live.reason_codes)
+              if TEXT_CLIP_STATE_UNRESOLVED not in live.reason_codes:
+                  continue
+
+              bbox = tuple(float(v) for v in receipt.geometry)
+              seqs = ()
+              pair_reasons = ()
+              if receipt.sequence_number is not None:
+                  seqs = (int(receipt.sequence_number),)
+              elif TEXT_TRACE_AMBIGUOUS in live.reason_codes:
+                  pair = classify_fill_stroke_text_pair_shadow(
+                      page,
+                      {"text": receipt.raw_text, "bbox": bbox},
+                  )
+                  seqs = tuple(int(v) for v in pair.sequence_numbers)
+                  pair_reasons = tuple(str(v) for v in pair.reason_codes)
+
+              native = native_visible(receipt.raw_text, bbox)
+              per_seq = []
+              observation_clear = bool(seqs) and native
+              observation_clipped = False
+
+              for seqno in seqs:
+                  may, must = may_must(seqno)
+                  containing = []
+                  excluded_disjoint = []
+                  unresolved = []
+                  clipped = []
+                  for clip_id in sorted(may):
+                      clip = model.clips[clip_id]
+                      contains = _rect_contains(clip.scissor, bbox)
+                      intersects = rect_intersects(clip.scissor, bbox)
+                      if contains and clip.exact_rectangle:
+                          containing.append(clip_id)
+                      elif clip_id in must:
+                          clipped.append(clip_id)
+                      elif native and clip.exact_rectangle and not intersects:
+                          excluded_disjoint.append(clip_id)
+                      else:
+                          unresolved.append(clip_id)
+                  seq_clear = not clipped and not unresolved
+                  observation_clear = observation_clear and seq_clear
+                  observation_clipped = observation_clipped or bool(clipped)
+                  per_seq.append({
+                      "seqno": seqno,
+                      "may_apply_clip_ids": sorted(may),
+                      "must_apply_clip_ids": sorted(must),
+                      "containing_clip_ids": containing,
+                      "excluded_disjoint_clip_ids": excluded_disjoint,
+                      "unresolved_clip_ids": unresolved,
+                      "clipped_clip_ids": clipped,
+                      "would_clear": seq_clear,
+                  })
+
+              counts["clip_unresolved_observations"] += 1
+              counts["would_clear"] += int(observation_clear)
+              counts["would_stay_unresolved"] += int(not observation_clear and not observation_clipped)
+              counts["would_be_clipped"] += int(observation_clipped)
+
+              row = {
+                  "observation_id": observation_id,
+                  "text": receipt.raw_text,
+                  "bbox": list(bbox),
+                  "live_reason_codes": list(live.reason_codes),
+                  "trace_sequence_numbers": list(seqs),
+                  "pair_reason_codes": list(pair_reasons),
+                  "native_visible": native,
+                  "would_clear_clip_state": observation_clear,
+                  "would_be_clipped": observation_clipped,
+                  "per_seq": per_seq,
+              }
+              rows.append(row)
+
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "source_sha256": digest,
+              "page_id": "47",
+              "clip_model_consistent": model.consistent,
+              "clip_count": len(model.clips),
+              "counts": dict(sorted(counts.items())),
+              "live_reason_counts": dict(sorted(reason_counts.items())),
+              "structural_term_rows": [row for row in rows if structural.search(row["text"])],
+              "remaining_rows": [row for row in rows if not row["would_clear_clip_state"]],
+              "rows": rows,
+          }
+          Path("kstvet-disjoint-sibling-all-text.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(json.dumps({
+              "counts": report["counts"],
+              "structural_term_rows": report["structural_term_rows"],
+              "remaining_rows": report["remaining_rows"],
+          }, indent=2, sort_keys=True))
+          doc.close()
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kstvet-disjoint-sibling-all-text
+          path: kstvet-disjoint-sibling-all-text.json
+          if-no-files-found: warn
