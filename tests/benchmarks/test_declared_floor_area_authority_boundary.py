@@ -97,19 +97,24 @@ def test_declared_total_mutation_cannot_change_physical_dimensions_or_quantities
         tmp_path, name="declared_high.pdf", declared_area=999.0
     ))
 
-    physical_tags = (
+    physical_quantity_tags = (
         "floor_screed",
         "reinforced_floor_slab",
         "substructure_bed_dpm",
         "substructure_a142_mesh",
         "substructure_surface_bed",
-        "perimeter_walling",
-        "gable_walling",
     )
-    for tag in physical_tags:
+    for tag in physical_quantity_tags:
         assert tag in base and tag in low and tag in high
         assert low[tag].quantity == pytest.approx(base[tag].quantity)
         assert high[tag].quantity == pytest.approx(base[tag].quantity)
+        assert low[tag].dimensions == base[tag].dimensions
+        assert high[tag].dimensions == base[tag].dimensions
+
+    # Wall/gable geometry may later be publication-blocked by opening authority,
+    # so compare their physical axes rather than requiring a non-null quantity.
+    for tag in ("perimeter_walling", "gable_walling"):
+        assert tag in base and tag in low and tag in high
         assert low[tag].dimensions == base[tag].dimensions
         assert high[tag].dimensions == base[tag].dimensions
 
