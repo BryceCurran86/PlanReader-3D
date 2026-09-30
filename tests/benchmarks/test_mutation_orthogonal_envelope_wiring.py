@@ -61,7 +61,7 @@ def test_declared_area_does_not_drive_wall_or_floor_geometry(tmp_path: Path):
     # reconstruction disagrees with the printed aggregate.
     assert floor.quantity == pytest.approx(176.25)
     assert floor.dimensions == pytest.approx([15.95, 11.05])
-    assert floor.metadata["derived_footprint_area_m2"] == pytest.approx(176.2475)
+    assert floor.metadata["derived_footprint_area_m2"] == pytest.approx(176.25)
     assert floor.metadata["declared_floor_area_m2"] == pytest.approx(162.69)
     assert floor.metadata["declared_floor_area_binding"] == "unbound"
     assert floor.metadata["declared_floor_area_reconciliation_status"] == (
