@@ -1,0 +1,165 @@
+name: TEST-ONLY KSTVET Structural Marker Validation
+
+on:
+  pull_request:
+    branches:
+      - 'fix/structural-definition-standalone-marker-main-v2'
+
+jobs:
+  exact-source:
+    if: github.head_ref == 'test-only/kstvet-structural-marker-1130'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and SHA-256 verify KSTVET source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o source.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  source.pdf' | sha256sum -c -
+
+      - name: Validate structural definition on page 47
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_structural_member_authority import StructuralMemberProducer, StructuralMemberSelector
+          from pb_structural_member_definition_source_shadow import (
+              STRUCTURAL_DEFINITION_SOURCE_SHADOW_TEXT_INCOMPLETE,
+              compile_structural_definition_source_shadow,
+          )
+
+          payload = Path("source.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          expected = "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+          assert digest == expected
+
+          source = SourceVisibilityProducer(
+              producer_method="kstvet-structural-marker-1130-exact-source",
+              producer_version="1.0",
+          )
+          published = source.ingest_native_pdf_bytes(
+              document_id=f"kstvet-structural:{digest[:16]}",
+              source_bytes=payload,
+              source_locator="sha256-verified-real-source",
+              page_ids=("47",),
+          )
+          selector = StructuralMemberSelector(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              decision_scope_id="source-page:47:unscoped",
+              member_kind="structural_support",
+          )
+          shadow = compile_structural_definition_source_shadow(
+              selector=selector,
+              source_visibility_producer=source,
+              page_ids=("47",),
+          )
+
+          definitions = [
+              {
+                  "member_role": row.member_role,
+                  "section_spec": row.definition.section_spec,
+                  "source_evidence_ids": list(row.definition.source_evidence_ids),
+              }
+              for row in shadow.definitions
+          ]
+          expected_definition = {
+              "member_role": "pillar",
+              "section_spec": "circular hollow section; 50mm dia x 1.5mm thick; pillar",
+          }
+          assert any(
+              row["member_role"] == expected_definition["member_role"]
+              and row["section_spec"] == expected_definition["section_spec"]
+              for row in definitions
+          ), definitions
+
+          # The isolated decorative marker must no longer poison definition
+          # completeness. Other incomplete source blocks, if present elsewhere
+          # on the page, are reported but cannot mint quantity.
+          authority = source.text_integrity_authority()
+          marker_rows = []
+          for observation_id in published.text_observation_ids:
+              result = authority.resolve_text(
+                  ObservationSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=published.revision.source_sha256,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      observation_id=observation_id,
+                  )
+              )
+              receipt = result.receipt
+              if receipt is not None and str(receipt.raw_text or "").strip() in {"-", "–", "—", "•", "·", "▪", "◦"}:
+                  marker_rows.append({
+                      "observation_id": observation_id,
+                      "raw_text": receipt.raw_text,
+                      "status": result.status.value,
+                      "reason_codes": list(result.reason_codes),
+                      "block_no": receipt.block_no,
+                      "line_no": receipt.line_no,
+                      "word_no": receipt.word_no,
+                  })
+
+          resolution = StructuralMemberProducer.from_authenticated_evidence(
+              selector=selector,
+              definitions=tuple(row.definition for row in shadow.definitions),
+              observations=(),
+              relations=(),
+              view_scopes=(),
+          ).publish()
+          assert resolution.status is EvidenceResolutionStatus.ABSTAINED
+          assert resolution.quantity is None
+          assert resolution.members == ()
+
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "source_sha256": digest,
+              "page_id": "47",
+              "shadow_status": shadow.status.value,
+              "shadow_reason_codes": list(shadow.reason_codes),
+              "has_page_incomplete_reason": (
+                  STRUCTURAL_DEFINITION_SOURCE_SHADOW_TEXT_INCOMPLETE
+                  in shadow.reason_codes
+              ),
+              "definitions": definitions,
+              "decorative_marker_rows": marker_rows,
+              "authority_without_instances": {
+                  "status": resolution.status.value,
+                  "quantity": resolution.quantity,
+                  "member_count": len(resolution.members),
+              },
+          }
+          Path("kstvet-structural-marker-1130.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kstvet-structural-marker-1130
+          path: kstvet-structural-marker-1130.json
+          if-no-files-found: warn
