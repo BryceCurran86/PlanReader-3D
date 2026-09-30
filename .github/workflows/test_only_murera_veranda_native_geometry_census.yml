@@ -1,0 +1,235 @@
+name: TEST-ONLY Murera Veranda Native Geometry Census
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  census:
+    if: github.head_ref == 'test-only/murera-veranda-native-geometry-census-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and SHA-256 verify Murera source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf' \
+            -o murera.pdf
+          echo '84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b  murera.pdf' | sha256sum -c -
+
+      - name: Describe native vector geometry near veranda labels
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          import fitz
+
+          from pb_secondary_area_support_evidence import (
+              _physical_support_glyphs,
+              _text_blocks,
+              _zone_type,
+          )
+
+          payload = Path("murera.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == "84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b"
+
+          doc = fitz.open(stream=payload, filetype="pdf")
+          page_reports = []
+
+          def rect_tuple(rect):
+              return (
+                  float(rect.x0),
+                  float(rect.y0),
+                  float(rect.x1),
+                  float(rect.y1),
+              )
+
+          def overlaps(a, b):
+              return (
+                  min(a[2], b[2]) > max(a[0], b[0])
+                  and min(a[3], b[3]) > max(a[1], b[1])
+              )
+
+          for page_id in (220, 221):
+              page = doc.load_page(page_id - 1)
+              page_rect = rect_tuple(page.rect)
+              blocks = _text_blocks(page)
+              zones = [
+                  (block, zone_type)
+                  for block in blocks
+                  if (zone_type := _zone_type(block.text)) is not None
+              ]
+              drawings = list(page.get_drawings() or ())
+              existing = _physical_support_glyphs(
+                  page,
+                  source_page=page_id,
+              )
+
+              drawing_rows = []
+              item_kind_counts = Counter()
+              fill_state_counts = Counter()
+              shape_class_counts = Counter()
+
+              zone_bands = []
+              for zone, zone_type in zones:
+                  height = page_rect[3] - page_rect[1]
+                  width = page_rect[2] - page_rect[0]
+                  zone_cy = (zone.bbox[1] + zone.bbox[3]) / 2.0
+                  zone_bands.append({
+                      "zone_type": zone_type,
+                      "zone_text": zone.text,
+                      "zone_bbox": list(zone.bbox),
+                      "broad_band_bbox": [
+                          page_rect[0],
+                          max(page_rect[1], zone_cy - height * 0.18),
+                          page_rect[2],
+                          min(page_rect[3], zone_cy + height * 0.18),
+                      ],
+                      "local_band_bbox": [
+                          max(page_rect[0], zone.bbox[0] - width * 0.20),
+                          max(page_rect[1], zone_cy - height * 0.12),
+                          min(page_rect[2], zone.bbox[2] + width * 0.20),
+                          min(page_rect[3], zone_cy + height * 0.12),
+                      ],
+                  })
+
+              for index, drawing in enumerate(drawings):
+                  rect = drawing.get("rect")
+                  if rect is None:
+                      continue
+                  bbox = rect_tuple(rect)
+                  w = max(0.0, bbox[2] - bbox[0])
+                  h = max(0.0, bbox[3] - bbox[1])
+                  items = tuple(drawing.get("items") or ())
+                  kinds = tuple(str(item[0]) for item in items if item)
+                  for kind in kinds:
+                      item_kind_counts[kind] += 1
+                  fill = drawing.get("fill")
+                  fill_state_counts["filled" if fill is not None else "unfilled"] += 1
+
+                  if w > 0 and h > 0 and max(w, h) / min(w, h) <= 1.20:
+                      shape_class = "near_square"
+                  elif h > max(1e-9, w) * 3.0:
+                      shape_class = "tall_narrow"
+                  elif w > max(1e-9, h) * 3.0:
+                      shape_class = "wide_shallow"
+                  elif kinds == ("re",):
+                      shape_class = "rectangle"
+                  elif kinds and all(kind == "l" for kind in kinds):
+                      shape_class = "line_path"
+                  else:
+                      shape_class = "other"
+                  shape_class_counts[shape_class] += 1
+
+                  broad_zone_hits = [
+                      band["zone_type"]
+                      for band in zone_bands
+                      if overlaps(bbox, band["broad_band_bbox"])
+                  ]
+                  local_zone_hits = [
+                      band["zone_type"]
+                      for band in zone_bands
+                      if overlaps(bbox, band["local_band_bbox"])
+                  ]
+
+                  descriptive_candidate = bool(
+                      broad_zone_hits
+                      and (
+                          shape_class in {
+                              "near_square",
+                              "tall_narrow",
+                              "rectangle",
+                              "line_path",
+                          }
+                          or fill is not None
+                      )
+                  )
+                  if not descriptive_candidate:
+                      continue
+
+                  drawing_rows.append({
+                      "drawing_index": index,
+                      "seqno": drawing.get("seqno"),
+                      "bbox": list(bbox),
+                      "width_extent": w,
+                      "height_extent": h,
+                      "shape_class": shape_class,
+                      "item_kinds": list(kinds),
+                      "item_count": len(items),
+                      "fill": drawing.get("fill"),
+                      "color": drawing.get("color"),
+                      "stroke_width": drawing.get("width"),
+                      "dashes": drawing.get("dashes"),
+                      "close_path": drawing.get("closePath"),
+                      "layer": drawing.get("layer"),
+                      "broad_zone_hits": broad_zone_hits,
+                      "local_zone_hits": local_zone_hits,
+                  })
+
+              page_reports.append({
+                  "page_id": page_id,
+                  "page_bbox": list(page_rect),
+                  "zone_bands": zone_bands,
+                  "drawing_count": len(drawings),
+                  "existing_physical_glyph_count": len(existing),
+                  "item_kind_counts": dict(sorted(item_kind_counts.items())),
+                  "fill_state_counts": dict(sorted(fill_state_counts.items())),
+                  "shape_class_counts": dict(sorted(shape_class_counts.items())),
+                  "descriptive_zone_geometry_count": len(drawing_rows),
+                  "descriptive_zone_geometry": drawing_rows,
+              })
+
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "source_sha256": digest,
+              "pages": page_reports,
+          }
+          Path("murera-veranda-native-geometry-census.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+
+          for page in page_reports:
+              print(json.dumps({
+                  "page_id": page["page_id"],
+                  "zone_bands": page["zone_bands"],
+                  "drawing_count": page["drawing_count"],
+                  "existing_physical_glyph_count": page[
+                      "existing_physical_glyph_count"
+                  ],
+                  "item_kind_counts": page["item_kind_counts"],
+                  "fill_state_counts": page["fill_state_counts"],
+                  "shape_class_counts": page["shape_class_counts"],
+                  "descriptive_zone_geometry_count": page[
+                      "descriptive_zone_geometry_count"
+                  ],
+                  "descriptive_zone_geometry": page[
+                      "descriptive_zone_geometry"
+                  ][:120],
+              }, indent=2, sort_keys=True))
+          doc.close()
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: murera-veranda-native-geometry-census
+          path: murera-veranda-native-geometry-census.json
+          if-no-files-found: warn
