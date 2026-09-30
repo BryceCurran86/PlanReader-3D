@@ -45,6 +45,20 @@ def source_blocks(count: int = 4, scope: str = "building-a"):
     )
 
 
+def masonry_pier_blocks():
+    return (
+        SourceStructuralTextBlock(
+            page_id="183", view_id="boq-page-183", block_id="21", reading_order=21,
+            bbox=(80.0, 410.0, 650.0, 432.0),
+            text=(
+                "Extra over for 300 x 300mm masonry piers, "
+                "4,500mm high (Including 1,200mm below ground)"
+            ),
+            scope_id="building-a",
+        ),
+    )
+
+
 def physical_members():
     return tuple(StructuralMemberObservation(
         observation_id=f"member:{index}", member_kind="structural_support",
@@ -90,6 +104,41 @@ def test_adjacent_source_fragments_create_stable_count_free_definition():
     )
     assert "4 NO" not in a[0].definition.section_spec
     assert "99" not in a[0].definition.section_spec
+
+
+def test_masonry_pier_definition_parses_without_minting_instances():
+    definitions = parse_structural_member_definitions(
+        selector=selector(), blocks=masonry_pier_blocks()
+    )
+    assert len(definitions) == 1
+    assert definitions[0].member_role == "pier"
+    assert definitions[0].definition.section_spec == "masonry; 300 x 300mm; pier"
+    assert "4,500" not in definitions[0].definition.section_spec
+    assert "1,200" not in definitions[0].definition.section_spec
+
+    binding = bind_structural_member_definitions(
+        selector=selector(), definitions=definitions, observations=(), links=(),
+    )
+    result = resolve(binding)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.quantity is None
+    assert result.members == ()
+
+
+def test_masonry_size_without_member_role_or_material_is_not_a_definition():
+    material = masonry_pier_blocks()[0]
+    assert parse_structural_member_definitions(
+        selector=selector(),
+        blocks=(replace(material, text="Window opening 300 x 300mm"),),
+    ) == ()
+    assert parse_structural_member_definitions(
+        selector=selector(),
+        blocks=(replace(material, text="300 x 300mm piers"),),
+    ) == ()
+    assert parse_structural_member_definitions(
+        selector=selector(),
+        blocks=(replace(material, text="300 x 300mm masonry wall"),),
+    ) == ()
 
 
 def test_definition_or_explicit_count_text_alone_never_creates_quantity():
