@@ -1,0 +1,146 @@
+name: TEST-ONLY KSTVET TrueType WinAnsi After 1116
+
+on:
+  pull_request:
+    branches:
+      - 'fix/pdf-text-truetype-winansi-glyph-proof-v1'
+
+jobs:
+  probe:
+    if: github.head_ref == 'test-only/kstvet-truetype-winansi-after-1116'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 439865521f9ea08154cefbf0f481fbeb79836127
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and verify KSTVET source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  kstvet.pdf' | sha256sum -c -
+
+      - name: Validate exact-source TrueType WinAnsi decode
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import fitz
+
+          from pb_pdf_text_integrity_authority import (
+              TEXT_TRACE_AMBIGUOUS,
+              _decode_status,
+          )
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          payload = Path("kstvet.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+
+          doc = fitz.open(stream=payload, filetype="pdf")
+          page = doc.load_page(46)
+          traces = [
+              span
+              for span in (page.get_texttrace() or ())
+              if int(span.get("seqno", -1)) in (108, 109)
+          ]
+          assert len(traces) == 2
+          rows = []
+          for span in sorted(traces, key=lambda item: int(item["seqno"])):
+              text = "".join(chr(int(ch[0])) for ch in span.get("chars") or ())
+              status, reasons, xref, subtype, base_font = _decode_status(
+                  page,
+                  span,
+                  text,
+              )
+              rows.append({
+                  "seqno": int(span["seqno"]),
+                  "text": text,
+                  "decode_status": status,
+                  "decode_reason_codes": list(reasons),
+                  "font_xref": xref,
+                  "font_subtype": subtype,
+                  "font_name": base_font,
+              })
+              assert status == "validated_truetype_winansi_glyph_mapping"
+              assert reasons == ()
+              assert xref == 59
+              assert subtype == "TrueType"
+
+          producer = SourceVisibilityProducer(
+              producer_method="kstvet-truetype-winansi-after-1116",
+              producer_version="1.0",
+          )
+          published = producer.ingest_native_pdf_bytes(
+              document_id=f"kstvet-truetype-winansi:{digest[:16]}",
+              source_bytes=payload,
+              source_locator="sha256-verified-kstvet-source",
+              page_ids=("47",),
+          )
+          authority = producer.text_integrity_authority()
+          ambiguous = []
+          for observation_id in published.text_observation_ids:
+              selector = ObservationSelector(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  observation_id=observation_id,
+              )
+              result = authority.resolve_text(selector)
+              receipt = result.receipt
+              if (
+                  receipt is not None
+                  and TEXT_TRACE_AMBIGUOUS in result.reason_codes
+                  and receipt.raw_text in {
+                      "Circular", "hollow", "sections", "painted", "fixed", "with", "and"
+                  }
+              ):
+                  ambiguous.append({
+                      "text": receipt.raw_text,
+                      "reason_codes": list(result.reason_codes),
+                      "trusted_text": result.trusted_text,
+                  })
+          assert ambiguous
+          assert all(row["trusted_text"] is None for row in ambiguous)
+
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "tested_production_head": "439865521f9ea08154cefbf0f481fbeb79836127",
+              "source_sha256": digest,
+              "page_id": "47",
+              "trace_decode_rows": rows,
+              "live_trace_ambiguous_chs_rows": ambiguous,
+              "decode_validation_passed": True,
+              "live_trace_ambiguity_unchanged": True,
+          }
+          Path("kstvet-truetype-winansi-after-1116.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          doc.close()
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kstvet-truetype-winansi-after-1116
+          path: kstvet-truetype-winansi-after-1116.json
+          if-no-files-found: warn
