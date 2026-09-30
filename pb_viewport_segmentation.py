@@ -549,6 +549,98 @@ def _title_field_owned_regions(page: Any) -> list[tuple[float, float, float, flo
     return regions
 
 
+@dataclass(frozen=True)
+class _NativeLine:
+    bbox: tuple[float, float, float, float]
+    text: str
+    size: float
+    bold: bool
+    horizontal: bool
+
+
+_WRAP_MAX_GAP_SIZE_FRACTION = 0.6
+_WRAP_MAX_OVERLAP_INTRUSION = 0.3
+_WRAP_SIZE_TOLERANCE = 0.1
+_WRAP_MIN_ALIGNED_OVERLAP = 0.4
+_PDF_BOLD_FLAG = 16
+
+
+def _native_line(line: dict[str, Any]) -> Optional[_NativeLine]:
+    spans = line.get("spans", []) or []
+    bbox = line.get("bbox")
+    if not spans or not bbox or len(bbox) < 4:
+        return None
+    text = _normalise_text(" ".join(str(span.get("text", "")) for span in spans))
+    if not text:
+        return None
+    direction = list(line.get("dir") or (1.0, 0.0)) + [0.0, 0.0]
+    horizontal = abs(direction[1]) <= 0.2 * max(abs(direction[0]), 1e-9)
+    return _NativeLine(
+        bbox=(float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])),
+        text=text,
+        size=max(float(span.get("size", 0.0) or 0.0) for span in spans),
+        bold=all(int(span.get("flags", 0) or 0) & _PDF_BOLD_FLAG for span in spans),
+        horizontal=horizontal,
+    )
+
+
+def _wrapped_continuation(previous: _NativeLine, current: _NativeLine) -> bool:
+    """``current`` continues ``previous`` as a wrapped line of the same text.
+
+    Contiguous (leading within a fraction of the type size), aligned
+    (horizontal overlap), of comparable type size, and not independently
+    dominant (not bold where the previous line is not).
+    """
+    if not (previous.horizontal and current.horizontal) or previous.size <= 0 or current.size <= 0:
+        return False
+    gap = current.bbox[1] - previous.bbox[3]
+    previous_height = previous.bbox[3] - previous.bbox[1]
+    if gap > _WRAP_MAX_GAP_SIZE_FRACTION * previous.size or gap < -_WRAP_MAX_OVERLAP_INTRUSION * previous_height:
+        return False
+    if abs(current.size - previous.size) > _WRAP_SIZE_TOLERANCE * previous.size:
+        return False
+    if current.bold and not previous.bold:
+        return False
+    overlap = min(current.bbox[2], previous.bbox[2]) - max(current.bbox[0], previous.bbox[0])
+    smaller = min(current.bbox[2] - current.bbox[0], previous.bbox[2] - previous.bbox[0])
+    return smaller > 0 and overlap >= _WRAP_MIN_ALIGNED_OVERLAP * smaller
+
+
+def _wrapped_note_tail_lines(page: Any) -> list[tuple[tuple[float, float, float, float], str]]:
+    """Lines (box, text) that are the wrapped tail of a note in the same native text block.
+
+    A run of contiguous, aligned, comparably typeset lines inside one native
+    PDF text block whose merged text the page-title authority rejects as a
+    title (a sentence, too long, a list item, ...) owns its non-first lines:
+    they are the tail of that note, never a standalone drawing title.  A
+    stacked multi-line heading merges to a title-shaped text and is untouched;
+    so is any first line of a run, and any line with independent typographic
+    dominance (larger, or bold where the run is not).
+    """
+    try:
+        data = page.get_text("dict") or {}
+    except Exception:
+        return []
+    tails: list[tuple[tuple[float, float, float, float], str]] = []
+    for block in data.get("blocks", []) or []:
+        if int(block.get("type", 0)) != 0:
+            continue
+        lines = [ln for ln in (_native_line(line) for line in block.get("lines", []) or []) if ln is not None]
+        runs: list[list[int]] = []
+        for index, line in enumerate(lines):
+            if index and _wrapped_continuation(lines[index - 1], line):
+                runs[-1].append(index)
+            else:
+                runs.append([index])
+        for run in runs:
+            if len(run) < 2:
+                continue
+            merged = _normalise_text(" ".join(lines[i].text for i in run))
+            if _title_authority.title_shape(merged, bound=False)[0] == 0.0:
+                tails.extend((lines[i].bbox, lines[i].text) for i in run[1:])
+    return tails
+
+
 def _to_visual_bbox(page: Any, bbox: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
     """Express a text-dict bbox in the page's visual orientation."""
     if not int(getattr(page, "rotation", 0) or 0):
@@ -564,6 +656,7 @@ def _to_visual_bbox(page: Any, bbox: tuple[float, float, float, float]) -> tuple
 def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
     candidates: list[_TitleAnchor] = []
     owned: Optional[list[tuple[float, float, float, float]]] = None
+    tails: Optional[list[tuple[tuple[float, float, float, float], str]]] = None
     for bbox, text in _text_fragments(page):
         if not _TITLE_SHAPE_RE.match(text):
             continue
@@ -574,6 +667,10 @@ def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
             owned = _title_field_owned_regions(page)
         if owned and any(_point_in_bbox(_bbox_center(_to_visual_bbox(page, bbox)), region) for region in owned):
             continue  # a title-field value, not a drawing-view title
+        if tails is None:
+            tails = _wrapped_note_tail_lines(page)
+        if tails and any(text in tail_text and _point_in_bbox(_bbox_center(bbox), tail_bbox) for tail_bbox, tail_text in tails):
+            continue  # the wrapped tail of a note, not a drawing-view title
         candidates.append(_TitleAnchor(text=text, bbox=bbox, view_type=view_type))
 
     # Prefer the tighter span when a line-level fragment duplicates it.
