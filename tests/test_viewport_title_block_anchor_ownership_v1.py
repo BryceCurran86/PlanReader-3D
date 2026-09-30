@@ -101,7 +101,7 @@ def _signature(viewports):
 def test_title_block_owned_title_is_not_a_drawing_title_anchor() -> None:
     doc = _sheet()
     page = doc[0]
-    assert vs._title_block_owned_regions(page), "the synthetic title block must be demonstrated"
+    assert vs._title_field_owned_regions(page), "the synthetic title block must be demonstrated"
     anchors = extract_view_title_anchors(page)
     assert len(anchors) == 1
     # the surviving anchor is the drawing title, not the title-block value
@@ -123,7 +123,7 @@ def test_title_block_duplicate_cannot_create_a_derived_partition() -> None:
 
 def test_without_ownership_evidence_the_same_sheet_is_ambiguous_not_two_halves(monkeypatch) -> None:
     """Part B is the backstop when Part A is unavailable: still no two halves."""
-    monkeypatch.setattr(vs, "_title_block_owned_regions", lambda page: [])
+    monkeypatch.setattr(vs, "_title_field_owned_regions", lambda page: [])
     doc = _sheet()
     viewports = segment_page_viewports(doc[0], page_number=3)
     plans = _plans(viewports)
@@ -133,11 +133,12 @@ def test_without_ownership_evidence_the_same_sheet_is_ambiguous_not_two_halves(m
     doc.close()
 
 
-def test_weak_title_block_cannot_suppress_a_title() -> None:
-    # two field labels only: not a demonstrated title block
-    doc = _sheet(block_labels=("DRAWING TITLE", "DRAWING NO"))
+def test_weak_title_block_without_an_explicit_title_field_cannot_suppress_a_title() -> None:
+    # two non-title field labels only: neither a demonstrated title block nor
+    # an explicit drawing-title field binding
+    doc = _sheet(block_labels=("SCALE", "DATE"))
     page = doc[0]
-    assert vs._title_block_owned_regions(page) == []
+    assert vs._title_field_owned_regions(page) == []
     assert len(extract_view_title_anchors(page)) == 2
     plans = _plans(segment_page_viewports(page, page_number=1))
     assert len(plans) == 2
@@ -145,10 +146,39 @@ def test_weak_title_block_cannot_suppress_a_title() -> None:
     doc.close()
 
 
+def test_explicit_title_field_binding_owns_its_value_without_a_demonstrated_block() -> None:
+    # only two labels (a weak cluster), but one is an explicit drawing-title
+    # field whose bound value is "FLOOR PLAN"
+    doc = _sheet(block_labels=("DRAWING TITLE", "DRAWING NO"))
+    page = doc[0]
+    analysis = vs._title_authority.analyse_cells(
+        vs._title_authority.page_cells(page), page.rect.width, page.rect.height, 0, "native"
+    )
+    assert analysis.title_block is None  # not a demonstrated block
+    assert vs._title_field_owned_regions(page)
+    anchors = extract_view_title_anchors(page)
+    assert len(anchors) == 1 and anchors[0].bbox[1] < 400
+    doc.close()
+
+
+@pytest.mark.parametrize("label", ["Drawing name:", "Sheet title", "Drawing Title:"])
+def test_each_explicit_title_label_form_owns_its_value(label: str) -> None:
+    doc = _sheet(block_labels=(label, "DATE"))
+    assert len(extract_view_title_anchors(doc[0])) == 1
+    doc.close()
+
+
+def test_bare_title_label_is_not_explicit_ownership() -> None:
+    doc = _sheet(block_labels=("TITLE", "DATE"))
+    assert vs._title_field_owned_regions(doc[0]) == []
+    assert len(extract_view_title_anchors(doc[0])) == 2
+    doc.close()
+
+
 def test_real_drawing_title_next_to_but_outside_the_title_block_is_kept() -> None:
     doc = _sheet(plan_title_at=(470.0, 545.0), block_at=(620.0, 540.0))
     page = doc[0]
-    regions = vs._title_block_owned_regions(page)
+    regions = vs._title_field_owned_regions(page)
     assert regions
     anchors = extract_view_title_anchors(page)
     assert len(anchors) == 1
@@ -159,7 +189,7 @@ def test_real_drawing_title_next_to_but_outside_the_title_block_is_kept() -> Non
 
 def test_no_title_block_means_no_suppression() -> None:
     doc = _sheet(block_at=None)
-    assert vs._title_block_owned_regions(doc[0]) == []
+    assert vs._title_field_owned_regions(doc[0]) == []
     assert len(extract_view_title_anchors(doc[0])) == 1
     doc.close()
 
@@ -192,6 +222,41 @@ def test_same_text_same_type_unframed_titles_fail_closed() -> None:
     viewports = segment_page_viewports(doc[0], page_number=1)
     assert len(viewports) == 2
     assert all(v.status == AMBIGUOUS and v.bounding_box is None for v in viewports)
+    doc.close()
+
+
+def test_duplicate_group_is_quarantined_without_collateral_to_unrelated_anchors() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=1190, height=842)
+    page.insert_text((60, 500), "FLOOR PLAN", fontsize=14)
+    page.insert_text((700, 780), "FLOOR PLAN", fontsize=14)
+    page.insert_text((900, 150), "NORTH ELEVATION", fontsize=14)
+    doc = _reopen(doc)
+    by_label = {}
+    for v in segment_page_viewports(doc[0], page_number=1):
+        by_label.setdefault(v.label, []).append(v)
+    assert [v.status for v in by_label["FLOOR PLAN"]] == [AMBIGUOUS, AMBIGUOUS]
+    assert all(v.bounding_box is None for v in by_label["FLOOR PLAN"])
+    (elevation,) = by_label["NORTH ELEVATION"]
+    assert elevation.status == UNSUPPORTED  # a lone unframed title: its own evidence path
+    assert elevation.bounding_box is None
+    doc.close()
+
+
+def test_unrelated_distinct_anchors_still_partition_beside_a_duplicate_group() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=1190, height=842)
+    page.insert_text((60, 500), "FLOOR PLAN", fontsize=14)
+    page.insert_text((700, 780), "FLOOR PLAN", fontsize=14)
+    page.insert_text((300, 150), "NORTH ELEVATION", fontsize=14)
+    page.insert_text((900, 150), "SOUTH ELEVATION", fontsize=14)
+    doc = _reopen(doc)
+    viewports = segment_page_viewports(doc[0], page_number=1)
+    plans = _plans(viewports)
+    elevations = [v for v in viewports if v.view_type != FLOOR]
+    assert [v.status for v in plans] == [AMBIGUOUS, AMBIGUOUS]
+    assert [v.status for v in elevations] == [DERIVED, DERIVED]
+    assert vs.validate_non_overlapping_viewports(viewports)
     doc.close()
 
 

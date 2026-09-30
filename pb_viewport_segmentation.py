@@ -508,15 +508,20 @@ def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
     )
 
 
-def _title_block_owned_regions(page: Any) -> list[tuple[float, float, float, float]]:
-    """Regions the page-title authority positively demonstrates as title-block owned.
+def _title_field_owned_regions(page: Any) -> list[tuple[float, float, float, float]]:
+    """Regions ``pb_page_title_authority`` positively shows as title-field values.
 
-    Reuses ``pb_page_title_authority`` (native text only, no OCR): the
-    demonstrated title-block region (a cluster of drawing title-block field
-    labels) plus the bound value boxes of title-block fields.  Nothing is
-    returned unless a title block is demonstrated, so a weak or absent
-    title block can never suppress a title.  Regions are in the page's visual
-    orientation, page points.
+    Reuses the page-title authority (native text only, no OCR) and nothing else:
+
+    - the value box of a drawing-title field bound by an *explicit* title label
+      ("Drawing name", "Drawing title", "Sheet title", ...), whether or not a
+      title-block region is demonstrated;
+    - when a title block *is* demonstrated (a cluster of drawing title-block
+      field labels): that region and the bound values of fields inside it.
+
+    A bare ``TITLE`` label, a weak label cluster, or an absent title block
+    contribute nothing.  Regions are in the page's visual orientation, in page
+    points.
     """
     try:
         rect = page.rect
@@ -526,12 +531,18 @@ def _title_block_owned_regions(page: Any) -> list[tuple[float, float, float, flo
         )
     except Exception:
         return []
-    block = analysis.title_block
-    if block is None or width <= 0 or height <= 0:
+    if width <= 0 or height <= 0:
         return []
-    regions = [tuple(float(v) for v in block)]
+    regions: list[tuple[float, float, float, float]] = []
+    block = analysis.title_block
+    if block is not None:
+        regions.append(tuple(float(v) for v in block))
     for candidate in analysis.candidates:
-        if candidate.region != "title block" or not candidate.text:
+        if candidate.kind != "label" or candidate.rejected or not candidate.text:
+            continue
+        explicit = candidate.label_strength == "title_explicit"
+        in_block = block is not None and candidate.region == "title block"
+        if not (explicit or in_block):
             continue
         box = candidate.box
         regions.append((box[0] * width, box[1] * height, box[2] * width, box[3] * height))
@@ -560,9 +571,9 @@ def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
         if view_type == DrawingViewType.UNKNOWN.value:
             continue
         if owned is None:
-            owned = _title_block_owned_regions(page)
+            owned = _title_field_owned_regions(page)
         if owned and any(_point_in_bbox(_bbox_center(_to_visual_bbox(page, bbox)), region) for region in owned):
-            continue  # a title-block field value, not a drawing-view title
+            continue  # a title-field value, not a drawing-view title
         candidates.append(_TitleAnchor(text=text, bbox=bbox, view_type=view_type))
 
     # Prefer the tighter span when a line-level fragment duplicates it.
@@ -1014,7 +1025,8 @@ def _derived_partitions(
     axis = 0 if x_spread / max(calibration.page_width_pt, 1.0) >= y_spread / max(calibration.page_height_pt, 1.0) else 1
     ordered = sorted(unresolved_indices, key=lambda i: (anchors[i].center[axis], anchors[i].center[1 - axis]))
     coords = [anchors[i].center[axis] for i in ordered]
-    if any(abs(coords[i + 1] - coords[i]) < calibration.title_separation_pt for i in range(len(coords) - 1)):
+    close = any(abs(coords[i + 1] - coords[i]) < calibration.title_separation_pt for i in range(len(coords) - 1))
+    if close:
         grid = _columnar_title_grid_partitions(
             page,
             anchors,
@@ -1024,6 +1036,32 @@ def _derived_partitions(
         )
         if grid is not None:
             return grid
+
+    # The same title text and view type more than once, unframed and not a
+    # validated title grid: nothing positively separates that group into
+    # independent drawing views, so no partition is manufactured for it.  Only
+    # the duplicate group is quarantined; unrelated anchors go on through their
+    # own evidence path.
+    identity_counts: dict[tuple[str, str], int] = {}
+    for index in unresolved_indices:
+        identity = _title_identity(anchors[index])
+        identity_counts[identity] = identity_counts.get(identity, 0) + 1
+    duplicated = [i for i in unresolved_indices if identity_counts[_title_identity(anchors[i])] > 1]
+    if duplicated:
+        quarantined = [SegmentedViewport(
+            view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
+            view_type=anchors[index].view_type, label=anchors[index].text,
+            title_bbox=anchors[index].bbox, bounding_box=None,
+            status=ViewportSegmentationStatus.AMBIGUOUS.value,
+            boundary_source=ViewportBoundarySource.NONE.value, confidence=0.0,
+            notes=["unframed same-identity titles are not proven independent views"],
+        ) for index in duplicated]
+        remaining = [i for i in unresolved_indices if i not in set(duplicated)]
+        return quarantined + _derived_partitions(
+            page, anchors, remaining, calibration, page_number=page_number,
+        )
+
+    if close:
         return [SegmentedViewport(
             view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
             view_type=anchors[index].view_type, label=anchors[index].text,
@@ -1031,20 +1069,6 @@ def _derived_partitions(
             status=ViewportSegmentationStatus.AMBIGUOUS.value,
             boundary_source=ViewportBoundarySource.NONE.value, confidence=0.0,
             notes=["unframed title anchors are not spatially separable"],
-        ) for index in unresolved_indices]
-
-    identities = [_title_identity(anchors[i]) for i in ordered]
-    if len(set(identities)) < len(identities):
-        # The same title text and view type more than once, unframed and not a
-        # validated title grid: nothing positively separates them into
-        # independent drawing views, so no partition is manufactured.
-        return [SegmentedViewport(
-            view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
-            view_type=anchors[index].view_type, label=anchors[index].text,
-            title_bbox=anchors[index].bbox, bounding_box=None,
-            status=ViewportSegmentationStatus.AMBIGUOUS.value,
-            boundary_source=ViewportBoundarySource.NONE.value, confidence=0.0,
-            notes=["unframed same-identity titles are not proven independent views"],
         ) for index in unresolved_indices]
 
     bounds = [0.0]

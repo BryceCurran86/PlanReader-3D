@@ -173,9 +173,12 @@ def test_title_block_panel_is_not_viewport_authority() -> None:
     page.insert_text((440, 320), "GROUND FLOOR PLAN", fontsize=10)
     page.insert_text((440, 350), "DRAWING NO", fontsize=8)
     doc = _reopen(doc)
-    plan = _floor_plans(segment_page_viewports(doc[0], page_number=1))[0]
-    assert plan.status != ViewportSegmentationStatus.RESOLVED.value
-    assert plan.bounding_box is None
+    # The value bound to the explicit "DRAWING TITLE" field is a title-field
+    # value, so it is not a view-title anchor at all; if it were one, it must
+    # still never be a resolved viewport.
+    for plan in _floor_plans(segment_page_viewports(doc[0], page_number=1)):
+        assert plan.status != ViewportSegmentationStatus.RESOLVED.value
+        assert plan.bounding_box is None
     assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
     doc.close()
 
