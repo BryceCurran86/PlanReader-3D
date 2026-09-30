@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import fitz
+import pytest
 
 from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
 
@@ -19,6 +20,8 @@ def _murera_like_unowned_shape_pdf(
     tmp_path: Path,
     *,
     include_explicit_count_text: bool = False,
+    square: bool = False,
+    filled: bool = True,
 ) -> Path:
     """Synthetic source shaped after the real-source blocker, not its quantity.
 
@@ -35,12 +38,16 @@ def _murera_like_unowned_shape_pdf(
     # tokens are deliberately present to prove that proximity does not mint a
     # physical masonry-pier observation.
     page.draw_rect(
-        fitz.Rect(369.5, 108.2, 382.0, 108.6),
+        fitz.Rect(369.5, 108.2, 382.0, 120.7 if square else 108.6),
         color=(0, 0, 0),
-        fill=(0, 0, 0),
+        fill=(0, 0, 0) if filled else None,
         width=0.5,
     )
     page.insert_text((393.0, 132.0), "AT 4", fontsize=8)
+
+    if square:
+        # An unbound nearby specification cannot turn a square into a member.
+        page.insert_text((393.0, 146.0), "300 x 300mm masonry piers", fontsize=8)
 
     if include_explicit_count_text:
         page.insert_text((72, 110), "7 Nos masonry piers", fontsize=9)
@@ -55,6 +62,23 @@ def test_unowned_pier_like_geometry_and_nearby_numbers_do_not_publish_masonry_pi
     tmp_path: Path,
 ) -> None:
     pdf_path = _murera_like_unowned_shape_pdf(tmp_path)
+    predictions = _extract_tags(pdf_path)
+    assert "masonry_piers" not in predictions
+
+
+@pytest.mark.parametrize("filled", (False, True), ids=("outline", "filled"))
+@pytest.mark.parametrize("include_count", (False, True), ids=("no-count", "count"))
+def test_unrelated_square_with_nearby_specification_cannot_publish_masonry_piers(
+    tmp_path: Path,
+    filled: bool,
+    include_count: bool,
+) -> None:
+    pdf_path = _murera_like_unowned_shape_pdf(
+        tmp_path,
+        square=True,
+        filled=filled,
+        include_explicit_count_text=include_count,
+    )
     predictions = _extract_tags(pdf_path)
     assert "masonry_piers" not in predictions
 
