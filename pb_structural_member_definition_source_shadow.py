@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+import re
 from typing import Mapping, Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
@@ -106,6 +107,124 @@ def _is_ignorable_standalone_untrusted_marker(
     return int(line_counts.get(key, 0)) == 1
 
 
+_BOQ_HEADER_LABELS = ("description", "quantity", "unit", "rate", "amount")
+_COMMERCIAL_NUMERIC_TOKEN = re.compile(r"^\(?[-+]?\d[\d,]*(?:\.\d+)?\)?$")
+
+
+@dataclass(frozen=True)
+class _BoqCommercialColumnBounds:
+    header_bottom: float
+    rate_left: float
+    rate_right: float
+    amount_left: float
+
+
+def _boq_commercial_columns(resolved_rows) -> dict[str, _BoqCommercialColumnBounds]:
+    """Prove rate/amount columns from one complete trusted BOQ header.
+
+    The structural compiler may ignore an untrusted commercial cell only when
+    producer-trusted source text proves the page's Description / Quantity /
+    Unit / Rate / Amount header, in that horizontal order and on one shared
+    vertical band. Ambiguous or incomplete headers prove nothing.
+    """
+
+    grouped: dict[tuple[str, int], dict[str, list[object]]] = {}
+    for _observation_id, result, receipt in resolved_rows:
+        if (
+            result.status is not EvidenceResolutionStatus.CORROBORATED
+            or result.trusted_text is None
+            or receipt.block_no is None
+            or len(receipt.geometry) < 4
+        ):
+            continue
+        label = " ".join(str(result.trusted_text).strip().lower().split())
+        if label not in _BOQ_HEADER_LABELS:
+            continue
+        grouped.setdefault(
+            (str(receipt.page_id), int(receipt.block_no)),
+            {},
+        ).setdefault(label, []).append(receipt)
+
+    candidates: dict[str, list[_BoqCommercialColumnBounds]] = {}
+    for (page_id, _block_no), labels in grouped.items():
+        if any(len(labels.get(label, ())) != 1 for label in _BOQ_HEADER_LABELS):
+            continue
+        receipts = [labels[label][0] for label in _BOQ_HEADER_LABELS]
+        try:
+            boxes = [
+                tuple(float(value) for value in receipt.geometry[:4])
+                for receipt in receipts
+            ]
+        except (TypeError, ValueError):
+            continue
+        if max(box[1] for box in boxes) > min(box[3] for box in boxes):
+            continue
+        centers = [(box[0] + box[2]) / 2.0 for box in boxes]
+        if not all(left < right for left, right in zip(centers, centers[1:])):
+            continue
+        _description, _quantity, unit, rate, amount = centers
+        rate_left = (unit + rate) / 2.0
+        rate_right = (rate + amount) / 2.0
+        candidates.setdefault(page_id, []).append(
+            _BoqCommercialColumnBounds(
+                header_bottom=max(box[3] for box in boxes),
+                rate_left=rate_left,
+                rate_right=rate_right,
+                amount_left=rate_right,
+            )
+        )
+
+    return {
+        page_id: rows[0]
+        for page_id, rows in candidates.items()
+        if len(rows) == 1
+    }
+
+
+def _is_ignorable_untrusted_commercial_cell(
+    receipt,
+    line_counts: Mapping[tuple[str, int, int], int],
+    commercial_columns: Mapping[str, _BoqCommercialColumnBounds],
+) -> bool:
+    """Omit only isolated numeric cells proven to be under Rate/Amount."""
+
+    if (
+        receipt.block_no is None
+        or receipt.line_no is None
+        or receipt.word_no is None
+        or int(receipt.word_no) != 0
+        or len(receipt.geometry) < 4
+        or _COMMERCIAL_NUMERIC_TOKEN.fullmatch(
+            str(receipt.raw_text or "").strip()
+        )
+        is None
+    ):
+        return False
+    key = (
+        str(receipt.page_id),
+        int(receipt.block_no),
+        int(receipt.line_no),
+    )
+    if int(line_counts.get(key, 0)) != 1:
+        return False
+    columns = commercial_columns.get(str(receipt.page_id))
+    if columns is None:
+        return False
+    try:
+        x0, y0, x1, _y1 = (
+            float(value) for value in receipt.geometry[:4]
+        )
+    except (TypeError, ValueError):
+        return False
+    if y0 < columns.header_bottom:
+        return False
+    center = (x0 + x1) / 2.0
+    return (
+        columns.rate_left <= center < columns.rate_right
+        or center >= columns.amount_left
+    )
+
+
 def compile_structural_definition_source_shadow(
     *,
     selector: StructuralMemberSelector,
@@ -194,6 +313,8 @@ def compile_structural_definition_source_shadow(
             )
         ] += 1
 
+    commercial_columns = _boq_commercial_columns(resolved_rows)
+
     for observation_id, result, receipt in resolved_rows:
         if receipt.block_no is None:
             incomplete_block = True
@@ -207,6 +328,12 @@ def compile_structural_definition_source_shadow(
             or len(receipt.geometry) < 4
         ):
             if _is_ignorable_standalone_untrusted_marker(receipt, line_counts):
+                continue
+            if _is_ignorable_untrusted_commercial_cell(
+                receipt,
+                line_counts,
+                commercial_columns,
+            ):
                 continue
             incomplete_block = True
             blocked_blocks.add(block_key)
@@ -298,6 +425,8 @@ __all__ = [
     "STRUCTURAL_DEFINITION_SOURCE_SHADOW_PAGE_UNAVAILABLE",
     "STRUCTURAL_DEFINITION_SOURCE_SHADOW_TEXT_INCOMPLETE",
     "StructuralDefinitionSourceShadowResult",
+    "_boq_commercial_columns",
     "_is_ignorable_standalone_untrusted_marker",
+    "_is_ignorable_untrusted_commercial_cell",
     "compile_structural_definition_source_shadow",
 ]
