@@ -152,6 +152,35 @@ jobs:
                       ].decode("latin1", errors="replace"),
                   })
 
+          xobjects = []
+          for item in page.get_xobjects() or ():
+              row = {"raw": [str(v) for v in item]}
+              try:
+                  xref = int(item[0])
+              except Exception:
+                  xobjects.append(row)
+                  continue
+              stream = bytes(doc.xref_stream(xref) or b"")
+              row.update({
+                  "xref": xref,
+                  "stream_len": len(stream),
+                  "clip_operator_count": len(
+                      re.findall(rb"(?<!\\S)W\\*?(?!\\S)", stream)
+                  ),
+                  "tm_count": len(tm_pattern.findall(stream)),
+                  "cm_count": len(
+                      re.findall(rb"(?<!\\S)cm(?!\\S)", stream)
+                  ),
+                  "sample_tm": [
+                      [float(m.group(i)) for i in range(1,7)]
+                      for m in list(tm_pattern.finditer(stream))[:20]
+                  ],
+                  "stream_prefix": stream[:2500].decode(
+                      "latin1", errors="replace"
+                  ),
+              })
+              xobjects.append(row)
+
           report = {
               "source_sha256": digest,
               "page_id": "47",
@@ -161,6 +190,10 @@ jobs:
               "raw_contexts": raw_contexts,
               "clip_text_contexts": clip_text_contexts,
               "tm_trace_bindings": tm_rows,
+              "xobjects": xobjects,
+              "page_cm_count": len(
+                  re.findall(rb"(?<!\\S)cm(?!\\S)", content)
+              ),
           }
           Path("kstvet-text-clip-operation-binding.json").write_text(
               json.dumps(report, indent=2, sort_keys=True),
