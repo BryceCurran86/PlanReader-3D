@@ -151,21 +151,22 @@ Structural-member publication that lacks the generic object-to-quantity seam mus
 
 The registry summary must report counts and ids for these four quantity-census states independently of object coverage-state counts.
 
-### 3. Coverage semantics
+### 3. Coverage semantics and frozen precedence
 
-ACCOUNTED:
-All explicit dependencies known to v1 for this admitted object resolve successfully to current lineage-compatible downstream records.
-This means only explicit-dependency closure; it does NOT mean all quantity families that ought to exist for the object are present.
+CoverageObjectRecordV1 classification is ordered and must apply the following precedence exactly:
+
+1. **UNACCOUNTED** - no explicit object-to-quantity relationship exists in the approved v1 seams.
+2. **ABSTAINED** - one or more explicit downstream abstention/refusal records exist and no resolved non-abstained row accounts for the object.
+3. **PARTIAL** - at least one explicit dependency resolves successfully and at least one other explicit dependency is dangling, conflicting, stale, lineage-incompatible, unresolved, or abstained.
+4. **ACCOUNTED** - one or more explicit dependencies exist and every explicit dependency known to v1 resolves lineage-cleanly.
+
+The ordering is normative. In particular, zero explicit dependencies can never satisfy ACCOUNTED through vacuous all-resolved logic; rule 1 classifies that object UNACCOUNTED first.
+An object with only explicit abstentions and no resolved non-abstained row is ABSTAINED, not PARTIAL.
+A mixed object with at least one resolved explicit dependency plus any abstained or otherwise defective explicit dependency is PARTIAL.
+
+ACCOUNTED means only explicit-dependency closure. It does NOT mean all quantity families that ought to exist for the object are present.
 Commercial publishability is reported separately and does not by itself demote coverage.
 Every v1 object record therefore carries coverage_basis=EXPLICIT_DEPENDENCIES_ONLY and expected_family_completeness=UNKNOWN.
-
-PARTIAL:
-At least one downstream link exists, but one or more explicit dependencies are dangling, conflicting, stale, lineage-incompatible or unresolved while another resolves.
-UNACCOUNTED:
-The proven physical object has no explicit object-to-quantity relationship in QuantityEvidence.input_entity_ids or validated editable dependent_quantity_ids.
-
-ABSTAINED:
-The physical object exists, downstream QuantityEvidence explicitly abstains/refuses for that object, and no resolved non-abstained row accounts for it.
 
 Unresolved physical existence creates no registry object at all.
 This prevents the coverage layer from minting geometry by implication.
@@ -217,6 +218,7 @@ ProducerObjectUniverseSnapshotV1 has exactly these fields:
 - source_document_id: str;
 - revision_id: str;
 - source_sha256: str;
+- registry_run_id: str;
 - snapshot_id: str;
 - admitted_object_ids: tuple[str, ...];
 - enumeration_status: COMPLETE | INCOMPLETE | UNAVAILABLE | NOT_ENUMERATED;
@@ -224,15 +226,71 @@ ProducerObjectUniverseSnapshotV1 has exactly these fields:
 
 CoverageRegistrySummaryV1 must report, at minimum and without collapsing categories:
 
-- every ProducerObjectUniverseSnapshotV1 consumed or expected for the run;
+- the CoverageRegistryRunManifestV1 identity for the run;
+- every expected object producer/category key and its enumeration result;
 - object counts and ids by coverage_state;
 - producer/category enumeration_status and reason_codes;
 - explicit identification of every INCOMPLETE, UNAVAILABLE and NOT_ENUMERATED producer/category;
+- QuantityEvidence-universe enumeration status and reason codes for every expected producer/source key;
+- TakeoffOutputRow-universe enumeration status and reason codes for every expected source/collection key;
 - quantity census counts and ids by LINKED_QUANTITY, DANGLING_QUANTITY, ORPHAN_UNBOUND_QUANTITY and CONFLICTING_LINEAGE_QUANTITY;
 - coverage_basis=EXPLICIT_DEPENDENCIES_ONLY;
 - expected_family_completeness=UNKNOWN.
 
 Only COMPLETE with an empty admitted_object_ids tuple may mean proven zero objects for that exact producer/category/source/revision/snapshot. No other empty or absent list has zero-object semantics.
+
+### 4C. Frozen run-level expected-universe manifest
+
+CoverageRegistryRunManifestV1 is mandatory for every registry run and has exactly these fields:
+
+- source_document_id: str;
+- revision_id: str;
+- source_sha256: str;
+- registry_run_id: str;
+- snapshot_id: str;
+- expected_object_universe_keys: tuple[(producer: str, category: str), ...];
+- expected_quantity_evidence_universe_keys: tuple[(producer: str, source: str), ...];
+- expected_takeoff_row_universe_keys: tuple[(source: str, collection: str), ...].
+
+The three expected-key collections are the complete expected universe sets for that run, are duplicate-free, and are interpreted only inside the manifest's exact document/revision/source-SHA/run/snapshot lineage.
+An expected universe cannot be inferred from whichever snapshots a caller happens to supply.
+Any supplied object, QuantityEvidence, or TakeoffOutputRow universe key that is absent from its corresponding manifest expected set is an unexpected_universe_key contract conflict and fails the run closed rather than silently expanding the manifest.
+
+For every expected object producer/category key, exactly one enumeration result must exist for the run. A producer-supplied ProducerObjectUniverseSnapshotV1 is used when present. If no snapshot is supplied for an expected key, the registry must synthesize a run-side enumeration result with enumeration_status=NOT_ENUMERATED and reason code expected_object_universe_snapshot_missing. The synthetic result reports absence only; it does not decide physical existence and must not impersonate a producer-owned snapshot.
+
+COMPLETE may contain zero admitted object ids. INCOMPLETE and UNAVAILABLE remain visible. NOT_ENUMERATED remains visible. No missing expected producer/category may be silently omitted.
+
+QuantityEvidenceUniverseSnapshotV1 has exactly these fields:
+
+- producer: str;
+- source: str;
+- source_document_id: str;
+- revision_id: str;
+- source_sha256: str;
+- registry_run_id: str;
+- snapshot_id: str;
+- quantity_ids: tuple[str, ...];
+- enumeration_status: COMPLETE | INCOMPLETE | UNAVAILABLE | NOT_ENUMERATED;
+- reason_codes: tuple[str, ...].
+
+TakeoffOutputRowUniverseSnapshotV1 has exactly these fields:
+
+- source: str;
+- collection: str;
+- source_document_id: str;
+- revision_id: str;
+- source_sha256: str;
+- registry_run_id: str;
+- snapshot_id: str;
+- quantity_ids: tuple[str, ...];
+- enumeration_status: COMPLETE | INCOMPLETE | UNAVAILABLE | NOT_ENUMERATED;
+- reason_codes: tuple[str, ...].
+
+For every expected QuantityEvidence producer/source key and every expected TakeoffOutputRow source/collection key, exactly one corresponding enumeration result must exist. Missing snapshots are synthesized as NOT_ENUMERATED with reason codes expected_quantity_evidence_universe_snapshot_missing or expected_takeoff_row_universe_snapshot_missing respectively.
+
+A zero linked/dangling/orphan/conflicting quantity count is conclusive only for a COMPLETE relevant quantity universe. INCOMPLETE, UNAVAILABLE, or NOT_ENUMERATED must remain attached to the census so missing enumeration can never masquerade as zero orphan quantities or zero dangling rows.
+
+Before any joins or classification, the registry must reject conflicting source_document_id, revision_id, source_sha256, registry_run_id, or snapshot_id lineage between CoverageRegistryRunManifestV1, every supplied ProducerObjectUniverseSnapshotV1, every QuantityEvidenceUniverseSnapshotV1, and every TakeoffOutputRowUniverseSnapshotV1. Such a conflict fails the run closed and is reported with reason codes; incompatible universes are never merged.
 
 ### 5. Audit renderer integration
 
@@ -247,7 +305,12 @@ No viewport/title work is part of this task.
 
 Tests must prove exact positive joins; survival without editable registration; survival with empty dependency list; exact input_entity_ids without editable registration; abstained quantity handling; dangling/mixed links; geometry and revision conflicts; duplicate/conflicting ids; input-order invariance; no mutation; and evidence-only records excluded.
 They must prove producer enumeration semantics: COMPLETE-empty is the only zero-object proof, while INCOMPLETE, UNAVAILABLE and NOT_ENUMERATED remain explicit non-zero-claim summary states.
+They must prove CoverageRegistryRunManifestV1 detects an entirely omitted expected object producer/category and reports NOT_ENUMERATED rather than zero objects.
+They must prove omitted expected QuantityEvidence and TakeoffOutputRow universes become NOT_ENUMERATED with reason codes and cannot yield conclusive zero orphan/dangling counts.
+They must prove document, revision, source SHA, registry run id, and snapshot id conflicts between manifest and any supplied universe fail the run closed before joins.
+They must prove exactly one enumeration result per expected manifest key, reject duplicate supplied results for the same key, and fail closed on any supplied universe key absent from the manifest's complete expected sets.
 They must prove the reverse quantity census classifies linked, dangling, orphan/unbound and conflicting-lineage quantities without inventing links, including roof-covering and structural-member generic-link gaps.
+They must prove the frozen coverage precedence: zero explicit links -> UNACCOUNTED; abstentions only -> ABSTAINED; resolved plus defective/abstained -> PARTIAL; one-or-more all-clean explicit dependencies -> ACCOUNTED.
 They must prove ACCOUNTED always retains coverage_basis=EXPLICIT_DEPENDENCIES_ONLY and expected_family_completeness=UNKNOWN through the renderer adapter.
 Adversarial tests must prove equal labels, equal values, nearest geometry and page coincidence cannot create links.
 W10 authority flags, commercial rows and JobHub preflight results must remain unchanged.
@@ -278,6 +341,6 @@ pb_planreader_pdf_extractor.py; viewport/title code; live opening deduction/publ
 
 ## Architecture review stop
 
-After approval: add one shadow/read-only registry module; consume producer-owned object-universe snapshots; perform exact left joins plus the reverse orphan/unbound quantity census; implement only the frozen v1 record/summary schemas; add adversarial/no-mutation tests; integrate PR #1137 provider only when available while preserving explicit-dependency-only semantics; then run a gold-free shadow census and authority review before any live consumer.
+After approval: add one shadow/read-only registry module; require CoverageRegistryRunManifestV1; consume producer-owned object-universe snapshots plus explicit QuantityEvidence/TakeoffOutputRow universe snapshots; synthesize NOT_ENUMERATED only for manifest-expected missing enumerations; enforce run-lineage conflicts before joins; perform exact left joins plus the reverse orphan/unbound quantity census; implement only the frozen v1 contracts and coverage precedence; add adversarial/no-mutation tests; integrate PR #1137 provider only when available while preserving explicit-dependency-only semantics; then run a gold-free shadow census and authority review before any live consumer.
 
 No production code should be written until this admission/linkage/state contract is approved.
