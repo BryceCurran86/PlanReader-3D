@@ -100,8 +100,21 @@ jobs:
                   "title_blocks":title_blocks[:20],
                   "compact_shapes":shapes,
                   "compact_shape_signature_counts":[{"signature":list(k),"count":v} for k,v in sorted(sigs.items(),key=lambda kv:(-kv[1],str(kv[0])))],
-                  "full_text":page.get_text("text") if pno in (222,223,224,225,226,227) else "",
+                  "full_text":page.get_text("text") if pno in (219,220,221,222,223,224,225,226,227) else "",
               })
+          source_hits=[]
+          search_re=re.compile(r"(?:\\bpier(?:s)?\\b|300\\s*(?:x|X|×)\\s*300|300mm[^\\n]{0,80}(?:pier|masonry)|masonry[^\\n]{0,80}(?:pier|300))", re.I)
+          for pno in range(1, len(doc)+1):
+              text=doc[pno-1].get_text("text") or ""
+              matches=[]
+              for m in search_re.finditer(text):
+                  lo=max(0,m.start()-140); hi=min(len(text),m.end()+180)
+                  matches.append(" ".join(text[lo:hi].split()))
+              if matches:
+                  source_hits.append({"page":pno,"matches":matches[:20]})
+          print("MURERA_PIER_TEXT_HITS_BEGIN")
+          print(json.dumps(source_hits, indent=2))
+          print("MURERA_PIER_TEXT_HITS_END")
           print("MURERA_PIER_SOURCE_PROBE_BEGIN")
           print(json.dumps({"source_sha256":"84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b","pages":pages}, indent=2, default=str))
           print("MURERA_PIER_SOURCE_PROBE_END")
