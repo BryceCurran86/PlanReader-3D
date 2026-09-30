@@ -1,0 +1,203 @@
+name: TEST-ONLY Structural Live Text Trust After Exact Fill
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  probe:
+    if: github.head_ref == 'test-only/structural-live-text-trust-after-exact-fill-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: murera
+            page: '183'
+            url: 'https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf'
+            sha256: '84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b'
+          - label: kstvet
+            page: '47'
+            url: 'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf'
+            sha256: '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and SHA-256 verify source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            "${{ matrix.url }}" -o source.pdf
+          echo "${{ matrix.sha256 }}  source.pdf" | sha256sum -c -
+
+      - name: Run live trusted structural-definition path
+        env:
+          LABEL: ${{ matrix.label }}
+          PAGE_ID: ${{ matrix.page }}
+          EXPECTED_SHA256: ${{ matrix.sha256 }}
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          from collections import Counter
+          from pathlib import Path
+
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_structural_member_authority import (
+              StructuralMemberProducer,
+              StructuralMemberSelector,
+          )
+          from pb_structural_member_definition_source_shadow import (
+              compile_structural_definition_source_shadow,
+          )
+
+          payload = Path("source.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == os.environ["EXPECTED_SHA256"]
+
+          label = os.environ["LABEL"]
+          page_id = os.environ["PAGE_ID"]
+          source = SourceVisibilityProducer(
+              producer_method="structural-live-text-trust-after-exact-fill-v1",
+              producer_version="1.0",
+          )
+          published = source.ingest_native_pdf_bytes(
+              document_id=f"structural-live-trust:{digest[:16]}",
+              source_bytes=payload,
+              source_locator="sha256-verified-real-source",
+              page_ids=(page_id,),
+          )
+
+          text_authority = source.text_integrity_authority()
+          status_counts = Counter()
+          reason_counts = Counter()
+          trusted_rows = []
+          structural_rows = []
+          structural_re = re.compile(
+              r"masonry|piers?|pillars?|stanchions?|"
+              r"circular|hollow|\bCHS\b|300|50mm|1\.5mm",
+              re.I,
+          )
+
+          for observation_id in published.text_observation_ids:
+              result = text_authority.resolve_text(
+                  ObservationSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=published.revision.source_sha256,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      observation_id=observation_id,
+                  )
+              )
+              status_counts[result.status.value] += 1
+              reason_counts.update(result.reason_codes)
+              receipt = result.receipt
+              row = {
+                  "observation_id": observation_id,
+                  "trusted_text": result.trusted_text,
+                  "status": result.status.value,
+                  "reason_codes": list(result.reason_codes),
+                  "raw_text": None if receipt is None else receipt.raw_text,
+                  "decode_status": None if receipt is None else receipt.decode_status,
+                  "visibility_status": None if receipt is None else receipt.visibility_status,
+                  "block_no": None if receipt is None else receipt.block_no,
+                  "line_no": None if receipt is None else receipt.line_no,
+                  "word_no": None if receipt is None else receipt.word_no,
+              }
+              if result.trusted_text is not None:
+                  trusted_rows.append(row)
+              if receipt is not None and structural_re.search(receipt.raw_text or ""):
+                  structural_rows.append(row)
+
+          selector = StructuralMemberSelector(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              decision_scope_id=f"source-page:{page_id}:unscoped",
+              member_kind="structural_support",
+          )
+          shadow = compile_structural_definition_source_shadow(
+              selector=selector,
+              source_visibility_producer=source,
+              page_ids=(page_id,),
+          )
+
+          resolution = StructuralMemberProducer.from_authenticated_evidence(
+              selector=selector,
+              definitions=tuple(row.definition for row in shadow.definitions),
+              observations=(),
+              relations=(),
+              view_scopes=(),
+          ).publish()
+
+          assert resolution.status is EvidenceResolutionStatus.ABSTAINED
+          assert resolution.quantity is None
+          assert resolution.members == ()
+
+          definitions = [
+              {
+                  "member_role": row.member_role,
+                  "section_spec": row.definition.section_spec,
+                  "page_id": row.definition.page_id,
+                  "view_id": row.definition.view_id,
+                  "source_evidence_ids": list(row.definition.source_evidence_ids),
+              }
+              for row in shadow.definitions
+          ]
+
+          if label == "murera":
+              assert any(
+                  row["member_role"] == "pier"
+                  and row["section_spec"] == "masonry; 300 x 300mm; pier"
+                  for row in definitions
+              ), definitions
+
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "label": label,
+              "page_id": page_id,
+              "source_sha256": digest,
+              "text_observation_count": len(published.text_observation_ids),
+              "trusted_text_count": len(trusted_rows),
+              "status_counts": dict(sorted(status_counts.items())),
+              "reason_counts": dict(sorted(reason_counts.items())),
+              "structural_term_rows": structural_rows,
+              "definition_shadow_status": shadow.status.value,
+              "definition_reason_codes": list(shadow.reason_codes),
+              "definitions": definitions,
+              "authority_without_instances": {
+                  "status": resolution.status.value,
+                  "quantity": resolution.quantity,
+                  "member_count": len(resolution.members),
+              },
+          }
+          Path(f"{label}-structural-live-trust.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: structural-live-trust-${{ matrix.label }}
+          path: ${{ matrix.label }}-structural-live-trust.json
+          if-no-files-found: warn
