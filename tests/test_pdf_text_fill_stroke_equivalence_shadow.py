@@ -415,16 +415,9 @@ def test_live_authority_promotes_exact_pair_and_shadow_resolver_defers():
     assert shadow.reason_codes == (FILL_STROKE_SHADOW_NOT_APPLICABLE,)
 
 
-def test_shadow_pair_id_is_deterministic_and_lineage_bound():
+def test_shadow_resolver_deterministically_defers_after_live_promotion():
     payload, producer, published = _ingest_pair_pdf()
-    selector = next(
-        selector
-        for selector in _selectors(published)
-        if TEXT_TRACE_AMBIGUOUS
-        in producer.text_integrity_authority()
-        .resolve_text(selector)
-        .reason_codes
-    )
+    selector = _selectors(published)[0]
 
     first = resolve_fill_stroke_text_pair_shadow(
         source_visibility_producer=producer,
@@ -438,7 +431,10 @@ def test_shadow_pair_id_is_deterministic_and_lineage_bound():
     )
 
     assert first == second
-    assert first.pair_id
+    assert first.status is EvidenceResolutionStatus.ABSTAINED
+    assert first.proposition is None
+    assert first.pair_id is None
+    assert first.reason_codes == (FILL_STROKE_SHADOW_NOT_APPLICABLE,)
 
 
 def test_source_hash_mismatch_fails_closed():
