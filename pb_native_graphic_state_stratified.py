@@ -46,10 +46,9 @@ the analysis (never guessed) and counted.
 Strata, standardisation and the reporting floor
 -----------------------------------------------
 Strata are page x visible-primitives-in-path band (x fill presence, except when
-fill presence is itself the outcome).  Sensitivity plans (finer size bands, or pages
-pooled so a multi-page source keeps an estimate) are labelled and never replace the
-approved plans.  Standardisation is direct, to the
-participating stratum mix, over the strata in which BOTH groups hold at least
+fill presence is itself the outcome); every plan conditions on page.  Sensitivity plans
+(finer size bands) are labelled and never replace the approved plans.  Standardisation
+is direct, to the participating stratum mix, over the strata in which BOTH groups hold at least
 ``RATIO_MIN_UNIQUE_PATHS`` unique paths.  Per outcome the crude difference, the
 difference restricted to those eligible strata, the standardised difference, the
 share of participating paths those strata cover, the per-stratum signs and a
@@ -121,7 +120,6 @@ FILL_PRESENCE = "fill_presence"
 FILL_PRESENT = "fill_present"
 FILL_ABSENT = "fill_absent"
 OTHER_VALUES = "other_values"
-POOLED_PAGES = "all_pages"
 MAX_VALUES = 12
 MAX_FOLDED_LISTED = 50
 NULL_SPLIT_SALTS = ("null_split_v1:0", "null_split_v1:1", "null_split_v1:2")
@@ -327,7 +325,6 @@ class _Plan:
     with_fill: bool
     fields: tuple[_Field, ...]
     sensitivity: bool = False
-    by_page: bool = True
 
     def __post_init__(self) -> None:
         if any(f.fill_present_only for f in self.fields) and not self.with_fill:
@@ -335,19 +332,16 @@ class _Plan:
 
     def stratum(self, record: PathRecord) -> Stratum:
         band = self.band(record.visible_primitives)
-        page = record.page_id if self.by_page else POOLED_PAGES
         if self.with_fill:
-            return (page, band, record.states[FILL_PRESENCE])
-        return (page, band)
+            return (record.page_id, band, record.states[FILL_PRESENCE])
+        return (record.page_id, band)
 
     def sort_key(self, stratum: Stratum) -> tuple[Any, ...]:
         fill = (FILL_PRESENT, FILL_ABSENT).index(stratum[2]) if self.with_fill else 0
         return (_page_key(stratum[0]), self.bands.index(stratum[1]), fill)
 
     def describe(self, stratum: Stratum) -> dict[str, str]:
-        out = {self.band_key: stratum[1]}
-        if self.by_page:
-            out["page_id"] = stratum[0]
+        out = {"page_id": stratum[0], self.band_key: stratum[1]}
         if self.with_fill:
             out["fill"] = stratum[2]
         return out
@@ -405,37 +399,6 @@ PLANS: tuple[_Plan, ...] = (
         ),
         sensitivity=True,
     ),
-    # Page-pooled sensitivity: page thins the strata, so a multi-page source can have no
-    # stratum that reaches the floor; pooling pages keeps an estimate, at the price of
-    # leaving any page-to-page difference in graphic state uncontrolled.
-    _Plan(
-        name="lines_fill_presence_page_pooled",
-        ref_class="native_line",
-        band=line_band,
-        bands=LINE_BANDS,
-        band_key="visible_segments_band",
-        with_fill=False,
-        fields=(_Field(FILL_PRESENCE, fixed_values=(FILL_PRESENT,)),),
-        sensitivity=True,
-        by_page=False,
-    ),
-    _Plan(
-        name="lines_conditioned_on_fill_page_pooled",
-        ref_class="native_line",
-        band=line_band,
-        bands=LINE_BANDS,
-        band_key="visible_segments_band",
-        with_fill=True,
-        fields=(
-            _Field("stroke_state"),
-            _Field("width_state"),
-            _Field("layer_state"),
-            _Field("dash_state"),
-            _Field("fill_state", fill_present_only=True),
-        ),
-        sensitivity=True,
-        by_page=False,
-    ),
     # Fill colour is descriptive only; nothing about it is a rule.
     _Plan(
         name="rect_edges_by_visible_edge_band",
@@ -455,17 +418,6 @@ PLANS: tuple[_Plan, ...] = (
         with_fill=False,
         fields=(_Field("fill_state"), _Field("paint_presence")),
         sensitivity=True,
-    ),
-    _Plan(
-        name="rect_edges_page_pooled",
-        ref_class="native_rect_edge",
-        band=rect_band,
-        bands=RECT_BANDS,
-        band_key="visible_edges_band",
-        with_fill=False,
-        fields=(_Field("fill_state"), _Field("paint_presence")),
-        sensitivity=True,
-        by_page=False,
     ),
 )
 
@@ -777,11 +729,7 @@ def _run_plan(
     return {
         "plan": plan.name,
         "sensitivity_only": plan.sensitivity,
-        "stratifiers": [
-            *(["page_id"] if plan.by_page else []),
-            plan.band_key,
-            *(["fill"] if plan.with_fill else []),
-        ],
+        "stratifiers": ["page_id", plan.band_key, *(["fill"] if plan.with_fill else [])],
         "band_scheme": list(plan.bands),
         "strata": {
             "total": len(strata_all),
@@ -957,9 +905,8 @@ def _definitions() -> dict[str, Any]:
             "reference difference; they are null when that reference is zero",
             "differences are rounded to 6 places for output; sign_concordance and sign_relation_* "
             "use the exact sign, so a tiny difference can print 0.0 yet count as positive",
-            "coverage can be 0 for a multi-page source (page thins the strata below the floor); "
-            "the page-pooled plans are sensitivity checks that keep an estimate and leave "
-            "page-to-page differences uncontrolled",
+            "coverage can be 0 or low for a multi-page source (page thins the strata below the "
+            "floor); that is the result to report, and no plan drops page from the conditioning set",
             "dominant_sign_share is only meaningful with a denominator above a few strata",
             "a field with one value in both groups (e.g. every layer absent) has a difference of "
             "0.0 that carries no information; check values_analysed",

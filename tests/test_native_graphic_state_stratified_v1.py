@@ -460,22 +460,16 @@ def test_lines_and_rect_edges_are_never_pooled():
         "lines_conditioned_on_fill",
         "lines_fill_presence_fine_bands",
         "lines_conditioned_on_fill_fine_bands",
-        "lines_fill_presence_page_pooled",
-        "lines_conditioned_on_fill_page_pooled",
     }
     assert set(result[RECT]["plans"]) == {
         "rect_edges_by_visible_edge_band",
         "rect_edges_by_visible_edge_count_fine",
-        "rect_edges_page_pooled",
     }
     sensitivity = {n for k in (LINE, RECT) for n, p in result[k]["plans"].items() if p["sensitivity_only"]}
     assert sensitivity == {
         "lines_fill_presence_fine_bands",
         "lines_conditioned_on_fill_fine_bands",
-        "lines_fill_presence_page_pooled",
-        "lines_conditioned_on_fill_page_pooled",
         "rect_edges_by_visible_edge_count_fine",
-        "rect_edges_page_pooled",
     }
     approved = {n for k in (LINE, RECT) for n, p in result[k]["plans"].items() if not p["sensitivity_only"]}
     assert approved == {"lines_fill_presence", "lines_conditioned_on_fill", "rect_edges_by_visible_edge_band"}
@@ -1348,36 +1342,34 @@ def test_script_uses_the_same_document_id_derivation_as_the_join_report():
 
 
 # ---------------------------------- review follow-ups: sensitivity, folded values, accounting
-def test_page_pooled_sensitivity_keeps_an_estimate_when_pages_thin_the_strata_below_the_floor():
+def test_pages_that_thin_every_stratum_give_no_adjusted_estimate_and_no_plan_recovers_one():
     records = []
     for page in ("1", "2", "3"):  # 12 vs 12 per page: no page stratum reaches the floor of 30
         records += group(page, 1, 12, 6, participating=True)
         records += group(page, 1, 12, 3, participating=False)
     result = analyse(records)
-    by_page = fill_outcome(result)
-    assert by_page["standardised"]["state"] == "no_eligible_strata" and by_page["standardised"]["difference"] is None
-    assert by_page["coverage"]["share_participating"] == 0.0 and by_page["retained_fraction_vs_crude"] is None
-    assert by_page["sign_relation_vs_crude"] == "not_estimable"
-    plan = result[LINE]["plans"]["lines_fill_presence_page_pooled"]
-    pooled = plan["fields"][S.FILL_PRESENCE]["outcomes"][S.FILL_PRESENT]
-    assert plan["sensitivity_only"] is True and plan["stratifiers"] == ["visible_segments_band"]
-    assert [row[1] for row in plan["strata"]["table"]] == [{"visible_segments_band": "1"}]  # no page in the stratum
-    assert (plan["strata"]["total"], plan["strata"]["eligible"]) == (1, 1)
-    assert pooled["crude"]["difference"] == pooled["standardised"]["difference"] == 0.25
-    assert pooled["coverage"]["share_participating"] == 1.0
-    assert result[LINE]["plans"]["lines_fill_presence"]["sensitivity_only"] is False  # the approved plan is still by page
+    entry = fill_outcome(result)
+    assert entry["standardised"]["state"] == "no_eligible_strata" and entry["standardised"]["difference"] is None
+    assert entry["coverage"]["share_participating"] == 0.0 and entry["retained_fraction_vs_crude"] is None
+    assert entry["sign_relation_vs_crude"] == "not_estimable"
+    assert entry["crude"]["difference"] == 0.25  # the crude number is still shown, as a crude number
+    # low page-stratified coverage is the result: no plan drops page from the conditioning set
+    for klass in (LINE, RECT):
+        for name, plan in result[klass]["plans"].items():
+            assert plan["stratifiers"][0] == "page_id", name
+            assert all(row[1]["page_id"] in {"1", "2", "3"} for row in plan["strata"]["table"]), name
 
 
-def test_a_page_that_differs_in_graphic_state_is_uncontrolled_only_in_the_pooled_sensitivity_plan():
+def test_page_composition_alone_is_removed_by_the_page_strata():
     # each page is internally null (P and M share the page's fill rate), but the pages differ and P sits on page 2
     records = [
         *group("1", 1, 30, 3, participating=True), *group("1", 1, 90, 9, participating=False),
         *group("2", 1, 90, 72, participating=True), *group("2", 1, 30, 24, participating=False),
     ]
-    result = analyse(records)
-    assert fill_outcome(result)["standardised"]["difference"] == 0.0  # by page: nothing left
-    pooled = result[LINE]["plans"]["lines_fill_presence_page_pooled"]["fields"][S.FILL_PRESENCE]["outcomes"][S.FILL_PRESENT]
-    assert pooled["standardised"]["difference"] == pooled["crude"]["difference"] == 0.35  # pooled: page looks like an effect
+    entry = fill_outcome(analyse(records))
+    assert entry["crude"]["difference"] == 0.35  # page composition looks like an effect ...
+    assert entry["standardised"]["difference"] == 0.0  # ... and vanishes once page is held fixed
+    assert entry["sign_concordance"]["zero"] == 2 and entry["retained_fraction_vs_crude"] == 0.0
 
 
 def test_a_crude_effect_carried_by_an_ineligible_stratum_is_not_reported_as_retained():
@@ -1466,7 +1458,7 @@ def test_the_integrity_block_carries_the_phase_2_replay_summary(tmp_path):
 def test_the_definitions_state_how_to_read_sparse_and_sensitivity_results(tmp_path):
     definitions = _stratified(_pdf(tmp_path, "bulk", _bulk_groups(), height=1000))["definitions"]
     notes = " ".join(definitions["reading_notes"])
-    for phrase in ("page-pooled", "dominant_sign_share", "exact sign", "folded_values", "sensitivity"):
+    for phrase in ("no plan drops page", "dominant_sign_share", "exact sign", "folded_values", "sensitivity"):
         assert phrase in notes, phrase
     assert "understates" in definitions["null_control"] and "not a significance test" in definitions["null_control"]
 
@@ -1558,8 +1550,6 @@ def test_rect_page_composition_drives_a_crude_difference_that_vanishes_by_page()
     result = analyse(_rect_population(by="page"))
     entry = outcome(result, "rect_edges_by_visible_edge_band", "fill_state", GREY, klass=RECT)
     assert entry["crude"]["difference"] == 0.2 and entry["standardised"]["difference"] == 0.0
-    pooled = outcome(result, "rect_edges_page_pooled", "fill_state", GREY, klass=RECT)
-    assert pooled["standardised"]["difference"] == 0.2  # uncontrolled by page, so the page reads as an effect
 
 
 @pytest.mark.parametrize("status", [s for s in J.JOIN_STATUSES if s != J.STATUS_JOINED])
@@ -1614,8 +1604,6 @@ def test_the_same_drawing_on_two_pages_gives_two_page_qualified_strata(tmp_path)
     assert two["integrity"]["candidate_pages"] == ["1", "2"] and two["integrity"]["checks"]["all_checks_passed"] is True
     plan = two["classes"][LINE]["plans"]["lines_fill_presence"]
     assert [row[1]["page_id"] for row in plan["strata"]["table"]] == ["1", "2"] and plan["strata"]["eligible"] == 2
-    pooled = two["classes"][LINE]["plans"]["lines_fill_presence_page_pooled"]
-    assert [row[2:] for row in pooled["strata"]["table"]] == [[80, 90, True]]  # page-pooled: one stratum, both pages
 
 
 def test_strata_are_ordered_by_page_number_then_band_then_fill():

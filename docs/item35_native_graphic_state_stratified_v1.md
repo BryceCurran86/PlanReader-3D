@@ -74,9 +74,8 @@ guessed) and counted in `integrity`; `analysis_complete` says whether any were.
 | `rect_edges_by_visible_edge_band` | rect edge | page x visible-edges band (1-2, 3-5, 6+) | fill colour, paint presence |
 | `rect_edges_by_visible_edge_count_fine` (sensitivity) | rect edge | page x visible-edges band (1, 2, 3, 4, 5-8, 9+) | same |
 | `lines_fill_presence_fine_bands`, `lines_conditioned_on_fill_fine_bands` (sensitivity) | line | as the line plans, bands 1, 2, 3, 4, 5, 6-10, 11-20, 21-50, 51+ | same |
-| `lines_fill_presence_page_pooled`, `lines_conditioned_on_fill_page_pooled`, `rect_edges_page_pooled` (sensitivity) | line / rect edge | as the approved plans but **without page** | same |
 
-Fill presence is not a stratifier when it is the outcome. The sensitivity plans are
+Fill presence is not a stratifier when it is the outcome. The finer-band plans are
 additions to the approved design, each labelled `sensitivity_only`, none replacing
 an approved plan:
 
@@ -86,12 +85,11 @@ an approved plan:
 - *Fine line bands.* Participation is path-level and grows with path size, and the
   approved top band (11+) is open-ended, so giant CAD paths sit beside small ones in
   one stratum. The finer bands close that band.
-- *Page-pooled.* Page x band strata can be so thin on a many-page source that none
-  reaches 30 paths in both groups, leaving no adjusted estimate at all. Pooling
-  pages keeps an estimate, at the price of leaving any page-to-page difference in
-  graphic state uncontrolled: an effect that shows only here may just be a page.
 
-Fill colour is descriptive only.
+Every plan, approved or sensitivity, conditions on page. If page-stratified coverage
+is zero or low on a many-page source, that is the result to report: no plan recovers
+an estimate by dropping page from the conditioning set. Fill colour is descriptive
+only.
 
 Outcome values: `absent` is always shown when present, then the most common
 values by path count (ties by value), at most 12 values, the remainder folded into
