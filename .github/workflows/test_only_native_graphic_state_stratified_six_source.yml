@@ -1,0 +1,110 @@
+name: TEST-ONLY Native Graphic-State Stratified Six-Source Run
+
+on:
+  pull_request:
+    branches:
+      - 'claude/native-graphic-state-stratified-v1'
+
+concurrency:
+  group: native-graphic-state-stratified-six-source-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    if: github.head_ref == 'test-only/native-graphic-state-stratified-six-source-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: kstvet
+            url: 'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf'
+            sha256: '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc'
+          - label: ghazi
+            url: 'https://tenders.go.ke/storage/Documents/1739211305954-tender-document-for-construction-of-science-laboratory-at-ghazi-primary-school.pdf'
+            sha256: 'c8c001c9dadb791e7cb18b7bea19ce795eebba2f9b9eb7dec4844212da4d8f4f'
+          - label: lamu
+            url: 'https://lamu.go.ke/wp-content/uploads/2018/11/Bill-of-Quantities-ECD-2No-Classrooms-and-Twin-Toilets-Ishakani.pdf'
+            sha256: 'fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2'
+          - label: murera
+            url: 'https://tenders.go.ke/storage/Documents/1785347143869-bqs-drawings.pdf'
+            sha256: '84dec737ede7adfa32b02c6732d4289a6a2d25f7ae50cf07209428f1b4e0c94b'
+          - label: umma
+            url: 'https://umma.ac.ke/wp-content/uploads/2026/06/Builders-work.pdf'
+            sha256: 'f30711f69944e66ef993341180e35b49ccfcb36d6f402743284823ab588183af'
+          - label: mbagha
+            url: 'https://tenders.go.ke/storage/Documents/1767789921937-drawings-construction-of-a-maternity-block-at-mbagha-dispensary-in-mwatate-sub-county.pdf'
+            sha256: 'b535961ae5aa549c6d532ad5afb2e93133dca1fa7c232e86e0eb2090f7852220'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and SHA-256 verify pinned source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            "${{ matrix.url }}" -o "${{ matrix.label }}.pdf"
+          echo "${{ matrix.sha256 }}  ${{ matrix.label }}.pdf" | sha256sum -c -
+
+      - name: Run structure-adjusted native graphic-state check
+        run: |
+          PYTHONPATH=. python scripts/native_graphic_state_stratified_report.py \
+            "${{ matrix.label }}.pdf" \
+            --output "${{ matrix.label }}-stratified.json"
+
+      - name: Print integrity summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          label = os.environ["LABEL"]
+          path = Path(f"{label}-stratified.json")
+          if not path.exists():
+              print("REPORT_UNAVAILABLE")
+              raise SystemExit(0)
+          report = json.loads(path.read_text())
+          entries = []
+          for e in report.get("entries", []):
+              s = e.get("stratified") or {}
+              integrity = s.get("integrity") or {}
+              entries.append({
+                  "status": e.get("status"),
+                  "sha256": e.get("pdf_sha256"),
+                  "analysis_state": e.get("analysis_state"),
+                  "checks_all_passed": (integrity.get("checks") or {}).get("all_checks_passed"),
+                  "candidate_pages": len(integrity.get("candidate_pages") or []),
+                  "participating_candidates": integrity.get("participating_candidates"),
+                  "excluded_paths": integrity.get("excluded_paths"),
+                  "populations": {
+                      klass: (block or {}).get("population")
+                      for klass, block in (s.get("classes") or {}).items()
+                  },
+              })
+          print(json.dumps({
+              "label": label,
+              "coverage": report.get("coverage"),
+              "entries": entries,
+          }, indent=2, sort_keys=True))
+          PY
+        env:
+          LABEL: ${{ matrix.label }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stratified-${{ matrix.label }}
+          path: ${{ matrix.label }}-stratified.json
+          if-no-files-found: warn
