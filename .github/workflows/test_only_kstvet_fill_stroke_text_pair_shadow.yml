@@ -1,0 +1,167 @@
+name: TEST-ONLY KSTVET Fill Stroke Text Pair Shadow
+
+on:
+  pull_request:
+    branches:
+      - 'feat/pdf-text-fill-stroke-equivalence-shadow-v1'
+
+jobs:
+  probe:
+    if: github.head_ref == 'test-only/kstvet-fill-stroke-text-pair-shadow-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and SHA-256 verify KSTVET source
+        run: |
+          curl -fL --retry 3 --retry-delay 2 --max-time 900 \
+            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
+            -o kstvet.pdf
+          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  kstvet.pdf' | sha256sum -c -
+
+      - name: Run page 47 fill stroke text-pair shadow census
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import hashlib
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          from pb_pdf_text_fill_stroke_equivalence_shadow import (
+              resolve_fill_stroke_text_pair_shadow,
+          )
+          from pb_pdf_text_integrity_authority import TEXT_TRACE_AMBIGUOUS
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_structural_member_authority import StructuralMemberSelector
+          from pb_structural_member_definition_source_shadow import (
+              compile_structural_definition_source_shadow,
+          )
+
+          payload = Path("kstvet.pdf").read_bytes()
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc"
+
+          producer = SourceVisibilityProducer(
+              producer_method="kstvet-fill-stroke-text-pair-shadow-v1",
+              producer_version="1.0",
+          )
+          published = producer.ingest_native_pdf_bytes(
+              document_id=f"kstvet-fill-stroke-shadow:{digest[:16]}",
+              source_bytes=payload,
+              source_locator="sha256-verified-kstvet-source",
+              page_ids=("47",),
+          )
+          authority = producer.text_integrity_authority()
+
+          rows = []
+          live_counts = Counter()
+          shadow_counts = Counter()
+
+          for observation_id in published.text_observation_ids:
+              selector = ObservationSelector(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  observation_id=observation_id,
+              )
+              live = authority.resolve_text(selector)
+              receipt = live.receipt
+              if receipt is None:
+                  continue
+              live_counts[live.status.value] += 1
+              if TEXT_TRACE_AMBIGUOUS not in live.reason_codes:
+                  continue
+
+              shadow = resolve_fill_stroke_text_pair_shadow(
+                  source_visibility_producer=producer,
+                  selector=selector,
+                  source_bytes=payload,
+              )
+              shadow_counts[shadow.status.value] += 1
+              rows.append({
+                  "observation_id": observation_id,
+                  "raw_text": receipt.raw_text,
+                  "bbox": list(receipt.geometry),
+                  "live_status": live.status.value,
+                  "live_reason_codes": list(live.reason_codes),
+                  "shadow_status": shadow.status.value,
+                  "shadow_proposition": shadow.proposition,
+                  "shadow_reason_codes": list(shadow.reason_codes),
+                  "pair_id": shadow.pair_id,
+                  "sequence_numbers": list(shadow.sequence_numbers),
+                  "render_modes": list(shadow.render_modes),
+                  "bboxlog_kinds": list(shadow.bboxlog_kinds),
+              })
+
+          structural_selector = StructuralMemberSelector(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              decision_scope_id="source-page:47:unscoped",
+              member_kind="structural_support",
+          )
+          definitions = compile_structural_definition_source_shadow(
+              selector=structural_selector,
+              source_visibility_producer=producer,
+              page_ids=("47",),
+          )
+
+          report = {
+              "diagnostic_only": True,
+              "do_not_merge": True,
+              "source_sha256": digest,
+              "page_id": "47",
+              "text_observation_count": len(published.text_observation_ids),
+              "live_status_counts": dict(sorted(live_counts.items())),
+              "trace_ambiguous_count": len(rows),
+              "shadow_status_counts": dict(sorted(shadow_counts.items())),
+              "resolved_pair_count": sum(
+                  1 for row in rows
+                  if row["shadow_status"] == "corroborated"
+              ),
+              "rows": rows,
+              "structural_definition_shadow_after_pair_probe": {
+                  "status": definitions.status.value,
+                  "reason_codes": list(definitions.reason_codes),
+                  "definition_count": len(definitions.definitions),
+                  "definitions": [
+                      {
+                          "definition_id": item.definition_id,
+                          "member_kind": item.member_kind,
+                          "section": item.section,
+                          "size": item.size,
+                          "thickness": item.thickness,
+                          "source_block_id": item.source_block_id,
+                      }
+                      for item in definitions.definitions
+                  ],
+              },
+          }
+          Path("kstvet-fill-stroke-text-pair-shadow.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kstvet-fill-stroke-text-pair-shadow
+          path: kstvet-fill-stroke-text-pair-shadow.json
+          if-no-files-found: warn
