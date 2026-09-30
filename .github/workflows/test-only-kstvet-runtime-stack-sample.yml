@@ -1,0 +1,62 @@
+name: TEST-ONLY KSTVET Runtime Stack Sample
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  kstvet-stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Download and verify exact KSTVET source
+        run: |
+          mkdir -p benchmarks/sources
+          curl -L --fail --retry 3             -o benchmarks/sources/1727358888238-bq-nd-drawing.pdf             "https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf"
+          echo "6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  benchmarks/sources/1727358888238-bq-nd-drawing.pdf" | sha256sum -c -
+
+      - name: Sample KSTVET extraction stacks
+        shell: bash
+        run: |
+          set +e
+          PYTHONUNBUFFERED=1 timeout --signal=TERM --kill-after=20s 360s             python -u - <<'PY' 2>&1 | tee /tmp/kstvet-runtime-stack.log
+          import faulthandler
+          import sys
+
+          from pb_benchmark_accuracy_engine import main
+
+          faulthandler.enable()
+          faulthandler.dump_traceback_later(30, repeat=True)
+          sys.argv = [
+              "pb_benchmark_accuracy_engine.py",
+              "--benchmark", "tenders_ke_kstvet_cbc_classroom",
+              "--pdf", "benchmarks/sources/1727358888238-bq-nd-drawing.pdf",
+              "--output-dir", "/tmp/kstvet-runtime-stack-result",
+          ]
+          raise SystemExit(main())
+          PY
+          rc=${PIPESTATUS[0]}
+          echo "KSTVET_STACK_EXIT_CODE=$rc"
+          exit "$rc"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kstvet-runtime-stack-sample
+          path: |
+            /tmp/kstvet-runtime-stack.log
+            /tmp/kstvet-runtime-stack-result
