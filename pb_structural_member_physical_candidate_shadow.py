@@ -597,7 +597,7 @@ def compile_structural_physical_candidate_shadow(
         page: {} for page in selected_pages
     }
     for observation_id in published.visible_observation_ids:
-        result = visibility.resolve(
+        result = visibility.resolve_visible(
             ObservationSelector(
                 document_id=published.revision.document_id,
                 revision_id=published.revision.revision_id,
