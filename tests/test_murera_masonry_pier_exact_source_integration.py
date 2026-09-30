@@ -257,7 +257,11 @@ def test_exact_neutral_geometry_candidates_are_not_member_registration_inputs(
 def test_exact_full_pdf_extraction_does_not_publish_unproven_masonry_piers(
     exact_source_path: Path,
 ) -> None:
-    # This executes the full live extractor, independently of the scoped
-    # structural checks above. It reads neither diagnostic rows nor gold.
-    predictions = GenericPlanReaderExtractor().extract_from_pdf(exact_source_path)
+    # Match the existing quantity-extraction invocation: all source pages,
+    # without Item 35's separate diagnostic replay. That shadow owns no scored
+    # quantities and is outside this structural lane. No gold is read here.
+    predictions = GenericPlanReaderExtractor().extract_from_pdf(
+        exact_source_path,
+        collect_item35_shadow=False,
+    )
     assert "masonry_piers" not in {prediction.tag for prediction in predictions}

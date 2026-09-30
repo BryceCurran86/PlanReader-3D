@@ -122,6 +122,11 @@ APIs against the SHA-locked official PDF:
 - the resulting decision is consumed through `StructuralMemberAuthority`;
 - full-document live extraction does not publish `masonry_piers`.
 
+The full-document test uses the existing quantity-extraction invocation with
+`collect_item35_shadow=False`; all PDF pages remain in scope. Item 35's
+separate full-document diagnostic replay owns no scored quantities and is
+outside this structural review. Its implementation and default are unchanged.
+
 Run the exact-source tests explicitly with a locally downloaded official PDF:
 
 ```sh
