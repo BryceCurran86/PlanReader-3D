@@ -19,11 +19,12 @@ from pb_structural_member_authority import (
 
 _SECTION = re.compile(
     r"\b(circular\s+hollow\s+sections?|rectangular\s+hollow\s+sections?|"
-    r"square\s+hollow\s+sections?|CHS|RHS|SHS)\b", re.I
+    r"square\s+hollow\s+sections?|stone\s+masonry|block\s+masonry|masonry|"
+    r"CHS|RHS|SHS)\b", re.I
 )
 _ROLE = re.compile(r"\b(pillars?|columns?|posts?|piers?|stanchions?)\b", re.I)
 _SIZE = re.compile(
-    r"\b\d+(?:\.\d+)?\s*mm\s*(?:dia(?:meter)?\s*)?x\s*"
+    r"\b\d+(?:\.\d+)?\s*(?:mm\s*(?:dia(?:meter)?\s*)?)?x\s*"
     r"\d+(?:\.\d+)?\s*mm\s*(?:thick)?\b", re.I
 )
 _CANONICAL_SECTION = {
