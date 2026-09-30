@@ -76,7 +76,7 @@ def _two_page_plan(tmp_path: Path, name: str, page_one: str, page_two: str) -> P
     return path
 
 
-def test_later_explicit_floor_area_replaces_early_dpm_envelope(tmp_path: Path) -> None:
+def test_later_declared_floor_area_does_not_replace_geometry_dpm_envelope(tmp_path: Path) -> None:
     pdf = _two_page_plan(
         tmp_path,
         "early-small-dpm.pdf",
@@ -92,14 +92,18 @@ def test_later_explicit_floor_area_replaces_early_dpm_envelope(tmp_path: Path) -
     preds = {
         p.tag: p for p in GenericPlanReaderExtractor().extract_from_pdf(pdf)
     }
-    assert preds["floor_screed"].quantity == 162.69
-    assert preds["substructure_bed_dpm"].quantity == 162.69
-    assert preds["substructure_bed_dpm"].metadata["area_authority"] == (
-        "explicit_drawing_floor_area"
-    )
+    # The printed 162.69 m2 is retained for reconciliation, but the physical
+    # takeoff remains owned by the independently figured 15.95 x 8.2 geometry.
+    assert preds["floor_screed"].quantity == pytest.approx(130.79)
+    assert preds["substructure_bed_dpm"].quantity == pytest.approx(130.79)
+    meta = preds["substructure_bed_dpm"].metadata
+    assert meta["declared_floor_area_m2"] == pytest.approx(162.69)
+    assert meta["declared_floor_area_binding"] == "unbound"
+    assert meta["declared_floor_area_evidence_role"] == "declared_source_area_claim"
+    assert "area_authority" not in meta
 
 
-def test_later_small_envelope_does_not_clobber_explicit_dpm(tmp_path: Path) -> None:
+def test_later_small_envelope_does_not_clobber_larger_geometry_dpm(tmp_path: Path) -> None:
     pdf = _two_page_plan(
         tmp_path,
         "explicit-then-small.pdf",
@@ -114,13 +118,15 @@ def test_later_small_envelope_does_not_clobber_explicit_dpm(tmp_path: Path) -> N
     preds = {
         p.tag: p for p in GenericPlanReaderExtractor().extract_from_pdf(pdf)
     }
-    assert preds["substructure_bed_dpm"].quantity == 162.69
+    assert preds["substructure_bed_dpm"].quantity == pytest.approx(130.79)
+    assert preds["substructure_bed_dpm"].metadata["declared_floor_area_m2"] == pytest.approx(162.69)
+    assert preds["substructure_bed_dpm"].metadata["declared_floor_area_binding"] == "unbound"
 
 
-def test_later_explicit_floor_area_replaces_early_envelope_without_local_dpm_text(
+def test_later_declared_area_does_not_replace_geometry_without_local_dpm_text(
     tmp_path: Path,
 ) -> None:
-    """DPM wording may appear only on the later plan; an earlier envelope still binds."""
+    """DPM wording may appear on the later plan; its declared total stays reconciliation-only."""
     pdf = _two_page_plan(
         tmp_path,
         "early-envelope-late-dpm-note.pdf",
@@ -135,11 +141,12 @@ def test_later_explicit_floor_area_replaces_early_envelope_without_local_dpm_tex
     preds = {
         p.tag: p for p in GenericPlanReaderExtractor().extract_from_pdf(pdf)
     }
-    assert preds["floor_screed"].quantity == 162.69
-    assert preds["substructure_bed_dpm"].quantity == 162.69
-    assert preds["substructure_bed_dpm"].metadata["area_authority"] == (
-        "explicit_drawing_floor_area"
-    )
+    assert preds["floor_screed"].quantity == pytest.approx(130.79)
+    assert preds["substructure_bed_dpm"].quantity == pytest.approx(130.79)
+    meta = preds["substructure_bed_dpm"].metadata
+    assert meta["declared_floor_area_m2"] == pytest.approx(162.69)
+    assert meta["declared_floor_area_binding"] == "unbound"
+    assert "area_authority" not in meta
 
 
 
