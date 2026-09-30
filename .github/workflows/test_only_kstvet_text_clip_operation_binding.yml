@@ -59,7 +59,10 @@ jobs:
               first_origin = None
               if chars:
                   origin = chars[0][2]
-                  first_origin = [float(origin.x), float(origin.y)]
+                  if hasattr(origin, "x") and hasattr(origin, "y"):
+                      first_origin = [float(origin.x), float(origin.y)]
+                  else:
+                      first_origin = [float(origin[0]), float(origin[1])]
               seqno = int(span.get("seqno"))
               trace_rows.append({
                   "seqno": seqno,
