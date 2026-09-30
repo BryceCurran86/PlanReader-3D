@@ -26,7 +26,11 @@ from pb_structural_member_authority import (
 from pb_structural_member_definition_source_shadow import (
     compile_structural_definition_source_shadow,
 )
+from pb_structural_member_physical_candidate_shadow import (
+    compile_structural_physical_candidate_shadow,
+)
 from pb_structural_member_registration_producer import (
+    STRUCTURAL_REGISTRATION_INPUT_UNAUTHENTICATED,
     STRUCTURAL_REGISTRATION_VIEW_COMPLETENESS_UNAUTHENTICATED,
     StructuralMemberRegistrationEvidenceProducer,
     build_structural_member_registration_authority,
@@ -208,10 +212,56 @@ def test_exact_source_receipts_cannot_authenticate_caller_claimed_complete_view(
         )
 
 
+def test_exact_neutral_geometry_candidates_are_not_member_registration_inputs(
+    exact_source_authorities,
+    exact_source_path: Path,
+) -> None:
+    producer, published, selector, _visible = exact_source_authorities
+    shadow = compile_structural_physical_candidate_shadow(
+        source_visibility_producer=producer,
+        revision_id=selector.revision_id,
+        source_bytes=exact_source_path.read_bytes(),
+        page_ids=("223", "225"),
+    )
+    assert shadow.status is EvidenceResolutionStatus.CORROBORATED
+    assert shadow.candidates
+    for candidate in shadow.candidates:
+        assert candidate.source_sha256 == selector.source_sha256
+        assert candidate.snapshot_id == selector.snapshot_id
+        assert candidate.view_id is None
+        assert candidate.source_observation_ids
+        assert set(candidate.source_observation_ids) <= set(published.visible_observation_ids)
+
+    # Deliberately exercise a mistaken promotion of neutral geometry records
+    # to member inputs. The public producer must reject that input schema.
+    result = build_structural_member_registration_authority(
+        selector=selector,
+        source_observations=shadow.candidates,
+        source_views=(),
+    )
+    assert result.observations == ()
+    assert STRUCTURAL_REGISTRATION_INPUT_UNAUTHENTICATED in result.resolution.reason_codes
+    authority = StructuralMemberProducer.from_authenticated_evidence(
+        selector=selector,
+        observations=result.observations,
+        relations=result.relations,
+        view_scopes=result.view_scopes,
+    ).authority()
+    resolution = authority.resolve(selector)
+    assert resolution.status is EvidenceResolutionStatus.ABSTAINED
+    assert resolution.reason_codes == (STRUCTURAL_MEMBER_SCOPE_INCOMPLETE,)
+    assert resolution.members == ()
+    assert resolution.quantity is None
+
+
 def test_exact_full_pdf_extraction_does_not_publish_unproven_masonry_piers(
     exact_source_path: Path,
 ) -> None:
-    # This executes the full live extractor, independently of the scoped
-    # structural checks above. It reads neither diagnostic rows nor gold.
-    predictions = GenericPlanReaderExtractor().extract_from_pdf(exact_source_path)
+    # Match the existing quantity-extraction invocation: all source pages,
+    # without Item 35's separate diagnostic replay. That shadow owns no scored
+    # quantities and is outside this structural lane. No gold is read here.
+    predictions = GenericPlanReaderExtractor().extract_from_pdf(
+        exact_source_path,
+        collect_item35_shadow=False,
+    )
     assert "masonry_piers" not in {prediction.tag for prediction in predictions}

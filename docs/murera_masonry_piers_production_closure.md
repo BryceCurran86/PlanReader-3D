@@ -79,6 +79,13 @@ rejects a production caller's unsupported `complete=True` claim. Decoding a
 page or authenticating visible primitives does not prove the member universe
 complete.
 
+Fresh main `84a74c8817dc72c568099e827eb69d17e8428588` also includes #1091's
+neutral physical-geometry shadow. Exact-source candidates retain their visible
+source backing but have no view ownership, member role, definition link, or
+completeness proof. Passing those candidate records directly to public member
+registration is rejected as unauthenticated input; they cannot raise quantity
+authority.
+
 ## Production conclusion
 
 There is no source-owned evidence presently sufficient to publish a
@@ -111,8 +118,14 @@ APIs against the SHA-locked official PDF:
   member proposition, are rejected by public structural registration;
 - incomplete view scopes remain incomplete, and source receipts cannot
   authenticate a caller's complete-view claim;
+- source-backed neutral geometry candidates are rejected as member inputs;
 - the resulting decision is consumed through `StructuralMemberAuthority`;
 - full-document live extraction does not publish `masonry_piers`.
+
+The full-document test uses the existing quantity-extraction invocation with
+`collect_item35_shadow=False`; all PDF pages remain in scope. Item 35's
+separate full-document diagnostic replay owns no scored quantities and is
+outside this structural review. Its implementation and default are unchanged.
 
 Run the exact-source tests explicitly with a locally downloaded official PDF:
 

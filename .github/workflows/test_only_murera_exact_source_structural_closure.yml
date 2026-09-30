@@ -11,10 +11,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 6371f50ef9cac06d4afaba2c6bb75c9d245169bf
+          ref: 7194b8a102ffe5c3b919f8e52bb6bc53e27758c1
 
       - name: Verify the tested production PR head
-        run: test "$(git rev-parse HEAD)" = "6371f50ef9cac06d4afaba2c6bb75c9d245169bf"
+        run: test "$(git rev-parse HEAD)" = "7194b8a102ffe5c3b919f8e52bb6bc53e27758c1"
 
       - uses: actions/setup-python@v5
         with:
@@ -51,7 +51,7 @@ jobs:
           import subprocess
           import xml.etree.ElementTree as ET
 
-          expected_head = "6371f50ef9cac06d4afaba2c6bb75c9d245169bf"
+          expected_head = "7194b8a102ffe5c3b919f8e52bb6bc53e27758c1"
           tested_head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
           assert tested_head == expected_head
           source_sha = hashlib.sha256(Path("/tmp/murera.pdf").read_bytes()).hexdigest()
@@ -60,7 +60,7 @@ jobs:
           suites = list(root.iter("testsuite"))
           totals = {key: sum(int(row.get(key, "0")) for row in suites)
                     for key in ("tests", "failures", "errors", "skipped")}
-          assert totals == {"tests": 11, "failures": 0, "errors": 0, "skipped": 0}, totals
+          assert totals == {"tests": 12, "failures": 0, "errors": 0, "skipped": 0}, totals
           cases = list(root.iter("testcase"))
           full = [row for row in cases if row.get("name") ==
                   "test_exact_full_pdf_extraction_does_not_publish_unproven_masonry_piers"]
@@ -70,7 +70,7 @@ jobs:
               "do_not_merge": True,
               "tested_production_pr": 1093,
               "tested_head_sha": tested_head,
-              "production_base_sha": "f1653a4d7046592c532abbcaaf2b3fced9aa843e",
+              "production_base_sha": "84a74c8817dc72c568099e827eb69d17e8428588",
               "source_sha256": source_sha,
               "test_totals": totals,
               "full_live_extraction_seconds": float(full[0].get("time", "0")),
