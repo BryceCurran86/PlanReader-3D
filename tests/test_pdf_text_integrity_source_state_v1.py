@@ -23,6 +23,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_pdf_text_integrity_authority import (
     TEXT_CLIP_STATE_UNRESOLVED,
     TEXT_CLIPPED_BY_CLIP_REGION,
+    TEXT_GLYPH_MAPPING_UNVERIFIED,
     TEXT_GLYPH_UNICODE_MISMATCH,
     TEXT_OPTIONAL_CONTENT_OFF,
     TEXT_OPTIONAL_CONTENT_UNRESOLVED,
@@ -30,6 +31,7 @@ from pb_pdf_text_integrity_authority import (
     TEXT_TRACE_AMBIGUOUS,
     TEXT_TRACE_UNAVAILABLE,
     _build_clip_model,
+    _decode_status,
     _optional_content_reasons,
     _text_clip_reasons,
     _valid_tounicode_cmap,
@@ -300,6 +302,149 @@ def test_structurally_valid_tounicode_that_lies_about_glyphs_is_blocked() -> Non
     assert not decision.trusted  # ... the independent glyph check is not
     assert TEXT_GLYPH_UNICODE_MISMATCH in decision.reason_codes
     assert decision.decode_status == "tounicode_glyph_mismatch"
+
+
+class _DecodeParent:
+    def xref_get_key(self, _xref, key):
+        assert key == "ToUnicode"
+        return "null", "null"
+
+
+class _DecodePage:
+    parent = _DecodeParent()
+
+
+_TRUETYPE_WINANSI_FONT = (
+    59,
+    "ttf",
+    "TrueType",
+    "ABCDEE+Maiandra GD",
+    "F1",
+    "WinAnsiEncoding",
+)
+
+
+def test_truetype_winansi_ascii_requires_and_accepts_exact_embedded_glyph_proof(
+    monkeypatch,
+) -> None:
+    import pb_pdf_text_integrity_authority as authority
+
+    monkeypatch.setattr(
+        authority,
+        "_font_binding",
+        lambda _page, _span: (_TRUETYPE_WINANSI_FONT, ()),
+    )
+    monkeypatch.setattr(
+        authority,
+        "_glyph_unicode_consistency_reasons",
+        lambda _page, _span, _font: (),
+    )
+
+    status, reasons, xref, subtype, base_font = _decode_status(
+        _DecodePage(),
+        {"chars": ((ord("C"), 38, (0, 0), (0, 0, 1, 1)),)},
+        "Circular",
+    )
+
+    assert status == "validated_truetype_winansi_glyph_mapping"
+    assert reasons == ()
+    assert xref == 59
+    assert subtype == "TrueType"
+    assert base_font == "ABCDEE+Maiandra GD"
+
+
+@pytest.mark.parametrize(
+    ("font", "raw_text"),
+    [
+        (
+            (
+                59,
+                "ttf",
+                "TrueType",
+                "ABCDEE+Maiandra GD",
+                "F1",
+                "MacRomanEncoding",
+            ),
+            "Circular",
+        ),
+        (_TRUETYPE_WINANSI_FONT, "Café"),
+    ],
+)
+def test_truetype_encoding_exception_stays_narrow(
+    monkeypatch,
+    font,
+    raw_text,
+) -> None:
+    import pb_pdf_text_integrity_authority as authority
+
+    monkeypatch.setattr(
+        authority,
+        "_font_binding",
+        lambda _page, _span: (font, ()),
+    )
+    called = False
+
+    def glyph_check(_page, _span, _font):
+        nonlocal called
+        called = True
+        return ()
+
+    monkeypatch.setattr(
+        authority,
+        "_glyph_unicode_consistency_reasons",
+        glyph_check,
+    )
+
+    status, reasons, *_rest = _decode_status(
+        _DecodePage(),
+        {"chars": ()},
+        raw_text,
+    )
+
+    assert status == "unresolved_encoding"
+    assert reasons
+    assert not called
+
+
+@pytest.mark.parametrize(
+    ("glyph_reasons", "expected_status"),
+    [
+        (
+            (TEXT_GLYPH_MAPPING_UNVERIFIED,),
+            "truetype_winansi_glyph_unverified",
+        ),
+        (
+            (TEXT_GLYPH_UNICODE_MISMATCH,),
+            "truetype_winansi_glyph_mismatch",
+        ),
+    ],
+)
+def test_truetype_winansi_ascii_fails_closed_on_glyph_proof_failure(
+    monkeypatch,
+    glyph_reasons,
+    expected_status,
+) -> None:
+    import pb_pdf_text_integrity_authority as authority
+
+    monkeypatch.setattr(
+        authority,
+        "_font_binding",
+        lambda _page, _span: (_TRUETYPE_WINANSI_FONT, ()),
+    )
+    monkeypatch.setattr(
+        authority,
+        "_glyph_unicode_consistency_reasons",
+        lambda _page, _span, _font: glyph_reasons,
+    )
+
+    status, reasons, *_rest = _decode_status(
+        _DecodePage(),
+        {"chars": ()},
+        "Circular",
+    )
+
+    assert status == expected_status
+    assert reasons == glyph_reasons
 
 
 # ---------------------------------------------------------------------------
