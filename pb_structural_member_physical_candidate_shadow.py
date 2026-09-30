@@ -580,16 +580,19 @@ def compile_structural_physical_candidate_shadow(
             )
         )
         observation = result.observation
-        if result.status is EvidenceResolutionStatus.CONFLICT:
+        if result.status is not EvidenceResolutionStatus.CORROBORATED:
             return _blocked(
-                status=EvidenceResolutionStatus.CONFLICT,
+                status=(
+                    EvidenceResolutionStatus.CONFLICT
+                    if result.status is EvidenceResolutionStatus.CONFLICT
+                    else EvidenceResolutionStatus.ABSTAINED
+                ),
                 reason=STRUCTURAL_PHYSICAL_CANDIDATE_SHADOW_VISIBLE_SOURCE_CONFLICT,
                 published=published,
                 page_ids=selected_pages,
             )
         if (
-            result.status is not EvidenceResolutionStatus.CORROBORATED
-            or observation is None
+            observation is None
             or observation.observation_kind != NATIVE_PDF_VISIBLE_SEGMENT
             or observation.page_id not in visible_by_page
         ):
