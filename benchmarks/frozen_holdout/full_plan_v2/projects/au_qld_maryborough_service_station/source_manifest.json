@@ -16,8 +16,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "8791e47eea9333006d83c5fc5689550f5e6f77992f8d314aba73d9487f861e68",
-      "size_bytes": 19753,
+      "sha256": "c9aeea5fc82f64a7aa67b7a971add0d3337f58b38593c5afe318e5cc65cc02ab",
+      "size_bytes": 23235,
       "page_count": null
     }
   ],
@@ -461,6 +461,90 @@
       "source_location_refs": [
         "A120:RCP:LAUNDRY:2400_WFPB",
         "A501:laundry_plan:1655x5044"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-food-prep-ft3-floor-area",
+      "description": "Food Prep FT3 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 13.270425,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:food_prep"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A140:FOOD_PREP:4025x3297:FT3",
+        "A110:FOOD_PREP:matching_physical_room_geometry"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-food-prep-fpb-ceiling-area",
+      "description": "Food Prep FPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 13.270425,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:food_prep"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:FOOD_PREP:3000_FPB",
+        "A140:FOOD_PREP:4025x3297"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-office-ft3-floor-area",
+      "description": "Office FT3 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 9.05352,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:office"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A140:OFFICE:3570x2536:FT3",
+        "A110:OFFICE:matching_physical_room_geometry"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-office-grid-ceiling-area",
+      "description": "Office 2400 GRID ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 9.05352,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:office"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:OFFICE:2400_GRID",
+        "A140:OFFICE:3570x2536"
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"

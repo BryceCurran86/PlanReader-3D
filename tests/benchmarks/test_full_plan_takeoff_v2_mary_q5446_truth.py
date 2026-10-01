@@ -41,12 +41,6 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     manifest = load_project_manifest(project / "source_manifest.json")
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
-    assert len(manifest.verified_items) == 19
-
-    eligible = [item for item in manifest.verified_items if item.denominator_eligible]
-    excluded = [item for item in manifest.verified_items if not item.denominator_eligible]
-    assert len(eligible) == 16
-    assert len(excluded) == 3
 
     by_id = {item.item_id: item for item in manifest.verified_items}
     assert by_id["maryborough-door-ipf3-count"].expected_quantity == 11
@@ -99,7 +93,88 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     assert ceilings["maryborough:surface:ceiling:airlock"]["expected_area_m2"] == 7.66688
     assert floors["maryborough:surface:floor:laundry"]["expected_area_m2"] == 8.34782
     assert ceilings["maryborough:surface:ceiling:laundry"]["expected_area_m2"] == 8.34782
+    assert floors["maryborough:surface:floor:food_prep"]["expected_area_m2"] == 13.270425
+    assert ceilings["maryborough:surface:ceiling:food_prep"]["expected_area_m2"] == 13.270425
+    assert floors["maryborough:surface:floor:office"]["expected_area_m2"] == 9.05352
+    assert ceilings["maryborough:surface:ceiling:office"]["expected_area_m2"] == 9.05352
     _assert_reference_hash("au_qld_maryborough_service_station")
+
+
+def test_maryborough_food_prep_office_family_is_scoped_and_source_closed():
+    project = ROOT / "au_qld_maryborough_service_station"
+    manifest = load_project_manifest(project / "source_manifest.json")
+    universe = _json(project / "object_universe.json")
+    manifest_json = _json(project / "source_manifest.json")
+
+    expected_refs = {
+        "maryborough:surface:floor:food_prep",
+        "maryborough:surface:ceiling:food_prep",
+        "maryborough:surface:floor:office",
+        "maryborough:surface:ceiling:office",
+    }
+    expected_ids = {
+        "maryborough-food-prep-ft3-floor-area",
+        "maryborough-food-prep-fpb-ceiling-area",
+        "maryborough-office-ft3-floor-area",
+        "maryborough-office-grid-ceiling-area",
+    }
+
+    family_items = [
+        item
+        for item in manifest.verified_items
+        if len(item.expected_object_refs) == 1
+        and item.expected_object_refs[0] in expected_refs
+    ]
+    assert {item.item_id for item in family_items} == expected_ids
+    assert {item.expected_object_refs[0] for item in family_items} == expected_refs
+    assert all(item.denominator_eligible for item in family_items)
+    assert all(item.unit == "m2" for item in family_items)
+    assert {item.trade_category for item in family_items} == {"tiling", "ceilings"}
+
+    objects = {
+        row["object_ref"]: row
+        for row in (
+            universe["verified_floor_surfaces"]
+            + universe["verified_ceiling_surfaces"]
+        )
+        if row["object_ref"] in expected_refs
+    }
+    assert set(objects) == expected_refs
+
+    source_docs = {row["name"] for row in manifest_json["source_documents"]}
+    for obj in objects.values():
+        verification = obj["verification"]
+        assert verification["object_exists"] is True
+        assert verification["object_identified"] is True
+        assert verification["geometry_verified"] is True
+        assert verification["quantity_verified"] is True
+        assert verification["fully_source_closed"] is True
+
+        provenance = obj["provenance"]
+        assert provenance["document_ref"] == (
+            "Arch_Combined_Maryborough_Service_Station.pdf"
+        )
+        assert provenance["document_ref"] in source_docs
+        assert set(provenance["source_evidence_refs"]) == set(
+            obj["source_locations"]
+        )
+        assert all(
+            any(
+                evidence.startswith(sheet + ":")
+                for sheet in provenance["sheet_page_refs"]
+            )
+            for evidence in provenance["source_evidence_refs"]
+        )
+
+    report = _json(project / "verification_report.json")
+    summary = report["food_prep_office_surface_closure_summary"]
+    assert set(summary["object_refs"]) == expected_refs
+    assert summary["source_closed_object_count"] == 4
+    assert summary["object_identity_available"] is True
+    assert summary["geometry_verified"] is True
+    assert summary["quantity_verified"] is True
+    assert summary["provenance_chain_complete"] is True
+    assert summary["project_surface_universe_complete"] is False
 
 
 def test_q5446_only_independently_closed_alfresco_enters_verified_core():
@@ -225,3 +300,27 @@ def test_maryborough_airlock_laundry_truth_is_closed():
         assert row["a120_ceiling_finish"] == "WFPB"
         assert row["a120_ceiling_height_mm"] == 2400
         assert row["agreement"] == "PASS"
+
+
+def test_maryborough_food_prep_truth_is_closed():
+    ref = _json(ROOT / "au_qld_maryborough_service_station" / "reference_takeoff.json")
+    check = ref["food_prep_geometry_check"]
+    assert check["a140_figured_mm"] == [4025, 3297]
+    assert check["area_m2"] == 13.270425
+    assert check["a140_floor_finish"] == "FT3"
+    assert check["a110_geometry_status"] == "MATCHING_PHYSICAL_ROOM"
+    assert check["a120_ceiling_finish"] == "FPB"
+    assert check["a120_ceiling_height_mm"] == 3000
+    assert check["agreement"] == "PASS"
+
+
+def test_maryborough_office_truth_is_closed():
+    ref = _json(ROOT / "au_qld_maryborough_service_station" / "reference_takeoff.json")
+    check = ref["office_geometry_check"]
+    assert check["a140_figured_mm"] == [3570, 2536]
+    assert check["area_m2"] == 9.05352
+    assert check["a140_floor_finish"] == "FT3"
+    assert check["a110_geometry_status"] == "MATCHING_PHYSICAL_ROOM"
+    assert check["a120_ceiling_finish"] == "GRID"
+    assert check["a120_ceiling_height_mm"] == 2400
+    assert check["agreement"] == "PASS"

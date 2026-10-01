@@ -606,6 +606,72 @@
       ],
       "physical_kind": "floor_finish_surface",
       "classification": "VERIFIED_CORE_OBJECT"
+    },
+    {
+      "object_ref": "maryborough:surface:floor:food_prep",
+      "physical_kind": "floor_finish_surface",
+      "room": "FOOD PREP",
+      "finish_mark": "FT3",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 13.270425,
+      "figured_dimensions_mm": [
+        4025,
+        3297
+      ],
+      "source_locations": [
+        "A140:FOOD_PREP:4025x3297:FT3",
+        "A110:FOOD_PREP:matching_physical_room_geometry"
+      ],
+      "verification": {
+        "object_exists": true,
+        "object_identified": true,
+        "geometry_verified": true,
+        "geometry_scope": "2D rectangular plan extents only",
+        "quantity_verified": true,
+        "fully_source_closed": true,
+        "source_closure_scope": "floor finish-surface identity, finish, 2D plan dimensions and area"
+      },
+      "provenance": {
+        "document_ref": "Arch_Combined_Maryborough_Service_Station.pdf",
+        "sheet_page_refs": ["A140", "A110"],
+        "source_evidence_refs": [
+          "A140:FOOD_PREP:4025x3297:FT3",
+          "A110:FOOD_PREP:matching_physical_room_geometry"
+        ]
+      }
+    },
+    {
+      "object_ref": "maryborough:surface:floor:office",
+      "physical_kind": "floor_finish_surface",
+      "room": "OFFICE",
+      "finish_mark": "FT3",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 9.05352,
+      "figured_dimensions_mm": [
+        3570,
+        2536
+      ],
+      "source_locations": [
+        "A140:OFFICE:3570x2536:FT3",
+        "A110:OFFICE:matching_physical_room_geometry"
+      ],
+      "verification": {
+        "object_exists": true,
+        "object_identified": true,
+        "geometry_verified": true,
+        "geometry_scope": "2D rectangular plan extents only",
+        "quantity_verified": true,
+        "fully_source_closed": true,
+        "source_closure_scope": "floor finish-surface identity, finish, 2D plan dimensions and area"
+      },
+      "provenance": {
+        "document_ref": "Arch_Combined_Maryborough_Service_Station.pdf",
+        "sheet_page_refs": ["A140", "A110"],
+        "source_evidence_refs": [
+          "A140:OFFICE:3570x2536:FT3",
+          "A110:OFFICE:matching_physical_room_geometry"
+        ]
+      }
     }
   ],
   "wc_shower_floor_surface_universe_complete": true,
@@ -717,6 +783,74 @@
       ],
       "physical_kind": "ceiling_finish_surface",
       "classification": "VERIFIED_CORE_OBJECT"
+    },
+    {
+      "object_ref": "maryborough:surface:ceiling:food_prep",
+      "physical_kind": "ceiling_finish_surface",
+      "room": "FOOD PREP",
+      "finish_mark": "FPB",
+      "ceiling_height_mm": 3000,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 13.270425,
+      "footprint_dimensions_mm": [
+        4025,
+        3297
+      ],
+      "source_locations": [
+        "A120:RCP:FOOD_PREP:3000_FPB",
+        "A140:FOOD_PREP:4025x3297"
+      ],
+      "verification": {
+        "object_exists": true,
+        "object_identified": true,
+        "geometry_verified": true,
+        "geometry_scope": "2D rectangular ceiling footprint matched to source-proven room extents",
+        "quantity_verified": true,
+        "fully_source_closed": true,
+        "source_closure_scope": "ceiling finish-surface identity, finish, height, 2D footprint and area"
+      },
+      "provenance": {
+        "document_ref": "Arch_Combined_Maryborough_Service_Station.pdf",
+        "sheet_page_refs": ["A120", "A140"],
+        "source_evidence_refs": [
+          "A120:RCP:FOOD_PREP:3000_FPB",
+          "A140:FOOD_PREP:4025x3297"
+        ]
+      }
+    },
+    {
+      "object_ref": "maryborough:surface:ceiling:office",
+      "physical_kind": "ceiling_finish_surface",
+      "room": "OFFICE",
+      "finish_mark": "GRID",
+      "ceiling_height_mm": 2400,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 9.05352,
+      "footprint_dimensions_mm": [
+        3570,
+        2536
+      ],
+      "source_locations": [
+        "A120:RCP:OFFICE:2400_GRID",
+        "A140:OFFICE:3570x2536"
+      ],
+      "verification": {
+        "object_exists": true,
+        "object_identified": true,
+        "geometry_verified": true,
+        "geometry_scope": "2D rectangular ceiling footprint matched to source-proven room extents",
+        "quantity_verified": true,
+        "fully_source_closed": true,
+        "source_closure_scope": "ceiling finish-surface identity, finish, height, 2D footprint and area"
+      },
+      "provenance": {
+        "document_ref": "Arch_Combined_Maryborough_Service_Station.pdf",
+        "sheet_page_refs": ["A120", "A140"],
+        "source_evidence_refs": [
+          "A120:RCP:OFFICE:2400_GRID",
+          "A140:OFFICE:3570x2536"
+        ]
+      }
     }
   ],
   "wc_shower_ceiling_surface_universe_complete": true
