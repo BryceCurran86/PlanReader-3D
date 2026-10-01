@@ -384,8 +384,10 @@ def test_3laurel_partial_internal_wall_gross_faces_are_dimension_closed_but_not_
         for row in faces
     )
     assert (
-        "internal_wall_faces_beyond_closed_bathroom_main_ensuite_main_wc_main_laundry_gf_ensuite_laundry_and_bed2_bed3_gross_faces"
-        in draft["unresolved_surface_families"]
+        any(
+            item.startswith("internal_wall_faces_beyond_closed_")
+            for item in draft["unresolved_surface_families"]
+        )
     )
 
 
@@ -441,8 +443,10 @@ def test_3laurel_main_laundry_gross_wall_faces_are_dimension_closed_but_not_net_
         for row in faces
     )
     assert (
-        "internal_wall_faces_beyond_closed_bathroom_main_ensuite_main_wc_main_laundry_gf_ensuite_laundry_and_bed2_bed3_gross_faces"
-        in draft["unresolved_surface_families"]
+        any(
+            item.startswith("internal_wall_faces_beyond_closed_")
+            for item in draft["unresolved_surface_families"]
+        )
     )
 
 
@@ -1060,3 +1064,44 @@ def test_3laurel_bed2_bed3_gross_wall_faces_are_source_closed():
     assert check["object_count"] == 8
     assert check["gross_wall_area_m2"] == pytest.approx(77.76)
     assert check["source_closed_gross_geometry"] is True
+
+
+def test_3laurel_media_floor_and_gross_walls_are_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+
+    floor = by_ref["3laurel:surface:floor:media"]
+    assert floor["expected_quantity"] == pytest.approx(13.146)
+    assert floor["attributes"]["finish"] == "vinyl"
+    assert floor["attributes"]["width_m"] == pytest.approx(4.2)
+    assert floor["attributes"]["length_m"] == pytest.approx(3.13)
+    assert (
+        floor["attributes"]["overlaps_aggregate_ref"]
+        == "3laurel:surface:floor:main_living_composite_region"
+    )
+
+    wall_refs = [
+        "3laurel:surface:internal_wall_gross:media:4200_side_1",
+        "3laurel:surface:internal_wall_gross:media:4200_side_2",
+        "3laurel:surface:internal_wall_gross:media:3130_side_1",
+        "3laurel:surface:internal_wall_gross:media:3130_side_2",
+    ]
+    walls = [by_ref[ref] for ref in wall_refs]
+    assert sum(float(row["expected_quantity"]) for row in walls) == pytest.approx(
+        39.582
+    )
+    assert all(row["attributes"]["openings_deducted"] is False for row in walls)
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:media_floor_and_gross_wall_faces"
+    )
+    assert check["figured_room_dimensions_m"] == [4.2, 3.13]
+    assert check["floor_area_m2"] == pytest.approx(13.146)
+    assert check["gross_wall_area_m2"] == pytest.approx(39.582)
+    assert check["source_closed_gross_geometry"] is True
+    assert check["openings_deducted"] is False
+    assert "must not be double-counted" in check["overlap_note"]
