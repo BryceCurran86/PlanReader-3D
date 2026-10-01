@@ -1429,3 +1429,47 @@ def test_lot16_niche_free_explicit_tile_faces_are_closed_to_source_datum():
     assert check["ensuite_top_plate_portion_complete"] is True
     assert check["ensuite_raked_extension_resolved"] is False
     assert check["complete_for_project_wet_area_tile_universe"] is False
+
+
+def test_3laurel_bed2_bed3_net_wall_geometry_closes_against_exact_openings():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+
+    assert (
+        by_ref["3laurel:opening:p3:internal_access:0870_swing:02"]["description"]
+        == "Internal room-access 870 mm hinged opening: Bed 3"
+    )
+    assert (
+        by_ref["3laurel:opening:p3:internal_access:0870_swing:03"]["description"]
+        == "Internal room-access 870 mm hinged opening: Bed 2"
+    )
+    assert (
+        by_ref["3laurel:opening:p3:1200x1810_asw:01"]["description"]
+        == "Bed 2 1200 x 1810 ASW"
+    )
+    assert (
+        by_ref["3laurel:opening:p3:1200x1810_asw:02"]["description"]
+        == "Bed 3 1200 x 1810 ASW"
+    )
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:bed2_bed3_net_wall_geometry"
+    )
+    assert check["combined_gross_wall_area_m2"] == pytest.approx(77.76)
+    assert check["combined_opening_deduction_area_m2"] == pytest.approx(15.558)
+    assert check["combined_net_wall_geometry_m2"] == pytest.approx(62.202)
+    assert check["complete_for_bed2_bed3_known_opening_geometry"] is True
+    assert check["finish_scope_resolved"] is False
+
+    for room in check["rooms"]:
+        assert room["gross_wall_area_m2"] == pytest.approx(38.88)
+        assert room["opening_deduction_area_m2"] == pytest.approx(7.779)
+        assert room["net_wall_geometry_m2"] == pytest.approx(31.101)
+        assert len(room["gross_surface_refs"]) == 4
+        assert len(room["deduction_opening_refs"]) == 3
+        for ref in room["gross_surface_refs"] + room["deduction_opening_refs"]:
+            assert ref in by_ref
