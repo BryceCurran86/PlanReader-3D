@@ -60,6 +60,8 @@ def item(
     unit="m2",
     trade="painting",
     denominator_eligible=True,
+    source_document_refs=("takeoff.pdf",),
+    source_location_refs=("reference:item",),
 ) -> VerifiedTakeoffItemV2:
     return VerifiedTakeoffItemV2(
         item_id=item_id,
@@ -71,8 +73,8 @@ def item(
         tolerance_policy_id="relative-tolerance-v1",
         tolerance_fraction=tolerance,
         expected_object_refs=refs,
-        source_document_refs=("takeoff.pdf",),
-        source_location_refs=("reference:item",),
+        source_document_refs=source_document_refs,
+        source_location_refs=source_location_refs,
         denominator_eligible=denominator_eligible,
     )
 
@@ -240,6 +242,16 @@ def test_verified_manifest_requires_denominator_item():
 def test_denominator_identity_must_be_unique():
     with pytest.raises(ValueError, match="unique trade/unit/object identity"):
         verified_manifest(item("paint-a"), item("paint-b"))
+
+
+def test_denominator_item_requires_reference_document_and_location_lineage():
+    with pytest.raises(ValueError, match="reference document and location lineage"):
+        item(source_location_refs=())
+
+
+def test_verified_item_reference_document_must_exist_in_manifest():
+    with pytest.raises(ValueError, match="must name reference takeoff documents"):
+        verified_manifest(item(source_document_refs=("wrong-takeoff.pdf",)))
 
 
 def test_incomplete_manifest_is_not_scored():
