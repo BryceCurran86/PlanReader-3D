@@ -1201,6 +1201,86 @@
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-joinery-1200-vsd-laundry-linen-01-area",
+      "description": "Internal 1200 mm vertical sliding joinery opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 2.52,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_joinery:1200_vsd_laundry_linen:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:laundry/linen 1200 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-joinery-1800-vsd-bed3-robe-01-area",
+      "description": "Internal 1800 mm vertical sliding joinery opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 3.78,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_joinery:1800_vsd_bed3_robe:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed 3 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-joinery-1800-vsd-bed2-robe-01-area",
+      "description": "Internal 1800 mm vertical sliding joinery opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 3.78,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_joinery:1800_vsd_bed2_robe:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed 2 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-joinery-1800-vsd-bed4-robe-01-area",
+      "description": "Internal 1800 mm vertical sliding joinery opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 3.78,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_joinery:1800_vsd_bed4_robe:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed 4 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "external_opening_reconciliation": {
@@ -1349,6 +1429,28 @@
     "residual_unresolved": [
       "robe_and_linen_sliding_joinery_openings",
       "unlabelled_internal_wall_openings"
+    ]
+  },
+  "internal_sliding_joinery_reconciliation": {
+    "closure_check_id": "3laurel:closure:internal_sliding_joinery_opening_census",
+    "component_object_refs": [
+      "3laurel:opening:p3:internal_joinery:1200_vsd_laundry_linen:01",
+      "3laurel:opening:p3:internal_joinery:1800_vsd_bed3_robe:01",
+      "3laurel:opening:p3:internal_joinery:1800_vsd_bed2_robe:01",
+      "3laurel:opening:p3:internal_joinery:1800_vsd_bed4_robe:01"
+    ],
+    "labelled_vsd_opening_count": 4,
+    "labelled_vsd_opening_area_m2": 13.86,
+    "width_distribution_m": {
+      "1.20": 1,
+      "1.80": 3
+    },
+    "joinery_height_m": 2.1,
+    "complete_for_explicit_vsd_labels": true,
+    "complete_for_all_internal_wall_openings": false,
+    "residual_unresolved": [
+      "dimensioned_open_archways",
+      "unlabelled_internal_wall_breaks"
     ]
   }
 }

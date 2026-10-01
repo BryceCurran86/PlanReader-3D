@@ -16,8 +16,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "9707745d6c1f61df19262ea73689c4ceeb0a6da002b0086aa72049a979de9680",
-      "size_bytes": 47072,
+      "sha256": "c68eb97ce52790cdf7537005ff29dfefa1c7d5b6a39bce713919562e822c0ac7",
+      "size_bytes": 50960,
       "page_count": null
     }
   ],
@@ -1212,6 +1212,86 @@
       ],
       "source_location_refs": [
         "architectural:p3:A0.3:floor_plan:main bathroom 720 hinged opening; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-joinery-1200-vsd-laundry-linen-01-area",
+      "description": "Internal 1200 mm vertical sliding joinery opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 2.52,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_joinery:1200_vsd_laundry_linen:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:laundry/linen 1200 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-joinery-1800-vsd-bed3-robe-01-area",
+      "description": "Internal 1800 mm vertical sliding joinery opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 3.78,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_joinery:1800_vsd_bed3_robe:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed 3 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-joinery-1800-vsd-bed2-robe-01-area",
+      "description": "Internal 1800 mm vertical sliding joinery opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 3.78,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_joinery:1800_vsd_bed2_robe:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed 2 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-joinery-1800-vsd-bed4-robe-01-area",
+      "description": "Internal 1800 mm vertical sliding joinery opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 3.78,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_joinery:1800_vsd_bed4_robe:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed 4 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
