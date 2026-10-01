@@ -1558,6 +1558,98 @@ def _exact_fill_path_coverage(
     return float(result.coverage_ratio)
 
 
+_LATER_PAINT_KINDS = frozenset({
+    "fill-path",
+    "fill-image",
+    "fill-shade",
+    "fill-text",
+})
+_LATER_PAINT_SPATIAL_BIN_PT = 64.0
+_LATER_PAINT_SPATIAL_MAX_CELLS = 4096
+
+
+def _later_paint_spatial_candidates(
+    page: object,
+    subject_bbox: Sequence[object],
+    text_sequence_number: int,
+    bboxlog: Sequence[object],
+) -> Optional[tuple[int, ...]]:
+    """Lossless broad phase for later-paint occlusion checks.
+
+    The authority predicate remains `_intersection_ratio` plus the exact fill
+    coverage gate below. This index only removes later paint records whose
+    axis-aligned bounding boxes cannot intersect the text subject at all.
+    Candidate sequence numbers are returned in original paint order so the
+    historical first-qualifying-occluder behavior is unchanged.
+    """
+    try:
+        sx0, sy0, sx1, sy1 = _rect_tuple(subject_bbox)
+    except (TypeError, ValueError):
+        return None
+    if sx1 <= sx0 or sy1 <= sy0:
+        return None
+
+    cache = _page_cache(page)
+    cache_key = "later_paint_spatial_index_v1"
+    indexed = cache.get(cache_key)
+    if indexed is None or indexed[0] is not bboxlog:
+        grid: dict[tuple[int, int], list[int]] = {}
+        broad: list[int] = []
+        bin_size = _LATER_PAINT_SPATIAL_BIN_PT
+        for paint_seqno, item in enumerate(bboxlog):
+            try:
+                paint_kind, paint_bbox = str(item[0]), item[1]  # type: ignore[index]
+            except (IndexError, TypeError):
+                continue
+            if paint_kind not in _LATER_PAINT_KINDS:
+                continue
+            try:
+                x0, y0, x1, y1 = _rect_tuple(paint_bbox)
+            except (TypeError, ValueError):
+                # The legacy exact predicate returns zero overlap for malformed
+                # boxes, so they cannot become positive occlusion authority.
+                continue
+            if x1 <= x0 or y1 <= y0:
+                continue
+            ix0 = int(math.floor(x0 / bin_size))
+            ix1 = int(math.floor(x1 / bin_size))
+            iy0 = int(math.floor(y0 / bin_size))
+            iy1 = int(math.floor(y1 / bin_size))
+            cell_count = (ix1 - ix0 + 1) * (iy1 - iy0 + 1)
+            if cell_count > _LATER_PAINT_SPATIAL_MAX_CELLS:
+                broad.append(paint_seqno)
+                continue
+            for ix in range(ix0, ix1 + 1):
+                for iy in range(iy0, iy1 + 1):
+                    grid.setdefault((ix, iy), []).append(paint_seqno)
+        indexed = (bboxlog, grid, tuple(broad))
+        cache[cache_key] = indexed
+
+    _same_bboxlog, grid, broad = indexed
+    bin_size = _LATER_PAINT_SPATIAL_BIN_PT
+    ix0 = int(math.floor(sx0 / bin_size))
+    ix1 = int(math.floor(sx1 / bin_size))
+    iy0 = int(math.floor(sy0 / bin_size))
+    iy1 = int(math.floor(sy1 / bin_size))
+    query_cell_count = (ix1 - ix0 + 1) * (iy1 - iy0 + 1)
+    if query_cell_count > _LATER_PAINT_SPATIAL_MAX_CELLS:
+        return None
+
+    candidates = {
+        seqno
+        for seqno in broad
+        if seqno > text_sequence_number
+    }
+    for ix in range(ix0, ix1 + 1):
+        for iy in range(iy0, iy1 + 1):
+            candidates.update(
+                seqno
+                for seqno in grid.get((ix, iy), ())
+                if seqno > text_sequence_number
+            )
+    return tuple(sorted(candidates))
+
+
 def _later_paint_occlusion_reasons(
     page: object,
     subject_bbox: Sequence[object],
@@ -1566,20 +1658,22 @@ def _later_paint_occlusion_reasons(
     *,
     threshold: float = 0.65,
 ) -> tuple[str, ...]:
-    for paint_seqno, item in enumerate(
-        bboxlog[text_sequence_number + 1 :],
-        start=text_sequence_number + 1,
-    ):
+    candidate_seqnos = _later_paint_spatial_candidates(
+        page,
+        subject_bbox,
+        text_sequence_number,
+        bboxlog,
+    )
+    if candidate_seqnos is None:
+        candidate_seqnos = tuple(range(text_sequence_number + 1, len(bboxlog)))
+
+    for paint_seqno in candidate_seqnos:
         try:
+            item = bboxlog[paint_seqno]
             paint_kind, paint_bbox = str(item[0]), item[1]  # type: ignore[index]
         except (IndexError, TypeError):
             continue
-        if paint_kind not in {
-            "fill-path",
-            "fill-image",
-            "fill-shade",
-            "fill-text",
-        }:
+        if paint_kind not in _LATER_PAINT_KINDS:
             continue
         if _intersection_ratio(subject_bbox, paint_bbox) < threshold:
             continue

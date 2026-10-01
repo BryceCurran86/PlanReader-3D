@@ -495,6 +495,14 @@ class PhysicalOpeningAuthority:
             tuple[str, str, str, str, str],
             tuple[CandidateSemanticOpening, ...],
         ] = {}
+        self._visible_candidate_membership_cache: dict[
+            tuple[str, str, str, str, str],
+            dict[str, tuple[CandidateSemanticOpening, ...]],
+        ] = {}
+        self._visible_existence_cache: dict[
+            tuple[str, str, str, str, str],
+            PhysicalOpeningExistenceResult,
+        ] = {}
         self._visible_snapshot_cache: dict[
             tuple[str, str, str, str],
             tuple[
@@ -1177,6 +1185,14 @@ class PhysicalOpeningAuthority:
             return cached
         candidates = self._visible_all_structural_candidates(seed, records)
         self._visible_candidate_cache[key] = candidates
+        membership: dict[str, list[CandidateSemanticOpening]] = {}
+        for candidate in candidates:
+            for observation_id in candidate.source_observation_ids:
+                membership.setdefault(str(observation_id), []).append(candidate)
+        self._visible_candidate_membership_cache[key] = {
+            observation_id: tuple(rows)
+            for observation_id, rows in membership.items()
+        }
         return candidates
 
     def assess_visible_candidate_closure(
@@ -1605,46 +1621,77 @@ class PhysicalOpeningAuthority:
             )
 
         visibility = self._source_visibility_authority
+        visible_cache_key = (
+            str(selector.document_id),
+            str(selector.revision_id),
+            str(selector.source_sha256),
+            str(selector.snapshot_id),
+            str(selector.observation_id),
+        )
+        cached_existence = self._visible_existence_cache.get(visible_cache_key)
+        if cached_existence is not None:
+            return cached_existence
+
+        def cache_visible(result: PhysicalOpeningExistenceResult) -> PhysicalOpeningExistenceResult:
+            self._visible_existence_cache[visible_cache_key] = result
+            return result
+
         source_result = visibility.resolve_visible(selector)
         if source_result.status is not EvidenceResolutionStatus.CORROBORATED or source_result.observation is None:
-            return PhysicalOpeningExistenceResult(
+            return cache_visible(PhysicalOpeningExistenceResult(
                 status=_source_failure_status(source_result), proposition=None,
                 physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
                 reason_codes=_dedupe_reason_codes(source_result.reason_codes),
                 source_observation=source_result,
                 missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
-            )
+            ))
         records, failures = self._visible_snapshot_records(source_result)
         if failures:
-            return PhysicalOpeningExistenceResult(
+            return cache_visible(PhysicalOpeningExistenceResult(
                 status=_source_failure_status(*failures), proposition=None,
                 physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
                 reason_codes=_dedupe_reason_codes(
                     (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),
                     *tuple(result.reason_codes for result in failures),
                 ), source_observation=source_result,
-            )
+            ))
         observation = source_result.observation
         candidates = self._visible_candidates_for(observation, records)
-        containing = tuple(
-            candidate for candidate in candidates
-            if observation.observation_id in candidate.source_observation_ids
+        page_key = (
+            observation.document_id,
+            observation.revision_id,
+            observation.source_sha256,
+            observation.snapshot_id,
+            observation.page_id,
         )
+        membership = self._visible_candidate_membership_cache.get(page_key)
+        if membership is None:
+            # Defensive compatibility for any pre-populated candidate cache.
+            rebuilt: dict[str, list[CandidateSemanticOpening]] = {}
+            for candidate in candidates:
+                for observation_id in candidate.source_observation_ids:
+                    rebuilt.setdefault(str(observation_id), []).append(candidate)
+            membership = {
+                observation_id: tuple(rows)
+                for observation_id, rows in rebuilt.items()
+            }
+            self._visible_candidate_membership_cache[page_key] = membership
+        containing = membership.get(str(observation.observation_id), ())
         if len(containing) > 1:
-            return PhysicalOpeningExistenceResult(
+            return cache_visible(PhysicalOpeningExistenceResult(
                 status=EvidenceResolutionStatus.CONFLICT, proposition=None,
                 physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
                 reason_codes=(AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES,),
                 source_observation=source_result,
-            )
+            ))
         if len(containing) != 1 or source_result.snapshot is None:
-            return PhysicalOpeningExistenceResult(
+            return cache_visible(PhysicalOpeningExistenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED, proposition=None,
                 physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
                 reason_codes=(VISIBLE_WALL_CONTINUATION_REQUIRED,),
                 source_observation=source_result,
                 missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
-            )
+            ))
 
         candidate = containing[0]
         record_payload = {
@@ -1680,7 +1727,7 @@ class PhysicalOpeningAuthority:
             producer_version=source_result.snapshot.producer_version,
             producer_generation=source_result.snapshot.producer_generation,
         )
-        return PhysicalOpeningExistenceResult(
+        return cache_visible(PhysicalOpeningExistenceResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             proposition=PHYSICAL_OPENING_EXISTS,
             physical_opening_existence=PHYSICAL_OPENING_EXISTS,
@@ -1688,7 +1735,7 @@ class PhysicalOpeningAuthority:
             source_observation=source_result,
             candidate=candidate,
             existence_record=existence,
-        )
+        ))
 
     @staticmethod
     def _identity_scope(record: PhysicalOpeningExistenceRecord) -> tuple[str, str, str, str, str]:

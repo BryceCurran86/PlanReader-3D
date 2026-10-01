@@ -973,7 +973,7 @@ def resolve_physical_wall_equivalence(
     same_links: list[tuple[str, str]] = []
     ambiguous_links: list[tuple[str, str]] = []
 
-    total_pairs = 0
+    total_pairs = len(usable) * (len(usable) - 1) // 2
     excluded_pairs = 0
     exclusion_reason_counts: dict[str, int] = {}
     verified_points_per_mm = (
@@ -987,41 +987,197 @@ def resolve_physical_wall_equivalence(
         verified_points_per_mm
     )
 
-    for i, left in enumerate(usable):
-        for right in usable[i + 1 :]:
-            total_pairs += 1
-            # A pair that could not possibly represent the same physical wall
-            # is not an identity competitor and gets no relation at all.
-            # Absence of a SAME proof between unrelated candidates is not
-            # ambiguity, and must not link them into one publication contest.
-            eligible, exclusion_reason = (
-                _physical_wall_pair_identity_candidacy_with_features(
-                    left,
-                    right,
-                    features_by_id[left.wall_candidate_id],
-                    features_by_id[right.wall_candidate_id],
-                    points_per_mm=points_per_mm,
+    def evaluate_pair(left_index: int, right_index: int) -> None:
+        nonlocal excluded_pairs
+        left = usable[left_index]
+        right = usable[right_index]
+        left_features = features_by_id[left.wall_candidate_id]
+        right_features = features_by_id[right.wall_candidate_id]
+        # A pair that could not possibly represent the same physical wall
+        # is not an identity competitor and gets no relation at all.
+        eligible, exclusion_reason = _physical_wall_pair_identity_candidacy_with_features(
+            left,
+            right,
+            left_features,
+            right_features,
+            points_per_mm=points_per_mm,
+        )
+        if not eligible:
+            excluded_pairs += 1
+            if exclusion_reason:
+                exclusion_reason_counts[exclusion_reason] = (
+                    exclusion_reason_counts.get(exclusion_reason, 0) + 1
                 )
-            )
-            if not eligible:
-                excluded_pairs += 1
-                if exclusion_reason:
-                    exclusion_reason_counts[exclusion_reason] = (
-                        exclusion_reason_counts.get(exclusion_reason, 0) + 1
-                    )
+            return
+        classification = _classify_physical_wall_pair_with_features(
+            left,
+            right,
+            left_features,
+            right_features,
+        )
+        a, b = sorted((left.wall_candidate_id, right.wall_candidate_id))
+        pair_classifications.append((a, b, classification.value))
+        if classification == PhysicalEquivalenceClass.SAME_PHYSICAL_WALL:
+            same_links.append((a, b))
+        elif classification == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE:
+            ambiguous_links.append((a, b))
+
+    # Dense CAD pages can contain thousands of one-segment wall identities.
+    # The historical resolver executed every N*(N-1)/2 pair predicate even
+    # when most pairs were provably orientation-incompatible. For one-segment
+    # identities in one homogeneous source scope, orientation is the first
+    # exclusion gate after source/path identity. Bucket only the pairs whose
+    # directions can fall within the exact angle tolerance; bulk-count all
+    # remaining pairs as the same orientation-incompatible audit outcome.
+    viewport_set = {identity.viewport_id for identity in usable}
+    nonempty_levels = {
+        features_by_id[identity.wall_candidate_id].level_id
+        for identity in usable
+        if features_by_id[identity.wall_candidate_id].level_id
+    }
+    angle_tol = float(_EQUIVALENCE_ANGLE_TOL_DEG)
+    bucket_count_float = 180.0 / angle_tol if angle_tol > 0.0 else 0.0
+    bucket_count = int(round(bucket_count_float)) if bucket_count_float else 0
+    homogeneous_scope = len(viewport_set) <= 1 and len(nonempty_levels) <= 1
+    exact_angle_buckets = (
+        bucket_count > 0
+        and abs(bucket_count * angle_tol - 180.0) <= 1e-9
+    )
+
+    fast_single_indexes: list[int] = []
+    slow_indexes: list[int] = []
+    angle_bucket_by_index: dict[int, int] = {}
+    angle_buckets: dict[int, list[int]] = {}
+    direction_key_by_index: dict[int, tuple[float, float]] = {}
+    longitudinal_interval_by_index: dict[int, tuple[float, float]] = {}
+    if homogeneous_scope and exact_angle_buckets:
+        for index, identity in enumerate(usable):
+            features = features_by_id[identity.wall_candidate_id]
+            unit = features.single_segment_unit
+            if len(features.segments) != 1 or unit is None:
+                slow_indexes.append(index)
                 continue
-            classification = _classify_physical_wall_pair_with_features(
-                left,
-                right,
-                features_by_id[left.wall_candidate_id],
-                features_by_id[right.wall_candidate_id],
+            angle = math.degrees(math.atan2(unit[1], unit[0])) % 180.0
+            bucket = min(bucket_count - 1, int(math.floor(angle / angle_tol)))
+            fast_single_indexes.append(index)
+            angle_bucket_by_index[index] = bucket
+            angle_buckets.setdefault(bucket, []).append(index)
+            direction_key_by_index[index] = (float(unit[0]), float(unit[1]))
+            segment = features.segments[0]
+            first_projection = segment[0] * unit[0] + segment[1] * unit[1]
+            second_projection = segment[2] * unit[0] + segment[3] * unit[1]
+            longitudinal_interval_by_index[index] = (
+                min(first_projection, second_projection),
+                max(first_projection, second_projection),
             )
-            a, b = sorted((left.wall_candidate_id, right.wall_candidate_id))
-            pair_classifications.append((a, b, classification.value))
-            if classification == PhysicalEquivalenceClass.SAME_PHYSICAL_WALL:
-                same_links.append((a, b))
-            elif classification == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE:
-                ambiguous_links.append((a, b))
+    else:
+        slow_indexes = list(range(len(usable)))
+
+    if fast_single_indexes:
+        fast_set = set(fast_single_indexes)
+        forced_by_lower: dict[int, set[int]] = {}
+
+        def force_group(indexes: Sequence[int]) -> None:
+            ordered = sorted(set(indexes))
+            for pos, left_index in enumerate(ordered):
+                if pos + 1 >= len(ordered):
+                    continue
+                forced_by_lower.setdefault(left_index, set()).update(
+                    ordered[pos + 1 :]
+                )
+
+        primitive_indexes: dict[str, list[int]] = {}
+        path_indexes: dict[tuple[tuple[float, float], ...], list[int]] = {}
+        for index in fast_single_indexes:
+            identity = usable[index]
+            features = features_by_id[identity.wall_candidate_id]
+            for primitive_id in features.primitive_set:
+                primitive_indexes.setdefault(str(primitive_id), []).append(index)
+            if identity.path_fingerprint is not None:
+                path_indexes.setdefault(tuple(identity.path_fingerprint), []).append(index)
+        for indexes in primitive_indexes.values():
+            if len(indexes) > 1:
+                force_group(indexes)
+        for indexes in path_indexes.values():
+            if len(indexes) > 1:
+                force_group(indexes)
+
+        suffix_fast_count = [0] * (len(usable) + 1)
+        for index in range(len(usable) - 1, -1, -1):
+            suffix_fast_count[index] = suffix_fast_count[index + 1] + (
+                1 if index in fast_set else 0
+            )
+
+        slow_set = set(slow_indexes)
+        for left_index in range(len(usable)):
+            if left_index in slow_set:
+                for right_index in range(left_index + 1, len(usable)):
+                    evaluate_pair(left_index, right_index)
+                continue
+
+            candidate_indexes: set[int] = set()
+            bucket = angle_bucket_by_index[left_index]
+            forced_indexes = forced_by_lower.get(left_index, set())
+            skipped_no_longitudinal = 0
+            left_direction = direction_key_by_index[left_index]
+            left_interval = longitudinal_interval_by_index[left_index]
+            for neighbor in (
+                (bucket - 1) % bucket_count,
+                bucket,
+                (bucket + 1) % bucket_count,
+            ):
+                for index in angle_buckets.get(neighbor, ()):
+                    if index <= left_index:
+                        continue
+                    if (
+                        index not in forced_indexes
+                        and direction_key_by_index[index] == left_direction
+                    ):
+                        right_interval = longitudinal_interval_by_index[index]
+                        gap = max(left_interval[0], right_interval[0]) - min(
+                            left_interval[1], right_interval[1]
+                        )
+                        if gap > _EQUIVALENCE_LATERAL_TOL_PT:
+                            skipped_no_longitudinal += 1
+                            continue
+                    candidate_indexes.add(index)
+            candidate_indexes.update(
+                index for index in slow_indexes if index > left_index
+            )
+            candidate_indexes.update(forced_indexes)
+
+            if skipped_no_longitudinal > 0:
+                excluded_pairs += skipped_no_longitudinal
+                exclusion_reason_counts[PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP] = (
+                    exclusion_reason_counts.get(
+                        PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP, 0
+                    )
+                    + skipped_no_longitudinal
+                )
+
+            evaluated_fast_count = sum(
+                1 for index in candidate_indexes if index in fast_set
+            )
+            skipped_orientation_pairs = (
+                suffix_fast_count[left_index + 1]
+                - evaluated_fast_count
+                - skipped_no_longitudinal
+            )
+            if skipped_orientation_pairs > 0:
+                excluded_pairs += skipped_orientation_pairs
+                exclusion_reason_counts[PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE] = (
+                    exclusion_reason_counts.get(
+                        PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE, 0
+                    )
+                    + skipped_orientation_pairs
+                )
+
+            for right_index in sorted(candidate_indexes):
+                evaluate_pair(left_index, right_index)
+    else:
+        for left_index in range(len(usable)):
+            for right_index in range(left_index + 1, len(usable)):
+                evaluate_pair(left_index, right_index)
 
     # Components over SAME ∪ AMBIGUOUS edges.
     related_links = same_links + ambiguous_links

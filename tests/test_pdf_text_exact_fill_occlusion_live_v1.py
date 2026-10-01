@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import random
 from typing import Mapping, Optional
 
 import fitz
@@ -326,3 +327,41 @@ def test_real_pdf_opaque_rectangle_over_word_remains_blocked():
     assert _intersection_ratio(word_bbox, later_fills[0][1]) >= 0.65
     assert not decision.trusted
     assert TEXT_OCCLUDED_BY_LATER_PAINT in decision.reason_codes
+
+
+def test_later_paint_spatial_index_matches_exhaustive_scan_randomized():
+    rng = random.Random(20261002)
+    kinds = ("fill-image", "fill-shade", "fill-text", "stroke-path", "stroke-text")
+
+    for case in range(40):
+        bboxlog = []
+        for _ in range(350):
+            x0 = rng.uniform(-200.0, 1800.0)
+            y0 = rng.uniform(-200.0, 1200.0)
+            width = rng.uniform(1.0, 300.0)
+            height = rng.uniform(1.0, 180.0)
+            bboxlog.append((rng.choice(kinds), (x0, y0, x0 + width, y0 + height)))
+
+        sx0 = rng.uniform(0.0, 1500.0)
+        sy0 = rng.uniform(0.0, 900.0)
+        subject = (sx0, sy0, sx0 + rng.uniform(5.0, 120.0), sy0 + rng.uniform(5.0, 60.0))
+        text_seqno = rng.randrange(0, len(bboxlog) - 1)
+        threshold = rng.choice((0.1, 0.35, 0.65, 0.9))
+
+        expected = ()
+        for item in bboxlog[text_seqno + 1 :]:
+            kind, paint_bbox = item
+            if kind not in {"fill-image", "fill-shade", "fill-text"}:
+                continue
+            if _intersection_ratio(subject, paint_bbox) >= threshold:
+                expected = (TEXT_OCCLUDED_BY_LATER_PAINT,)
+                break
+
+        actual = _later_paint_occlusion_reasons(
+            FakePage(()),
+            subject,
+            text_seqno,
+            tuple(bboxlog),
+            threshold=threshold,
+        )
+        assert actual == expected, f"random case {case} diverged"
