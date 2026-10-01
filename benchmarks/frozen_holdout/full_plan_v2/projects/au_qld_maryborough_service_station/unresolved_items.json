@@ -1,0 +1,31 @@
+{
+  "schema_version": "v2-unresolved-items-1.0",
+  "project_id": "au_qld_maryborough_service_station",
+  "status": "INCOMPLETE",
+  "unresolved_families": [
+    {
+      "family": "room_floor_areas",
+      "reason": "Room geometry route not independently closed."
+    },
+    {
+      "family": "internal_wall_ipf2_areas",
+      "reason": "Wall-face universe not independently closed."
+    },
+    {
+      "family": "ceilings",
+      "reason": "Ceiling surface universe not independently closed."
+    },
+    {
+      "family": "wall_tiles",
+      "reason": "Tile surface universe not independently closed."
+    },
+    {
+      "family": "external_surfaces",
+      "reason": "External surface universe not independently closed."
+    },
+    {
+      "family": "windows",
+      "reason": "W01-W06 identity is corroborated but exact size/surface truth is not yet independently verified."
+    }
+  ]
+}
