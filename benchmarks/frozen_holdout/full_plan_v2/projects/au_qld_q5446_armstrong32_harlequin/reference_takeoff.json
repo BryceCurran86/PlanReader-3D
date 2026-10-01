@@ -1,0 +1,64 @@
+{
+  "schema_version": "v2-reference-truth-1.0",
+  "project_id": "au_qld_q5446_armstrong32_harlequin",
+  "status": "VERIFIED_CORE_ONLY",
+  "truth_policy": {
+    "planreader_output_used_as_truth": false,
+    "minimum_independent_routes": 2,
+    "note": "Only quantities independently closed by a second route enter the verified core."
+  },
+  "source_plan": {
+    "name": "Q5446_Standard_Plans_V1_20220320.pdf",
+    "sha256": "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0"
+  },
+  "items": [
+    {
+      "item_id": "q5446-alfresco-floor-area",
+      "description": "Alfresco floor area independently closed by 3000 x 4000 figured dimensions",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 12,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:alfresco"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p1:areas_table:ALFRESCO_12.00_m2",
+        "standard_plans:p1:figured_dimensions:3000x4000"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    }
+  ],
+  "declared_area_controls_not_truth": [
+    {
+      "name": "ground_floor",
+      "quantity_m2": 123.89,
+      "reason": "Designer table only; no independent complete polygon closure."
+    },
+    {
+      "name": "first_floor",
+      "quantity_m2": 121.81,
+      "reason": "Designer table only; no independent complete polygon closure."
+    },
+    {
+      "name": "porch",
+      "quantity_m2": 4.08,
+      "reason": "Designer table only; independent geometric closure not frozen."
+    },
+    {
+      "name": "garage",
+      "quantity_m2": 36.4,
+      "reason": "Designer table and 6500x5600 arithmetic agree, but 6470/6500 plan-chain discrepancy remains unresolved."
+    },
+    {
+      "name": "total",
+      "quantity_m2": 298.19,
+      "reason": "Aggregate control; overlaps component areas."
+    }
+  ]
+}
