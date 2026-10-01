@@ -72,8 +72,18 @@ def test_lot16_and_3laurel_truth_drafts_do_not_modify_live_v2_denominator():
     for project_id in PROJECTS:
         manifest = _load(ROOT / project_id / "source_manifest.json")
         assert manifest["status"] == "INCOMPLETE"
-        assert manifest["reference_takeoff_documents"] == []
-        assert manifest["verified_takeoff_items"] == []
+
+        active_document_names = {
+            row["name"]
+            for row in (
+                manifest["source_documents"]
+                + manifest["reference_takeoff_documents"]
+            )
+        }
+        assert "reference_truth_draft.json" not in active_document_names
+
+        for item in manifest["verified_takeoff_items"]:
+            assert "reference_truth_draft.json" not in item["source_document_refs"]
 
 
 @pytest.mark.parametrize(
@@ -102,7 +112,7 @@ def test_3laurel_primary_ceiling_planes_close_to_declared_plan_area():
     assert calculated == pytest.approx(float(check["declared_reference_plan_area_m2"]), abs=1e-9)
 
 
-def test_3laurel_gross_shower_tile_faces_stay_out_of_net_denominator_until_deductions_close():
+def test_3laurel_gross_shower_tile_faces_preserve_closed_vs_niche_blocked_state():
     draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
     faces = [
         row
@@ -111,11 +121,23 @@ def test_3laurel_gross_shower_tile_faces_stay_out_of_net_denominator_until_deduc
     ]
     assert len(faces) == 8
     assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(23.085)
-    assert all(
-        row["attributes"]["denominator_readiness"]
-        == "draft_only_until_niche_and_return_adjustments_are_resolved"
+
+    readiness = {
+        row["object_ref"]: row["attributes"]["denominator_readiness"]
         for row in faces
-    )
+    }
+    assert sum(
+        value == "gross_face_is_also_net_finish_face_no_opening_or_niche"
+        for value in readiness.values()
+    ) == 5
+    assert sum(
+        value == "draft_only_until_niche_and_return_adjustments_are_resolved"
+        for value in readiness.values()
+    ) == 2
+    assert readiness[
+        "3laurel:surface:wall_tile_gross:bath_shower_wall_2"
+    ] == "draft_only_until_bathroom_niche_width_and_return_depth_are_resolved"
+
     check = next(
         row
         for row in draft["closure_checks"]
@@ -123,9 +145,8 @@ def test_3laurel_gross_shower_tile_faces_stay_out_of_net_denominator_until_deduc
     )
     assert check["net_denominator_ready"] is False
     assert "niche/recess returns and deductions remain unresolved" in check["reason"]
-    assert any(
-        item.startswith("wet_area_tile_bathroom_niche_")
-        for item in draft["unresolved_surface_families"]
+    assert "wet_area_tile_bathroom_niche_width_and_all_niche_return_depths" in (
+        draft["unresolved_surface_families"]
     )
 
 
@@ -148,7 +169,14 @@ def test_3laurel_typed_external_opening_census_is_source_closed():
     assert check["typed_opening_area_m2"] == pytest.approx(58.59)
     assert check["complete_for_typed_labels"] is True
     assert check["complete_for_all_openings"] is False
-    assert "untyped_or_ambiguous_door_openings_and_internal_external_classification" in draft["unresolved_surface_families"]
+
+    completed = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:external_opening_census"
+    )
+    assert completed["complete_for_all_external_openings"] is True
+    assert "external_wall_faces_and_cladding" in draft["unresolved_surface_families"]
 
 
 @pytest.mark.parametrize(
@@ -190,7 +218,7 @@ def test_lot16_typed_external_opening_census_closes_without_guessing_custom_fron
     assert check["complete_for_all_openings"] is False
     assert "custom_front_windows_measure_on_site" in check["residual_unresolved"]
     assert (
-        "custom_front_glazing_and_untyped_external_door_elements"
+        "custom_front_glazing_measure_on_site_only"
         in draft["unresolved_surface_families"]
     )
 
@@ -479,7 +507,7 @@ def test_3laurel_two_source_dimensioned_niche_face_deductions_are_closed_but_ret
         for row in openings
     )
     assert (
-        "wet_area_tile_bathroom_niche_face_and_all_niche_return_depths"
+        "wet_area_tile_bathroom_niche_width_and_all_niche_return_depths"
         in draft["unresolved_surface_families"]
     )
 
