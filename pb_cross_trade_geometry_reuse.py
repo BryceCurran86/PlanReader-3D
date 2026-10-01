@@ -650,6 +650,122 @@ def derive_roof_trade_quantities(
     return results
 
 
+def _derive_area_surface_trade_quantities(
+    *,
+    surface: Mapping[str, Any],
+    specs: Optional[Mapping[str, Any]],
+    host_id_field: str,
+    host_type: str,
+    area_field: str,
+    quantity_id_field: str,
+    authority_field: str,
+    trade_definitions: Sequence[tuple[str, str, str]],
+) -> List[DerivedTradeQuantity]:
+    host_id = _clean(surface.get(host_id_field))
+    area_m2 = _positive(surface.get(area_field))
+    quantity_id = _clean(surface.get(quantity_id_field))
+    authority = _clean(surface.get(authority_field))
+    host_evidence = _evidence_ids(surface.get("evidence_ids"))
+    if (
+        not host_id
+        or area_m2 is None
+        or not quantity_id
+        or not authority
+        or not host_evidence
+    ):
+        return []
+
+    host_evidence = tuple(
+        dict.fromkeys((*host_evidence, quantity_id))
+    )
+    results: List[DerivedTradeQuantity] = []
+    for spec_name, trade_scope, element in trade_definitions:
+        spec = _trade_spec(specs, spec_name)
+        if spec is None:
+            continue
+        material = _material(spec)
+        spec_evidence = _spec_evidence(spec)
+        section = _spec_section(spec)
+        if not material or not spec_evidence or section is None:
+            continue
+        results.append(
+            _quantity(
+                trade_scope=trade_scope,
+                section=section,
+                element=element,
+                location=host_id,
+                material=material,
+                quantity=area_m2,
+                unit="m²",
+                host_id=host_id,
+                host_type=host_type,
+                formula=(
+                    f"Canonical {host_type.lower()} metric area "
+                    f"{area_m2:.6f} m²"
+                ),
+                host_evidence_ids=host_evidence,
+                spec_evidence_ids=spec_evidence,
+                notes=(
+                    f"Trade quantity reuses canonical {host_type.lower()} "
+                    f"surface {host_id}; no waste factor applied."
+                ),
+            )
+        )
+    return results
+
+
+def derive_floor_surface_trade_quantities(
+    floor: Mapping[str, Any],
+    specs: Optional[Mapping[str, Any]] = None,
+) -> List[DerivedTradeQuantity]:
+    """Reuse one canonical floor surface across explicitly scoped floor trades."""
+
+    if floor.get("geometry_complete") is not True:
+        return []
+    return _derive_area_surface_trade_quantities(
+        surface=floor,
+        specs=specs,
+        host_id_field="canonical_floor_id",
+        host_type="FLOOR",
+        area_field="metric_area_m2",
+        quantity_id_field="metric_area_quantity_id",
+        authority_field="metric_area_authority",
+        trade_definitions=(
+            ("flooring", "flooring", "Floor finish / covering"),
+            ("tiling", "tiling", "Floor tiling"),
+            ("coating", "painting", "Floor coating"),
+            ("waterproofing", "waterproofing", "Floor waterproofing"),
+        ),
+    )
+
+
+def derive_ceiling_trade_quantities(
+    ceiling: Mapping[str, Any],
+    specs: Optional[Mapping[str, Any]] = None,
+) -> List[DerivedTradeQuantity]:
+    """Reuse one canonical ceiling surface across explicitly scoped trades."""
+
+    if (
+        ceiling.get("geometry_complete") is not True
+        or ceiling.get("metric_area_complete") is not True
+    ):
+        return []
+    return _derive_area_surface_trade_quantities(
+        surface=ceiling,
+        specs=specs,
+        host_id_field="canonical_ceiling_id",
+        host_type="CEILING",
+        area_field="area_m2",
+        quantity_id_field="ceiling_quantity_id",
+        authority_field="physical_scale_record_id",
+        trade_definitions=(
+            ("lining", "linings", "Ceiling lining"),
+            ("painting", "painting", "Ceiling painting"),
+            ("insulation", "insulation", "Ceiling insulation"),
+        ),
+    )
+
+
 def derive_space_trade_quantities(
     space: Mapping[str, Any],
     specs: Optional[Mapping[str, Any]] = None,
@@ -833,6 +949,8 @@ def to_takeoff_rows(
 
 __all__ = [
     "DerivedTradeQuantity",
+    "derive_ceiling_trade_quantities",
+    "derive_floor_surface_trade_quantities",
     "derive_roof_trade_quantities",
     "derive_slab_trade_quantities",
     "derive_space_trade_quantities",
