@@ -54,15 +54,19 @@ def item(
     expected=100.0,
     tolerance=0.05,
     unit="m2",
+    trade="painting",
+    denominator_eligible=True,
 ) -> VerifiedTakeoffItemV2:
     return VerifiedTakeoffItemV2(
         item_id=item_id,
         project_id="project-a",
         description="Verified paint area",
+        trade_category=trade,
         unit=unit,
         expected_quantity=expected,
         tolerance_fraction=tolerance,
         expected_object_refs=refs,
+        denominator_eligible=denominator_eligible,
     )
 
 
@@ -70,6 +74,7 @@ def verified_manifest(*items: VerifiedTakeoffItemV2) -> ProjectBenchmarkManifest
     return ProjectBenchmarkManifestV2(
         project_id="project-a",
         status=PROJECT_VERIFIED,
+        source_package_complete=True,
         source_documents=(doc(),),
         reference_takeoff_documents=(doc("takeoff.pdf"),),
         verified_items=items or (item(),),
@@ -82,10 +87,12 @@ def produced(
     refs=("surface-a", "surface-b"),
     value=100.0,
     unit="m2",
+    trade="painting",
     lineage_ok=True,
 ) -> ProducedTakeoffItemV2:
     return ProducedTakeoffItemV2(
         quantity_id=quantity_id,
+        trade_category=trade,
         value=value,
         unit=unit,
         object_refs=refs,
@@ -109,6 +116,16 @@ def test_equal_numeric_value_on_wrong_surfaces_is_not_a_match():
     assert result.matched_within_tolerance == 0
     assert result.unsupported_extra == 1
     assert result.coverage_accuracy == pytest.approx(0.0)
+
+
+def test_equal_surfaces_and_value_in_wrong_trade_is_not_a_match():
+    result = evaluate_project_v2(
+        verified_manifest(item()),
+        (produced(trade="plastering", value=100.0),),
+    )
+    assert result.item_results[0].state == MISSED
+    assert result.matched_within_tolerance == 0
+    assert result.unsupported_extra == 1
 
 
 def test_partial_expected_surface_closure_is_partial():
@@ -150,6 +167,17 @@ def test_duplicate_exact_surface_claims_are_unresolved():
     )
     assert result.item_results[0].state == UNRESOLVED
     assert result.unresolved == 1
+
+
+def test_duplicate_produced_quantity_ids_fail_closed():
+    with pytest.raises(ValueError, match="produced quantity ids must be unique"):
+        evaluate_project_v2(
+            verified_manifest(item()),
+            (
+                produced("q-duplicate", value=100.0),
+                produced("q-duplicate", refs=("surface-x",), value=50.0),
+            ),
+        )
 def test_exact_surfaces_outside_tolerance_is_not_accepted():
     result = evaluate_project_v2(
         verified_manifest(item(expected=100.0, tolerance=0.05)),
@@ -174,16 +202,40 @@ def test_verified_manifest_requires_reference_takeoff_and_items():
         ProjectBenchmarkManifestV2(
             project_id="project-a",
             status=PROJECT_VERIFIED,
+            source_package_complete=True,
             source_documents=(doc(),),
             reference_takeoff_documents=(),
             verified_items=(item(),),
         )
 
 
+def test_verified_manifest_requires_complete_source_package():
+    with pytest.raises(ValueError, match="complete source package"):
+        ProjectBenchmarkManifestV2(
+            project_id="project-a",
+            status=PROJECT_VERIFIED,
+            source_package_complete=False,
+            source_documents=(doc(),),
+            reference_takeoff_documents=(doc("takeoff.pdf"),),
+            verified_items=(item(),),
+        )
+
+
+def test_verified_manifest_requires_denominator_item():
+    with pytest.raises(ValueError, match="denominator-eligible"):
+        verified_manifest(item(denominator_eligible=False))
+
+
+def test_denominator_identity_must_be_unique():
+    with pytest.raises(ValueError, match="unique trade/unit/object identity"):
+        verified_manifest(item("paint-a"), item("paint-b"))
+
+
 def test_incomplete_manifest_is_not_scored():
     manifest = ProjectBenchmarkManifestV2(
         project_id="project-a",
         status=PROJECT_INCOMPLETE,
+        source_package_complete=True,
         source_documents=(doc(),),
         reference_takeoff_documents=(),
         verified_items=(),
@@ -198,6 +250,7 @@ def _manifest_for(project_id: str, status: str) -> ProjectBenchmarkManifestV2:
             item_id=f"{project_id}-paint",
             project_id=project_id,
             description="Paint area",
+            trade_category="painting",
             unit="m2",
             expected_quantity=10.0,
             tolerance_fraction=0.05,
@@ -206,6 +259,7 @@ def _manifest_for(project_id: str, status: str) -> ProjectBenchmarkManifestV2:
         return ProjectBenchmarkManifestV2(
             project_id=project_id,
             status=status,
+            source_package_complete=True,
             source_documents=(doc(f"{project_id}.pdf"),),
             reference_takeoff_documents=(doc(f"{project_id}-takeoff.pdf"),),
             verified_items=(verified_item,),
@@ -213,6 +267,7 @@ def _manifest_for(project_id: str, status: str) -> ProjectBenchmarkManifestV2:
     return ProjectBenchmarkManifestV2(
         project_id=project_id,
         status=status,
+        source_package_complete=status != PROJECT_NOT_CONFIGURED,
         source_documents=() if status == PROJECT_NOT_CONFIGURED else (doc(),),
         reference_takeoff_documents=(),
         verified_items=(),
@@ -228,6 +283,7 @@ def test_four_of_five_never_publishes_a_five_project_headline():
         f"p{i}": (
             ProducedTakeoffItemV2(
                 quantity_id=f"q{i}",
+                trade_category="painting",
                 value=10.0,
                 unit="m2",
                 object_refs=(f"p{i}-surface",),
@@ -235,7 +291,16 @@ def test_four_of_five_never_publishes_a_five_project_headline():
         )
         for i in range(1, 5)
     }
-    result = evaluate_suite_v2(manifests, produced_by_project)
+    result = evaluate_suite_v2(
+        manifests,
+        produced_by_project,
+        evaluated_source_sha256s_by_project={
+            f"p{i}": (SHA,) for i in range(1, 5)
+        },
+        reconciliation_complete_by_project={
+            f"p{i}": True for i in range(1, 5)
+        },
+    )
     assert result.publication_status == "UNPUBLISHED"
     assert result.development_status == "PROVISIONAL_4_OF_5"
     assert result.verified_projects == 4
@@ -246,6 +311,43 @@ def test_required_project_count_mismatch_fails_closed():
     result = evaluate_suite_v2(manifests, {})
     assert result.publication_status == "UNPUBLISHED"
     assert "required_project_count_not_met" in result.reason_codes
+
+
+def test_five_verified_projects_require_run_integrity_before_publish():
+    manifests = tuple(_manifest_for(f"p{i}", PROJECT_VERIFIED) for i in range(1, 6))
+    produced_by_project = {
+        f"p{i}": (
+            ProducedTakeoffItemV2(
+                quantity_id=f"q{i}",
+                trade_category="painting",
+                value=10.0,
+                unit="m2",
+                object_refs=(f"p{i}-surface",),
+            ),
+        )
+        for i in range(1, 6)
+    }
+
+    blocked = evaluate_suite_v2(manifests, produced_by_project)
+    assert blocked.publication_status == "UNPUBLISHED"
+    assert blocked.development_status == "VERIFIED_MANIFESTS_RUN_INCOMPLETE"
+    assert blocked.coverage_accuracy is None
+    assert any("source_hashes_not_verified" in reason for reason in blocked.reason_codes)
+    assert any("object_reconciliation_incomplete" in reason for reason in blocked.reason_codes)
+
+    published = evaluate_suite_v2(
+        manifests,
+        produced_by_project,
+        evaluated_source_sha256s_by_project={
+            f"p{i}": (SHA,) for i in range(1, 6)
+        },
+        reconciliation_complete_by_project={
+            f"p{i}": True for i in range(1, 6)
+        },
+    )
+    assert published.publication_status == "PUBLISHED"
+    assert published.development_status == "COMPLETE"
+    assert published.coverage_accuracy == pytest.approx(1.0)
 
 
 def test_project_ids_must_be_unique():
@@ -274,6 +376,7 @@ def test_denominator_item_requires_verified_surface_object_refs():
             item_id="no-surface",
             project_id="project-a",
             description="Unmapped area",
+            trade_category="painting",
             unit="m2",
             expected_quantity=10.0,
             tolerance_fraction=0.05,
