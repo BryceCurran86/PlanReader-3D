@@ -88,9 +88,9 @@
       "attributes": {
         "opening_type": "fixed_glass",
         "height_m": 0.6,
-        "width_m": 3.0,
+        "width_m": 3,
         "source_bbox_pdf_pt": [
-          814.0,
+          814,
           180.1,
           836.3,
           187.9
@@ -132,7 +132,7 @@
         "source_bbox_pdf_pt": [
           622.4,
           430.7,
-          661.0,
+          661,
           438.5
         ]
       },
@@ -643,7 +643,7 @@
       "attributes": {
         "plan_width_m": 6.54,
         "plan_run_m": 6.49,
-        "pitch_degrees": 5.0,
+        "pitch_degrees": 5,
         "projected_area_m2": 42.4446,
         "calculation": "plan_width_m * plan_run_m / cos(pitch_degrees)",
         "material": "selected Colorbond roof sheeting",
@@ -661,7 +661,7 @@
       "attributes": {
         "plan_width_m": 15.16,
         "plan_run_m": 5.846,
-        "pitch_degrees": 5.0,
+        "pitch_degrees": 5,
         "projected_area_m2": 88.62536,
         "calculation": "plan_width_m * plan_run_m / cos(pitch_degrees)",
         "material": "selected Colorbond roof sheeting",
@@ -679,7 +679,7 @@
       "attributes": {
         "plan_width_m": 16.15,
         "plan_run_m": 5.66,
-        "pitch_degrees": 12.0,
+        "pitch_degrees": 12,
         "projected_area_m2": 91.409,
         "calculation": "plan_width_m * plan_run_m / cos(pitch_degrees)",
         "material": "selected Colorbond roof sheeting",
@@ -697,7 +697,7 @@
       "attributes": {
         "plan_width_m": 9.24,
         "plan_run_m": 3.2,
-        "pitch_degrees": 12.0,
+        "pitch_degrees": 12,
         "projected_area_m2": 29.568,
         "calculation": "plan_width_m * plan_run_m / cos(pitch_degrees)",
         "material": "selected Colorbond roof sheeting",
@@ -725,8 +725,45 @@
       ],
       "component_sum_m2": 224.36,
       "declared_total_m2": 224.36,
-      "difference_m2": 0.0,
+      "difference_m2": 0,
       "source_location": "architectural:p3:area_calculations"
+    },
+    {
+      "check_id": "lot16:closure:wall_bracing_schedule",
+      "source_location": "structural:p10:S10:ground_floor_wall_bracing_plan",
+      "schedule_direction_a_resistance_required_kn": 98.9,
+      "schedule_direction_a_resistance_provided_kn": 104.96,
+      "schedule_direction_b_resistance_required_kn": 45.7,
+      "schedule_direction_b_resistance_provided_kn": 51.48,
+      "message": "test(benchmark): close Lot16 bracing schedule truth",
+      "component_object_refs": [
+        "lot16:structural:brace:A1:01",
+        "lot16:structural:brace:A2:01",
+        "lot16:structural:brace:A2:02",
+        "lot16:structural:brace:A2:03",
+        "lot16:structural:brace:A2:04",
+        "lot16:structural:brace:A2:05",
+        "lot16:structural:brace:A2:06",
+        "lot16:structural:brace:A2:07",
+        "lot16:structural:brace:A3:01",
+        "lot16:structural:brace:A4:01",
+        "lot16:structural:brace:A4:02",
+        "lot16:structural:brace:A5:01",
+        "lot16:structural:brace:A5:02",
+        "lot16:structural:brace:A6:01",
+        "lot16:structural:brace:A6:02",
+        "lot16:structural:brace:B1:01",
+        "lot16:structural:brace:B1:02",
+        "lot16:structural:brace:B1:03",
+        "lot16:structural:brace:B1:04",
+        "lot16:structural:brace:B1:05",
+        "lot16:structural:brace:B1:06",
+        "lot16:structural:brace:B1:07",
+        "lot16:structural:brace:B2:01",
+        "lot16:structural:brace:B3:01"
+      ],
+      "object_count": 24,
+      "total_length_m": 27.9
     }
   ]
 }
