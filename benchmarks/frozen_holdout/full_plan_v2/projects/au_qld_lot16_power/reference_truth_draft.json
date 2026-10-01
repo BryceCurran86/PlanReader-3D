@@ -28,7 +28,7 @@
     }
   ],
   "unresolved_surface_families": [
-    "internal_wall_faces",
+    "internal_wall_faces_beyond_closed_bed2_bed3_top_plate_gross_faces",
     "external_wall_faces_and_cladding",
     "ceilings_including_raked_ceiling",
     "custom_front_glazing_measure_on_site_only",
@@ -799,6 +799,142 @@
         "quantity_basis": "explicit floor-plan perimeter door width x elevation FSL-to-joinery-line height"
       },
       "source_location": "architectural:p3:floor_plan:GARAGE_external_870; architectural:p4-p5:elevations:FSL_to_JL_2100"
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed2:3300_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 2 gross room-side wall face, 3.300m side 1",
+      "expected_quantity": 8.547,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_2:figured_3300mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.3,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed2:3300_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 2 gross room-side wall face, 3.300m side 2",
+      "expected_quantity": 8.547,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_2:figured_3300mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.3,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed2:3600_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 2 gross room-side wall face, 3.600m side 1",
+      "expected_quantity": 9.324,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_2:figured_3600mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.6,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed2:3600_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 2 gross room-side wall face, 3.600m side 2",
+      "expected_quantity": 9.324,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_2:figured_3600mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.6,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed3:3250_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 3 gross room-side wall face, 3.250m side 1",
+      "expected_quantity": 8.4175,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_3:figured_3250mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.25,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed3:3250_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 3 gross room-side wall face, 3.250m side 2",
+      "expected_quantity": 8.4175,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_3:figured_3250mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.25,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed3:3600_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 3 gross room-side wall face, 3.600m side 1",
+      "expected_quantity": 9.324,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_3:figured_3600mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.6,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed3:3600_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 3 gross room-side wall face, 3.600m side 2",
+      "expected_quantity": 9.324,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_3:figured_3600mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.6,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
     }
   ],
   "closure_checks": [
@@ -970,6 +1106,49 @@
       "scaling_substitute_allowed": false,
       "reason": "source explicitly requires site measurement; no exact figured custom-front glazing dimensions are supplied in the frozen package",
       "benchmark_rule": "do not promote custom front glazing to denominator truth until independent exact dimensions are supplied"
+    },
+    {
+      "check_id": "lot16:control:bed2_bed3_gross_wall_faces",
+      "component_object_refs": [
+        "lot16:surface:internal_wall_gross:bed2:3300_side_1",
+        "lot16:surface:internal_wall_gross:bed2:3300_side_2",
+        "lot16:surface:internal_wall_gross:bed2:3600_side_1",
+        "lot16:surface:internal_wall_gross:bed2:3600_side_2",
+        "lot16:surface:internal_wall_gross:bed3:3250_side_1",
+        "lot16:surface:internal_wall_gross:bed3:3250_side_2",
+        "lot16:surface:internal_wall_gross:bed3:3600_side_1",
+        "lot16:surface:internal_wall_gross:bed3:3600_side_2"
+      ],
+      "object_count": 8,
+      "bed2_floor_dimension_closure": {
+        "figured_dimensions_m": [
+          3.3,
+          3.6
+        ],
+        "calculated_floor_area_m2": 11.88,
+        "source_declared_floor_area_m2": 11.88,
+        "difference_m2": 0
+      },
+      "bed3_floor_dimension_closure": {
+        "figured_dimensions_m": [
+          3.25,
+          3.6
+        ],
+        "calculated_floor_area_m2": 11.7,
+        "source_declared_floor_area_m2": 11.7,
+        "difference_m2": 0
+      },
+      "wall_height_to_top_plate_m": 2.59,
+      "bed2_gross_wall_area_m2": 35.742,
+      "bed3_gross_wall_area_m2": 35.483,
+      "gross_wall_area_m2": 71.225,
+      "complete_for_bed2_bed3_top_plate_rectangular_wall_faces": true,
+      "openings_and_ceiling_intersections_resolved": false,
+      "source_locations": [
+        "architectural:p3:floor_plan:BED_2_3300x3600_and_11.88m2",
+        "architectural:p3:floor_plan:BED_3_3250x3600_and_11.70m2",
+        "architectural:p4-p5:elevations:FSL_68560_TP_71150"
+      ]
     }
   ]
 }
