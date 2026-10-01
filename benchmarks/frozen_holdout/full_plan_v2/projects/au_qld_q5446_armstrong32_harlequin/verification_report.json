@@ -1,0 +1,90 @@
+{
+  "schema_version": "v2-verification-report-1.0",
+  "project_id": "au_qld_q5446_armstrong32_harlequin",
+  "project_status": "INCOMPLETE",
+  "source_hash_verification": {
+    "status": "PASS",
+    "documents": [
+      {
+        "name": "Q5446_Standard_Plans_V1_20220320.pdf",
+        "expected_sha256": "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0",
+        "observed_sha256": "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0"
+      },
+      {
+        "name": "Q5446_Siting_V1_20220313.pdf",
+        "expected_sha256": "80f30567db613e44af18998e82ee9e044513a7c1393dc9b9c5aa0ecd82685900",
+        "observed_sha256": "80f30567db613e44af18998e82ee9e044513a7c1393dc9b9c5aa0ecd82685900"
+      },
+      {
+        "name": "Q5446_Standard_Inclusions_V1_20220313.pdf",
+        "expected_sha256": "db0af9871032e9b77f151cd2f8bddf171aa10ad3a3c975abba0d24a020e0bd63",
+        "observed_sha256": "db0af9871032e9b77f151cd2f8bddf171aa10ad3a3c975abba0d24a020e0bd63"
+      },
+      {
+        "name": "mysimonds_specificationdocumentqld.pdf",
+        "expected_sha256": "a4217d18de87e5b4deb545fe511b6cf480c499844b1a4e8415e929c3c9051bbc",
+        "observed_sha256": "a4217d18de87e5b4deb545fe511b6cf480c499844b1a4e8415e929c3c9051bbc"
+      },
+      {
+        "name": "Colour Boards.pdf",
+        "expected_sha256": "425b554664061b9fca04b4511572f80ee76dc55f000b2907241272f687a85b0e",
+        "observed_sha256": "425b554664061b9fca04b4511572f80ee76dc55f000b2907241272f687a85b0e"
+      },
+      {
+        "name": "Q5446_Sales_Advice_Estimate_V1_20220320.pdf",
+        "expected_sha256": "a2b134a0bca2b314737e2f58351018b65e0ff011774780f3e5758e9f576444dd",
+        "observed_sha256": "a2b134a0bca2b314737e2f58351018b65e0ff011774780f3e5758e9f576444dd"
+      }
+    ]
+  },
+  "scope_evidence": {
+    "standard_inclusions": [
+      "Haymes low sheen acrylic to internal walls; flat acrylic to ceilings.",
+      "2440mm nominal internal ceiling height in standard inclusions.",
+      "Wet-area floor and wall tiling scope described."
+    ],
+    "sales_advice": [
+      "2740mm ceiling height upgrade to ground floor and garage.",
+      "2340mm hinged door upgrade to ground floor.",
+      "2400mm alfresco door upgrade.",
+      "Colorbond metal roof upgrade.",
+      "Carpet and porcelain floor finish promotions.",
+      "Full-height ceramic wall tiling to master ensuite."
+    ],
+    "note": "These scope facts constrain later truth construction but are not promoted to measured quantities here."
+  },
+  "proofs": [
+    {
+      "proof": "all six source/companion hashes match frozen manifest",
+      "status": "PASS"
+    },
+    {
+      "proof": "independent reference quantity exists for every admitted core item",
+      "status": "PASS",
+      "evidence": "12.00 m2 table plus 3000x4000 figured dimensions"
+    },
+    {
+      "proof": "every denominator item has exact physical object refs",
+      "status": "PASS",
+      "evidence": "q5446:surface:floor:alfresco"
+    },
+    {
+      "proof": "source lineage complete for admitted core",
+      "status": "PASS"
+    },
+    {
+      "proof": "PlanReader output not used as benchmark truth",
+      "status": "PASS"
+    },
+    {
+      "proof": "unsupported surfaces are not silently excluded",
+      "status": "PASS",
+      "evidence": "All remaining area/opening/finish families are explicit unresolved candidates"
+    },
+    {
+      "proof": "full project surface universe complete",
+      "status": "FAIL",
+      "evidence": "Only the alfresco surface is independently closed"
+    }
+  ]
+}
