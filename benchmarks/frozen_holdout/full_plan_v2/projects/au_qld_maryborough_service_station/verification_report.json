@@ -83,5 +83,20 @@
       "status": "FAIL",
       "evidence": "WC/shower, PWD, airlock, laundry, Food Prep and Office floor/ceiling surfaces plus door/window identity universes are closed; remaining surfaces stay unresolved."
     }
-  ]
+  ],
+  "food_prep_office_surface_closure_summary": {
+    "object_refs": [
+      "maryborough:surface:floor:food_prep",
+      "maryborough:surface:ceiling:food_prep",
+      "maryborough:surface:floor:office",
+      "maryborough:surface:ceiling:office"
+    ],
+    "source_closed_object_count": 4,
+    "object_identity_available": true,
+    "geometry_verified": true,
+    "geometry_scope": "2D rectangular plan extents / ceiling footprints only",
+    "quantity_verified": true,
+    "provenance_chain_complete": true,
+    "project_surface_universe_complete": false
+  }
 }
