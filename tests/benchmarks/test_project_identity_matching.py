@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 import pytest
 
-from pb_benchmark_schema import ProjectIdentity, SourceManifest
+from pb_project_identity_models import ProjectIdentity, SourceManifest
 from pb_project_identity import (
     evaluate_project_identity_match,
     extract_project_identity_from_pdf,

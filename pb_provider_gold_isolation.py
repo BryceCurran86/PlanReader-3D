@@ -1,8 +1,8 @@
-"""Transitive gold-isolation integrity for registered production providers.
+"""Transitive isolation from retired benchmark truth for production providers.
 
-M3 itself is gold-free.  This module inspects the *transitive local import
-closure* of a registered provider so a helper cannot quietly pull in
-benchmark, gold, mapping, scoring, or holdout modules.
+This module inspects the *transitive local import closure* of a registered
+provider so a helper cannot quietly pull in retired benchmark, expected-value,
+mapping, scoring, or holdout modules.
 
 Inspection is deterministic AST / import-graph analysis.  It does not execute
 provider code and does not load expected quantities.
