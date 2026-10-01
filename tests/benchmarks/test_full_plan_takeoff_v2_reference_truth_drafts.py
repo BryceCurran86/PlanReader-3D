@@ -715,3 +715,20 @@ def test_lot16_bed1_gross_wall_faces_are_dimension_closed_but_raked_extension_st
         in draft["unresolved_surface_families"]
     )
 
+
+
+def test_lot16_unscheduled_structural_members_stay_out_of_truth():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    blocker = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:blocker:unscheduled_structural_members"
+    )
+    assert blocker["status"] == "UNRESOLVED_SOURCE_LIMITATION"
+    assert blocker["instance_specific_bracing_schedule_available"] is True
+    assert blocker["remaining_instance_specific_beam_lintel_truss_schedule_available"] is False
+    assert blocker["typical_detail_scaling_allowed"] is False
+    assert (
+        "structural_members_beyond_closed_wall_bracing_and_explicit_architectural_supports"
+        in draft["unresolved_surface_families"]
+    )
