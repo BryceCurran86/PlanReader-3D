@@ -1438,12 +1438,21 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
         except Exception:
             pass
 
+        # AG-11: Bridge authoritative DPC and Substructure quantities
+        substructure_row_count = 0
+        try:
+            from pb_dpc_substructure_customer_bridge import publish_substructure_takeoff_rows
+            substructure_row_count = publish_substructure_takeoff_rows(publication, int(workspace_id))
+        except Exception:
+            pass
+
         report = {
             "version": VERSION, "analysed_at": app.now_stamp(), "selected_pages": len(pages),
             "calibrations": calibrations, "footprint": footprint, "units": units, "facades": facades,
             "partitions": partitions, "finishes": finishes,
             "semantic_conflicts": [c.to_dict() if hasattr(c, "to_dict") else dict(c) for c in conflicts],
             "auto_takeoff_rows": len(all_auto_rows), "model_mass_id": mass_id,
+            "substructure_takeoff_rows": substructure_row_count,
             "canonical_model_id": canonical_model_id,
             "canonical_wall_count": canonical_wall_count,
             "canonical_opening_count": canonical_opening_count,
@@ -1481,9 +1490,11 @@ def auto_geometry_panel(app: Any, workspace: Dict[str, Any]) -> None:
         if app.st.button("Re-run automatic geometry", type="secondary", use_container_width=True, key=f"auto_geometry_refresh_{workspace_id}"):
             with app.st.spinner("Cross-referencing selected plans and elevations…"):
                 result = analyse_workspace(app, workspace_id)
+            sub_count = result.get("substructure_takeoff_rows", 0)
+            sub_msg = f", {sub_count} substructure row(s)" if sub_count else ""
             app.st.success(
                 f"Automatic geometry refreshed: {len(result.get('units') or [])} unit area(s), "
-                f"{len(result.get('facades') or [])} elevation(s), {result.get('auto_takeoff_rows', 0)} take-off row(s)."
+                f"{len(result.get('facades') or [])} elevation(s), {result.get('auto_takeoff_rows', 0)} take-off row(s){sub_msg}."
             )
             app.st.rerun()
         if report:
@@ -1502,12 +1513,14 @@ def auto_geometry_panel(app: Any, workspace: Dict[str, Any]) -> None:
             c_col = report.get("canonical_column_count", 0)
             c_par = report.get("canonical_parapet_count", 0)
             c_bal = report.get("canonical_balcony_count", 0)
+            c_sub = report.get("substructure_takeoff_rows", 0)
             c_issue = report.get("constructability_issue_count", 0)
-            if any([c_wall, c_open, c_floor, c_ceil, c_roof, c_col, c_par, c_bal]):
+            if any([c_wall, c_open, c_floor, c_ceil, c_roof, c_col, c_par, c_bal, c_sub]):
                 app.st.caption(
                     f"Canonical model: {c_wall} wall(s) · {c_open} opening(s) · {c_floor} floor(s) · "
                     f"{c_ceil} ceiling(s) · {c_roof} roof(s) · {c_col} column(s) · "
                     f"{c_par} parapet(s) · {c_bal} balcony(ies)"
+                    + (f" · {c_sub} substructure row(s)" if c_sub else "")
                     + (f" · ⚠️ {c_issue} constructability issue(s)" if c_issue else "")
                 )
             unresolved = [f for f in report.get("facades") or [] if len(f.get("substrates") or []) != 1 and not f.get("explicit_areas")]

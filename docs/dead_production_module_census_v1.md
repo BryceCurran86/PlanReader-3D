@@ -70,7 +70,7 @@ A comprehensive AST-based caller census was executed across all 350 root Python 
 The 44 `TEST ONLY` modules represent high-value benchmark-proven capabilities that have not yet been wired into the live customer upload-to-takeoff runtime:
 
 1. **Trade & Substructure Authorities:**
-   - `pb_dpc_substructure_authority.py`: Damp-proof course and footing substructure extraction. Candidate for AG-21 (Concreting).
+   - `pb_dpc_substructure_authority.py`: Damp-proof course and footing substructure extraction. **[PROMOTED TO LIVE via `pb_dpc_substructure_customer_bridge.py` under AG-11]**
    - `pb_paintable_surface_v176.py`: Paintable area computation from wall faces.
    - `pb_structural_member_*.py` (3 modules): Structural steel and timber member framing extractors. Candidate for AG-24.
    - `pb_roof_ceiling_authority.py`: Pitch and ceiling area correlation engine.
@@ -82,7 +82,24 @@ The 44 `TEST ONLY` modules represent high-value benchmark-proven capabilities th
 
 ---
 
-## 5. Architectural Decision
+## 5. AG-11 Refresh: Authority Census & Substructure Promotion
+
+Under task **AG-11 (Orphaned Authority Census Refresh)**:
+- Re-evaluated caller graphs across all 72 dedicated `pb_*authority*.py` production modules.
+- **Classification:**
+  - **LIVE (55 modules):** In active use across customer application runtime and regression suites (now includes `pb_dpc_substructure_authority.py`).
+  - **PARTIALLY LIVE (1 module):** `pb_mapped_zone_geometry_authority.py` (active in production callers, covered via integration suites).
+  - **TEST ONLY / DISCONNECTED (15 modules):** Mature authorities with regression tests awaiting customer runtime wiring.
+  - **ORPHANED (1 module):** `pb_native_text_render_authority.py` (perception authority preserved for OCR/text occlusion).
+- **Highest-Value Disconnected Authority Bridged:**
+  - `pb_dpc_substructure_authority.py` was bridged into customer runtime via `pb_dpc_substructure_customer_bridge.py`.
+  - Integrated into `pb_auto_geometry_v1219.py` (`analyse_workspace()`) to automatically extract and publish authoritative DPC and foundation rows into `takeoff_rows` adhering strictly to the 21-field core contract.
+  - Preserves fail-closed behavior: drawings without authenticated witness callouts produce zero rows (no hallucinated default values).
+
+---
+
+## 6. Architectural Decision
 As required by the global operating instructions:
 **DO NOT DELETE MODULES MERELY BECAUSE THEY HAVE ZERO CALLERS.**  
-All 6 ORPHANED modules and 44 TEST-ONLY modules are preserved. High-value authorities will be bridged autonomously as each corresponding trade task is reached.
+All ORPHANED modules and TEST-ONLY modules are preserved. High-value authorities will be bridged autonomously as each corresponding trade task is reached.
+
