@@ -170,6 +170,15 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
 ) -> None:
     path = tmp_path / "drawing.pdf"
     path.write_bytes(_drawing_and_boq_pdf())
+    canonical_opening_payload = {
+        "canonical_opening_id": "opening-1",
+        "physical_opening_id": "opening-1",
+        "host_wall_id": "whole-wall-1",
+        "geometry_complete": False,
+    }
+    canonical_opening = SimpleNamespace(
+        to_dict=lambda: canonical_opening_payload
+    )
 
     monkeypatch.setattr(
         GenericPlanReaderExtractor,
