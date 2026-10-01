@@ -1088,7 +1088,7 @@
       "object_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_1",
       "physical_kind": "surface",
       "object_family": "wet_area_wall_tile_gross_face",
-      "description": "Main bathroom shower wall 1",
+      "description": "Main bathroom C shower wall",
       "expected_quantity": 1.89,
       "unit": "m2",
       "attributes": {
@@ -1096,15 +1096,17 @@
         "tile_height_m": 2.1,
         "calculation": "width_m * tile_height_m",
         "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
-        "denominator_readiness": "draft_only_until_niche_and_return_adjustments_are_resolved"
+        "denominator_readiness": "gross_face_is_also_net_finish_face_no_opening_or_niche",
+        "host_elevation": "Bathroom C",
+        "niche_present": false
       },
-      "source_location": "architectural:p11:A0.11:bathroom_C_or_D:900_SHW_x_2100_TILES"
+      "source_location": "architectural:p11:A0.11:Bathroom_C:900_SHW_x_2100_TILES:no_niche"
     },
     {
       "object_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_2",
       "physical_kind": "surface",
       "object_family": "wet_area_wall_tile_gross_face",
-      "description": "Main bathroom shower wall 2",
+      "description": "Main bathroom D shower wall",
       "expected_quantity": 1.89,
       "unit": "m2",
       "attributes": {
@@ -1112,9 +1114,11 @@
         "tile_height_m": 2.1,
         "calculation": "width_m * tile_height_m",
         "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
-        "denominator_readiness": "draft_only_until_niche_and_return_adjustments_are_resolved"
+        "denominator_readiness": "draft_only_until_bathroom_niche_width_and_return_depth_are_resolved",
+        "host_elevation": "Bathroom D",
+        "niche_present": true
       },
-      "source_location": "architectural:p11:A0.11:bathroom_C_or_D:900_SHW_x_2100_TILES"
+      "source_location": "architectural:p11:A0.11:Bathroom_D:900_SHW_x_2100_TILES:1100_sill_400_high_niche_width_unresolved"
     },
     {
       "object_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_rear",
@@ -2475,6 +2479,25 @@
         "floor_level_openings_in_host_face": false,
         "net_finish_area_ready": true
       }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:bathroom_C_shower_net",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Main bathroom C shower tile finish",
+      "expected_quantity": 1.89,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:Bathroom_C:900_SHW_x_2100_TILES:no_niche",
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_1",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.1,
+        "calculation": "0.900m * 2.100m",
+        "finish_scope": "shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      }
     }
   ],
   "closure_checks": [
@@ -3029,6 +3052,18 @@
       "source_location": "architectural:p13:A0.13:Laundry_D",
       "complete_for_this_explicit_strip": true,
       "complete_for_project_non_shower_tile_universe": false
+    },
+    {
+      "check_id": "3laurel:closure:bathroom_C_shower_tile_face",
+      "component_object_refs": [
+        "3laurel:surface:wall_tile:bathroom_C_shower_net"
+      ],
+      "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_1",
+      "object_count": 1,
+      "tile_area_m2": 1.89,
+      "source_location": "architectural:p11:A0.11:Bathroom_C",
+      "complete_for_this_explicit_face": true,
+      "complete_for_project_wet_area_tile_universe": false
     }
   ]
 }
