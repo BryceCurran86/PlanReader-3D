@@ -572,6 +572,40 @@
         "A502:PWD_plan:3570x2200:FT2",
         "A140:floor_finishes:PWD:FT2"
       ]
+    },
+    {
+      "object_ref": "maryborough:surface:floor:airlock",
+      "room": "AIRLOCK",
+      "entry_door_tag": "D03",
+      "finish_mark": "FT2",
+      "expected_area_m2": 7.66688,
+      "figured_dimensions_mm": [
+        1520,
+        5044
+      ],
+      "source_locations": [
+        "A501:airlock_plan:1520x5044:FT2",
+        "A140:floor_finishes:AIRLOCK:FT2"
+      ],
+      "physical_kind": "floor_finish_surface",
+      "classification": "VERIFIED_CORE_OBJECT"
+    },
+    {
+      "object_ref": "maryborough:surface:floor:laundry",
+      "room": "LAUNDRY",
+      "entry_door_tag": "D10",
+      "finish_mark": "FT2",
+      "expected_area_m2": 8.34782,
+      "figured_dimensions_mm": [
+        1655,
+        5044
+      ],
+      "source_locations": [
+        "A501:laundry_plan:1655x5044:FT2",
+        "A140:floor_finishes:LAUNDRY:FT2"
+      ],
+      "physical_kind": "floor_finish_surface",
+      "classification": "VERIFIED_CORE_OBJECT"
     }
   ],
   "wc_shower_floor_surface_universe_complete": true,
@@ -649,6 +683,40 @@
         "A120:RCP:PWD:2400_WFPB",
         "A502:PWD_plan:3570x2200"
       ]
+    },
+    {
+      "object_ref": "maryborough:surface:ceiling:airlock",
+      "room": "AIRLOCK",
+      "finish_mark": "WFPB",
+      "ceiling_height_mm": 2400,
+      "expected_area_m2": 7.66688,
+      "footprint_dimensions_mm": [
+        1520,
+        5044
+      ],
+      "source_locations": [
+        "A120:RCP:AIRLOCK:2400_WFPB",
+        "A501:airlock_plan:1520x5044"
+      ],
+      "physical_kind": "ceiling_finish_surface",
+      "classification": "VERIFIED_CORE_OBJECT"
+    },
+    {
+      "object_ref": "maryborough:surface:ceiling:laundry",
+      "room": "LAUNDRY",
+      "finish_mark": "WFPB",
+      "ceiling_height_mm": 2400,
+      "expected_area_m2": 8.34782,
+      "footprint_dimensions_mm": [
+        1655,
+        5044
+      ],
+      "source_locations": [
+        "A120:RCP:LAUNDRY:2400_WFPB",
+        "A501:laundry_plan:1655x5044"
+      ],
+      "physical_kind": "ceiling_finish_surface",
+      "classification": "VERIFIED_CORE_OBJECT"
     }
   ],
   "wc_shower_ceiling_surface_universe_complete": true
