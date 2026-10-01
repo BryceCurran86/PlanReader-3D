@@ -1,0 +1,56 @@
+{
+  "schema_version": "v2-verification-report-1.0",
+  "project_id": "au_qld_lot16_power",
+  "project_status": "INCOMPLETE",
+  "source_hash_verification": {
+    "status": "PASS",
+    "documents": [
+      {
+        "name": "1. Construction Plans - Lot 16 Power (REV E).pdf",
+        "expected_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+        "observed_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+      },
+      {
+        "name": "4. Structural Engineering - Lot 16 Power.pdf",
+        "expected_sha256": "b40259589dd39a46e45d25e145cfa789d9a9415b50613ebc4fee01dceab6b3d6",
+        "observed_sha256": "b40259589dd39a46e45d25e145cfa789d9a9415b50613ebc4fee01dceab6b3d6"
+      }
+    ]
+  },
+  "proofs": [
+    {
+      "proof": "independent reference quantity exists for every admitted core item",
+      "status": "PASS",
+      "evidence": "13 dimensioned/plan-width external openings, 37.584 m2 total, each mapped to one exact physical opening ref"
+    },
+    {
+      "proof": "every denominator item has exact physical object refs",
+      "status": "PASS",
+      "evidence": "13 atomic denominator items each carry exactly one external-opening object ref"
+    },
+    {
+      "proof": "source lineage complete for admitted core",
+      "status": "PASS"
+    },
+    {
+      "proof": "PlanReader output not used as benchmark truth",
+      "status": "PASS"
+    },
+    {
+      "proof": "unsupported surfaces are not silently excluded",
+      "status": "PASS",
+      "evidence": "custom front glazing marked MEASURE ON SITE and all unfinished wall/ceiling/roof/structural families remain explicit unresolved work"
+    },
+    {
+      "proof": "full project surface universe complete",
+      "status": "FAIL",
+      "evidence": "Only the independently closed 13-opening subset is promoted; multiple in-scope families remain unresolved."
+    }
+  ],
+  "opening_closure_summary": {
+    "verified_opening_count": 13,
+    "verified_area_m2": 37.584,
+    "full_external_opening_universe_complete": false,
+    "unresolved_reason": "custom front glazing explicitly marked MEASURE ON SITE"
+  }
+}
