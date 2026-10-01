@@ -3303,10 +3303,7 @@ class GenericPlanReaderExtractor:
                 for page_index in target_pages
                 if (
                     0 <= page_index < len(doc)
-                    and self.is_drawing_page(
-                        doc[page_index].get_text("text"),
-                        doc[page_index],
-                    )
+                    and _is_drawing_page_index(page_index)
                 )
             ]
             _live_level_records = collect_source_owned_floor_plan_levels(
