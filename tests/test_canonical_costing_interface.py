@@ -169,6 +169,7 @@ def test_m3_is_supported_by_canonical_costing_independent_of_legacy_takeoff_unit
     rate = CanonicalCompanyRate(
         rate_key="concrete.25mpa",
         unit="m³",
+        currency="AUD",
         material_cost_per_unit=240.0,
         labour_cost_per_unit=35.0,
         plant_cost_per_unit=10.0,
