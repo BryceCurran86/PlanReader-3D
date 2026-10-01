@@ -970,3 +970,31 @@ def test_3laurel_dimensioned_internal_open_archways_are_source_closed():
         "unlabelled_internal_wall_breaks_beyond_two_closed_dimensioned_open_archways_for_wall_face_deductions"
         in draft["unresolved_surface_families"]
     )
+
+
+def test_lot16_ensuite_and_wir_floor_surfaces_are_source_closed():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    ens = by_ref["lot16:surface:floor:ensuite"]
+    wir = by_ref["lot16:surface:floor:wir"]
+
+    assert ens["expected_quantity"] == pytest.approx(5.491)
+    assert ens["attributes"]["finish"] == "tiles"
+    assert ens["attributes"]["width_m"] == pytest.approx(2.89)
+    assert ens["attributes"]["length_m"] == pytest.approx(1.9)
+
+    assert wir["expected_quantity"] == pytest.approx(4.6818)
+    assert wir["attributes"]["finish"] == "vinyl"
+    assert wir["attributes"]["width_m"] == pytest.approx(2.89)
+    assert wir["attributes"]["length_m"] == pytest.approx(1.62)
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:ensuite_wir_floor_surfaces"
+    )
+    assert check["component_sum_m2"] == pytest.approx(10.1728)
+    assert check["source_closed"] is True
+    assert "do not double-count" in check["overlap_note"]
