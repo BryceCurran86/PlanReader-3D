@@ -496,6 +496,48 @@
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-office-ft3-floor-area",
+      "description": "Office FT3 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 9.05352,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:office"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A140:OFFICE:3570x2536:FT3",
+        "A110:OFFICE:matching_physical_room_geometry"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-office-grid-ceiling-area",
+      "description": "Office 2400 GRID ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 9.05352,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:office"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:OFFICE:2400_GRID",
+        "A140:OFFICE:3570x2536"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "door_universe_reconciliation": {
@@ -700,6 +742,20 @@
     "a110_geometry_status": "MATCHING_PHYSICAL_ROOM",
     "a120_ceiling_finish": "FPB",
     "a120_ceiling_height_mm": 3000,
+    "agreement": "PASS"
+  },
+  "office_geometry_check": {
+    "floor_ref": "maryborough:surface:floor:office",
+    "ceiling_ref": "maryborough:surface:ceiling:office",
+    "a140_figured_mm": [
+      3570,
+      2536
+    ],
+    "area_m2": 9.05352,
+    "a140_floor_finish": "FT3",
+    "a110_geometry_status": "MATCHING_PHYSICAL_ROOM",
+    "a120_ceiling_finish": "GRID",
+    "a120_ceiling_height_mm": 2400,
     "agreement": "PASS"
   }
 }
