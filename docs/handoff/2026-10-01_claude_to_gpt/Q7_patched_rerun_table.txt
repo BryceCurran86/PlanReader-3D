@@ -1,0 +1,32 @@
+subset | snapshot at ingest (A) -> consumed (B) | unresolved pages | doc id | seconds
+ctrlA | 64bd1b65ee01 -> 64bd1b65ee01 | [] | real-q7-maryborough | 79.8s | schema 1.1.0
+rotB  | 64471550d7c1 -> 442992b7ae1b | [] | real-q7-maryborough | 103.6s | schema 1.1.0
+rotC  | d92ada0e46e2 -> 13b879bdcfea | [] | real-q7-maryborough | 451.6s | schema 1.1.0
+rotE  | 9dac41ea28c1 -> 8ace84ae9158 | [] | real-q7-maryborough | 1469.2s | schema 1.1.0
+rotF  | 27d8fa6cc7cc -> 2eb7781f299f | [] | real-q7-maryborough | 700.2s | schema 1.1.0
+
+src_pg /Rotate frame  walls dangling cur shadow(def/q) div(def/q) scope      valid pipeline xcheck  refreshed
+     1      90    raw   1799      202   0     0/0       0/0    resolved   True       ok  match     True
+     2      90    raw    103       29   0     0/0       0/0    resolved   True       ok  match     True
+     3      90    raw    913      821   0     0/0       0/0    resolved   True       ok  match     True
+    13      90    raw   2175     1048   0     0/0       0/0    resolved   True       ok  match     True
+    14      90    raw  13898     1531   0     0/0       0/0    resolved   True       ok  match     True
+    15      90    raw   4602     1623   0     0/0       0/0    resolved   True       ok  match     True
+    16      90    raw   2209      667   0     0/0       0/0    resolved   True       ok  match     True
+    17      90    raw   1669      625   0     0/0       0/0    resolved   True       ok  match     True
+    18      90    raw   2130      530   0     0/0       0/0    resolved   True       ok  match     True
+    19      90    raw   3649     1222   0     0/0       0/0    resolved   True       ok  match     True
+    20      90    raw   3047      996   0     0/0       0/0    resolved   True       ok  match     True
+    21      90    raw   3810      586   0     0/0       0/0    resolved   True       ok  match     True
+    22      90    raw   5124      726   0     0/0       0/0    resolved   True       ok  match     True
+    23      90    raw   4920      791   0     0/0       0/0    resolved   True       ok  match     True
+    24      90    raw   6646      517   0     0/0       0/0    resolved   True       ok  match     True
+    25      90    raw   3989      300   0     0/0       0/0    resolved   True       ok  match     True
+    26      90    raw   3591      465   0     0/0       0/0    resolved   True       ok  match     True
+    27      90    raw   4517      480   0     0/0       0/0    resolved   True       ok  match     True
+    28      90    raw   1811      627   0     0/0       0/0    resolved   True       ok  match     True
+    29      90    raw   1001      675   0     0/0       0/0    resolved   True       ok  match     True
+    30       0    raw    136       24   0     0/0       0/0    resolved   True       ok  match    False
+    31       0    raw     36       12   0     0/0       0/0    resolved   True       ok  match    False
+
+rot-90 pages: 20 | all valid: True | all refreshed: True | any at-boundary end: False | any divergence: False | walls total: 71603 | dangling total: 14461

@@ -1,0 +1,48 @@
+{
+  "source": "Arch_Combined_Maryborough_Service_Station.pdf (sha256 b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007), page 28 = sheet A600 DOOR SCHEDULE",
+  "how_obtained": "text layer of page 28 (native coordinates rotated to display with page.rotation_matrix); rows transcribed 1:1; NOT produced by any PlanReader module",
+  "cross_check": "A110 floor plan (page 7) text layer carries exactly 28 distinct tags D01..D28, each once; none missing, none extra (see maryborough_tag_census.json)",
+  "finish_codes": {
+    "IPF3": "TAUBMANS SEMI-GLOSS PAINT FINISH: SEALORD T15 25.5 - INTERNAL DOORS (sheet A140/A500-A503 internal finishes schedule)",
+    "IPF2": "TAUBMANS INTERIOR PAINT FINISH - 'CRISP WHITE' LOW SHEEN - APPLIED TO INTERNAL WALLS"
+  },
+  "doors": [
+    {"id": "D01", "room": "SALES", "type": "AUTOMATED DOUBLE SLIDING DOOR", "w_mm": null, "h_mm": null, "t_mm": null, "leaf": "ALUMINIUM FRAMED GLASS AUTO-SLIDING DOOR, CLEAR LAMINATED SAFETY GLASS", "class": "aluminium_glazed"},
+    {"id": "D02", "room": "TRUCK DRIVER LOUNGE", "type": "", "w_mm": 900, "h_mm": 2050, "t_mm": 45, "leaf": "ALUMINIUM FRAMED GLASS DOOR, CLEAR LAMINATED SAFETY GLASS", "class": "aluminium_glazed"},
+    {"id": "D03", "room": "AIRLOCK", "type": "SINGLE SWING", "w_mm": 920, "h_mm": 2040, "t_mm": 40, "leaf": "SOLID CORE FLUSH FACED TIMBER DOOR", "finish": "PAINT FINISH: IPF3", "class": "painted_ipf3"},
+    {"id": "D04", "room": "WC & SHOWER", "type": "SINGLE SWING", "w_mm": 600, "h_mm": 1700, "t_mm": 19, "leaf": "PARTITION SYSTEM SWING SINGLE DOOR", "finish": "LAMINEX 'BLACK NUANCE'", "class": "laminex_partition"},
+    {"id": "D05", "room": "WC & SHOWER", "type": "SINGLE SWING", "w_mm": 600, "h_mm": 1700, "t_mm": 19, "leaf": "PARTITION SYSTEM SWING SINGLE DOOR", "finish": "LAMINEX 'BLACK NUANCE'", "class": "laminex_partition"},
+    {"id": "D06", "room": "WC & SHOWER", "type": "SINGLE SWING", "w_mm": 600, "h_mm": 1700, "t_mm": 19, "leaf": "PARTITION SYSTEM SWING SINGLE DOOR", "finish": "LAMINEX 'BLACK NUANCE'", "class": "laminex_partition"},
+    {"id": "D07", "room": "WC & SHOWER", "type": "SINGLE SWING", "w_mm": 920, "h_mm": 2040, "t_mm": 40, "leaf": "SOLID CORE FLUSH FACED TIMBER DOOR", "finish": "PAINT FINISH: IPF3", "class": "painted_ipf3"},
+    {"id": "D08", "room": "WC & SHOWER", "type": "SINGLE SWING", "w_mm": 920, "h_mm": 2040, "t_mm": 40, "leaf": "SOLID CORE FLUSH FACED TIMBER DOOR", "finish": "PAINT FINISH: IPF3", "class": "painted_ipf3"},
+    {"id": "D09", "room": "WC & SHOWER", "type": "SINGLE SWING", "w_mm": 920, "h_mm": 2040, "t_mm": 40, "leaf": "SOLID CORE FLUSH FACED TIMBER DOOR", "finish": "PAINT FINISH: IPF3", "class": "painted_ipf3"},
+    {"id": "D10", "room": "LAUNDRY", "type": "SINGLE SWING", "w_mm": 920, "h_mm": 2040, "t_mm": 40, "leaf": "SOLID CORE FLUSH FACED TIMBER DOOR", "finish": "PAINT FINISH: IPF3", "class": "painted_ipf3"},
+    {"id": "D11", "room": "F-AMB", "type": "SINGLE SWING", "w_mm": 820, "h_mm": 2040, "t_mm": 40, "leaf": "SOLID CORE FLUSH FACED TIMBER DOOR", "finish": "PAINT FINISH: IPF3", "class": "painted_ipf3"},
+    {"id": "D12", "room": "M-AMB", "type": "SINGLE SWING", "w_mm": 820, "h_mm": 2040, "t_mm": 40, "leaf": "SOLID CORE FLUSH FACED TIMBER DOOR", "finish": "PAINT FINISH: IPF3", "class": "painted_ipf3"},
+    {"id": "D13", "room": "PWD", "type": "SINGLE SWING", "w_mm": 920, "h_mm": 2040, "t_mm": 40, "leaf": "SOLID CORE FLUSH FACED TIMBER DOOR", "finish": "PAINT FINISH: IPF3", "class": "painted_ipf3"},
+    {"id": "D14", "room": "DRY STORE", "type": "SINGLE SWING", "w_mm": 920, "h_mm": 2040, "t_mm": 40, "leaf": "SOLID CORE FLUSH FACED TIMBER DOOR", "finish": "PAINT FINISH: IPF3", "class": "painted_ipf3"},
+    {"id": "D15", "room": "OFFICE", "type": "SINGLE SWING", "w_mm": 920, "h_mm": 2040, "t_mm": 40, "leaf": "SOLID CORE FLUSH FACED TIMBER DOOR", "finish": "PAINT FINISH: IPF3", "class": "painted_ipf3"},
+    {"id": "D16", "room": "COLD ROOM", "type": "SINGLE SWING", "w_mm": 800, "h_mm": 2000, "t_mm": 75, "leaf": "BY COOLROOM CONTRACTOR", "class": "by_others_coolroom"},
+    {"id": "D17", "room": "FREEZER", "type": "SLIDING DOOR", "w_mm": 800, "h_mm": 2000, "t_mm": 75, "leaf": "BY COOLROOM CONTRACTOR", "class": "by_others_coolroom"},
+    {"id": "D18", "room": "FREEZER", "type": "AS PER MANUFACTURER", "leaf": "BY COOLROOM CONTRACTOR", "comment": "FREEZER / COLD ROOM DISPLAY SHELVING DOOR - TO BE SUPPLIED & INSTALLED BY LESSEE CONTRACTOR", "class": "by_others_lessee_shelving"},
+    {"id": "D19", "room": "FREEZER", "type": "AS PER MANUFACTURER", "leaf": "BY COOLROOM CONTRACTOR", "comment": "FREEZER / COLD ROOM DISPLAY SHELVING DOOR - TO BE SUPPLIED & INSTALLED BY LESSEE CONTRACTOR", "class": "by_others_lessee_shelving"},
+    {"id": "D20", "room": "COLD ROOM", "type": "AS PER MANUFACTURER", "leaf": "BY COOLROOM CONTRACTOR", "comment": "SHELVING DOOR - LESSEE CONTRACTOR", "class": "by_others_lessee_shelving"},
+    {"id": "D21", "room": "COLD ROOM", "type": "AS PER MANUFACTURER", "leaf": "BY COOLROOM CONTRACTOR", "comment": "SHELVING DOOR - LESSEE CONTRACTOR", "class": "by_others_lessee_shelving"},
+    {"id": "D22", "room": "COLD ROOM", "type": "AS PER MANUFACTURER", "leaf": "BY COOLROOM CONTRACTOR", "comment": "SHELVING DOOR - LESSEE CONTRACTOR", "class": "by_others_lessee_shelving"},
+    {"id": "D23", "room": "COLD ROOM", "type": "AS PER MANUFACTURER", "leaf": "BY COOLROOM CONTRACTOR", "comment": "SHELVING DOOR - LESSEE CONTRACTOR", "class": "by_others_lessee_shelving"},
+    {"id": "D24", "room": "COLD ROOM", "type": "AS PER MANUFACTURER", "leaf": "BY COOLROOM CONTRACTOR", "comment": "SHELVING DOOR - LESSEE CONTRACTOR", "class": "by_others_lessee_shelving"},
+    {"id": "D25", "room": "COLD ROOM", "type": "AS PER MANUFACTURER", "leaf": "BY COOLROOM CONTRACTOR", "comment": "SHELVING DOOR - LESSEE CONTRACTOR", "class": "by_others_lessee_shelving"},
+    {"id": "D26", "room": "COLD ROOM", "type": "AS PER MANUFACTURER", "leaf": "BY COOLROOM CONTRACTOR", "comment": "SHELVING DOOR - LESSEE CONTRACTOR", "class": "by_others_lessee_shelving"},
+    {"id": "D27", "room": "COLD ROOM", "type": "AS PER MANUFACTURER", "leaf": "BY COOLROOM CONTRACTOR", "comment": "SHELVING DOOR - LESSEE CONTRACTOR", "class": "by_others_lessee_shelving"},
+    {"id": "D28", "room": "FOOD PREP", "type": "SINGLE SWING", "w_mm": 920, "h_mm": 2040, "t_mm": 40, "leaf": "SOLID CORE FLUSH FACED TIMBER DOOR", "finish": "PAINT FINISH: IPF3", "class": "painted_ipf3"}
+  ],
+  "derived_counts_by_class": {"painted_ipf3": 11, "laminex_partition": 3, "aluminium_glazed": 2, "by_others_coolroom": 2, "by_others_lessee_shelving": 10, "total": 28},
+  "painted_ipf3_ids": ["D03", "D07", "D08", "D09", "D10", "D11", "D12", "D13", "D14", "D15", "D28"],
+  "painted_ipf3_leaf_area_one_face_m2": 20.2368,
+  "painted_ipf3_leaf_area_formula": "9 doors at 0.92x2.04 (D03,D07,D08,D09,D10,D13,D14,D15,D28) + 2 doors at 0.82x2.04 (D11,D12) = 16.8912 + 3.3456",
+  "windows": {
+    "tags_on_plan_A110_each_once": ["W01", "W02", "W03", "W04", "W05", "W06"],
+    "glazing_sheet": "A610 (page 29) W01..W06 elevations at 1:25; NPW (night pay window, STERLING proprietary) appears in the legend - classify as equipment, not a W-tag window",
+    "sizes_read_visually_from_A610_NOT_YET_VERIFIED": {"W01": "3600 wide, 3 EQ panels, glazing 1900 high above 1100 sill", "W02": "4100 wide, 3 EQ panels, 1900 high", "W03": "3650 wide, 3 EQ panels", "W04": "4500 wide entry glazing with D01 (1240+2020+1240)", "W05": "7585 wide, 7 EQ panels, 1900 high", "W06": "1800 wide x 2100 high with D02"}
+  }
+}
