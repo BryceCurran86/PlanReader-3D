@@ -385,11 +385,21 @@ class GenericPlanReaderExtractor:
             "slope_length_m": None,
             "roof_covering_area_m2": None,
         }
+        self.structural_member_coverage_shadow: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "registry_run_id": None,
+            "physical_member_ids": [],
+            "quantity_id": None,
+            "object_universe_snapshot": None,
+            "quantity_evidence": None,
+        }
         self.physical_net_wall_live: Dict[str, Any] = {
             "status": "abstained",
             "reason_codes": ["not_collected"],
             "quantity_m2": None,
             "source_pages": [],
+            "canonical_walls": [],
             "external_wall_ids": [],
             "evidence_ids": [],
             "quantity_id": None,
@@ -943,12 +953,22 @@ class GenericPlanReaderExtractor:
             "slope_length_m": None,
             "roof_covering_area_m2": None,
         }
+        self.structural_member_coverage_shadow = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "registry_run_id": None,
+            "physical_member_ids": [],
+            "quantity_id": None,
+            "object_universe_snapshot": None,
+            "quantity_evidence": None,
+        }
 
         self.physical_net_wall_live = {
             "status": "abstained",
             "reason_codes": ["not_collected"],
             "quantity_m2": None,
             "source_pages": [],
+            "canonical_walls": [],
             "external_wall_ids": [],
             "evidence_ids": [],
             "quantity_id": None,
@@ -1178,6 +1198,33 @@ class GenericPlanReaderExtractor:
                     and bool(global_resolved_secondary_support.support_symbol_ids)
                 ),
             ).resolution
+
+            # Structural coverage SHADOW only. It reissues the already-resolved
+            # producer-owned member universe and quantity trace. Failure here is
+            # diagnostic only and must never change live prediction publication.
+            try:
+                from pb_structural_member_coverage_shadow import (
+                    collect_structural_member_coverage_shadow,
+                )
+
+                self.structural_member_coverage_shadow = (
+                    collect_structural_member_coverage_shadow(
+                        structural_support,
+                        registry_run_id=(
+                            f"extractor-structural:{structural_source_sha256}"
+                        ),
+                    )
+                )
+            except Exception:
+                self.structural_member_coverage_shadow = {
+                    "status": "abstained",
+                    "reason_codes": ["shadow_collection_failed"],
+                    "registry_run_id": None,
+                    "physical_member_ids": [],
+                    "quantity_id": None,
+                    "object_universe_snapshot": None,
+                    "quantity_evidence": None,
+                }
 
             if (
                 structural_support.status is EvidenceResolutionStatus.CORROBORATED
@@ -2866,11 +2913,16 @@ class GenericPlanReaderExtractor:
                     p_path,
                     pages=physical_net_pages,
                 )
+                canonical_wall_objects = [
+                    wall.to_dict()
+                    for wall in physical_wall_result.canonical_walls
+                ]
                 self.physical_net_wall_live = {
                     "status": physical_wall_result.status.value,
                     "reason_codes": list(physical_wall_result.reason_codes),
                     "quantity_m2": physical_wall_result.quantity_m2,
                     "source_pages": list(physical_wall_result.source_pages),
+                    "canonical_walls": canonical_wall_objects,
                     "external_wall_ids": list(
                         physical_wall_result.external_wall_ids
                     ),
@@ -2928,6 +2980,11 @@ class GenericPlanReaderExtractor:
                             "external_wall_ids": list(
                                 physical_wall_result.external_wall_ids
                             ),
+                            "canonical_wall_ids": [
+                                wall["canonical_wall_id"]
+                                for wall in canonical_wall_objects
+                            ],
+                            "canonical_wall_objects": canonical_wall_objects,
                             "evidence_ids": list(
                                 physical_wall_result.evidence_ids
                             ),

@@ -1,0 +1,649 @@
+{
+  "schema_version": "v2-reference-truth-1.0",
+  "project_id": "au_qld_maryborough_service_station",
+  "status": "VERIFIED_CORE_ONLY",
+  "truth_policy": {
+    "planreader_output_used_as_truth": false,
+    "minimum_independent_routes": 2,
+    "note": "Only independently cross-checked opening identities/counts and physical floor/ceiling surfaces are admitted; remaining room, wall, external, tile-wall and window-area surfaces stay unresolved."
+  },
+  "source_plan": {
+    "name": "Arch_Combined_Maryborough_Service_Station.pdf",
+    "sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+  },
+  "items": [
+    {
+      "item_id": "maryborough-door-ipf3-count",
+      "description": "Solid-core flush timber doors with IPF3 paint finish",
+      "trade_category": "doors",
+      "unit": "nr",
+      "expected_quantity": 11,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:door:D03",
+        "maryborough:door:D07",
+        "maryborough:door:D08",
+        "maryborough:door:D09",
+        "maryborough:door:D10",
+        "maryborough:door:D11",
+        "maryborough:door:D12",
+        "maryborough:door:D13",
+        "maryborough:door:D14",
+        "maryborough:door:D15",
+        "maryborough:door:D28"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A600:door_schedule:D03,D07-D15,D28",
+        "A110:floor_plan:tags:D03,D07-D15,D28"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-door-ipf3-leaf-area-one-face",
+      "description": "One-face geometric leaf-area control for IPF3 doors; not a full painting-scope quantity",
+      "trade_category": "painting",
+      "unit": "m2",
+      "expected_quantity": 20.2368,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:door:D03",
+        "maryborough:door:D07",
+        "maryborough:door:D08",
+        "maryborough:door:D09",
+        "maryborough:door:D10",
+        "maryborough:door:D11",
+        "maryborough:door:D12",
+        "maryborough:door:D13",
+        "maryborough:door:D14",
+        "maryborough:door:D15",
+        "maryborough:door:D28"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A600:door_schedule:9x920x2040_plus_2x820x2040",
+        "A110:floor_plan:matching_11_door_tags"
+      ],
+      "denominator_eligible": false,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-door-laminex-partition-count",
+      "description": "Laminex partition-system swing doors",
+      "trade_category": "doors",
+      "unit": "nr",
+      "expected_quantity": 3,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:door:D04",
+        "maryborough:door:D05",
+        "maryborough:door:D06"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A600:door_schedule:D04-D06",
+        "A110:floor_plan:tags:D04-D06"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-door-aluminium-glazed-count",
+      "description": "Aluminium framed glazed doors",
+      "trade_category": "doors",
+      "unit": "nr",
+      "expected_quantity": 2,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:door:D01",
+        "maryborough:door:D02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A600:door_schedule:D01-D02",
+        "A110:floor_plan:tags:D01-D02"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-door-coolroom-by-others-count",
+      "description": "Coolroom-contractor doors excluded from builder denominator",
+      "trade_category": "doors",
+      "unit": "nr",
+      "expected_quantity": 2,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:door:D16",
+        "maryborough:door:D17"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A600:door_schedule:D16-D17:by_coolroom_contractor",
+        "A110:floor_plan:tags:D16-D17"
+      ],
+      "denominator_eligible": false,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-door-lessee-shelving-by-others-count",
+      "description": "Coldroom/freezer display shelving doors supplied and installed by lessee contractor",
+      "trade_category": "doors",
+      "unit": "nr",
+      "expected_quantity": 10,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:door:D18",
+        "maryborough:door:D19",
+        "maryborough:door:D20",
+        "maryborough:door:D21",
+        "maryborough:door:D22",
+        "maryborough:door:D23",
+        "maryborough:door:D24",
+        "maryborough:door:D25",
+        "maryborough:door:D26",
+        "maryborough:door:D27"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A600:door_schedule:D18-D27:lessee_contractor",
+        "A110:floor_plan:tags:D18-D27"
+      ],
+      "denominator_eligible": false,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-window-tagged-count",
+      "description": "Tagged external window/glazing objects W01-W06 reconciled between A110 floor plan and A610 window elevations",
+      "trade_category": "windows",
+      "unit": "nr",
+      "expected_quantity": 6,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:window:W01",
+        "maryborough:window:W02",
+        "maryborough:window:W03",
+        "maryborough:window:W04",
+        "maryborough:window:W05",
+        "maryborough:window:W06"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A110:floor_plan:tags:W01-W06",
+        "A610:window_elevations:W01-W06"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-wc-shower-north-ft2-floor-area",
+      "description": "North WC & SHOWER FT2 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 4.7547,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:wc_shower_north"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A140:floor_finishes:WC_SHOWER_north:FT2",
+        "A140:figured_dimensions:WC_SHOWER_2935x1620",
+        "A110:physical_room_geometry:WC_SHOWER_north:entry_D07"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-wc-shower-middle-ft2-floor-area",
+      "description": "Middle WC & SHOWER FT2 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 4.7547,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:wc_shower_middle"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A140:floor_finishes:WC_SHOWER_middle:FT2",
+        "A140:figured_dimensions:WC_SHOWER_2935x1620",
+        "A110:physical_room_geometry:WC_SHOWER_middle:entry_D08"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-wc-shower-south-ft2-floor-area",
+      "description": "South WC & SHOWER FT2 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 4.7547,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:wc_shower_south"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A140:floor_finishes:WC_SHOWER_south:FT2",
+        "A140:figured_dimensions:WC_SHOWER_2935x1620",
+        "A110:physical_room_geometry:WC_SHOWER_south:entry_D09"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-wc-shower-north-wfpb-ceiling-area",
+      "description": "North WC & SHOWER WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 4.7547,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:wc_shower_north"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:WC_SHOWER_north:2400_WFPB",
+        "A140:figured_dimensions:WC_SHOWER_2935x1620",
+        "A110:physical_room_geometry:WC_SHOWER_north:entry_D07"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-wc-shower-middle-wfpb-ceiling-area",
+      "description": "Middle WC & SHOWER WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 4.7547,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:wc_shower_middle"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:WC_SHOWER_middle:2400_WFPB",
+        "A140:figured_dimensions:WC_SHOWER_2935x1620",
+        "A110:physical_room_geometry:WC_SHOWER_middle:entry_D08"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-wc-shower-south-wfpb-ceiling-area",
+      "description": "South WC & SHOWER WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 4.7547,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:wc_shower_south"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:WC_SHOWER_south:2400_WFPB",
+        "A140:figured_dimensions:WC_SHOWER_2935x1620",
+        "A110:physical_room_geometry:WC_SHOWER_south:entry_D09"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-pwd-ft2-floor-area",
+      "description": "PWD FT2 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 7.854,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:pwd"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A502:PWD_plan:3570x2200:FT2",
+        "A140:floor_finishes:PWD:FT2_and_matching_room_geometry"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-pwd-wfpb-ceiling-area",
+      "description": "PWD WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 7.854,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:pwd"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:PWD:2400_WFPB",
+        "A502:PWD_plan:3570x2200"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-airlock-ft2-floor-area",
+      "description": "Airlock FT2 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 7.66688,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:airlock"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A501:airlock_plan:1520x5044:FT2",
+        "A140:floor_finishes:AIRLOCK:FT2_and_matching_geometry"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-airlock-wfpb-ceiling-area",
+      "description": "Airlock WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 7.66688,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:airlock"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:AIRLOCK:2400_WFPB",
+        "A501:airlock_plan:1520x5044"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-laundry-ft2-floor-area",
+      "description": "Laundry FT2 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 8.34782,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:laundry"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A501:laundry_plan:1655x5044:FT2",
+        "A140:floor_finishes:LAUNDRY:FT2_and_matching_geometry"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-laundry-wfpb-ceiling-area",
+      "description": "Laundry WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 8.34782,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:laundry"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:LAUNDRY:2400_WFPB",
+        "A501:laundry_plan:1655x5044"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    }
+  ],
+  "door_universe_reconciliation": {
+    "schedule_rows": 28,
+    "distinct_A110_tags": 28,
+    "expected_ids": [
+      "D01",
+      "D02",
+      "D03",
+      "D04",
+      "D05",
+      "D06",
+      "D07",
+      "D08",
+      "D09",
+      "D10",
+      "D11",
+      "D12",
+      "D13",
+      "D14",
+      "D15",
+      "D16",
+      "D17",
+      "D18",
+      "D19",
+      "D20",
+      "D21",
+      "D22",
+      "D23",
+      "D24",
+      "D25",
+      "D26",
+      "D27",
+      "D28"
+    ],
+    "class_counts": {
+      "painted_ipf3": 11,
+      "laminex_partition": 3,
+      "aluminium_glazed": 2,
+      "by_others_coolroom": 2,
+      "by_others_lessee_shelving": 10,
+      "total": 28
+    },
+    "partition_check": {
+      "painted_ipf3": 11,
+      "laminex_partition": 3,
+      "aluminium_glazed": 2,
+      "by_others_coolroom": 2,
+      "by_others_lessee_shelving": 10,
+      "sum": 28
+    }
+  },
+  "window_universe_reconciliation": {
+    "distinct_A110_tags": 6,
+    "distinct_A610_elevation_tags": 6,
+    "expected_ids": [
+      "W01",
+      "W02",
+      "W03",
+      "W04",
+      "W05",
+      "W06"
+    ],
+    "count": 6,
+    "area_status": "UNRESOLVED",
+    "note": "A610 nominal dimensions are retained as evidence but full glazing/opening area semantics are not yet frozen."
+  },
+  "wc_shower_floor_geometry_checks": [
+    {
+      "surface_ref": "maryborough:surface:floor:wc_shower_north",
+      "entry_door_tag": "D07",
+      "a140_figured_mm": [
+        2935,
+        1620
+      ],
+      "a140_area_m2": 4.7547,
+      "a110_vector_mm_approx": [
+        2913,
+        1634
+      ],
+      "agreement": "PASS_WITHIN_DRAWING_TOLERANCE"
+    },
+    {
+      "surface_ref": "maryborough:surface:floor:wc_shower_middle",
+      "entry_door_tag": "D08",
+      "a140_figured_mm": [
+        2935,
+        1620
+      ],
+      "a140_area_m2": 4.7547,
+      "a110_vector_mm_approx": [
+        2913,
+        1634
+      ],
+      "agreement": "PASS_WITHIN_DRAWING_TOLERANCE"
+    },
+    {
+      "surface_ref": "maryborough:surface:floor:wc_shower_south",
+      "entry_door_tag": "D09",
+      "a140_figured_mm": [
+        2935,
+        1620
+      ],
+      "a140_area_m2": 4.7547,
+      "a110_vector_mm_approx": [
+        2913,
+        1634
+      ],
+      "agreement": "PASS_WITHIN_DRAWING_TOLERANCE"
+    }
+  ],
+  "wc_shower_ceiling_geometry_checks": [
+    {
+      "surface_ref": "maryborough:surface:ceiling:wc_shower_north",
+      "entry_door_tag": "D07",
+      "a120_ceiling_finish": "WFPB",
+      "a120_ceiling_height_mm": 2400,
+      "footprint_figured_mm": [
+        2935,
+        1620
+      ],
+      "expected_area_m2": 4.7547,
+      "agreement": "PASS"
+    },
+    {
+      "surface_ref": "maryborough:surface:ceiling:wc_shower_middle",
+      "entry_door_tag": "D08",
+      "a120_ceiling_finish": "WFPB",
+      "a120_ceiling_height_mm": 2400,
+      "footprint_figured_mm": [
+        2935,
+        1620
+      ],
+      "expected_area_m2": 4.7547,
+      "agreement": "PASS"
+    },
+    {
+      "surface_ref": "maryborough:surface:ceiling:wc_shower_south",
+      "entry_door_tag": "D09",
+      "a120_ceiling_finish": "WFPB",
+      "a120_ceiling_height_mm": 2400,
+      "footprint_figured_mm": [
+        2935,
+        1620
+      ],
+      "expected_area_m2": 4.7547,
+      "agreement": "PASS"
+    }
+  ],
+  "pwd_geometry_checks": {
+    "floor_surface_ref": "maryborough:surface:floor:pwd",
+    "ceiling_surface_ref": "maryborough:surface:ceiling:pwd",
+    "a502_figured_mm": [
+      3570,
+      2200
+    ],
+    "area_m2": 7.854,
+    "a140_floor_finish": "FT2",
+    "a120_ceiling_finish": "WFPB",
+    "a120_ceiling_height_mm": 2400,
+    "agreement": "PASS"
+  },
+  "airlock_laundry_geometry_checks": [
+    {
+      "room": "AIRLOCK",
+      "floor_ref": "maryborough:surface:floor:airlock",
+      "ceiling_ref": "maryborough:surface:ceiling:airlock",
+      "a501_figured_mm": [
+        1520,
+        5044
+      ],
+      "area_m2": 7.66688,
+      "a501_floor_finish": "FT2",
+      "a120_ceiling_finish": "WFPB",
+      "a120_ceiling_height_mm": 2400,
+      "agreement": "PASS"
+    },
+    {
+      "room": "LAUNDRY",
+      "floor_ref": "maryborough:surface:floor:laundry",
+      "ceiling_ref": "maryborough:surface:ceiling:laundry",
+      "a501_figured_mm": [
+        1655,
+        5044
+      ],
+      "area_m2": 8.34782,
+      "a501_floor_finish": "FT2",
+      "a120_ceiling_finish": "WFPB",
+      "a120_ceiling_height_mm": 2400,
+      "agreement": "PASS"
+    }
+  ]
+}

@@ -1,0 +1,1434 @@
+{
+  "schema_version": "v2-object-universe-1.0",
+  "project_id": "au_qld_3laurel",
+  "scope": "verified-only core",
+  "external_openings": [
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "Bed 2 1200 x 1810 ASW",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.172,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          663.3,
+          463.1,
+          718.8,
+          470.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:Bed_2_external_1200x1810_ASW:bbox_663.3_463.1_718.8_470.9"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "Bed 3 1200 x 1810 ASW",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.172,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          576.3,
+          463.1,
+          631.7,
+          470.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:Bed_3_external_1200x1810_ASW:bbox_576.3_463.1_631.7_470.9"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:03",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 x 1810 ASW #3",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.172,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          383.3,
+          463.1,
+          438.7,
+          470.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:03"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:04",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 x 1810 ASW #4",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.172,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          168.3,
+          259.3,
+          223.7,
+          267.1
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:04"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #1",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.338,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          275.6,
+          180.5,
+          331,
+          188.3
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.338,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          391.8,
+          270.1,
+          447.2,
+          277.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:02"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:03",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #3",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.338,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          522.3,
+          180.5,
+          577.7,
+          188.3
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:03"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:04",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #4",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.338,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          624.6,
+          180.5,
+          680.1,
+          188.3
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:04"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x610_asw_obs:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 610 ASW obs",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.098,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window_obscure",
+        "height_m": 1.8,
+        "width_m": 0.61,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:1800_610_asw_obs"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x900_adh:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 900 ADH #1",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.62,
+      "attributes": {
+        "opening_type": "aluminium_double_hung_window",
+        "height_m": 1.8,
+        "width_m": 0.9,
+        "source_bbox_pdf_pt": [
+          994.8,
+          200.7,
+          1002.6,
+          236
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x900_adh:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 900 ADH #2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.62,
+      "attributes": {
+        "opening_type": "aluminium_double_hung_window",
+        "height_m": 1.8,
+        "width_m": 0.9,
+        "source_bbox_pdf_pt": [
+          994.8,
+          252.3,
+          1002.6,
+          287.6
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:02"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x910_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 910 ASW",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.638,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 0.91,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:1800_910_asw"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:2100x1500_asd:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 1500 ASD",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 3.15,
+      "attributes": {
+        "opening_type": "aluminium_sliding_door",
+        "height_m": 2.1,
+        "width_m": 1.5,
+        "source_bbox_pdf_pt": [
+          740,
+          460.5,
+          779.2,
+          468.3
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:2100x2100_asd:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 2100 ASD",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.41,
+      "attributes": {
+        "opening_type": "aluminium_sliding_door",
+        "height_m": 2.1,
+        "width_m": 2.1,
+        "source_bbox_pdf_pt": [
+          236.7,
+          211.5,
+          244.5,
+          250.7
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:2100x2700_assd:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 2700 ASSD",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 5.67,
+      "attributes": {
+        "opening_type": "aluminium_sliding_stack_door",
+        "height_m": 2.1,
+        "width_m": 2.7,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:21_27_assd"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:2100x4800_panel_lift:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 4800 panel lift door",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 10.08,
+      "attributes": {
+        "opening_type": "panel_lift_door",
+        "height_m": 2.1,
+        "width_m": 4.8,
+        "source_bbox_pdf_pt": [
+          957.9,
+          381.9,
+          965.8,
+          471.2
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1210_asw_obs:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1210 ASW obs #1",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 0.726,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window_obscure",
+        "height_m": 0.6,
+        "width_m": 1.21,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:600_1210_asw_obs_01"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1210_asw_obs:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1210 ASW obs #2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 0.726,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window_obscure",
+        "height_m": 0.6,
+        "width_m": 1.21,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:600_1210_asw_obs_02"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1510_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1510 ASW #1",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 0.906,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 0.6,
+        "width_m": 1.51,
+        "source_bbox_pdf_pt": [
+          132.5,
+          374.8,
+          140.3,
+          424.4
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1510_asw:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1510 ASW #2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 0.906,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 0.6,
+        "width_m": 1.51,
+        "source_bbox_pdf_pt": [
+          132.5,
+          288.9,
+          140.3,
+          338.5
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:02"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200_main_entry_hinged:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 main entry hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.52,
+      "attributes": {
+        "opening_type": "aluminium_entry_door",
+        "height_m": 2.1,
+        "width_m": 1.2,
+        "quantity_basis": "explicit floor-plan entry opening width x elevation joinery height 2100 AFL U.N.O."
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:ENTRY_PORCH_1200_opening",
+        "architectural:p4:A0.4:ALUMINIUM_ENTRY_DOOR_and_JOINERY_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:0870_gf_entry_hinged:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "870 granny-flat porch entry hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_external_entry_door",
+        "height_m": 2.1,
+        "width_m": 0.87,
+        "quantity_basis": "explicit perimeter door width x elevation joinery height 2100 AFL U.N.O."
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:GF_PORCH_entry_870",
+        "architectural:p4:A0.4:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:0870_garage_personnel_hinged:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "870 garage personnel external hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_external_personnel_door",
+        "height_m": 2.1,
+        "width_m": 0.87,
+        "quantity_basis": "explicit perimeter door width x elevation joinery height 2100 AFL U.N.O."
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:GARAGE_perimeter_870",
+        "architectural:p4:A0.4:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    }
+  ],
+  "external_opening_universe_complete": true,
+  "primary_ceiling_planes": [
+    {
+      "object_ref": "3laurel:surface:ceiling:garage",
+      "physical_kind": "ceiling_finish_surface",
+      "object_family": "ceiling_plane",
+      "description": "Garage ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 36.4,
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "10mm Gyprock to truss bottom chord",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_area_region:garage",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:gf_alfresco",
+      "physical_kind": "ceiling_finish_surface",
+      "object_family": "ceiling_plane",
+      "description": "Granny-flat alfresco ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 10.5,
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "horizontal underside ceiling plane",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_area_region:gf_alfresco",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:gf_living",
+      "physical_kind": "ceiling_finish_surface",
+      "object_family": "ceiling_plane",
+      "description": "Granny-flat internal ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 60,
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "10mm Gyprock to truss bottom chord",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_area_region:gf_living",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:gf_porch",
+      "physical_kind": "ceiling_finish_surface",
+      "object_family": "ceiling_plane",
+      "description": "Granny-flat porch ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.4,
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "FC sheet to underside truss/joists",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_area_region:gf_porch",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:main_alfresco",
+      "physical_kind": "ceiling_finish_surface",
+      "object_family": "ceiling_plane",
+      "description": "Main-house alfresco ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 13.6,
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "plaster to underside of trusses",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_area_region:main_alfresco",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:main_living",
+      "physical_kind": "ceiling_finish_surface",
+      "object_family": "ceiling_plane",
+      "description": "Main-house internal ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 168.1,
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "10mm Gyprock to truss bottom chord",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_area_region:main_living",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:main_porch",
+      "physical_kind": "ceiling_finish_surface",
+      "object_family": "ceiling_plane",
+      "description": "Main-house porch ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 7.5,
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "FC sheet to underside truss/joists",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_area_region:main_porch",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ]
+    }
+  ],
+  "primary_ceiling_plane_universe_complete": true,
+  "wet_area_floor_surfaces": [
+    {
+      "object_ref": "3laurel:surface:floor:bathroom",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Main bathroom tiled floor surface",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 5.17,
+      "attributes": {
+        "width_m": 1.88,
+        "length_m": 2.75,
+        "calculation": "1.880m * 2.750m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from bathroom layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      },
+      "source_locations": [
+        "architectural:p11:A0.11:Bathroom_Layout:1880x2750_finished_dimensions",
+        "architectural:p3:A0.3:BATH:TILES"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:floor:main_wc",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Main WC tiled floor surface",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.7316,
+      "attributes": {
+        "width_m": 1.56,
+        "length_m": 1.11,
+        "calculation": "1.560m * 1.110m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from WC layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      },
+      "source_locations": [
+        "architectural:p11:A0.11:WC_plan:1560x1110_finished_dimensions",
+        "architectural:p3:A0.3:WC:TILES"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:floor:laundry",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Main laundry tiled floor surface",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 5.1744,
+      "attributes": {
+        "width_m": 3.08,
+        "length_m": 1.68,
+        "calculation": "3.080m * 1.680m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from laundry layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      },
+      "source_locations": [
+        "architectural:p13:A0.13:Laundry_Layout:3080x1680_finished_dimensions",
+        "architectural:p3:A0.3:LDY:TILES"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:floor:gf_ensuite_laundry",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Granny-flat ensuite/laundry tiled floor surface",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 6.4889,
+      "attributes": {
+        "width_m": 1.87,
+        "length_m": 3.47,
+        "calculation": "1.870m * 3.470m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from GF ensuite/laundry layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:gf_living_composite_region"
+      },
+      "source_locations": [
+        "architectural:p15:A0.15:GF_Ensuite_Laundry:1870x3470_finished_dimensions",
+        "architectural:p3:A0.3:GF_wet_area:TILES"
+      ]
+    }
+  ],
+  "wet_area_floor_surface_universe_complete": true,
+  "vinyl_floor_surfaces": [
+    {
+      "object_ref": "3laurel:surface:floor:media",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Media room vinyl floor surface",
+      "finish": "vinyl",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 13.146,
+      "attributes": {
+        "width_m": 4.2,
+        "length_m": 3.13,
+        "calculation": "4.200m * 3.130m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:MEDIA:4200x3130_figured_dimensions:VINYL"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:floor:bed2",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Bed 2 vinyl floor surface",
+      "finish": "vinyl",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 12.6,
+      "attributes": {
+        "width_m": 3,
+        "length_m": 4.2,
+        "calculation": "3.000m * 4.200m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:BED_2:3000x4200_figured_dimensions:VINYL"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:floor:bed3",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Bed 3 vinyl floor surface",
+      "finish": "vinyl",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 12.6,
+      "attributes": {
+        "width_m": 3,
+        "length_m": 4.2,
+        "calculation": "3.000m * 4.200m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:BED_3:3000x4200_figured_dimensions:VINYL"
+      ]
+    }
+  ],
+  "vinyl_floor_surface_universe_complete": true,
+  "wall_tile_finish_surfaces": [
+    {
+      "object_ref": "3laurel:surface:wall_tile:laundry_D_skirting",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "Laundry D tile skirting strip",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 0.5852,
+      "attributes": {
+        "finished_face_width_m": 3.08,
+        "tile_height_m": 0.19,
+        "calculation": "3.080m * 0.190m",
+        "finish_scope": "tile_skirting",
+        "floor_level_openings_in_host_face": false,
+        "net_finish_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p13:A0.13:Laundry_D:3080_finished_wall_width_x_190_TILE_SKIRTING_height"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:bathroom_C_shower_net",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "Main bathroom C shower tile finish",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.89,
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_1",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.1,
+        "calculation": "0.900m * 2.100m",
+        "finish_scope": "shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p11:A0.11:Bathroom_C:900_SHW_x_2100_TILES:no_niche"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:ensuite_B_shower_return_net",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "Ensuite B full-height shower return tile finish",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.43,
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_return_1",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "0.900m * 2.700m",
+        "finish_scope": "full_height_shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p12:A0.12:Ensuite_B:900_SHW:SHOWER_TILES_TO_RUN_UP_TO_CEILING"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:ensuite_D_shower_return_net",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "Ensuite D full-height shower return tile finish",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.43,
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_return_2",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "0.900m * 2.700m",
+        "finish_scope": "full_height_shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p12:A0.12:Ensuite_D:900_SHW:full_height_shower_tiling_scope"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:gf_ensuite_B_shower_return_net",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "GF Ens/Ldry B full-height shower return tile finish",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.43,
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_return_1",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "0.900m * 2.700m",
+        "finish_scope": "full_height_shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p15:A0.15:GF_Ens_Ldry_B:900_SHW:SHOWER_TILES_TO_RUN_UP_TO_CEILING"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:gf_ensuite_D_shower_return_net",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "GF Ens/Ldry D full-height shower return tile finish",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.43,
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_return_2",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "0.900m * 2.700m",
+        "finish_scope": "full_height_shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p15:A0.15:GF_Ens_Ldry_D:900_SHW:SHOWER_TILES_TO_RUN_UP_TO_CEILING"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:ensuite_rear_flat_after_niche",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "Main ensuite rear shower wall flat tile face after niche opening deduction",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.296,
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_rear",
+        "niche_deduction_ref": "3laurel:opening:p12:main_ensuite_niche:01",
+        "gross_area_m2": 4.536,
+        "niche_face_deduction_m2": 0.24,
+        "calculation": "4.536 - 0.240",
+        "niche_returns_included": false,
+        "net_flat_face_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p12:A0.12:Ensuite_A:1680x2700_gross_less_600x400_niche_face"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:gf_ensuite_rear_flat_after_niche",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "GF ensuite rear shower wall flat tile face after niche opening deduction",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.809,
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_rear",
+        "niche_deduction_ref": "3laurel:opening:p15:gf_ensuite_niche:01",
+        "gross_area_m2": 5.049,
+        "niche_face_deduction_m2": 0.24,
+        "calculation": "5.049 - 0.240",
+        "niche_returns_included": false,
+        "net_flat_face_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p15:A0.15:GF_Ens_Ldry_C:1870x2700_gross_less_600x400_niche_face"
+      ]
+    }
+  ],
+  "wall_tile_face_subset_source_closed": true,
+  "project_wet_area_tile_universe_complete": false,
+  "internal_room_access_openings": [
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0720_cs:01",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 720 mm cavity-slider opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.512,
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.72,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          739.1,
+          219.6,
+          750.8,
+          227.4
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:WIP-side 720 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_cs:01",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm cavity-slider opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          814.2,
+          276.3,
+          825.9,
+          284.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:ENS/WIR-side 870 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:01",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          894.3,
+          285.2,
+          905.9,
+          293
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:master/WIR-entry zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:1200_cs:01",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 1200 mm cavity-slider opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.52,
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 1.2,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          470.6,
+          302.8,
+          478.4,
+          329.2
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:media-side 1200 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_cs:02",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm cavity-slider opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          249,
+          330.5,
+          256.8,
+          351.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:granny-flat wet-area zone 870 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:02",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm hinged opening: Bed 3",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          559.4,
+          347.5,
+          567.2,
+          359.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:Bed_3_hall_870:bbox_559.4_347.5_567.2_359.1; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:03",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm hinged opening: Bed 2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          722.8,
+          347.5,
+          730.6,
+          359.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:Bed_2_hall_870:bbox_722.8_347.5_730.6_359.1; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:04",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          783.6,
+          347.5,
+          791.4,
+          359.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:laundry/hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0720_cs:02",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 720 mm cavity-slider opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.512,
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.72,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          222.7,
+          347.9,
+          243.2,
+          355.7
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:granny-flat bathroom-side 720 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:05",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          155.3,
+          356.7,
+          166.9,
+          364.5
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:Bed 5/WIR zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:06",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          744.2,
+          367.8,
+          755.8,
+          375.6
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:laundry/bedroom hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0720_cs:03",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 720 mm cavity-slider opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.512,
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.72,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          506.1,
+          372.9,
+          526.7,
+          380.7
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:main WC-side 720 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:07",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          468.3,
+          381.5,
+          476.1,
+          393.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:Bed 3/4 hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0720_swing:01",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 720 mm hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.512,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.72,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          514,
+          401.8,
+          525.6,
+          409.6
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:main bathroom 720 hinged opening; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    }
+  ],
+  "internal_room_access_labelled_subset_complete": true,
+  "project_internal_opening_universe_complete": false,
+  "internal_sliding_joinery_openings": [
+    {
+      "object_ref": "3laurel:opening:p3:internal_joinery:1200_vsd_laundry_linen:01",
+      "physical_kind": "internal_sliding_joinery_opening",
+      "object_family": "internal_sliding_joinery_opening",
+      "description": "Internal 1200 mm vertical sliding joinery opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.52,
+      "attributes": {
+        "opening_type": "vertical_sliding_joinery_door",
+        "width_m": 1.2,
+        "height_m": 2.1,
+        "quantity_basis": "explicit VSD width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          757.8,
+          386.9,
+          765.6,
+          397.8
+        ],
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:laundry/linen 1200 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_joinery:1800_vsd_bed3_robe:01",
+      "physical_kind": "internal_sliding_joinery_opening",
+      "object_family": "internal_sliding_joinery_opening",
+      "description": "Internal 1800 mm vertical sliding joinery opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 3.78,
+      "attributes": {
+        "opening_type": "vertical_sliding_joinery_door",
+        "width_m": 1.8,
+        "height_m": 2.1,
+        "quantity_basis": "explicit VSD width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          609,
+          355.4,
+          619.9,
+          363.2
+        ],
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:Bed 3 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_joinery:1800_vsd_bed2_robe:01",
+      "physical_kind": "internal_sliding_joinery_opening",
+      "object_family": "internal_sliding_joinery_opening",
+      "description": "Internal 1800 mm vertical sliding joinery opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 3.78,
+      "attributes": {
+        "opening_type": "vertical_sliding_joinery_door",
+        "width_m": 1.8,
+        "height_m": 2.1,
+        "quantity_basis": "explicit VSD width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          691.6,
+          355.4,
+          702.5,
+          363.2
+        ],
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:Bed 2 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_joinery:1800_vsd_bed4_robe:01",
+      "physical_kind": "internal_sliding_joinery_opening",
+      "object_family": "internal_sliding_joinery_opening",
+      "description": "Internal 1800 mm vertical sliding joinery opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 3.78,
+      "attributes": {
+        "opening_type": "vertical_sliding_joinery_door",
+        "width_m": 1.8,
+        "height_m": 2.1,
+        "quantity_basis": "explicit VSD width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          453,
+          404.8,
+          460.9,
+          415.7
+        ],
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:Bed 4 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    }
+  ],
+  "internal_sliding_joinery_labelled_subset_complete": true
+}
