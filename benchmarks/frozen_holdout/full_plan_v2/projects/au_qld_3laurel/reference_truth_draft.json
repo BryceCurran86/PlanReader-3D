@@ -1442,6 +1442,33 @@
         "architectural:p3:A0.3:floor_plan:two_140_POST_labels_and_four_470_PIER_labels",
         "architectural:p4-p5:A0.4-A0.5:elevation_material_dimension_crosscheck"
       ]
+    },
+    {
+      "check_id": "3laurel:control:wall_bracing_resistance",
+      "schedules": {
+        "A": {
+          "required_kN": 93.71,
+          "provided_kN": 97.84,
+          "margin_kN": 4.13
+        },
+        "B": {
+          "required_kN": 44.66,
+          "provided_kN": 49.68,
+          "margin_kN": 5.02
+        },
+        "A_U2": {
+          "required_kN": 25.41,
+          "provided_kN": 30.7,
+          "margin_kN": 5.29
+        },
+        "B_U2": {
+          "required_kN": 31.2,
+          "provided_kN": 33.6,
+          "margin_kN": 2.4
+        }
+      },
+      "source_location": "architectural:p8:A0.8:BRACING_SCHEDULES_A_B_AU2_BU2",
+      "note": "Independent source-declared resistance control over the closed 37-member bracing census; not a denominator quantity."
     }
   ]
 }
