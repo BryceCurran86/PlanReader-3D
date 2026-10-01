@@ -56,6 +56,8 @@ from pb_canonical_building import (
     CanonicalSpace,
     CanonicalFinishSurface,
     CanonicalEvidenceObservation,
+    WallFace,
+    QuantityFormulaBinding,
     Vector2D,
     Vector3D,
     BoundingBox3D,
@@ -616,6 +618,10 @@ def registered_wall_to_canonical_input(wall_obj: Any) -> Dict[str, Any]:
         "level_id": lvl_id,
         "provenance": d.get("provenance"),
         "openings": d.get("openings", []),
+        "is_external": parse_strict_bool(getattr(wall_obj, "is_external", d.get("is_external", True if side else False))),
+        "thickness_m": _safe_float(getattr(wall_obj, "thickness_m", d.get("thickness_m", d.get("wall_thickness_m")))),
+        "face_a": d.get("face_a"),
+        "face_b": d.get("face_b"),
     }
 
 
@@ -790,6 +796,10 @@ def planreader_to_canonical_model(
 
         target_lvl, wall_lvl_slug = resolve_canonical_level(level_val, levels_map)
 
+        is_ext = parse_strict_bool(w_input.get("is_external", True if w_input.get("side") else False))
+        face_a_obj = WallFace.from_dict(w_input.get("face_a")) if w_input.get("face_a") else None
+        face_b_obj = WallFace.from_dict(w_input.get("face_b")) if w_input.get("face_b") else None
+
         wall_id = wall_ref if wall_ref.startswith("wall_") else f"wall_{wall_ref}"
         c_wall = CanonicalWall(
             id=wall_id,
@@ -799,6 +809,9 @@ def planreader_to_canonical_model(
             end_point=b_vec,
             height_m=h_m,
             thickness_m=th_m,
+            is_external=is_ext,
+            face_a=face_a_obj,
+            face_b=face_b_obj,
             confidence=w_conf,
             review_state=r_state,
             takeoff_eligible=takeoff_elig,
@@ -905,6 +918,9 @@ def planreader_to_canonical_model(
                 height_m=h_op,
                 offset_along_wall_m=offset_m,
                 sill_height_m=sill_m,
+                mark=op_mark,
+                host_wall_id=c_wall.id if not is_wrong_host else None,
+                opening_classification=str(op_raw.get("opening_classification") or op_raw.get("classification") or ("DOOR" if "DOOR" in op_type_str else "WINDOW" if "WINDOW" in op_type_str else "OPENING")),
                 confidence=parse_optional_confidence(op_raw.get("confidence")),
                 review_state=ReviewState.REVIEW_REQUIRED,
                 takeoff_eligible=False,
@@ -1111,6 +1127,44 @@ def planreader_to_canonical_model(
         c_floor.metadata["geometry_reason"] = poly_msg
         c_floor.metadata["level_derivation"] = f_lvl_val if isinstance(f_lvl_val, dict) else {"value": f_lvl_val}
         target_lvl.floors.append(c_floor)
+
+    # Process spaces / rooms
+    raw_spaces = payload.get("spaces") or payload.get("rooms") or []
+    for sp_idx, sp_raw in enumerate(raw_spaces):
+        if not isinstance(sp_raw, dict):
+            continue
+        sp_id = str(sp_raw.get("id") or sp_raw.get("room_ref") or f"space_{sp_idx+1}")
+        sp_name = str(sp_raw.get("name") or sp_raw.get("label") or f"Space {sp_idx+1}")
+        sp_num = str(sp_raw.get("room_number") or sp_raw.get("number") or "")
+        sp_lvl_val = _strong_floor_level_claim(sp_raw) or sp_raw.get("level_id") or sp_raw.get("level")
+        target_lvl, _ = resolve_canonical_level(sp_lvl_val, levels_map)
+
+        boundary_pts = []
+        raw_poly = sp_raw.get("boundary_polygon") or sp_raw.get("polygon_m") or sp_raw.get("polygon") or []
+        for pt in raw_poly:
+            p_vec = _parse_vector2d(pt)
+            if p_vec:
+                boundary_pts.append(p_vec)
+
+        c_space = CanonicalSpace(
+            id=sp_id,
+            name=sp_name,
+            level_id=target_lvl.id,
+            room_number=sp_num if sp_num else None,
+            boundary_polygon=boundary_pts,
+            specified_floor_area_m2=_safe_float(sp_raw.get("specified_floor_area_m2") or sp_raw.get("area_m2")),
+            height_m=_safe_float(sp_raw.get("height_m")),
+            bounding_wall_ids=list(sp_raw.get("bounding_wall_ids") or sp_raw.get("bounding_wall_candidate_ids") or []),
+            floor_element_id=sp_raw.get("floor_element_id"),
+            ceiling_element_id=sp_raw.get("ceiling_element_id"),
+            finish_assignments=dict(sp_raw.get("finish_assignments") or {}),
+            confidence=parse_optional_confidence(sp_raw.get("confidence") or sp_raw.get("geometry_confidence")),
+            review_state=ReviewState.CONFIRMED if sp_raw.get("status") == "confirmed" else ReviewState.REVIEW_REQUIRED,
+            takeoff_eligible=parse_strict_bool(sp_raw.get("takeoff_eligible")),
+            provenance=_parse_provenance(sp_raw.get("provenance")),
+            metadata=dict(sp_raw.get("metadata") or {}),
+        )
+        target_lvl.spaces.append(c_space)
 
     # SECTION J, K, L: Process v140 roof evidence & caps with objective roof Z proof!
     roof_data = payload.get("roof_data")
@@ -1555,6 +1609,44 @@ def collect_workspace_3d_evidence(app: Any, workspace_id: int) -> Dict[str, Any]
                         })
         except Exception as e:
             snapshot["diagnostics_log"].append({"type": "v175_persisted_evidence_error", "msg": str(e)})
+
+        # 9. Collect auto-geometry partition & finish observations
+        try:
+            auto_rep_raw = app.workspace_setting(wid, "auto_geometry_v1219", "{}") if hasattr(app, "workspace_setting") else None
+            auto_rep = json.loads(str(auto_rep_raw or "{}")) if isinstance(auto_rep_raw, str) else auto_rep_raw
+            if isinstance(auto_rep, dict):
+                for p_idx, part in enumerate(auto_rep.get("partitions") or []):
+                    if not isinstance(part, dict):
+                        continue
+                    snapshot["evidence_observations"].append({
+                        "candidate_id": f"internal_part_{part.get('page_id')}_{p_idx+1}",
+                        "kind": "internal_partition_evidence",
+                        "workspace_id": str(wid),
+                        "page_id": str(part.get("page_id")),
+                        "producer": "pb_wall_fill_internal_partition_evidence",
+                        "producer_version": auto_rep.get("version") or "1.2.19",
+                        "total_length_m": part.get("total_length_m"),
+                        "wall_thickness_m": part.get("wall_thickness_m"),
+                        "segment_lengths_m": part.get("segment_lengths_m"),
+                        "reason": part.get("reason"),
+                    })
+                for f_idx, fin in enumerate(auto_rep.get("finishes") or []):
+                    if not isinstance(fin, dict):
+                        continue
+                    snapshot["evidence_observations"].append({
+                        "candidate_id": f"finish_binding_{fin.get('record_id') or f_idx+1}",
+                        "kind": "bound_wall_finish_evidence",
+                        "workspace_id": str(wid),
+                        "page_id": str(fin.get("page_id") or ""),
+                        "producer": "pb_bound_wall_finish_quantity_authority",
+                        "trade_scope_id": fin.get("trade_scope_id"),
+                        "finish_material": fin.get("finish_material"),
+                        "quantity_m2": fin.get("quantity_m2"),
+                        "physical_wall_ids": fin.get("physical_wall_ids"),
+                        "physical_face_ids": fin.get("physical_face_ids"),
+                    })
+        except Exception as e:
+            snapshot["diagnostics_log"].append({"type": "auto_geometry_evidence_error", "msg": str(e)})
 
     except Exception as e:
         snapshot["diagnostics_log"].append({"type": "evidence_collection_error", "msg": str(e)})

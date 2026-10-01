@@ -235,3 +235,127 @@ def test_canonical_project_json_roundtrip():
     assert rec_wall.derived_quantities[0].total_cost == 270.0
     assert len(reconstructed.constructability_issues) == 1
     assert reconstructed.constructability_issues[0].category == "test_issue"
+
+
+def test_adapter_preserves_wall_external_and_faces():
+    """planreader_to_canonical_model preserves is_external, face_a, and face_b on walls."""
+    from pb_production_3d_adapter import planreader_to_canonical_model
+
+    payload = {
+        "walls": [
+            {
+                "wall_ref": "W-INT-01",
+                "a": {"x": 0.0, "y": 0.0},
+                "b": {"x": 5.0, "y": 0.0},
+                "height_m": 2.7,
+                "thickness_m": 0.09,
+                "is_external": False,
+                "face_a": {"face_id": "A", "finish": "Plasterboard", "area_net_m2": 13.5},
+                "face_b": {"face_id": "B", "finish": "Tiles", "area_net_m2": 13.5},
+                "openings": [
+                    {
+                        "id": "D-01",
+                        "mark": "D01",
+                        "width_m": 0.82,
+                        "height_m": 2.04,
+                        "offset_along_wall_m": 1.0,
+                        "sill_height_m": 0.0,
+                        "opening_classification": "DOOR",
+                    }
+                ],
+            }
+        ]
+    }
+    project, skipped = planreader_to_canonical_model(payload, is_validated_internal_workspace=True)
+    assert not skipped
+    walls = project.all_walls()
+    assert len(walls) == 1
+    wall = walls[0]
+    assert wall.id == "wall_W-INT-01"
+    assert wall.is_external is False
+    assert wall.thickness_m == 0.09
+    assert wall.face_a is not None
+    assert wall.face_a.finish == "Plasterboard"
+    assert wall.face_b is not None
+    assert wall.face_b.finish == "Tiles"
+    assert len(wall.openings) == 1
+    op = wall.openings[0]
+    assert op.host_wall_id == "wall_W-INT-01"
+    assert op.mark == "D01"
+    assert op.opening_classification == "DOOR"
+
+
+def test_adapter_converts_spaces_and_links_to_bounding_walls():
+    """planreader_to_canonical_model converts spaces/rooms and recompute_relationships links them to walls."""
+    from pb_production_3d_adapter import planreader_to_canonical_model
+
+    payload = {
+        "walls": [
+            {
+                "wall_ref": "W-BOUND-1",
+                "a": {"x": 0.0, "y": 0.0},
+                "b": {"x": 4.0, "y": 0.0},
+                "height_m": 2.7,
+                "is_external": True,
+            },
+            {
+                "wall_ref": "W-BOUND-2",
+                "a": {"x": 4.0, "y": 0.0},
+                "b": {"x": 4.0, "y": 3.0},
+                "height_m": 2.7,
+                "is_external": False,
+            },
+        ],
+        "spaces": [
+            {
+                "id": "SP-BED1",
+                "name": "Bedroom 1",
+                "area_m2": 12.0,
+                "bounding_wall_ids": ["wall_W-BOUND-1", "wall_W-BOUND-2"],
+                "polygon": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}],
+            }
+        ],
+    }
+    project, skipped = planreader_to_canonical_model(payload, is_validated_internal_workspace=True)
+    project.recompute_relationships()
+
+    spaces = project.all_spaces()
+    assert len(spaces) == 1
+    sp = spaces[0]
+    assert sp.id == "SP-BED1"
+    assert sp.name == "Bedroom 1"
+    assert sp.specified_floor_area_m2 == 12.0
+    assert len(sp.bounding_wall_ids) == 2
+
+    walls = {w.id: w for w in project.all_walls()}
+    assert "SP-BED1" in walls["wall_W-BOUND-1"].bounded_space_ids
+    assert "SP-BED1" in walls["wall_W-BOUND-2"].bounded_space_ids
+
+
+def test_collect_workspace_evidence_captures_auto_geometry_partitions_and_finishes():
+    """collect_workspace_3d_evidence ingests partition and finish observations from auto_geometry_v1219."""
+    from pb_production_3d_adapter import collect_workspace_3d_evidence
+    import json
+
+    class MockApp:
+        def lquery(self, sql, params=()):
+            return []
+
+        def workspace_setting(self, wid, key, default=None):
+            if key == "auto_geometry_v1219":
+                return json.dumps({
+                    "version": "1.2.19",
+                    "partitions": [
+                        {"page_id": 1, "page_label": "A101", "total_length_m": 14.5, "wall_thickness_m": 0.09, "reason": "3 partition segments found"}
+                    ],
+                    "finishes": [
+                        {"record_id": "fin_01", "trade_scope_id": "internal_paint", "finish_material": "Low sheen acrylic", "quantity_m2": 45.2, "physical_wall_ids": ["W1", "W2"]}
+                    ],
+                })
+            return default
+
+    snapshot = collect_workspace_3d_evidence(MockApp(), 42)
+    obs_kinds = {obs["kind"] for obs in snapshot.get("evidence_observations", [])}
+    assert "internal_partition_evidence" in obs_kinds
+    assert "bound_wall_finish_evidence" in obs_kinds
+

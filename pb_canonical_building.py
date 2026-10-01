@@ -1252,6 +1252,8 @@ class CanonicalProject(CanonicalElement):
                 for sp in lvl.spaces:
                     sp.level_id = lvl_id
                     sp.parent_id = lvl_id
+                    if not sp.bounding_wall_ids and sp.metadata and sp.metadata.get("bounding_wall_candidate_ids"):
+                        sp.bounding_wall_ids = [str(wid) for wid in (sp.metadata.get("bounding_wall_candidate_ids") or [])]
                     for wall_id in sp.bounding_wall_ids:
                         target_wall = self.find_element(wall_id)
                         if isinstance(target_wall, CanonicalWall):
