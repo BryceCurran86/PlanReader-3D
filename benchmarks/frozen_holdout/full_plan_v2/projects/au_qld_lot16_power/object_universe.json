@@ -303,5 +303,377 @@
       "denominator_core": false,
       "reason": "Source explicitly marks custom front glazing MEASURE ON SITE; no independent source dimension is established."
     }
-  ]
+  ],
+  "internal_room_access_openings": [
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_bed3",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal 870 mm hinged room-access opening: bed3",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          627.5,
+          276.9,
+          634.9,
+          287.8
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:870_bed3:bbox_627.5_276.9_634.9_287.8; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_bed2",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal 870 mm hinged room-access opening: bed2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          593.8,
+          276.9,
+          601.1,
+          287.8
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:870_bed2:bbox_593.8_276.9_601.1_287.8; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_bath",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal 870 mm hinged room-access opening: bath",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          586.7,
+          374.9,
+          594.1,
+          385.8
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:870_bath:bbox_586.7_374.9_594.1_385.8; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_laundry",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal 870 mm hinged room-access opening: laundry",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          690.2,
+          343.4,
+          697.6,
+          354.2
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:870_laundry:bbox_690.2_343.4_697.6_354.2; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_bed1",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal 870 mm hinged room-access opening: bed1",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          415.6,
+          276.5,
+          423,
+          287.3
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:870_bed1:bbox_415.6_276.5_423_287.3; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_wir",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal 870 mm hinged room-access opening: wir",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          439.7,
+          253.8,
+          450.6,
+          261.2
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:870_wir:bbox_439.7_253.8_450.6_261.2; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_ensuite",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal 870 mm hinged room-access opening: ensuite",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          439.7,
+          240,
+          450.6,
+          247.4
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:870_ensuite:bbox_439.7_240_450.6_247.4; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_wc",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal 870 mm cavity-slider room-access opening: wc",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          638.6,
+          324.2,
+          655.3,
+          329.9
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:870_wc:bbox_638.6_324.2_655.3_329.9; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_garage_to_entry",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal 870 mm hinged room-access opening: garage to entry",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          567,
+          354.6,
+          574.4,
+          365.4
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:870_garage_to_entry:bbox_567_354.6_574.4_365.4; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ]
+    }
+  ],
+  "internal_room_access_labelled_subset_complete": true,
+  "project_internal_opening_universe_complete": false,
+  "source_closed_ceiling_planes": [
+    {
+      "object_ref": "lot16:surface:ceiling:garage_flat",
+      "physical_kind": "ceiling_surface",
+      "object_family": "ceiling_plane",
+      "description": "Garage flat ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 38.94,
+      "attributes": {
+        "ceiling_type": "flat",
+        "plan_width_m": 6,
+        "plan_length_m": 6.49,
+        "calculation": "plan_width_m * plan_length_m",
+        "raked_adjustment_required": false,
+        "source_closed_plane": true,
+        "denominator_readiness": "source_closed_plane_candidate"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:GARAGE_[FLAT_CEILING]:6000x6490_figured_dimensions"
+      ]
+    },
+    {
+      "object_ref": "lot16:surface:ceiling:ensuite_raked_12deg",
+      "physical_kind": "ceiling_surface",
+      "object_family": "ceiling_plane",
+      "description": "Ensuite raked ceiling plane following 12 degree roof pitch",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 5.613672,
+      "attributes": {
+        "plan_width_m": 2.89,
+        "plan_length_m": 1.9,
+        "plan_projection_area_m2": 5.491,
+        "pitch_degrees": 12,
+        "calculation": "2.890m * 1.900m / cos(12deg)",
+        "ceiling_geometry": "raked",
+        "source_closed_plane": true,
+        "denominator_readiness": "source_closed_plane_candidate"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:ENS_[RAKED_CEILING]:2890x1900_figured_dimensions; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof"
+      ]
+    },
+    {
+      "object_ref": "lot16:surface:ceiling:wir_raked_12deg",
+      "physical_kind": "ceiling_surface",
+      "object_family": "ceiling_plane",
+      "description": "WIR raked ceiling plane following 12 degree roof pitch",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.786394,
+      "attributes": {
+        "plan_width_m": 2.89,
+        "plan_length_m": 1.62,
+        "plan_projection_area_m2": 4.6818,
+        "pitch_degrees": 12,
+        "calculation": "2.890m * 1.620m / cos(12deg)",
+        "ceiling_geometry": "raked",
+        "source_closed_plane": true,
+        "denominator_readiness": "source_closed_plane_candidate"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:WIR_[RAKED_CEILING]:2890x1620_figured_dimensions; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof"
+      ]
+    }
+  ],
+  "promoted_ceiling_plane_subset_source_closed": true,
+  "project_ceiling_universe_complete": false,
+  "ensuite_wir_floor_surfaces": [
+    {
+      "object_ref": "lot16:surface:floor:ensuite",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Ensuite tiled floor surface",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 5.491,
+      "attributes": {
+        "width_m": 2.89,
+        "length_m": 1.9,
+        "calculation": "2.890m * 1.900m",
+        "finish": "tiles",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "lot16_declared_floor_area"
+      },
+      "verification": {
+        "object_exists": true,
+        "object_identified": true,
+        "geometry_verified": true,
+        "geometry_scope": "2D rectangular plan extents only",
+        "quantity_verified": true,
+        "fully_source_closed": true,
+        "source_closure_scope": "floor finish-surface identity, finish, 2D plan dimensions and area"
+      },
+      "provenance": {
+        "document_ref": "1. Construction Plans - Lot 16 Power (REV E).pdf",
+        "sheet_page_ref": "architectural:p3",
+        "source_evidence_ref": "floor_plan:ENS:TILES:2890x1900_figured_dimensions"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:ENS:TILES:2890x1900_figured_dimensions"
+      ]
+    },
+    {
+      "object_ref": "lot16:surface:floor:wir",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "WIR vinyl floor surface",
+      "finish": "vinyl",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.6818,
+      "attributes": {
+        "width_m": 2.89,
+        "length_m": 1.62,
+        "calculation": "2.890m * 1.620m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "lot16_declared_floor_area"
+      },
+      "verification": {
+        "object_exists": true,
+        "object_identified": true,
+        "geometry_verified": true,
+        "geometry_scope": "2D rectangular plan extents only",
+        "quantity_verified": true,
+        "fully_source_closed": true,
+        "source_closure_scope": "floor finish-surface identity, finish, 2D plan dimensions and area"
+      },
+      "provenance": {
+        "document_ref": "1. Construction Plans - Lot 16 Power (REV E).pdf",
+        "sheet_page_ref": "architectural:p3",
+        "source_evidence_ref": "floor_plan:WIR:VINYL:2890x1620_figured_dimensions"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:WIR:VINYL:2890x1620_figured_dimensions"
+      ]
+    }
+  ],
+  "promoted_atomic_floor_subset_source_closed": true,
+  "project_floor_universe_complete": false
 }

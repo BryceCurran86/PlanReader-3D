@@ -234,7 +234,7 @@ def walk_local_import_graph(root_module: str) -> tuple[tuple[str, ...], tuple[Im
         if path_reason:
             findings.append(ImportGraphFinding(module=module, via=via, reason=path_reason))
             continue
-        imported = _imported_names(path.read_text(encoding="utf-8"), current_module=module)
+        imported = _imported_names(path.read_text(encoding="utf-8-sig"), current_module=module)
         for name in imported:
             forbidden = _forbidden_reason(name)
             if forbidden:
