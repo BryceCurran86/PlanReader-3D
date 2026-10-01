@@ -1163,3 +1163,34 @@ def test_3laurel_bathroom_niche_dimensions_fail_closed_without_width_or_returns(
         "wet_area_tile_bathroom_niche_width_and_all_niche_return_depths"
         in draft["unresolved_surface_families"]
     )
+
+
+def test_3laurel_wet_area_atomic_floors_are_source_closed_without_double_counting():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    expected = {
+        "3laurel:surface:floor:bathroom": 5.17,
+        "3laurel:surface:floor:main_wc": 1.7316,
+        "3laurel:surface:floor:laundry": 5.1744,
+        "3laurel:surface:floor:gf_ensuite_laundry": 6.4889,
+    }
+    for ref, area in expected.items():
+        row = by_ref[ref]
+        assert row["expected_quantity"] == pytest.approx(area)
+        assert row["attributes"]["finish"] == "tiles"
+        assert row["attributes"]["overlaps_aggregate_ref"] in {
+            "3laurel:surface:floor:main_living_composite_region",
+            "3laurel:surface:floor:gf_living_composite_region",
+        }
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:wet_area_atomic_floor_surfaces"
+    )
+    assert check["object_count"] == 4
+    assert check["component_sum_m2"] == pytest.approx(18.5649)
+    assert check["source_closed"] is True
+    assert "must not be double-counted" in check["aggregate_overlap"]["rule"]
