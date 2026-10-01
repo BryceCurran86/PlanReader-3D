@@ -20,6 +20,7 @@ No commercial rates, coating systems, coats or productivity are invented here.
 from __future__ import annotations
 
 import bisect
+import hashlib
 import json
 import math
 import numbers
@@ -638,7 +639,8 @@ def _cross_calibrate_elevations(app: Any, pages: Sequence[Dict[str, Any]], footp
 
 def _takeoff_row(*, workspace_id: int, section: str, element: str, location: str, substrate: str,
                  quantity: float, status: str, source_page: str, source_reference: str,
-                 confidence: str, notes: str, row_role: str = "", unit: str = "m²") -> Tuple[Any, ...]:
+                 confidence: str, notes: str, row_role: str = "", unit: str = "m²",
+                 preserve_quantity: bool = False) -> Tuple[Any, ...]:
     # Checked before rounding, which would turn NaN into a plausible 0.0 m².
     if not _is_finite_number(quantity):
         raise takeoff_contract.TakeoffRowContractError(
@@ -646,7 +648,8 @@ def _takeoff_row(*, workspace_id: int, section: str, element: str, location: str
         )
     stamp = ""  # replaced by caller
     return (
-        workspace_id, section, element, location, substrate, "To be confirmed", round(max(0.0, quantity), 2), unit,
+        workspace_id, section, element, location, substrate, "To be confirmed",
+        max(0.0, quantity) if preserve_quantity else round(max(0.0, quantity), 2), unit,
         status, source_page, source_reference, "INCLUSION" if row_role == "floor_area" else "PROVISIONAL",
         0, 0, 0, 0, confidence, notes, row_role, stamp, stamp,
     )
@@ -792,6 +795,14 @@ def _setting_set(app: Any, workspace_id: int, data: Dict[str, Any]) -> None:
     )
 
 
+def _runtime_coverage_source_scope(app: Any, workspace_id: Optional[int]) -> Optional[set[str]]:
+    coverage = getattr(app, "_ag09_family_coverage_by_workspace", None)
+    if workspace_id is None or not isinstance(coverage, Mapping):
+        return None
+    current = coverage.get(int(workspace_id), {})
+    return set(current.get("source_sha256s", ())) if isinstance(current, Mapping) else set()
+
+
 def _runtime_coverage_registry_summaries(app: Any, workspace_id: Optional[int] = None) -> List[Any]:
     """Return only live typed coverage registries explicitly attached to runtime.
 
@@ -838,8 +849,11 @@ def _runtime_coverage_registry_summaries(app: Any, workspace_id: Optional[int] =
             candidates.extend(value)
 
     unique: Dict[str, Any] = {}
+    source_scope = _runtime_coverage_source_scope(app, workspace_id)
     for summary in candidates:
         if not isinstance(summary, CoverageRegistrySummaryV1):
+            continue
+        if source_scope is not None and summary.manifest.source_sha256 not in source_scope:
             continue
         # Never let the first of two conflicting snapshots hide the second.
         key = json.dumps(summary.to_dict(), sort_keys=True, separators=(",", ":"))
@@ -861,7 +875,14 @@ def _runtime_coverage_lifecycle_report(
     holders = [app] + [getattr(app, name, None) for name in (
         "planreader_extractor", "generic_planreader_extractor", "extractor",
     )]
-    gap_sources = [getattr(holder, "coverage_family_gaps_live", {}) for holder in holders if holder is not None]
+    source_scope = _runtime_coverage_source_scope(app, workspace_id)
+    gap_sources = []
+    for holder in holders:
+        if holder is None:
+            continue
+        holder_summaries = _runtime_coverage_registry_summaries(holder)
+        if source_scope is None or any(summary.manifest.source_sha256 in source_scope for summary in holder_summaries):
+            gap_sources.append(getattr(holder, "coverage_family_gaps_live", {}))
     workspace_coverage = getattr(app, "_ag09_family_coverage_by_workspace", {})
     if isinstance(workspace_coverage, Mapping):
         current = workspace_coverage.get(int(workspace_id), {})
@@ -917,6 +938,38 @@ def _build_unit_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, Any]
     return rows, summary
 
 
+def _physical_wall_claim_problem(claim: Any, source_sha256: str, page_indices: Sequence[int]) -> Optional[str]:
+    """Check the live claim against its original publication and selected source."""
+    from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+
+    if type(claim) is not LivePhysicalNetWallClaim:
+        return None  # Only the typed integration carries a publication contract.
+    publication = claim.publication
+    quantity = publication.quantity_evidence
+    if (publication.status.value != "corroborated" or quantity is None or quantity.abstained
+            or quantity.status != "corroborated" or not _is_finite_number(quantity.value)):
+        return "original_physical_wall_quantity_unavailable"
+    if (claim.quantity_id != quantity.quantity_id or claim.quantity_m2 != quantity.value
+            or quantity.unit.lower() not in {"m2", "m²"}):
+        return "physical_wall_claim_quantity_mismatch"
+    targets = set(quantity.input_entity_ids)
+    if not targets or targets != set(claim.external_wall_ids) or targets != set(publication.external_wall_ids):
+        return "physical_wall_quantity_identity_mismatch"
+    walls = [wall for wall in claim.canonical_walls if wall.physical_wall_id in targets]
+    if len(walls) != len(targets) or any(
+        not wall.physical_identity_resolved or wall.canonical_wall_id != wall.physical_wall_id
+        or wall.source_sha256 != source_sha256
+        or (quantity.metadata.get("revision_id") is not None
+            and wall.revision_id != quantity.metadata["revision_id"])
+        for wall in walls
+    ):
+        return "physical_wall_canonical_source_mismatch"
+    selected_pages = {index + 1 for index in page_indices}
+    if not claim.source_pages or not set(claim.source_pages).issubset(selected_pages):
+        return "physical_wall_claim_page_scope_mismatch"
+    return None
+
+
 def _try_physical_net_wall_rows(
     app: Any, workspace_id: int, pages: Sequence[Dict[str, Any]], facades: Sequence[Dict[str, Any]]
 ) -> Optional[List[Tuple[Any, ...]]]:
@@ -937,7 +990,10 @@ def _try_physical_net_wall_rows(
     if not isinstance(workspace_coverage, dict):
         workspace_coverage = {}
         app._ag09_family_coverage_by_workspace = workspace_coverage
-    current_coverage: Dict[str, Any] = {"summaries": [], "family_gaps": {}}
+    current_coverage: Dict[str, Any] = {
+        "summaries": [], "family_gaps": {}, "source_sha256s": [],
+        "physical_net_document_ids": [], "source_reports": [], "wall_bridge_mode": None,
+    }
     workspace_coverage[int(workspace_id)] = current_coverage
 
     def record_coverage(claim: Any, row: Optional[Tuple[Any, ...]] = None) -> None:
@@ -972,8 +1028,12 @@ def _try_physical_net_wall_rows(
             current_coverage["family_gaps"].setdefault("wall", []).append(
                 f"live_coverage_collection_failed:{type(exc).__name__}"
             )
-    # 1. Check live physical net-wall integration
-    doc_paths: List[Tuple[int, Path]] = []
+    def wall_gap(reason: str) -> None:
+        current_coverage["family_gaps"].setdefault("wall", []).append(reason)
+
+    # 1. Check only selected sources. Identical bytes are the same authority
+    # source; their selected page union is replayed once, without type-mark joins.
+    source_groups: Dict[str, Dict[str, Any]] = {}
     if hasattr(app, "lquery"):
         try:
             doc_rows = app.lquery(
@@ -981,42 +1041,73 @@ def _try_physical_net_wall_rows(
                 (int(workspace_id),),
             )
             for d in doc_rows:
+                doc_id = int(d["id"])
+                page_indices = set()
+                for page in pages:
+                    try:
+                        if int(page.get("document_id") or 0) != doc_id or page.get("selected", 1) in (0, False, "0"):
+                            continue
+                        page_no = str(page.get("page_no") or "").strip()
+                        if page_no.isdecimal() and int(page_no) > 0:
+                            page_indices.add(int(page_no) - 1)
+                        else:
+                            wall_gap("selected_pdf_page_number_invalid")
+                    except (TypeError, ValueError, OverflowError):
+                        wall_gap("selected_pdf_page_identity_invalid")
+                if not page_indices:
+                    continue
                 p = Path(str(d.get("path") or ""))
-                if p.is_file() and p.suffix.lower() == ".pdf":
-                    doc_paths.append((int(d["id"]), p))
-        except Exception:
-            pass
+                if p.suffix.lower() != ".pdf":
+                    continue
+                try:
+                    sha256 = hashlib.sha256(p.read_bytes()).hexdigest()
+                except OSError as exc:
+                    wall_gap(f"selected_pdf_source_unreadable:{type(exc).__name__}")
+                    continue
+                group = source_groups.setdefault(sha256, {"path": p, "document_ids": [], "page_indices": set()})
+                group["document_ids"].append(doc_id)
+                group["page_indices"].update(page_indices)
+        except Exception as exc:
+            wall_gap(f"workspace_document_enumeration_failed:{type(exc).__name__}")
+    current_coverage["source_sha256s"] = sorted(source_groups)
 
-    for doc_id, doc_path in doc_paths:
+    accepted: List[Tuple[Any, Tuple[Any, ...], Dict[str, Any]]] = []
+    for sha256, group in source_groups.items():
+        source_report: Dict[str, Any] = {
+            "source_sha256": sha256, "document_ids": sorted(group["document_ids"]),
+            "page_indices": sorted(group["page_indices"]), "status": "unavailable",
+        }
+        current_coverage["source_reports"].append(source_report)
         try:
             from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
-            from pb_migration_contracts import EvidenceResolutionStatus
 
-            doc_pages = [p for p in pages if int(p.get("document_id") or 0) == doc_id]
-            page_nos = [
-                int(p.get("page_no"))
-                for p in doc_pages
-                if p.get("page_no") is not None and int(p.get("page_no")) > 0
-            ]
-            page_indices = tuple(p - 1 for p in sorted(set(page_nos))) if page_nos else None
-
-            claim = collect_live_physical_net_wall_claim(doc_path, pages=page_indices)
+            claim = collect_live_physical_net_wall_claim(group["path"], pages=tuple(sorted(group["page_indices"])))
             status_val = getattr(claim.status, "value", str(claim.status))
+            source_report.update(status=status_val, quantity_id=claim.quantity_id,
+                                 reason_codes=list(getattr(claim, "reason_codes", ())))
+            if status_val == "corroborated":
+                problem = _physical_wall_claim_problem(claim, sha256, group["page_indices"])
+                if problem:
+                    wall_gap(problem)
+                    source_report.update(status="review", reason_codes=[problem])
+                    record_coverage(claim)
+                    continue
             if (
                 status_val == "corroborated"
-                and claim.quantity_m2 is not None
-                and float(claim.quantity_m2) > 0.0
+                and _is_finite_number(claim.quantity_m2)
+                and claim.quantity_m2 > 0.0
                 and claim.quantity_id
             ):
-                qty = round(max(0.0, float(claim.quantity_m2)), 2)
+                qty = float(claim.quantity_m2)
                 src_pages = claim.source_pages if hasattr(claim, "source_pages") and claim.source_pages else ()
-                source_page_str = ", ".join(f"p{p}" for p in src_pages) if src_pages else "1"
+                source_page_str = ", ".join(f"p{p}" for p in src_pages) if src_pages else "Selected PDF pages"
                 source_ref = f"{SOURCE_PREFIX} · physical_net_wall:{claim.quantity_id}"
                 confidence = "Documented" if getattr(claim, "confidence", 0.0) >= 0.8 else "Derived"
                 notes = (
                     "External walling — source-authenticated physical net whole-wall area with proven opening voids deducted."
                 )
-                all_subs = [s for f in facades for s in (f.get("substrates") or [])]
+                all_subs = [s for f in facades if f.get("document_id") in group["document_ids"]
+                            for s in (f.get("substrates") or [])]
                 sub_names = sorted({s.get("name") for s in all_subs if s.get("name")})
                 substrate_name = sub_names[0] if len(sub_names) == 1 else "External walling"
                 location_str = (
@@ -1037,12 +1128,35 @@ def _try_physical_net_wall_rows(
                     confidence=confidence,
                     notes=notes,
                     row_role="external_wall",
+                    preserve_quantity=True,
                 )
-                record_coverage(claim, row)
-                return [row]
+                accepted.append((claim, row, source_report))
+            else:
+                record_coverage(claim)
+        except Exception as exc:
+            reason = f"live_physical_net_wall_collection_failed:{type(exc).__name__}"
+            wall_gap(reason)
+            source_report.update(status="review", reason_codes=[reason])
+
+    quantity_sources: Dict[str, List[str]] = {}
+    for claim, _, source_report in accepted:
+        quantity_sources.setdefault(claim.quantity_id, []).append(source_report["source_sha256"])
+    direct_rows = []
+    for claim, row, source_report in accepted:
+        if len(quantity_sources[claim.quantity_id]) > 1:
+            wall_gap("conflicting_quantity_identity_across_sources")
+            source_report.update(status="review", reason_codes=["conflicting_quantity_identity_across_sources"])
             record_coverage(claim)
-        except Exception:
-            pass
+            continue
+        direct_rows.append(row)
+        current_coverage["physical_net_document_ids"].extend(source_report["document_ids"])
+        record_coverage(claim, row)
+    if direct_rows:
+        current_coverage["wall_bridge_mode"] = "direct"
+        return direct_rows
+    if any(report["status"] in {"review", "conflict", "ambiguous"}
+           for report in current_coverage["source_reports"]):
+        return None  # An unresolved identity cannot be rescued by a weaker path.
 
     # 2. Check unified registered-wall authority with verified opening deductions
     if hasattr(app, "build_registered_walls_v139") and callable(getattr(app, "build_registered_walls_v139")):
@@ -1118,8 +1232,6 @@ def _try_physical_net_wall_rows(
                         doc_provenance = ""
                         if w.get("source_document") or w.get("document_name"):
                             doc_provenance = f" Doc: {w.get('source_document') or w.get('document_name')}."
-                        elif doc_paths:
-                            doc_provenance = f" Doc: {doc_paths[0][1].name}."
 
                         source_page_str = (
                             str(w.get("source_page") or "")
@@ -1153,6 +1265,8 @@ def _try_physical_net_wall_rows(
                             row_role="external_wall",
                         ))
                     if reg_rows:
+                        current_coverage["wall_bridge_mode"] = "registered"
+                        wall_gap("registered_wall_path_has_no_live_canonical_registry")
                         return reg_rows
         except Exception:
             pass
@@ -1164,6 +1278,8 @@ def _build_facade_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, An
     rows: List[Tuple[Any, ...]] = []
     facades: List[Dict[str, Any]] = []
     for page in pages:
+        if page.get("selected", 1) in (0, False, "0"):
+            continue
         if "elevation" not in str(page.get("page_type") or "").lower():
             continue
         path = _regular_image(page.get("image_path"))
@@ -1174,6 +1290,7 @@ def _build_facade_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, An
         substrates = _substrates_from_text(page.get("extracted_text"))
         facade: Dict[str, Any] = {
             "page_id": int(page["id"]), "page_label": str(page.get("page_label") or ""), "face": face,
+            "document_id": int(page.get("document_id") or 0),
             "substrates": substrates, "explicit_areas": explicit, "gross_m2": 0.0, "height_m": 0.0,
         }
         if component and pxpm > 0:
@@ -1188,12 +1305,17 @@ def _build_facade_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, An
     # 1. Prefer authenticated physical net-wall evidence where available
     physical_net_rows = _try_physical_net_wall_rows(app, workspace_id, pages, facades)
     if physical_net_rows is not None and len(physical_net_rows) > 0:
+        rows.extend(physical_net_rows)
+        coverage = getattr(app, "_ag09_family_coverage_by_workspace", {}).get(int(workspace_id), {})
+        covered_documents = set(coverage.get("physical_net_document_ids", ()))
         for facade in facades:
-            facade["superseded_by_physical_net_wall"] = True
-        return physical_net_rows, facades
+            if coverage.get("wall_bridge_mode") == "registered" or facade["document_id"] in covered_documents:
+                facade["superseded_by_physical_net_wall"] = True
 
     # 2. Fall back to explicit substrate text areas or gross calibrated elevation areas
     for facade in facades:
+        if facade.get("superseded_by_physical_net_wall"):
+            continue
         explicit = facade.get("explicit_areas") or []
         page_label = facade.get("page_label") or ""
         page_id = facade.get("page_id") or 0
