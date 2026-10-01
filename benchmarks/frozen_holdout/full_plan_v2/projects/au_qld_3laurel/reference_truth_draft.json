@@ -11,22 +11,6 @@
   ],
   "aggregate_controls_not_denominator": [
     {
-      "control_id": "3laurel:control:main_living_area",
-      "description": "Main-house living aggregate area",
-      "expected_quantity": 168.1,
-      "unit": "m2",
-      "source_location": "architectural:p3:floor_plan:area_table:MAIN_LIVING_168.10_m2",
-      "reason": "aggregate spans multiple atomic room surfaces; retain as closure control"
-    },
-    {
-      "control_id": "3laurel:control:gf_living_area",
-      "description": "Granny-flat living aggregate area",
-      "expected_quantity": 60.0,
-      "unit": "m2",
-      "source_location": "architectural:p3:floor_plan:area_table:GF_LIVING_60.00_m2",
-      "reason": "aggregate spans multiple atomic room surfaces; retain as closure control"
-    },
-    {
       "control_id": "3laurel:control:total_floor_area",
       "description": "Total declared floor area",
       "expected_quantity": 297.5,
@@ -44,14 +28,13 @@
     }
   ],
   "unresolved_surface_families": [
-    "main_and_granny_flat_atomic_living_floor_surfaces",
     "internal_wall_faces",
     "external_wall_faces_and_cladding",
-    "ceilings_and_fc_soffits",
     "roof_planes",
     "doors_and_windows",
     "wet_area_wall_tiling",
-    "structural_members_other_than_scheduled_wall_bracing"
+    "structural_members_other_than_scheduled_wall_bracing",
+    "secondary_fc_soffit_and_beam_faces_beyond_primary_ceiling_planes"
   ],
   "completion_rule": "Do not mark project VERIFIED until every in-scope family is independently closed and aggregate controls reconcile without double counting.",
   "verified_physical_candidates": [
@@ -837,6 +820,104 @@
       "source_location": "architectural:p8:A0.8:bracing_schedule:B-U2-07"
     },
     {
+      "object_ref": "3laurel:surface:ceiling:garage",
+      "physical_kind": "surface",
+      "object_family": "ceiling_plane",
+      "description": "Garage ceiling plane",
+      "expected_quantity": 36.4,
+      "unit": "m2",
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "10mm Gyprock to truss bottom chord",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_location": "architectural:p3:A0.3:floor_area_region:garage; architectural:p7:A0.7:ceiling_bottom_chord_note"
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:gf_alfresco",
+      "physical_kind": "surface",
+      "object_family": "ceiling_plane",
+      "description": "Granny-flat alfresco ceiling plane",
+      "expected_quantity": 10.5,
+      "unit": "m2",
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "horizontal underside ceiling plane",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_location": "architectural:p3:A0.3:floor_area_region:gf_alfresco; architectural:p7:A0.7:ceiling_bottom_chord_note"
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:gf_living",
+      "physical_kind": "surface",
+      "object_family": "ceiling_plane",
+      "description": "Granny-flat internal ceiling plane",
+      "expected_quantity": 60.0,
+      "unit": "m2",
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "10mm Gyprock to truss bottom chord",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_location": "architectural:p3:A0.3:floor_area_region:gf_living; architectural:p7:A0.7:ceiling_bottom_chord_note"
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:gf_porch",
+      "physical_kind": "surface",
+      "object_family": "ceiling_plane",
+      "description": "Granny-flat porch ceiling plane",
+      "expected_quantity": 1.4,
+      "unit": "m2",
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "FC sheet to underside truss/joists",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_location": "architectural:p3:A0.3:floor_area_region:gf_porch; architectural:p7:A0.7:ceiling_bottom_chord_note"
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:main_alfresco",
+      "physical_kind": "surface",
+      "object_family": "ceiling_plane",
+      "description": "Main-house alfresco ceiling plane",
+      "expected_quantity": 13.6,
+      "unit": "m2",
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "plaster to underside of trusses",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_location": "architectural:p3:A0.3:floor_area_region:main_alfresco; architectural:p7:A0.7:ceiling_bottom_chord_note"
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:main_living",
+      "physical_kind": "surface",
+      "object_family": "ceiling_plane",
+      "description": "Main-house internal ceiling plane",
+      "expected_quantity": 168.1,
+      "unit": "m2",
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "10mm Gyprock to truss bottom chord",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_location": "architectural:p3:A0.3:floor_area_region:main_living; architectural:p7:A0.7:ceiling_bottom_chord_note"
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:main_porch",
+      "physical_kind": "surface",
+      "object_family": "ceiling_plane",
+      "description": "Main-house porch ceiling plane",
+      "expected_quantity": 7.5,
+      "unit": "m2",
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "FC sheet to underside truss/joists",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_location": "architectural:p3:A0.3:floor_area_region:main_porch; architectural:p7:A0.7:ceiling_bottom_chord_note"
+    },
+    {
       "object_ref": "3laurel:surface:floor:garage",
       "description": "Garage concrete floor surface",
       "expected_quantity": 36.4,
@@ -855,6 +936,20 @@
       "object_family": "floor"
     },
     {
+      "object_ref": "3laurel:surface:floor:gf_living_composite_region",
+      "physical_kind": "surface",
+      "object_family": "floor",
+      "description": "Source-defined granny-flat living floor region",
+      "expected_quantity": 60.0,
+      "unit": "m2",
+      "attributes": {
+        "region_granularity": "source_area_schedule_composite",
+        "finish_scope": "mixed internal floor finishes",
+        "closure_group": "3laurel_declared_floor_area"
+      },
+      "source_location": "architectural:p3:floor_plan:area_table:GF_LIVING_60.00_m2"
+    },
+    {
       "object_ref": "3laurel:surface:floor:gf_porch",
       "description": "Granny-flat porch tiled floor surface",
       "expected_quantity": 1.4,
@@ -871,6 +966,20 @@
       "source_location": "architectural:p3:floor_plan:area_table:ALFRESCO_13.60_m2",
       "physical_kind": "surface",
       "object_family": "floor"
+    },
+    {
+      "object_ref": "3laurel:surface:floor:main_living_composite_region",
+      "physical_kind": "surface",
+      "object_family": "floor",
+      "description": "Source-defined main-house living floor region",
+      "expected_quantity": 168.1,
+      "unit": "m2",
+      "attributes": {
+        "region_granularity": "source_area_schedule_composite",
+        "finish_scope": "mixed internal floor finishes",
+        "closure_group": "3laurel_declared_floor_area"
+      },
+      "source_location": "architectural:p3:floor_plan:area_table:MAIN_LIVING_168.10_m2"
     },
     {
       "object_ref": "3laurel:surface:floor:main_porch",
@@ -898,6 +1007,40 @@
       "source_location": "architectural:p2:site_plan:PATH_TOTAL_26.7_m2",
       "physical_kind": "surface",
       "object_family": "site_concrete"
+    }
+  ],
+  "closure_checks": [
+    {
+      "check_id": "3laurel:closure:declared_floor_area",
+      "component_object_refs": [
+        "3laurel:surface:floor:main_living_composite_region",
+        "3laurel:surface:floor:garage",
+        "3laurel:surface:floor:main_porch",
+        "3laurel:surface:floor:main_alfresco",
+        "3laurel:surface:floor:gf_living_composite_region",
+        "3laurel:surface:floor:gf_alfresco",
+        "3laurel:surface:floor:gf_porch"
+      ],
+      "component_sum_m2": 297.5,
+      "declared_total_m2": 297.5,
+      "difference_m2": 0.0,
+      "source_location": "architectural:p3:floor_plan:area_table"
+    },
+    {
+      "check_id": "3laurel:closure:primary_ceiling_planes",
+      "component_object_refs": [
+        "3laurel:surface:ceiling:main_living",
+        "3laurel:surface:ceiling:garage",
+        "3laurel:surface:ceiling:main_porch",
+        "3laurel:surface:ceiling:main_alfresco",
+        "3laurel:surface:ceiling:gf_living",
+        "3laurel:surface:ceiling:gf_alfresco",
+        "3laurel:surface:ceiling:gf_porch"
+      ],
+      "component_sum_m2": 297.5,
+      "declared_reference_plan_area_m2": 297.5,
+      "difference_m2": 0.0,
+      "source_location": "architectural:p3:A0.3:area_table; architectural:p7:A0.7:ceilings_to_truss_bottom_chord"
     }
   ]
 }

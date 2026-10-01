@@ -74,3 +74,29 @@ def test_lot16_and_3laurel_truth_drafts_do_not_modify_live_v2_denominator():
         assert manifest["status"] == "INCOMPLETE"
         assert manifest["reference_takeoff_documents"] == []
         assert manifest["verified_takeoff_items"] == []
+
+
+@pytest.mark.parametrize(
+    ("project_id", "check_id"),
+    (
+        ("au_qld_lot16_power", "lot16:closure:declared_floor_area"),
+        ("au_qld_3laurel", "3laurel:closure:declared_floor_area"),
+    ),
+)
+def test_declared_floor_area_components_close_exactly_to_source_total(project_id: str, check_id: str):
+    draft = _load(ROOT / project_id / "reference_truth_draft.json")
+    check = next(row for row in draft["closure_checks"] if row["check_id"] == check_id)
+    by_ref = {row["object_ref"]: row for row in draft["verified_physical_candidates"]}
+    calculated = sum(float(by_ref[ref]["expected_quantity"]) for ref in check["component_object_refs"])
+    assert calculated == pytest.approx(float(check["declared_total_m2"]), abs=1e-9)
+    assert float(check["difference_m2"]) == pytest.approx(0.0, abs=1e-9)
+
+
+
+def test_3laurel_primary_ceiling_planes_close_to_declared_plan_area():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    check = next(row for row in draft["closure_checks"] if row["check_id"] == "3laurel:closure:primary_ceiling_planes")
+    by_ref = {row["object_ref"]: row for row in draft["verified_physical_candidates"]}
+    calculated = sum(float(by_ref[ref]["expected_quantity"]) for ref in check["component_object_refs"])
+    assert calculated == pytest.approx(297.50, abs=1e-9)
+    assert calculated == pytest.approx(float(check["declared_reference_plan_area_m2"]), abs=1e-9)

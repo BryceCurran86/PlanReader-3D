@@ -11,32 +11,30 @@
   ],
   "aggregate_controls_not_denominator": [
     {
-      "control_id": "lot16:control:residence_area",
-      "description": "Residence aggregate area",
-      "expected_quantity": 193.24,
-      "unit": "m2",
-      "source_location": "architectural:p3:area_calculations:RESIDENCE_193.24_m2",
-      "reason": "aggregate overlaps atomic room/floor surfaces; retain as closure control until atomic residence surface universe is complete"
-    },
-    {
       "control_id": "lot16:control:total_floor_area",
       "description": "Residence + alfresco + porch aggregate",
       "expected_quantity": 224.36,
       "unit": "m2",
       "source_location": "architectural:p3:area_calculations:TOTAL_224.36_m2",
       "reason": "aggregate overlaps component surfaces"
+    },
+    {
+      "control_id": "lot16:control:roof_sheeting_total_from_four_dimensioned_planes",
+      "description": "Calculated total sloped Colorbond roof sheeting area across four dimensioned roof planes",
+      "expected_quantity": 255.250324,
+      "unit": "m2",
+      "source_location": "architectural:p6:roof_plan:four_dimensioned_pitch_regions; architectural:p4-p5:elevations:pitch_crosscheck",
+      "reason": "sum control over atomic roof planes; not a second denominator item"
     }
   ],
   "unresolved_surface_families": [
-    "remaining_internal_floor_surfaces",
-    "garage_floor_partition",
     "internal_wall_faces",
     "external_wall_faces_and_cladding",
     "ceilings_including_raked_ceiling",
-    "roof_planes",
     "doors_and_windows",
     "wet_area_wall_tiling",
-    "structural_members_other_than_scheduled_wall_bracing"
+    "structural_members_other_than_scheduled_wall_bracing",
+    "roof_planes_final_crosscheck_against_engineering_stormwater_note"
   ],
   "completion_rule": "Do not mark project VERIFIED until every in-scope family is independently closed and aggregate controls reconcile without double counting.",
   "verified_physical_candidates": [
@@ -622,6 +620,92 @@
       "object_family": "floor"
     },
     {
+      "object_ref": "lot16:surface:floor:residence_composite_region",
+      "physical_kind": "surface",
+      "object_family": "floor",
+      "description": "Source-defined enclosed residence floor region",
+      "expected_quantity": 193.24,
+      "unit": "m2",
+      "attributes": {
+        "region_granularity": "source_area_schedule_composite",
+        "finish_scope": "mixed internal floor finishes",
+        "closure_group": "lot16_declared_floor_area"
+      },
+      "source_location": "architectural:p3:area_calculations:RESIDENCE_193.24_m2"
+    },
+    {
+      "object_ref": "lot16:surface:roof:lower_left_5deg",
+      "physical_kind": "surface",
+      "object_family": "roof_sheathing",
+      "description": "Colorbond roof plane lower left 5deg",
+      "expected_quantity": 42.606731,
+      "unit": "m2",
+      "attributes": {
+        "plan_width_m": 6.54,
+        "plan_run_m": 6.49,
+        "pitch_degrees": 5.0,
+        "projected_area_m2": 42.4446,
+        "calculation": "plan_width_m * plan_run_m / cos(pitch_degrees)",
+        "material": "selected Colorbond roof sheeting",
+        "source_note": "roof plan is a guide and is cross-checked to elevation pitch labels"
+      },
+      "source_location": "architectural:p6:roof_plan:lower_left:6540_x_6490; elevations:p4-p5:pitch_crosscheck"
+    },
+    {
+      "object_ref": "lot16:surface:roof:lower_right_5deg",
+      "physical_kind": "surface",
+      "object_family": "roof_sheathing",
+      "description": "Colorbond roof plane lower right 5deg",
+      "expected_quantity": 88.963894,
+      "unit": "m2",
+      "attributes": {
+        "plan_width_m": 15.16,
+        "plan_run_m": 5.846,
+        "pitch_degrees": 5.0,
+        "projected_area_m2": 88.62536,
+        "calculation": "plan_width_m * plan_run_m / cos(pitch_degrees)",
+        "material": "selected Colorbond roof sheeting",
+        "source_note": "roof plan is a guide and is cross-checked to elevation pitch labels"
+      },
+      "source_location": "architectural:p6:roof_plan:lower_right:15160_x_5846; elevations:p4-p5:pitch_crosscheck"
+    },
+    {
+      "object_ref": "lot16:surface:roof:upper_left_12deg",
+      "physical_kind": "surface",
+      "object_family": "roof_sheathing",
+      "description": "Colorbond roof plane upper left 12deg",
+      "expected_quantity": 93.451131,
+      "unit": "m2",
+      "attributes": {
+        "plan_width_m": 16.15,
+        "plan_run_m": 5.66,
+        "pitch_degrees": 12.0,
+        "projected_area_m2": 91.409,
+        "calculation": "plan_width_m * plan_run_m / cos(pitch_degrees)",
+        "material": "selected Colorbond roof sheeting",
+        "source_note": "roof plan is a guide and is cross-checked to elevation pitch labels"
+      },
+      "source_location": "architectural:p6:roof_plan:upper_left:16150_x_5660; elevations:p4-p5:pitch_crosscheck"
+    },
+    {
+      "object_ref": "lot16:surface:roof:upper_right_12deg",
+      "physical_kind": "surface",
+      "object_family": "roof_sheathing",
+      "description": "Colorbond roof plane upper right 12deg",
+      "expected_quantity": 30.228567,
+      "unit": "m2",
+      "attributes": {
+        "plan_width_m": 9.24,
+        "plan_run_m": 3.2,
+        "pitch_degrees": 12.0,
+        "projected_area_m2": 29.568,
+        "calculation": "plan_width_m * plan_run_m / cos(pitch_degrees)",
+        "material": "selected Colorbond roof sheeting",
+        "source_note": "roof plan is a guide and is cross-checked to elevation pitch labels"
+      },
+      "source_location": "architectural:p6:roof_plan:upper_right:9240_x_3200; elevations:p4-p5:pitch_crosscheck"
+    },
+    {
       "object_ref": "lot16:surface:site:driveway_concrete",
       "description": "Driveway concrete surface",
       "expected_quantity": 10.7,
@@ -629,6 +713,20 @@
       "source_location": "architectural:p2:site_plan:DRIVEWAY_CONCRETE_10.7_m2",
       "physical_kind": "surface",
       "object_family": "site_concrete"
+    }
+  ],
+  "closure_checks": [
+    {
+      "check_id": "lot16:closure:declared_floor_area",
+      "component_object_refs": [
+        "lot16:surface:floor:residence_composite_region",
+        "lot16:surface:floor:alfresco",
+        "lot16:surface:floor:porch"
+      ],
+      "component_sum_m2": 224.36,
+      "declared_total_m2": 224.36,
+      "difference_m2": 0.0,
+      "source_location": "architectural:p3:area_calculations"
     }
   ]
 }
