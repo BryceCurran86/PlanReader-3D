@@ -1,0 +1,21 @@
+{
+  "schema_version": "2.0",
+  "project_id": "au_qld_3laurel",
+  "status": "INCOMPLETE",
+  "source_package_complete": true,
+  "source_documents": [
+    {
+      "name": "3LAUREL - Construction Plan Set Rev3 08.05.26.pdf",
+      "role": "architectural_drawings",
+      "sha256": "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e",
+      "size_bytes": 5157446,
+      "page_count": 18
+    }
+  ],
+  "reference_takeoff_documents": [],
+  "verified_takeoff_items": [],
+  "reason_codes": [
+    "reference_takeoff_not_supplied",
+    "verified_surface_universe_not_built"
+  ]
+}
