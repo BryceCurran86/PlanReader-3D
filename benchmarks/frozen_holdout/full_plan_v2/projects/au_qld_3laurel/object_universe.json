@@ -720,5 +720,74 @@
       ]
     }
   ],
-  "wet_area_floor_surface_universe_complete": true
+  "wet_area_floor_surface_universe_complete": true,
+  "vinyl_floor_surfaces": [
+    {
+      "object_ref": "3laurel:surface:floor:media",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Media room vinyl floor surface",
+      "finish": "vinyl",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 13.146,
+      "attributes": {
+        "width_m": 4.2,
+        "length_m": 3.13,
+        "calculation": "4.200m * 3.130m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:MEDIA:4200x3130_figured_dimensions:VINYL"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:floor:bed2",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Bed 2 vinyl floor surface",
+      "finish": "vinyl",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 12.6,
+      "attributes": {
+        "width_m": 3,
+        "length_m": 4.2,
+        "calculation": "3.000m * 4.200m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:BED_2:3000x4200_figured_dimensions:VINYL"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:floor:bed3",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Bed 3 vinyl floor surface",
+      "finish": "vinyl",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 12.6,
+      "attributes": {
+        "width_m": 3,
+        "length_m": 4.2,
+        "calculation": "3.000m * 4.200m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:BED_3:3000x4200_figured_dimensions:VINYL"
+      ]
+    }
+  ],
+  "vinyl_floor_surface_universe_complete": true
 }
