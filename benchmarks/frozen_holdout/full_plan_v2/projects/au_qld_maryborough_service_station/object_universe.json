@@ -430,25 +430,37 @@
       "object_ref": "maryborough:window:W01",
       "physical_kind": "window_or_tagged_glazing_object",
       "source_tag": "W01",
-      "classification": "VERIFIED_CORE_OBJECT_IDENTITY_ONLY",
+      "classification": "VERIFIED_CORE_OBJECT_WITH_GEOMETRY",
       "denominator_core": true,
       "source_locations": [
         "A110:floor_plan:W01",
-        "A610:window_elevations:W01"
+        "A610:window_elevations:W01:3600x1900:sill_1100"
       ],
-      "area_status": "UNRESOLVED"
+      "area_status": "VERIFIED_GROSS_FRAME_OPENING",
+      "width_mm": 3600,
+      "height_mm": 1900,
+      "sill_height_mm": 1100,
+      "gross_frame_opening_area_m2": 6.84,
+      "geometry_status": "VERIFIED_NOMINAL_A610",
+      "area_semantics": "nominal gross framed opening area from A610 outer-frame dimensions; not net glass area"
     },
     {
       "object_ref": "maryborough:window:W02",
       "physical_kind": "window_or_tagged_glazing_object",
       "source_tag": "W02",
-      "classification": "VERIFIED_CORE_OBJECT_IDENTITY_ONLY",
+      "classification": "VERIFIED_CORE_OBJECT_WITH_GEOMETRY",
       "denominator_core": true,
       "source_locations": [
         "A110:floor_plan:W02",
-        "A610:window_elevations:W02"
+        "A610:window_elevations:W02:4100x1900:sill_1100"
       ],
-      "area_status": "UNRESOLVED"
+      "area_status": "VERIFIED_GROSS_FRAME_OPENING",
+      "width_mm": 4100,
+      "height_mm": 1900,
+      "sill_height_mm": 1100,
+      "gross_frame_opening_area_m2": 7.79,
+      "geometry_status": "VERIFIED_NOMINAL_A610",
+      "area_semantics": "nominal gross framed opening area from A610 outer-frame dimensions; not net glass area"
     },
     {
       "object_ref": "maryborough:window:W03",
@@ -460,7 +472,8 @@
         "A110:floor_plan:W03",
         "A610:window_elevations:W03"
       ],
-      "area_status": "UNRESOLVED"
+      "area_status": "UNRESOLVED",
+      "unresolved_area_reason": "A610 gives figured width 3650 but no explicit individual W03 window-height/sill chain; do not scale the drawn elevation."
     },
     {
       "object_ref": "maryborough:window:W04",
@@ -472,31 +485,44 @@
         "A110:floor_plan:W04",
         "A610:window_elevations:W04"
       ],
-      "area_status": "UNRESOLVED"
+      "area_status": "UNRESOLVED",
+      "unresolved_area_reason": "W04 is integrated with D01 in a 4500-wide storefront assembly; non-overlapping W04-only gross area semantics are not yet source-closed."
     },
     {
       "object_ref": "maryborough:window:W05",
       "physical_kind": "window_or_tagged_glazing_object",
       "source_tag": "W05",
-      "classification": "VERIFIED_CORE_OBJECT_IDENTITY_ONLY",
+      "classification": "VERIFIED_CORE_OBJECT_WITH_GEOMETRY",
       "denominator_core": true,
       "source_locations": [
         "A110:floor_plan:W05",
-        "A610:window_elevations:W05"
+        "A610:window_elevations:W05:7585x1900:sill_1100"
       ],
-      "area_status": "UNRESOLVED"
+      "area_status": "VERIFIED_GROSS_FRAME_OPENING",
+      "width_mm": 7585,
+      "height_mm": 1900,
+      "sill_height_mm": 1100,
+      "gross_frame_opening_area_m2": 14.4115,
+      "geometry_status": "VERIFIED_NOMINAL_A610",
+      "area_semantics": "nominal gross framed opening area from A610 outer-frame dimensions; not net glass area"
     },
     {
       "object_ref": "maryborough:window:W06",
       "physical_kind": "window_or_tagged_glazing_object",
       "source_tag": "W06",
-      "classification": "VERIFIED_CORE_OBJECT_IDENTITY_ONLY",
+      "classification": "VERIFIED_CORE_OBJECT_WITH_GEOMETRY",
       "denominator_core": true,
       "source_locations": [
         "A110:floor_plan:W06",
-        "A610:window_elevations:W06"
+        "A610:window_elevations:W06:700x2100:full_height_sidelight"
       ],
-      "area_status": "UNRESOLVED"
+      "area_status": "VERIFIED_GROSS_FRAME_OPENING",
+      "width_mm": 700,
+      "height_mm": 2100,
+      "sill_height_mm": 0,
+      "gross_frame_opening_area_m2": 1.47,
+      "geometry_status": "VERIFIED_NOMINAL_A610",
+      "area_semantics": "nominal gross framed opening area from A610 outer-frame dimensions; not net glass area"
     }
   ],
   "window_identity_universe_complete": true,
@@ -719,5 +745,16 @@
       "classification": "VERIFIED_CORE_OBJECT"
     }
   ],
-  "wc_shower_ceiling_surface_universe_complete": true
+  "wc_shower_ceiling_surface_universe_complete": true,
+  "window_area_source_closed_ids": [
+    "W01",
+    "W02",
+    "W05",
+    "W06"
+  ],
+  "window_area_unresolved_ids": [
+    "W03",
+    "W04"
+  ],
+  "window_area_source_closed_subset_area_m2": 30.5115
 }

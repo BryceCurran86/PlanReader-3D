@@ -41,14 +41,25 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     manifest = load_project_manifest(project / "source_manifest.json")
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
-    assert len(manifest.verified_items) == 19
+    door_items = [
+        item for item in manifest.verified_items
+        if item.item_id.startswith("maryborough-door-")
+    ]
+    assert {item.item_id for item in door_items} == {
+        "maryborough-door-ipf3-count",
+        "maryborough-door-ipf3-leaf-area-one-face",
+        "maryborough-door-laminex-partition-count",
+        "maryborough-door-aluminium-glazed-count",
+        "maryborough-door-coolroom-by-others-count",
+        "maryborough-door-lessee-shelving-by-others-count",
+    }
 
-    eligible = [item for item in manifest.verified_items if item.denominator_eligible]
-    excluded = [item for item in manifest.verified_items if not item.denominator_eligible]
-    assert len(eligible) == 16
+    eligible = [item for item in door_items if item.denominator_eligible]
+    excluded = [item for item in door_items if not item.denominator_eligible]
+    assert len(eligible) == 3
     assert len(excluded) == 3
 
-    by_id = {item.item_id: item for item in manifest.verified_items}
+    by_id = {item.item_id: item for item in door_items}
     assert by_id["maryborough-door-ipf3-count"].expected_quantity == 11
     assert by_id["maryborough-door-ipf3-leaf-area-one-face"].expected_quantity == 20.2368
     assert not by_id["maryborough-door-ipf3-leaf-area-one-face"].denominator_eligible

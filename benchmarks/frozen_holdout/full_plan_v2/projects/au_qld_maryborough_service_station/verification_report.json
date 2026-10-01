@@ -64,14 +64,19 @@
       "evidence": "Truth derived from source drawings and independent cross-check only"
     },
     {
+      "proof": "source-closed nominal gross window-area subset verified",
+      "status": "PASS",
+      "evidence": "A610 explicitly figures W01 3600x1900=6.84 m2, W02 4100x1900=7.79 m2, W05 7585x1900=14.4115 m2 and W06 sidelight 700x2100=1.47 m2; A110 independently reconciles each physical tag. W03/W04 remain unresolved."
+    },
+    {
       "proof": "unsupported surfaces are not silently excluded",
       "status": "PASS",
-      "evidence": "All unresolved families are explicit; by-others doors are explicit non-denominator items"
+      "evidence": "All unresolved families are explicit; by-others doors are explicit non-denominator items and W03/W04 window areas remain explicit unresolved geometry/overlap cases."
     },
     {
       "proof": "full project surface universe complete",
       "status": "FAIL",
-      "evidence": "WC/shower floor/ceilings, PWD floor/ceiling, airlock floor/ceiling, laundry floor/ceiling, and door/window identity universes are closed; remaining surfaces stay unresolved."
+      "evidence": "WC/shower, PWD, airlock and laundry floor/ceilings plus door/window identity universes and the W01/W02/W05/W06 gross window-area subset are closed; W03/W04 window areas and remaining surfaces stay unresolved."
     }
   ]
 }
