@@ -1,0 +1,107 @@
+{
+  "schema_version": "v2-verification-report-1.0",
+  "project_id": "au_qld_maryborough_service_station",
+  "project_status": "INCOMPLETE",
+  "source_hash_verification": {
+    "status": "PASS",
+    "documents": [
+      {
+        "name": "Arch_Combined_Maryborough_Service_Station.pdf",
+        "expected_sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
+        "observed_sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+      }
+    ]
+  },
+  "proofs": [
+    {
+      "proof": "independent reference quantity exists for every admitted core item",
+      "status": "PASS",
+      "evidence": "A600 schedule plus A110 tag census"
+    },
+    {
+      "proof": "every denominator item has exact physical object refs",
+      "status": "PASS",
+      "evidence": "Exact D-tag object sets"
+    },
+    {
+      "proof": "source lineage complete for admitted core",
+      "status": "PASS",
+      "evidence": "A600 and A110 locations retained per item"
+    },
+    {
+      "proof": "door object universe reconciled",
+      "status": "PASS",
+      "evidence": "28 schedule rows = 28 distinct A110 door tags; 11+3+2+2+10=28"
+    },
+    {
+      "proof": "window identity universe reconciled",
+      "status": "PASS",
+      "evidence": "A110 has exactly W01-W06 once each; A610 provides elevations for W01-W06"
+    },
+    {
+      "proof": "WC shower FT2 floor surfaces independently closed",
+      "status": "PASS",
+      "evidence": "A140 gives FT2 and 2935 x 1620 figured dimensions for each of three rooms; A110 independently reproduces the same physical room geometry within drawing tolerance."
+    },
+    {
+      "proof": "WC shower WFPB ceiling surfaces independently closed",
+      "status": "PASS",
+      "evidence": "A120 assigns 2400 WFPB ceilings to all three WC/shower rooms; their 2935 x 1620 footprints are already independently closed by A140 figured dimensions and A110 geometry."
+    },
+    {
+      "proof": "PWD floor and ceiling independently closed",
+      "status": "PASS",
+      "evidence": "A502 gives 3570 x 2200 mm PWD geometry and FT2 floor; A140 confirms PWD FT2; A120 assigns 2400 WFPB ceiling to the same room."
+    },
+    {
+      "proof": "Airlock and laundry floor/ceiling surfaces independently closed",
+      "status": "PASS",
+      "evidence": "A501 gives AIRLOCK 1520 x 5044 FT2 and LAUNDRY 1655 x 5044 FT2; A140 independently shows matching room/finish geometry; A120 assigns 2400 WFPB ceilings to both rooms."
+    },
+    {
+      "proof": "PlanReader output not used as benchmark truth",
+      "status": "PASS",
+      "evidence": "Truth derived from source drawings and independent cross-check only"
+    },
+    {
+      "proof": "source-closed nominal gross window-area subset verified",
+      "status": "PASS",
+      "evidence": "A610 explicitly figures W01 3600x1900=6.84 m2, W02 4100x1900=7.79 m2, W05 7585x1900=14.4115 m2 and W06 sidelight 700x2100=1.47 m2; A110 independently reconciles each physical tag. W03/W04 remain unresolved."
+    },
+    {
+      "proof": "Food Prep floor and ceiling independently closed",
+      "status": "PASS",
+      "evidence": "A140 gives 4025 x 3297 mm Food Prep FT3 geometry; A110 independently shows the same room footprint; A120 assigns a 3000 FPB ceiling."
+    },
+    {
+      "proof": "Office floor and ceiling independently closed",
+      "status": "PASS",
+      "evidence": "A140 gives 3570 x 2536 mm OFFICE FT3 geometry; A110 independently shows the same room; A120 assigns a 2400 GRID ceiling."
+    },
+    {
+      "proof": "unsupported surfaces are not silently excluded",
+      "status": "PASS",
+      "evidence": "All unresolved families are explicit; by-others doors are explicit non-denominator items and W03/W04 window areas remain explicit unresolved geometry/overlap cases."
+    },
+    {
+      "proof": "full project surface universe complete",
+      "status": "FAIL",
+      "evidence": "WC/shower, PWD, airlock, laundry, Food Prep and Office floor/ceiling surfaces, door/window identity universes, and the W01/W02/W05/W06 gross window-area subset are closed; W03/W04 window areas and remaining surfaces stay unresolved."
+    }
+  ],
+  "food_prep_office_surface_closure_summary": {
+    "object_refs": [
+      "maryborough:surface:floor:food_prep",
+      "maryborough:surface:ceiling:food_prep",
+      "maryborough:surface:floor:office",
+      "maryborough:surface:ceiling:office"
+    ],
+    "source_closed_object_count": 4,
+    "object_identity_available": true,
+    "geometry_verified": true,
+    "geometry_scope": "2D rectangular plan extents / ceiling footprints only",
+    "quantity_verified": true,
+    "provenance_chain_complete": true,
+    "project_surface_universe_complete": false
+  }
+}

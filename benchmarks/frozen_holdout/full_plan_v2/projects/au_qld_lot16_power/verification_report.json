@@ -1,0 +1,106 @@
+{
+  "schema_version": "v2-verification-report-1.0",
+  "project_id": "au_qld_lot16_power",
+  "project_status": "INCOMPLETE",
+  "source_hash_verification": {
+    "status": "PASS",
+    "documents": [
+      {
+        "name": "1. Construction Plans - Lot 16 Power (REV E).pdf",
+        "expected_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+        "observed_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+      },
+      {
+        "name": "4. Structural Engineering - Lot 16 Power.pdf",
+        "expected_sha256": "b40259589dd39a46e45d25e145cfa789d9a9415b50613ebc4fee01dceab6b3d6",
+        "observed_sha256": "b40259589dd39a46e45d25e145cfa789d9a9415b50613ebc4fee01dceab6b3d6"
+      }
+    ]
+  },
+  "proofs": [
+    {
+      "proof": "independent reference quantity exists for every admitted core item",
+      "status": "PASS",
+      "evidence": "13 dimensioned/plan-width external openings, 37.584 m2 total, each mapped to one exact physical opening ref"
+    },
+    {
+      "proof": "every denominator item has exact physical object refs",
+      "status": "PASS",
+      "evidence": "13 atomic denominator items each carry exactly one external-opening object ref"
+    },
+    {
+      "proof": "source lineage complete for admitted core",
+      "status": "PASS"
+    },
+    {
+      "proof": "PlanReader output not used as benchmark truth",
+      "status": "PASS"
+    },
+    {
+      "proof": "unsupported surfaces are not silently excluded",
+      "status": "PASS",
+      "evidence": "custom front glazing marked MEASURE ON SITE and all unfinished wall/ceiling/roof/structural families remain explicit unresolved work"
+    },
+    {
+      "proof": "labelled internal room-access opening subset source-closed",
+      "status": "PASS",
+      "evidence": "Nine explicit internal 870 mm room-access openings are closed from source width labels and the 2100 mm FSL-to-JL height datum; combined opening area 16.443 m2. External 870 service-door labels are excluded and remaining internal joinery/open archways stay unresolved."
+    },
+    {
+      "proof": "source-closed Lot16 ceiling-plane subset verified",
+      "status": "PASS",
+      "evidence": "Garage flat ceiling plus ensuite and WIR raked ceiling planes are independently source-closed for 49.340066 m2 total. Bed 1 and the remaining project ceiling universe stay unresolved."
+    },
+    {
+      "proof": "Lot16 ensuite and WIR atomic floor subset source-closed",
+      "status": "PASS",
+      "evidence": "Ensuite tiled floor and WIR vinyl floor are independently source-closed for 10.1728 m2 total. The overlapping residence composite remains a non-denominator control."
+    },
+    {
+      "proof": "full project surface universe complete",
+      "status": "FAIL",
+      "evidence": "Only the independently closed 13-opening subset is promoted; multiple in-scope families remain unresolved."
+    }
+  ],
+  "opening_closure_summary": {
+    "verified_opening_count": 13,
+    "verified_area_m2": 37.584,
+    "full_external_opening_universe_complete": false,
+    "unresolved_reason": "custom front glazing explicitly marked MEASURE ON SITE"
+  },
+  "internal_room_access_closure_summary": {
+    "closure_check_id": "lot16:closure:internal_room_access_opening_census",
+    "verified_opening_count": 9,
+    "verified_area_m2": 16.443,
+    "width_distribution_m": {
+      "0.87": 9
+    },
+    "joinery_height_m": 2.1,
+    "complete_for_explicit_internal_870_room_access_openings": true,
+    "complete_for_all_internal_wall_openings": false
+  },
+  "ceiling_plane_closure_summary": {
+    "closure_check_ids": [
+      "lot16:closure:garage_flat_ceiling_plane",
+      "lot16:closure:ensuite_wir_raked_ceiling_planes"
+    ],
+    "verified_ceiling_plane_count": 3,
+    "verified_area_m2": 49.340066,
+    "source_closed_for_promoted_planes": true,
+    "complete_for_project_ceiling_universe": false,
+    "bed1_raked_ceiling_promoted": false
+  },
+  "ensuite_wir_floor_closure_summary": {
+    "closure_check_id": "lot16:closure:ensuite_wir_floor_surfaces",
+    "verified_floor_count": 2,
+    "verified_area_m2": 10.1728,
+    "object_identity_available": true,
+    "geometry_verified": true,
+    "geometry_scope": "2D rectangular plan extents only",
+    "quantity_verified": true,
+    "provenance_chain_complete": true,
+    "source_closed": true,
+    "overlapping_residence_composite_denominator_eligible": false,
+    "project_floor_universe_complete": false
+  }
+}

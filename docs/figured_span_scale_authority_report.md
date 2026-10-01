@@ -61,10 +61,9 @@ Files that remain untouched by this report and by the proposed first implementat
 - `pb_planreader_pdf_extractor.py`
 - `pb_planreader_jobhub_publish_contract.py`
 - live opening/deduction files
-- `benchmarks/**`
-- `pb_benchmark_accuracy_engine.py`
+- active Full Plan V2 truth
+- V2 integrity/separation policy
 - W10 takeoff/deduction defaults
-- benchmark mappings/tolerances/manifests
 
 ## Observed repository behavior
 
@@ -155,13 +154,11 @@ No benchmark quantity, project name, file name, expected area, known ratio, or d
 - unrelated content and viewport expansion invariance
 - deterministic replay/stable-ID equality
 - input nonmutation
-- proof that live predictions, commercial quantities, and benchmark denominator remain unchanged
+- proof that live predictions and commercial quantities remain unchanged while V2 truth remains untouched
 
-## Benchmark observations that must not influence implementation
+## Validation observations that must not influence implementation
 
-The canonical five-project benchmark on main is currently recorded as 36/60 accepted, strict exact 29/60, zero hallucinations.
-
-The Lamu development benchmark contains a roof-covering target, but that expected value must not select witness bundles, tolerances, ratios, roof lines, or promotion rules. Diagnostic calculations in PR #874 are evaluation/debug information only.
+Retired legacy benchmark percentages and expected values are not active validation inputs and must not select witness bundles, tolerances, ratios, roof lines, or promotion rules. V2 source-closed truth may evaluate the result only after production evidence has been independently derived.
 
 ## Review question
 

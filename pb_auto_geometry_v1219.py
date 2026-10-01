@@ -554,6 +554,15 @@ def _auto_calibrate_page(app: Any, page: Dict[str, Any]) -> Optional[Dict[str, A
         app.lexecute("UPDATE pages SET px_per_m=?,scale_text=? WHERE id=?", (_num(detected["px_per_m"]), label, int(page["id"])))
         return {"page_id": int(page["id"]), "method": "Dimension line", "px_per_m": _num(detected["px_per_m"]), "confidence": detected.get("confidence", "Medium")}
     try:
+        from pb_raster_plan_dimension_bridge import detect_raster_plan_dimension_calibration
+        raster_detected = detect_raster_plan_dimension_calibration(app, page)
+    except Exception:
+        raster_detected = None
+    if raster_detected:
+        label = f"Auto raster dimension {raster_detected.get('dimension_text')} · {raster_detected.get('confidence')} confidence"
+        app.lexecute("UPDATE pages SET px_per_m=?,scale_text=? WHERE id=?", (_num(raster_detected["px_per_m"]), label, int(page["id"])))
+        return {"page_id": int(page["id"]), "method": "Raster dimension", "px_per_m": _num(raster_detected["px_per_m"]), "confidence": raster_detected.get("confidence", "Medium")}
+    try:
         scale = app.auto_detect_scale(page)
     except Exception:
         scale = None
@@ -663,7 +672,7 @@ def _is_finite_number(value: Any) -> bool:
 
 # What an automatic row may carry: the roles _takeoff_row() assigns, text in
 # every text column (required ones non-empty), and finite non-negative numbers.
-AUTO_ROW_ROLES = ("", "floor_area")
+AUTO_ROW_ROLES = ("", "floor_area", "external_wall", "internal_partition", "wall_finish")
 _AUTO_REQUIRED_TEXT = ("section", "element", "location", "substrate", "unit", "quantity_status",
                        "source_reference", "inclusion_status", "confidence")
 _AUTO_OPTIONAL_TEXT = ("finish_system", "source_page", "notes", "row_role")
@@ -816,6 +825,206 @@ def _build_unit_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, Any]
     return rows, summary
 
 
+def _try_physical_net_wall_rows(
+    app: Any, workspace_id: int, pages: Sequence[Dict[str, Any]], facades: Sequence[Dict[str, Any]]
+) -> Optional[List[Tuple[Any, ...]]]:
+    """Attempt to produce source-authenticated physical net-wall takeoff rows.
+
+    Checks:
+    1. Direct live physical net-wall authority (`collect_live_physical_net_wall_claim`),
+       which replays the complete source-owned wall/opening void chain on the PDF.
+    2. Sibling unified registered-wall authority (`build_registered_walls_v139`),
+       which binds plan wall lengths, elevation heights, and authenticated B5 opening deductions.
+
+    Returns canonical 21-field takeoff rows if authenticated evidence exists,
+    or None to signal that the caller must fall back to gross elevation rows.
+    """
+    # 1. Check live physical net-wall integration
+    doc_paths: List[Tuple[int, Path]] = []
+    if hasattr(app, "lquery"):
+        try:
+            doc_rows = app.lquery(
+                "SELECT id, path FROM documents WHERE workspace_id=? ORDER BY id",
+                (int(workspace_id),),
+            )
+            for d in doc_rows:
+                p = Path(str(d.get("path") or ""))
+                if p.is_file() and p.suffix.lower() == ".pdf":
+                    doc_paths.append((int(d["id"]), p))
+        except Exception:
+            pass
+
+    for doc_id, doc_path in doc_paths:
+        try:
+            from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+            from pb_migration_contracts import EvidenceResolutionStatus
+
+            doc_pages = [p for p in pages if int(p.get("document_id") or 0) == doc_id]
+            page_nos = [
+                int(p.get("page_no"))
+                for p in doc_pages
+                if p.get("page_no") is not None and int(p.get("page_no")) > 0
+            ]
+            page_indices = tuple(p - 1 for p in sorted(set(page_nos))) if page_nos else None
+
+            claim = collect_live_physical_net_wall_claim(doc_path, pages=page_indices)
+            status_val = getattr(claim.status, "value", str(claim.status))
+            if (
+                status_val == "corroborated"
+                and claim.quantity_m2 is not None
+                and float(claim.quantity_m2) > 0.0
+                and claim.quantity_id
+            ):
+                qty = round(max(0.0, float(claim.quantity_m2)), 2)
+                src_pages = claim.source_pages if hasattr(claim, "source_pages") and claim.source_pages else ()
+                source_page_str = ", ".join(f"p{p}" for p in src_pages) if src_pages else "1"
+                source_ref = f"{SOURCE_PREFIX} · physical_net_wall:{claim.quantity_id}"
+                confidence = "Documented" if getattr(claim, "confidence", 0.0) >= 0.8 else "Derived"
+                notes = (
+                    "External walling — source-authenticated physical net whole-wall area with proven opening voids deducted."
+                )
+                all_subs = [s for f in facades for s in (f.get("substrates") or [])]
+                sub_names = sorted({s.get("name") for s in all_subs if s.get("name")})
+                substrate_name = sub_names[0] if len(sub_names) == 1 else "External walling"
+                location_str = (
+                    f"External perimeter walling · {substrate_name}"
+                    if substrate_name != "External walling"
+                    else "External perimeter walling · Physical net wall"
+                )
+                row = _takeoff_row(
+                    workspace_id=workspace_id,
+                    section="External",
+                    element="External walls / cladding",
+                    location=location_str,
+                    substrate=substrate_name,
+                    quantity=qty,
+                    status="Measured",
+                    source_page=source_page_str,
+                    source_reference=source_ref,
+                    confidence=confidence,
+                    notes=notes,
+                    row_role="external_wall",
+                )
+                return [row]
+        except Exception:
+            pass
+
+    # 2. Check unified registered-wall authority with verified opening deductions
+    if hasattr(app, "build_registered_walls_v139") and callable(getattr(app, "build_registered_walls_v139")):
+        try:
+            reg_walls = app.build_registered_walls_v139(int(workspace_id))
+            if reg_walls:
+                has_authenticated_openings = any(
+                    float(w.get("opening_deduction_m2") or 0.0) > 0.0
+                    for w in reg_walls
+                )
+                has_verified_height = any(
+                    w.get("height_confidence") in {"Verified", "High"}
+                    for w in reg_walls
+                )
+                if has_authenticated_openings or has_verified_height:
+                    if hasattr(app, "opening_detail_definitions") and hasattr(app, "building_openings"):
+                        try:
+                            from pb_opening_detail_definition_bridge import (
+                                consolidate_opening_identities,
+                                enrich_openings_with_detail_definitions,
+                                apply_opening_deductions_to_walls,
+                            )
+                            consolidated = consolidate_opening_identities(app.building_openings)
+                            enriched = enrich_openings_with_detail_definitions(
+                                consolidated,
+                                app.opening_detail_definitions,
+                                getattr(app, "opening_mark_map", None),
+                            )
+                            reg_walls = apply_opening_deductions_to_walls(reg_walls, enriched)
+                        except Exception:
+                            pass
+                    if hasattr(app, "wall_finish_callout_bindings"):
+                        try:
+                            from pb_bound_wall_finish_customer_bridge import apply_finish_callout_bindings_to_walls
+                            reg_walls = apply_finish_callout_bindings_to_walls(reg_walls, app.wall_finish_callout_bindings)
+                        except Exception:
+                            pass
+                    reg_rows: List[Tuple[Any, ...]] = []
+                    for w_idx, w in enumerate(reg_walls):
+                        net_qty = round(max(0.0, float(w.get("net_m2") or 0.0)), 2)
+                        if net_qty <= 0.0:
+                            continue
+                        sub = str(w.get("substrate") or "External walling")
+                        ref = str(w.get("wall_ref") or w.get("wall_id") or w.get("candidate_id") or w.get("id") or f"wall_{w_idx+1}")
+                        side = str(w.get("side") or "Perimeter")
+                        gross_val = float(w.get("gross_m2") or 0.0)
+                        ded_val = float(w.get("opening_deduction_m2") or 0.0)
+                        h_status = str(w.get("height_status") or "")
+                        callout_note = f" Authenticated callout finish: {sub}." if w.get("callout_bound") else ""
+                        ded_details = ""
+                        if w.get("openings"):
+                            op_summaries = []
+                            for op in w.get("openings"):
+                                op_mark = (
+                                    (getattr(op, "type_mark", None) or getattr(op, "mark", None) or getattr(op, "opening_id", None))
+                                    if hasattr(op, "type_mark") or hasattr(op, "mark")
+                                    else (op.get("type_mark") or op.get("mark") or op.get("opening_id") or "opening")
+                                    if isinstance(op, dict)
+                                    else "opening"
+                                )
+                                op_area = (
+                                    float(getattr(op, "area_m2", 0.0) or 0.0)
+                                    if hasattr(op, "area_m2")
+                                    else float(op.get("area_m2") or op.get("deduction_m2") or 0.0)
+                                    if isinstance(op, dict)
+                                    else 0.0
+                                )
+                                if op_area > 0.0:
+                                    op_summaries.append(f"{op_mark} ({op_area:.2f} m²)")
+                            if op_summaries:
+                                ded_details = f" Deductions: {', '.join(op_summaries)}."
+
+                        doc_provenance = ""
+                        if w.get("source_document") or w.get("document_name"):
+                            doc_provenance = f" Doc: {w.get('source_document') or w.get('document_name')}."
+                        elif doc_paths:
+                            doc_provenance = f" Doc: {doc_paths[0][1].name}."
+
+                        source_page_str = (
+                            str(w.get("source_page") or "")
+                            or (
+                                f"Plan p.{w.get('plan_page_id')} / Elev p.{w.get('elevation_page_id')}"
+                                if w.get("plan_page_id") and w.get("elevation_page_id")
+                                else f"Page {w.get('plan_page_id') or w.get('page_id') or w.get('page_no')}"
+                                if (w.get("plan_page_id") or w.get("page_id") or w.get("page_no"))
+                                else "Registered plan/elevation geometry"
+                            )
+                        )
+
+                        note_text = f"Gross {gross_val:.2f} m²; authenticated opening deductions {ded_val:.2f} m².{ded_details} {h_status}{callout_note}{doc_provenance}".strip()
+                        source_ref = (
+                            f"{SOURCE_PREFIX} · registered_wall:{ref} · {w.get('finish_callout_binding_id')}"
+                            if w.get("callout_bound")
+                            else f"{SOURCE_PREFIX} · registered_wall:{ref}"
+                        )
+                        reg_rows.append(_takeoff_row(
+                            workspace_id=workspace_id,
+                            section="External",
+                            element="External walls / cladding",
+                            location=f"{side} · {ref}",
+                            substrate=sub,
+                            quantity=net_qty,
+                            status="Measured",
+                            source_page=source_page_str,
+                            source_reference=source_ref,
+                            confidence="Documented" if (w.get("height_confidence") in {"Verified", "High"} or w.get("callout_bound")) else "Derived",
+                            notes=note_text,
+                            row_role="external_wall",
+                        ))
+                    if reg_rows:
+                        return reg_rows
+        except Exception:
+            pass
+
+    return None
+
+
 def _build_facade_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, Any]]) -> Tuple[List[Tuple[Any, ...]], List[Dict[str, Any]]]:
     rows: List[Tuple[Any, ...]] = []
     facades: List[Dict[str, Any]] = []
@@ -839,6 +1048,22 @@ def _build_facade_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, An
             facade["gross_m2"] = round((w * h) / (pxpm * pxpm), 2)
             facade["bbox"] = component["bbox"]
             facade["polygon"] = component["polygon"]
+        facades.append(facade)
+
+    # 1. Prefer authenticated physical net-wall evidence where available
+    physical_net_rows = _try_physical_net_wall_rows(app, workspace_id, pages, facades)
+    if physical_net_rows is not None and len(physical_net_rows) > 0:
+        for facade in facades:
+            facade["superseded_by_physical_net_wall"] = True
+        return physical_net_rows, facades
+
+    # 2. Fall back to explicit substrate text areas or gross calibrated elevation areas
+    for facade in facades:
+        explicit = facade.get("explicit_areas") or []
+        page_label = facade.get("page_label") or ""
+        page_id = facade.get("page_id") or 0
+        face = facade.get("face") or ""
+        substrates = facade.get("substrates") or []
 
         if explicit:
             for item in explicit:
@@ -846,11 +1071,11 @@ def _build_facade_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, An
                 rows.append(_takeoff_row(
                     workspace_id=workspace_id, section="External", element="External walls / cladding",
                     location=f"{face.title() if face else 'Elevation'} · {sub['name']}", substrate=sub["name"],
-                    quantity=_num(item["area_m2"]), status="Measured", source_page=facade["page_label"],
-                    source_reference=f"{SOURCE_PREFIX} · facade:{int(page['id'])} · {sub['code']}",
+                    quantity=_num(item["area_m2"]), status="Measured", source_page=page_label,
+                    source_reference=f"{SOURCE_PREFIX} · facade:{int(page_id)} · {sub['code']}",
                     confidence="Documented", notes=f"Substrate area read directly from drawing text: {item['source']}",
                 ))
-        elif facade["gross_m2"] > 0:
+        elif facade.get("gross_m2", 0.0) > 0:
             if len(substrates) == 1:
                 sub = substrates[0]
                 location = f"{face.title() if face else 'Elevation'} · {sub['name']}"
@@ -864,11 +1089,126 @@ def _build_facade_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, An
             rows.append(_takeoff_row(
                 workspace_id=workspace_id, section="External", element="External walls / cladding", location=location,
                 substrate=substrate, quantity=_num(facade["gross_m2"]), status="Provisional measured",
-                source_page=facade["page_label"], source_reference=f"{SOURCE_PREFIX} · facade:{int(page['id'])} · gross",
+                source_page=page_label, source_reference=f"{SOURCE_PREFIX} · facade:{int(page_id)} · gross",
                 confidence="Derived", notes=note,
             ))
-        facades.append(facade)
+
     return rows, facades
+
+
+def _build_internal_partition_rows(
+    app: Any,
+    workspace_id: int,
+    pages: Sequence[Dict[str, Any]],
+    footprint: Optional[Dict[str, Any]],
+) -> Tuple[List[Tuple[Any, ...]], List[Dict[str, Any]]]:
+    """Extract evidenced internal partition walls from vector drawing geometry.
+
+    Leverages `pb_wall_fill_internal_partition_evidence` to detect solid-fill wall bands
+    and distinguish genuine internal partitions from furniture/desk symbols, title-block borders,
+    or perimeter walls. Emits canonical takeoff rows in linear meters (`lm`).
+    """
+    rows: List[Tuple[Any, ...]] = []
+    partitions: List[Dict[str, Any]] = []
+
+    doc_paths: Dict[int, Path] = {}
+    if hasattr(app, "lquery"):
+        try:
+            doc_rows = app.lquery(
+                "SELECT id, path FROM documents WHERE workspace_id=? ORDER BY id",
+                (int(workspace_id),),
+            )
+            for d in doc_rows:
+                p = Path(str(d.get("path") or ""))
+                if p.is_file() and p.suffix.lower() == ".pdf":
+                    doc_paths[int(d["id"])] = p
+        except Exception:
+            pass
+
+    length_m = 0.0
+    width_m = 0.0
+    if footprint:
+        w_f = _num(footprint.get("width_m"))
+        d_f = _num(footprint.get("depth_m"))
+        if w_f > 0 and d_f > 0:
+            length_m = max(w_f, d_f)
+            width_m = min(w_f, d_f)
+
+    for page in pages:
+        ptype = str(page.get("page_type") or "").lower()
+        if "floor" not in ptype and "plan" not in ptype:
+            continue
+        doc_id = int(page.get("document_id") or 0)
+        doc_path = doc_paths.get(doc_id)
+        if not doc_path:
+            continue
+
+        page_no = int(page.get("page_no") or 1)
+        px_per_m = _num(page.get("px_per_m"))
+
+        p_len_m = length_m
+        p_wid_m = width_m
+        if p_len_m <= 0 or p_wid_m <= 0:
+            if px_per_m > 0:
+                p_len_m = _num(page.get("width_px"), 1000.0) / px_per_m
+                p_wid_m = _num(page.get("height_px"), 700.0) / px_per_m
+
+        if p_len_m <= 0 or p_wid_m <= 0:
+            continue
+
+        try:
+            from pb_wall_fill_internal_partition_evidence import resolve_internal_partition_length_m
+            fitz_mod = getattr(app, "fitz", None)
+            if fitz_mod is None:
+                import fitz as fitz_mod
+            doc = fitz_mod.open(doc_path)
+            try:
+                pdf_page = doc[page_no - 1]
+                drawings = pdf_page.get_drawings()
+                evidence = resolve_internal_partition_length_m(
+                    drawings,
+                    length_m=p_len_m,
+                    width_m=p_wid_m,
+                    page=pdf_page,
+                )
+            finally:
+                doc.close()
+
+            if evidence.status == "found" and evidence.total_length_m > 0:
+                qty_lm = round(max(0.0, float(evidence.total_length_m)), 2)
+                page_label = str(page.get("page_label") or f"p{page_no}")
+                note = f"Internal partition length derived from vector geometry: {evidence.reason}."
+                if evidence.wall_thickness_m:
+                    note += f" Thickness: {evidence.wall_thickness_m:.3f} m."
+
+                row = _takeoff_row(
+                    workspace_id=workspace_id,
+                    section="Internal",
+                    element="Internal partitions / walls",
+                    location=f"Internal partitions · {page_label}",
+                    substrate="Plasterboard / partition",
+                    quantity=qty_lm,
+                    status="Measured",
+                    source_page=page_label,
+                    source_reference=f"{SOURCE_PREFIX} · internal_partition:{int(page['id'])}",
+                    confidence="Documented",
+                    notes=note,
+                    row_role="internal_partition",
+                    unit="lm",
+                )
+                rows.append(row)
+                partitions.append({
+                    "page_id": int(page["id"]),
+                    "page_label": page_label,
+                    "total_length_m": qty_lm,
+                    "wall_thickness_m": evidence.wall_thickness_m,
+                    "segment_lengths_m": list(evidence.segment_lengths_m),
+                    "reason": evidence.reason,
+                })
+        except Exception:
+            pass
+
+    return rows, partitions
 
 
 def _surface_code_for(substrates: Sequence[Dict[str, str]]) -> str:
@@ -943,6 +1283,52 @@ def _refresh_auto_model(app: Any, workspace_id: int, footprint: Optional[Dict[st
     return mass_id
 
 
+def _ensure_opening_evidence_v175(app: Any, workspace_id: int, pages: Sequence[Dict[str, Any]]) -> None:
+    """Ensure P5 opening evidence is generated for drawing sheets automatically.
+
+    Eliminates the requirement for an estimator to manually enter Accuracy Lab
+    and press 'Run native vector analysis' before opening deductions take effect.
+    Idempotent: skips any page whose opening evidence is already recorded.
+    """
+    if not hasattr(app, "analyse_stored_page_v130") or not callable(getattr(app, "analyse_stored_page_v130")):
+        return
+    for page in pages:
+        pid = int(page.get("id") or 0)
+        if pid <= 0:
+            continue
+        key = f"opening_evidence_v175_page_{pid}"
+        if hasattr(app, "workspace_setting"):
+            try:
+                existing = app.workspace_setting(int(workspace_id), key, None)
+                if existing:
+                    continue
+            except Exception:
+                pass
+        ptype = str(page.get("page_type") or "").lower()
+        if any(t in ptype for t in ("floor", "plan", "elevation", "drawing", "section")):
+            try:
+                app.analyse_stored_page_v130(pid)
+            except Exception:
+                pass
+
+
+def _build_bound_wall_finish_rows(
+    app: Any,
+    workspace_id: int,
+    pages: Sequence[Dict[str, Any]],
+) -> Tuple[List[Tuple[Any, ...]], List[Dict[str, Any]]]:
+    """Extract source-bound wall finish rows via SourceBoundWallFinishQuantityAuthority.
+
+    Consumes authenticated net-wall geometry directly via face/finish binding without
+    reinventing or duplicating wall geometry (AG-04).
+    """
+    try:
+        from pb_bound_wall_finish_customer_bridge import build_bound_wall_finish_rows
+        return build_bound_wall_finish_rows(app, workspace_id, pages)
+    except Exception:
+        return [], []
+
+
 def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
     """Run the automatic non-AI geometry pipeline on selected, rendered sheets."""
     pages = app.lquery(
@@ -950,6 +1336,9 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
            WHERE p.workspace_id=? AND COALESCE(p.selected,0)=1 ORDER BY p.id""",
         (int(workspace_id),),
     )
+    # AG-02: Auto-generate opening evidence for drawing sheets without manual Accuracy Lab interaction
+    _ensure_opening_evidence_v175(app, int(workspace_id), [dict(p) for p in pages])
+
     calibrations = []
     for page in pages:
         result = _auto_calibrate_page(app, dict(page))
@@ -972,13 +1361,30 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
         )
     unit_rows, units = _build_unit_rows(app, int(workspace_id), [dict(p) for p in pages])
     facade_rows, facades = _build_facade_rows(app, int(workspace_id), [dict(p) for p in pages])
+    partition_rows, partitions = _build_internal_partition_rows(app, int(workspace_id), [dict(p) for p in pages], footprint)
+    finish_rows, finishes = _build_bound_wall_finish_rows(app, int(workspace_id), [dict(p) for p in pages])
+    all_auto_rows = unit_rows + facade_rows + partition_rows + finish_rows
+
+    # AG-08: Run semantic conflict diagnostic guard across candidates
+    conflicts = []
+    try:
+        from pb_semantic_conflict_guard import annotate_rows_with_conflicts
+        explicit_conflicts = getattr(app, "detected_semantic_conflicts", []) or []
+        conflicts.extend(explicit_conflicts)
+        if conflicts:
+            all_auto_rows = annotate_rows_with_conflicts(all_auto_rows, conflicts)
+    except Exception:
+        pass
+
     # Rows, envelope and report are one publication: all commit or none do.
-    with _auto_publication(app, int(workspace_id), unit_rows + facade_rows) as publication:
+    with _auto_publication(app, int(workspace_id), all_auto_rows) as publication:
         mass_id = _refresh_auto_model(publication, int(workspace_id), footprint, facades)
         report = {
             "version": VERSION, "analysed_at": app.now_stamp(), "selected_pages": len(pages),
             "calibrations": calibrations, "footprint": footprint, "units": units, "facades": facades,
-            "auto_takeoff_rows": len(unit_rows) + len(facade_rows), "model_mass_id": mass_id,
+            "partitions": partitions, "finishes": finishes,
+            "semantic_conflicts": [c.to_dict() if hasattr(c, "to_dict") else dict(c) for c in conflicts],
+            "auto_takeoff_rows": len(all_auto_rows), "model_mass_id": mass_id,
         }
         _setting_set(publication, int(workspace_id), report)
     return report
