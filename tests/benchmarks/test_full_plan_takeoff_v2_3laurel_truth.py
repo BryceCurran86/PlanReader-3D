@@ -86,6 +86,7 @@ def test_3laurel_opening_truth_reconciles_window_and_door_subtotals():
     assert summary["door_count"] == 7
     assert summary["door_area_m2"] == pytest.approx(29.484)
     assert summary["external_opening_universe_complete"] is True
+    assert summary["closure_check_id"] == "3laurel:closure:external_opening_census"
 
 
 def test_3laurel_remaining_project_families_stay_fail_closed():
