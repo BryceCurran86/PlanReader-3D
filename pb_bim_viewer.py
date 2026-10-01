@@ -146,6 +146,7 @@ def project_to_viewer_payload(project: CanonicalProject) -> Dict[str, Any]:
                     "is_external": parse_strict_bool(w.is_external),
                     "substrate": w.substrate,
                     "finish": w.finish,
+                    "derived_quantities": [q.to_dict() for q in getattr(w, "derived_quantities", [])],
                     "confidence": w.confidence,
                     "review_state": w_rev,
                     "provenance": w.provenance.to_dict() if w.provenance else {},
@@ -185,6 +186,7 @@ def project_to_viewer_payload(project: CanonicalProject) -> Dict[str, Any]:
                         "elevation_offset_m": elev_off,
                         "substrate": item.substrate,
                         "finish": item.finish,
+                        "derived_quantities": [q.to_dict() for q in getattr(item, "derived_quantities", [])],
                         "confidence": item.confidence,
                         "review_state": item_rev,
                         "provenance": item.provenance.to_dict() if item.provenance else {},
@@ -243,6 +245,7 @@ def project_to_viewer_payload(project: CanonicalProject) -> Dict[str, Any]:
                     "gross_area_m2": p_len * p.height_m if p.height_m else 0.0,
                     "substrate": p.substrate,
                     "finish": p.finish,
+                    "derived_quantities": [q.to_dict() for q in getattr(p, "derived_quantities", [])],
                     "confidence": p.confidence,
                     "review_state": p_rev,
                     "provenance": p.provenance.to_dict() if p.provenance else {},
@@ -263,6 +266,7 @@ def project_to_viewer_payload(project: CanonicalProject) -> Dict[str, Any]:
                     "height_m": col.height_m,
                     "substrate": col.substrate,
                     "finish": col.finish,
+                    "derived_quantities": [q.to_dict() for q in getattr(col, "derived_quantities", [])],
                     "confidence": col.confidence,
                     "review_state": col_rev,
                     "provenance": col.provenance.to_dict() if col.provenance else {},
@@ -1153,6 +1157,15 @@ def generate_bim_viewer_html(payload: Dict[str, Any], height_px: int = 750) -> s
                     if (obj.wall_id) addInfoRow(container, 'Host Wall', String(obj.wall_id));
                     if (obj.schedule_page_id) addInfoRow(container, 'Schedule Page', String(obj.schedule_page_id));
                     if (obj.detail_record_id) addInfoRow(container, 'Detail Record', String(obj.detail_record_id));
+                    if (obj.derived_quantities && obj.derived_quantities.length > 0) {{
+                        addSectionTitle(container, 'Derived Trade Quantities');
+                        obj.derived_quantities.forEach(q => {{
+                            addInfoRow(container, (q.trade_category || '') + ': ' + (q.item_code || ''), (q.quantity || 0) + ' ' + (q.unit || ''));
+                        }});
+                    }}
+                }}
+
+                if (obj.type !== 'SPACE' && obj.type !== 'DOOR' && obj.type !== 'WINDOW' && obj.type !== 'OPENING') {{
                     if (obj.derived_quantities && obj.derived_quantities.length > 0) {{
                         addSectionTitle(container, 'Derived Trade Quantities');
                         obj.derived_quantities.forEach(q => {{
