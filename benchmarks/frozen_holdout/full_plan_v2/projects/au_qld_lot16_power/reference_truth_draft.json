@@ -1187,6 +1187,24 @@
         "quantity_basis": "gross explicitly tiled wall face to flat ceiling/top-plate datum",
         "denominator_readiness": "draft_only_until_remaining_bath_face_niche_opening_and_return_deductions_are_closed"
       }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile:bath_shower_full_height:01",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Bath shower wall tile finish to ceiling",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:TILED_WALL_TO_CEILING_leader_to_bath_shower_wall; architectural:p11:Bath_SHR_Elev:1200_finished_wall_width; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "host_wall_ref": "lot16:surface:internal_wall_gross:bath:shower",
+        "finished_face_width_m": 1.2,
+        "tile_height_m": 2.59,
+        "calculation": "finished_face_width_m * tile_height_m",
+        "finish_scope": "tiled_wall_to_ceiling",
+        "openings_in_host_face": false,
+        "net_finish_area_ready": true
+      }
     }
   ],
   "closure_checks": [
@@ -1484,6 +1502,22 @@
       ],
       "net_denominator_ready": false,
       "reason": "three explicitly dimensioned full-height bath tile faces are gross-source-closed; remaining bath face, niche/opening deductions and returns remain unresolved"
+    },
+    {
+      "check_id": "lot16:closure:bath_shower_full_height_tile_face",
+      "component_object_refs": [
+        "lot16:surface:wall_tile:bath_shower_full_height:01"
+      ],
+      "host_wall_ref": "lot16:surface:internal_wall_gross:bath:shower",
+      "object_count": 1,
+      "tile_area_m2": 3.108,
+      "complete_for_this_explicit_face": true,
+      "complete_for_project_wet_area_tile_universe": false,
+      "source_locations": [
+        "architectural:p3:floor_plan:TILED_WALL_TO_CEILING",
+        "architectural:p11:Bath_SHR_Elev:1200_finished_wall_dimension",
+        "architectural:p4-p5:elevations:FSL_68560_to_TP_71150"
+      ]
     }
   ]
 }
