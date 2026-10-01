@@ -1158,7 +1158,9 @@ def _build_internal_partition_rows(
 
         try:
             from pb_wall_fill_internal_partition_evidence import resolve_internal_partition_length_m
-            fitz_mod = getattr(app, "fitz", None) or fitz
+            fitz_mod = getattr(app, "fitz", None)
+            if fitz_mod is None:
+                import fitz as fitz_mod
             doc = fitz_mod.open(doc_path)
             try:
                 pdf_page = doc[page_no - 1]
