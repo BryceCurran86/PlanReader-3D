@@ -41,11 +41,11 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     manifest = load_project_manifest(project / "source_manifest.json")
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
-    assert len(manifest.verified_items) == 15
+    assert len(manifest.verified_items) == 19
 
     eligible = [item for item in manifest.verified_items if item.denominator_eligible]
     excluded = [item for item in manifest.verified_items if not item.denominator_eligible]
-    assert len(eligible) == 12
+    assert len(eligible) == 16
     assert len(excluded) == 3
 
     by_id = {item.item_id: item for item in manifest.verified_items}
@@ -95,6 +95,10 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     assert ceilings["maryborough:surface:ceiling:wc_shower_south"]["expected_area_m2"] == 4.7547
     assert floors["maryborough:surface:floor:pwd"]["expected_area_m2"] == 7.854
     assert ceilings["maryborough:surface:ceiling:pwd"]["expected_area_m2"] == 7.854
+    assert floors["maryborough:surface:floor:airlock"]["expected_area_m2"] == 7.66688
+    assert ceilings["maryborough:surface:ceiling:airlock"]["expected_area_m2"] == 7.66688
+    assert floors["maryborough:surface:floor:laundry"]["expected_area_m2"] == 8.34782
+    assert ceilings["maryborough:surface:ceiling:laundry"]["expected_area_m2"] == 8.34782
     _assert_reference_hash("au_qld_maryborough_service_station")
 
 
@@ -207,3 +211,17 @@ def test_maryborough_pwd_floor_and_ceiling_truth_is_closed():
     assert check["a120_ceiling_finish"] == "WFPB"
     assert check["a120_ceiling_height_mm"] == 2400
     assert check["agreement"] == "PASS"
+
+
+def test_maryborough_airlock_laundry_truth_is_closed():
+    ref = _json(ROOT / "au_qld_maryborough_service_station" / "reference_takeoff.json")
+    checks = {row["room"]: row for row in ref["airlock_laundry_geometry_checks"]}
+    assert checks["AIRLOCK"]["a501_figured_mm"] == [1520, 5044]
+    assert checks["AIRLOCK"]["area_m2"] == 7.66688
+    assert checks["LAUNDRY"]["a501_figured_mm"] == [1655, 5044]
+    assert checks["LAUNDRY"]["area_m2"] == 8.34782
+    for row in checks.values():
+        assert row["a501_floor_finish"] == "FT2"
+        assert row["a120_ceiling_finish"] == "WFPB"
+        assert row["a120_ceiling_height_mm"] == 2400
+        assert row["agreement"] == "PASS"
