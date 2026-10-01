@@ -51,9 +51,38 @@ class DerivedTradeQuantity:
         elif self.unit in ("ea", "count", "nr", "no"):
             self.unit = "No."
 
+    @property
+    def trade_family(self) -> str:
+        """Normalized canonical trade family according to AG-15 taxonomy."""
+        if self.trade_scope in ("linings", "plaster", "plastering"):
+            return "plaster"
+        if self.trade_scope in ("painting", "paint"):
+            return "paint"
+        if self.trade_scope in ("carpentry", "skirting"):
+            if "skirt" in self.element.lower():
+                return "skirting"
+            return "carpentry"
+        if self.trade_scope in ("tiling", "tile"):
+            return "tile"
+        if self.trade_scope in ("waterproofing", "membrane"):
+            return "membrane"
+        if self.trade_scope in ("plumbing", "gutters"):
+            if "gutter" in self.element.lower():
+                return "gutters"
+            return "plumbing"
+        if "capping" in self.element.lower():
+            return "capping"
+        return self.trade_scope
+
+
+def _get_val(obj: Any, key: str, default: Any = None) -> Any:
+    if isinstance(obj, Mapping):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
 
 def derive_wall_trade_quantities(
-    wall: Mapping[str, Any],
+    wall: Any,
     specs: Optional[Mapping[str, Any]] = None,
 ) -> List[DerivedTradeQuantity]:
     """Derive multiple trade quantities from a single physical wall object.
@@ -66,20 +95,20 @@ def derive_wall_trade_quantities(
     - Insulation (cavity/stud insulation batts)
     - Carpentry (base skirting)
     """
-    wall_id = str(wall.get("wall_ref") or wall.get("wall_id") or wall.get("id") or "wall")
-    length_m = float(wall.get("length_m") or 0.0)
-    height_m = float(wall.get("height_m") or 0.0)
-    gross_m2 = float(wall.get("gross_m2") or (length_m * height_m))
-    ded_m2 = float(wall.get("opening_deduction_m2") or 0.0)
-    net_m2 = float(wall.get("net_m2") or max(0.0, gross_m2 - ded_m2))
+    wall_id = str(_get_val(wall, "wall_ref") or _get_val(wall, "wall_id") or _get_val(wall, "id") or "wall")
+    length_m = (wall.length_m() if hasattr(wall, "length_m") and callable(wall.length_m) else float(_get_val(wall, "length_m") or 0.0))
+    height_m = float(_get_val(wall, "height_m") or 0.0)
+    gross_m2 = (wall.gross_area_m2() if hasattr(wall, "gross_area_m2") and callable(wall.gross_area_m2) else float(_get_val(wall, "gross_m2") or (length_m * height_m)))
+    ded_m2 = (wall.total_opening_deductions_m2() if hasattr(wall, "total_opening_deductions_m2") and callable(wall.total_opening_deductions_m2) else float(_get_val(wall, "opening_deduction_m2") or 0.0))
+    net_m2 = (wall.net_area_m2() if hasattr(wall, "net_area_m2") and callable(wall.net_area_m2) else float(_get_val(wall, "net_m2") or max(0.0, gross_m2 - ded_m2)))
 
     if net_m2 <= 0.0 or length_m <= 0.0:
         return []
 
-    is_ext = bool(wall.get("is_external", True))
-    side = str(wall.get("side") or ("External" if is_ext else "Internal"))
+    is_ext = bool(_get_val(wall, "is_external", True))
+    side = str(_get_val(wall, "side") or ("External" if is_ext else "Internal"))
     section = "External" if is_ext else "Internal"
-    substrate = str(wall.get("substrate") or ("Brick veneer" if is_ext else "Plasterboard stud wall"))
+    substrate = str(_get_val(wall, "substrate") or ("Brick veneer" if is_ext else "Plasterboard stud wall"))
 
     specs_map = dict(specs or {})
     results: List[DerivedTradeQuantity] = []
@@ -101,9 +130,9 @@ def derive_wall_trade_quantities(
             notes=f"Structural wall core derived from physical wall {wall_id}.",
         ))
 
-    # 2. Linings (Plasterboard)
-    if specs_map.get("include_linings", True):
-        lining_sub = specs_map.get("lining_substrate", "Plasterboard 10mm")
+    # 2. Linings (Plasterboard / Plaster)
+    if specs_map.get("include_linings", True) or specs_map.get("include_plaster", True):
+        lining_sub = specs_map.get("lining_substrate") or specs_map.get("plaster_substrate", "Plasterboard 10mm")
         results.append(DerivedTradeQuantity(
             trade_scope="linings",
             section="Internal",
@@ -118,8 +147,8 @@ def derive_wall_trade_quantities(
             notes=f"Wall lining derived from physical wall {wall_id}.",
         ))
 
-    # 3. Painting
-    if specs_map.get("include_painting", True):
+    # 3. Painting (Paint)
+    if specs_map.get("include_painting", True) or specs_map.get("include_paint", True):
         paint_sub = specs_map.get("paint_system", "Acrylic 2-coat")
         results.append(DerivedTradeQuantity(
             trade_scope="painting",
@@ -135,7 +164,33 @@ def derive_wall_trade_quantities(
             notes=f"Wall paint finish derived from physical wall {wall_id}.",
         ))
 
-    # 4. Insulation
+    # 4. Tiling (Tile)
+    has_tile = bool(
+        specs_map.get("include_tiling", False)
+        or specs_map.get("include_tile", False)
+        or _get_val(wall, "is_wet_area", False)
+        or "tile" in str(_get_val(wall, "finish") or "").lower()
+        or (hasattr(wall, "face_a") and "tile" in str(getattr(getattr(wall, "face_a", None), "finish", "") or "").lower())
+        or (hasattr(wall, "face_b") and "tile" in str(getattr(getattr(wall, "face_b", None), "finish", "") or "").lower())
+    )
+    if has_tile:
+        tile_sub = specs_map.get("tile_system", "Ceramic wall tiles & waterproofing")
+        tile_area = float(specs_map.get("tile_area_m2") or net_m2)
+        results.append(DerivedTradeQuantity(
+            trade_scope="tiling",
+            section=section,
+            element="Wall tiling / splashback",
+            location=f"{side} · {wall_id}",
+            substrate=tile_sub,
+            quantity=round(tile_area, 2),
+            unit="m2",
+            host_object_id=wall_id,
+            host_object_type="WALL",
+            derivation_formula=f"Wall tile area {tile_area:.2f} m²",
+            notes=f"Wall tiling derived from physical wall {wall_id}.",
+        ))
+
+    # 5. Insulation
     if specs_map.get("include_insulation", is_ext):
         insul_sub = specs_map.get("insulation_system", "R2.5 Thermal Batts")
         results.append(DerivedTradeQuantity(
@@ -152,10 +207,14 @@ def derive_wall_trade_quantities(
             notes=f"Wall insulation derived from physical wall {wall_id}.",
         ))
 
-    # 5. Carpentry Skirting (Base run)
+    # 6. Carpentry Skirting (Base run)
     if specs_map.get("include_skirting", not is_ext):
-        # Base length minus door deductions if present
         door_width = float(specs_map.get("door_width_deduction_m", 0.0))
+        if door_width == 0.0 and hasattr(wall, "openings"):
+            for op in getattr(wall, "openings", []):
+                op_type = str(getattr(op, "object_type", "") or getattr(op, "opening_type", "")).upper()
+                if "DOOR" in op_type:
+                    door_width += float(getattr(op, "width_m", 0.0) or 0.0)
         net_base_lm = max(0.0, length_m - door_width)
         if net_base_lm > 0.0:
             results.append(DerivedTradeQuantity(
@@ -176,23 +235,23 @@ def derive_wall_trade_quantities(
 
 
 def derive_slab_trade_quantities(
-    slab: Mapping[str, Any],
+    slab: Any,
     specs: Optional[Mapping[str, Any]] = None,
 ) -> List[DerivedTradeQuantity]:
     """Derive multiple trade quantities from a single physical slab object.
 
     Trades supported:
-    - Concrete (slab volume m3)
+    - Concrete (slab volume m3 / item)
     - Formwork (edge formwork m2, soffit formwork m2 if suspended)
-    - Waterproofing (vapor barrier membrane m2)
+    - Membrane / Waterproofing (vapor barrier membrane m2)
     - Reinforcement (reinforcing mesh m2 with lap factor)
     - Finishes (concrete sealer / topping m2)
     """
-    slab_id = str(slab.get("floor_id") or slab.get("id") or "slab")
-    area_m2 = float(slab.get("area_m2") or slab.get("specified_floor_area_m2") or 0.0)
-    thickness_m = float(slab.get("thickness_m") or 0.1)
-    perimeter_m = float(slab.get("perimeter_m") or 0.0)
-    is_suspended = bool(slab.get("is_suspended", False))
+    slab_id = str(_get_val(slab, "floor_id") or _get_val(slab, "id") or "slab")
+    area_m2 = (slab.effective_area_m2() if hasattr(slab, "effective_area_m2") and callable(slab.effective_area_m2) else float(_get_val(slab, "area_m2") or _get_val(slab, "specified_floor_area_m2") or 0.0))
+    thickness_m = float(_get_val(slab, "thickness_m") or 0.1)
+    perimeter_m = (slab.perimeter_lm() if hasattr(slab, "perimeter_lm") and callable(slab.perimeter_lm) else float(_get_val(slab, "perimeter_m") or 0.0))
+    is_suspended = bool(_get_val(slab, "is_suspended", False))
 
     if area_m2 <= 0.0:
         return []
@@ -200,7 +259,7 @@ def derive_slab_trade_quantities(
     results: List[DerivedTradeQuantity] = []
     specs_map = dict(specs or {})
 
-    # 1. Concrete Volume (m3)
+    # 1. Concrete Volume (m3 / item)
     volume_m3 = round(area_m2 * thickness_m, 2)
     results.append(DerivedTradeQuantity(
         trade_scope="concrete",
@@ -209,7 +268,7 @@ def derive_slab_trade_quantities(
         location=f"Slab · {slab_id}",
         substrate=specs_map.get("concrete_grade", "25 MPa Concrete"),
         quantity=volume_m3,
-        unit="m3",
+        unit="item",
         host_object_id=slab_id,
         host_object_type="SLAB",
         derivation_formula=f"Area {area_m2:.2f} m² × Thickness {thickness_m:.3f} m",
@@ -249,7 +308,7 @@ def derive_slab_trade_quantities(
             notes=f"Soffit formwork derived from physical slab {slab_id}.",
         ))
 
-    # 4. Vapor Barrier (m2) - for ground-bearing slabs
+    # 4. Vapor Barrier / Membrane (m2) - for ground-bearing slabs
     if not is_suspended and specs_map.get("include_vapor_barrier", True):
         results.append(DerivedTradeQuantity(
             trade_scope="waterproofing",
@@ -287,7 +346,7 @@ def derive_slab_trade_quantities(
 
 
 def derive_roof_trade_quantities(
-    roof: Mapping[str, Any],
+    roof: Any,
     specs: Optional[Mapping[str, Any]] = None,
 ) -> List[DerivedTradeQuantity]:
     """Derive multiple trade quantities from a single physical roof object.
@@ -299,11 +358,11 @@ def derive_roof_trade_quantities(
     - Plumbing Gutters (eave perimeter lm)
     - Roofing Capping / Valleys (ridge/valley lm)
     """
-    roof_id = str(roof.get("roof_id") or roof.get("id") or "roof")
-    plan_area_m2 = float(roof.get("plan_area_m2") or roof.get("specified_floor_area_m2") or 0.0)
-    pitch_deg = float(roof.get("pitch_deg") or 22.5)
-    eave_length_lm = float(roof.get("eave_length_lm") or 0.0)
-    ridge_length_lm = float(roof.get("ridge_length_lm") or 0.0)
+    roof_id = str(_get_val(roof, "roof_id") or _get_val(roof, "id") or "roof")
+    plan_area_m2 = (roof.effective_area_m2() if hasattr(roof, "effective_area_m2") and callable(roof.effective_area_m2) else float(_get_val(roof, "plan_area_m2") or _get_val(roof, "area_m2") or _get_val(roof, "specified_floor_area_m2") or 0.0))
+    pitch_deg = float(_get_val(roof, "pitch_deg") or 22.5)
+    eave_length_lm = (roof.perimeter_lm() if hasattr(roof, "perimeter_lm") and callable(roof.perimeter_lm) else float(_get_val(roof, "eave_length_lm") or 0.0))
+    ridge_length_lm = float(_get_val(roof, "ridge_length_lm") or _get_val(roof, "ridge_length_m") or (round(eave_length_lm * 0.25, 2) if eave_length_lm > 0.0 else 0.0))
 
     if plan_area_m2 <= 0.0:
         return []
@@ -311,13 +370,13 @@ def derive_roof_trade_quantities(
     # True raked surface area = plan area / cos(pitch) = plan area * sec(pitch)
     pitch_rad = math.radians(pitch_deg)
     sec_pitch = 1.0 / math.cos(pitch_rad) if math.cos(pitch_rad) > 0.0 else 1.0
-    raked_area_m2 = round(plan_area_m2 * sec_pitch, 2)
+    raked_area_m2 = (roof.surface_area_m2() if hasattr(roof, "surface_area_m2") and callable(roof.surface_area_m2) else round(plan_area_m2 * sec_pitch, 2))
 
     results: List[DerivedTradeQuantity] = []
     specs_map = dict(specs or {})
 
     # 1. Roofing Cladding (m2)
-    cladding_sub = specs_map.get("roof_cladding", "Colorbond Corrugated Sheet")
+    cladding_sub = specs_map.get("roof_cladding") or _get_val(roof, "substrate") or "Colorbond Corrugated Sheet"
     results.append(DerivedTradeQuantity(
         trade_scope="roofing",
         section="Roof",
@@ -387,7 +446,7 @@ def derive_roof_trade_quantities(
 
 
 def derive_space_trade_quantities(
-    space: Mapping[str, Any],
+    space: Any,
     specs: Optional[Mapping[str, Any]] = None,
     doors: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> List[DerivedTradeQuantity]:
@@ -399,9 +458,13 @@ def derive_space_trade_quantities(
     - Skirting (perimeter minus door widths lm)
     - Ceiling Cornice (perimeter lm)
     """
-    space_id = str(space.get("room_number") or space.get("name") or space.get("id") or "space")
-    floor_area_m2 = float(space.get("specified_floor_area_m2") or space.get("area_m2") or 0.0)
-    perimeter_m = float(space.get("perimeter_m") or 0.0)
+    space_id = str(_get_val(space, "room_number") or _get_val(space, "name") or _get_val(space, "id") or "space")
+    floor_area_m2 = (
+        space.effective_floor_area_m2() if hasattr(space, "effective_floor_area_m2") and callable(space.effective_floor_area_m2)
+        else space.effective_area_m2() if hasattr(space, "effective_area_m2") and callable(space.effective_area_m2)
+        else float(_get_val(space, "specified_floor_area_m2") or _get_val(space, "area_m2") or 0.0)
+    )
+    perimeter_m = (space.perimeter_lm() if hasattr(space, "perimeter_lm") and callable(space.perimeter_lm) else float(_get_val(space, "perimeter_m") or 0.0))
 
     if floor_area_m2 <= 0.0:
         return []
@@ -443,7 +506,7 @@ def derive_space_trade_quantities(
 
     # 3. Skirting (lm) = perimeter minus door openings
     if perimeter_m > 0.0 and specs_map.get("include_skirting", True):
-        door_deduction_m = sum(float(d.get("width_m") or 0.9) for d in (doors or []))
+        door_deduction_m = sum(float(_get_val(d, "width_m", 0.9)) for d in (doors or []))
         skirting_lm = round(max(0.0, perimeter_m - door_deduction_m), 2)
         skirting_sub = specs_map.get("skirting_profile", "Timber 67mm Skirting")
         results.append(DerivedTradeQuantity(
@@ -485,13 +548,15 @@ def to_takeoff_rows(
     quantities: Sequence[DerivedTradeQuantity],
     source_page: str = "1",
     source_prefix: str = SOURCE_PREFIX,
-) -> List[Tuple[Any, ...]]:
+    source_document: Optional[str] = None,
+    as_dicts: bool = False,
+) -> List[Any]:
     """Convert a sequence of DerivedTradeQuantity objects into canonical 21-field takeoff rows."""
-    rows: List[Tuple[Any, ...]] = []
+    rows: List[Any] = []
     stamp = ""
 
     for q in quantities:
-        # Map to canonical AUTO_ROW_ROLES ("external_wall", "internal_partition", "wall_finish", "floor_area", "")
+        # Map to canonical AUTO_ROW_ROLES ("external_wall", "internal_partition", "wall_finish", "floor_area", "roof_area", "ceiling_area", "")
         if q.host_object_type == "WALL":
             if q.trade_scope == "masonry":
                 role = "external_wall" if q.section == "External" else "internal_partition"
@@ -499,14 +564,21 @@ def to_takeoff_rows(
                 role = "wall_finish"
         elif q.host_object_type in ("SLAB", "SPACE") and q.trade_scope in ("concrete", "finishes"):
             role = "floor_area"
+        elif q.host_object_type == "ROOF" and q.trade_scope in ("roofing",):
+            role = "roof_area"
+        elif q.host_object_type == "SPACE" and q.trade_scope in ("linings", "plastering"):
+            role = "ceiling_area"
         else:
             role = ""
 
         source_ref = f"{source_prefix} · {q.trade_scope}:{q.host_object_id}"
         notes = f"{q.notes} Derivation: {q.derivation_formula}."
+        if source_document and "Doc:" not in notes:
+            notes += f" [Doc: {source_document}]"
+
         inclusion = "INCLUSION" if role == "floor_area" else "PROVISIONAL"
 
-        row = (
+        row_tuple = (
             int(workspace_id),
             q.section,
             q.element,
@@ -516,7 +588,7 @@ def to_takeoff_rows(
             q.quantity,
             q.unit,
             q.status,                # quantity_status
-            source_page,
+            str(source_page),
             source_ref,
             inclusion,               # inclusion_status
             2 if "paint" in q.trade_scope else 1,  # coats
@@ -529,6 +601,59 @@ def to_takeoff_rows(
             stamp,
             stamp,
         )
-        rows.append(row)
+        if as_dicts:
+            rows.append(dict(zip(takeoff_contract.CORE_FIELDS, row_tuple)))
+        else:
+            rows.append(row_tuple)
 
     return rows
+
+
+def derive_multi_trade_takeoff_from_canonical_model(
+    model: Any,
+    workspace_id: int,
+    source_document: Optional[str] = None,
+    specs: Optional[Mapping[str, Any]] = None,
+    as_dicts: bool = True,
+) -> List[Any]:
+    """Derives multi-trade takeoff rows directly from a CanonicalProject or building model
+    without duplicate geometric extraction or re-extraction passes.
+
+    Reuses:
+    - Walls -> masonry, plaster, paint, tile, insulation, skirting
+    - Floors/Slabs -> concrete, formwork, reinforcement, membrane
+    - Roofs -> roofing, insulation, capping, gutters
+    - Spaces -> floor finish, ceiling lining, skirting, cornice
+    """
+    quantities: List[DerivedTradeQuantity] = []
+
+    # 1. Walls
+    walls = model.all_walls() if hasattr(model, "all_walls") and callable(model.all_walls) else (_get_val(model, "walls") or [])
+    for w in walls:
+        quantities.extend(derive_wall_trade_quantities(w, specs=specs))
+
+    # 2. Floors / Slabs
+    floors = model.all_floors() if hasattr(model, "all_floors") and callable(model.all_floors) else (_get_val(model, "floors") or [])
+    for fl in floors:
+        quantities.extend(derive_slab_trade_quantities(fl, specs=specs))
+
+    # 3. Roofs
+    roofs = model.all_roofs() if hasattr(model, "all_roofs") and callable(model.all_roofs) else (_get_val(model, "roofs") or [])
+    for rf in roofs:
+        quantities.extend(derive_roof_trade_quantities(rf, specs=specs))
+
+    # 4. Spaces
+    spaces = model.all_spaces() if hasattr(model, "all_spaces") and callable(model.all_spaces) else (_get_val(model, "spaces") or [])
+    for sp in spaces:
+        quantities.extend(derive_space_trade_quantities(sp, specs=specs))
+
+    source_page = "1"
+    return to_takeoff_rows(
+        workspace_id=workspace_id,
+        quantities=quantities,
+        source_page=source_page,
+        source_prefix="PB Cross-Trade Geometry Reuse",
+        source_document=source_document,
+        as_dicts=as_dicts,
+    )
+

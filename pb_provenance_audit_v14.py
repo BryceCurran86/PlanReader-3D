@@ -148,7 +148,7 @@ def audit_takeoff_row_provenance(
                 break
     # In absence of explicit document text, if source_reference is an authenticated canonical BIM producer with ID,
     # and source_page is present, the row is source-grounded.
-    if not has_doc and (src_ref.startswith("PB Canonical BIM") or src_ref.startswith("PB Auto Geometry") or src_ref.startswith("PB DPC")):
+    if not has_doc and (src_ref.startswith("PB Canonical BIM") or src_ref.startswith("PB Auto Geometry") or src_ref.startswith("PB DPC") or src_ref.startswith("PB Cross-Trade")):
         has_doc = True
         doc_val = "canonical_producer_authority"
 
@@ -216,7 +216,7 @@ def audit_takeoff_row_provenance(
     # 5. LINK 5: CANONICAL OBJECT
     has_canon = False
     canon_val = ""
-    if any(p in src_ref for p in ("PB Canonical BIM", "PB Auto Geometry", "PB DPC Substructure", "PB Takeoff Studio", "PB Manual Polygon")):
+    if any(p in src_ref for p in ("PB Canonical BIM", "PB Auto Geometry", "PB DPC Substructure", "PB Takeoff Studio", "PB Manual Polygon", "PB Cross-Trade Geometry Reuse")):
         has_canon = True
         canon_val = src_ref.split("·")[0].strip()
     elif role and role in {"external_wall", "internal_partition", "wall_finish", "door", "window", "opening", "opening_trim", "floor_area", "ceiling_area", "roof_area", "column", "structural_member", "finish_surface", "dpc_substructure", "balustrade", "parapet", "soffit", "balcony"}:
