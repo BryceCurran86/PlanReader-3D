@@ -71,6 +71,7 @@ class VerifiedTakeoffItemV2:
     item_id: str
     project_id: str
     description: str
+    trade_category: str
     unit: str
     expected_quantity: float
     tolerance_fraction: float
@@ -82,6 +83,9 @@ class VerifiedTakeoffItemV2:
         object.__setattr__(self, "item_id", _required(self.item_id, "item_id"))
         object.__setattr__(self, "project_id", _required(self.project_id, "project_id"))
         object.__setattr__(self, "description", _required(self.description, "description"))
+        object.__setattr__(
+            self, "trade_category", _required(self.trade_category, "trade_category").lower()
+        )
         object.__setattr__(self, "unit", _unit(self.unit))
         if not math.isfinite(self.expected_quantity) or self.expected_quantity < 0:
             raise ValueError("expected_quantity must be finite and non-negative")
@@ -100,6 +104,7 @@ class VerifiedTakeoffItemV2:
 @dataclass(frozen=True)
 class ProducedTakeoffItemV2:
     quantity_id: str
+    trade_category: str
     value: float | None
     unit: str
     object_refs: tuple[str, ...]
@@ -108,6 +113,9 @@ class ProducedTakeoffItemV2:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "quantity_id", _required(self.quantity_id, "quantity_id"))
+        object.__setattr__(
+            self, "trade_category", _required(self.trade_category, "trade_category").lower()
+        )
         object.__setattr__(self, "unit", _unit(self.unit))
         object.__setattr__(self, "object_refs", _tuple(self.object_refs, "object_refs"))
         if self.value is not None and (not math.isfinite(self.value) or self.value < 0):
@@ -116,6 +124,7 @@ class ProducedTakeoffItemV2:
 class ProjectBenchmarkManifestV2:
     project_id: str
     status: str
+    source_package_complete: bool
     source_documents: tuple[SourceDocumentV2, ...]
     reference_takeoff_documents: tuple[SourceDocumentV2, ...]
     verified_items: tuple[VerifiedTakeoffItemV2, ...]
@@ -128,16 +137,33 @@ class ProjectBenchmarkManifestV2:
         if status not in _PROJECT_STATES:
             raise ValueError(f"unknown project status: {status}")
         object.__setattr__(self, "status", status)
+        if type(self.source_package_complete) is not bool:
+            raise TypeError("source_package_complete must be bool")
         if any(item.project_id != project_id for item in self.verified_items):
             raise ValueError("verified item project_id must match manifest")
         ids = [item.item_id for item in self.verified_items]
         if len(ids) != len(set(ids)):
             raise ValueError("verified item ids must be unique")
+        denominator_keys = [
+            (item.trade_category, item.unit, item.expected_object_refs)
+            for item in self.verified_items
+            if item.denominator_eligible
+        ]
+        if len(denominator_keys) != len(set(denominator_keys)):
+            raise ValueError(
+                "denominator items must have unique trade/unit/object identity"
+            )
         if status == PROJECT_VERIFIED:
+            if not self.source_package_complete:
+                raise ValueError("VERIFIED project requires complete source package")
             if not self.source_documents or not self.reference_takeoff_documents:
                 raise ValueError("VERIFIED project requires source and reference takeoff documents")
             if not self.verified_items:
                 raise ValueError("VERIFIED project requires verified takeoff items")
+            if not any(item.denominator_eligible for item in self.verified_items):
+                raise ValueError(
+                    "VERIFIED project requires at least one denominator-eligible item"
+                )
         if status != PROJECT_VERIFIED and not self.reason_codes:
             raise ValueError("non-VERIFIED project requires reason_codes")
 
@@ -208,6 +234,9 @@ def evaluate_project_v2(
             item_results=(),
             unsupported_quantity_ids=(),
         )
+    quantity_ids = [row.quantity_id for row in produced]
+    if len(quantity_ids) != len(set(quantity_ids)):
+        raise ValueError("produced quantity ids must be unique")
     consumed: set[str] = set()
     related: set[str] = set()
     results: list[ItemResultV2] = []
@@ -222,7 +251,12 @@ def evaluate_project_v2(
 
         compatible = tuple(
             row for row in produced
-            if row.unit == item.unit and not row.abstained and row.lineage_ok
+            if (
+                row.trade_category == item.trade_category
+                and row.unit == item.unit
+                and not row.abstained
+                and row.lineage_ok
+            )
         )
         exact = tuple(row for row in compatible if set(row.object_refs) == expected_refs)
         overlap = tuple(row for row in compatible if set(row.object_refs) & expected_refs)
@@ -291,6 +325,8 @@ def evaluate_suite_v2(
     produced_by_project: dict[str, Iterable[ProducedTakeoffItemV2]],
     *,
     required_project_count: int = 5,
+    evaluated_source_sha256s_by_project: dict[str, Iterable[str]] | None = None,
+    reconciliation_complete_by_project: dict[str, bool] | None = None,
 ) -> SuiteResultV2:
     manifest_tuple = tuple(manifests)
     if len({manifest.project_id for manifest in manifest_tuple}) != len(manifest_tuple):
@@ -306,11 +342,34 @@ def evaluate_suite_v2(
     within = sum(result.matched_within_tolerance for result in results)
     extras = sum(result.unsupported_extra for result in results)
     reasons: list[str] = []
+    run_blocked = False
+    source_hashes = evaluated_source_sha256s_by_project or {}
+    reconciliation = reconciliation_complete_by_project or {}
     if len(manifest_tuple) != required_project_count:
         reasons.append("required_project_count_not_met")
     for manifest in manifest_tuple:
         if manifest.status != PROJECT_VERIFIED:
             reasons.extend(f"{manifest.project_id}:{reason}" for reason in manifest.reason_codes)
+            continue
+        if manifest.project_id not in produced_by_project:
+            reasons.append(f"{manifest.project_id}:extraction_not_complete")
+            run_blocked = True
+        expected_hashes = tuple(sorted(doc.sha256 for doc in manifest.source_documents))
+        actual_hashes = tuple(
+            sorted(
+                {
+                    str(value).strip().lower()
+                    for value in source_hashes.get(manifest.project_id, ())
+                    if str(value).strip()
+                }
+            )
+        )
+        if actual_hashes != expected_hashes:
+            reasons.append(f"{manifest.project_id}:source_hashes_not_verified")
+            run_blocked = True
+        if reconciliation.get(manifest.project_id) is not True:
+            reasons.append(f"{manifest.project_id}:object_reconciliation_incomplete")
+            run_blocked = True
 
     complete = (
         len(manifest_tuple) == required_project_count
@@ -318,16 +377,22 @@ def evaluate_suite_v2(
         and not reasons
     )
     publication_status = "PUBLISHED" if complete else "UNPUBLISHED"
-    if verified == required_project_count:
+    if complete:
         development_status = "COMPLETE"
+    elif verified == required_project_count:
+        development_status = "VERIFIED_MANIFESTS_RUN_INCOMPLETE"
     elif verified == required_project_count - 1:
         development_status = f"PROVISIONAL_{verified}_OF_{required_project_count}"
     else:
         development_status = f"INCOMPLETE_{verified}_OF_{required_project_count}"
 
-    coverage = within / denominator if denominator else None
+    coverage = within / denominator if denominator and not run_blocked else None
     adjusted_denominator = denominator + extras
-    adjusted = within / adjusted_denominator if adjusted_denominator else None
+    adjusted = (
+        within / adjusted_denominator
+        if adjusted_denominator and not run_blocked
+        else None
+    )
     return SuiteResultV2(
         publication_status=publication_status,
         development_status=development_status,
