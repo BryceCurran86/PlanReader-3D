@@ -47,6 +47,11 @@
       "evidence": "Nine explicit internal 870 mm room-access openings are closed from source width labels and the 2100 mm FSL-to-JL height datum; combined opening area 16.443 m2. External 870 service-door labels are excluded and remaining internal joinery/open archways stay unresolved."
     },
     {
+      "proof": "source-closed Lot16 ceiling-plane subset verified",
+      "status": "PASS",
+      "evidence": "Garage flat ceiling plus ensuite and WIR raked ceiling planes are independently source-closed for 49.340066 m2 total. Bed 1 and the remaining project ceiling universe stay unresolved."
+    },
+    {
       "proof": "full project surface universe complete",
       "status": "FAIL",
       "evidence": "Only the independently closed 13-opening subset is promoted; multiple in-scope families remain unresolved."
@@ -68,5 +73,16 @@
     "joinery_height_m": 2.1,
     "complete_for_explicit_internal_870_room_access_openings": true,
     "complete_for_all_internal_wall_openings": false
+  },
+  "ceiling_plane_closure_summary": {
+    "closure_check_ids": [
+      "lot16:closure:garage_flat_ceiling_plane",
+      "lot16:closure:ensuite_wir_raked_ceiling_planes"
+    ],
+    "verified_ceiling_plane_count": 3,
+    "verified_area_m2": 49.340066,
+    "source_closed_for_promoted_planes": true,
+    "complete_for_project_ceiling_universe": false,
+    "bed1_raked_ceiling_promoted": false
   }
 }
