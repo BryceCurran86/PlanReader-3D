@@ -121,6 +121,25 @@ def test_partial_expected_surface_closure_is_partial():
     assert result.unsupported_extra == 0
 
 
+def test_extra_overlapping_claim_is_unsupported_when_exact_match_exists():
+    result = evaluate_project_v2(
+        verified_manifest(item()),
+        (
+            produced("q-exact", value=100.0),
+            produced(
+                "q-extra",
+                refs=("surface-a", "surface-unverified"),
+                value=50.0,
+            ),
+        ),
+    )
+    assert result.item_results[0].state == MATCHED_WITHIN_TOLERANCE
+    assert result.unsupported_extra == 1
+    assert result.unsupported_quantity_ids == ("q-extra",)
+    assert result.coverage_accuracy == pytest.approx(1.0)
+    assert result.precision_adjusted_accuracy == pytest.approx(0.5)
+
+
 def test_duplicate_exact_surface_claims_are_unresolved():
     result = evaluate_project_v2(
         verified_manifest(item()),
