@@ -1397,3 +1397,35 @@ def test_lot16_known_niche_flat_tile_faces_close_without_guessing_returns():
     assert check["ensuite_raked_extension_resolved"] is False
     assert check["niche_returns_resolved"] is False
     assert check["complete_for_project_wet_area_tile_universe"] is False
+
+
+def test_lot16_niche_free_explicit_tile_faces_are_closed_to_source_datum():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    bath = by_ref["lot16:surface:wall_tile:bath_elev1_net"]
+    ens = by_ref["lot16:surface:wall_tile:ensuite_elev1_topplate_net"]
+
+    assert bath["expected_quantity"] == pytest.approx(3.108)
+    assert bath["attributes"]["openings_in_host_face"] is False
+    assert bath["attributes"]["niche_in_host_face"] is False
+    assert bath["attributes"]["net_finish_area_ready"] is True
+
+    assert ens["expected_quantity"] == pytest.approx(4.7138)
+    assert ens["attributes"]["openings_in_host_face"] is False
+    assert ens["attributes"]["niche_in_host_face"] is False
+    assert ens["attributes"]["raked_extension_above_top_plate_included"] is False
+    assert ens["attributes"]["top_plate_flat_portion_ready"] is True
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:niche_free_explicit_tile_faces"
+    )
+    assert check["object_count"] == 2
+    assert check["component_sum_m2"] == pytest.approx(7.8218)
+    assert check["bath_face_complete"] is True
+    assert check["ensuite_top_plate_portion_complete"] is True
+    assert check["ensuite_raked_extension_resolved"] is False
+    assert check["complete_for_project_wet_area_tile_universe"] is False
