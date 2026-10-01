@@ -74,8 +74,11 @@ class VerifiedTakeoffItemV2:
     trade_category: str
     unit: str
     expected_quantity: float
+    tolerance_policy_id: str
     tolerance_fraction: float
     expected_object_refs: tuple[str, ...]
+    source_document_refs: tuple[str, ...]
+    source_location_refs: tuple[str, ...]
     denominator_eligible: bool = True
     verification_status: str = PROJECT_VERIFIED
 
@@ -89,12 +92,25 @@ class VerifiedTakeoffItemV2:
         object.__setattr__(self, "unit", _unit(self.unit))
         if not math.isfinite(self.expected_quantity) or self.expected_quantity < 0:
             raise ValueError("expected_quantity must be finite and non-negative")
+        object.__setattr__(
+            self,
+            "tolerance_policy_id",
+            _required(self.tolerance_policy_id, "tolerance_policy_id"),
+        )
         if not math.isfinite(self.tolerance_fraction) or not 0 <= self.tolerance_fraction <= 1:
             raise ValueError("tolerance_fraction must be between 0 and 1")
         refs = _tuple(self.expected_object_refs, "expected_object_refs")
+        source_docs = _tuple(self.source_document_refs, "source_document_refs")
+        source_locations = _tuple(self.source_location_refs, "source_location_refs")
         if self.denominator_eligible and not refs:
             raise ValueError("denominator-eligible takeoff item requires expected_object_refs")
         object.__setattr__(self, "expected_object_refs", refs)
+        object.__setattr__(self, "source_document_refs", source_docs)
+        object.__setattr__(self, "source_location_refs", source_locations)
+        if self.denominator_eligible and (not source_docs or not source_locations):
+            raise ValueError(
+                "denominator-eligible item requires reference document and location lineage"
+            )
         status = _required(self.verification_status, "verification_status").upper()
         if status != PROJECT_VERIFIED:
             raise ValueError("takeoff items entering the denominator must be independently VERIFIED")
@@ -144,6 +160,24 @@ class ProjectBenchmarkManifestV2:
         ids = [item.item_id for item in self.verified_items]
         if len(ids) != len(set(ids)):
             raise ValueError("verified item ids must be unique")
+        source_names = [doc.name for doc in self.source_documents]
+        if len(source_names) != len(set(source_names)):
+            raise ValueError("source document names must be unique")
+        source_hashes = [doc.sha256 for doc in self.source_documents]
+        if len(source_hashes) != len(set(source_hashes)):
+            raise ValueError("source document hashes must be unique")
+        reference_names = [doc.name for doc in self.reference_takeoff_documents]
+        if len(reference_names) != len(set(reference_names)):
+            raise ValueError("reference takeoff document names must be unique")
+        reference_hashes = [doc.sha256 for doc in self.reference_takeoff_documents]
+        if len(reference_hashes) != len(set(reference_hashes)):
+            raise ValueError("reference takeoff document hashes must be unique")
+        reference_name_set = set(reference_names)
+        for item in self.verified_items:
+            if not set(item.source_document_refs).issubset(reference_name_set):
+                raise ValueError(
+                    "verified item source_document_refs must name reference takeoff documents"
+                )
         denominator_keys = [
             (item.trade_category, item.unit, item.expected_object_refs)
             for item in self.verified_items
