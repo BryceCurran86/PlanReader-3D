@@ -13,7 +13,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_structural_member_authority import StructuralMemberResolution
 
 
-LIVE_CANONICAL_STRUCTURAL_MEMBER_SCHEMA_VERSION = "1.0.0"
+LIVE_CANONICAL_STRUCTURAL_MEMBER_SCHEMA_VERSION = "1.1.0"
 LIVE_CANONICAL_STRUCTURAL_MEMBER_RESOLVED = (
     "live_canonical_structural_members_resolved"
 )
@@ -35,6 +35,13 @@ class LiveCanonicalStructuralMemberObject:
     definition_ids: tuple[str, ...]
     section_specs: tuple[str, ...]
     provenance: Mapping[str, object]
+    source_primitive_bboxes: tuple[
+        tuple[str, tuple[float, float, float, float]], ...
+    ] = ()
+    plan_bbox_source_pts: Optional[tuple[float, float, float, float]] = None
+    plan_geometry_page_id: Optional[str] = None
+    plan_geometry_complete: bool = False
+    geometry_coordinate_space: Optional[str] = None
     geometry_complete: bool = False
     commercial_quantity_authority: bool = False
     schema_version: str = LIVE_CANONICAL_STRUCTURAL_MEMBER_SCHEMA_VERSION
@@ -52,6 +59,18 @@ class LiveCanonicalStructuralMemberObject:
             "definition_ids": list(self.definition_ids),
             "section_specs": list(self.section_specs),
             "provenance": dict(self.provenance),
+            "source_primitive_bboxes": [
+                [primitive_id, list(bbox)]
+                for primitive_id, bbox in self.source_primitive_bboxes
+            ],
+            "plan_bbox_source_pts": (
+                list(self.plan_bbox_source_pts)
+                if self.plan_bbox_source_pts is not None
+                else None
+            ),
+            "plan_geometry_page_id": self.plan_geometry_page_id,
+            "plan_geometry_complete": self.plan_geometry_complete,
+            "geometry_coordinate_space": self.geometry_coordinate_space,
             "geometry_complete": self.geometry_complete,
             "commercial_quantity_authority": self.commercial_quantity_authority,
             "schema_version": self.schema_version,
@@ -61,6 +80,52 @@ class LiveCanonicalStructuralMemberObject:
 class LiveCanonicalStructuralMemberProjection:
     objects: tuple[LiveCanonicalStructuralMemberObject, ...]
     reason_codes: tuple[str, ...]
+
+
+def _plan_geometry(
+    *,
+    source_primitive_ids: tuple[str, ...],
+    source_primitive_bboxes: tuple[
+        tuple[str, tuple[float, float, float, float]], ...
+    ],
+    page_ids: tuple[str, ...],
+) -> tuple[
+    tuple[tuple[str, tuple[float, float, float, float]], ...],
+    Optional[tuple[float, float, float, float]],
+    Optional[str],
+    bool,
+]:
+    geometry_by_id = {
+        str(primitive_id): tuple(float(value) for value in bbox)
+        for primitive_id, bbox in source_primitive_bboxes
+    }
+    primitive_ids = tuple(
+        dict.fromkeys(
+            str(value)
+            for value in source_primitive_ids
+            if str(value)
+        )
+    )
+    if (
+        not primitive_ids
+        or len(page_ids) != 1
+        or set(geometry_by_id) != set(primitive_ids)
+    ):
+        return tuple(sorted(geometry_by_id.items())), None, None, False
+
+    boxes = tuple(geometry_by_id[primitive_id] for primitive_id in primitive_ids)
+    union_bbox = (
+        min(box[0] for box in boxes),
+        min(box[1] for box in boxes),
+        max(box[2] for box in boxes),
+        max(box[3] for box in boxes),
+    )
+    return (
+        tuple(sorted(geometry_by_id.items())),
+        union_bbox,
+        str(page_ids[0]),
+        True,
+    )
 
 
 def project_structural_member_resolution(
@@ -105,6 +170,18 @@ def project_structural_member_resolution(
                 }
             )
         )
+        (
+            source_primitive_bboxes,
+            plan_bbox_source_pts,
+            plan_geometry_page_id,
+            plan_geometry_complete,
+        ) = _plan_geometry(
+            source_primitive_ids=tuple(member.source_primitive_ids),
+            source_primitive_bboxes=tuple(
+                getattr(member, "source_primitive_bboxes", ()) or ()
+            ),
+            page_ids=tuple(member.page_ids),
+        )
         provenance = {
             "selector_document_id": resolution.selector.document_id,
             "selector_revision_id": resolution.selector.revision_id,
@@ -126,6 +203,16 @@ def project_structural_member_resolution(
                 definition_ids=tuple(member.definition_ids),
                 section_specs=section_specs,
                 provenance=provenance,
+                source_primitive_bboxes=source_primitive_bboxes,
+                plan_bbox_source_pts=plan_bbox_source_pts,
+                plan_geometry_page_id=plan_geometry_page_id,
+                plan_geometry_complete=plan_geometry_complete,
+                geometry_coordinate_space=(
+                    "source_page_points"
+                    if plan_geometry_complete
+                    else None
+                ),
+                geometry_complete=False,
             )
         )
 
