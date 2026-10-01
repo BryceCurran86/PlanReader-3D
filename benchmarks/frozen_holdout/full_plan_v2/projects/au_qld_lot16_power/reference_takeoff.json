@@ -2,33 +2,12 @@
   "schema_version": "2.0",
   "project_id": "au_qld_lot16_power",
   "status": "INCOMPLETE",
-  "source_package_complete": true,
-  "source_documents": [
-    {
-      "name": "1. Construction Plans - Lot 16 Power (REV E).pdf",
-      "role": "architectural_drawings",
-      "sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
-      "size_bytes": 7141615,
-      "page_count": 13
-    },
-    {
-      "name": "4. Structural Engineering - Lot 16 Power.pdf",
-      "role": "structural_drawings",
-      "sha256": "b40259589dd39a46e45d25e145cfa789d9a9415b50613ebc4fee01dceab6b3d6",
-      "size_bytes": 3590638,
-      "page_count": 11
-    }
-  ],
-  "reference_takeoff_documents": [
-    {
-      "name": "reference_takeoff.json",
-      "role": "independent_verified_reference_takeoff",
-      "sha256": "30b118e56395c61c7499e7305d203b77d4b6e62cd1df3977c3112a4920070a85",
-      "size_bytes": 9038,
-      "page_count": null
-    }
-  ],
-  "verified_takeoff_items": [
+  "truth_policy": "verified-only core from source drawings and independently closed dimensions; never PlanReader output",
+  "source_plan": {
+    "name": "1. Construction Plans - Lot 16 Power (REV E).pdf",
+    "sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+  },
+  "items": [
     {
       "item_id": "lot16-0615-sgw-01-area",
       "description": "0615 SGW area",
@@ -294,13 +273,13 @@
       "verification_status": "VERIFIED"
     }
   ],
-  "reason_codes": [
-    "custom_front_glazing_measure_on_site_unresolved",
-    "remaining_internal_wall_faces_not_closed",
-    "external_wall_faces_and_cladding_not_closed",
-    "ceiling_surface_universe_not_closed",
-    "wet_area_wall_tiling_not_closed",
-    "structural_member_universe_not_closed",
-    "roof_surface_final_crosscheck_blocked_by_missing_engineering_stormwater_plan"
-  ]
+  "external_opening_reconciliation": {
+    "verified_dimensioned_opening_count": 13,
+    "verified_dimensioned_opening_area_m2": 37.584,
+    "dimensioned_subset_status": "SOURCE_CLOSED",
+    "full_external_opening_universe_complete": false,
+    "unresolved": [
+      "custom front glazing explicitly marked MEASURE ON SITE; no independent source dimension was established"
+    ]
+  }
 }

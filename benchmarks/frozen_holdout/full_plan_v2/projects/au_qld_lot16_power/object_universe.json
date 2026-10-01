@@ -1,0 +1,307 @@
+{
+  "schema_version": "v2-object-universe-1.0",
+  "project_id": "au_qld_lot16_power",
+  "scope": "verified-only core",
+  "external_openings": [
+    {
+      "object_ref": "lot16:opening:p3:0615_sgw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "0615 SGW",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 0.9,
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 0.6,
+        "width_m": 1.5,
+        "source_bbox_pdf_pt": [
+          445.3,
+          534.1,
+          473.1,
+          541.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:0615_SGW"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:0621_sgw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "0621 SGW",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.26,
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 0.6,
+        "width_m": 2.1,
+        "source_bbox_pdf_pt": [
+          364.6,
+          196.1,
+          392.4,
+          203.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:0621_SGW"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:0630_fg:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "0630 fixed glass",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.8,
+      "attributes": {
+        "opening_type": "fixed_glass",
+        "height_m": 0.6,
+        "width_m": 3,
+        "source_bbox_pdf_pt": [
+          814,
+          180.1,
+          836.3,
+          187.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:0630_fixed_glass"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:0906_sgw_obs:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "0906 SGW obs",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 0.54,
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 0.9,
+        "width_m": 0.6,
+        "source_bbox_pdf_pt": [
+          485.3,
+          180.1,
+          523.8,
+          187.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:0906_SGW_obs"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:1215_sgw_obs:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1215 SGW obs",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.8,
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 1.2,
+        "width_m": 1.5,
+        "source_bbox_pdf_pt": [
+          622.4,
+          430.7,
+          661,
+          438.5
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:1215_SGW_obs"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:1218_sgw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1218 SGW #1",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.16,
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 1.2,
+        "width_m": 1.8,
+        "source_bbox_pdf_pt": [
+          545.5,
+          180.1,
+          573.3,
+          187.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:1218_SGW_#1"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:1218_sgw:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1218 SGW #2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.16,
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 1.2,
+        "width_m": 1.8,
+        "source_bbox_pdf_pt": [
+          655.1,
+          180.1,
+          682.9,
+          187.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:1218_SGW_#2"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:2124_corner_stack:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2124 corner stack opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 5.04,
+      "attributes": {
+        "opening_type": "corner_stacker_door",
+        "height_m": 2.1,
+        "width_m": 2.4,
+        "source_bbox_pdf_pt": [
+          896.5,
+          271.6,
+          933.8,
+          277.3
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:2124_corner_stack_opening"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:2127_stacker:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2127 stacker door",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 5.67,
+      "attributes": {
+        "opening_type": "stacker_door",
+        "height_m": 2.1,
+        "width_m": 2.7,
+        "source_bbox_pdf_pt": [
+          783.6,
+          435.2,
+          813.6,
+          440.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:2127_stacker_door"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:2148_panel_lift:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2148 panel lift door",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 10.08,
+      "attributes": {
+        "opening_type": "panel_lift_door",
+        "height_m": 2.1,
+        "width_m": 4.8,
+        "source_bbox_pdf_pt": [
+          414.9,
+          421.4,
+          420.6,
+          454.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:2148_panel_lift_door"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:1200_entry_hinged:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 front entry hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.52,
+      "attributes": {
+        "opening_type": "hinged_external_entry_door",
+        "height_m": 2.1,
+        "width_m": 1.2,
+        "quantity_basis": "explicit floor-plan opening width x elevation FSL-to-joinery-line height"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:ENTRY_PORCH_1200_opening",
+        "architectural:p4-p5:elevations:FSL_to_JL_2100"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:0870_laundry_external:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "870 laundry external hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_external_door",
+        "height_m": 2.1,
+        "width_m": 0.87,
+        "quantity_basis": "explicit floor-plan perimeter door width x elevation FSL-to-joinery-line height"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:LDRY_external_870",
+        "architectural:p5:elevation_4:door_between_1215_SGW_obs_and_2127_STACKER",
+        "architectural:p4-p5:elevations:FSL_to_JL_2100"
+      ]
+    },
+    {
+      "object_ref": "lot16:opening:p3:0870_garage_personnel:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "870 garage personnel external hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_external_personnel_door",
+        "height_m": 2.1,
+        "width_m": 0.87,
+        "quantity_basis": "explicit floor-plan perimeter door width x elevation FSL-to-joinery-line height"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:GARAGE_external_870",
+        "architectural:p4-p5:elevations:FSL_to_JL_2100"
+      ]
+    }
+  ],
+  "dimensioned_external_opening_subset_complete": true,
+  "external_opening_universe_complete": false,
+  "unresolved_external_openings": [
+    {
+      "object_ref": "lot16:opening:p3:custom_front_glazing_measure_on_site",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "classification": "UNRESOLVED_CANDIDATE",
+      "denominator_core": false,
+      "reason": "Source explicitly marks custom front glazing MEASURE ON SITE; no independent source dimension is established."
+    }
+  ]
+}

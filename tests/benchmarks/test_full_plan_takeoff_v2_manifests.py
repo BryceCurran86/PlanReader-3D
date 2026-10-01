@@ -35,10 +35,11 @@ def test_all_four_configured_projects_are_source_complete_but_not_falsely_verifi
     assert all(m["source_package_complete"] for m in manifests)
     assert all(m["status"] == "INCOMPLETE" for m in manifests)
     by_id = {m["project_id"]: m for m in manifests}
-    for project_id in ("au_qld_lot16_power", "au_qld_3laurel"):
+    for project_id in ("au_qld_3laurel",):
         assert "reference_takeoff_not_supplied" in by_id[project_id]["reason_codes"]
         assert by_id[project_id]["reference_takeoff_documents"] == []
     for project_id in (
+        "au_qld_lot16_power",
         "au_qld_maryborough_service_station",
         "au_qld_q5446_armstrong32_harlequin",
     ):
