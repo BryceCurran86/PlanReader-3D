@@ -57,6 +57,11 @@
       "evidence": "Media, Bed 2 and Bed 3 vinyl floors are independently figured and finish-labelled; combined atomic area 38.346 m2. The overlapping main living composite region remains non-denominator."
     },
     {
+      "proof": "explicit wet-area wall-tile face subset source-closed",
+      "status": "PASS",
+      "evidence": "Eight explicitly dimensioned wall-tile finish faces are independently quantity-closed for 21.3002 m2 total. Niche returns/depths and the remaining project wet-area tile universe stay unresolved."
+    },
+    {
       "proof": "full project surface universe complete",
       "status": "FAIL",
       "evidence": "External openings are source-closed, but multiple other in-scope families remain unresolved."
@@ -101,5 +106,18 @@
     "verified_area_m2": 38.346,
     "source_closed": true,
     "overlapping_main_living_aggregate_denominator_eligible": false
+  },
+  "wall_tile_face_closure_summary": {
+    "closure_check_ids": [
+      "3laurel:closure:laundry_D_tile_skirting",
+      "3laurel:closure:bathroom_C_shower_tile_face",
+      "3laurel:closure:niche_free_ensuite_shower_returns",
+      "3laurel:closure:ensuite_rear_flat_faces_after_niche_deductions"
+    ],
+    "verified_face_count": 8,
+    "verified_area_m2": 21.3002,
+    "source_closed_for_promoted_faces": true,
+    "complete_for_project_wet_area_tile_universe": false,
+    "niche_returns_resolved": false
   }
 }
