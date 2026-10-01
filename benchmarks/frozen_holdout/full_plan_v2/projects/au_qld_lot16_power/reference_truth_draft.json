@@ -792,6 +792,21 @@
         "architectural:p4-p5:elevations:typed_opening_crosscheck",
         "architectural:p4:elevation_1:CUSTOM_WINDOWS_TO_FRONT_MEASURE_ON_SITE"
       ]
+    },
+    {
+      "check_id": "lot16:control:wall_bracing_resistance",
+      "direction_A": {
+        "required_kN": 98.9,
+        "provided_kN": 104.96,
+        "margin_kN": 6.06
+      },
+      "direction_B": {
+        "required_kN": 45.7,
+        "provided_kN": 51.48,
+        "margin_kN": 5.78
+      },
+      "source_location": "structural:p10:S10:GROUND_FLOOR_WALL_BRACING_PLAN",
+      "note": "Independent engineering control over the already-closed 24-member bracing census; not a denominator quantity."
     }
   ]
 }
