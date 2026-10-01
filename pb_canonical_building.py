@@ -834,6 +834,116 @@ class CanonicalWall(CanonicalElement):
             return round(max(0.0, gross - self.total_opening_deductions_m2()), 4)
         return None
 
+    def derive_trade_quantities(self) -> List[QuantityFormulaBinding]:
+        """Derives structural wall, masonry, framing, and lintel trade quantities."""
+        length = self.length_m()
+        net = self.net_area_m2() or 0.0
+        sub = (self.substrate or "").lower()
+        fin = (self.finish or "").lower()
+
+        bindings: List[QuantityFormulaBinding] = []
+
+        is_brick = "brick" in sub or "brick" in fin or "veneer" in sub
+        is_block = "block" in sub or "block" in fin or "masonry" in sub
+
+        if self.is_external:
+            if is_brick and net > 0.0:
+                bindings.append(QuantityFormulaBinding(
+                    trade_category="masonry",
+                    item_code="BRICKWORK_FACE_SKIN",
+                    formula_expression="net_area_m2",
+                    unit="m²",
+                    quantity=round(net, 2),
+                ))
+                bindings.append(QuantityFormulaBinding(
+                    trade_category="masonry",
+                    item_code="CAVITY_WALL_TIES",
+                    formula_expression="net_area_m2 * 4.5",
+                    unit="No.",
+                    quantity=round(net * 4.5),
+                ))
+                if length > 0.0:
+                    bindings.append(QuantityFormulaBinding(
+                        trade_category="masonry",
+                        item_code="DPC_AND_BASE_FLASHING",
+                        formula_expression="length_m",
+                        unit="lm",
+                        quantity=round(length, 2),
+                    ))
+            elif is_block and net > 0.0:
+                bindings.append(QuantityFormulaBinding(
+                    trade_category="masonry",
+                    item_code="BLOCKWORK_WALL",
+                    formula_expression="net_area_m2",
+                    unit="m²",
+                    quantity=round(net, 2),
+                ))
+            else:
+                if net > 0.0:
+                    bindings.append(QuantityFormulaBinding(
+                        trade_category="cladding",
+                        item_code="EXTERNAL_WALL_CLADDING",
+                        formula_expression="net_area_m2",
+                        unit="m²",
+                        quantity=round(net, 2),
+                    ))
+                    bindings.append(QuantityFormulaBinding(
+                        trade_category="carpentry",
+                        item_code="WALL_SARKING_VAPOR_BARRIER",
+                        formula_expression="net_area_m2 * 1.05",
+                        unit="m²",
+                        quantity=round(net * 1.05, 2),
+                    ))
+                if length > 0.0:
+                    bindings.append(QuantityFormulaBinding(
+                        trade_category="carpentry",
+                        item_code="EXTERNAL_WALL_FRAMING_RUN",
+                        formula_expression="length_m",
+                        unit="lm",
+                        quantity=round(length, 2),
+                    ))
+        else:
+            # Internal partition
+            if is_block and net > 0.0:
+                bindings.append(QuantityFormulaBinding(
+                    trade_category="masonry",
+                    item_code="BLOCKWORK_INTERNAL_WALL",
+                    formula_expression="net_area_m2",
+                    unit="m²",
+                    quantity=round(net, 2),
+                ))
+            if length > 0.0:
+                bindings.append(QuantityFormulaBinding(
+                    trade_category="carpentry",
+                    item_code="INTERNAL_PARTITION_FRAMING_RUN",
+                    formula_expression="length_m",
+                    unit="lm",
+                    quantity=round(length, 2),
+                ))
+                bindings.append(QuantityFormulaBinding(
+                    trade_category="carpentry",
+                    item_code="PARTITION_BASE_AND_HEAD_TRACK",
+                    formula_expression="2 * length_m",
+                    unit="lm",
+                    quantity=round(length * 2.0, 2),
+                ))
+
+        # Lintels over openings
+        for op in self.openings:
+            w = float(op.width_m) if op.width_m is not None else 0.0
+            if w > 0.0:
+                lintel_len = round(w + 0.30, 2)
+                bindings.append(QuantityFormulaBinding(
+                    trade_category="structural_steel" if w > 1.8 else "masonry",
+                    item_code=f"OPENING_LINTEL_{op.mark or 'OP'}",
+                    formula_expression="width_m + 0.30",
+                    unit="lm",
+                    quantity=lintel_len,
+                ))
+
+        self.derived_quantities = bindings
+        return bindings
+
     def to_dict(self) -> Dict[str, Any]:
         res = self.base_to_dict()
         res.update({
@@ -1238,9 +1348,64 @@ class CanonicalFloor(PolygonElement):
 
 @dataclass
 class CanonicalCeiling(PolygonElement):
+    derived_quantities: List[QuantityFormulaBinding] = field(default_factory=list)
+
     def __post_init__(self):
         super().__post_init__()
         self.object_type = ObjectType.CEILING
+
+    def derive_trade_quantities(self) -> List[QuantityFormulaBinding]:
+        """Derives ceiling trade quantities (plasterboard lining, insulation, cornice/trim)."""
+        area = self.effective_area_m2()
+        if not area or area <= 0.0:
+            return []
+        perim = self.perimeter_lm()
+        bindings = [
+            QuantityFormulaBinding(
+                trade_category="plastering",
+                item_code="CEILING_PLASTERBOARD_LINING",
+                formula_expression="effective_area_m2",
+                unit="m²",
+                quantity=round(area, 2),
+            ),
+            QuantityFormulaBinding(
+                trade_category="plastering",
+                item_code="CEILING_INSULATION_BATTS",
+                formula_expression="effective_area_m2",
+                unit="m²",
+                quantity=round(area, 2),
+            ),
+        ]
+        if perim > 0.0:
+            bindings.append(QuantityFormulaBinding(
+                trade_category="plastering",
+                item_code="CEILING_CORNICE_TRIM",
+                formula_expression="perimeter_lm",
+                unit="lm",
+                quantity=round(perim, 2),
+            ))
+        self.derived_quantities = bindings
+        return bindings
+
+    def to_dict(self) -> Dict[str, Any]:
+        res = super().to_dict()
+        res["derived_quantities"] = [q.to_dict() for q in self.derived_quantities]
+        return res
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "CanonicalCeiling":
+        base_args = cls.base_from_dict_args(data)
+        poly_raw = data.get("polygon", []) or []
+        poly = [Vector2D.from_dict(pt) for pt in poly_raw if pt]
+        d_quants_raw = data.get("derived_quantities", []) or []
+        d_quants = [QuantityFormulaBinding.from_dict(q) for q in d_quants_raw if isinstance(q, dict)]
+        return cls(
+            **base_args,
+            polygon=poly,
+            thickness_m=parse_optional_float(data.get("thickness_m")),
+            elevation_offset_m=parse_optional_float(data.get("elevation_offset_m")),
+            derived_quantities=d_quants,
+        )
 
 
 @dataclass
@@ -1249,6 +1414,7 @@ class CanonicalRoof(PolygonElement):
     overhang_m: Optional[float] = None
     roof_type: str = "UNKNOWN"
     elevation: Optional[float] = None
+    derived_quantities: List[QuantityFormulaBinding] = field(default_factory=list)
 
     def __post_init__(self):
         super().__post_init__()
@@ -1264,6 +1430,42 @@ class CanonicalRoof(PolygonElement):
             return round(plan_area / math.cos(rad), 4)
         return plan_area
 
+    def derive_trade_quantities(self) -> List[QuantityFormulaBinding]:
+        """Derives roofing trade quantities (covering, insulation/sarking, gutters, fascia)."""
+        surf_area = self.surface_area_m2() or self.effective_area_m2()
+        if not surf_area or surf_area <= 0.0:
+            return []
+        perim = self.perimeter_lm()
+        mat = (self.finish or self.substrate or "Metal roofing").lower()
+        cov_code = "ROOF_TILES" if ("tile" in mat or "slate" in mat) else "ROOF_SHEET_METAL"
+
+        bindings = [
+            QuantityFormulaBinding(
+                trade_category="roofing",
+                item_code=cov_code,
+                formula_expression="surface_area_m2",
+                unit="m²",
+                quantity=round(surf_area, 2),
+            ),
+            QuantityFormulaBinding(
+                trade_category="roofing",
+                item_code="ROOF_INSULATION_SARKING",
+                formula_expression="surface_area_m2 * 1.05",
+                unit="m²",
+                quantity=round(surf_area * 1.05, 2),
+            ),
+        ]
+        if perim > 0.0:
+            bindings.append(QuantityFormulaBinding(
+                trade_category="roofing",
+                item_code="ROOF_GUTTER_AND_FASCIA",
+                formula_expression="perimeter_lm",
+                unit="lm",
+                quantity=round(perim, 2),
+            ))
+        self.derived_quantities = bindings
+        return bindings
+
     def to_dict(self) -> Dict[str, Any]:
         res = super().to_dict()
         res.update({
@@ -1271,6 +1473,7 @@ class CanonicalRoof(PolygonElement):
             "overhang_m": self.overhang_m,
             "roof_type": self.roof_type,
             "elevation": self.elevation,
+            "derived_quantities": [q.to_dict() for q in self.derived_quantities],
         })
         return res
 
@@ -1279,6 +1482,8 @@ class CanonicalRoof(PolygonElement):
         base_args = cls.base_from_dict_args(data)
         poly_raw = data.get("polygon", []) or []
         poly = [Vector2D.from_dict(pt) for pt in poly_raw if pt]
+        d_quants_raw = data.get("derived_quantities", []) or []
+        d_quants = [QuantityFormulaBinding.from_dict(q) for q in d_quants_raw if isinstance(q, dict)]
         return cls(
             **base_args,
             polygon=poly,
@@ -1288,27 +1493,104 @@ class CanonicalRoof(PolygonElement):
             overhang_m=parse_optional_float(data.get("overhang_m")),
             roof_type=str(data.get("roof_type", "UNKNOWN")),
             elevation=parse_optional_float(data.get("elevation")),
+            derived_quantities=d_quants,
         )
 
 
 @dataclass
 class CanonicalSoffit(PolygonElement):
+    derived_quantities: List[QuantityFormulaBinding] = field(default_factory=list)
+
     def __post_init__(self):
         super().__post_init__()
         self.object_type = ObjectType.SOFFIT
+
+    def derive_trade_quantities(self) -> List[QuantityFormulaBinding]:
+        """Derives exterior soffit lining quantities."""
+        area = self.effective_area_m2()
+        if not area or area <= 0.0:
+            return []
+        bindings = [
+            QuantityFormulaBinding(
+                trade_category="cladding",
+                item_code="EXTERNAL_SOFFIT_LINING",
+                formula_expression="effective_area_m2",
+                unit="m²",
+                quantity=round(area, 2),
+            ),
+        ]
+        self.derived_quantities = bindings
+        return bindings
+
+    def to_dict(self) -> Dict[str, Any]:
+        res = super().to_dict()
+        res["derived_quantities"] = [q.to_dict() for q in self.derived_quantities]
+        return res
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "CanonicalSoffit":
+        base_args = cls.base_from_dict_args(data)
+        poly_raw = data.get("polygon", []) or []
+        poly = [Vector2D.from_dict(pt) for pt in poly_raw if pt]
+        d_quants_raw = data.get("derived_quantities", []) or []
+        d_quants = [QuantityFormulaBinding.from_dict(q) for q in d_quants_raw if isinstance(q, dict)]
+        return cls(
+            **base_args,
+            polygon=poly,
+            thickness_m=parse_optional_float(data.get("thickness_m")),
+            elevation_offset_m=parse_optional_float(data.get("elevation_offset_m")),
+            derived_quantities=d_quants,
+        )
 
 
 @dataclass
 class CanonicalBalcony(PolygonElement):
     balustrade_ids: List[str] = field(default_factory=list)
+    derived_quantities: List[QuantityFormulaBinding] = field(default_factory=list)
 
     def __post_init__(self):
         super().__post_init__()
         self.object_type = ObjectType.BALCONY
 
+    def derive_trade_quantities(self) -> List[QuantityFormulaBinding]:
+        """Derives balcony trade quantities (waterproofing, tiles/finishes)."""
+        area = self.effective_area_m2()
+        if not area or area <= 0.0:
+            return []
+        perim = self.perimeter_lm()
+        bindings = [
+            QuantityFormulaBinding(
+                trade_category="waterproofing",
+                item_code="BALCONY_WATERPROOFING_MEMBRANE",
+                formula_expression="effective_area_m2 * 1.15",
+                unit="m²",
+                quantity=round(area * 1.15, 2),
+            ),
+            QuantityFormulaBinding(
+                trade_category="tiling",
+                item_code="BALCONY_EXTERNAL_FLOOR_TILES",
+                formula_expression="effective_area_m2",
+                unit="m²",
+                quantity=round(area, 2),
+            ),
+        ]
+        if perim > 0.0:
+            bindings.append(QuantityFormulaBinding(
+                trade_category="metalwork",
+                item_code="BALCONY_DRIP_EDGE_FLASHING",
+                formula_expression="perimeter_lm",
+                unit="lm",
+                quantity=round(perim, 2),
+            ))
+        self.derived_quantities = bindings
+        return bindings
+
     def to_dict(self) -> Dict[str, Any]:
         res = super().to_dict()
-        res["balustrade_ids"] = list(self.balustrade_ids)
+        res.update({
+            "balustrade_ids": list(self.balustrade_ids),
+            "derived_quantities": [q.to_dict() for q in self.derived_quantities],
+        })
         return res
 
     @classmethod
@@ -1316,12 +1598,15 @@ class CanonicalBalcony(PolygonElement):
         base_args = cls.base_from_dict_args(data)
         poly_raw = data.get("polygon", []) or []
         poly = [Vector2D.from_dict(pt) for pt in poly_raw if pt]
+        d_quants_raw = data.get("derived_quantities", []) or []
+        d_quants = [QuantityFormulaBinding.from_dict(q) for q in d_quants_raw if isinstance(q, dict)]
         return cls(
             **base_args,
             polygon=poly,
             thickness_m=parse_optional_float(data.get("thickness_m")),
             elevation_offset_m=parse_optional_float(data.get("elevation_offset_m")),
             balustrade_ids=list(data.get("balustrade_ids", []) or []),
+            derived_quantities=d_quants,
         )
 
 
@@ -1331,10 +1616,42 @@ class CanonicalParapet(CanonicalElement):
     end_point: Vector2D = field(default_factory=Vector2D)
     height_m: Optional[float] = None
     thickness_m: Optional[float] = None
+    derived_quantities: List[QuantityFormulaBinding] = field(default_factory=list)
 
     def __post_init__(self):
         super().__post_init__()
         self.object_type = ObjectType.PARAPET
+
+    def length_m(self) -> float:
+        if self.start_point and self.end_point and self.start_point.is_valid() and self.end_point.is_valid():
+            return self.start_point.distance_to(self.end_point)
+        return 0.0
+
+    def derive_trade_quantities(self) -> List[QuantityFormulaBinding]:
+        """Derives parapet trade quantities (metal capping, framing)."""
+        length = self.length_m()
+        if length <= 0.0:
+            return []
+        h = float(self.height_m) if self.height_m is not None else 0.0
+        bindings = [
+            QuantityFormulaBinding(
+                trade_category="roofing",
+                item_code="PARAPET_METAL_CAPPING",
+                formula_expression="length_m",
+                unit="lm",
+                quantity=round(length, 2),
+            ),
+        ]
+        if h > 0.0:
+            bindings.append(QuantityFormulaBinding(
+                trade_category="carpentry",
+                item_code="PARAPET_WALL_FRAMING",
+                formula_expression="length_m * height_m",
+                unit="m²",
+                quantity=round(length * h, 2),
+            ))
+        self.derived_quantities = bindings
+        return bindings
 
     def to_dict(self) -> Dict[str, Any]:
         res = self.base_to_dict()
@@ -1343,18 +1660,22 @@ class CanonicalParapet(CanonicalElement):
             "end_point": self.end_point.to_dict(),
             "height_m": self.height_m,
             "thickness_m": self.thickness_m,
+            "derived_quantities": [q.to_dict() for q in self.derived_quantities],
         })
         return res
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CanonicalParapet":
         base_args = cls.base_from_dict_args(data)
+        d_quants_raw = data.get("derived_quantities", []) or []
+        d_quants = [QuantityFormulaBinding.from_dict(q) for q in d_quants_raw if isinstance(q, dict)]
         return cls(
             **base_args,
             start_point=Vector2D.from_dict(data.get("start_point")),
             end_point=Vector2D.from_dict(data.get("end_point")),
             height_m=parse_optional_float(data.get("height_m")),
             thickness_m=parse_optional_float(data.get("thickness_m")),
+            derived_quantities=d_quants,
         )
 
 
@@ -1364,10 +1685,39 @@ class CanonicalColumn(CanonicalElement):
     width_m: Optional[float] = None
     depth_m: Optional[float] = None
     height_m: Optional[float] = None
+    derived_quantities: List[QuantityFormulaBinding] = field(default_factory=list)
 
     def __post_init__(self):
         super().__post_init__()
         self.object_type = ObjectType.COLUMN
+
+    def derive_trade_quantities(self) -> List[QuantityFormulaBinding]:
+        """Derives structural column trade quantities (formwork, concrete volume)."""
+        w = float(self.width_m) if self.width_m is not None else 0.0
+        d = float(self.depth_m) if self.depth_m is not None else w
+        h = float(self.height_m) if self.height_m is not None else 0.0
+        if w <= 0.0 or h <= 0.0:
+            return []
+        vol_m3 = round(w * d * h, 3)
+        fw_m2 = round(2.0 * (w + d) * h, 2)
+        bindings = [
+            QuantityFormulaBinding(
+                trade_category="formwork",
+                item_code="COLUMN_FORMWORK",
+                formula_expression="2 * (width_m + depth_m) * height_m",
+                unit="m²",
+                quantity=fw_m2,
+            ),
+            QuantityFormulaBinding(
+                trade_category="concreting",
+                item_code="COLUMN_CONCRETE_SUPPLY",
+                formula_expression="width_m * depth_m * height_m",
+                unit="item",
+                quantity=vol_m3,
+            ),
+        ]
+        self.derived_quantities = bindings
+        return bindings
 
     def to_dict(self) -> Dict[str, Any]:
         res = self.base_to_dict()
@@ -1376,18 +1726,22 @@ class CanonicalColumn(CanonicalElement):
             "width_m": self.width_m,
             "depth_m": self.depth_m,
             "height_m": self.height_m,
+            "derived_quantities": [q.to_dict() for q in self.derived_quantities],
         })
         return res
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CanonicalColumn":
         base_args = cls.base_from_dict_args(data)
+        d_quants_raw = data.get("derived_quantities", []) or []
+        d_quants = [QuantityFormulaBinding.from_dict(q) for q in d_quants_raw if isinstance(q, dict)]
         return cls(
             **base_args,
             center=Vector2D.from_dict(data.get("center")),
             width_m=parse_optional_float(data.get("width_m")),
             depth_m=parse_optional_float(data.get("depth_m")),
             height_m=parse_optional_float(data.get("height_m")),
+            derived_quantities=d_quants,
         )
 
 
@@ -1693,6 +2047,62 @@ class CanonicalProject(CanonicalElement):
                 floors.extend(lvl.floors)
         return floors
 
+    def all_ceilings(self) -> List[CanonicalCeiling]:
+        ceilings = []
+        for b in self.buildings:
+            for lvl in b.levels:
+                ceilings.extend(lvl.ceilings)
+        return ceilings
+
+    def all_roofs(self) -> List[CanonicalRoof]:
+        roofs = []
+        for b in self.buildings:
+            for lvl in b.levels:
+                roofs.extend(lvl.roofs)
+        return roofs
+
+    def all_soffits(self) -> List[CanonicalSoffit]:
+        soffits = []
+        for b in self.buildings:
+            for lvl in b.levels:
+                soffits.extend(lvl.soffits)
+        return soffits
+
+    def all_balconies(self) -> List[CanonicalBalcony]:
+        balconies = []
+        for b in self.buildings:
+            for lvl in b.levels:
+                balconies.extend(lvl.balconies)
+        return balconies
+
+    def all_parapets(self) -> List[CanonicalParapet]:
+        parapets = []
+        for b in self.buildings:
+            for lvl in b.levels:
+                parapets.extend(lvl.parapets)
+        return parapets
+
+    def all_columns(self) -> List[CanonicalColumn]:
+        columns = []
+        for b in self.buildings:
+            for lvl in b.levels:
+                columns.extend(lvl.columns)
+        return columns
+
+    def all_balustrades(self) -> List[CanonicalBalustrade]:
+        balustrades = []
+        for b in self.buildings:
+            for lvl in b.levels:
+                balustrades.extend(lvl.balustrades)
+        return balustrades
+
+    def all_screens(self) -> List[CanonicalScreen]:
+        screens = []
+        for b in self.buildings:
+            for lvl in b.levels:
+                screens.extend(lvl.screens)
+        return screens
+
     def find_element(self, element_id: str) -> Optional[CanonicalElement]:
         """Finds any element in the canonical building hierarchy by id."""
         if not element_id:
@@ -1723,9 +2133,24 @@ class CanonicalProject(CanonicalElement):
                 for rf in lvl.roofs:
                     if rf.id == element_id:
                         return rf
+                for sof in lvl.soffits:
+                    if sof.id == element_id:
+                        return sof
+                for bal in lvl.balconies:
+                    if bal.id == element_id:
+                        return bal
+                for p in lvl.parapets:
+                    if p.id == element_id:
+                        return p
                 for col in lvl.columns:
                     if col.id == element_id:
                         return col
+                for bld in lvl.balustrades:
+                    if bld.id == element_id:
+                        return bld
+                for scr in lvl.screens:
+                    if scr.id == element_id:
+                        return scr
         return None
 
     def recompute_relationships(self) -> None:
@@ -1772,10 +2197,34 @@ class CanonicalProject(CanonicalElement):
                                 elif target_wall.face_b and not target_wall.face_b.bounded_space_id and target_wall.face_a and target_wall.face_a.bounded_space_id != sp.id:
                                     target_wall.face_b.bounded_space_id = sp.id
 
-                # Link floors
+                # Link horizontal and structural elements
                 for fl in lvl.floors:
                     fl.level_id = lvl_id
                     fl.parent_id = lvl_id
+                for cl in lvl.ceilings:
+                    cl.level_id = lvl_id
+                    cl.parent_id = lvl_id
+                for rf in lvl.roofs:
+                    rf.level_id = lvl_id
+                    rf.parent_id = lvl_id
+                for sof in lvl.soffits:
+                    sof.level_id = lvl_id
+                    sof.parent_id = lvl_id
+                for bal in lvl.balconies:
+                    bal.level_id = lvl_id
+                    bal.parent_id = lvl_id
+                for p in lvl.parapets:
+                    p.level_id = lvl_id
+                    p.parent_id = lvl_id
+                for col in lvl.columns:
+                    col.level_id = lvl_id
+                    col.parent_id = lvl_id
+                for bld in lvl.balustrades:
+                    bld.level_id = lvl_id
+                    bld.parent_id = lvl_id
+                for scr in lvl.screens:
+                    scr.level_id = lvl_id
+                    scr.parent_id = lvl_id
 
     def recompute_quantities(self, rates_map: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
         """Recomputes costs across all quantity bindings using current rates map:
@@ -1806,6 +2255,24 @@ class CanonicalProject(CanonicalElement):
                 process_binding(qb)
         for fl in self.all_floors():
             for qb in fl.derived_quantities:
+                process_binding(qb)
+        for cl in self.all_ceilings():
+            for qb in cl.derived_quantities:
+                process_binding(qb)
+        for rf in self.all_roofs():
+            for qb in rf.derived_quantities:
+                process_binding(qb)
+        for sof in self.all_soffits():
+            for qb in sof.derived_quantities:
+                process_binding(qb)
+        for bal in self.all_balconies():
+            for qb in bal.derived_quantities:
+                process_binding(qb)
+        for p in self.all_parapets():
+            for qb in p.derived_quantities:
+                process_binding(qb)
+        for col in self.all_columns():
+            for qb in col.derived_quantities:
                 process_binding(qb)
 
         return summary
@@ -1983,10 +2450,14 @@ class CanonicalProject(CanonicalElement):
     ) -> List[Dict[str, Any]]:
         """Generates canonical 21-field core takeoff rows for all trades in this canonical building model:
 
-        - Walls (bricklaying/masonry external walls, carpentry internal partitions, wall face finishes)
-        - Openings (doors, windows)
+        - Walls (bricklaying/masonry external walls, carpentry internal partitions, wall face finishes, wall ties, DPC, lintels)
+        - Openings (doors, windows, architraves, reveals)
         - Floors (concrete slab area, concrete volume m³, vapor barrier m², edge formwork lm)
         - Spaces (carpet/timber/tile floor finishes, underlay/screed, waterproofing membrane)
+        - Ceilings (plasterboard linings, insulation batts, cornice/trim)
+        - Roofs (metal sheeting / roof tiles, reflective foil sarking, gutters & fascia)
+        - Columns (structural column formwork, concrete volume/supply)
+        - Parapets, Balconies & Soffits (metal capping, framing, waterproofing, external tiling, drip edge, soffit linings)
         """
         stamp = now_stamp or ""
         rows: List[Dict[str, Any]] = []
@@ -2070,6 +2541,133 @@ class CanonicalProject(CanonicalElement):
                         "confidence": "Documented",
                         "notes": f"Net finish area {face.area_net_m2:.2f} m².",
                         "row_role": "wall_finish",
+                        "created_at": stamp,
+                        "updated_at": stamp,
+                    })
+
+            # Secondary wall trade quantities (masonry ties, DPC, sarking, partition plates, lintels)
+            if not w.derived_quantities:
+                w.derive_trade_quantities()
+
+            for dq in w.derived_quantities:
+                if dq.item_code == "CAVITY_WALL_TIES" and dq.quantity > 0:
+                    rows.append({
+                        "workspace_id": int(workspace_id),
+                        "section": "External",
+                        "element": "Cavity wall ties (masonry)",
+                        "location": f"Wall cavity · {w.id}",
+                        "substrate": "Galvanised / stainless steel",
+                        "finish_system": "Ties built into masonry joints",
+                        "quantity": round(dq.quantity, 2),
+                        "unit": "No.",
+                        "quantity_status": "Measured",
+                        "source_page": getattr(w.provenance, "source_page", "1") or "1",
+                        "source_reference": f"PB Canonical BIM · wall_ties:{w.id}",
+                        "inclusion_status": "INCLUSION",
+                        "coats": 1,
+                        "coverage_m2_per_litre": 0.0,
+                        "productivity_m2_per_hour": 0.0,
+                        "rate_per_unit": 0.0,
+                        "confidence": "Documented",
+                        "notes": f"Cavity wall ties {dq.quantity:.0f} No. (at 4.5 ties/m²).",
+                        "row_role": "",
+                        "created_at": stamp,
+                        "updated_at": stamp,
+                    })
+                elif dq.item_code == "DPC_AND_BASE_FLASHING" and dq.quantity > 0:
+                    rows.append({
+                        "workspace_id": int(workspace_id),
+                        "section": "External",
+                        "element": "Damp-proof course & base flashing",
+                        "location": f"Wall base · {w.id}",
+                        "substrate": "Embossed polyethylene DPC",
+                        "finish_system": "Laid under base course of brickwork",
+                        "quantity": round(dq.quantity, 2),
+                        "unit": "lm",
+                        "quantity_status": "Measured",
+                        "source_page": getattr(w.provenance, "source_page", "1") or "1",
+                        "source_reference": f"PB Canonical BIM · wall_dpc:{w.id}",
+                        "inclusion_status": "INCLUSION",
+                        "coats": 1,
+                        "coverage_m2_per_litre": 0.0,
+                        "productivity_m2_per_hour": 0.0,
+                        "rate_per_unit": 0.0,
+                        "confidence": "Documented",
+                        "notes": f"DPC and base flashing run {dq.quantity:.2f} lm.",
+                        "row_role": "",
+                        "created_at": stamp,
+                        "updated_at": stamp,
+                    })
+                elif dq.item_code == "WALL_SARKING_VAPOR_BARRIER" and dq.quantity > 0:
+                    rows.append({
+                        "workspace_id": int(workspace_id),
+                        "section": "External",
+                        "element": "Wall sarking & vapor barrier",
+                        "location": f"Wall envelope · {w.id}",
+                        "substrate": "Reflective foil laminate / building wrap",
+                        "finish_system": "Fixed to external face of wall framing",
+                        "quantity": round(dq.quantity, 2),
+                        "unit": "m²",
+                        "quantity_status": "Measured",
+                        "source_page": getattr(w.provenance, "source_page", "1") or "1",
+                        "source_reference": f"PB Canonical BIM · wall_sarking:{w.id}",
+                        "inclusion_status": "INCLUSION",
+                        "coats": 1,
+                        "coverage_m2_per_litre": 0.0,
+                        "productivity_m2_per_hour": 0.0,
+                        "rate_per_unit": 0.0,
+                        "confidence": "Documented",
+                        "notes": f"Wall sarking {dq.quantity:.2f} m².",
+                        "row_role": "",
+                        "created_at": stamp,
+                        "updated_at": stamp,
+                    })
+                elif dq.item_code == "PARTITION_BASE_AND_HEAD_TRACK" and dq.quantity > 0:
+                    rows.append({
+                        "workspace_id": int(workspace_id),
+                        "section": "Internal",
+                        "element": "Partition base & head plates/tracks",
+                        "location": f"Partition plates · {w.id}",
+                        "substrate": "Timber top/bottom plates",
+                        "finish_system": "Fixed top and bottom",
+                        "quantity": round(dq.quantity, 2),
+                        "unit": "lm",
+                        "quantity_status": "Measured",
+                        "source_page": getattr(w.provenance, "source_page", "1") or "1",
+                        "source_reference": f"PB Canonical BIM · partition_plates:{w.id}",
+                        "inclusion_status": "PROVISIONAL",
+                        "coats": 1,
+                        "coverage_m2_per_litre": 0.0,
+                        "productivity_m2_per_hour": 0.0,
+                        "rate_per_unit": 0.0,
+                        "confidence": "Documented",
+                        "notes": f"Partition top and bottom plates run {dq.quantity:.2f} lm.",
+                        "row_role": "",
+                        "created_at": stamp,
+                        "updated_at": stamp,
+                    })
+                elif dq.item_code.startswith("OPENING_LINTEL_") and dq.quantity > 0:
+                    is_steel = dq.trade_category == "structural_steel"
+                    rows.append({
+                        "workspace_id": int(workspace_id),
+                        "section": "Structural" if is_steel else ("External" if w.is_external else "Internal"),
+                        "element": "Structural steel lintel" if is_steel else "Galvanised angle / masonry lintel",
+                        "location": f"Opening lintel · {w.id}",
+                        "substrate": "Structural steel" if is_steel else "Galvanised steel angle",
+                        "finish_system": "Hot-dip galvanised",
+                        "quantity": round(dq.quantity, 2),
+                        "unit": "lm",
+                        "quantity_status": "Measured",
+                        "source_page": getattr(w.provenance, "source_page", "1") or "1",
+                        "source_reference": f"PB Canonical BIM · lintel:{w.id}:{dq.item_code}",
+                        "inclusion_status": "INCLUSION",
+                        "coats": 1,
+                        "coverage_m2_per_litre": 0.0,
+                        "productivity_m2_per_hour": 0.0,
+                        "rate_per_unit": 0.0,
+                        "confidence": "Documented",
+                        "notes": f"Lintel {dq.quantity:.2f} lm ({dq.item_code}).",
+                        "row_role": "",
                         "created_at": stamp,
                         "updated_at": stamp,
                     })
@@ -2294,6 +2892,217 @@ class CanonicalProject(CanonicalElement):
                     "confidence": "Documented",
                     "notes": f"{b.trade_category.title()} derived from {sp.name} ({b.formula_expression}).",
                     "row_role": "floor_area" if b.item_code.startswith("FLOOR_") and b.unit == "m²" else "",
+                    "created_at": stamp,
+                    "updated_at": stamp,
+                })
+
+        # 4. Ceilings (Plasterboard, Insulation, Cornice)
+        for c in self.all_ceilings():
+            c_area = c.effective_area_m2()
+            if not c_area or c_area <= 0.0:
+                continue
+            if not c.derived_quantities:
+                c.derive_trade_quantities()
+            for b in c.derived_quantities:
+                elem_name = (
+                    "Ceiling plasterboard lining" if b.item_code == "CEILING_PLASTERBOARD_LINING"
+                    else "Ceiling thermal insulation batts" if b.item_code == "CEILING_INSULATION_BATTS"
+                    else "Ceiling cornice / perimeter trim" if b.item_code == "CEILING_CORNICE_TRIM"
+                    else b.item_code.replace("_", " ").title()
+                )
+                rows.append({
+                    "workspace_id": int(workspace_id),
+                    "section": "Internal",
+                    "element": elem_name,
+                    "location": f"Ceiling · {c.id}",
+                    "substrate": c.substrate or "Plasterboard / Framing",
+                    "finish_system": "Flush set joints and primed" if b.unit == "m²" else "Fitted to wall/ceiling junction",
+                    "quantity": round(b.quantity, 2),
+                    "unit": b.unit,
+                    "quantity_status": "Measured",
+                    "source_page": getattr(c.provenance, "source_page", "1") or "1",
+                    "source_reference": f"PB Canonical BIM · ceiling:{c.id}:{b.item_code}",
+                    "inclusion_status": "INCLUSION",
+                    "coats": 1,
+                    "coverage_m2_per_litre": 0.0,
+                    "productivity_m2_per_hour": 0.0,
+                    "rate_per_unit": 0.0,
+                    "confidence": "Documented",
+                    "notes": f"Ceiling trade {elem_name} ({b.formula_expression} = {b.quantity:.2f} {b.unit}).",
+                    "row_role": "ceiling_area" if b.item_code == "CEILING_PLASTERBOARD_LINING" else "",
+                    "created_at": stamp,
+                    "updated_at": stamp,
+                })
+
+        # 5. Roofs (Roof Covering, Sarking, Gutters & Fascia)
+        for rf in self.all_roofs():
+            rf_surf = rf.surface_area_m2() or rf.effective_area_m2()
+            if not rf_surf or rf_surf <= 0.0:
+                continue
+            if not rf.derived_quantities:
+                rf.derive_trade_quantities()
+            for b in rf.derived_quantities:
+                elem_name = (
+                    "Metal roof sheeting / cladding" if b.item_code == "ROOF_SHEET_METAL"
+                    else "Concrete/terracotta roof tiles" if b.item_code == "ROOF_TILES"
+                    else "Roof insulation & reflective foil sarking" if b.item_code == "ROOF_INSULATION_SARKING"
+                    else "Eaves gutter and fascia" if b.item_code == "ROOF_GUTTER_AND_FASCIA"
+                    else b.item_code.replace("_", " ").title()
+                )
+                rows.append({
+                    "workspace_id": int(workspace_id),
+                    "section": "Roof",
+                    "element": elem_name,
+                    "location": f"Roof envelope · {rf.id}",
+                    "substrate": rf.substrate or "Roof trusses / battens",
+                    "finish_system": rf.finish or "Factory pre-finished",
+                    "quantity": round(b.quantity, 2),
+                    "unit": b.unit,
+                    "quantity_status": "Measured",
+                    "source_page": getattr(rf.provenance, "source_page", "1") or "1",
+                    "source_reference": f"PB Canonical BIM · roof:{rf.id}:{b.item_code}",
+                    "inclusion_status": "INCLUSION",
+                    "coats": 1,
+                    "coverage_m2_per_litre": 0.0,
+                    "productivity_m2_per_hour": 0.0,
+                    "rate_per_unit": 0.0,
+                    "confidence": "Documented",
+                    "notes": f"Roof trade {elem_name} (pitch {rf.pitch_deg or 0.0}°: {b.formula_expression} = {b.quantity:.2f} {b.unit}).",
+                    "row_role": "roof_area" if b.item_code in ("ROOF_SHEET_METAL", "ROOF_TILES") else "",
+                    "created_at": stamp,
+                    "updated_at": stamp,
+                })
+
+        # 6. Columns (Formwork & Concrete Volume)
+        for col in self.all_columns():
+            if not col.derived_quantities:
+                col.derive_trade_quantities()
+            for b in col.derived_quantities:
+                elem_name = (
+                    "Structural column formwork" if b.item_code == "COLUMN_FORMWORK"
+                    else "Structural column concrete supply & pump" if b.item_code == "COLUMN_CONCRETE_SUPPLY"
+                    else b.item_code.replace("_", " ").title()
+                )
+                rows.append({
+                    "workspace_id": int(workspace_id),
+                    "section": "Structure",
+                    "element": elem_name,
+                    "location": f"Column · {col.id}",
+                    "substrate": col.substrate or "Reinforced Concrete",
+                    "finish_system": "Form, pour, cure and strip",
+                    "quantity": round(b.quantity, 2),
+                    "unit": b.unit,
+                    "quantity_status": "Measured",
+                    "source_page": getattr(col.provenance, "source_page", "1") or "1",
+                    "source_reference": f"PB Canonical BIM · column:{col.id}:{b.item_code}",
+                    "inclusion_status": "INCLUSION",
+                    "coats": 1,
+                    "coverage_m2_per_litre": 0.0,
+                    "productivity_m2_per_hour": 0.0,
+                    "rate_per_unit": 0.0,
+                    "confidence": "Documented",
+                    "notes": f"Column {col.id} ({col.width_m or 0.0:.2f}m × {col.depth_m or col.width_m or 0.0:.2f}m × {col.height_m or 0.0:.2f}m H).",
+                    "row_role": "",
+                    "created_at": stamp,
+                    "updated_at": stamp,
+                })
+
+        # 7. Parapets, Balconies, and Soffits
+        for p in self.all_parapets():
+            if not p.derived_quantities:
+                p.derive_trade_quantities()
+            for b in p.derived_quantities:
+                elem_name = (
+                    "Parapet metal capping" if b.item_code == "PARAPET_METAL_CAPPING"
+                    else "Parapet wall framing" if b.item_code == "PARAPET_WALL_FRAMING"
+                    else b.item_code.replace("_", " ").title()
+                )
+                rows.append({
+                    "workspace_id": int(workspace_id),
+                    "section": "Roof",
+                    "element": elem_name,
+                    "location": f"Parapet · {p.id}",
+                    "substrate": p.substrate or "Sheet metal / Timber framing",
+                    "finish_system": "Installed to parapet upstand",
+                    "quantity": round(b.quantity, 2),
+                    "unit": b.unit,
+                    "quantity_status": "Measured",
+                    "source_page": getattr(p.provenance, "source_page", "1") or "1",
+                    "source_reference": f"PB Canonical BIM · parapet:{p.id}:{b.item_code}",
+                    "inclusion_status": "INCLUSION",
+                    "coats": 1,
+                    "coverage_m2_per_litre": 0.0,
+                    "productivity_m2_per_hour": 0.0,
+                    "rate_per_unit": 0.0,
+                    "confidence": "Documented",
+                    "notes": f"Parapet {elem_name} ({b.formula_expression} = {b.quantity:.2f} {b.unit}).",
+                    "row_role": "",
+                    "created_at": stamp,
+                    "updated_at": stamp,
+                })
+
+        for b_elem in self.all_balconies():
+            if not b_elem.derived_quantities:
+                b_elem.derive_trade_quantities()
+            for b in b_elem.derived_quantities:
+                elem_name = (
+                    "Balcony waterproofing membrane" if b.item_code == "BALCONY_WATERPROOFING_MEMBRANE"
+                    else "Balcony external floor tiles" if b.item_code == "BALCONY_EXTERNAL_FLOOR_TILES"
+                    else "Balcony drip edge flashing" if b.item_code == "BALCONY_DRIP_EDGE_FLASHING"
+                    else b.item_code.replace("_", " ").title()
+                )
+                rows.append({
+                    "workspace_id": int(workspace_id),
+                    "section": "External",
+                    "element": elem_name,
+                    "location": f"Balcony · {b_elem.id}",
+                    "substrate": b_elem.substrate or "Concrete balcony slab",
+                    "finish_system": "Applied to exterior balcony substrate",
+                    "quantity": round(b.quantity, 2),
+                    "unit": b.unit,
+                    "quantity_status": "Measured",
+                    "source_page": getattr(b_elem.provenance, "source_page", "1") or "1",
+                    "source_reference": f"PB Canonical BIM · balcony:{b_elem.id}:{b.item_code}",
+                    "inclusion_status": "INCLUSION",
+                    "coats": 1,
+                    "coverage_m2_per_litre": 0.0,
+                    "productivity_m2_per_hour": 0.0,
+                    "rate_per_unit": 0.0,
+                    "confidence": "Documented",
+                    "notes": f"Balcony {elem_name} ({b.formula_expression} = {b.quantity:.2f} {b.unit}).",
+                    "row_role": "",
+                    "created_at": stamp,
+                    "updated_at": stamp,
+                })
+
+        for s in self.all_soffits():
+            if not s.derived_quantities:
+                s.derive_trade_quantities()
+            for b in s.derived_quantities:
+                elem_name = (
+                    "Exterior soffit lining" if b.item_code == "EXTERNAL_SOFFIT_LINING"
+                    else b.item_code.replace("_", " ").title()
+                )
+                rows.append({
+                    "workspace_id": int(workspace_id),
+                    "section": "External",
+                    "element": elem_name,
+                    "location": f"Soffit · {s.id}",
+                    "substrate": s.substrate or "Fibre cement / timber framing",
+                    "finish_system": "Fixed to underside of eaves/trusses",
+                    "quantity": round(b.quantity, 2),
+                    "unit": b.unit,
+                    "quantity_status": "Measured",
+                    "source_page": getattr(s.provenance, "source_page", "1") or "1",
+                    "source_reference": f"PB Canonical BIM · soffit:{s.id}:{b.item_code}",
+                    "inclusion_status": "INCLUSION",
+                    "coats": 1,
+                    "coverage_m2_per_litre": 0.0,
+                    "productivity_m2_per_hour": 0.0,
+                    "rate_per_unit": 0.0,
+                    "confidence": "Documented",
+                    "notes": f"Soffit lining {b.quantity:.2f} m².",
+                    "row_role": "",
                     "created_at": stamp,
                     "updated_at": stamp,
                 })

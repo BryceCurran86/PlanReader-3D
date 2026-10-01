@@ -15,13 +15,18 @@ import json
 import pytest
 
 from pb_canonical_building import (
+    CanonicalBalcony,
     CanonicalBuilding,
+    CanonicalCeiling,
+    CanonicalColumn,
     CanonicalConstructabilityIssue,
     CanonicalFloor,
     CanonicalLevel,
     CanonicalOpening,
+    CanonicalParapet,
     CanonicalProject,
     CanonicalRoof,
+    CanonicalSoffit,
     CanonicalSpace,
     CanonicalWall,
     ObjectType,
@@ -1447,5 +1452,299 @@ def test_takeoff_rows_preserve_schedule_and_detail_provenance():
     assert "Detail record det_awning_2000." in op_row["notes"]
     assert "Sill: 0.90m." in op_row["notes"]
     assert "Head: 2.10m." in op_row["notes"]
+
+
+def test_ceiling_trade_quantities_and_serialization():
+    """CanonicalCeiling derives lining, insulation, and cornice trim without geometry rediscovery."""
+    poly = [Vector2D(0, 0), Vector2D(5, 0), Vector2D(5, 4), Vector2D(0, 4)]
+    ceil = CanonicalCeiling(
+        id="C-01",
+        name="Living Room Ceiling",
+        polygon=poly,
+        thickness_m=0.010,
+    )
+    assert ceil.measured_area_m2() == 20.0
+    assert ceil.perimeter_lm() == 18.0
+
+    bindings = ceil.derive_trade_quantities()
+    assert len(bindings) == 3
+    b_map = {b.item_code: b for b in bindings}
+    assert b_map["CEILING_PLASTERBOARD_LINING"].quantity == 20.0
+    assert b_map["CEILING_PLASTERBOARD_LINING"].unit == "m²"
+    assert b_map["CEILING_INSULATION_BATTS"].quantity == 20.0
+    assert b_map["CEILING_INSULATION_BATTS"].unit == "m²"
+    assert b_map["CEILING_CORNICE_TRIM"].quantity == 18.0
+    assert b_map["CEILING_CORNICE_TRIM"].unit == "lm"
+
+    d = ceil.to_dict()
+    assert len(d["derived_quantities"]) == 3
+    restored = CanonicalCeiling.from_dict(d)
+    assert restored.id == "C-01"
+    assert restored.measured_area_m2() == 20.0
+    assert len(restored.derived_quantities) == 3
+    assert restored.derived_quantities[0].item_code == "CEILING_PLASTERBOARD_LINING"
+
+
+def test_roof_trade_quantities_and_surface_area():
+    """CanonicalRoof computes 3D pitched surface area and derives roofing, sarking, and gutters."""
+    poly = [Vector2D(0, 0), Vector2D(10, 0), Vector2D(10, 8), Vector2D(0, 8)]
+    roof = CanonicalRoof(
+        id="R-01",
+        name="Main Hip Roof",
+        polygon=poly,
+        pitch_deg=25.0,
+        finish="Colorbond corrugated steel roofing",
+    )
+    plan_area = roof.measured_area_m2()
+    assert plan_area == 80.0
+    surf_area = roof.surface_area_m2()
+    assert round(surf_area, 2) == 88.27
+
+    bindings = roof.derive_trade_quantities()
+    b_map = {b.item_code: b for b in bindings}
+    assert b_map["ROOF_SHEET_METAL"].quantity == round(surf_area, 2)
+    assert b_map["ROOF_SHEET_METAL"].unit == "m²"
+    assert b_map["ROOF_INSULATION_SARKING"].quantity == round(surf_area * 1.05, 2)
+    assert b_map["ROOF_GUTTER_AND_FASCIA"].quantity == 36.0
+    assert b_map["ROOF_GUTTER_AND_FASCIA"].unit == "lm"
+
+    # Tile variant
+    tile_roof = CanonicalRoof(id="R-02", polygon=poly, pitch_deg=22.5, finish="Concrete Roof Tiles")
+    tile_bindings = tile_roof.derive_trade_quantities()
+    tile_codes = [b.item_code for b in tile_bindings]
+    assert "ROOF_TILES" in tile_codes
+    assert "ROOF_SHEET_METAL" not in tile_codes
+
+
+def test_column_trade_quantities_and_serialization():
+    """CanonicalColumn derives 4-sided formwork and concrete volume m3."""
+    col = CanonicalColumn(
+        id="COL-01",
+        name="Perimeter Verandah Column",
+        center=Vector2D(2.0, 3.0),
+        width_m=0.35,
+        depth_m=0.35,
+        height_m=2.70,
+        substrate="32 MPa Concrete",
+    )
+    bindings = col.derive_trade_quantities()
+    assert len(bindings) == 2
+    b_map = {b.item_code: b for b in bindings}
+    assert b_map["COLUMN_FORMWORK"].quantity == round(2.0 * (0.35 + 0.35) * 2.70, 2)  # 3.78 m²
+    assert b_map["COLUMN_FORMWORK"].unit == "m²"
+    assert b_map["COLUMN_CONCRETE_SUPPLY"].quantity == round(0.35 * 0.35 * 2.70, 3)  # 0.331 m³
+    assert b_map["COLUMN_CONCRETE_SUPPLY"].unit == "item"
+
+    d = col.to_dict()
+    assert len(d["derived_quantities"]) == 2
+    restored = CanonicalColumn.from_dict(d)
+    assert restored.id == "COL-01"
+    assert restored.width_m == 0.35
+    assert len(restored.derived_quantities) == 2
+
+
+def test_parapet_balcony_soffit_trade_quantities():
+    """Verifies parapet capping, balcony waterproofing/tiling/drip edge, and soffit linings."""
+    parapet = CanonicalParapet(
+        id="PAR-01",
+        start_point=Vector2D(0, 0),
+        end_point=Vector2D(12.5, 0),
+        height_m=0.60,
+    )
+    assert parapet.length_m() == 12.5
+    p_bindings = parapet.derive_trade_quantities()
+    p_map = {b.item_code: b for b in p_bindings}
+    assert p_map["PARAPET_METAL_CAPPING"].quantity == 12.5
+    assert p_map["PARAPET_METAL_CAPPING"].unit == "lm"
+    assert p_map["PARAPET_WALL_FRAMING"].quantity == 7.5  # 12.5 * 0.60
+    assert p_map["PARAPET_WALL_FRAMING"].unit == "m²"
+
+    balcony = CanonicalBalcony(
+        id="BALC-01",
+        polygon=[Vector2D(0, 0), Vector2D(4, 0), Vector2D(4, 2), Vector2D(0, 2)],
+    )
+    assert balcony.measured_area_m2() == 8.0
+    assert balcony.perimeter_lm() == 12.0
+    b_bindings = balcony.derive_trade_quantities()
+    b_map = {b.item_code: b for b in b_bindings}
+    assert b_map["BALCONY_WATERPROOFING_MEMBRANE"].quantity == round(8.0 * 1.15, 2)
+    assert b_map["BALCONY_EXTERNAL_FLOOR_TILES"].quantity == 8.0
+    assert b_map["BALCONY_DRIP_EDGE_FLASHING"].quantity == 12.0
+
+    soffit = CanonicalSoffit(
+        id="SOF-01",
+        polygon=[Vector2D(0, 0), Vector2D(10, 0), Vector2D(10, 0.6), Vector2D(0, 0.6)],
+    )
+    s_bindings = soffit.derive_trade_quantities()
+    assert len(s_bindings) == 1
+    assert s_bindings[0].item_code == "EXTERNAL_SOFFIT_LINING"
+    assert s_bindings[0].quantity == 6.0
+
+
+def test_wall_secondary_trades_and_lintel_derivation():
+    """CanonicalWall derives masonry ties, DPC flashing, and lintels over openings."""
+    wall = CanonicalWall(
+        id="W-MASONRY-01",
+        start_point=Vector2D(0, 0),
+        end_point=Vector2D(10, 0),
+        height_m=2.70,
+        thickness_m=0.23,
+        is_external=True,
+        substrate="Clay Face Brickwork",
+    )
+    win = CanonicalOpening(
+        id="OP-W1",
+        mark="W01",
+        opening_type="WINDOW",
+        width_m=1.80,
+        height_m=1.20,
+    )
+    wall.openings.append(win)
+
+    bindings = wall.derive_trade_quantities()
+    b_map = {b.item_code: b for b in bindings}
+    assert "BRICKWORK_FACE_SKIN" in b_map
+    assert "CAVITY_WALL_TIES" in b_map
+    assert "DPC_AND_BASE_FLASHING" in b_map
+    assert "OPENING_LINTEL_W01" in b_map
+    assert b_map["OPENING_LINTEL_W01"].quantity == 2.10  # 1.80 + 0.30 bearing
+
+
+def test_full_model_takeoff_rows_across_all_seven_trades():
+    """Generates and validates complete 21-field core takeoff rows across all 7 trade categories:
+    Walls, Openings, Floors, Spaces, Ceilings, Roofs, Columns, and Parapets/Balconies/Soffits.
+    """
+    import pb_takeoff_row_contract as takeoff_contract
+
+    # 1. Wall & Opening
+    wall = CanonicalWall(
+        id="W-1",
+        start_point=Vector2D(0, 0),
+        end_point=Vector2D(8, 0),
+        height_m=2.7,
+        is_external=True,
+        substrate="Face Brickwork",
+    )
+    door = CanonicalOpening(
+        id="D-1",
+        mark="D01",
+        opening_type="DOOR",
+        width_m=0.92,
+        height_m=2.04,
+        deduction_authority=True,
+    )
+    wall.openings.append(door)
+
+    # 2. Floor
+    floor = CanonicalFloor(
+        id="FL-1",
+        polygon=[Vector2D(0, 0), Vector2D(8, 0), Vector2D(8, 6), Vector2D(0, 6)],
+        thickness_m=0.10,
+    )
+
+    # 3. Space
+    space = CanonicalSpace(
+        id="SP-1",
+        name="Master Bedroom",
+        boundary_polygon=[Vector2D(0, 0), Vector2D(4, 0), Vector2D(4, 4), Vector2D(0, 4)],
+        finish_assignments={"floor": "Selected Wool Carpet & Underlay"},
+    )
+
+    # 4. Ceiling
+    ceiling = CanonicalCeiling(
+        id="CL-1",
+        polygon=[Vector2D(0, 0), Vector2D(4, 0), Vector2D(4, 4), Vector2D(0, 4)],
+    )
+
+    # 5. Roof
+    roof = CanonicalRoof(
+        id="RF-1",
+        polygon=[Vector2D(0, 0), Vector2D(8, 0), Vector2D(8, 6), Vector2D(0, 6)],
+        pitch_deg=22.5,
+    )
+
+    # 6. Column
+    column = CanonicalColumn(
+        id="COL-1",
+        width_m=0.4,
+        depth_m=0.4,
+        height_m=2.7,
+    )
+
+    # 7. Parapet, Balcony, Soffit
+    parapet = CanonicalParapet(
+        id="PAR-1",
+        start_point=Vector2D(0, 0),
+        end_point=Vector2D(6, 0),
+        height_m=0.5,
+    )
+    balcony = CanonicalBalcony(
+        id="BAL-1",
+        polygon=[Vector2D(0, 0), Vector2D(3, 0), Vector2D(3, 2), Vector2D(0, 2)],
+    )
+    soffit = CanonicalSoffit(
+        id="SOF-1",
+        polygon=[Vector2D(0, 0), Vector2D(6, 0), Vector2D(6, 0.6), Vector2D(0, 0.6)],
+    )
+
+    level = CanonicalLevel(
+        id="LVL-01",
+        name="Ground Floor",
+        walls=[wall],
+        floors=[floor],
+        spaces=[space],
+        ceilings=[ceiling],
+        roofs=[roof],
+        columns=[column],
+        parapets=[parapet],
+        balconies=[balcony],
+        soffits=[soffit],
+    )
+    project = CanonicalProject(
+        id="PROJ-01",
+        buildings=[CanonicalBuilding(id="BLD-01", levels=[level])],
+    )
+
+    # Recompute relationships
+    project.recompute_relationships()
+    assert wall.level_id == "LVL-01"
+    assert ceiling.level_id == "LVL-01"
+    assert roof.level_id == "LVL-01"
+    assert column.level_id == "LVL-01"
+    assert parapet.level_id == "LVL-01"
+    assert balcony.level_id == "LVL-01"
+    assert soffit.level_id == "LVL-01"
+
+    # Generate takeoff rows
+    rows = project.generate_takeoff_rows(workspace_id=42, now_stamp="2026-10-02T12:00:00")
+    assert len(rows) > 15  # Comprehensive trade rows emitted
+
+    # Validate strict contract conformance for every row
+    for r in rows:
+        assert set(r.keys()) == set(takeoff_contract.CORE_FIELDS)
+        assert r["unit"] in takeoff_contract.TAKEOFF_UNITS
+        assert r["workspace_id"] == 42
+        assert r["quantity"] >= 0.0
+
+    # Verify presence of all trade roles / sections
+    sections = {r["section"] for r in rows}
+    assert "External" in sections
+    assert "Substructure" in sections
+    assert "Internal" in sections
+    assert "Roof" in sections
+    assert "Structure" in sections
+
+    # Test publication to SQLite via dummy app
+    executed_statements = []
+
+    class DummyApp:
+        def lexecute(self, sql, values):
+            executed_statements.append((sql, values))
+
+    app = DummyApp()
+    pub_count = publish_canonical_model_to_takeoff(app, workspace_id=42, project=project)
+    assert pub_count == len(rows)
+    assert len(executed_statements) == len(rows)
+
 
 
