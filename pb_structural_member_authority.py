@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import math
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
@@ -17,9 +18,43 @@ STRUCTURAL_MEMBER_REGISTRATION_INCOMPLETE = "structural_member_registration_inco
 STRUCTURAL_MEMBER_COUNT_CONFLICT = "structural_member_count_conflict"
 STRUCTURAL_MEMBER_DEFINITION_ONLY = "structural_member_definition_only"
 STRUCTURAL_MEMBER_DEFINITION_CONFLICT = "structural_member_definition_conflict"
+STRUCTURAL_MEMBER_GEOMETRY_CONFLICT = "structural_member_geometry_conflict"
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
+
+
+def _validated_primitive_bbox_pairs(
+    observation: StructuralMemberObservation,
+) -> Optional[
+    tuple[tuple[str, tuple[float, float, float, float]], ...]
+]:
+    primitive_ids = {
+        str(value).strip()
+        for value in observation.source_primitive_ids
+        if str(value).strip()
+    }
+    seen: dict[str, tuple[float, float, float, float]] = {}
+    for primitive_id, bbox in observation.source_primitive_bboxes:
+        clean_id = str(primitive_id or "").strip()
+        if not clean_id or clean_id not in primitive_ids or len(bbox) != 4:
+            return None
+        try:
+            x0, y0, x1, y1 = (float(value) for value in bbox)
+        except (TypeError, ValueError):
+            return None
+        if not all(math.isfinite(value) for value in (x0, y0, x1, y1)):
+            return None
+        left, right = sorted((x0, x1))
+        top, bottom = sorted((y0, y1))
+        if right <= left or bottom <= top:
+            return None
+        normalized = (left, top, right, bottom)
+        prior = seen.get(clean_id)
+        if prior is not None and prior != normalized:
+            return None
+        seen[clean_id] = normalized
+    return tuple(sorted(seen.items()))
 
 
 class StructuralMemberRelation(str, Enum):
@@ -48,6 +83,9 @@ class StructuralMemberObservation:
     view_type: str
     source_evidence_ids: tuple[str, ...]
     source_primitive_ids: tuple[str, ...] = ()
+    source_primitive_bboxes: tuple[
+        tuple[str, tuple[float, float, float, float]], ...
+    ] = ()
     definition_id: Optional[str] = None
     schema_version: str = STRUCTURAL_MEMBER_SCHEMA_VERSION
 
@@ -91,6 +129,9 @@ class PhysicalStructuralMember:
     page_ids: tuple[str, ...]
     view_ids: tuple[str, ...]
     definition_ids: tuple[str, ...]
+    source_primitive_bboxes: tuple[
+        tuple[str, tuple[float, float, float, float]], ...
+    ] = ()
     schema_version: str = STRUCTURAL_MEMBER_SCHEMA_VERSION
 
 
@@ -169,6 +210,22 @@ class StructuralMemberProducer:
                 definitions=defs,
             )
             return self._result
+
+        geometry_by_observation: dict[
+            str,
+            tuple[tuple[str, tuple[float, float, float, float]], ...],
+        ] = {}
+        for observation in obs:
+            geometry = _validated_primitive_bbox_pairs(observation)
+            if geometry is None:
+                self._result = self._blocked(
+                    EvidenceResolutionStatus.CONFLICT,
+                    STRUCTURAL_MEMBER_GEOMETRY_CONFLICT,
+                    definitions=defs,
+                    unresolved=tuple(sorted(by_id)),
+                )
+                return self._result
+            geometry_by_observation[observation.observation_id] = geometry
 
         required_views = {o.view_id for o in obs}
         scopes = {s.view_id: s for s in self._view_scopes if s.view_id in required_views}
@@ -284,6 +341,44 @@ class StructuralMemberProducer:
         for grouped in sorted(groups.values(), key=lambda g: min(x.observation_id for x in g)):
             grouped = sorted(grouped, key=lambda x: x.observation_id)
             evidence = tuple(sorted({e for x in grouped for e in x.source_evidence_ids}))
+            primitive_geometry: dict[
+                str, tuple[float, float, float, float]
+            ] = {}
+            for observation in grouped:
+                for primitive_id, bbox in geometry_by_observation.get(
+                    observation.observation_id,
+                    (),
+                ):
+                    prior = primitive_geometry.get(primitive_id)
+                    if prior is not None and prior != bbox:
+                        self._result = self._blocked(
+                            EvidenceResolutionStatus.CONFLICT,
+                            STRUCTURAL_MEMBER_GEOMETRY_CONFLICT,
+                            definitions=defs,
+                            unresolved=tuple(sorted(by_id)),
+                        )
+                        return self._result
+                    primitive_geometry[primitive_id] = bbox
+            member_primitive_ids = tuple(
+                sorted(
+                    {
+                        primitive_id
+                        for observation in grouped
+                        for primitive_id in observation.source_primitive_ids
+                    }
+                )
+            )
+            if any(
+                primitive_id not in member_primitive_ids
+                for primitive_id in primitive_geometry
+            ):
+                self._result = self._blocked(
+                    EvidenceResolutionStatus.CONFLICT,
+                    STRUCTURAL_MEMBER_GEOMETRY_CONFLICT,
+                    definitions=defs,
+                    unresolved=tuple(sorted(by_id)),
+                )
+                return self._result
             payload = {"selector": self._selector.__dict__, "kind": kind,
                        "observation_ids": [x.observation_id for x in grouped],
                        "source_evidence_ids": evidence}
@@ -292,10 +387,11 @@ class StructuralMemberProducer:
                 member_kind=kind,
                 observation_ids=tuple(x.observation_id for x in grouped),
                 source_evidence_ids=evidence,
-                source_primitive_ids=tuple(sorted({p for x in grouped for p in x.source_primitive_ids})),
+                source_primitive_ids=member_primitive_ids,
                 page_ids=tuple(sorted({x.page_id for x in grouped})),
                 view_ids=tuple(sorted({x.view_id for x in grouped})),
                 definition_ids=tuple(sorted({x.definition_id for x in grouped if x.definition_id})),
+                source_primitive_bboxes=tuple(sorted(primitive_geometry.items())),
             ))
 
         self._result = StructuralMemberResolution(

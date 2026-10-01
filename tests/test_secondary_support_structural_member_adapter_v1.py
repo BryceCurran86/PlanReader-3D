@@ -4,7 +4,13 @@ from pb_secondary_support_structural_member_adapter import (
     build_secondary_support_structural_member_authority,
 )
 
-def evidence(*, mode="physical_symbol", ids=("g1","g2","g3","g4"), kind="physical_support"):
+def evidence(
+    *,
+    mode="physical_symbol",
+    ids=("g1","g2","g3","g4"),
+    kind="physical_support",
+    bboxes=(),
+):
     return SecondaryAreaSupportEvidence(
         zone_type="verandah",
         support_kind=kind,
@@ -18,6 +24,7 @@ def evidence(*, mode="physical_symbol", ids=("g1","g2","g3","g4"), kind="physica
         zone_text="VERANDAH",
         support_text="",
         support_symbol_ids=ids,
+        support_symbol_bboxes=bboxes,
         evidence_mode=mode,
         confidence=0.97,
     )
@@ -38,6 +45,25 @@ def test_four_proven_symbols_publish_four_physical_members():
     assert {m.source_primitive_ids for m in r.members} == {
         ("g1",),("g2",),("g3",),("g4",)
     }
+
+def test_proven_symbol_geometry_is_carried_by_the_same_physical_members():
+    bboxes = (
+        (10.0, 20.0, 14.0, 24.0),
+        (30.0, 20.0, 34.0, 24.0),
+        (50.0, 20.0, 54.0, 24.0),
+        (70.0, 20.0, 74.0, 24.0),
+    )
+    r = build(evidence(bboxes=bboxes))
+    assert r.status is EvidenceResolutionStatus.CORROBORATED
+    assert r.quantity == 4
+    by_primitive = {
+        member.source_primitive_ids[0]: member
+        for member in r.members
+    }
+    for symbol_id, bbox in zip(("g1", "g2", "g3", "g4"), bboxes):
+        member = by_primitive[symbol_id]
+        assert member.source_primitive_bboxes == ((symbol_id, bbox),)
+
 
 def test_text_or_bay_count_evidence_without_physical_symbols_never_mints_quantity():
     r=build(evidence(mode="text_specification",ids=()))

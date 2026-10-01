@@ -37,7 +37,13 @@ def _scope(*, complete: bool = True) -> StructuralMemberViewScope:
         reason_codes=() if complete else ("cropped_view",),
     )
 
-def _observation(index: int, *, kind: str = "column") -> StructuralMemberObservation:
+def _observation(
+    index: int,
+    *,
+    kind: str = "column",
+    bbox=None,
+) -> StructuralMemberObservation:
+    primitive_id = f"primitive-col-{index}"
     return StructuralMemberObservation(
         observation_id=f"col-{index}",
         member_kind=kind,
@@ -45,7 +51,12 @@ def _observation(index: int, *, kind: str = "column") -> StructuralMemberObserva
         view_id="plan",
         view_type="plan",
         source_evidence_ids=(f"src-col-{index}",),
-        source_primitive_ids=(f"primitive-col-{index}",),
+        source_primitive_ids=(primitive_id,),
+        source_primitive_bboxes=(
+            ((primitive_id, tuple(float(value) for value in bbox)),)
+            if bbox is not None
+            else ()
+        ),
         definition_id=f"def-{kind}",
     )
 
@@ -61,8 +72,19 @@ def _definition(kind: str = "column") -> StructuralMemberDefinition:
     )
 
 
-def _resolved(kind: str = "column"):
-    observations = (_observation(1, kind=kind), _observation(2, kind=kind))
+def _resolved(kind: str = "column", *, with_geometry: bool = False):
+    observations = (
+        _observation(
+            1,
+            kind=kind,
+            bbox=(10.0, 20.0, 14.0, 24.0) if with_geometry else None,
+        ),
+        _observation(
+            2,
+            kind=kind,
+            bbox=(30.0, 20.0, 34.0, 24.0) if with_geometry else None,
+        ),
+    )
     relation = StructuralMemberRelationEvidence(
         left_observation_id=observations[0].observation_id,
         right_observation_id=observations[1].observation_id,
@@ -101,6 +123,32 @@ def test_corroborated_members_project_to_stable_canonical_identities() -> None:
         payload = member.to_dict()
         assert payload["canonical_structural_member_id"] == member.physical_member_id
         assert payload["geometry_complete"] is False
+
+
+def test_owned_plan_geometry_is_preserved_without_claiming_full_3d_geometry() -> None:
+    resolution = _resolved(with_geometry=True)
+
+    result = project_structural_member_resolution(resolution)
+
+    assert result.reason_codes == (LIVE_CANONICAL_STRUCTURAL_MEMBER_RESOLVED,)
+    assert len(result.objects) == 2
+    by_primitive = {
+        member.source_primitive_ids[0]: member
+        for member in result.objects
+    }
+    first = by_primitive["primitive-col-1"]
+    assert first.source_primitive_bboxes == (
+        ("primitive-col-1", (10.0, 20.0, 14.0, 24.0)),
+    )
+    assert first.plan_bbox_source_pts == (10.0, 20.0, 14.0, 24.0)
+    assert first.plan_geometry_page_id == "1"
+    assert first.plan_geometry_complete is True
+    assert first.geometry_coordinate_space == "source_page_points"
+    assert first.geometry_complete is False
+    payload = first.to_dict()
+    assert payload["plan_bbox_source_pts"] == [10.0, 20.0, 14.0, 24.0]
+    assert payload["plan_geometry_complete"] is True
+    assert payload["geometry_complete"] is False
 
 
 def test_incomplete_structural_scope_does_not_mint_canonical_member() -> None:
