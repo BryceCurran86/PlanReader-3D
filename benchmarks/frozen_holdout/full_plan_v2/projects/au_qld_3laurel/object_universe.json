@@ -789,5 +789,189 @@
       ]
     }
   ],
-  "vinyl_floor_surface_universe_complete": true
+  "vinyl_floor_surface_universe_complete": true,
+  "wall_tile_finish_surfaces": [
+    {
+      "object_ref": "3laurel:surface:wall_tile:laundry_D_skirting",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "Laundry D tile skirting strip",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 0.5852,
+      "attributes": {
+        "finished_face_width_m": 3.08,
+        "tile_height_m": 0.19,
+        "calculation": "3.080m * 0.190m",
+        "finish_scope": "tile_skirting",
+        "floor_level_openings_in_host_face": false,
+        "net_finish_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p13:A0.13:Laundry_D:3080_finished_wall_width_x_190_TILE_SKIRTING_height"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:bathroom_C_shower_net",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "Main bathroom C shower tile finish",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.89,
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_1",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.1,
+        "calculation": "0.900m * 2.100m",
+        "finish_scope": "shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p11:A0.11:Bathroom_C:900_SHW_x_2100_TILES:no_niche"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:ensuite_B_shower_return_net",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "Ensuite B full-height shower return tile finish",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.43,
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_return_1",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "0.900m * 2.700m",
+        "finish_scope": "full_height_shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p12:A0.12:Ensuite_B:900_SHW:SHOWER_TILES_TO_RUN_UP_TO_CEILING"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:ensuite_D_shower_return_net",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "Ensuite D full-height shower return tile finish",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.43,
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_return_2",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "0.900m * 2.700m",
+        "finish_scope": "full_height_shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p12:A0.12:Ensuite_D:900_SHW:full_height_shower_tiling_scope"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:gf_ensuite_B_shower_return_net",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "GF Ens/Ldry B full-height shower return tile finish",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.43,
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_return_1",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "0.900m * 2.700m",
+        "finish_scope": "full_height_shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p15:A0.15:GF_Ens_Ldry_B:900_SHW:SHOWER_TILES_TO_RUN_UP_TO_CEILING"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:gf_ensuite_D_shower_return_net",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "GF Ens/Ldry D full-height shower return tile finish",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.43,
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_return_2",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "0.900m * 2.700m",
+        "finish_scope": "full_height_shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p15:A0.15:GF_Ens_Ldry_D:900_SHW:SHOWER_TILES_TO_RUN_UP_TO_CEILING"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:ensuite_rear_flat_after_niche",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "Main ensuite rear shower wall flat tile face after niche opening deduction",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.296,
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_rear",
+        "niche_deduction_ref": "3laurel:opening:p12:main_ensuite_niche:01",
+        "gross_area_m2": 4.536,
+        "niche_face_deduction_m2": 0.24,
+        "calculation": "4.536 - 0.240",
+        "niche_returns_included": false,
+        "net_flat_face_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p12:A0.12:Ensuite_A:1680x2700_gross_less_600x400_niche_face"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:gf_ensuite_rear_flat_after_niche",
+      "physical_kind": "wall_tile_finish_surface",
+      "object_family": "wet_area_wall_tile_finish",
+      "description": "GF ensuite rear shower wall flat tile face after niche opening deduction",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.809,
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_rear",
+        "niche_deduction_ref": "3laurel:opening:p15:gf_ensuite_niche:01",
+        "gross_area_m2": 5.049,
+        "niche_face_deduction_m2": 0.24,
+        "calculation": "5.049 - 0.240",
+        "niche_returns_included": false,
+        "net_flat_face_area_ready": true
+      },
+      "source_locations": [
+        "architectural:p15:A0.15:GF_Ens_Ldry_C:1870x2700_gross_less_600x400_niche_face"
+      ]
+    }
+  ],
+  "wall_tile_face_subset_source_closed": true,
+  "project_wet_area_tile_universe_complete": false
 }
