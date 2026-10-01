@@ -59,6 +59,155 @@ LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID = (
 )
 
 PERIMETER_WALLING_SEMANTIC_KEY = "perimeter_walling"
+CANONICAL_WALL_OBJECT_SCHEMA_VERSION = "1.0.0"
+
+
+@dataclass(frozen=True)
+class CanonicalWallPlanMember:
+    """Authenticated plan-space geometry retained for one wall member candidate."""
+
+    wall_candidate_id: str
+    physical_identity_id: Optional[str]
+    viewport_id: str
+    centerline_pts: tuple[tuple[float, float], ...]
+    curve_control_pts: tuple[tuple[float, float], ...]
+    is_curved: bool
+    thickness_m: Optional[float]
+    length_m: Optional[float]
+    level_id: Optional[str]
+    end_node_ids: tuple[str, str]
+    junction_types: tuple[str, str]
+    source_primitive_ids: tuple[str, ...]
+    supporting_evidence_ids: tuple[str, ...]
+    coordinate_space: str = "source_page_points"
+
+    def to_dict(self) -> dict:
+        return {
+            "wall_candidate_id": self.wall_candidate_id,
+            "physical_identity_id": self.physical_identity_id,
+            "viewport_id": self.viewport_id,
+            "centerline_pts": [list(point) for point in self.centerline_pts],
+            "curve_control_pts": [list(point) for point in self.curve_control_pts],
+            "is_curved": self.is_curved,
+            "thickness_m": self.thickness_m,
+            "length_m": self.length_m,
+            "level_id": self.level_id,
+            "end_node_ids": list(self.end_node_ids),
+            "junction_types": list(self.junction_types),
+            "source_primitive_ids": list(self.source_primitive_ids),
+            "supporting_evidence_ids": list(self.supporting_evidence_ids),
+            "coordinate_space": self.coordinate_space,
+        }
+
+
+@dataclass(frozen=True)
+class CanonicalOpeningVoidGeometry:
+    """Authenticated opening relationship + wall-local void geometry."""
+
+    opening_identity_id: str
+    physical_void_record_id: str
+    host_binding_record_id: str
+    opening_universe_record_id: str
+    width_record_id: str
+    height_record_id: str
+    vertical_placement_record_id: str
+    wall_local_frame_id: str
+    profile_kind: str
+    coordinate_unit: str
+    u0: float
+    u1: float
+    z0: float
+    z1: float
+
+    @property
+    def width_m(self) -> float:
+        return float(self.u1) - float(self.u0)
+
+    @property
+    def height_m(self) -> float:
+        return float(self.z1) - float(self.z0)
+
+    def to_dict(self) -> dict:
+        return {
+            "opening_identity_id": self.opening_identity_id,
+            "physical_void_record_id": self.physical_void_record_id,
+            "host_binding_record_id": self.host_binding_record_id,
+            "opening_universe_record_id": self.opening_universe_record_id,
+            "width_record_id": self.width_record_id,
+            "height_record_id": self.height_record_id,
+            "vertical_placement_record_id": self.vertical_placement_record_id,
+            "wall_local_frame_id": self.wall_local_frame_id,
+            "profile_kind": self.profile_kind,
+            "coordinate_unit": self.coordinate_unit,
+            "u0": self.u0,
+            "u1": self.u1,
+            "z0": self.z0,
+            "z1": self.z1,
+            "width_m": self.width_m,
+            "height_m": self.height_m,
+        }
+
+
+@dataclass(frozen=True)
+class LiveCanonicalWallObject:
+    """Persistent semantic wall snapshot; quantities are derived from this object."""
+
+    canonical_wall_id: str
+    physical_wall_id: str
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    snapshot_id: str
+    page_id: str
+    decision_scope_id: str
+    wall_local_frame_id: str
+    role: str
+    coordinate_unit: str
+    length_m: float
+    height_m: float
+    gross_area_m2: float
+    net_area_m2: float
+    gross_polygon_wkb_hex: str
+    net_polygon_wkb_hex: str
+    member_wall_candidate_ids: tuple[str, ...]
+    plan_members: tuple[CanonicalWallPlanMember, ...]
+    level_ids: tuple[str, ...]
+    opening_identity_ids: tuple[str, ...]
+    opening_voids: tuple[CanonicalOpeningVoidGeometry, ...]
+    gross_geometry_record_id: str
+    whole_wall_role_record_id: str
+    evidence_ids: tuple[str, ...]
+    schema_version: str = CANONICAL_WALL_OBJECT_SCHEMA_VERSION
+
+    def to_dict(self) -> dict:
+        return {
+            "canonical_wall_id": self.canonical_wall_id,
+            "physical_wall_id": self.physical_wall_id,
+            "document_id": self.document_id,
+            "revision_id": self.revision_id,
+            "source_sha256": self.source_sha256,
+            "snapshot_id": self.snapshot_id,
+            "page_id": self.page_id,
+            "decision_scope_id": self.decision_scope_id,
+            "wall_local_frame_id": self.wall_local_frame_id,
+            "role": self.role,
+            "coordinate_unit": self.coordinate_unit,
+            "length_m": self.length_m,
+            "height_m": self.height_m,
+            "gross_area_m2": self.gross_area_m2,
+            "net_area_m2": self.net_area_m2,
+            "gross_polygon_wkb_hex": self.gross_polygon_wkb_hex,
+            "net_polygon_wkb_hex": self.net_polygon_wkb_hex,
+            "member_wall_candidate_ids": list(self.member_wall_candidate_ids),
+            "plan_members": [member.to_dict() for member in self.plan_members],
+            "level_ids": list(self.level_ids),
+            "opening_identity_ids": list(self.opening_identity_ids),
+            "opening_voids": [void.to_dict() for void in self.opening_voids],
+            "gross_geometry_record_id": self.gross_geometry_record_id,
+            "whole_wall_role_record_id": self.whole_wall_role_record_id,
+            "evidence_ids": list(self.evidence_ids),
+            "schema_version": self.schema_version,
+        }
 
 
 @dataclass(frozen=True)
@@ -67,6 +216,7 @@ class LiveExternalPhysicalNetWallPublication:
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
     quantity_evidence: Optional[QuantityEvidence]
+    canonical_walls: tuple[LiveCanonicalWallObject, ...]
     external_wall_ids: tuple[str, ...]
     gross_geometry_record_ids: tuple[str, ...]
     whole_wall_role_record_ids: tuple[str, ...]
@@ -103,6 +253,7 @@ def _blocked(
         status=status,
         reason_codes=_reasons(reason, extra_reasons),
         quantity_evidence=None,
+        canonical_walls=(),
         external_wall_ids=(),
         gross_geometry_record_ids=(),
         whole_wall_role_record_ids=(),
@@ -120,6 +271,83 @@ def _lineage_tuple(value) -> tuple[str, str, str, str, str, str]:
         _clean(value.page_id),
         _clean(value.decision_scope_id),
     )
+
+
+def _enum_value(value: object) -> str:
+    raw = getattr(value, "value", value)
+    return _clean(raw)
+
+
+def _canonical_plan_members(
+    wall_opening_composition: LiveWallOpeningAuthorityComposition,
+    gross_record: object,
+) -> tuple[CanonicalWallPlanMember, ...]:
+    """Rehydrate authenticated plan geometry without changing quantity authority."""
+
+    authority = wall_opening_composition.physical_wall_candidate_authority
+    if authority is None:
+        return ()
+    selector = authority.selector_for_decision_scope(
+        document_id=_clean(gross_record.document_id),
+        revision_id=_clean(gross_record.revision_id),
+        source_sha256=_clean(gross_record.source_sha256),
+        snapshot_id=_clean(gross_record.snapshot_id),
+        page_id=_clean(gross_record.page_id),
+        decision_scope_id=_clean(gross_record.decision_scope_id),
+    )
+    if selector is None:
+        return ()
+    scope = authority.resolve_scope(selector)
+    if scope.status is not EvidenceResolutionStatus.CORROBORATED:
+        return ()
+
+    records_by_id = {record.wall_candidate_id: record for record in scope.records}
+    out: list[CanonicalWallPlanMember] = []
+    for member_id in tuple(gross_record.member_wall_candidate_ids):
+        record = records_by_id.get(_clean(member_id))
+        if record is None:
+            return ()
+        wall = record.wall_candidate
+        identity = record.physical_identity
+        out.append(
+            CanonicalWallPlanMember(
+                wall_candidate_id=_clean(record.wall_candidate_id),
+                physical_identity_id=(
+                    _clean(identity.physical_identity_id)
+                    if identity.physical_identity_id
+                    else None
+                ),
+                viewport_id=_clean(wall.viewport_id),
+                centerline_pts=tuple(
+                    (float(point[0]), float(point[1]))
+                    for point in wall.centerline_pts
+                ),
+                curve_control_pts=tuple(
+                    (float(point[0]), float(point[1]))
+                    for point in (wall.curve_control_pts or ())
+                ),
+                is_curved=bool(wall.is_curved),
+                thickness_m=(
+                    float(wall.thickness_m)
+                    if wall.thickness_m is not None
+                    else None
+                ),
+                length_m=(
+                    float(wall.length_m) if wall.length_m is not None else None
+                ),
+                level_id=_clean(wall.level_id) or None,
+                end_node_ids=(
+                    _clean(wall.end_node_ids[0]),
+                    _clean(wall.end_node_ids[1]),
+                ),
+                junction_types=tuple(
+                    _enum_value(value) for value in wall.junction_types
+                ),
+                source_primitive_ids=tuple(identity.source_primitive_ids),
+                supporting_evidence_ids=tuple(wall.supporting_evidence_ids),
+            )
+        )
+    return tuple(out)
 
 
 def compose_live_external_physical_net_wall_publication(
@@ -428,6 +656,7 @@ def compose_live_external_physical_net_wall_publication(
     external_role_ids: list[str] = []
     net_values: list[float] = []
     external_void_ids: list[str] = []
+    canonical_walls: list[LiveCanonicalWallObject] = []
 
     for wall_id in wall_ids:
         role_record = role_records[wall_id]
@@ -465,6 +694,84 @@ def compose_live_external_physical_net_wall_publication(
                 status=EvidenceResolutionStatus.CONFLICT,
                 reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID,
             )
+
+        plan_members = _canonical_plan_members(
+            wall_opening_composition,
+            gross_record,
+        )
+        opening_voids = tuple(
+            CanonicalOpeningVoidGeometry(
+                opening_identity_id=_clean(void.opening_identity_id),
+                physical_void_record_id=_clean(void.record_id),
+                host_binding_record_id=_clean(void.host_binding_record_id),
+                opening_universe_record_id=_clean(void.opening_universe_record_id),
+                width_record_id=_clean(void.width_record_id),
+                height_record_id=_clean(void.height_record_id),
+                vertical_placement_record_id=_clean(void.vertical_placement_record_id),
+                wall_local_frame_id=_clean(void.wall_local_frame_id),
+                profile_kind=_clean(void.profile_kind),
+                coordinate_unit=_clean(void.coordinate_unit),
+                u0=float(void.u0),
+                u1=float(void.u1),
+                z0=float(void.z0),
+                z1=float(void.z1),
+            )
+            for void in void_records
+        )
+        canonical_evidence_ids = tuple(
+            dict.fromkeys(
+                (
+                    _clean(gross_record.record_id),
+                    _clean(role_record.record_id),
+                    *(_clean(void.record_id) for void in void_records),
+                    *(
+                        evidence_id
+                        for member in plan_members
+                        for evidence_id in member.supporting_evidence_ids
+                    ),
+                )
+            )
+        )
+        canonical_walls.append(
+            LiveCanonicalWallObject(
+                canonical_wall_id=wall_id,
+                physical_wall_id=wall_id,
+                document_id=_clean(gross_record.document_id),
+                revision_id=_clean(gross_record.revision_id),
+                source_sha256=_clean(gross_record.source_sha256),
+                snapshot_id=_clean(gross_record.snapshot_id),
+                page_id=_clean(gross_record.page_id),
+                decision_scope_id=_clean(gross_record.decision_scope_id),
+                wall_local_frame_id=_clean(gross_record.wall_local_frame_id),
+                role=_enum_value(role_record.role),
+                coordinate_unit=_clean(gross_record.coordinate_unit),
+                length_m=float(gross_record.length_m),
+                height_m=float(gross_record.height_m),
+                gross_area_m2=float(gross_record.gross_area_m2),
+                net_area_m2=net_area,
+                gross_polygon_wkb_hex=_clean(gross_record.polygon_wkb_hex),
+                net_polygon_wkb_hex=str(net_polygon.wkb_hex),
+                member_wall_candidate_ids=tuple(
+                    _clean(value)
+                    for value in gross_record.member_wall_candidate_ids
+                ),
+                plan_members=plan_members,
+                level_ids=tuple(
+                    dict.fromkeys(
+                        member.level_id
+                        for member in plan_members
+                        if member.level_id
+                    )
+                ),
+                opening_identity_ids=tuple(
+                    _clean(void.opening_identity_id) for void in void_records
+                ),
+                opening_voids=opening_voids,
+                gross_geometry_record_id=_clean(gross_record.record_id),
+                whole_wall_role_record_id=_clean(role_record.record_id),
+                evidence_ids=canonical_evidence_ids,
+            )
+        )
 
         external_wall_ids.append(wall_id)
         external_gross_ids.append(_clean(gross_record.record_id))
@@ -525,6 +832,9 @@ def compose_live_external_physical_net_wall_publication(
         metadata={
             "revision_id": revision_id,
             "external_wall_ids": tuple(external_wall_ids),
+            "canonical_wall_object_ids": tuple(
+                wall.canonical_wall_id for wall in canonical_walls
+            ),
             "gross_geometry_record_ids": tuple(external_gross_ids),
             "whole_wall_role_record_ids": tuple(external_role_ids),
             "physical_void_record_ids": tuple(external_void_ids),
@@ -539,6 +849,7 @@ def compose_live_external_physical_net_wall_publication(
         status=EvidenceResolutionStatus.CORROBORATED,
         reason_codes=(LIVE_EXTERNAL_PHYSICAL_NET_WALL_RESOLVED,),
         quantity_evidence=evidence,
+        canonical_walls=tuple(canonical_walls),
         external_wall_ids=tuple(external_wall_ids),
         gross_geometry_record_ids=tuple(external_gross_ids),
         whole_wall_role_record_ids=tuple(external_role_ids),
@@ -557,7 +868,11 @@ __all__ = [
     "LIVE_EXTERNAL_PHYSICAL_NET_WALL_SCHEMA_VERSION",
     "LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE",
     "LIVE_EXTERNAL_PHYSICAL_NET_WALL_VOID_UNRESOLVED",
+    "CANONICAL_WALL_OBJECT_SCHEMA_VERSION",
     "PERIMETER_WALLING_SEMANTIC_KEY",
+    "CanonicalOpeningVoidGeometry",
+    "CanonicalWallPlanMember",
+    "LiveCanonicalWallObject",
     "LiveExternalPhysicalNetWallPublication",
     "compose_live_external_physical_net_wall_publication",
 ]
