@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2] / "benchmarks" / "frozen_holdout" / "full_plan_v2"
@@ -59,3 +61,17 @@ def test_source_hashes_are_frozen_to_uploaded_files():
     for project_id, sha in expected.items():
         manifest = _json(ROOT / "projects" / project_id / "source_manifest.json")
         assert manifest["source_documents"][0]["sha256"] == sha
+
+
+def test_baseline_cli_runs_directly_from_repo_checkout():
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "run_baseline.py")],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 2
+    payload = json.loads(completed.stdout)
+    assert payload["publication_status"] == "UNPUBLISHED"
+    assert payload["configured_projects"] == 5

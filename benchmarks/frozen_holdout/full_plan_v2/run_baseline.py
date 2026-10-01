@@ -3,11 +3,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from .evaluator import evaluate_suite_v2
-from .manifest_io import load_produced_items, load_suite_manifests
+if __package__:
+    from .evaluator import evaluate_suite_v2
+    from .manifest_io import load_produced_items, load_suite_manifests
+else:
+    repo_root = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(repo_root))
+    from benchmarks.frozen_holdout.full_plan_v2.evaluator import evaluate_suite_v2
+    from benchmarks.frozen_holdout.full_plan_v2.manifest_io import (
+        load_produced_items,
+        load_suite_manifests,
+    )
 
 
 def main() -> int:
