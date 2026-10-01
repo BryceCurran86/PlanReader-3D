@@ -35,7 +35,7 @@
     "secondary_fc_soffit_and_beam_faces_beyond_primary_ceiling_planes",
     "wet_area_tile_bathroom_niche_face_and_all_niche_return_depths",
     "wet_area_non_shower_tile_skirtings_bath_surrounds_and_splashbacks",
-    "unlabelled_internal_wall_breaks_or_open_archways_for_wall_face_deductions"
+    "unlabelled_internal_wall_breaks_beyond_two_closed_dimensioned_open_archways_for_wall_face_deductions"
   ],
   "completion_rule": "Do not mark project VERIFIED until every in-scope family is independently closed and aggregate controls reconcile without double counting.",
   "verified_physical_candidates": [
@@ -2106,6 +2106,40 @@
         ],
         "wall_deduction_scope": "labelled_sliding_joinery_opening"
       }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_archway:2100x1030:01",
+      "object_family": "internal_open_archway",
+      "physical_kind": "opening_surface",
+      "description": "Dimensioned internal open archway, 2100 high x 1030 wide",
+      "expected_quantity": 2.163,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:wall_break_between_living_media_and_WC_Bed3_hall:2100x1030",
+      "attributes": {
+        "opening_type": "open_archway",
+        "width_m": 1.03,
+        "height_m": 2.1,
+        "calculation": "1.030m * 2.100m",
+        "wall_deduction_scope": "dimensioned_open_archway",
+        "source_closed_opening": true
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_archway:2100x1000:01",
+      "object_family": "internal_open_archway",
+      "physical_kind": "opening_surface",
+      "description": "Dimensioned internal open archway, 2100 high x 1000 wide",
+      "expected_quantity": 2.1,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:wall_break_between_dining_entry_and_Bed2_laundry_hall:2100x1000",
+      "attributes": {
+        "opening_type": "open_archway",
+        "width_m": 1,
+        "height_m": 2.1,
+        "calculation": "1.000m * 2.100m",
+        "wall_deduction_scope": "dimensioned_open_archway",
+        "source_closed_opening": true
+      }
     }
   ],
   "closure_checks": [
@@ -2533,6 +2567,17 @@
         "architectural:p3:A0.3:main_bathroom_720_hinged_and_main_WC_720_cs",
         "architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
       ]
+    },
+    {
+      "check_id": "3laurel:closure:dimensioned_internal_open_archways",
+      "component_object_refs": [
+        "3laurel:opening:p3:internal_archway:2100x1030:01",
+        "3laurel:opening:p3:internal_archway:2100x1000:01"
+      ],
+      "object_count": 2,
+      "total_opening_area_m2": 4.263,
+      "source_location": "architectural:p3:A0.3:floor_plan:2100x1030_and_2100x1000_wall_breaks",
+      "source_closed": true
     }
   ]
 }
