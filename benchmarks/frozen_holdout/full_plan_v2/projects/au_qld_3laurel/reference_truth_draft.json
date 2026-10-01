@@ -2386,6 +2386,78 @@
         "closure_group": "3laurel_declared_floor_area",
         "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
       }
+    },
+    {
+      "object_ref": "3laurel:surface:floor:bathroom",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Main bathroom tiled floor surface",
+      "expected_quantity": 5.17,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:Bathroom_Layout:1880x2750_finished_dimensions; architectural:p3:A0.3:BATH:TILES",
+      "attributes": {
+        "width_m": 1.88,
+        "length_m": 2.75,
+        "calculation": "1.880m * 2.750m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from bathroom layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:floor:main_wc",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Main WC tiled floor surface",
+      "expected_quantity": 1.7316,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:WC_plan:1560x1110_finished_dimensions; architectural:p3:A0.3:WC:TILES",
+      "attributes": {
+        "width_m": 1.56,
+        "length_m": 1.11,
+        "calculation": "1.560m * 1.110m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from WC layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:floor:laundry",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Main laundry tiled floor surface",
+      "expected_quantity": 5.1744,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_Layout:3080x1680_finished_dimensions; architectural:p3:A0.3:LDY:TILES",
+      "attributes": {
+        "width_m": 3.08,
+        "length_m": 1.68,
+        "calculation": "3.080m * 1.680m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from laundry layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:floor:gf_ensuite_laundry",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Granny-flat ensuite/laundry tiled floor surface",
+      "expected_quantity": 6.4889,
+      "unit": "m2",
+      "source_location": "architectural:p15:A0.15:GF_Ensuite_Laundry:1870x3470_finished_dimensions; architectural:p3:A0.3:GF_wet_area:TILES",
+      "attributes": {
+        "width_m": 1.87,
+        "length_m": 3.47,
+        "calculation": "1.870m * 3.470m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from GF ensuite/laundry layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:gf_living_composite_region"
+      }
     }
   ],
   "closure_checks": [
@@ -2906,6 +2978,29 @@
       "drawing_instruction": "Dimensions shall not be obtained by scaling.",
       "scaling_substitute_allowed": false,
       "conclusion": "Bathroom niche face area and all niche return areas remain unresolved until independent dimensions are supplied."
+    },
+    {
+      "check_id": "3laurel:closure:wet_area_atomic_floor_surfaces",
+      "component_object_refs": [
+        "3laurel:surface:floor:bathroom",
+        "3laurel:surface:floor:main_wc",
+        "3laurel:surface:floor:laundry",
+        "3laurel:surface:floor:gf_ensuite_laundry"
+      ],
+      "object_count": 4,
+      "component_sum_m2": 18.5649,
+      "source_closed": true,
+      "aggregate_overlap": {
+        "main_living_refs": [
+          "3laurel:surface:floor:bathroom",
+          "3laurel:surface:floor:main_wc",
+          "3laurel:surface:floor:laundry"
+        ],
+        "gf_living_refs": [
+          "3laurel:surface:floor:gf_ensuite_laundry"
+        ],
+        "rule": "Atomic wet-area floor surfaces are components of the declared living aggregates and must not be double-counted with those aggregate controls."
+      }
     }
   ]
 }
