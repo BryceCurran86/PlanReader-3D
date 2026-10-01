@@ -599,3 +599,29 @@ def test_3laurel_internal_room_access_door_census_is_source_closed_but_joinery_s
         in draft["unresolved_surface_families"]
     )
 
+def test_3laurel_labelled_internal_joinery_openings_are_closed_but_unlabelled_breaks_stay_open():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "internal_sliding_joinery_opening"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:internal_sliding_joinery_opening_census"
+    )
+    assert len(openings) == check["labelled_vsd_opening_count"] == 4
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(13.86)
+    assert check["width_distribution_m"] == {"1.20": 1, "1.80": 3}
+    assert check["joinery_height_m"] == pytest.approx(2.1)
+    assert check["complete_for_explicit_vsd_labels"] is True
+    assert check["complete_for_all_internal_wall_openings"] is False
+    assert check["residual_unresolved"] == [
+        "unlabelled_internal_wall_breaks_or_open_archways"
+    ]
+    assert (
+        "unlabelled_internal_wall_breaks_or_open_archways_for_wall_face_deductions"
+        in draft["unresolved_surface_families"]
+    )
+
