@@ -1023,3 +1023,38 @@ def test_lot16_roof_final_crosscheck_stays_blocked_without_stormwater_plan():
         "roof_planes_final_crosscheck_blocked_by_missing_engineering_stormwater_drainage_plan"
         in draft["unresolved_surface_families"]
     )
+
+
+def test_3laurel_bed2_bed3_gross_wall_faces_are_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"].startswith(
+            ("3laurel:surface:internal_wall_gross:bed2:",
+             "3laurel:surface:internal_wall_gross:bed3:")
+        )
+    ]
+    assert len(faces) == 8
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(
+        77.76
+    )
+    assert {row["attributes"]["finished_room_face_width_m"] for row in faces} == {
+        3.0,
+        4.2,
+    }
+    assert all(
+        row["attributes"]["finished_ceiling_height_m"] == pytest.approx(2.7)
+        for row in faces
+    )
+    assert all(row["attributes"]["openings_deducted"] is False for row in faces)
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:bed2_bed3_gross_wall_faces"
+    )
+    assert check["room_count"] == 2
+    assert check["object_count"] == 8
+    assert check["gross_wall_area_m2"] == pytest.approx(77.76)
+    assert check["source_closed_gross_geometry"] is True
