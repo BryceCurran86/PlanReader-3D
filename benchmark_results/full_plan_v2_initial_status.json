@@ -73,11 +73,14 @@
     "au_qld_3laurel:verified_surface_universe_not_built",
     "au_qld_lot16_power:reference_takeoff_not_supplied",
     "au_qld_lot16_power:verified_surface_universe_not_built",
-    "au_qld_maryborough_service_station:reference_takeoff_not_supplied",
-    "au_qld_maryborough_service_station:verified_surface_universe_not_built",
-    "au_qld_q5446_armstrong32_harlequin:reference_takeoff_not_supplied",
+    "au_qld_maryborough_service_station:external_surface_universe_not_built",
+    "au_qld_maryborough_service_station:room_area_universe_not_built",
+    "au_qld_maryborough_service_station:wall_ceiling_finish_surface_universe_not_built",
+    "au_qld_maryborough_service_station:window_surface_universe_not_built",
+    "au_qld_q5446_armstrong32_harlequin:ground_first_porch_garage_area_routes_not_independently_closed",
     "au_qld_q5446_armstrong32_harlequin:sales_estimate_is_not_complete_measured_takeoff",
-    "au_qld_q5446_armstrong32_harlequin:verified_surface_universe_not_built"
+    "au_qld_q5446_armstrong32_harlequin:wall_ceiling_finish_surface_universe_not_built",
+    "au_qld_q5446_armstrong32_harlequin:window_door_opening_universe_not_reconciled"
   ],
   "unsupported_extra": 0,
   "verified_projects": 0
