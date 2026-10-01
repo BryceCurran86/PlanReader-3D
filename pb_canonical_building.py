@@ -317,6 +317,155 @@ class CanonicalElement:
 
 
 @dataclass
+class WallFace:
+    """Represents one face of a physical wall (Face A or Face B) for trade finish binding."""
+    face_id: str = "A"  # "A" or "B" (or "INTERNAL", "EXTERNAL")
+    finish: Optional[str] = None
+    substrate: Optional[str] = None
+    finish_code: Optional[str] = None
+    bounded_space_id: Optional[str] = None
+    area_gross_m2: Optional[float] = None
+    opening_deductions_m2: Optional[float] = None
+    area_net_m2: Optional[float] = None
+    notes: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "face_id": self.face_id,
+            "finish": self.finish,
+            "substrate": self.substrate,
+            "finish_code": self.finish_code,
+            "bounded_space_id": self.bounded_space_id,
+            "area_gross_m2": self.area_gross_m2,
+            "opening_deductions_m2": self.opening_deductions_m2,
+            "area_net_m2": self.area_net_m2,
+            "notes": self.notes,
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "WallFace":
+        if not isinstance(data, dict):
+            return cls()
+        return cls(
+            face_id=str(data.get("face_id", "A")),
+            finish=data.get("finish"),
+            substrate=data.get("substrate"),
+            finish_code=data.get("finish_code"),
+            bounded_space_id=data.get("bounded_space_id"),
+            area_gross_m2=parse_optional_float(data.get("area_gross_m2")),
+            opening_deductions_m2=parse_optional_float(data.get("opening_deductions_m2")),
+            area_net_m2=parse_optional_float(data.get("area_net_m2")),
+            notes=data.get("notes"),
+            metadata=dict(data.get("metadata", {}) or {}),
+        )
+
+
+@dataclass
+class QuantityFormulaBinding:
+    """Prepares architecture for OBJECT -> QUANTITY FORMULA -> USER RATE -> COST.
+
+    Rates remain changeable without rerunning plan extraction.
+    """
+    trade_category: str = "general"
+    item_code: str = ""
+    formula_expression: str = "quantity"  # e.g. "net_wall_area_m2", "length_m * height_m"
+    unit: str = "m2"  # "m2", "lm", "m3", "No."
+    quantity: float = 0.0
+    user_rate: Optional[float] = None
+    total_cost: Optional[float] = None
+    formula_variables: Dict[str, float] = field(default_factory=dict)
+
+    def calculate_cost(self, rate: Optional[float] = None) -> Optional[float]:
+        r = rate if rate is not None else self.user_rate
+        if r is not None and self.quantity is not None:
+            self.total_cost = round(float(self.quantity) * float(r), 2)
+            self.user_rate = float(r)
+            return self.total_cost
+        return None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "trade_category": self.trade_category,
+            "item_code": self.item_code,
+            "formula_expression": self.formula_expression,
+            "unit": self.unit,
+            "quantity": self.quantity,
+            "user_rate": self.user_rate,
+            "total_cost": self.total_cost,
+            "formula_variables": dict(self.formula_variables),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "QuantityFormulaBinding":
+        if not isinstance(data, dict):
+            return cls()
+        return cls(
+            trade_category=str(data.get("trade_category", "general")),
+            item_code=str(data.get("item_code", "")),
+            formula_expression=str(data.get("formula_expression", "quantity")),
+            unit=str(data.get("unit", "m2")),
+            quantity=float(data.get("quantity", 0.0) or 0.0),
+            user_rate=parse_optional_float(data.get("user_rate")),
+            total_cost=parse_optional_float(data.get("total_cost")),
+            formula_variables=dict(data.get("formula_variables", {}) or {}),
+        )
+
+
+@dataclass
+class CanonicalConstructabilityIssue:
+    """Issue/constraint model for evidence-based constructability warnings."""
+    id: str = field(default_factory=lambda: f"issue_{uuid.uuid4().hex[:8]}")
+    category: str = "geometry_conflict"  # e.g. "unsupported_upper_wall", "opening_beam_clash", "service_collision"
+    severity: str = "WARNING"  # "INFO", "WARNING", "ERROR"
+    description: str = ""
+    affected_element_ids: List[str] = field(default_factory=list)
+    evidence_refs: List[str] = field(default_factory=list)
+    review_state: ReviewState = ReviewState.REVIEW_REQUIRED
+    recommended_action: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "category": self.category,
+            "severity": self.severity,
+            "description": self.description,
+            "affected_element_ids": list(self.affected_element_ids),
+            "evidence_refs": list(self.evidence_refs),
+            "review_state": self.review_state.value if isinstance(self.review_state, ReviewState) else str(self.review_state),
+            "recommended_action": self.recommended_action,
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "CanonicalConstructabilityIssue":
+        if not isinstance(data, dict):
+            return cls()
+        rev_state = data.get("review_state")
+        if isinstance(rev_state, str):
+            try:
+                rev_state = ReviewState(rev_state)
+            except ValueError:
+                rev_state = ReviewState.REVIEW_REQUIRED
+        else:
+            rev_state = ReviewState.REVIEW_REQUIRED
+
+        return cls(
+            id=str(data.get("id", f"issue_{uuid.uuid4().hex[:8]}")),
+            category=str(data.get("category", "geometry_conflict")),
+            severity=str(data.get("severity", "WARNING")),
+            description=str(data.get("description", "")),
+            affected_element_ids=[str(x) for x in (data.get("affected_element_ids") or []) if x],
+            evidence_refs=[str(x) for x in (data.get("evidence_refs") or []) if x],
+            review_state=rev_state,
+            recommended_action=data.get("recommended_action"),
+            metadata=dict(data.get("metadata", {}) or {}),
+        )
+
+
+@dataclass
 class CanonicalOpening(CanonicalElement):
     wall_id: Optional[str] = None
     opening_type: str = "GENERIC"
@@ -325,9 +474,18 @@ class CanonicalOpening(CanonicalElement):
     width_m: Optional[float] = None
     height_m: Optional[float] = None
     mark: Optional[str] = None
+    host_wall_id: Optional[str] = None
+    opening_classification: Optional[str] = None
+    derived_quantities: List[QuantityFormulaBinding] = field(default_factory=list)
+    is_user_edited: bool = False
+    revision_id: Optional[str] = None
 
     def __post_init__(self):
         super().__post_init__()
+        if not self.host_wall_id and self.wall_id:
+            self.host_wall_id = self.wall_id
+        elif not self.wall_id and self.host_wall_id:
+            self.wall_id = self.host_wall_id
         if self.opening_type.upper() == "DOOR":
             self.object_type = ObjectType.DOOR
         elif self.opening_type.upper() == "WINDOW":
@@ -345,21 +503,33 @@ class CanonicalOpening(CanonicalElement):
             "width_m": self.width_m,
             "height_m": self.height_m,
             "mark": self.mark,
+            "host_wall_id": self.host_wall_id or self.wall_id,
+            "opening_classification": self.opening_classification,
+            "derived_quantities": [q.to_dict() for q in self.derived_quantities],
+            "is_user_edited": parse_strict_bool(self.is_user_edited),
+            "revision_id": self.revision_id,
         })
         return res
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CanonicalOpening":
         base_args = cls.base_from_dict_args(data)
+        d_quants_raw = data.get("derived_quantities", []) or []
+        d_quants = [QuantityFormulaBinding.from_dict(q) for q in d_quants_raw if isinstance(q, dict)]
         return cls(
             **base_args,
-            wall_id=data.get("wall_id"),
+            wall_id=data.get("wall_id") or data.get("host_wall_id"),
             opening_type=str(data.get("opening_type", "GENERIC")),
             offset_along_wall_m=parse_optional_float(data.get("offset_along_wall_m")),
             sill_height_m=parse_optional_float(data.get("sill_height_m")),
             width_m=parse_optional_float(data.get("width_m")),
             height_m=parse_optional_float(data.get("height_m")),
             mark=data.get("mark"),
+            host_wall_id=data.get("host_wall_id") or data.get("wall_id"),
+            opening_classification=data.get("opening_classification"),
+            derived_quantities=d_quants,
+            is_user_edited=parse_strict_bool(data.get("is_user_edited")),
+            revision_id=data.get("revision_id"),
         )
 
 
@@ -371,11 +541,41 @@ class CanonicalWall(CanonicalElement):
     height_m: Optional[float] = None     # No invented defaults
     is_external: bool = False
     openings: List[CanonicalOpening] = field(default_factory=list)
+    bounded_space_ids: List[str] = field(default_factory=list)
+    face_a: Optional[WallFace] = None
+    face_b: Optional[WallFace] = None
+    derived_quantities: List[QuantityFormulaBinding] = field(default_factory=list)
+    is_user_edited: bool = False
+    revision_id: Optional[str] = None
 
     def __post_init__(self):
         super().__post_init__()
         self.object_type = ObjectType.WALL
         self.is_external = parse_strict_bool(self.is_external)
+        self.is_user_edited = parse_strict_bool(self.is_user_edited)
+
+    def length_m(self) -> float:
+        if self.start_point and self.end_point:
+            return self.start_point.distance_to(self.end_point)
+        return 0.0
+
+    def gross_area_m2(self) -> Optional[float]:
+        if self.height_m is not None:
+            return round(self.length_m() * float(self.height_m), 4)
+        return None
+
+    def total_opening_deductions_m2(self) -> float:
+        ded = 0.0
+        for op in self.openings:
+            if op.width_m is not None and op.height_m is not None:
+                ded += float(op.width_m) * float(op.height_m)
+        return round(ded, 4)
+
+    def net_area_m2(self) -> Optional[float]:
+        gross = self.gross_area_m2()
+        if gross is not None:
+            return round(max(0.0, gross - self.total_opening_deductions_m2()), 4)
+        return None
 
     def to_dict(self) -> Dict[str, Any]:
         res = self.base_to_dict()
@@ -386,6 +586,12 @@ class CanonicalWall(CanonicalElement):
             "height_m": self.height_m,
             "is_external": parse_strict_bool(self.is_external),
             "openings": [op.to_dict() for op in self.openings],
+            "bounded_space_ids": list(self.bounded_space_ids),
+            "face_a": self.face_a.to_dict() if self.face_a else None,
+            "face_b": self.face_b.to_dict() if self.face_b else None,
+            "derived_quantities": [q.to_dict() for q in self.derived_quantities],
+            "is_user_edited": parse_strict_bool(self.is_user_edited),
+            "revision_id": self.revision_id,
         })
         return res
 
@@ -394,6 +600,12 @@ class CanonicalWall(CanonicalElement):
         base_args = cls.base_from_dict_args(data)
         openings_raw = data.get("openings", []) or []
         openings = [CanonicalOpening.from_dict(op) for op in openings_raw if isinstance(op, dict)]
+        face_a_raw = data.get("face_a")
+        face_b_raw = data.get("face_b")
+        face_a = WallFace.from_dict(face_a_raw) if isinstance(face_a_raw, dict) else None
+        face_b = WallFace.from_dict(face_b_raw) if isinstance(face_b_raw, dict) else None
+        d_quants_raw = data.get("derived_quantities", []) or []
+        d_quants = [QuantityFormulaBinding.from_dict(q) for q in d_quants_raw if isinstance(q, dict)]
 
         return cls(
             **base_args,
@@ -403,6 +615,12 @@ class CanonicalWall(CanonicalElement):
             height_m=parse_optional_float(data.get("height_m")),
             is_external=parse_strict_bool(data.get("is_external")),
             openings=openings,
+            bounded_space_ids=list(data.get("bounded_space_ids", []) or []),
+            face_a=face_a,
+            face_b=face_b,
+            derived_quantities=d_quants,
+            is_user_edited=parse_strict_bool(data.get("is_user_edited")),
+            revision_id=data.get("revision_id"),
         )
 
 
@@ -412,10 +630,18 @@ class CanonicalSpace(CanonicalElement):
     height_m: Optional[float] = None
     specified_floor_area_m2: Optional[float] = None
     room_number: Optional[str] = None
+    bounding_wall_ids: List[str] = field(default_factory=list)
+    floor_element_id: Optional[str] = None
+    ceiling_element_id: Optional[str] = None
+    finish_assignments: Dict[str, Any] = field(default_factory=dict)
+    derived_quantities: List[QuantityFormulaBinding] = field(default_factory=list)
+    is_user_edited: bool = False
+    revision_id: Optional[str] = None
 
     def __post_init__(self):
         super().__post_init__()
         self.object_type = ObjectType.SPACE
+        self.is_user_edited = parse_strict_bool(self.is_user_edited)
 
     def to_dict(self) -> Dict[str, Any]:
         res = self.base_to_dict()
@@ -424,6 +650,13 @@ class CanonicalSpace(CanonicalElement):
             "height_m": self.height_m,
             "specified_floor_area_m2": self.specified_floor_area_m2,
             "room_number": self.room_number,
+            "bounding_wall_ids": list(self.bounding_wall_ids),
+            "floor_element_id": self.floor_element_id,
+            "ceiling_element_id": self.ceiling_element_id,
+            "finish_assignments": dict(self.finish_assignments),
+            "derived_quantities": [q.to_dict() for q in self.derived_quantities],
+            "is_user_edited": parse_strict_bool(self.is_user_edited),
+            "revision_id": self.revision_id,
         })
         return res
 
@@ -432,6 +665,8 @@ class CanonicalSpace(CanonicalElement):
         base_args = cls.base_from_dict_args(data)
         poly_raw = data.get("boundary_polygon", []) or []
         poly = [Vector2D.from_dict(pt) for pt in poly_raw if pt]
+        d_quants_raw = data.get("derived_quantities", []) or []
+        d_quants = [QuantityFormulaBinding.from_dict(q) for q in d_quants_raw if isinstance(q, dict)]
 
         return cls(
             **base_args,
@@ -439,7 +674,15 @@ class CanonicalSpace(CanonicalElement):
             height_m=parse_optional_float(data.get("height_m")),
             specified_floor_area_m2=parse_optional_float(data.get("specified_floor_area_m2")),
             room_number=data.get("room_number"),
+            bounding_wall_ids=list(data.get("bounding_wall_ids", []) or []),
+            floor_element_id=data.get("floor_element_id"),
+            ceiling_element_id=data.get("ceiling_element_id"),
+            finish_assignments=dict(data.get("finish_assignments", {}) or {}),
+            derived_quantities=d_quants,
+            is_user_edited=parse_strict_bool(data.get("is_user_edited")),
+            revision_id=data.get("revision_id"),
         )
+
 
 
 @dataclass
@@ -449,6 +692,14 @@ class PolygonElement(CanonicalElement):
     thickness_m: Optional[float] = None
     elevation_offset_m: Optional[float] = None
     specified_floor_area_m2: Optional[float] = None
+    bounded_space_ids: List[str] = field(default_factory=list)
+    derived_quantities: List[QuantityFormulaBinding] = field(default_factory=list)
+    is_user_edited: bool = False
+    revision_id: Optional[str] = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.is_user_edited = parse_strict_bool(self.is_user_edited)
 
     def to_dict(self) -> Dict[str, Any]:
         res = self.base_to_dict()
@@ -457,6 +708,10 @@ class PolygonElement(CanonicalElement):
             "thickness_m": self.thickness_m,
             "elevation_offset_m": self.elevation_offset_m,
             "specified_floor_area_m2": self.specified_floor_area_m2,
+            "bounded_space_ids": list(self.bounded_space_ids),
+            "derived_quantities": [q.to_dict() for q in self.derived_quantities],
+            "is_user_edited": parse_strict_bool(self.is_user_edited),
+            "revision_id": self.revision_id,
         })
         return res
 
@@ -465,13 +720,20 @@ class PolygonElement(CanonicalElement):
         base_args = cls.base_from_dict_args(data)
         poly_raw = data.get("polygon", []) or []
         poly = [Vector2D.from_dict(pt) for pt in poly_raw if pt]
+        d_quants_raw = data.get("derived_quantities", []) or []
+        d_quants = [QuantityFormulaBinding.from_dict(q) for q in d_quants_raw if isinstance(q, dict)]
         return cls(
             **base_args,
             polygon=poly,
             thickness_m=parse_optional_float(data.get("thickness_m")),
             elevation_offset_m=parse_optional_float(data.get("elevation_offset_m")),
             specified_floor_area_m2=parse_optional_float(data.get("specified_floor_area_m2")),
+            bounded_space_ids=list(data.get("bounded_space_ids", []) or []),
+            derived_quantities=d_quants,
+            is_user_edited=parse_strict_bool(data.get("is_user_edited")),
+            revision_id=data.get("revision_id"),
         )
+
 
 
 @dataclass
@@ -893,11 +1155,194 @@ class CanonicalProject(CanonicalElement):
     buildings: List[CanonicalBuilding] = field(default_factory=list)
     evidence_observations: List[CanonicalEvidenceObservation] = field(default_factory=list)
     is_synthetic_demo: bool = False
+    constructability_issues: List[CanonicalConstructabilityIssue] = field(default_factory=list)
+    revision_history: List[Dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self):
         super().__post_init__()
         self.object_type = ObjectType.PROJECT
         self.is_synthetic_demo = parse_strict_bool(self.is_synthetic_demo)
+
+    def all_walls(self) -> List[CanonicalWall]:
+        walls = []
+        for b in self.buildings:
+            for lvl in b.levels:
+                walls.extend(lvl.walls)
+        return walls
+
+    def all_spaces(self) -> List[CanonicalSpace]:
+        spaces = []
+        for b in self.buildings:
+            for lvl in b.levels:
+                spaces.extend(lvl.spaces)
+        return spaces
+
+    def all_openings(self) -> List[CanonicalOpening]:
+        openings = []
+        for w in self.all_walls():
+            openings.extend(w.openings)
+        return openings
+
+    def all_floors(self) -> List[CanonicalFloor]:
+        floors = []
+        for b in self.buildings:
+            for lvl in b.levels:
+                floors.extend(lvl.floors)
+        return floors
+
+    def find_element(self, element_id: str) -> Optional[CanonicalElement]:
+        """Finds any element in the canonical building hierarchy by id."""
+        if not element_id:
+            return None
+        if self.id == element_id:
+            return self
+        for b in self.buildings:
+            if b.id == element_id:
+                return b
+            for lvl in b.levels:
+                if lvl.id == element_id:
+                    return lvl
+                for w in lvl.walls:
+                    if w.id == element_id:
+                        return w
+                    for op in w.openings:
+                        if op.id == element_id:
+                            return op
+                for sp in lvl.spaces:
+                    if sp.id == element_id:
+                        return sp
+                for fl in lvl.floors:
+                    if fl.id == element_id:
+                        return fl
+                for cl in lvl.ceilings:
+                    if cl.id == element_id:
+                        return cl
+                for rf in lvl.roofs:
+                    if rf.id == element_id:
+                        return rf
+                for col in lvl.columns:
+                    if col.id == element_id:
+                        return col
+        return None
+
+    def recompute_relationships(self) -> None:
+        """Enforces structural and topological linkages across the building model:
+        
+        HOUSE -> STOREY -> ROOM -> WALL/FLOOR/CEILING -> OPENING -> FACE A/B.
+        """
+        for b in self.buildings:
+            b.parent_id = self.id
+            for lvl in b.levels:
+                lvl.parent_id = b.id
+                lvl_id = lvl.id
+
+                # Link walls and openings
+                for w in lvl.walls:
+                    w.level_id = lvl_id
+                    w.parent_id = lvl_id
+                    for op in w.openings:
+                        op.wall_id = w.id
+                        op.host_wall_id = w.id
+                        op.level_id = lvl_id
+                        op.parent_id = w.id
+                        if op.id not in w.children_ids:
+                            w.children_ids.append(op.id)
+
+                # Link spaces and bounding walls
+                for sp in lvl.spaces:
+                    sp.level_id = lvl_id
+                    sp.parent_id = lvl_id
+                    for wall_id in sp.bounding_wall_ids:
+                        target_wall = self.find_element(wall_id)
+                        if isinstance(target_wall, CanonicalWall):
+                            if sp.id not in target_wall.bounded_space_ids:
+                                target_wall.bounded_space_ids.append(sp.id)
+
+                # Link floors
+                for fl in lvl.floors:
+                    fl.level_id = lvl_id
+                    fl.parent_id = lvl_id
+
+    def recompute_quantities(self, rates_map: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+        """Recomputes costs across all quantity bindings using current rates map:
+        
+        OBJECT -> QUANTITY FORMULA -> USER RATE -> COST.
+        Allows instant customer rate edits without re-extracting plans.
+        """
+        rates = rates_map or {}
+        summary = {"total_cost": 0.0, "items_costed": 0, "by_trade": {}}
+
+        def process_binding(b: QuantityFormulaBinding):
+            rate = rates.get(b.item_code)
+            cost = b.calculate_cost(rate)
+            if cost is not None:
+                summary["total_cost"] = round(summary["total_cost"] + cost, 2)
+                summary["items_costed"] += 1
+                trade = b.trade_category
+                summary["by_trade"][trade] = round(summary["by_trade"].get(trade, 0.0) + cost, 2)
+
+        for w in self.all_walls():
+            for qb in w.derived_quantities:
+                process_binding(qb)
+            for op in w.openings:
+                for qb in op.derived_quantities:
+                    process_binding(qb)
+        for sp in self.all_spaces():
+            for qb in sp.derived_quantities:
+                process_binding(qb)
+        for fl in self.all_floors():
+            for qb in fl.derived_quantities:
+                process_binding(qb)
+
+        return summary
+
+    def check_constructability(self) -> List[CanonicalConstructabilityIssue]:
+        """Generic constructability, consistency, and clash checks for the canonical model."""
+        issues: List[CanonicalConstructabilityIssue] = []
+
+        # 1. Check for walls with openings larger than the wall itself
+        for w in self.all_walls():
+            w_len = w.length_m()
+            for op in w.openings:
+                if op.width_m is not None and w_len > 0.0 and float(op.width_m) > w_len:
+                    issue = CanonicalConstructabilityIssue(
+                        category="opening_width_exceeds_wall",
+                        severity="ERROR",
+                        description=f"Opening {op.id} ({op.mark or op.name}) width {op.width_m}m exceeds host wall {w.id} length {w_len:.2f}m",
+                        affected_element_ids=[w.id, op.id],
+                        review_state=ReviewState.REVIEW_REQUIRED,
+                        recommended_action="Verify opening placement against architectural elevation",
+                    )
+                    issues.append(issue)
+
+                if op.height_m is not None and w.height_m is not None and float(op.height_m) > float(w.height_m):
+                    issue = CanonicalConstructabilityIssue(
+                        category="opening_height_exceeds_wall",
+                        severity="ERROR",
+                        description=f"Opening {op.id} height {op.height_m}m exceeds host wall {w.id} height {w.height_m}m",
+                        affected_element_ids=[w.id, op.id],
+                        review_state=ReviewState.REVIEW_REQUIRED,
+                        recommended_action="Verify vertical section and lintel datum",
+                    )
+                    issues.append(issue)
+
+        # 2. Check for level elevation continuity
+        prev_elev = None
+        for b in self.buildings:
+            for lvl in sorted(b.levels, key=lambda l: l.level_index):
+                if lvl.elevation_m is None and lvl.review_state == ReviewState.REVIEW_REQUIRED:
+                    issue = CanonicalConstructabilityIssue(
+                        category="unresolved_level_datum",
+                        severity="WARNING",
+                        description=f"Level {lvl.name} ({lvl.id}) lacks confirmed vertical datum elevation",
+                        affected_element_ids=[lvl.id],
+                        review_state=ReviewState.REVIEW_REQUIRED,
+                        recommended_action="Confirm finish floor level from section drawing",
+                    )
+                    issues.append(issue)
+
+        self.constructability_issues = issues
+        return issues
 
     def to_dict(self) -> Dict[str, Any]:
         res = self.base_to_dict()
@@ -905,17 +1350,23 @@ class CanonicalProject(CanonicalElement):
             "buildings": [b.to_dict() for b in self.buildings],
             "evidence_observations": [obs.to_dict() for obs in self.evidence_observations],
             "is_synthetic_demo": parse_strict_bool(self.is_synthetic_demo),
+            "constructability_issues": [iss.to_dict() for iss in self.constructability_issues],
+            "revision_history": list(self.revision_history),
         })
         return res
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CanonicalProject":
         base_args = cls.base_from_dict_args(data)
+        issues_raw = data.get("constructability_issues", []) or []
+        issues = [CanonicalConstructabilityIssue.from_dict(iss) for iss in issues_raw if isinstance(iss, dict)]
         return cls(
             **base_args,
             buildings=[CanonicalBuilding.from_dict(b) for b in data.get("buildings", []) or [] if isinstance(b, dict)],
             evidence_observations=[CanonicalEvidenceObservation.from_dict(obs) for obs in data.get("evidence_observations", []) or [] if isinstance(obs, dict)],
             is_synthetic_demo=parse_strict_bool(data.get("is_synthetic_demo")),
+            constructability_issues=issues,
+            revision_history=list(data.get("revision_history", []) or []),
         )
 
     def to_json(self, indent: Optional[int] = 2) -> str:
@@ -925,4 +1376,5 @@ class CanonicalProject(CanonicalElement):
     def from_json(cls, json_str: str) -> "CanonicalProject":
         data = json.loads(json_str)
         return cls.from_dict(data)
+
 
