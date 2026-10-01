@@ -31,7 +31,7 @@
     "internal_wall_faces",
     "external_wall_faces_and_cladding",
     "roof_planes",
-    "structural_members_other_than_scheduled_wall_bracing",
+    "structural_members_beyond_closed_wall_bracing_and_explicit_140x140_posts_470x470_piers",
     "secondary_fc_soffit_and_beam_faces_beyond_primary_ceiling_planes",
     "wet_area_tile_niche_returns_and_recess_deductions",
     "wet_area_non_shower_tile_skirtings_bath_surrounds_and_splashbacks",
@@ -1211,6 +1211,90 @@
         "denominator_readiness": "draft_only_until_niche_and_return_adjustments_are_resolved"
       },
       "source_location": "architectural:p15:A0.15:GF_Ens_Ldry_D:900_SHW:shower_tiles_to_ceiling; architectural:p7:A0.7:FCL_2700"
+    },
+    {
+      "object_ref": "3laurel:structural:timber_post:140x140:01",
+      "object_family": "external_structural_post",
+      "physical_kind": "structural_member",
+      "description": "140x140 timber post, floor-plan instance 1",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:A0.3:floor_plan:140_POST_instance_1",
+      "attributes": {
+        "section_mm": "140x140",
+        "material": "timber",
+        "crosscheck": "architectural:p5:A0.5:140x140_TIMBER_POST"
+      }
+    },
+    {
+      "object_ref": "3laurel:structural:timber_post:140x140:02",
+      "object_family": "external_structural_post",
+      "physical_kind": "structural_member",
+      "description": "140x140 timber post, floor-plan instance 2",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:A0.3:floor_plan:140_POST_instance_2",
+      "attributes": {
+        "section_mm": "140x140",
+        "material": "timber",
+        "crosscheck": "architectural:p5:A0.5:140x140_TIMBER_POST"
+      }
+    },
+    {
+      "object_ref": "3laurel:structural:brick_pier:470x470:01",
+      "object_family": "external_structural_pier",
+      "physical_kind": "structural_member",
+      "description": "470x470 brick pier clad in stone, floor-plan instance 1",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:A0.3:floor_plan:470_PIER_instance_1",
+      "attributes": {
+        "section_mm": "470x470",
+        "material": "brick_pier_clad_in_stone",
+        "crosscheck": "architectural:p4-p5:A0.4-A0.5:470x470_BRICK_PIER"
+      }
+    },
+    {
+      "object_ref": "3laurel:structural:brick_pier:470x470:02",
+      "object_family": "external_structural_pier",
+      "physical_kind": "structural_member",
+      "description": "470x470 brick pier clad in stone, floor-plan instance 2",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:A0.3:floor_plan:470_PIER_instance_2",
+      "attributes": {
+        "section_mm": "470x470",
+        "material": "brick_pier_clad_in_stone",
+        "crosscheck": "architectural:p4-p5:A0.4-A0.5:470x470_BRICK_PIER"
+      }
+    },
+    {
+      "object_ref": "3laurel:structural:brick_pier:470x470:03",
+      "object_family": "external_structural_pier",
+      "physical_kind": "structural_member",
+      "description": "470x470 brick pier clad in stone, floor-plan instance 3",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:A0.3:floor_plan:470_PIER_instance_3",
+      "attributes": {
+        "section_mm": "470x470",
+        "material": "brick_pier_clad_in_stone",
+        "crosscheck": "architectural:p4-p5:A0.4-A0.5:470x470_BRICK_PIER"
+      }
+    },
+    {
+      "object_ref": "3laurel:structural:brick_pier:470x470:04",
+      "object_family": "external_structural_pier",
+      "physical_kind": "structural_member",
+      "description": "470x470 brick pier clad in stone, floor-plan instance 4",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:A0.3:floor_plan:470_PIER_instance_4",
+      "attributes": {
+        "section_mm": "470x470",
+        "material": "brick_pier_clad_in_stone",
+        "crosscheck": "architectural:p4-p5:A0.4-A0.5:470x470_BRICK_PIER"
+      }
     }
   ],
   "closure_checks": [
@@ -1339,6 +1423,25 @@
       ],
       "object_count": 37,
       "total_length_m": 45.75
+    },
+    {
+      "check_id": "3laurel:closure:external_post_pier_census",
+      "component_object_refs": [
+        "3laurel:structural:timber_post:140x140:01",
+        "3laurel:structural:timber_post:140x140:02",
+        "3laurel:structural:brick_pier:470x470:01",
+        "3laurel:structural:brick_pier:470x470:02",
+        "3laurel:structural:brick_pier:470x470:03",
+        "3laurel:structural:brick_pier:470x470:04"
+      ],
+      "timber_post_count": 2,
+      "brick_pier_count": 4,
+      "object_count": 6,
+      "complete_for_explicitly_dimensioned_posts_and_piers": true,
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:two_140_POST_labels_and_four_470_PIER_labels",
+        "architectural:p4-p5:A0.4-A0.5:elevation_material_dimension_crosscheck"
+      ]
     }
   ]
 }
