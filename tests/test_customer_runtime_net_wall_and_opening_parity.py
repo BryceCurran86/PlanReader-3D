@@ -1208,6 +1208,212 @@ class CustomerRuntimeNetWallParityTests(unittest.TestCase):
             self.assertNotIn("call-bind-801", d2["source_reference"])
             self.assertNotIn("Sand-cement render", d2["notes"])
 
+    def test_ag06_target_relationship_opening_definition_deduction(self):
+        """AG-06: Target relationship opening mark -> detail definition -> physical opening -> host wall -> deduction."""
+        import pb_opening_detail_definition_authority as openmod
+        from pb_opening_detail_definition_authority import OpeningDetailDefinitionRecord
+        from pb_opening_detail_definition_bridge import (
+            ConsolidatedPhysicalOpening,
+            enrich_openings_with_detail_definitions,
+            apply_opening_deductions_to_walls,
+        )
+
+        detail_record = OpeningDetailDefinitionRecord(
+            record_id="det-rec-001",
+            semantic_identity_id="sem-win-1200x1500",
+            document_id="doc1",
+            revision_id="rev1",
+            source_sha256="a" * 64,
+            snapshot_id="snap1",
+            page_id="5",
+            source_partition_id="part1",
+            sequence_start=10,
+            sequence_end=20,
+            source_bbox=(100.0, 200.0, 300.0, 400.0),
+            family="window",
+            subtype="casement",
+            material="aluminium",
+            width_mm=1200,
+            height_mm=1500,
+            dimension_basis="detail_unspecified",
+            source_observation_ids=("obs-1", "obs-2"),
+            required_observation_ids=("obs-1", "obs-2"),
+            word_evidence=(),
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=(openmod.OPENING_DETAIL_DEFINITION_RESOLVED,),
+            _seal=openmod._RECORD_SEAL,
+        )
+
+        raw_opening = {
+            "opening_id": "op-north-w01",
+            "type_mark": "W01",
+            "host_wall_id": "wall-north",
+            "width_m": 1.2,
+            "height_m": 0.0,  # Unspecified on plan
+            "area_m2": 0.0,
+            "plan_page_id": "2",
+        }
+
+        mark_map = {"W01": "sem-win-1200x1500"}
+
+        enriched = enrich_openings_with_detail_definitions(
+            [raw_opening],
+            [detail_record],
+            mark_to_semantic_identity=mark_map,
+        )
+
+        self.assertEqual(len(enriched), 1)
+        en_op = enriched[0]
+        self.assertEqual(en_op.opening_id, "op-north-w01")
+        self.assertEqual(en_op.type_mark, "W01")
+        self.assertEqual(en_op.host_wall_id, "wall-north")
+        self.assertEqual(en_op.width_m, 1.2)
+        self.assertEqual(en_op.height_m, 1.5)
+        self.assertEqual(en_op.area_m2, 1.8)
+        self.assertEqual(en_op.family, "window")
+        self.assertEqual(en_op.subtype, "casement")
+        self.assertEqual(en_op.material, "aluminium")
+        self.assertEqual(en_op.detail_record_id, "det-rec-001")
+
+        walls = [
+            {"wall_ref": "wall-north", "gross_m2": 20.0, "opening_deduction_m2": 0.0, "net_m2": 20.0},
+        ]
+        updated_walls = apply_opening_deductions_to_walls(walls, enriched)
+        self.assertEqual(len(updated_walls), 1)
+        w = updated_walls[0]
+        self.assertEqual(w["opening_deduction_m2"], 1.8)
+        self.assertEqual(w["net_m2"], 18.2)
+        self.assertEqual(w["consolidated_opening_ids"], ["op-north-w01"])
+
+    def test_ag06_cross_sheet_consolidation_single_deduction(self):
+        """AG-06: Multiple cross-sheet observations of an opening consolidate to 1 physical opening and 1 deduction."""
+        from pb_opening_detail_definition_bridge import (
+            consolidate_opening_identities,
+            apply_opening_deductions_to_walls,
+        )
+
+        raw_observations = [
+            {"host_wall_id": "wall-south", "type_mark": "D01", "width_m": 0.9, "plan_page_id": "1"},
+            {"host_wall_id": "wall-south", "type_mark": "D01", "height_m": 2.1, "elevation_page_id": "2"},
+            {"host_wall_id": "wall-south", "type_mark": "D01", "schedule_page_id": "3"},
+            {"host_wall_id": "wall-south", "type_mark": "D01", "detail_page_id": "4"},
+        ]
+
+        consolidated = consolidate_opening_identities(raw_observations)
+        self.assertEqual(len(consolidated), 1)
+        cop = consolidated[0]
+        self.assertEqual(cop.host_wall_id, "wall-south")
+        self.assertEqual(cop.type_mark, "D01")
+        self.assertEqual(cop.width_m, 0.9)
+        self.assertEqual(cop.height_m, 2.1)
+        self.assertEqual(cop.area_m2, 1.89)
+        self.assertEqual(cop.plan_page_id, "1")
+        self.assertEqual(cop.elevation_page_id, "2")
+        self.assertEqual(cop.schedule_page_id, "3")
+        self.assertEqual(cop.detail_page_id, "4")
+
+        walls = [
+            {"wall_ref": "wall-south", "gross_m2": 30.0, "opening_deduction_m2": 0.0, "net_m2": 30.0},
+        ]
+        updated = apply_opening_deductions_to_walls(walls, consolidated)
+        self.assertEqual(len(updated), 1)
+        # Deducted exactly once (1.89 m2), not 4 times (7.56 m2)
+        self.assertEqual(updated[0]["opening_deduction_m2"], 1.89)
+        self.assertEqual(updated[0]["net_m2"], 28.11)
+
+    def test_ag06_detail_definition_without_host_wall_does_not_mint_physical_opening(self):
+        """AG-06: Detail definitions describe TYPES, not physical instances; unhosted details do not mint deductions."""
+        from pb_opening_detail_definition_bridge import (
+            ConsolidatedPhysicalOpening,
+            apply_opening_deductions_to_walls,
+        )
+
+        unhosted_opening = ConsolidatedPhysicalOpening(
+            opening_id="detail-lib-type-w01",
+            type_mark="W01",
+            host_wall_id="",  # No host wall
+            width_m=1.8,
+            height_m=1.2,
+            area_m2=2.16,
+            family="window",
+            deducts=True,
+        )
+
+        walls = [
+            {"wall_ref": "wall-west", "gross_m2": 25.0, "opening_deduction_m2": 0.0, "net_m2": 25.0},
+        ]
+
+        updated = apply_opening_deductions_to_walls(walls, [unhosted_opening])
+        self.assertEqual(len(updated), 1)
+        # Wall is untouched; no phantom deductions
+        self.assertEqual(updated[0]["opening_deduction_m2"], 0.0)
+        self.assertEqual(updated[0]["net_m2"], 25.0)
+
+    def test_ag06_takeoff_rows_reflect_detail_enriched_opening_deduction(self):
+        """AG-06: _try_physical_net_wall_rows consumes detail definitions and openings for accurate net wall rows."""
+        import pb_opening_detail_definition_authority as openmod
+        from pb_opening_detail_definition_authority import OpeningDetailDefinitionRecord
+
+        detail_record = OpeningDetailDefinitionRecord(
+            record_id="det-rec-901",
+            semantic_identity_id="sem-win-2000x1200",
+            document_id="doc9",
+            revision_id="rev9",
+            source_sha256="9" * 64,
+            snapshot_id="snap9",
+            page_id="6",
+            source_partition_id="part9",
+            sequence_start=40,
+            sequence_end=50,
+            source_bbox=(100.0, 100.0, 200.0, 200.0),
+            family="window",
+            subtype="sliding",
+            material="aluminium",
+            width_mm=2000,
+            height_mm=1200,
+            dimension_basis="detail_unspecified",
+            source_observation_ids=("obs-901",),
+            required_observation_ids=("obs-901",),
+            word_evidence=(),
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=(openmod.OPENING_DETAIL_DEFINITION_RESOLVED,),
+            _seal=openmod._RECORD_SEAL,
+        )
+
+        raw_opening = {
+            "opening_id": "op-901",
+            "type_mark": "W901",
+            "host_wall_id": "wall-901",
+            "width_m": 2.0,
+            "height_m": 0.0,
+            "area_m2": 0.0,
+        }
+
+        with _test_workspace() as ws:
+            ws.app.build_registered_walls_v139 = lambda ws_id: [
+                {
+                    "wall_ref": "wall-901",
+                    "side": "North",
+                    "gross_m2": 50.0,
+                    "opening_deduction_m2": 0.0,
+                    "net_m2": 50.0,
+                    "substrate": "External walling",
+                    "height_confidence": "Verified",
+                },
+            ]
+            ws.app.opening_detail_definitions = [detail_record]
+            ws.app.building_openings = [raw_opening]
+            ws.app.opening_mark_map = {"W901": "sem-win-2000x1200"}
+
+            rows = auto._try_physical_net_wall_rows(ws.app, 1, [], [])
+            self.assertIsNotNone(rows)
+            self.assertEqual(len(rows), 1)
+
+            row_dict = dict(zip(auto.TAKEOFF_ROW_FIELDS, rows[0]))
+            # 50.0 gross - 2.4 m2 opening = 47.6 net
+            self.assertEqual(row_dict["quantity"], 47.6)
+            self.assertIn("opening deductions", row_dict["notes"])
+
 
 if __name__ == "__main__":
     unittest.main()

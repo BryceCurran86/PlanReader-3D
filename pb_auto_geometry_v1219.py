@@ -914,6 +914,22 @@ def _try_physical_net_wall_rows(
                     for w in reg_walls
                 )
                 if has_authenticated_openings or has_verified_height:
+                    if hasattr(app, "opening_detail_definitions") and hasattr(app, "building_openings"):
+                        try:
+                            from pb_opening_detail_definition_bridge import (
+                                consolidate_opening_identities,
+                                enrich_openings_with_detail_definitions,
+                                apply_opening_deductions_to_walls,
+                            )
+                            consolidated = consolidate_opening_identities(app.building_openings)
+                            enriched = enrich_openings_with_detail_definitions(
+                                consolidated,
+                                app.opening_detail_definitions,
+                                getattr(app, "opening_mark_map", None),
+                            )
+                            reg_walls = apply_opening_deductions_to_walls(reg_walls, enriched)
+                        except Exception:
+                            pass
                     if hasattr(app, "wall_finish_callout_bindings"):
                         try:
                             from pb_bound_wall_finish_customer_bridge import apply_finish_callout_bindings_to_walls
