@@ -49,6 +49,11 @@
       "evidence": "A120 assigns 2400 WFPB ceilings to all three WC/shower rooms; their 2935 x 1620 footprints are already independently closed by A140 figured dimensions and A110 geometry."
     },
     {
+      "proof": "PWD floor and ceiling independently closed",
+      "status": "PASS",
+      "evidence": "A502 gives 3570 x 2200 mm PWD geometry and FT2 floor; A140 confirms PWD FT2; A120 assigns 2400 WFPB ceiling to the same room."
+    },
+    {
       "proof": "PlanReader output not used as benchmark truth",
       "status": "PASS",
       "evidence": "Truth derived from source drawings and independent cross-check only"
@@ -61,7 +66,7 @@
     {
       "proof": "full project surface universe complete",
       "status": "FAIL",
-      "evidence": "Three FT2 WC/shower floors, three WFPB WC/shower ceilings, and door/window identity universes are closed; remaining surfaces stay unresolved."
+      "evidence": "Three WC/shower floors, three WC/shower ceilings, PWD floor and PWD ceiling, plus door/window identity universes are closed; remaining surfaces stay unresolved."
     }
   ]
 }
