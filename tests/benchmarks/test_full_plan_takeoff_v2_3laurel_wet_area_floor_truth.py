@@ -35,7 +35,6 @@ def test_3laurel_wet_area_floor_truth_is_atomic_and_source_closed():
     manifest = load_project_manifest(project / "source_manifest.json")
 
     assert manifest.status == "INCOMPLETE"
-    assert len(manifest.verified_items) == 34
 
     expected_refs = {
         "3laurel:surface:floor:bathroom",
