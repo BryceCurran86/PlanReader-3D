@@ -66,19 +66,10 @@ Every correction records:
 
 ---
 
-## 4. Golden Plan Accuracy Matrix
+## 4. V2 validation boundary
 
-Run the automated accuracy matrix to evaluate regression health:
+The learning ledger no longer runs or publishes a golden-plan percentage matrix.
 
-```python
-from pb_takeoff_learning_ledger import generate_golden_plan_accuracy_report
+Use the ledger for correction/error evidence only. Product validation belongs to the independently source-closed Full Plan V2 framework under `benchmarks/frozen_holdout/full_plan_v2/`.
 
-report = generate_golden_plan_accuracy_report(
-    benchmark_dir="benchmarks/plans",
-    output_dir="benchmark_results",
-)
-```
-
-Outputs:
-- `benchmark_results/accuracy_report.md`: Markdown summary table for review.
-- `benchmark_results/accuracy_report.json`: Machine-readable results and error distributions.
+Corrections may inform engineering diagnosis, but they do not automatically become V2 truth. V2 truth requires independent source closure and the normal truth-review process.

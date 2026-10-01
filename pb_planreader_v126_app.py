@@ -39,8 +39,8 @@ from pb_plan_read_engine_v1228 import apply as apply_plan_read_engine_v1228
 from pb_mapper_hard_guard_v1228 import apply as apply_mapper_hard_guard_v1228
 from pb_persistent_login_v1229 import apply as apply_persistent_login_v1229
 from pb_vector_geometry_v130 import apply as apply_vector_geometry_v130
-from pb_accuracy_benchmark_v130 import apply as apply_accuracy_benchmark_v130
-from pb_accuracy_ui_v130 import apply as apply_accuracy_ui_v130
+from pb_accuracy_benchmark_v130 import apply as apply_workspace_verification_v130
+from pb_accuracy_ui_v130 import apply as apply_verification_ui_v130
 from pb_substrate_qa_v131 import apply as apply_substrate_qa_v131
 from pb_precision_3d_v132 import apply as apply_precision_3d_v132
 from pb_opening_deductions_v134 import apply as apply_opening_deductions_v134
@@ -88,8 +88,8 @@ apply_mapper_hard_guard_v1228(launcher.app)
 apply_persistent_login_v1229(launcher.app)
 apply_vector_geometry_v130(launcher.app)
 apply_room_face_takeoff(launcher.app)
-apply_accuracy_benchmark_v130(launcher.app)
-apply_accuracy_ui_v130(launcher.app)
+apply_workspace_verification_v130(launcher.app)
+apply_verification_ui_v130(launcher.app)
 apply_substrate_qa_v131(launcher.app)
 apply_surface_evidence_v160(launcher.app)
 try:

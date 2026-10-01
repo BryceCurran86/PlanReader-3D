@@ -49,7 +49,7 @@ jobs:
         run: |
           PYTHONPATH=. python scripts/item19b_kstvet_callout_wall_fast_shadow.py /tmp/kstvet.pdf
 
-      # Full canonical-five scoring is intentionally NOT part of this
+      # Retired legacy scoring is intentionally not part of this source-backed production shadow
       # pre-merge wall-equivalence shadow. The production agent first verifies
       # that representative_wall_ids reach the live commercial quantity path;
       # only then is the complete benchmark run, per the benchmark gate.
