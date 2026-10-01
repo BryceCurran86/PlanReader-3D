@@ -409,6 +409,11 @@ class GenericPlanReaderExtractor:
             "reason_codes": ["not_collected"],
             "openings": [],
         }
+        self.canonical_rooms_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "rooms": [],
+        }
         # Live extraction visibility: distinguish absence from failure/conflict.
         self.extraction_status: Dict[str, str] = {}
 
@@ -2931,6 +2936,14 @@ class GenericPlanReaderExtractor:
                     opening.to_dict()
                     for opening in physical_wall_result.canonical_openings
                 ]
+                canonical_room_objects = [
+                    room.to_dict()
+                    for room in getattr(
+                        physical_wall_result,
+                        "canonical_rooms",
+                        (),
+                    )
+                ]
                 self.canonical_openings_live = {
                     "status": (
                         "corroborated"
@@ -2939,6 +2952,37 @@ class GenericPlanReaderExtractor:
                     ),
                     "reason_codes": list(physical_wall_result.reason_codes),
                     "openings": canonical_opening_objects,
+                }
+                room_status = getattr(
+                    physical_wall_result,
+                    "canonical_room_status",
+                    None,
+                )
+                room_status_value = getattr(room_status, "value", None)
+                if room_status_value is None:
+                    room_status_value = (
+                        "corroborated"
+                        if canonical_room_objects
+                        else "abstained"
+                    )
+                room_reason_codes = list(
+                    getattr(
+                        physical_wall_result,
+                        "canonical_room_reason_codes",
+                        (),
+                    )
+                )
+                self.canonical_rooms_live = {
+                    "status": room_status_value,
+                    "reason_codes": room_reason_codes,
+                    "source_pages": list(
+                        getattr(
+                            physical_wall_result,
+                            "canonical_room_source_pages",
+                            (),
+                        )
+                    ),
+                    "rooms": canonical_room_objects,
                 }
                 self.physical_net_wall_live = {
                     "status": physical_wall_result.status.value,
@@ -3040,6 +3084,11 @@ class GenericPlanReaderExtractor:
                     "reason_codes": ["no_drawing_pages_selected"],
                     "openings": [],
                 }
+                self.canonical_rooms_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "rooms": [],
+                }
                 self.extraction_status["physical_net_wall_live"] = "abstained"
         except Exception as exc:
             self.physical_net_wall_live = {
@@ -3059,6 +3108,13 @@ class GenericPlanReaderExtractor:
                     f"live_canonical_opening_exception:{type(exc).__name__}"
                 ],
                 "openings": [],
+            }
+            self.canonical_rooms_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_room_exception:{type(exc).__name__}"
+                ],
+                "rooms": [],
             }
             self.extraction_status["physical_net_wall_live"] = (
                 "extraction_failed"

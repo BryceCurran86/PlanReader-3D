@@ -17,6 +17,10 @@ from typing import Optional, Sequence
 
 import fitz
 
+from pb_live_canonical_room_composition import (
+    LiveCanonicalRoomObject,
+    compose_live_canonical_rooms,
+)
 from pb_live_external_physical_net_wall_publication import (
     LiveCanonicalWallObject,
     LiveExternalPhysicalNetWallPublication,
@@ -52,6 +56,10 @@ class LivePhysicalNetWallClaim:
     source_pages: tuple[int, ...]
     canonical_walls: tuple[LiveCanonicalWallObject, ...]
     canonical_openings: tuple[LiveCanonicalOpeningObject, ...]
+    canonical_rooms: tuple[LiveCanonicalRoomObject, ...]
+    canonical_room_status: EvidenceResolutionStatus
+    canonical_room_reason_codes: tuple[str, ...]
+    canonical_room_source_pages: tuple[int, ...]
     external_wall_ids: tuple[str, ...]
     evidence_ids: tuple[str, ...]
     quantity_id: Optional[str]
@@ -115,6 +123,10 @@ def collect_live_physical_net_wall_claim(
         revision_id=published.revision.revision_id,
         page_ids=page_ids,
     )
+    canonical_rooms = compose_live_canonical_rooms(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
     physical_void = compose_live_physical_opening_voids(
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
@@ -162,6 +174,10 @@ def collect_live_physical_net_wall_claim(
             source_pages=source_pages,
             canonical_walls=publication.canonical_walls,
             canonical_openings=physical_void.canonical_openings,
+            canonical_rooms=canonical_rooms.rooms,
+            canonical_room_status=canonical_rooms.status,
+            canonical_room_reason_codes=canonical_rooms.reason_codes,
+            canonical_room_source_pages=canonical_rooms.source_pages,
             external_wall_ids=publication.external_wall_ids,
             evidence_ids=tuple(evidence.evidence_ids),
             quantity_id=evidence.quantity_id,
@@ -179,6 +195,10 @@ def collect_live_physical_net_wall_claim(
         source_pages=(),
         canonical_walls=(),
         canonical_openings=physical_void.canonical_openings,
+        canonical_rooms=canonical_rooms.rooms,
+        canonical_room_status=canonical_rooms.status,
+        canonical_room_reason_codes=canonical_rooms.reason_codes,
+        canonical_room_source_pages=canonical_rooms.source_pages,
         external_wall_ids=(),
         evidence_ids=(),
         quantity_id=None,
