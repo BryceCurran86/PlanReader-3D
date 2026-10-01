@@ -961,6 +961,15 @@
       "complete_for_architectural_guide_geometry": true,
       "final_engineering_crosscheck_complete": false,
       "blocker": "architectural roof plan explicitly states GUIDE ONLY and requires engineer stormwater drainage plan; that independent engineering roof/stormwater document is not present in the supplied Lot16 source package"
+    },
+    {
+      "check_id": "lot16:blocker:custom_front_glazing_measure_on_site",
+      "status": "UNRESOLVED_SOURCE_LIMITATION",
+      "source_location": "architectural:p4:elevation_1:CUSTOM_WINDOWS_TO_FRONT_MEASURE_ON_SITE",
+      "exact_dimensions_available": false,
+      "scaling_substitute_allowed": false,
+      "reason": "source explicitly requires site measurement; no exact figured custom-front glazing dimensions are supplied in the frozen package",
+      "benchmark_rule": "do not promote custom front glazing to denominator truth until independent exact dimensions are supplied"
     }
   ]
 }
