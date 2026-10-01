@@ -44,3 +44,14 @@ def test_cross_viewport_structural_evidence_does_not_combine() -> None:
 
 def test_cross_page_structural_evidence_does_not_combine() -> None:
     _assert_not_resolved(*_publish_structure(jamb_page="2"))
+
+
+def test_resolved_physical_opening_preserves_authenticated_viewport_id() -> None:
+    published, physical, snapshot_id = _publish_structure()
+    result = physical.prove_existence(
+        selector(published, snapshot_id, "face-a")
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.existence_record is not None
+    assert result.existence_record.viewport_id == "vp-1"
