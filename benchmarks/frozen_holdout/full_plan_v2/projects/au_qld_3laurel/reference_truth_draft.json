@@ -1704,6 +1704,23 @@
         "architectural:p15:A0.15:GF_Ensuite_Laundry:1870x3470_finished_internal_dimensions",
         "architectural:p7:A0.7:FCL_2700"
       ]
+    },
+    {
+      "check_id": "3laurel:blocker:roof_plane_geometry",
+      "status": "UNRESOLVED_SOURCE_LIMITATION",
+      "source_locations": [
+        "architectural:p4:A0.4:elevations:25deg_pitch",
+        "architectural:p7:A0.7:section_A-A:25deg_pitch",
+        "architectural:all_sheets:dimensions_shall_not_be_obtained_by_scaling"
+      ],
+      "roof_plan_sheet_present": false,
+      "pitch_evidence_degrees": [
+        25
+      ],
+      "figured_roof_plane_dimensions_available": false,
+      "scaling_substitute_allowed": false,
+      "reason": "the frozen construction set supplies elevation/section pitch but no dimensioned roof-plan geometry; source notes expressly prohibit obtaining dimensions by scaling",
+      "benchmark_rule": "keep roof_planes unresolved until an independent dimensioned roof/framing source is supplied"
     }
   ]
 }
