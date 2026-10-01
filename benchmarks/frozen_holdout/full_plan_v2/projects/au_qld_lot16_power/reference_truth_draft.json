@@ -33,7 +33,7 @@
     "ceilings_including_raked_ceiling",
     "custom_front_glazing_and_untyped_external_door_elements",
     "wet_area_wall_tiling",
-    "structural_members_other_than_scheduled_wall_bracing",
+    "structural_members_beyond_closed_wall_bracing_and_explicit_architectural_supports",
     "roof_planes_final_crosscheck_against_engineering_stormwater_note"
   ],
   "completion_rule": "Do not mark project VERIFIED until every in-scope family is independently closed and aggregate controls reconcile without double counting.",
@@ -713,6 +713,47 @@
       "source_location": "architectural:p2:site_plan:DRIVEWAY_CONCRETE_10.7_m2",
       "physical_kind": "surface",
       "object_family": "site_concrete"
+    },
+    {
+      "object_ref": "lot16:structural:telescopic_pier:01",
+      "object_family": "architectural_support_member",
+      "physical_kind": "structural_member",
+      "description": "Telescopic pier, floor-plan instance 1",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:floor_plan:TELESCOPIC_PIER_instance_1",
+      "attributes": {
+        "member_type": "telescopic_pier",
+        "engineering_instance_crosscheck": "not_project_tagged_in_structural_set"
+      }
+    },
+    {
+      "object_ref": "lot16:structural:telescopic_pier:02",
+      "object_family": "architectural_support_member",
+      "physical_kind": "structural_member",
+      "description": "Telescopic pier, floor-plan instance 2",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:floor_plan:TELESCOPIC_PIER_instance_2",
+      "attributes": {
+        "member_type": "telescopic_pier",
+        "engineering_instance_crosscheck": "not_project_tagged_in_structural_set"
+      }
+    },
+    {
+      "object_ref": "lot16:structural:timber_post:90x90:01",
+      "object_family": "architectural_support_member",
+      "physical_kind": "structural_member",
+      "description": "90x90 hardwood timber post called out on Elevation 1",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p4:elevation_1:90x90_HWD_Timber_Post",
+      "attributes": {
+        "member_type": "timber_post",
+        "section_mm": "90x90",
+        "material": "hardwood",
+        "engineering_instance_crosscheck": "not_project_tagged_in_structural_set"
+      }
     }
   ],
   "closure_checks": [
@@ -807,6 +848,23 @@
       },
       "source_location": "structural:p10:S10:GROUND_FLOOR_WALL_BRACING_PLAN",
       "note": "Independent engineering control over the already-closed 24-member bracing census; not a denominator quantity."
+    },
+    {
+      "check_id": "lot16:closure:explicit_architectural_support_census",
+      "component_object_refs": [
+        "lot16:structural:telescopic_pier:01",
+        "lot16:structural:telescopic_pier:02",
+        "lot16:structural:timber_post:90x90:01"
+      ],
+      "telescopic_pier_count": 2,
+      "hardwood_post_count": 1,
+      "object_count": 3,
+      "complete_for_explicitly_labelled_architectural_supports": true,
+      "structural_engineering_instance_schedule_available": false,
+      "source_locations": [
+        "architectural:p3:floor_plan:two_TELESCOPIC_PIER_labels",
+        "architectural:p4:elevation_1:90x90_HWD_Timber_Post"
+      ]
     }
   ]
 }
