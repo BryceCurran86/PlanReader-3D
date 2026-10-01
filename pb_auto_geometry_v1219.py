@@ -663,7 +663,7 @@ def _is_finite_number(value: Any) -> bool:
 
 # What an automatic row may carry: the roles _takeoff_row() assigns, text in
 # every text column (required ones non-empty), and finite non-negative numbers.
-AUTO_ROW_ROLES = ("", "floor_area")
+AUTO_ROW_ROLES = ("", "floor_area", "external_wall")
 _AUTO_REQUIRED_TEXT = ("section", "element", "location", "substrate", "unit", "quantity_status",
                        "source_reference", "inclusion_status", "confidence")
 _AUTO_OPTIONAL_TEXT = ("finish_system", "source_page", "notes", "row_role")
@@ -816,6 +816,138 @@ def _build_unit_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, Any]
     return rows, summary
 
 
+def _try_physical_net_wall_rows(
+    app: Any, workspace_id: int, pages: Sequence[Dict[str, Any]], facades: Sequence[Dict[str, Any]]
+) -> Optional[List[Tuple[Any, ...]]]:
+    """Attempt to produce source-authenticated physical net-wall takeoff rows.
+
+    Checks:
+    1. Direct live physical net-wall authority (`collect_live_physical_net_wall_claim`),
+       which replays the complete source-owned wall/opening void chain on the PDF.
+    2. Sibling unified registered-wall authority (`build_registered_walls_v139`),
+       which binds plan wall lengths, elevation heights, and authenticated B5 opening deductions.
+
+    Returns canonical 21-field takeoff rows if authenticated evidence exists,
+    or None to signal that the caller must fall back to gross elevation rows.
+    """
+    # 1. Check live physical net-wall integration
+    doc_paths: List[Tuple[int, Path]] = []
+    if hasattr(app, "lquery"):
+        try:
+            doc_rows = app.lquery(
+                "SELECT id, path FROM documents WHERE workspace_id=? ORDER BY id",
+                (int(workspace_id),),
+            )
+            for d in doc_rows:
+                p = Path(str(d.get("path") or ""))
+                if p.is_file() and p.suffix.lower() == ".pdf":
+                    doc_paths.append((int(d["id"]), p))
+        except Exception:
+            pass
+
+    for doc_id, doc_path in doc_paths:
+        try:
+            from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+            from pb_migration_contracts import EvidenceResolutionStatus
+
+            doc_pages = [p for p in pages if int(p.get("document_id") or 0) == doc_id]
+            page_nos = [
+                int(p.get("page_no"))
+                for p in doc_pages
+                if p.get("page_no") is not None and int(p.get("page_no")) > 0
+            ]
+            page_indices = tuple(p - 1 for p in sorted(set(page_nos))) if page_nos else None
+
+            claim = collect_live_physical_net_wall_claim(doc_path, pages=page_indices)
+            status_val = getattr(claim.status, "value", str(claim.status))
+            if (
+                status_val == "corroborated"
+                and claim.quantity_m2 is not None
+                and float(claim.quantity_m2) > 0.0
+                and claim.quantity_id
+            ):
+                qty = round(max(0.0, float(claim.quantity_m2)), 2)
+                src_pages = claim.source_pages if hasattr(claim, "source_pages") and claim.source_pages else ()
+                source_page_str = ", ".join(f"p{p}" for p in src_pages) if src_pages else "1"
+                source_ref = f"{SOURCE_PREFIX} · physical_net_wall:{claim.quantity_id}"
+                confidence = "Documented" if getattr(claim, "confidence", 0.0) >= 0.8 else "Derived"
+                notes = (
+                    "External walling — source-authenticated physical net whole-wall area with proven opening voids deducted."
+                )
+                all_subs = [s for f in facades for s in (f.get("substrates") or [])]
+                sub_names = sorted({s.get("name") for s in all_subs if s.get("name")})
+                substrate_name = sub_names[0] if len(sub_names) == 1 else "External walling"
+                location_str = (
+                    f"External perimeter walling · {substrate_name}"
+                    if substrate_name != "External walling"
+                    else "External perimeter walling · Physical net wall"
+                )
+                row = _takeoff_row(
+                    workspace_id=workspace_id,
+                    section="External",
+                    element="External walls / cladding",
+                    location=location_str,
+                    substrate=substrate_name,
+                    quantity=qty,
+                    status="Measured",
+                    source_page=source_page_str,
+                    source_reference=source_ref,
+                    confidence=confidence,
+                    notes=notes,
+                    row_role="external_wall",
+                )
+                return [row]
+        except Exception:
+            pass
+
+    # 2. Check unified registered-wall authority with verified opening deductions
+    if hasattr(app, "build_registered_walls_v139") and callable(getattr(app, "build_registered_walls_v139")):
+        try:
+            reg_walls = app.build_registered_walls_v139(int(workspace_id))
+            if reg_walls:
+                has_authenticated_openings = any(
+                    float(w.get("opening_deduction_m2") or 0.0) > 0.0
+                    for w in reg_walls
+                )
+                has_verified_height = any(
+                    w.get("height_confidence") in {"Verified", "High"}
+                    for w in reg_walls
+                )
+                if has_authenticated_openings or has_verified_height:
+                    reg_rows: List[Tuple[Any, ...]] = []
+                    for w in reg_walls:
+                        net_qty = round(max(0.0, float(w.get("net_m2") or 0.0)), 2)
+                        if net_qty <= 0.0:
+                            continue
+                        sub = str(w.get("substrate") or "External walling")
+                        ref = str(w.get("wall_ref") or "wall")
+                        side = str(w.get("side") or "Perimeter")
+                        gross_val = float(w.get("gross_m2") or 0.0)
+                        ded_val = float(w.get("opening_deduction_m2") or 0.0)
+                        h_status = str(w.get("height_status") or "")
+                        note_text = f"Gross {gross_val:.2f} m²; authenticated opening deductions {ded_val:.2f} m². {h_status}".strip()
+                        reg_rows.append(_takeoff_row(
+                            workspace_id=workspace_id,
+                            section="External",
+                            element="External walls / cladding",
+                            location=f"{side} · {ref}",
+                            substrate=sub,
+                            quantity=net_qty,
+                            status="Measured",
+                            source_page="Registered plan/elevation geometry",
+                            source_reference=f"{SOURCE_PREFIX} · registered_wall:{ref}",
+                            confidence="Documented" if w.get("height_confidence") in {"Verified", "High"} else "Derived",
+                            notes=note_text,
+                            row_role="external_wall",
+                        ))
+                    if reg_rows:
+                        return reg_rows
+        except Exception:
+            pass
+
+    return None
+
+
 def _build_facade_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, Any]]) -> Tuple[List[Tuple[Any, ...]], List[Dict[str, Any]]]:
     rows: List[Tuple[Any, ...]] = []
     facades: List[Dict[str, Any]] = []
@@ -839,6 +971,22 @@ def _build_facade_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, An
             facade["gross_m2"] = round((w * h) / (pxpm * pxpm), 2)
             facade["bbox"] = component["bbox"]
             facade["polygon"] = component["polygon"]
+        facades.append(facade)
+
+    # 1. Prefer authenticated physical net-wall evidence where available
+    physical_net_rows = _try_physical_net_wall_rows(app, workspace_id, pages, facades)
+    if physical_net_rows is not None and len(physical_net_rows) > 0:
+        for facade in facades:
+            facade["superseded_by_physical_net_wall"] = True
+        return physical_net_rows, facades
+
+    # 2. Fall back to explicit substrate text areas or gross calibrated elevation areas
+    for facade in facades:
+        explicit = facade.get("explicit_areas") or []
+        page_label = facade.get("page_label") or ""
+        page_id = facade.get("page_id") or 0
+        face = facade.get("face") or ""
+        substrates = facade.get("substrates") or []
 
         if explicit:
             for item in explicit:
@@ -846,11 +994,11 @@ def _build_facade_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, An
                 rows.append(_takeoff_row(
                     workspace_id=workspace_id, section="External", element="External walls / cladding",
                     location=f"{face.title() if face else 'Elevation'} · {sub['name']}", substrate=sub["name"],
-                    quantity=_num(item["area_m2"]), status="Measured", source_page=facade["page_label"],
-                    source_reference=f"{SOURCE_PREFIX} · facade:{int(page['id'])} · {sub['code']}",
+                    quantity=_num(item["area_m2"]), status="Measured", source_page=page_label,
+                    source_reference=f"{SOURCE_PREFIX} · facade:{int(page_id)} · {sub['code']}",
                     confidence="Documented", notes=f"Substrate area read directly from drawing text: {item['source']}",
                 ))
-        elif facade["gross_m2"] > 0:
+        elif facade.get("gross_m2", 0.0) > 0:
             if len(substrates) == 1:
                 sub = substrates[0]
                 location = f"{face.title() if face else 'Elevation'} · {sub['name']}"
@@ -864,10 +1012,10 @@ def _build_facade_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, An
             rows.append(_takeoff_row(
                 workspace_id=workspace_id, section="External", element="External walls / cladding", location=location,
                 substrate=substrate, quantity=_num(facade["gross_m2"]), status="Provisional measured",
-                source_page=facade["page_label"], source_reference=f"{SOURCE_PREFIX} · facade:{int(page['id'])} · gross",
+                source_page=page_label, source_reference=f"{SOURCE_PREFIX} · facade:{int(page_id)} · gross",
                 confidence="Derived", notes=note,
             ))
-        facades.append(facade)
+
     return rows, facades
 
 
@@ -943,6 +1091,35 @@ def _refresh_auto_model(app: Any, workspace_id: int, footprint: Optional[Dict[st
     return mass_id
 
 
+def _ensure_opening_evidence_v175(app: Any, workspace_id: int, pages: Sequence[Dict[str, Any]]) -> None:
+    """Ensure P5 opening evidence is generated for drawing sheets automatically.
+
+    Eliminates the requirement for an estimator to manually enter Accuracy Lab
+    and press 'Run native vector analysis' before opening deductions take effect.
+    Idempotent: skips any page whose opening evidence is already recorded.
+    """
+    if not hasattr(app, "analyse_stored_page_v130") or not callable(getattr(app, "analyse_stored_page_v130")):
+        return
+    for page in pages:
+        pid = int(page.get("id") or 0)
+        if pid <= 0:
+            continue
+        key = f"opening_evidence_v175_page_{pid}"
+        if hasattr(app, "workspace_setting"):
+            try:
+                existing = app.workspace_setting(int(workspace_id), key, None)
+                if existing:
+                    continue
+            except Exception:
+                pass
+        ptype = str(page.get("page_type") or "").lower()
+        if any(t in ptype for t in ("floor", "plan", "elevation", "drawing", "section")):
+            try:
+                app.analyse_stored_page_v130(pid)
+            except Exception:
+                pass
+
+
 def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
     """Run the automatic non-AI geometry pipeline on selected, rendered sheets."""
     pages = app.lquery(
@@ -950,6 +1127,9 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
            WHERE p.workspace_id=? AND COALESCE(p.selected,0)=1 ORDER BY p.id""",
         (int(workspace_id),),
     )
+    # AG-02: Auto-generate opening evidence for drawing sheets without manual Accuracy Lab interaction
+    _ensure_opening_evidence_v175(app, int(workspace_id), [dict(p) for p in pages])
+
     calibrations = []
     for page in pages:
         result = _auto_calibrate_page(app, dict(page))
