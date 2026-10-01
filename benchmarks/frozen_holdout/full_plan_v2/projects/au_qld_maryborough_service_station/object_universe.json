@@ -500,5 +500,62 @@
     }
   ],
   "window_identity_universe_complete": true,
-  "window_area_universe_complete": false
+  "window_area_universe_complete": false,
+  "verified_floor_surfaces": [
+    {
+      "object_ref": "maryborough:surface:floor:wc_shower_north",
+      "physical_kind": "floor_finish_surface",
+      "room": "WC & SHOWER north",
+      "entry_door_tag": "D07",
+      "finish_mark": "FT2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 4.7547,
+      "figured_dimensions_mm": [
+        2935,
+        1620
+      ],
+      "source_locations": [
+        "A140:floor_finishes:WC_SHOWER_north:FT2",
+        "A140:figured_dimensions:2935x1620",
+        "A110:physical_room_geometry:entry_D07"
+      ]
+    },
+    {
+      "object_ref": "maryborough:surface:floor:wc_shower_middle",
+      "physical_kind": "floor_finish_surface",
+      "room": "WC & SHOWER middle",
+      "entry_door_tag": "D08",
+      "finish_mark": "FT2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 4.7547,
+      "figured_dimensions_mm": [
+        2935,
+        1620
+      ],
+      "source_locations": [
+        "A140:floor_finishes:WC_SHOWER_middle:FT2",
+        "A140:figured_dimensions:2935x1620",
+        "A110:physical_room_geometry:entry_D08"
+      ]
+    },
+    {
+      "object_ref": "maryborough:surface:floor:wc_shower_south",
+      "physical_kind": "floor_finish_surface",
+      "room": "WC & SHOWER south",
+      "entry_door_tag": "D09",
+      "finish_mark": "FT2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 4.7547,
+      "figured_dimensions_mm": [
+        2935,
+        1620
+      ],
+      "source_locations": [
+        "A140:floor_finishes:WC_SHOWER_south:FT2",
+        "A140:figured_dimensions:2935x1620",
+        "A110:physical_room_geometry:entry_D09"
+      ]
+    }
+  ],
+  "wc_shower_floor_surface_universe_complete": true
 }
