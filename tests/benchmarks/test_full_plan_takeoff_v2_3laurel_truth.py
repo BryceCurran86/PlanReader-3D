@@ -61,6 +61,14 @@ def test_3laurel_external_opening_truth_is_atomic_and_source_closed():
     }
     assert universe["external_opening_universe_complete"] is True
 
+    reference = _json(project / "reference_takeoff.json")
+    closure = reference["external_opening_reconciliation"]
+    assert closure["typed_opening_subset"]["count"] == 20
+    assert closure["typed_opening_subset"]["area_m2"] == pytest.approx(58.59)
+    assert closure["separately_closed_perimeter_hinged_doors"]["count"] == 3
+    assert closure["separately_closed_perimeter_hinged_doors"]["area_m2"] == pytest.approx(6.174)
+    assert closure["external_opening_universe_complete"] is True
+
     ref = manifest.reference_takeoff_documents[0]
     ref_path = project / ref.name
     assert _sha256(ref_path) == ref.sha256
