@@ -197,9 +197,9 @@ class TestCrossTradeReuseRuntimeParityV15(unittest.TestCase):
         self.assertIn("reinforcement", trade_map)
         self.assertIn("membrane", trade_map)
 
-        # 1. Concrete: 96.0 m2 * 0.100m = 9.60 m3 (unit: item)
+        # 1. Concrete: 96.0 m2 * 0.100m = 9.60 m3 (unit: m³)
         self.assertEqual(trade_map["concrete"].quantity, 9.60)
-        self.assertEqual(trade_map["concrete"].unit, "item")
+        self.assertEqual(trade_map["concrete"].unit, "m³")
 
         # 2. Formwork: 40.0 lm * 0.100m = 4.00 m2
         self.assertEqual(trade_map["formwork"].quantity, 4.00)

@@ -2435,10 +2435,21 @@ def seed_drawing_register(workspace_id: int) -> None:
 
 
 def _normalise_unit(raw: Any) -> str:
+    if raw in TAKEOFF_UNITS:
+        return str(raw)
     text = str(raw or "").strip().lower()
     if not text:
         return ""
     cleaned = re.sub(r"[\s\.\-_]+", "", text)
+    if (
+        text in {"m3", "cum", "cu m", "m³", "m^3", "cubic metre", "cubic metres", "cubic meter", "cubic meters"}
+        or cleaned in {"m3", "cum", "cumetre", "cumetres", "cumeter", "cumeters", "m^3", "m³"}
+        or "m³" in text
+        or "m3" in text
+        or "m^3" in text
+        or "cubic" in text
+    ):
+        return "m³"
     if (
         text in {"m2", "sqm", "sq m", "m²", "m^2"}
         or "m2" in text
@@ -3652,7 +3663,7 @@ def per_level_summary(workspace_id: int) -> pd.DataFrame:
     """
     takeoff = dataframe_for_takeoff(workspace_id)
     if takeoff.empty:
-        return pd.DataFrame(columns=["level", "rows", "m2", "floor_m2", "lm", "count", "paint_litres", "labour_hours", "value_ex_gst"])
+        return pd.DataFrame(columns=["level", "rows", "m2", "floor_m2", "lm", "m3", "count", "paint_litres", "labour_hours", "value_ex_gst"])
     takeoff = takeoff.copy()
     takeoff["level"] = [level_of(loc) for loc in takeoff["location"]]
     work = takeoff_work_rows(takeoff)
@@ -3677,6 +3688,7 @@ def per_level_summary(workspace_id: int) -> pd.DataFrame:
             "m2": to_float(work_group.loc[work_group["unit"].map(_normalise_unit).eq("m²"), "quantity"].sum()),
             "floor_m2": to_float(floor_m2_val),
             "lm": to_float(work_group.loc[work_group["unit"].map(_normalise_unit).eq("lm"), "quantity"].sum()),
+            "m3": to_float(work_group.loc[work_group["unit"].map(_normalise_unit).eq("m³"), "quantity"].sum()),
             "count": to_float(work_group.loc[work_group["unit"].map(_normalise_unit).isin({"No.", "item"}), "quantity"].sum()),
             "paint_litres": to_float(work_group["paint_litres"].sum()),
             "labour_hours": to_float(work_group["labour_hours"].sum()),
@@ -3684,7 +3696,7 @@ def per_level_summary(workspace_id: int) -> pd.DataFrame:
         })
     df = pd.DataFrame(out)
     if df.empty:
-        return pd.DataFrame(columns=["level", "rows", "m2", "floor_m2", "lm", "count", "paint_litres", "labour_hours", "value_ex_gst"])
+        return pd.DataFrame(columns=["level", "rows", "m2", "floor_m2", "lm", "m3", "count", "paint_litres", "labour_hours", "value_ex_gst"])
     df["sort"] = df["level"].map(level_sort_key)
     df = df.sort_values("sort", ignore_index=True).drop(columns=["sort"])
     return df

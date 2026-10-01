@@ -80,9 +80,9 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
         self.assertEqual(len(quantities), 4)
 
         trades = {q.trade_scope: q for q in quantities}
-        # 120.0 m2 * 0.15m = 18.0 m3 concrete -> normalized to canonical unit 'item'
+        # 120.0 m2 * 0.15m = 18.0 m3 concrete -> preserved canonical unit 'm³'
         self.assertEqual(trades["concrete"].quantity, 18.00)
-        self.assertEqual(trades["concrete"].unit, "item")
+        self.assertEqual(trades["concrete"].unit, "m³")
 
         # 44.0 lm * 0.15m = 6.6 m2 edge formwork
         self.assertEqual(trades["formwork"].quantity, 6.60)

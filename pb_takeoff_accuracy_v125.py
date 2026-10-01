@@ -266,7 +266,7 @@ def dataframe_for_takeoff(app: Any, wid: int) -> pd.DataFrame:
 
 
 def per_level_summary(app: Any, wid: int) -> pd.DataFrame:
-    df = dataframe_for_takeoff(app,wid); cols=["level","rows","m2","floor_m2","lm","count","paint_litres","labour_hours","value_ex_gst"]
+    df = dataframe_for_takeoff(app,wid); cols=["level","rows","m2","floor_m2","lm","m3","count","paint_litres","labour_hours","value_ex_gst"]
     if df.empty: return pd.DataFrame(columns=cols)
     work=app.takeoff_work_rows(df.copy()); work["level"]=[level_of(x) for x in work["location"]]
     fm: dict[str,float]={}
@@ -274,7 +274,7 @@ def per_level_summary(app: Any, wid: int) -> pd.DataFrame:
     out=[]
     for lvl in set(work["level"].tolist())|set(fm):
         g=work.loc[work["level"].eq(lvl)]
-        out.append({"level":str(lvl),"rows":len(g),"m2":app.to_float(g.loc[g["unit"].map(app._normalise_unit).eq("m²"),"quantity"].sum()),"floor_m2":app.to_float(fm.get(lvl,0.0)),"lm":app.to_float(g.loc[g["unit"].map(app._normalise_unit).eq("lm"),"quantity"].sum()),"count":app.to_float(g.loc[g["unit"].map(app._normalise_unit).isin({"No.","item"}),"quantity"].sum()),"paint_litres":app.to_float(g["paint_litres"].sum()),"labour_hours":app.to_float(g["labour_hours"].sum()),"value_ex_gst":app.to_float(g["value_ex_gst"].sum())})
+        out.append({"level":str(lvl),"rows":len(g),"m2":app.to_float(g.loc[g["unit"].map(app._normalise_unit).eq("m²"),"quantity"].sum()),"floor_m2":app.to_float(fm.get(lvl,0.0)),"lm":app.to_float(g.loc[g["unit"].map(app._normalise_unit).eq("lm"),"quantity"].sum()),"m3":app.to_float(g.loc[g["unit"].map(app._normalise_unit).eq("m³"),"quantity"].sum()),"count":app.to_float(g.loc[g["unit"].map(app._normalise_unit).isin({"No.","item"}),"quantity"].sum()),"paint_litres":app.to_float(g["paint_litres"].sum()),"labour_hours":app.to_float(g["labour_hours"].sum()),"value_ex_gst":app.to_float(g["value_ex_gst"].sum())})
     r=pd.DataFrame(out,columns=cols); r["_sort"]=r["level"].map(level_sort_key); return r.sort_values(["_sort","level"]).drop(columns="_sort").reset_index(drop=True)
 
 

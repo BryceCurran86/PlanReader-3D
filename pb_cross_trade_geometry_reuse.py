@@ -46,10 +46,12 @@ class DerivedTradeQuantity:
         self.quantity = round(self.quantity, 2)
         if self.unit in ("m2", "sqm", "m^2"):
             self.unit = "m²"
-        elif self.unit in ("m3", "cum", "m^3"):
-            self.unit = "item"
+        elif self.unit in ("m3", "cum", "cu m", "m^3", "cubic metre", "cubic metres", "cubic meter", "cubic meters"):
+            self.unit = "m³"
         elif self.unit in ("ea", "count", "nr", "no"):
             self.unit = "No."
+        elif self.unit in ("m", "lin m", "linear metre", "linear metres", "linear meter", "linear meters", "lineal", "linear"):
+            self.unit = "lm"
 
     @property
     def trade_family(self) -> str:
@@ -259,8 +261,9 @@ def derive_slab_trade_quantities(
     results: List[DerivedTradeQuantity] = []
     specs_map = dict(specs or {})
 
-    # 1. Concrete Volume (m3 / item)
+    # 1. Concrete Volume (m³)
     volume_m3 = round(area_m2 * thickness_m, 2)
+    concrete_unit = str(specs_map.get("concrete_unit") or "m³")
     results.append(DerivedTradeQuantity(
         trade_scope="concrete",
         section="Substructure" if not is_suspended else "Structure",
@@ -268,7 +271,7 @@ def derive_slab_trade_quantities(
         location=f"Slab · {slab_id}",
         substrate=specs_map.get("concrete_grade", "25 MPa Concrete"),
         quantity=volume_m3,
-        unit="item",
+        unit=concrete_unit,
         host_object_id=slab_id,
         host_object_type="SLAB",
         derivation_formula=f"Area {area_m2:.2f} m² × Thickness {thickness_m:.3f} m",
@@ -628,22 +631,42 @@ def derive_multi_trade_takeoff_from_canonical_model(
     quantities: List[DerivedTradeQuantity] = []
 
     # 1. Walls
-    walls = model.all_walls() if hasattr(model, "all_walls") and callable(model.all_walls) else (_get_val(model, "walls") or [])
+    if hasattr(model, "all_walls") and callable(model.all_walls):
+        walls = model.all_walls()
+    elif hasattr(model, "levels"):
+        walls = [w for lvl in model.levels for w in getattr(lvl, "walls", [])]
+    else:
+        walls = _get_val(model, "walls") or []
     for w in walls:
         quantities.extend(derive_wall_trade_quantities(w, specs=specs))
 
     # 2. Floors / Slabs
-    floors = model.all_floors() if hasattr(model, "all_floors") and callable(model.all_floors) else (_get_val(model, "floors") or [])
+    if hasattr(model, "all_floors") and callable(model.all_floors):
+        floors = model.all_floors()
+    elif hasattr(model, "levels"):
+        floors = [fl for lvl in model.levels for fl in getattr(lvl, "floors", [])]
+    else:
+        floors = _get_val(model, "floors") or []
     for fl in floors:
         quantities.extend(derive_slab_trade_quantities(fl, specs=specs))
 
     # 3. Roofs
-    roofs = model.all_roofs() if hasattr(model, "all_roofs") and callable(model.all_roofs) else (_get_val(model, "roofs") or [])
+    if hasattr(model, "all_roofs") and callable(model.all_roofs):
+        roofs = model.all_roofs()
+    elif hasattr(model, "levels"):
+        roofs = [rf for lvl in model.levels for rf in getattr(lvl, "roofs", [])]
+    else:
+        roofs = _get_val(model, "roofs") or []
     for rf in roofs:
         quantities.extend(derive_roof_trade_quantities(rf, specs=specs))
 
     # 4. Spaces
-    spaces = model.all_spaces() if hasattr(model, "all_spaces") and callable(model.all_spaces) else (_get_val(model, "spaces") or [])
+    if hasattr(model, "all_spaces") and callable(model.all_spaces):
+        spaces = model.all_spaces()
+    elif hasattr(model, "levels"):
+        spaces = [sp for lvl in model.levels for sp in getattr(lvl, "spaces", [])]
+    else:
+        spaces = _get_val(model, "spaces") or []
     for sp in spaces:
         quantities.extend(derive_space_trade_quantities(sp, specs=specs))
 
