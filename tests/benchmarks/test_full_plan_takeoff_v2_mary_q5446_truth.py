@@ -41,11 +41,11 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     manifest = load_project_manifest(project / "source_manifest.json")
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
-    assert len(manifest.verified_items) == 10
+    assert len(manifest.verified_items) == 13
 
     eligible = [item for item in manifest.verified_items if item.denominator_eligible]
     excluded = [item for item in manifest.verified_items if not item.denominator_eligible]
-    assert len(eligible) == 7
+    assert len(eligible) == 10
     assert len(excluded) == 3
 
     by_id = {item.item_id: item for item in manifest.verified_items}
@@ -88,6 +88,11 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     assert floors["maryborough:surface:floor:wc_shower_north"]["expected_area_m2"] == 4.7547
     assert floors["maryborough:surface:floor:wc_shower_middle"]["expected_area_m2"] == 4.7547
     assert floors["maryborough:surface:floor:wc_shower_south"]["expected_area_m2"] == 4.7547
+    assert universe["wc_shower_ceiling_surface_universe_complete"] is True
+    ceilings = {row["object_ref"]: row for row in universe["verified_ceiling_surfaces"]}
+    assert ceilings["maryborough:surface:ceiling:wc_shower_north"]["expected_area_m2"] == 4.7547
+    assert ceilings["maryborough:surface:ceiling:wc_shower_middle"]["expected_area_m2"] == 4.7547
+    assert ceilings["maryborough:surface:ceiling:wc_shower_south"]["expected_area_m2"] == 4.7547
     _assert_reference_hash("au_qld_maryborough_service_station")
 
 
@@ -177,3 +182,15 @@ def test_maryborough_wc_shower_geometry_is_two_route_closed():
         assert row["a140_figured_mm"] == [2935, 1620]
         assert row["a140_area_m2"] == 4.7547
         assert row["agreement"] == "PASS_WITHIN_DRAWING_TOLERANCE"
+
+
+def test_maryborough_wc_shower_ceiling_truth_is_closed():
+    ref = _json(ROOT / "au_qld_maryborough_service_station" / "reference_takeoff.json")
+    checks = ref["wc_shower_ceiling_geometry_checks"]
+    assert len(checks) == 3
+    for row in checks:
+        assert row["a120_ceiling_finish"] == "WFPB"
+        assert row["a120_ceiling_height_mm"] == 2400
+        assert row["footprint_figured_mm"] == [2935, 1620]
+        assert row["expected_area_m2"] == 4.7547
+        assert row["agreement"] == "PASS"
