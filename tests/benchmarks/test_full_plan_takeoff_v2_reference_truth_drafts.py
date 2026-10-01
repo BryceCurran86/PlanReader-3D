@@ -766,3 +766,29 @@ def test_lot16_source_closed_bath_tile_faces_stay_gross_until_deductions_close()
     assert check["object_count"] == 3
     assert check["component_sum_m2"] == pytest.approx(9.324)
     assert check["net_denominator_ready"] is False
+
+def test_lot16_explicit_bath_shower_tile_face_is_net_closed_but_wet_area_universe_stays_open():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    tile = next(
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] == "lot16:surface:wall_tile:bath_shower_full_height:01"
+    )
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:bath_shower_full_height_tile_face"
+    )
+    assert tile["expected_quantity"] == pytest.approx(3.108)
+    assert tile["attributes"]["finished_face_width_m"] == pytest.approx(1.2)
+    assert tile["attributes"]["tile_height_m"] == pytest.approx(2.59)
+    assert tile["attributes"]["openings_in_host_face"] is False
+    assert tile["attributes"]["net_finish_area_ready"] is True
+    assert check["tile_area_m2"] == pytest.approx(3.108)
+    assert check["complete_for_this_explicit_face"] is True
+    assert check["complete_for_project_wet_area_tile_universe"] is False
+    assert (
+        "wet_area_wall_tiling_beyond_explicit_bath_shower_full_height_face"
+        in draft["unresolved_surface_families"]
+    )
+
