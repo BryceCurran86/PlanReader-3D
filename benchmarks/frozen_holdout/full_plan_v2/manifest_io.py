@@ -30,7 +30,7 @@ def _source_doc(raw: dict[str, Any]) -> SourceDocumentV2:
         role=raw["role"],
         sha256=raw["sha256"],
         size_bytes=int(raw["size_bytes"]),
-        page_count=int(raw["page_count"]),
+        page_count=None if raw.get("page_count") is None else int(raw["page_count"]),
     )
 def _verified_item(raw: dict[str, Any], project_id: str) -> VerifiedTakeoffItemV2:
     return VerifiedTakeoffItemV2(

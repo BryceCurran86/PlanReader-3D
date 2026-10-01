@@ -236,3 +236,27 @@ def test_project_ids_must_be_unique():
     )
     with pytest.raises(ValueError):
         evaluate_suite_v2(manifests, {})
+
+
+def test_spreadsheet_reference_takeoff_does_not_require_page_count():
+    source = SourceDocumentV2(
+        name="verified_takeoff.xlsx",
+        role="reference_takeoff",
+        sha256=SHA,
+        size_bytes=100,
+        page_count=None,
+    )
+    assert source.page_count is None
+
+
+def test_denominator_item_requires_verified_surface_object_refs():
+    with pytest.raises(ValueError):
+        VerifiedTakeoffItemV2(
+            item_id="no-surface",
+            project_id="project-a",
+            description="Unmapped area",
+            unit="m2",
+            expected_quantity=10.0,
+            tolerance_fraction=0.05,
+            expected_object_refs=(),
+        )

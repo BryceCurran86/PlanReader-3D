@@ -53,7 +53,7 @@ class SourceDocumentV2:
     role: str
     sha256: str
     size_bytes: int
-    page_count: int
+    page_count: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "name", _required(self.name, "name"))
@@ -62,8 +62,10 @@ class SourceDocumentV2:
         if not _SHA256_RE.fullmatch(sha):
             raise ValueError("sha256 must be a lowercase SHA-256 digest")
         object.__setattr__(self, "sha256", sha)
-        if self.size_bytes <= 0 or self.page_count <= 0:
-            raise ValueError("source document size/page count must be positive")
+        if self.size_bytes <= 0:
+            raise ValueError("source document size must be positive")
+        if self.page_count is not None and self.page_count <= 0:
+            raise ValueError("page_count must be positive when supplied")
 @dataclass(frozen=True)
 class VerifiedTakeoffItemV2:
     item_id: str
@@ -85,11 +87,10 @@ class VerifiedTakeoffItemV2:
             raise ValueError("expected_quantity must be finite and non-negative")
         if not math.isfinite(self.tolerance_fraction) or not 0 <= self.tolerance_fraction <= 1:
             raise ValueError("tolerance_fraction must be between 0 and 1")
-        object.__setattr__(
-            self,
-            "expected_object_refs",
-            _tuple(self.expected_object_refs, "expected_object_refs"),
-        )
+        refs = _tuple(self.expected_object_refs, "expected_object_refs")
+        if self.denominator_eligible and not refs:
+            raise ValueError("denominator-eligible takeoff item requires expected_object_refs")
+        object.__setattr__(self, "expected_object_refs", refs)
         status = _required(self.verification_status, "verification_status").upper()
         if status != PROJECT_VERIFIED:
             raise ValueError("takeoff items entering the denominator must be independently VERIFIED")
