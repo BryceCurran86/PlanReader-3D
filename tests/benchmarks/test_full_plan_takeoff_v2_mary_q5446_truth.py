@@ -91,7 +91,7 @@ def test_q5446_only_independently_closed_alfresco_enters_verified_core():
     manifest = load_project_manifest(project / "source_manifest.json")
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
-    assert len(manifest.verified_items) == 4
+    assert len(manifest.verified_items) == 5
 
     item = manifest.verified_items[0]
     assert item.item_id == "q5446-alfresco-floor-area"
@@ -103,6 +103,7 @@ def test_q5446_only_independently_closed_alfresco_enters_verified_core():
     assert by_id["q5446-ground-ensuite-floor-tiling-area"].expected_quantity == 4.2224
     assert by_id["q5446-first-ensuite-floor-tiling-area"].expected_quantity == 5.9572
     assert by_id["q5446-first-bath-floor-tiling-area"].expected_quantity == 5.8446
+    assert by_id["q5446-ground-laundry-floor-tiling-area"].expected_quantity == 4.1864
 
     ref = _json(project / "reference_takeoff.json")
     controls = {
@@ -117,7 +118,7 @@ def test_q5446_only_independently_closed_alfresco_enters_verified_core():
     }
     assert controls["garage"]["quantity_m2"] == 36.40
     assert controls["total"]["quantity_m2"] == 298.19
-    assert len(ref["independent_geometry_checks"]) == 3
+    assert len(ref["independent_geometry_checks"]) == 4
     _assert_reference_hash("au_qld_q5446_armstrong32_harlequin")
 
 
@@ -155,6 +156,7 @@ def test_q5446_area_closure_audit_stays_fail_closed():
     report = _json(ROOT / "au_qld_q5446_armstrong32_harlequin" / "verification_report.json")
     checks = {row["object_ref"]: row for row in report["measurement_closure_checks"]}
     assert checks["q5446:surface:floor:alfresco"]["status"] == "PASS"
+    assert checks["q5446:surface:floor:ground_laundry"]["status"] == "PASS"
     assert checks["q5446:candidate:garage"]["status"] == "UNRESOLVED"
     assert checks["q5446:candidate:porch"]["status"] == "UNRESOLVED"
     assert checks["q5446:candidate:ground_floor"]["status"] == "UNRESOLVED"
