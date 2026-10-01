@@ -149,3 +149,13 @@ def test_verification_reports_fail_closed_on_full_project_completeness():
         proof = {row["proof"]: row for row in report["proofs"]}
         assert proof["PlanReader output not used as benchmark truth"]["status"] == "PASS"
         assert proof["full project surface universe complete"]["status"] == "FAIL"
+
+
+def test_q5446_area_closure_audit_stays_fail_closed():
+    report = _json(ROOT / "au_qld_q5446_armstrong32_harlequin" / "verification_report.json")
+    checks = {row["object_ref"]: row for row in report["measurement_closure_checks"]}
+    assert checks["q5446:surface:floor:alfresco"]["status"] == "PASS"
+    assert checks["q5446:candidate:garage"]["status"] == "UNRESOLVED"
+    assert checks["q5446:candidate:porch"]["status"] == "UNRESOLVED"
+    assert checks["q5446:candidate:ground_floor"]["status"] == "UNRESOLVED"
+    assert checks["q5446:candidate:first_floor"]["status"] == "UNRESOLVED"
