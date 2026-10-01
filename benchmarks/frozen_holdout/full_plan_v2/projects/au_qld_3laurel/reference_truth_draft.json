@@ -35,7 +35,7 @@
     "secondary_fc_soffit_and_beam_faces_beyond_primary_ceiling_planes",
     "wet_area_tile_bathroom_niche_face_and_all_niche_return_depths",
     "wet_area_non_shower_tile_skirtings_bath_surrounds_and_splashbacks",
-    "internal_wall_openings_beyond_closed_room_access_doors_including_robe_linen_joinery"
+    "unlabelled_internal_wall_breaks_or_open_archways_for_wall_face_deductions"
   ],
   "completion_rule": "Do not mark project VERIFIED until every in-scope family is independently closed and aggregate controls reconcile without double counting.",
   "verified_physical_candidates": [
@@ -2018,6 +2018,94 @@
         ],
         "wall_deduction_scope": "room_access_opening_only"
       }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_joinery:1200_vsd_laundry_linen:01",
+      "object_family": "internal_sliding_joinery_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 1200 mm vertical sliding joinery opening",
+      "expected_quantity": 2.52,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:laundry/linen 1200 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "vertical_sliding_joinery_door",
+        "width_m": 1.2,
+        "height_m": 2.1,
+        "quantity_basis": "explicit VSD width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          757.8,
+          386.9,
+          765.6,
+          397.8
+        ],
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_joinery:1800_vsd_bed3_robe:01",
+      "object_family": "internal_sliding_joinery_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 1800 mm vertical sliding joinery opening",
+      "expected_quantity": 3.78,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed 3 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "vertical_sliding_joinery_door",
+        "width_m": 1.8,
+        "height_m": 2.1,
+        "quantity_basis": "explicit VSD width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          609,
+          355.4,
+          619.9,
+          363.2
+        ],
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_joinery:1800_vsd_bed2_robe:01",
+      "object_family": "internal_sliding_joinery_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 1800 mm vertical sliding joinery opening",
+      "expected_quantity": 3.78,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed 2 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "vertical_sliding_joinery_door",
+        "width_m": 1.8,
+        "height_m": 2.1,
+        "quantity_basis": "explicit VSD width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          691.6,
+          355.4,
+          702.5,
+          363.2
+        ],
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_joinery:1800_vsd_bed4_robe:01",
+      "object_family": "internal_sliding_joinery_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 1800 mm vertical sliding joinery opening",
+      "expected_quantity": 3.78,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed 4 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "vertical_sliding_joinery_door",
+        "width_m": 1.8,
+        "height_m": 2.1,
+        "quantity_basis": "explicit VSD width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          453,
+          404.8,
+          460.9,
+          415.7
+        ],
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      }
     }
   ],
   "closure_checks": [
@@ -2388,6 +2476,31 @@
       ],
       "source_locations": [
         "architectural:p3:A0.3:floor_plan:internal_room_access_door_width_labels_and_swing_or_cs_symbols",
+        "architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_TO_BE_2100_AFL_UNO"
+      ]
+    },
+    {
+      "check_id": "3laurel:closure:internal_sliding_joinery_opening_census",
+      "component_object_refs": [
+        "3laurel:opening:p3:internal_joinery:1200_vsd_laundry_linen:01",
+        "3laurel:opening:p3:internal_joinery:1800_vsd_bed3_robe:01",
+        "3laurel:opening:p3:internal_joinery:1800_vsd_bed2_robe:01",
+        "3laurel:opening:p3:internal_joinery:1800_vsd_bed4_robe:01"
+      ],
+      "labelled_vsd_opening_count": 4,
+      "labelled_vsd_opening_area_m2": 13.86,
+      "width_distribution_m": {
+        "1.20": 1,
+        "1.80": 3
+      },
+      "joinery_height_m": 2.1,
+      "complete_for_explicit_vsd_labels": true,
+      "complete_for_all_internal_wall_openings": false,
+      "residual_unresolved": [
+        "unlabelled_internal_wall_breaks_or_open_archways"
+      ],
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:four_explicit_vsd_labels",
         "architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_TO_BE_2100_AFL_UNO"
       ]
     }
