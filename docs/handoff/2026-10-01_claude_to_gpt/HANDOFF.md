@@ -33,10 +33,10 @@ Done by Claude on this lane
 - Proof on a raster-only synthetic page (real augmentation, no mocks): original script -> `ok/match/0 walls/scope_unavailable`; patched -> 10 walls resolved (rot 0 and 90).
 - Local verification at push time: all 5 page-frame test files **396 passed** (382 + 14) on Python 3.13.14 / PyMuPDF 1.28.0; `py_compile`, `ruff --select F` clean;
   `check_benchmark_gold_separation.py` (CI-style, paths on stdin) passed; `check_provider_gold_isolation.py` rc 0; frozen-holdout integrity passed.
-- Hosted CI on `cd44926` was RUNNING at handoff (fastpath 3.13/3.14 green; `test (3.13/3.14)` and `kstvet-wall-authority-shadow` in progress). **Check it first.** Claude was subscribed to PR activity; that subscription dies with the session.
+- **Hosted CI on `cd44926` finished GREEN** (checked after the handoff was first written): `test (3.13)`, `test (3.14)`, `fastpath (3.13)`, `fastpath (3.14)`, `kstvet-wall-authority-shadow` = success; `wall-provenance` and `kstvet-wall-shadow` skipped (as on the previous head). Claude's PR-activity subscription ended with the session.
 
 Still to do on lane 1
-1. Check hosted CI on `cd44926`; if red, root-cause (do not skip/disable tests; one re-run only if the failure is clearly not the PR's).
+1. Hosted CI on `cd44926` is green (see above). Re-check only if you push again.
 2. The PR body still says "8 new files / head d389ae5b / 382 passed". Update: now 9 new files vs main, head `cd44926`, 396 tests, add the stale-snapshot fix + schema 1.1.0 note. (Claude did not edit the body.)
 3. ChatGPT-owned items NOT done by Claude (verify whether you did them): page-selection silently drops out-of-range pages (`--pages 999` -> `pages: []`, exit 0); the `label_page_report` docstring says 1e-3 is "about 30 float32 ulp" but measured 16.4 ulp at A4 and 4.1 ulp at 2384 pt;
    possible crash path: the dangling-end `RuntimeError` and `describe_page_frame` sit outside the try/except meant to "report, never raise" (read, not executed); docs `docs/rotated_sheet_page_frame_architecture_report.md` lines 12/145/161 still call #1137 "NOT present / UNVERIFIED" and Q6 open - #1137 merged (d3e93fb), the PR comment also says "unmerged".
@@ -118,5 +118,6 @@ Facts and limits are in `data/q5446_figured_dimension_chains_READ_VISUALLY.md` a
 Open question for the user (not answered): whether to later invest in the full wall/ceiling/finish-area universe (many hours, semi-manual) - recorded answer for THIS pass is "verified-only core".
 
 ## Housekeeping
+- This handoff lives in draft PR #1151 (branch `claude/hopeful-knuth-244lx6`); it is documentation + benchmark-only tooling and is not meant to be merged as-is.
 - Local Claude artifacts that are NOT preserved: renders, ~100 MB of rerun JSONs (`rerun_*.json`), synthetic fixtures, venvs. Regenerate with the tools; the key tables are in this folder.
 - No production file, benchmark-defining file, or holdout file was modified by Claude in this lane. This handoff PR contains only docs and `benchmarks/truth_tools/*.py`.
