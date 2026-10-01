@@ -11,7 +11,7 @@
     {
       "family": "internal_wall_faces",
       "status": "UNRESOLVED",
-      "reason": "Remaining internal wall faces and opening/joinery deductions are not fully closed."
+      "reason": "Nine 870 room-access openings, both 1765 robe sliding openings, and the explicit 2110 square-set opening are source-closed; linen/broom joinery and unlabelled wall breaks remain unresolved."
     },
     {
       "family": "external_wall_faces_and_cladding",
@@ -21,7 +21,7 @@
     {
       "family": "ceilings",
       "status": "UNRESOLVED",
-      "reason": "Ceiling and raked-ceiling surface universe is not fully closed."
+      "reason": "Bed 1, ensuite, WIR and porch raked planes plus the garage flat plane are source-closed; entry and remaining flat/outdoor ceiling regions are not fully closed."
     },
     {
       "family": "wet_area_wall_tiling",

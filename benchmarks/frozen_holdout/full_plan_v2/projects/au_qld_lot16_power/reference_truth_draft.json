@@ -28,9 +28,9 @@
     }
   ],
   "unresolved_surface_families": [
-    "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces_with_room_access_deductions_pending_joinery_and_open_archways",
+    "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces_with_room_access_robe_and_2110_square_set_deductions_pending_linen_broom_joinery_and_unlabelled_archways",
     "external_wall_faces_and_cladding",
-    "ceilings_beyond_closed_bed1_ensuite_wir_raked_and_garage_flat_planes_including_entry_porch_and_other_flat_regions",
+    "ceilings_beyond_closed_bed1_ensuite_wir_porch_raked_and_garage_flat_planes_including_entry_and_other_flat_regions",
     "custom_front_glazing_measure_on_site_only",
     "wet_area_wall_tiling_beyond_three_closed_bath_gross_faces_including_remaining_bath_face_and_raked_ensuite",
     "structural_members_beyond_closed_wall_bracing_and_explicit_architectural_supports",
@@ -1224,6 +1224,23 @@
       }
     },
     {
+      "object_ref": "lot16:surface:ceiling:porch_raked_12deg",
+      "object_family": "ceiling_plane",
+      "physical_kind": "surface",
+      "description": "Front porch raked ceiling plane following 12 degree roof pitch",
+      "expected_quantity": 3.087469,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:PORCH_[RAKED_CEILING]; architectural:p3:area_calculations:PORCH_3.02_m2; architectural:p4:Elevation_1:12deg_front_roof",
+      "attributes": {
+        "plan_projection_area_m2": 3.02,
+        "pitch_degrees": 12,
+        "calculation": "3.02 / cos(12deg)",
+        "ceiling_geometry": "raked",
+        "source_closed_plane": true,
+        "denominator_readiness": "source_closed_plane_candidate"
+      }
+    },
+    {
       "object_ref": "lot16:surface:wall_tile_gross:ensuite:elev1",
       "object_family": "wet_area_wall_tile_gross_face",
       "physical_kind": "surface",
@@ -1521,6 +1538,57 @@
           365.4
         ],
         "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_joinery:1765_bed2_robe_sliding",
+      "object_family": "internal_sliding_joinery_opening",
+      "physical_kind": "opening_surface",
+      "description": "Bed 2 robe opening with two sliding doors",
+      "expected_quantity": 3.7065,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_2_ROBE_2_sld_drs:1765_figured_opening_length; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "sliding_robe_joinery",
+        "width_m": 1.765,
+        "height_m": 2.1,
+        "calculation": "1.765m * 2.100m",
+        "quantity_basis": "figured robe opening length x FSL-to-JL 2100mm joinery-height datum",
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_joinery:1765_bed3_robe_sliding",
+      "object_family": "internal_sliding_joinery_opening",
+      "physical_kind": "opening_surface",
+      "description": "Bed 3 robe opening with two sliding doors",
+      "expected_quantity": 3.7065,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_3_ROBE_2_sld_drs:1765_figured_opening_length; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "sliding_robe_joinery",
+        "width_m": 1.765,
+        "height_m": 2.1,
+        "calculation": "1.765m * 2.100m",
+        "quantity_basis": "figured robe opening length x FSL-to-JL 2100mm joinery-height datum",
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_open_archway:2110_square_set",
+      "object_family": "internal_open_archway",
+      "physical_kind": "opening_surface",
+      "description": "Explicit 2110 square-set internal opening",
+      "expected_quantity": 2.1,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:2110_SQ_SET_OPENING",
+      "attributes": {
+        "opening_type": "square_set_opening",
+        "width_m": 1.0,
+        "height_m": 2.1,
+        "calculation": "1.000m * 2.100m",
+        "quantity_basis": "source opening code 2110 = 2100mm high x 1000mm wide",
+        "wall_deduction_scope": "explicit_open_archway"
       }
     },
     {
@@ -2011,6 +2079,22 @@
       "reason": "Bed 1 raked ceiling is source-closed; remaining raked/flat ceiling regions are unresolved."
     },
     {
+      "check_id": "lot16:closure:porch_raked_ceiling",
+      "component_object_refs": [
+        "lot16:surface:ceiling:porch_raked_12deg"
+      ],
+      "plan_projection_area_m2": 3.02,
+      "raked_surface_area_m2": 3.087469,
+      "pitch_degrees": 12,
+      "source_locations": [
+        "architectural:p3:floor_plan:PORCH_[RAKED_CEILING]",
+        "architectural:p3:area_calculations:PORCH_3.02_m2",
+        "architectural:p4:Elevation_1:12deg_front_roof"
+      ],
+      "source_closed": true,
+      "complete_for_project_ceiling_universe": false
+    },
+    {
       "check_id": "lot16:control:partial_wet_area_tile_faces",
       "component_object_refs": [
         "lot16:surface:wall_tile_gross:bath:elev1",
@@ -2095,9 +2179,8 @@
       "complete_for_explicit_internal_870_room_access_openings": true,
       "complete_for_all_internal_wall_openings": false,
       "residual_unresolved": [
-        "robe_sliding_joinery_openings",
-        "bifold_or_other_internal_joinery_openings",
-        "unlabelled_open_archways"
+        "linen_broom_or_other_internal_joinery_openings",
+        "unlabelled_open_archways_beyond_explicit_2110_square_set"
       ],
       "excluded_external_870_labels": [
         "laundry_external_service_door",
@@ -2107,6 +2190,25 @@
         "architectural:p3:floor_plan:nine_internal_870_labels_with_native_text_bboxes",
         "architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
       ]
+    },
+    {
+      "check_id": "lot16:closure:labelled_internal_joinery_and_square_set_openings",
+      "component_object_refs": [
+        "lot16:opening:p3:internal_joinery:1765_bed2_robe_sliding",
+        "lot16:opening:p3:internal_joinery:1765_bed3_robe_sliding",
+        "lot16:opening:p3:internal_open_archway:2110_square_set"
+      ],
+      "object_count": 3,
+      "robe_opening_count": 2,
+      "square_set_opening_count": 1,
+      "component_sum_m2": 9.513,
+      "source_locations": [
+        "architectural:p3:floor_plan:BED_2_and_BED_3_ROBE_2_sld_drs_with_1765_figured_lengths",
+        "architectural:p3:floor_plan:2110_SQ_SET_OPENING",
+        "architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ],
+      "source_closed_for_these_labelled_openings": true,
+      "complete_for_all_internal_wall_openings": false
     },
     {
       "check_id": "lot16:closure:ensuite_wir_raked_ceiling_planes",

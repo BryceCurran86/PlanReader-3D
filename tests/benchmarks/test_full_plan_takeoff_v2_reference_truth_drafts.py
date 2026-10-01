@@ -598,7 +598,7 @@ def test_lot16_bed2_bed3_gross_wall_faces_are_dimension_closed_but_not_net_ready
         for row in faces
     )
     assert (
-        "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces_with_room_access_deductions_pending_joinery_and_open_archways"
+        "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces_with_room_access_robe_and_2110_square_set_deductions_pending_linen_broom_joinery_and_unlabelled_archways"
         in draft["unresolved_surface_families"]
     )
 
@@ -744,7 +744,7 @@ def test_lot16_bed1_gross_wall_faces_are_dimension_closed_but_raked_extension_st
     assert check["openings_and_raked_ceiling_intersection_resolved"] is False
     assert all(row["attributes"]["raked_ceiling_extension_included"] is False for row in faces)
     assert (
-        "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces_with_room_access_deductions_pending_joinery_and_open_archways"
+        "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces_with_room_access_robe_and_2110_square_set_deductions_pending_linen_broom_joinery_and_unlabelled_archways"
         in draft["unresolved_surface_families"]
     )
 
@@ -846,6 +846,26 @@ def test_lot16_bed1_raked_ceiling_closes_from_area_and_section_pitch():
     assert check["net_denominator_ready"] is False
 
 
+def test_lot16_porch_raked_ceiling_closes_from_declared_area_and_front_pitch():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    row = next(
+        item for item in draft["verified_physical_candidates"]
+        if item["object_ref"] == "lot16:surface:ceiling:porch_raked_12deg"
+    )
+    assert row["object_family"] == "ceiling_plane"
+    assert row["expected_quantity"] == pytest.approx(3.087469)
+    assert row["attributes"]["plan_projection_area_m2"] == pytest.approx(3.02)
+    assert row["attributes"]["pitch_degrees"] == 12
+    assert row["attributes"]["source_closed_plane"] is True
+    check = next(
+        item for item in draft["closure_checks"]
+        if item["check_id"] == "lot16:closure:porch_raked_ceiling"
+    )
+    assert check["raked_surface_area_m2"] == pytest.approx(3.087469)
+    assert check["source_closed"] is True
+    assert check["complete_for_project_ceiling_universe"] is False
+
+
 def test_lot16_partial_wet_area_tile_faces_and_known_niches_are_source_closed():
     draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
     check = next(
@@ -905,7 +925,7 @@ def test_lot16_garage_floor_and_flat_ceiling_close_to_same_figured_rectangle():
     assert check["floor_surface_closed"] is True
     assert check["ceiling_surface_closed"] is True
     assert (
-        "ceilings_beyond_closed_bed1_ensuite_wir_raked_and_garage_flat_planes_including_entry_porch_and_other_flat_regions"
+        "ceilings_beyond_closed_bed1_ensuite_wir_porch_raked_and_garage_flat_planes_including_entry_and_other_flat_regions"
         in draft["unresolved_surface_families"]
     )
 
@@ -935,10 +955,37 @@ def test_lot16_internal_room_access_opening_census_closes_nine_870_openings():
     assert check["internal_opening_area_m2"] == pytest.approx(16.443)
     assert check["complete_for_explicit_internal_870_room_access_openings"] is True
     assert check["complete_for_all_internal_wall_openings"] is False
+    assert check["residual_unresolved"] == [
+        "linen_broom_or_other_internal_joinery_openings",
+        "unlabelled_open_archways_beyond_explicit_2110_square_set",
+    ]
     assert set(check["excluded_external_870_labels"]) == {
         "laundry_external_service_door",
         "garage_external_service_door",
     }
+
+
+def test_lot16_labelled_robe_and_square_set_openings_are_source_closed():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    by_ref = {row["object_ref"]: row for row in draft["verified_physical_candidates"]}
+    bed2 = by_ref["lot16:opening:p3:internal_joinery:1765_bed2_robe_sliding"]
+    bed3 = by_ref["lot16:opening:p3:internal_joinery:1765_bed3_robe_sliding"]
+    square = by_ref["lot16:opening:p3:internal_open_archway:2110_square_set"]
+
+    assert bed2["expected_quantity"] == pytest.approx(3.7065)
+    assert bed3["expected_quantity"] == pytest.approx(3.7065)
+    assert bed2["attributes"]["width_m"] == pytest.approx(1.765)
+    assert bed3["attributes"]["width_m"] == pytest.approx(1.765)
+    assert square["expected_quantity"] == pytest.approx(2.1)
+
+    check = next(
+        row for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:labelled_internal_joinery_and_square_set_openings"
+    )
+    assert check["object_count"] == 3
+    assert check["component_sum_m2"] == pytest.approx(9.513)
+    assert check["source_closed_for_these_labelled_openings"] is True
+    assert check["complete_for_all_internal_wall_openings"] is False
 
 
 def test_lot16_ensuite_and_wir_raked_ceiling_planes_are_source_closed():
