@@ -124,6 +124,28 @@
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "q5446-ground-living-floor-tiling-area",
+      "description": "Ground-floor Living porcelain-tile floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 12.92,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:ground_living"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p1:figured_dimensions:LIVING_4000x3230",
+        "standard_plans:p1:vector_inner_faces:3996.27x3234.27_mm",
+        "sales_advice:p6:porcelain_floor_tiles_to_living_area"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "declared_area_controls_not_truth": [
@@ -208,6 +230,21 @@
       ],
       "measured_area_m2": 4.1864,
       "agreement": "PASS"
+    },
+    {
+      "surface_ref": "q5446:surface:floor:ground_living",
+      "figured_mm": [
+        4000,
+        3230
+      ],
+      "figured_area_m2": 12.92,
+      "vector_mm": [
+        3996.27,
+        3234.27
+      ],
+      "vector_area_m2": 12.924992,
+      "relative_difference": 0.000386,
+      "agreement": "PASS"
     }
   ],
   "scope_evidence": {
@@ -218,6 +255,9 @@
     "laundry_floor_tiles": [
       "Q5446_Standard_Inclusions_V1_20220313.pdf:p1: laundry floor tiles throughout",
       "Q5446_Sales_Advice_Estimate_V1_20220320.pdf:p6: standard wet-area floor tiles upgraded to match"
+    ],
+    "living_floor_tile": [
+      "Q5446_Sales_Advice_Estimate_V1_20220320.pdf:p6: builders range 600x600 porcelain floor tiles to entry, kitchen and living areas"
     ]
   }
 }

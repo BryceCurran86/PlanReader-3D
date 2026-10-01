@@ -51,8 +51,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "faffaf2e0424b29c8da3deac26d3e9577d72858272a6443a44f02801ccd827ca",
-      "size_bytes": 7120,
+      "sha256": "dbe90d55b8f8865cd584c95936777091c95b1f053b089326bfbbf3cc6e89d894",
+      "size_bytes": 8405,
       "page_count": null
     }
   ],
@@ -166,6 +166,28 @@
         "standard_plans:p5:electrical_vector_inner_faces:2616.2x1600.2_mm",
         "standard_inclusions:p1:laundry_floor_tiles_throughout",
         "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "q5446-ground-living-floor-tiling-area",
+      "description": "Ground-floor Living porcelain-tile floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 12.92,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:ground_living"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p1:figured_dimensions:LIVING_4000x3230",
+        "standard_plans:p1:vector_inner_faces:3996.27x3234.27_mm",
+        "sales_advice:p6:porcelain_floor_tiles_to_living_area"
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
