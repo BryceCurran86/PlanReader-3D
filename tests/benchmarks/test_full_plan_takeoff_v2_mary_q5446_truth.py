@@ -41,11 +41,11 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     manifest = load_project_manifest(project / "source_manifest.json")
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
-    assert len(manifest.verified_items) == 7
+    assert len(manifest.verified_items) == 10
 
     eligible = [item for item in manifest.verified_items if item.denominator_eligible]
     excluded = [item for item in manifest.verified_items if not item.denominator_eligible]
-    assert len(eligible) == 4
+    assert len(eligible) == 7
     assert len(excluded) == 3
 
     by_id = {item.item_id: item for item in manifest.verified_items}
@@ -83,6 +83,11 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     assert universe["window_identity_universe_complete"] is True
     assert universe["window_area_universe_complete"] is False
     assert {row["source_tag"] for row in universe["windows"]} == {"W01", "W02", "W03", "W04", "W05", "W06"}
+    assert universe["wc_shower_floor_surface_universe_complete"] is True
+    floors = {row["object_ref"]: row for row in universe["verified_floor_surfaces"]}
+    assert floors["maryborough:surface:floor:wc_shower_north"]["expected_area_m2"] == 4.7547
+    assert floors["maryborough:surface:floor:wc_shower_middle"]["expected_area_m2"] == 4.7547
+    assert floors["maryborough:surface:floor:wc_shower_south"]["expected_area_m2"] == 4.7547
     _assert_reference_hash("au_qld_maryborough_service_station")
 
 
@@ -161,3 +166,14 @@ def test_q5446_area_closure_audit_stays_fail_closed():
     assert checks["q5446:candidate:porch"]["status"] == "UNRESOLVED"
     assert checks["q5446:candidate:ground_floor"]["status"] == "UNRESOLVED"
     assert checks["q5446:candidate:first_floor"]["status"] == "UNRESOLVED"
+
+
+def test_maryborough_wc_shower_geometry_is_two_route_closed():
+    ref = _json(ROOT / "au_qld_maryborough_service_station" / "reference_takeoff.json")
+    checks = ref["wc_shower_floor_geometry_checks"]
+    assert len(checks) == 3
+    assert {row["entry_door_tag"] for row in checks} == {"D07", "D08", "D09"}
+    for row in checks:
+        assert row["a140_figured_mm"] == [2935, 1620]
+        assert row["a140_area_m2"] == 4.7547
+        assert row["agreement"] == "PASS_WITHIN_DRAWING_TOLERANCE"

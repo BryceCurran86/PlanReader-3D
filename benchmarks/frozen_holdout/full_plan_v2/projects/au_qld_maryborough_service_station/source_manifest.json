@@ -16,8 +16,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "ff4a6b73ac1e75f0f28afd2d20033867cfb0c157f4b3eaaa9d086e0db6bd7f44",
-      "size_bytes": 7900,
+      "sha256": "50abdaabb043d221a649e8c9e45fc606c125ac6e0eff83ac48f9cf8745ac1061",
+      "size_bytes": 11286,
       "page_count": null
     }
   ],
@@ -206,10 +206,76 @@
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-wc-shower-north-ft2-floor-area",
+      "description": "North WC & SHOWER FT2 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 4.7547,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:wc_shower_north"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A140:floor_finishes:WC_SHOWER_north:FT2",
+        "A140:figured_dimensions:WC_SHOWER_2935x1620",
+        "A110:physical_room_geometry:WC_SHOWER_north:entry_D07"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-wc-shower-middle-ft2-floor-area",
+      "description": "Middle WC & SHOWER FT2 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 4.7547,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:wc_shower_middle"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A140:floor_finishes:WC_SHOWER_middle:FT2",
+        "A140:figured_dimensions:WC_SHOWER_2935x1620",
+        "A110:physical_room_geometry:WC_SHOWER_middle:entry_D08"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-wc-shower-south-ft2-floor-area",
+      "description": "South WC & SHOWER FT2 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 4.7547,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:wc_shower_south"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A140:floor_finishes:WC_SHOWER_south:FT2",
+        "A140:figured_dimensions:WC_SHOWER_2935x1620",
+        "A110:physical_room_geometry:WC_SHOWER_south:entry_D09"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "reason_codes": [
-    "room_area_universe_not_built",
+    "remaining_room_area_universe_not_built",
     "wall_ceiling_finish_surface_universe_not_built",
     "window_area_universe_not_built",
     "external_surface_universe_not_built"
