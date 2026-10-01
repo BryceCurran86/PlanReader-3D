@@ -1514,12 +1514,9 @@ class GenericPlanReaderExtractor:
             # producer-owned member universe and quantity trace. Failure here is
             # diagnostic only and must never change live prediction publication.
             try:
-                from pb_structural_member_quantity import build_structural_member_count_quantity
                 from pb_structural_member_coverage_shadow import (
                     collect_structural_member_coverage_shadow,
                 )
-
-                _coverage_quantities.append(build_structural_member_count_quantity(structural_support))
 
                 self.structural_member_coverage_shadow = (
                     collect_structural_member_coverage_shadow(
@@ -1527,6 +1524,7 @@ class GenericPlanReaderExtractor:
                         registry_run_id=(
                             f"extractor-structural:{structural_source_sha256}"
                         ),
+                        quantity_evidence_sink=_coverage_quantities.append,
                     )
                 )
             except Exception:

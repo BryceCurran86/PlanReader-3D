@@ -66,6 +66,26 @@ CI review and merging to normal GPT. Syntax compilation and `git diff --check`
 are performed here; the final head needs focused tests, relevant wider regression
 and repository CI before promotion from draft. Do not run retired benchmarks.
 
+## CI correction trace
+
+Observed: the structural diagnostic quantity uses the existing
+`AuthorityStatus.FIRM`, while wall publication uses
+`EvidenceResolutionStatus.CORROBORATED`. The coverage adapter incorrectly
+accepted only the latter. Accept those exact established verified statuses;
+provisional, review, blocked, abstained and unknown dependencies remain refused.
+
+Observed: the extractor newly called the structural diagnostic quantity builder
+directly, violating its existing shadow-only import boundary and calculating the
+same diagnostic result twice. Preserve that boundary by capturing the original
+typed QuantityEvidence from the existing shadow collector through an optional
+diagnostic sink; predictions and serialized shadow payloads remain unchanged.
+
+Observed: `PhysicalOpeningAuthority.prove_existence` includes a proven candidate
+viewport in its identity payload, but sets the resulting existence record's
+viewport to None. Preserve the candidate's exact viewport id, including None for
+page-scoped candidates. Do not invent a viewport, change admission or combine
+cross-viewport evidence. This defect also exists in the fetched main source.
+
 ## Authority boundaries and expected abstentions
 
 Source authority -> typed canonical producer -> read-only registry -> exact

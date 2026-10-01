@@ -267,6 +267,21 @@ def test_collector_preserves_exact_producer_lineage_and_is_replayable():
     assert resolution == before
 
 
+def test_diagnostic_sink_retains_original_typed_quantity_without_changing_shadow_payload():
+    resolution = _producer_resolution()
+    before = copy.deepcopy(resolution)
+    original = collect_structural_member_coverage_shadow(resolution, registry_run_id="run-sink")
+    retained = []
+    captured = collect_structural_member_coverage_shadow(
+        resolution, registry_run_id="run-sink", quantity_evidence_sink=retained.append,
+    )
+    assert len(retained) == 1
+    assert retained[0].to_dict() == original["quantity_evidence"]
+    assert retained[0].input_entity_ids == tuple(original["physical_member_ids"])
+    assert captured == original
+    assert resolution == before
+
+
 @pytest.mark.parametrize("defect", ["blank_id", "duplicate_id", "wrong_kind", "no_members"])
 def test_malformed_corroborated_result_cannot_keep_corroborated_shadow(defect):
     resolution = _producer_resolution()

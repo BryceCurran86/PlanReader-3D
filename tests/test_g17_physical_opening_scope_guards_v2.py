@@ -127,3 +127,13 @@ def test_resolved_physical_opening_preserves_authenticated_viewport_id(monkeypat
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.existence_record is not None
     assert result.existence_record.viewport_id == viewport_id
+
+
+def test_page_scoped_physical_opening_does_not_invent_a_viewport_id() -> None:
+    published, physical = _visible_opening_fixture()
+    result = physical.prove_existence(selector(
+        published, published.snapshot.snapshot_id, published.visible_observation_ids[0],
+    ))
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.candidate.viewport_id is None
+    assert result.existence_record.viewport_id is None

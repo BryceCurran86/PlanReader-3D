@@ -1,9 +1,40 @@
-# Normal GPT: validate and merge GPT-01 / GPT-02
+# Production accuracy handoff: GPT-01 / GPT-02
 
-Implementation is published in two **draft** PRs. Run the tests, inspect CI,
-resolve failures without weakening authority/abstention, then merge **#1195
-before #1196**. The user explicitly assigned test execution and merging to
-normal GPT. Neither final implementation head has a completed regression run.
+The user authorized completing validation and merging in this session. GPT-01
+PR #1195 passed required CI and merged into main as
+`a8b1459ebf1a9510559126ff8c9c49b0b5234a42`. GPT-02 is based on that merged
+main. Its final required checks and merge identity are recorded in PR #1196;
+do not infer a successful merge from focused tests alone.
+
+## Validation resumed after user authorization
+
+GPT-01 correction commit `bc54b025d27c34b3c3e20bee99e0c4a11269d83c`
+preserves the existing `firm` structural quantity status, captures the original
+typed quantity through the shadow collector instead of calling its builder from
+the live extractor, and retains a proven opening viewport id. The shadow-only
+import boundary and all abstention guards remain enforced.
+
+The correction passed 131 focused coverage/structural/opening tests, followed by
+10 additional status/sink/page-scope regressions. GitHub CI on Python 3.13 and
+3.14 each passed 7,267 tests, with 55 skipped and 13 xfailed. Integrity, provider
+isolation, compilation, Ruff, JavaScript, smoke, Docker, performance and wall
+equivalence shadow checks all passed for that head.
+
+The GPT-02 tree on merged main passed 184 focused customer, quantity, publication,
+registry and lifecycle tests. Its local full run was interrupted by a blocked
+external telemetry request; this is not a completed regression result. Required
+GitHub CI must pass for its final published head before merging.
+
+One local opening schedule test fails on untouched main as well:
+`tests/benchmarks/test_mutation_generic_opening_binding_wiring.py::test_removing_explicit_identity_removes_firm_opening`.
+The standalone baseline reproduces the same unresolved instance/type identity;
+do not change source authority or weaken the test merely to erase that result.
+Two other local subprocess failures came from missing cv2; the fourth came from
+missing historical refs in the shallow checkout. After restoring the local
+dependency path and fetching those refs, all three rechecks passed. The opening
+schedule test still abstained. No test expectations or production authority were
+weakened to hide the local result. Required CI uses Python 3.13/3.14; the local
+limitation remains separate from PR regression results.
 
 Repository: `BryceCurran86/PlanReader-3D`.
 Main fetched independently for both tasks: `e95ef8489f3a0b7c024fb99dc5e48fed887ee40b`.
@@ -20,11 +51,11 @@ Main fetched independently for both tasks: `e95ef8489f3a0b7c024fb99dc5e48fed887e
 | QUANTITY | Original QuantityEvidence only, joined by input entity ids. Abstention/conflicts block QUANTIFIED. Aggregate totals are not allocated to individual objects. Live publication checks original value/unit. | Original verified net m² quantity reaches the 21-field contract without two-decimal rounding. Conflicting quantity ids between sources and mismatched typed publication/identity/selection require review. |
 | CUSTOMER CONSUMER | Live extractor attachments and customer wall producer -> typed registry -> same-transaction takeoff query -> `coverage_lifecycle` report/settings. | `analyse_workspace` -> `_build_facade_rows` -> `_auto_publication` -> SQLite `takeoff_rows` -> existing customer takeoff consumers and AG-09 transaction report. |
 | AG-09 STAGE | AUTHENTICATED -> CANONICALIZED -> QUANTIFIED -> PUBLISHED traced independently; missing customer rows remain visible. All nine families classify CONNECTED / PARTIAL / UNAVAILABLE / WRONG / DUPLICATE PATH. Unavailable counts are null. | Repairs QUANTIFIED -> PUBLISHED bridge: accumulate all selected independent claims, source-scoped facade replacement/material labels, continue past failed siblings, preserve original quantity precision and reset/scope registry attachments per workspace/run. |
-| TESTS | Earlier draft: 38 focused passes before final guards; **not current-head validation**. Current syntax/diff checks passed; final new dependency/abstention/value/unit tests await execution. | Syntax, Ruff F821/F823 on changed Python, and diff checks passed. Multi-PDF, duplicate source, unselected/invalid pages, collisions, conflicts, malformed quantities, missing sources, stale attachments, typed parity, actual SQLite/rerun/rollback cases added; execution pending. |
-| COMMIT | Published implementation `a5b529fbbb321ad5dcc237493177b3820ba5a9df`. | Published implementation `35bb51e17aa173a29d9715f38a0e1667f64ac95d`. This handoff is a later documentation-only commit; validate the latest PR head. |
-| PR | [#1195](https://github.com/BryceCurran86/PlanReader-3D/pull/1195), `accuracy/gpt01-ag09-family-coverage`, base main. | [#1196](https://github.com/BryceCurran86/PlanReader-3D/pull/1196), `accuracy/gpt02-wall-customer-dropouts`, stacked base GPT-01 branch. |
+| TESTS | 131 focused passes plus 10 added status/sink/page-scope cases. Required GitHub CI: 7,267 passed / 55 skipped / 13 xfailed on each of Python 3.13 and 3.14; all supporting gates passed. Local baseline limitation described above. | 184 focused passes on merged main. Multi-PDF, duplicate source, unselected/invalid pages, collisions, conflicts, malformed quantities, missing sources, stale attachments, typed parity, actual SQLite/rerun/rollback verified. Final full CI evidence is recorded in PR #1196. |
+| COMMIT | Tested head `bc54b025d27c34b3c3e20bee99e0c4a11269d83c`; merge `a8b1459ebf1a9510559126ff8c9c49b0b5234a42`. | Original implementation `35bb51e17aa173a29d9715f38a0e1667f64ac95d`, updated with the tested GPT-01 correction and merged main. Validate the latest PR head; its final commit and merge SHA are recorded in PR metadata. |
+| PR | [#1195](https://github.com/BryceCurran86/PlanReader-3D/pull/1195), merged into main. | [#1196](https://github.com/BryceCurran86/PlanReader-3D/pull/1196), `accuracy/gpt02-wall-customer-dropouts`, updated onto merged main. |
 | UNRESOLVED | Filling identity; unproven physical floor identity; missing complete ceiling/roof/slab lineage; absent live finish-surface producer; downstream family quantity/publication gaps. No claim that all nine are connected. | Separate registered-wall authority policy is retained and explicitly lacks a live canonical registry. Cross-file equivalence beyond identical source replay is unresolved. Real source fixtures with missing height still abstain. Zero-quantity fallback policy is unchanged. No complete source-set accuracy claim. |
-| NEXT TASK | Validate this PR first; preserve null/unavailable and explicit identity requirements. | Validate/merge after GPT-01; then GPT-03 explicit cross-sheet identity, followed by source-backed metric closure. Do not join instances by shared type marks. |
+| NEXT TASK | Complete GPT-02 validation; preserve null/unavailable and explicit identity requirements. | GPT-03 explicit cross-sheet identity, followed by source-backed metric closure. Do not join instances by shared type marks. |
 
 ## Validation and merge sequence
 
@@ -69,8 +100,8 @@ the actual final head. Run `git diff --check` after any fixes. Do not modify
 scoring, source truth, expected values, production authority flags, VR UI or
 costing to make tests pass.
 
-Merge #1195 only after its required checks and review pass. Retarget #1196 to
-main, rebase onto current main after #1195, and validate the resulting commit
-before merging. If conflicts expose competing producer snapshots, retain the
+The merge sequence is #1195 before #1196. GPT-01 has completed that sequence;
+GPT-02 must target current main and pass checks on its resulting commit before
+merging. If conflicts expose competing producer snapshots, retain the
 conflict for review; never discard the second path merely to make coverage look
 connected. Record final tested heads, outcomes and merge SHAs in the next handoff.

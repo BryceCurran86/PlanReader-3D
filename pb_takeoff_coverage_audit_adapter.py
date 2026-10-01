@@ -25,6 +25,8 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
+from pb_geometry_takeoff_model import AuthorityStatus
+from pb_migration_contracts import EvidenceResolutionStatus
 from pb_audit_coverage_record import (
     AuditObjectRecord,
     CoverageState,
@@ -290,10 +292,11 @@ def _valid_quantity_ids(record: CoverageObjectRecordV1) -> tuple[str, ...]:
         "quantity_input_entity_not_admitted",
     }
     statuses = record.provenance.get("quantity_evidence_statuses")
+    verified_statuses = {EvidenceResolutionStatus.CORROBORATED.value, AuthorityStatus.FIRM.value}
     return tuple(quantity_id for quantity_id in record.quantity_ids if not any(
         reason in blockers or (reason.startswith("quantity_") and reason.endswith("_lineage_conflict"))
         for reason in _quantity_dependency_reasons(record, quantity_id)
-    ) and (not isinstance(statuses, Mapping) or statuses.get(quantity_id) == "corroborated"))
+    ) and (not isinstance(statuses, Mapping) or statuses.get(quantity_id) in verified_statuses))
 
 
 def _row_preserves_quantity(record: CoverageObjectRecordV1, quantity_id: str, row: Mapping[str, Any]) -> bool:

@@ -1,7 +1,9 @@
 # GPT-02: selected-source wall publication repair
 
 Current main was fetched again at task start: e95ef8489f3a0b7c024fb99dc5e48fed887ee40b.
-This isolated branch is stacked on GPT-01 draft PR #1195, a5b529fbbb321ad5dcc237493177b3820ba5a9df.
+The implementation was initially stacked on GPT-01 PR #1195. Validation now uses
+merged main `a8b1459ebf1a9510559126ff8c9c49b0b5234a42`, including the tested
+GPT-01 correction `bc54b025d27c34b3c3e20bee99e0c4a11269d83c`.
 
 ## Observed authority and consumers
 
@@ -47,5 +49,8 @@ its missing canonical registry remains explicit and is not represented as
 CONNECTED. Cross-file physical equivalence beyond byte-identical source replay,
 and source-proven missing geometry in other families, remain separate tasks.
 
-The user assigned tests, CI review and merge to normal GPT. This branch includes
-focused hostile/parity regressions; syntax and diff checks are performed here.
+The user subsequently authorized completing tests, CI review and merge in this
+session. The branch passed 184 focused hostile/parity/coverage regressions on
+merged main, with syntax and diff checks. Required full CI for the final head is
+recorded in PR #1196. The local full run was interrupted by an external telemetry
+request blocked by the execution environment; no full local pass is claimed.
