@@ -993,16 +993,7 @@ def planreader_to_canonical_model(
                     if isinstance(qb_raw, dict):
                         c_opening.derived_quantities.append(QuantityFormulaBinding.from_dict(qb_raw))
             if not c_opening.derived_quantities:
-                trade_cat = "doors" if op_type == ObjectType.DOOR else "windows" if op_type == ObjectType.WINDOW else "openings"
-                c_opening.derived_quantities.append(
-                    QuantityFormulaBinding(
-                        trade_category=trade_cat,
-                        item_code=f"OPENING_{op_mark}",
-                        formula_expression="1.0",
-                        unit="No.",
-                        quantity=1.0,
-                    )
-                )
+                c_opening.derive_trade_quantities()
 
             # Bidirectional parent/child relationship
             if not is_wrong_host and c_opening.id not in c_wall.children_ids:

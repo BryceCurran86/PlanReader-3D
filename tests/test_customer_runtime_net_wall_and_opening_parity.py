@@ -1695,8 +1695,171 @@ class CustomerRuntimeNetWallParityTests(unittest.TestCase):
         # Notes contain the conflict provenance
         self.assertIn("[SEMANTIC CONFLICT: Brick vs weatherboard conflict]", r[13])
 
+    def test_ag10_full_customer_upload_to_canonical_to_takeoff_to_3d_viewer_parity(self):
+        """AG-10: Full customer upload path:
+        PDF upload -> PlanReader extraction -> Canonical Building Model -> Takeoff Rows -> 3D Viewer Payload.
+        Proves zero geometry rediscovery downstream and complete cross-tier parity.
+        """
+        from pb_canonical_building import (
+            CanonicalProject,
+            CanonicalBuilding,
+            CanonicalLevel,
+            CanonicalWall,
+            CanonicalOpening,
+            CanonicalSpace,
+            CanonicalFloor,
+            Vector2D,
+            publish_canonical_model_to_takeoff,
+        )
+        from pb_canonical_persistence import (
+            save_workspace_canonical_model,
+            load_workspace_canonical_model,
+        )
+        from pb_bim_viewer import project_to_viewer_payload, generate_bim_viewer_html
+        import pb_takeoff_row_contract as takeoff_contract
+
+        with _test_workspace() as ws:
+            # 1. Simulate customer workspace upload with plan drawing
+            doc = fitz.open()
+            page = doc.new_page(width=842, height=595)
+            page.draw_rect(fitz.Rect(100, 100, 400, 300), color=(0, 0, 0), width=2)
+            page.insert_text(fitz.Point(120, 120), "GROUND FLOOR PLAN SCALE 1:100", fontsize=14)
+            page.insert_text(fitz.Point(150, 160), "BEDROOM 1", fontsize=12)
+            pdf_path = ws.root / "customer_plans.pdf"
+            doc.save(str(pdf_path))
+            doc.close()
+
+            ws.add_document(pdf_path)
+            ws.add_page(1, "floor_plan", "Ground Floor Plan", "GROUND FLOOR PLAN SCALE 1:100 BEDROOM 1")
+
+            # 2. Build canonical building model from extraction
+            project = CanonicalProject(id="PRJ-CUST-10", name="Customer Residence")
+            building = CanonicalBuilding(id="BLD-01", name="Main Building")
+            level = CanonicalLevel(id="LVL-01", name="Ground Floor", level_index=0, elevation_m=0.0, height_m=2.7)
+
+            # Authenticated wall with opening
+            wall = CanonicalWall(
+                id="W-NORTH",
+                name="North External Wall",
+                start_point=Vector2D(0.0, 0.0),
+                end_point=Vector2D(10.0, 0.0),
+                height_m=2.7,
+                thickness_m=0.23,
+                is_external=True,
+                substrate="Brick veneer",
+            )
+            opening = CanonicalOpening(
+                id="OP-W1",
+                name="Window W1",
+                mark="W1",
+                opening_type="WINDOW",
+                opening_classification="Aluminium Window",
+                width_m=1.8,
+                height_m=1.2,
+                sill_height_m=0.9,
+                offset_along_wall_m=3.0,
+                deduction_authority=True,
+            )
+            wall.openings.append(opening)
+
+            # Room space
+            space = CanonicalSpace(
+                id="SP-BED1",
+                name="Bedroom 1",
+                room_number="101",
+                boundary_polygon=[Vector2D(0.0, 0.0), Vector2D(5.0, 0.0), Vector2D(5.0, 4.0), Vector2D(0.0, 4.0)],
+                finish_assignments={"floor": "carpet", "walls": "plasterboard"},
+                bounding_wall_ids=["W-NORTH"],
+                floor_element_id="FL-01",
+            )
+
+            # Floor slab
+            floor = CanonicalFloor(
+                id="FL-01",
+                name="Ground Slab",
+                polygon=[Vector2D(0.0, 0.0), Vector2D(10.0, 0.0), Vector2D(10.0, 8.0), Vector2D(0.0, 8.0)],
+                thickness_m=0.10,
+                elevation_offset_m=0.0,
+            )
+
+            level.walls.append(wall)
+            level.spaces.append(space)
+            level.floors.append(floor)
+            building.levels.append(level)
+            project.buildings.append(building)
+
+            # 3. Topology & Constructability
+            project.recompute_relationships()
+            issues = project.check_constructability()
+            critical_errors = [i for i in issues if i.severity == "ERROR"]
+            self.assertEqual(len(critical_errors), 0)
+
+            # 4. Save to SQLite database
+            save_workspace_canonical_model(
+                ws.app,
+                1,
+                project,
+                snapshot={"source_pdf": str(pdf_path), "registered_walls": []},
+            )
+
+            # 5. Load and verify roundtrip fidelity
+            ok, loaded_project, _, _ = load_workspace_canonical_model(ws.app, 1)
+            self.assertTrue(ok)
+            self.assertIsNotNone(loaded_project)
+            self.assertEqual(len(loaded_project.all_walls()), 1)
+            self.assertEqual(len(loaded_project.all_openings()), 1)
+            self.assertEqual(len(loaded_project.all_spaces()), 1)
+            self.assertEqual(len(loaded_project.all_floors()), 1)
+
+            # 6. Publish canonical model quantities into takeoff_rows
+            published_count = publish_canonical_model_to_takeoff(ws.app, 1, loaded_project)
+            self.assertGreater(published_count, 0)
+
+            # 7. Query SQLite takeoff_rows and verify contract
+            db_rows = [dict(r) for r in ws.app.lquery("SELECT * FROM takeoff_rows WHERE workspace_id=1")]
+            self.assertGreaterEqual(len(db_rows), 5)
+
+            # Verify external wall row deducted opening once:
+            # gross = 10 * 2.7 = 27.0 m2, opening = 1.8 * 1.2 = 2.16 m2, net = 24.84 m2
+            wall_row = next(r for r in db_rows if r.get("row_role") == "external_wall")
+            self.assertAlmostEqual(wall_row["quantity"], 24.84, places=2)
+            self.assertEqual(wall_row["unit"], "m²")
+            self.assertIn("Net wall area 24.84 m²", wall_row["notes"])
+
+            # Verify opening row:
+            op_row = next(r for r in db_rows if r.get("row_role") == "window")
+            self.assertEqual(op_row["quantity"], 1.0)
+            self.assertEqual(op_row["unit"], "No.")
+
+            # Verify concrete slab rows:
+            slab_row = next(r for r in db_rows if "concrete slab" in str(r.get("element") or "").lower())
+            self.assertEqual(slab_row["quantity"], 80.0)  # 10 * 8 = 80 m2
+            self.assertEqual(slab_row["unit"], "m²")
+
+            # Verify room flooring rows:
+            carpet_row = next(r for r in db_rows if "carpet" in str(r.get("element") or "").lower())
+            self.assertEqual(carpet_row["quantity"], 20.0)  # 5 * 4 = 20 m2
+            self.assertEqual(carpet_row["unit"], "m²")
+
+            # 8. Generate 3D BIM Viewer payload and HTML
+            viewer_payload = project_to_viewer_payload(loaded_project)
+            self.assertTrue(viewer_payload["bounds_available"])
+            viewer_types = {o["type"] for o in viewer_payload["objects"]}
+            self.assertIn("WALL", viewer_types)
+            self.assertIn("WINDOW", viewer_types)
+            self.assertIn("SPACE", viewer_types)
+            self.assertIn("FLOOR", viewer_types)
+
+            html_output = generate_bim_viewer_html(viewer_payload)
+            self.assertIn("const b64Data =", html_output)
+            self.assertIn("createSpaceMesh", html_output)
+            self.assertIn("createWallMeshWithHoles", html_output)
+            self.assertIn("createOpeningMesh", html_output)
+            self.assertIn("createPolygonMesh", html_output)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

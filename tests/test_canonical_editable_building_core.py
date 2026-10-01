@@ -1204,3 +1204,58 @@ def test_end_to_end_concreting_and_flooring_takeoff_publishing():
                 assert r["unit"] in takeoff_contract.TAKEOFF_UNITS
                 assert r["quantity"] >= 0.0
 
+
+def test_canonical_opening_trade_derivation_and_takeoff_publishing():
+    """Verifies opening trade quantities (unit, architrave, hardware) and takeoff publication."""
+    op_door = CanonicalOpening(
+        id="OP-D01",
+        mark="D01",
+        opening_type="DOOR",
+        opening_classification="Internal Timber Door",
+        width_m=0.82,
+        height_m=2.04,
+        deduction_authority=True,
+    )
+    bindings_door = op_door.derive_trade_quantities(include_ancillary=True)
+    assert len(bindings_door) == 3
+    unit_door = next(b for b in bindings_door if b.unit == "No.")
+    assert unit_door.item_code == "OPENING_D01"
+    assert unit_door.quantity == 1.0
+
+    arch_door = next(b for b in bindings_door if b.item_code == "DOOR_ARCHITRAVE")
+    assert arch_door.unit == "lm"
+    assert arch_door.quantity == 4.90
+
+    op_win = CanonicalOpening(
+        id="OP-W01",
+        mark="W01",
+        opening_type="WINDOW",
+        opening_classification="Aluminium Sliding Window",
+        width_m=1.80,
+        height_m=1.20,
+        deduction_authority=True,
+    )
+    bindings_win = op_win.derive_trade_quantities(include_ancillary=True)
+    assert len(bindings_win) == 3
+    rev_win = next(b for b in bindings_win if b.item_code == "WINDOW_REVEAL_LINER")
+    assert rev_win.unit == "lm"
+    assert rev_win.quantity == 6.0
+
+    # Test takeoff rows generation
+    wall = CanonicalWall(id="W-01", start_point=Vector2D(0, 0), end_point=Vector2D(5, 0), height_m=2.7, is_external=True)
+    wall.openings.append(op_win)
+    proj = CanonicalProject(buildings=[CanonicalBuilding(levels=[CanonicalLevel(walls=[wall])])])
+    rows = proj.generate_takeoff_rows(workspace_id=99)
+
+    win_rows = [r for r in rows if "opening" in str(r.get("source_reference") or "")]
+    assert len(win_rows) >= 1
+    primary_win = next(r for r in win_rows if r.get("unit") == "No.")
+    assert primary_win["row_role"] == "window"
+    assert primary_win["quantity"] == 1.0
+
+    trim_win = next((r for r in win_rows if r.get("row_role") == "opening_trim"), None)
+    assert trim_win is not None
+    assert trim_win["quantity"] == 6.0
+    assert trim_win["unit"] == "lm"
+
+

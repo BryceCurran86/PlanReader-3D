@@ -493,6 +493,64 @@ class CanonicalOpening(CanonicalElement):
         else:
             self.object_type = ObjectType.OPENING
 
+    def derive_trade_quantities(self, include_ancillary: bool = False) -> List[QuantityFormulaBinding]:
+        """Derives primary unit and optional ancillary trade quantities from this physical opening."""
+        mark_label = self.mark or self.name or "OP"
+        is_door = (self.object_type == ObjectType.DOOR) or ("DOOR" in (self.opening_type or "").upper())
+        is_window = (self.object_type == ObjectType.WINDOW) or ("WINDOW" in (self.opening_type or "").upper())
+        trade_cat = "doors" if is_door else "windows" if is_window else "openings"
+
+        bindings = [
+            QuantityFormulaBinding(
+                trade_category=trade_cat,
+                item_code=f"OPENING_{mark_label}",
+                formula_expression="1.0",
+                unit="No.",
+                quantity=1.0,
+            )
+        ]
+
+        if include_ancillary:
+            w = float(self.width_m) if self.width_m is not None else 0.0
+            h = float(self.height_m) if self.height_m is not None else 0.0
+            if is_door:
+                if h > 0.0 and w > 0.0:
+                    arch_lm = round(2.0 * h + w, 2)
+                    bindings.append(QuantityFormulaBinding(
+                        trade_category="carpentry",
+                        item_code="DOOR_ARCHITRAVE",
+                        formula_expression="2 * height_m + width_m",
+                        unit="lm",
+                        quantity=arch_lm,
+                    ))
+                bindings.append(QuantityFormulaBinding(
+                    trade_category="hardware",
+                    item_code="DOOR_LOCKSET",
+                    formula_expression="1.0",
+                    unit="item",
+                    quantity=1.0,
+                ))
+            elif is_window:
+                if h > 0.0 and w > 0.0:
+                    rev_lm = round(2.0 * (h + w), 2)
+                    bindings.append(QuantityFormulaBinding(
+                        trade_category="carpentry",
+                        item_code="WINDOW_REVEAL_LINER",
+                        formula_expression="2 * (height_m + width_m)",
+                        unit="lm",
+                        quantity=rev_lm,
+                    ))
+                bindings.append(QuantityFormulaBinding(
+                    trade_category="windows",
+                    item_code="WINDOW_SCREEN",
+                    formula_expression="1.0",
+                    unit="item",
+                    quantity=1.0,
+                ))
+
+        self.derived_quantities = bindings
+        return bindings
+
     def to_dict(self) -> Dict[str, Any]:
         res = self.base_to_dict()
         res.update({
@@ -1820,10 +1878,13 @@ class CanonicalProject(CanonicalElement):
             # Openings
             for op in w.openings:
                 if op.deduction_authority:
+                    if not op.derived_quantities:
+                        op.derive_trade_quantities()
+                    elem_name = op.opening_classification or ("Door" if op.object_type == ObjectType.DOOR else "Window")
                     rows.append({
                         "workspace_id": int(workspace_id),
-                        "section": "Internal" if op.opening_type == ObjectType.DOOR else "External",
-                        "element": op.opening_classification or ("Door" if op.opening_type == ObjectType.DOOR else "Window"),
+                        "section": "Internal" if op.object_type == ObjectType.DOOR else "External",
+                        "element": elem_name,
                         "location": f"{op.mark} · on {w.id}",
                         "substrate": "Selected timber / aluminium",
                         "finish_system": "Factory pre-finished",
@@ -1838,11 +1899,38 @@ class CanonicalProject(CanonicalElement):
                         "productivity_m2_per_hour": 0.0,
                         "rate_per_unit": 0.0,
                         "confidence": "Documented",
-                        "notes": f"{op.opening_classification} {op.mark} ({op.width_m or 0.0:.2f}m W × {op.height_m or 0.0:.2f}m H).",
-                        "row_role": "",
+                        "notes": f"{elem_name} {op.mark} ({op.width_m or 0.0:.2f}m W × {op.height_m or 0.0:.2f}m H).",
+                        "row_role": "door" if op.object_type == ObjectType.DOOR else "window" if op.object_type == ObjectType.WINDOW else "opening",
                         "created_at": stamp,
                         "updated_at": stamp,
                     })
+
+                    # Secondary opening trade quantities (architraves, reveals)
+                    for dq in op.derived_quantities:
+                        if dq.item_code in ("DOOR_ARCHITRAVE", "WINDOW_REVEAL_LINER"):
+                            rows.append({
+                                "workspace_id": int(workspace_id),
+                                "section": "Internal" if op.object_type == ObjectType.DOOR else "External",
+                                "element": "Door architrave / jamb trim" if op.object_type == ObjectType.DOOR else "Window timber reveal liner",
+                                "location": f"{op.mark} · on {w.id}",
+                                "substrate": "MDF / Pine timber",
+                                "finish_system": "Primed timber trim",
+                                "quantity": round(dq.quantity, 2),
+                                "unit": "lm",
+                                "quantity_status": "Measured",
+                                "source_page": getattr(op.provenance, "source_page", "1") or "1",
+                                "source_reference": f"PB Canonical BIM · opening_trim:{op.id}",
+                                "inclusion_status": "PROVISIONAL",
+                                "coats": 1,
+                                "coverage_m2_per_litre": 0.0,
+                                "productivity_m2_per_hour": 0.0,
+                                "rate_per_unit": 0.0,
+                                "confidence": "Documented",
+                                "notes": f"Opening trim perimeter {dq.quantity:.2f} lm for {op.mark}.",
+                                "row_role": "opening_trim",
+                                "created_at": stamp,
+                                "updated_at": stamp,
+                            })
 
         # 2. Floors (Concreting)
         for fl in self.all_floors():
