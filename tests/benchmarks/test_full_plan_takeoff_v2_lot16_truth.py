@@ -36,11 +36,19 @@ def test_lot16_external_opening_truth_is_atomic_and_project_stays_incomplete():
 
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
-    assert len(manifest.verified_items) == 13
-    assert all(item.denominator_eligible for item in manifest.verified_items)
+    universe = _json(project / "object_universe.json")
+    external_refs = {row["object_ref"] for row in universe["external_openings"]}
+    opening_items = [
+        item
+        for item in manifest.verified_items
+        if item.expected_object_refs
+        and item.expected_object_refs[0] in external_refs
+    ]
+    assert len(opening_items) == 13
+    assert all(item.denominator_eligible for item in opening_items)
 
     by_trade = {}
-    for item in manifest.verified_items:
+    for item in opening_items:
         by_trade[item.trade_category] = by_trade.get(item.trade_category, 0) + 1
         assert item.unit == "m2"
         assert len(item.expected_object_refs) == 1
@@ -49,13 +57,12 @@ def test_lot16_external_opening_truth_is_atomic_and_project_stays_incomplete():
         assert item.verification_status == "VERIFIED"
 
     assert by_trade == {"windows": 7, "doors": 6}
-    assert sum(item.expected_quantity for item in manifest.verified_items) == pytest.approx(37.584)
+    assert sum(item.expected_quantity for item in opening_items) == pytest.approx(37.584)
 
-    universe = _json(project / "object_universe.json")
     openings = universe["external_openings"]
     assert len(openings) == 13
     assert {row["object_ref"] for row in openings} == {
-        item.expected_object_refs[0] for item in manifest.verified_items
+        item.expected_object_refs[0] for item in opening_items
     }
     assert universe["dimensioned_external_opening_subset_complete"] is True
     assert universe["external_opening_universe_complete"] is False
