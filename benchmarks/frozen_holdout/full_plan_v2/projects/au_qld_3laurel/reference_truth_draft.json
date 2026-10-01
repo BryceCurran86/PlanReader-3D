@@ -28,7 +28,7 @@
     }
   ],
   "unresolved_surface_families": [
-    "internal_wall_faces_beyond_closed_bathroom_main_ensuite_main_wc_main_laundry_gf_ensuite_laundry_and_bed2_bed3_gross_faces",
+    "internal_wall_faces_beyond_closed_bathroom_main_ensuite_main_wc_main_laundry_gf_ensuite_laundry_bed2_bed3_and_media_gross_faces",
     "external_wall_faces_and_cladding",
     "roof_planes",
     "structural_members_beyond_closed_wall_bracing_and_explicit_140x140_posts_470x470_piers",
@@ -2268,6 +2268,88 @@
         "openings_deducted": false,
         "denominator_readiness": "draft_only_until_room_access_and_robe_opening_deductions_are_applied"
       }
+    },
+    {
+      "object_ref": "3laurel:surface:floor:media",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Media room vinyl floor surface",
+      "expected_quantity": 13.146,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:MEDIA:4200x3130_figured_dimensions:VINYL",
+      "attributes": {
+        "width_m": 4.2,
+        "length_m": 3.13,
+        "calculation": "4.200m * 3.130m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:media:4200_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Media gross room-side wall face, 4.200m side",
+      "expected_quantity": 11.34,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:MEDIA:4200_finished_room_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 4.2,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_window_room_access_and_other_wall_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:media:4200_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Media gross room-side wall face, 4.200m side",
+      "expected_quantity": 11.34,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:MEDIA:4200_finished_room_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 4.2,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_window_room_access_and_other_wall_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:media:3130_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Media gross room-side wall face, 3.130m side",
+      "expected_quantity": 8.451,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:MEDIA:3130_finished_room_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 3.13,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_window_room_access_and_other_wall_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:media:3130_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Media gross room-side wall face, 3.130m side",
+      "expected_quantity": 8.451,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:MEDIA:3130_finished_room_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 3.13,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_window_room_access_and_other_wall_opening_deductions_are_applied"
+      }
     }
   ],
   "closure_checks": [
@@ -2730,6 +2812,28 @@
       "source_location": "architectural:p3:A0.3:floor_plan:3000_B2_3000_B3_and_4200_B2&B3; architectural:p7:A0.7:FCL_2700",
       "openings_deducted": false,
       "source_closed_gross_geometry": true
+    },
+    {
+      "check_id": "3laurel:closure:media_floor_and_gross_wall_faces",
+      "component_object_refs": [
+        "3laurel:surface:floor:media",
+        "3laurel:surface:internal_wall_gross:media:4200_side_1",
+        "3laurel:surface:internal_wall_gross:media:4200_side_2",
+        "3laurel:surface:internal_wall_gross:media:3130_side_1",
+        "3laurel:surface:internal_wall_gross:media:3130_side_2"
+      ],
+      "floor_area_m2": 13.146,
+      "gross_wall_area_m2": 39.582,
+      "figured_room_dimensions_m": [
+        4.2,
+        3.13
+      ],
+      "wall_height_m": 2.7,
+      "floor_finish": "vinyl",
+      "source_location": "architectural:p3:A0.3:floor_plan:4200_MEDIA_and_3130_MEDIA; architectural:p7:A0.7:FCL_2700",
+      "source_closed_gross_geometry": true,
+      "openings_deducted": false,
+      "overlap_note": "Atomic media floor is a component of main_living_composite_region and must not be double-counted with that aggregate."
     }
   ]
 }
