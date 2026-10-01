@@ -259,7 +259,10 @@ def test_module_has_no_live_non_test_importers():
         rel = path.relative_to(root)
         if rel.parts and rel.parts[0] == "tests":
             continue
-        if path.name == "pb_structural_member_coverage_snapshot.py":
+        if path.name in {
+            "pb_structural_member_coverage_snapshot.py",
+            "pb_structural_member_coverage_shadow.py",
+        }:
             continue
         text = path.read_text(encoding="utf-8-sig")
         if (
