@@ -139,6 +139,38 @@ def test_explicit_object_level_is_accepted_without_guessing() -> None:
     assert result.level_assignment_complete is True
 
 
+def test_source_owned_level_metadata_survives_into_building_bucket() -> None:
+    level_id = "level-source-view-1"
+    source_level = {
+        "canonical_level_id": level_id,
+        "level_label": "GROUND FLOOR PLAN",
+        "normalized_level_label": "ground_floor",
+        "level_index": 0,
+        "source_page": 4,
+        "source_viewport_id": "view_p4_1",
+        "cross_view_identity_resolved": False,
+    }
+    result = assemble_live_canonical_building_core(
+        source_sha256=SHA,
+        levels=(source_level,),
+        walls=(_wall(level_ids=(level_id,)),),
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.levels) == 1
+    level = result.levels[0]
+    assert level.level_id == level_id
+    assert level.level_label == "GROUND FLOOR PLAN"
+    assert level.normalized_level_label == "ground_floor"
+    assert level.level_index == 0
+    assert level.source_page == 4
+    assert level.source_viewport_id == "view_p4_1"
+    assert level.cross_view_identity_resolved is False
+    payload = result.to_dict()
+    assert payload["levels"][0]["level_label"] == "GROUND FLOOR PLAN"
+    assert payload["object_counts"]["levels"] == 1
+
+
 def test_duplicate_canonical_identity_fails_closed() -> None:
     result = assemble_live_canonical_building_core(
         source_sha256=SHA,
