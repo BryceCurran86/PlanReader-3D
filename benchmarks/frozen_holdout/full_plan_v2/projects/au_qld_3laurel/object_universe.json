@@ -1,0 +1,500 @@
+{
+  "schema_version": "v2-object-universe-1.0",
+  "project_id": "au_qld_3laurel",
+  "scope": "verified-only core",
+  "external_openings": [
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "Bed 2 1200 x 1810 ASW",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.172,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          663.3,
+          463.1,
+          718.8,
+          470.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:Bed_2_external_1200x1810_ASW:bbox_663.3_463.1_718.8_470.9"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "Bed 3 1200 x 1810 ASW",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.172,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          576.3,
+          463.1,
+          631.7,
+          470.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:Bed_3_external_1200x1810_ASW:bbox_576.3_463.1_631.7_470.9"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:03",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 x 1810 ASW #3",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.172,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          383.3,
+          463.1,
+          438.7,
+          470.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:03"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:04",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 x 1810 ASW #4",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.172,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          168.3,
+          259.3,
+          223.7,
+          267.1
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:04"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #1",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.338,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          275.6,
+          180.5,
+          331,
+          188.3
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.338,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          391.8,
+          270.1,
+          447.2,
+          277.9
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:02"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:03",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #3",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.338,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          522.3,
+          180.5,
+          577.7,
+          188.3
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:03"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:04",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #4",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.338,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          624.6,
+          180.5,
+          680.1,
+          188.3
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:04"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x610_asw_obs:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 610 ASW obs",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.098,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window_obscure",
+        "height_m": 1.8,
+        "width_m": 0.61,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:1800_610_asw_obs"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x900_adh:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 900 ADH #1",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.62,
+      "attributes": {
+        "opening_type": "aluminium_double_hung_window",
+        "height_m": 1.8,
+        "width_m": 0.9,
+        "source_bbox_pdf_pt": [
+          994.8,
+          200.7,
+          1002.6,
+          236
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x900_adh:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 900 ADH #2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.62,
+      "attributes": {
+        "opening_type": "aluminium_double_hung_window",
+        "height_m": 1.8,
+        "width_m": 0.9,
+        "source_bbox_pdf_pt": [
+          994.8,
+          252.3,
+          1002.6,
+          287.6
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:02"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x910_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 910 ASW",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.638,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 0.91,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:1800_910_asw"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:2100x1500_asd:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 1500 ASD",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 3.15,
+      "attributes": {
+        "opening_type": "aluminium_sliding_door",
+        "height_m": 2.1,
+        "width_m": 1.5,
+        "source_bbox_pdf_pt": [
+          740,
+          460.5,
+          779.2,
+          468.3
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:2100x2100_asd:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 2100 ASD",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.41,
+      "attributes": {
+        "opening_type": "aluminium_sliding_door",
+        "height_m": 2.1,
+        "width_m": 2.1,
+        "source_bbox_pdf_pt": [
+          236.7,
+          211.5,
+          244.5,
+          250.7
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:2100x2700_assd:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 2700 ASSD",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 5.67,
+      "attributes": {
+        "opening_type": "aluminium_sliding_stack_door",
+        "height_m": 2.1,
+        "width_m": 2.7,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:21_27_assd"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:2100x4800_panel_lift:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 4800 panel lift door",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 10.08,
+      "attributes": {
+        "opening_type": "panel_lift_door",
+        "height_m": 2.1,
+        "width_m": 4.8,
+        "source_bbox_pdf_pt": [
+          957.9,
+          381.9,
+          965.8,
+          471.2
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1210_asw_obs:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1210 ASW obs #1",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 0.726,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window_obscure",
+        "height_m": 0.6,
+        "width_m": 1.21,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:600_1210_asw_obs_01"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1210_asw_obs:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1210 ASW obs #2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 0.726,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window_obscure",
+        "height_m": 0.6,
+        "width_m": 1.21,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:600_1210_asw_obs_02"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1510_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1510 ASW #1",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 0.906,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 0.6,
+        "width_m": 1.51,
+        "source_bbox_pdf_pt": [
+          132.5,
+          374.8,
+          140.3,
+          424.4
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1510_asw:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1510 ASW #2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 0.906,
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 0.6,
+        "width_m": 1.51,
+        "source_bbox_pdf_pt": [
+          132.5,
+          288.9,
+          140.3,
+          338.5
+        ]
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:02"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200_main_entry_hinged:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 main entry hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.52,
+      "attributes": {
+        "opening_type": "aluminium_entry_door",
+        "height_m": 2.1,
+        "width_m": 1.2,
+        "quantity_basis": "explicit floor-plan entry opening width x elevation joinery height 2100 AFL U.N.O."
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:ENTRY_PORCH_1200_opening",
+        "architectural:p4:A0.4:ALUMINIUM_ENTRY_DOOR_and_JOINERY_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:0870_gf_entry_hinged:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "870 granny-flat porch entry hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_external_entry_door",
+        "height_m": 2.1,
+        "width_m": 0.87,
+        "quantity_basis": "explicit perimeter door width x elevation joinery height 2100 AFL U.N.O."
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:GF_PORCH_entry_870",
+        "architectural:p4:A0.4:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:0870_garage_personnel_hinged:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "870 garage personnel external hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_external_personnel_door",
+        "height_m": 2.1,
+        "width_m": 0.87,
+        "quantity_basis": "explicit perimeter door width x elevation joinery height 2100 AFL U.N.O."
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:GARAGE_perimeter_870",
+        "architectural:p4:A0.4:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    }
+  ],
+  "external_opening_universe_complete": true
+}
