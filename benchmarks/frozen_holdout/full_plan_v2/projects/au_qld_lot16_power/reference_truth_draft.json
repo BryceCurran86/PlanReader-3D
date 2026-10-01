@@ -34,7 +34,7 @@
     "custom_front_glazing_measure_on_site_only",
     "wet_area_wall_tiling_beyond_three_closed_bath_gross_faces_including_remaining_bath_face_and_raked_ensuite",
     "structural_members_beyond_closed_wall_bracing_and_explicit_architectural_supports",
-    "roof_planes_final_crosscheck_against_engineering_stormwater_note"
+    "roof_planes_final_crosscheck_blocked_by_missing_engineering_stormwater_drainage_plan"
   ],
   "completion_rule": "Do not mark project VERIFIED until every in-scope family is independently closed and aggregate controls reconcile without double counting.",
   "verified_physical_candidates": [
@@ -1754,7 +1754,22 @@
       "pitch_crosscheck_source": "architectural:p4-p5:elevations:5deg_and_12deg",
       "complete_for_architectural_guide_geometry": true,
       "final_engineering_crosscheck_complete": false,
-      "blocker": "architectural roof plan explicitly states GUIDE ONLY and requires engineer stormwater drainage plan; that independent engineering roof/stormwater document is not present in the supplied Lot16 source package"
+      "blocker": "architectural p6 roof plan is GUIDE ONLY and requires an engineer stormwater drainage plan; supplied structural package has no stormwater, catchment, or downpipe design content, so final roof-plane truth must remain unresolved",
+      "engineering_crosscheck_search": {
+        "supplied_document": "4. Structural Engineering - Lot 16 Power.pdf",
+        "supplied_document_sha256": "add9dd4b0bd11554a13562ad0830e80847db1dcb043489e452a6c8d95a3b6cda",
+        "search_terms": [
+          "stormwater",
+          "catchment",
+          "downpipe"
+        ],
+        "matches_found": {
+          "stormwater": 0,
+          "catchment": 0,
+          "downpipe": 0
+        },
+        "conclusion": "required engineering stormwater drainage plan is not present in the supplied structural package"
+      }
     },
     {
       "check_id": "lot16:blocker:custom_front_glazing_measure_on_site",
