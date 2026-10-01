@@ -511,6 +511,46 @@
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-floor-ensuite-area",
+      "description": "Ensuite tiled floor surface area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 5.491,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:surface:floor:ensuite"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:ENS:TILES:2890x1900_figured_dimensions"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-floor-wir-area",
+      "description": "WIR vinyl floor surface area",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 4.6818,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:surface:floor:wir"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:WIR:VINYL:2890x1620_figured_dimensions"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "external_opening_reconciliation": {
@@ -568,5 +608,19 @@
     "source_closed_for_promoted_planes": true,
     "complete_for_project_ceiling_universe": false,
     "excluded_bed1_raked_ceiling_reason": "Draft marks Bed 1 raked ceiling as not denominator-ready until remaining ceiling regions/intersections are resolved."
+  },
+  "ensuite_wir_floor_reconciliation": {
+    "closure_check_id": "lot16:closure:ensuite_wir_floor_surfaces",
+    "component_object_refs": [
+      "lot16:surface:floor:ensuite",
+      "lot16:surface:floor:wir"
+    ],
+    "object_count": 2,
+    "component_sum_m2": 10.1728,
+    "source_closed": true,
+    "aggregate_overlap": {
+      "aggregate_ref": "lot16:surface:floor:residence_composite_region",
+      "rule": "These atomic finish-labelled floor surfaces are denominator truth; the overlapping residence composite remains a non-denominator control."
+    }
   }
 }

@@ -52,6 +52,11 @@
       "evidence": "Garage flat ceiling plus ensuite and WIR raked ceiling planes are independently source-closed for 49.340066 m2 total. Bed 1 and the remaining project ceiling universe stay unresolved."
     },
     {
+      "proof": "Lot16 ensuite and WIR atomic floor subset source-closed",
+      "status": "PASS",
+      "evidence": "Ensuite tiled floor and WIR vinyl floor are independently source-closed for 10.1728 m2 total. The overlapping residence composite remains a non-denominator control."
+    },
+    {
       "proof": "full project surface universe complete",
       "status": "FAIL",
       "evidence": "Only the independently closed 13-opening subset is promoted; multiple in-scope families remain unresolved."
@@ -84,5 +89,18 @@
     "source_closed_for_promoted_planes": true,
     "complete_for_project_ceiling_universe": false,
     "bed1_raked_ceiling_promoted": false
+  },
+  "ensuite_wir_floor_closure_summary": {
+    "closure_check_id": "lot16:closure:ensuite_wir_floor_surfaces",
+    "verified_floor_count": 2,
+    "verified_area_m2": 10.1728,
+    "object_identity_available": true,
+    "geometry_verified": true,
+    "geometry_scope": "2D rectangular plan extents only",
+    "quantity_verified": true,
+    "provenance_chain_complete": true,
+    "source_closed": true,
+    "overlapping_residence_composite_denominator_eligible": false,
+    "project_floor_universe_complete": false
   }
 }

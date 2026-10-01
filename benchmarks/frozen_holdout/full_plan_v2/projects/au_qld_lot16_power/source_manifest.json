@@ -23,8 +23,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "933720c2ebaebdbada4ebfc4cdc96c116f55c53185bc23c97f9398f8371d2ecc",
-      "size_bytes": 19823,
+      "sha256": "41ee9b0562f9054355a8014028b340289b371fab3dc78dc5dfc9de5d3065b73e",
+      "size_bytes": 22279,
       "page_count": null
     }
   ],
@@ -529,6 +529,46 @@
       ],
       "source_location_refs": [
         "architectural:p3:floor_plan:WIR_[RAKED_CEILING]:2890x1620_figured_dimensions; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-floor-ensuite-area",
+      "description": "Ensuite tiled floor surface area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 5.491,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:surface:floor:ensuite"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:ENS:TILES:2890x1900_figured_dimensions"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-floor-wir-area",
+      "description": "WIR vinyl floor surface area",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 4.6818,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:surface:floor:wir"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:WIR:VINYL:2890x1620_figured_dimensions"
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
