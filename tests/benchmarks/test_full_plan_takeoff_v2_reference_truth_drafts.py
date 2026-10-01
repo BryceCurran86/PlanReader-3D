@@ -792,3 +792,22 @@ def test_lot16_explicit_bath_shower_tile_face_is_net_closed_but_wet_area_univers
         in draft["unresolved_surface_families"]
     )
 
+
+
+def test_lot16_bed1_raked_ceiling_closes_from_area_and_section_pitch():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    row = next(
+        item for item in draft["verified_physical_candidates"]
+        if item["object_ref"] == "lot16:surface:ceiling:bed1_raked_12deg"
+    )
+    assert row["object_family"] == "ceiling_plane"
+    assert row["expected_quantity"] == pytest.approx(12.922385)
+    assert row["attributes"]["plan_projection_area_m2"] == pytest.approx(12.64)
+    assert row["attributes"]["pitch_degrees"] == 12
+    assert row["attributes"]["ceiling_geometry"] == "raked"
+    check = next(
+        item for item in draft["closure_checks"]
+        if item["check_id"] == "lot16:control:bed1_raked_ceiling"
+    )
+    assert check["component_sum_m2"] == pytest.approx(12.922385)
+    assert check["net_denominator_ready"] is False
