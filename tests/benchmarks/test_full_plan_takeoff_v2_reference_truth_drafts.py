@@ -255,3 +255,33 @@ def test_3laurel_bracing_resistance_controls_match_source_schedules():
         assert row["margin_kN"] == pytest.approx(margin)
         assert row["provided_kN"] > row["required_kN"]
 
+def test_lot16_explicit_architectural_support_census_is_source_closed():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    supports = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "architectural_support_member"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:explicit_architectural_support_census"
+    )
+    assert len(supports) == check["object_count"] == 3
+    assert check["telescopic_pier_count"] == 2
+    assert check["hardwood_post_count"] == 1
+    assert sum(
+        row["attributes"]["member_type"] == "telescopic_pier" for row in supports
+    ) == 2
+    post = next(
+        row for row in supports if row["attributes"]["member_type"] == "timber_post"
+    )
+    assert post["attributes"]["section_mm"] == "90x90"
+    assert post["attributes"]["material"] == "hardwood"
+    assert check["complete_for_explicitly_labelled_architectural_supports"] is True
+    assert check["structural_engineering_instance_schedule_available"] is False
+    assert (
+        "structural_members_beyond_closed_wall_bracing_and_explicit_architectural_supports"
+        in draft["unresolved_surface_families"]
+    )
+
