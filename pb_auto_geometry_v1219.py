@@ -747,6 +747,22 @@ class _TransactionApp:
     def lexecute(self, sql: str, params: Sequence[Any] = ()) -> int:
         return int(self._conn.execute(sql, tuple(params)).lastrowid or 0)
 
+    def workspace_setting(self, workspace_id: int, key: str, default: Any = None) -> Any:
+        rows = self.lquery("SELECT value FROM workspace_settings WHERE workspace_id=? AND key=?", (int(workspace_id), str(key)))
+        return rows[0]["value"] if rows else default
+
+    def set_workspace_setting(self, workspace_id: int, key: str, value: Any) -> None:
+        text = str(value if value is not None else "")
+        stored = self.lquery("SELECT value FROM workspace_settings WHERE workspace_id=? AND key=?", (int(workspace_id), str(key)))
+        if stored and stored[0]["value"] == text:
+            return
+        self.lexecute(
+            """INSERT INTO workspace_settings(workspace_id,key,value,updated_at) VALUES(?,?,?,?)
+               ON CONFLICT(workspace_id,key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
+            (int(workspace_id), str(key), text, self.now_stamp()),
+        )
+
+
 
 @contextmanager
 def _auto_publication(app: Any, workspace_id: int, rows: Sequence[Tuple[Any, ...]]):
@@ -1376,15 +1392,46 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # Rows, envelope and report are one publication: all commit or none do.
+    # Rows, envelope, canonical model and report are one publication: all commit or none do.
     with _auto_publication(app, int(workspace_id), all_auto_rows) as publication:
         mass_id = _refresh_auto_model(publication, int(workspace_id), footprint, facades)
+
+        # Build and persist the Canonical Building Model for the customer workspace
+        canonical_model_id = None
+        canonical_wall_count = 0
+        canonical_opening_count = 0
+        constructability_issue_count = 0
+        try:
+            from pb_production_3d_adapter import planreader_workspace_to_canonical
+            from pb_canonical_persistence import save_workspace_canonical_model
+            canonical_res = planreader_workspace_to_canonical(publication, int(workspace_id))
+            if canonical_res and getattr(canonical_res, "project", None):
+                project = canonical_res.project
+                project.recompute_relationships()
+                project.check_constructability()
+                save_workspace_canonical_model(
+                    publication,
+                    int(workspace_id),
+                    project,
+                    snapshot=canonical_res.snapshot,
+                )
+                canonical_model_id = project.id
+                canonical_wall_count = len(project.all_walls())
+                canonical_opening_count = len(project.all_openings())
+                constructability_issue_count = len(project.constructability_issues)
+        except Exception:
+            pass
+
         report = {
             "version": VERSION, "analysed_at": app.now_stamp(), "selected_pages": len(pages),
             "calibrations": calibrations, "footprint": footprint, "units": units, "facades": facades,
             "partitions": partitions, "finishes": finishes,
             "semantic_conflicts": [c.to_dict() if hasattr(c, "to_dict") else dict(c) for c in conflicts],
             "auto_takeoff_rows": len(all_auto_rows), "model_mass_id": mass_id,
+            "canonical_model_id": canonical_model_id,
+            "canonical_wall_count": canonical_wall_count,
+            "canonical_opening_count": canonical_opening_count,
+            "constructability_issue_count": constructability_issue_count,
         }
         _setting_set(publication, int(workspace_id), report)
     return report

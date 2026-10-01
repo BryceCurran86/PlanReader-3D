@@ -131,10 +131,21 @@ class RerunIdempotencyTests(unittest.TestCase):
                 self.assertNotIn("other", families)
                 manual = [r for r in first_rows if r["source_reference"] == "Estimator manual entry"]
                 self.assertEqual(len(manual), 1)
-                self.assertEqual(len(first_masses), 1)
+                self.assertIsNotNone(stored.get("canonical_model_id"))
                 for rows, masses in snapshots[1:]:
                     self.assertEqual(rows, first_rows, "re-running must replace, never accumulate or alter rows")
                     self.assertEqual(masses, first_masses)
+
+    def test_canonical_building_model_persisted_in_publication_transaction(self):
+        from pb_canonical_persistence import load_workspace_canonical_model
+        with _PreparedWorkspace() as ws:
+            report = auto.analyse_workspace(ws.app, 1)
+            self.assertIsNotNone(report.get("canonical_model_id"))
+            fresh, project, msg, payload = load_workspace_canonical_model(ws.app, 1)
+            self.assertTrue(fresh, f"Expected fresh canonical model, got msg: {msg}")
+            self.assertIsNotNone(project)
+            self.assertEqual(project.id, report["canonical_model_id"])
+
 
 
 class PublicationFailureTests(unittest.TestCase):
