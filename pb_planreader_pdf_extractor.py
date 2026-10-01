@@ -23,8 +23,10 @@ from collections import Counter
 from dataclasses import asdict, dataclass, field
 import json
 import math
+import os
 from pathlib import Path
 import re
+import time
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import fitz  # PyMuPDF
@@ -328,6 +330,39 @@ def merge_extracted_prediction(
         pred_dict[incoming.tag] = incoming
 
 
+def _best_effort_process_memory_mb() -> Dict[str, Optional[float]]:
+    """Return process memory diagnostics without creating a hard dependency.
+
+    ``psutil`` is intentionally optional: extraction correctness must not depend
+    on observability support being installed.  When unavailable, callers still
+    receive timing/progress events with ``None`` memory fields.
+    """
+    try:
+        import psutil  # type: ignore
+
+        process = psutil.Process(os.getpid())
+        info = process.memory_info()
+        result: Dict[str, Optional[float]] = {
+            "rss_mb": round(float(info.rss) / (1024.0 * 1024.0), 1),
+            "vms_mb": round(float(info.vms) / (1024.0 * 1024.0), 1),
+            "private_mb": None,
+        }
+        try:
+            full = process.memory_full_info()
+            private_bytes = getattr(full, "private", None)
+            if private_bytes is None:
+                private_bytes = getattr(full, "uss", None)
+            if private_bytes is not None:
+                result["private_mb"] = round(
+                    float(private_bytes) / (1024.0 * 1024.0), 1
+                )
+        except Exception:
+            pass
+        return result
+    except Exception:
+        return {"rss_mb": None, "vms_mb": None, "private_mb": None}
+
+
 class GenericPlanReaderExtractor:
     """Extracts physical building quantities from PDF drawing sets strictly from drawing evidence."""
 
@@ -412,6 +447,86 @@ class GenericPlanReaderExtractor:
         }
         # Live extraction visibility: distinguish absence from failure/conflict.
         self.extraction_status: Dict[str, str] = {}
+        # Diagnostic-only extractor observability. This trace must never feed
+        # authority, prediction publication, or benchmark truth.
+        self.performance_trace: Dict[str, Any] = {
+            "version": "extractor-performance-v1",
+            "total_pages": 0,
+            "elapsed_seconds": 0.0,
+            "events": [],
+        }
+        self._performance_started_at: Optional[float] = None
+        self._performance_last_mark_at: Optional[float] = None
+        self._performance_emit_progress = False
+
+    def _reset_performance_trace(self, *, total_pages: int) -> None:
+        now = time.perf_counter()
+        self._performance_started_at = now
+        self._performance_last_mark_at = now
+        self._performance_emit_progress = str(
+            os.getenv("PLANREADER_EXTRACTOR_PROGRESS", "")
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        self.performance_trace = {
+            "version": "extractor-performance-v1",
+            "total_pages": int(total_pages),
+            "elapsed_seconds": 0.0,
+            "events": [],
+        }
+        self._mark_performance("extract_start")
+
+    def _mark_performance(
+        self,
+        stage: str,
+        *,
+        page: Optional[int] = None,
+        total_pages: Optional[int] = None,
+        note: Optional[str] = None,
+    ) -> None:
+        """Record a best-effort diagnostic event without affecting extraction."""
+        try:
+            now = time.perf_counter()
+            started = self._performance_started_at or now
+            previous = self._performance_last_mark_at or started
+            if stage in {"cross_page_pre_scan_page", "main_page_analysis_page"}:
+                memory = {"rss_mb": None, "vms_mb": None, "private_mb": None}
+            else:
+                try:
+                    memory = _best_effort_process_memory_mb()
+                except Exception:
+                    memory = {"rss_mb": None, "vms_mb": None, "private_mb": None}
+            event: Dict[str, Any] = {
+                "stage": str(stage),
+                "elapsed_seconds": round(now - started, 3),
+                "delta_seconds": round(now - previous, 3),
+                **memory,
+            }
+            if page is not None:
+                event["page"] = int(page)
+            if total_pages is not None:
+                event["total_pages"] = int(total_pages)
+            if note:
+                event["note"] = str(note)
+            events = self.performance_trace.setdefault("events", [])
+            if isinstance(events, list):
+                events.append(event)
+            self.performance_trace["elapsed_seconds"] = event["elapsed_seconds"]
+            self._performance_last_mark_at = now
+            if self._performance_emit_progress:
+                progress = ""
+                if page is not None:
+                    denominator = total_pages or self.performance_trace.get("total_pages")
+                    progress = f" page={page}/{denominator}" if denominator else f" page={page}"
+                mem = ""
+                if event.get("rss_mb") is not None:
+                    mem = f" rss_mb={event['rss_mb']}"
+                print(
+                    f"[PlanReaderPerf] stage={stage}{progress} "
+                    f"elapsed_s={event['elapsed_seconds']} delta_s={event['delta_seconds']}{mem}",
+                    flush=True,
+                )
+        except Exception:
+            # Observability is explicitly non-authoritative and fail-open.
+            pass
 
     def is_drawing_page(self, page_text: str, page: Optional[fitz.Page] = None) -> bool:
         """Heuristically determine if a PDF page contains architectural drawings."""
@@ -916,6 +1031,32 @@ class GenericPlanReaderExtractor:
 
         doc = fitz.open(str(p_path))
         target_pages = list(pages) if pages else list(range(len(doc)))
+        self._reset_performance_trace(total_pages=len(target_pages))
+        self._mark_performance("document_opened")
+
+        # One extraction owns one immutable PDF snapshot. Cache native page text
+        # and drawing-page classification once so later authorities do not ask
+        # PyMuPDF to reparse the same content stream repeatedly.
+        native_page_text: Dict[int, str] = {}
+        drawing_page_flags: Dict[int, bool] = {}
+
+        def _native_text(page_index: int) -> str:
+            cached = native_page_text.get(page_index)
+            if cached is None:
+                cached = doc[page_index].get_text("text") or ""
+                native_page_text[page_index] = cached
+            return cached
+
+        def _is_drawing_page_index(page_index: int) -> bool:
+            cached = drawing_page_flags.get(page_index)
+            if cached is None:
+                cached = self.is_drawing_page(
+                    _native_text(page_index),
+                    doc[page_index],
+                )
+                drawing_page_flags[page_index] = bool(cached)
+            return bool(cached)
+
         # OCR evidence is source-document scoped. Never carry cached text or
         # page-budget state across separate PDFs when an extractor instance is reused.
         self._ocr_text_by_page = {}
@@ -1007,9 +1148,14 @@ class GenericPlanReaderExtractor:
         for p_idx in target_pages:
             if p_idx < 0 or p_idx >= len(doc):
                 continue
+            self._mark_performance(
+                "cross_page_pre_scan_page",
+                page=p_idx + 1,
+                total_pages=len(target_pages),
+            )
             page_obj = doc[p_idx]
-            pg_txt = page_obj.get_text("text")
-            if not self.is_drawing_page(pg_txt, page_obj):
+            pg_txt = _native_text(p_idx)
+            if not _is_drawing_page_index(p_idx):
                 continue
             native_sparse = len((pg_txt or "").strip()) < 150
             if native_sparse or self._page_has_large_raster(page_obj):
@@ -1133,6 +1279,8 @@ class GenericPlanReaderExtractor:
             if secondary_support_evidence is not None:
                 global_secondary_area_support_evidence.append(secondary_support_evidence)
 
+        self._mark_performance("cross_page_pre_scan_complete")
+
         # Resolve wall height strictly from real level-datum evidence when
         # present; otherwise this stays None and every wall-height use below
         # falls back to self.default_ceiling_height_m exactly as before --
@@ -1242,7 +1390,7 @@ class GenericPlanReaderExtractor:
                 and structural_support.quantity is not None
             ):
                 support_sheet_no = self.extract_sheet_number(
-                    doc[support_page - 1].get_text("text"), support_page
+                    _native_text(support_page - 1), support_page
                 )
                 pred_dict["verandah_pillars"] = ExtractedPrediction(
                     tag="verandah_pillars",
@@ -1286,14 +1434,20 @@ class GenericPlanReaderExtractor:
                     },
                 )
 
+        self._mark_performance("main_page_analysis_start")
         for pno in target_pages:
             if pno < 0 or pno >= len(doc):
                 continue
 
+            self._mark_performance(
+                "main_page_analysis_page",
+                page=pno + 1,
+                total_pages=len(target_pages),
+            )
             page = doc[pno]
-            page_text = page.get_text("text")
+            page_text = _native_text(pno)
 
-            if not self.is_drawing_page(page_text, page):
+            if not _is_drawing_page_index(pno):
                 continue
 
             sheet_no = self.extract_sheet_number(page_text, pno + 1)
@@ -2292,13 +2446,15 @@ class GenericPlanReaderExtractor:
                     "evidence_present_unresolved_physical_members"
                 )
 
+        self._mark_performance("main_page_analysis_complete")
+
         # ------------------------------------------------------------------
         # Generic Schedule & Table Extraction (Phase F.8)
         # ------------------------------------------------------------------
         try:
             from pb_raster_schedule_extractor import GenericScheduleTableExtractor
             schedule_extractor = GenericScheduleTableExtractor()
-            dwg_pages = [p for p in target_pages if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])]
+            dwg_pages = [p for p in target_pages if 0 <= p < len(doc) and _is_drawing_page_index(p)]
             schedule_rows = schedule_extractor.extract_from_document(doc, pages=dwg_pages)
 
             self.extraction_status["schedule"] = (
@@ -2362,6 +2518,7 @@ class GenericPlanReaderExtractor:
                 )
         except Exception:
             self.extraction_status["schedule"] = "extraction_failed"
+        self._mark_performance("schedule_extraction_complete")
 
         # ------------------------------------------------------------------
         # Plan instance marks (hyphenated W-# / D-# stamps on scanned plans)
@@ -2377,9 +2534,9 @@ class GenericPlanReaderExtractor:
 
             dwg_pages = [
                 p for p in target_pages
-                if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])
+                if 0 <= p < len(doc) and _is_drawing_page_index(p)
             ]
-            drawing_texts = [doc[p].get_text("text") or "" for p in dwg_pages]
+            drawing_texts = [_native_text(p) for p in dwg_pages]
 
             # Opening-system semantics must come from drawing-owned source pages.
             # BOQ/specification pages may describe commercial scope but cannot
@@ -2458,6 +2615,7 @@ class GenericPlanReaderExtractor:
                         )
         except Exception:
             self.extraction_status["plan_instance_marks"] = "extraction_failed"
+        self._mark_performance("plan_instance_marks_complete")
 
         # ------------------------------------------------------------------
         # Sole unlabeled floor-plan door swing (native quarter-circle cubic)
@@ -2470,7 +2628,7 @@ class GenericPlanReaderExtractor:
 
             dwg_pages = [
                 p for p in target_pages
-                if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])
+                if 0 <= p < len(doc) and _is_drawing_page_index(p)
             ]
             sole = extract_sole_plan_door_swing(doc, dwg_pages)
             if (
@@ -2506,7 +2664,7 @@ class GenericPlanReaderExtractor:
 
             dwg_pages = [
                 p for p in target_pages
-                if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])
+                if 0 <= p < len(doc) and _is_drawing_page_index(p)
             ]
             interior = extract_interior_plan_door_swings(doc, dwg_pages)
             if interior is not None and should_emit_interior_door_total(
@@ -2553,9 +2711,12 @@ class GenericPlanReaderExtractor:
         except Exception:
             pass
 
+        self._mark_performance("door_geometry_passes_complete")
+
         # ------------------------------------------------------------------
         # Generic Drawing Vision / OCR Evidence Layer (Phase F.10)
         # ------------------------------------------------------------------
+        self._mark_performance("drawing_ocr_reconciliation_start")
         try:
             from pb_drawing_ocr_evidence_layer import (
                 DrawingEvidenceParser,
@@ -2567,11 +2728,11 @@ class GenericPlanReaderExtractor:
             )
 
             ocr_engine = DrawingOCREngine()
-            dwg_pages = [p for p in target_pages if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])]
+            dwg_pages = [p for p in target_pages if 0 <= p < len(doc) and _is_drawing_page_index(p)]
 
             for p_num in dwg_pages:
                 page = doc[p_num]
-                p_text = page.get_text("text")
+                p_text = _native_text(p_num)
 
                 # Prefer native evidence first:
                 # Only run raster OCR if native extraction on this sheet is insufficient:
@@ -2622,7 +2783,17 @@ class GenericPlanReaderExtractor:
                 # evidence on this page is insufficient (raster/scanned
                 # sheet, or a schedule-word page with incomplete native
                 # window/door quantities).
+                self._mark_performance(
+                    "drawing_ocr_page_start",
+                    page=p_num + 1,
+                    total_pages=len(target_pages),
+                )
                 ocr_lines = ocr_engine.recognize_page_rect(page, dpi=150)
+                self._mark_performance(
+                    "drawing_ocr_page_complete",
+                    page=p_num + 1,
+                    total_pages=len(target_pages),
+                )
                 ocr_records: List[DrawingEvidenceRecord] = []
                 for o_line in ocr_lines:
                     rec = DrawingEvidenceParser.parse_schedule_line(
@@ -2731,6 +2902,7 @@ class GenericPlanReaderExtractor:
             self.extraction_status.setdefault("ocr_reconcile", "evidence_present")
         except Exception:
             self.extraction_status["ocr_reconcile"] = "extraction_failed"
+        self._mark_performance("drawing_ocr_reconciliation_complete")
 
         # ------------------------------------------------------------------
         # Unique door WxH callout → already identified dimensionless D#
@@ -2741,7 +2913,7 @@ class GenericPlanReaderExtractor:
             )
 
             dwg_texts = [
-                doc[p].get_text("text") or ""
+                _native_text(p)
                 for p in target_pages
                 if 0 <= p < len(doc)
             ]
@@ -2752,6 +2924,7 @@ class GenericPlanReaderExtractor:
         # ------------------------------------------------------------------
         # Generic Opening Deduction Pipeline (Phase F.9)
         # ------------------------------------------------------------------
+        self._mark_performance("opening_deduction_start")
         try:
             from pb_opening_deduction_pipeline import (
                 GenericOpeningDeductionPipeline,
@@ -2819,8 +2992,10 @@ class GenericPlanReaderExtractor:
                 self.live_net_wall_shadow = collect_live_net_wall_shadow(wall_results)
         except Exception:
             self.extraction_status["opening_deduction"] = "extraction_failed"
+        self._mark_performance("opening_deduction_complete")
 
         # Hosted-opening SHADOW only. Never appended to F.9 live openings.
+        self._mark_performance("opening_shadows_start")
         # Collection requires an F.07 RESOLVED floor-plan viewport bbox.
         try:
             from pb_hosted_opening_instance_adapter import (
@@ -2865,6 +3040,8 @@ class GenericPlanReaderExtractor:
                 "openings": [],
             }
 
+        self._mark_performance("opening_shadows_complete")
+
         # Item 35 production-authority SHADOW only. This executes the real
         # source-visibility -> semantic-opening -> commercial-count gate on the
         # same PDF bytes, but never mutates pred_dict or the F.9 deduction path.
@@ -2872,6 +3049,7 @@ class GenericPlanReaderExtractor:
         # Scoped extraction passes only page addresses. The Item 35 producer
         # still owns source observations, physical-opening discovery, and
         # semantic inventory; callers cannot inject a candidate universe.
+        self._mark_performance("item35_shadow_start")
         if collect_item35_shadow:
             try:
                 from pb_item35_production_authority_shadow import (
@@ -2895,8 +3073,10 @@ class GenericPlanReaderExtractor:
                     reason=f"shadow_exception:{type(exc).__name__}"
                 )
                 self.extraction_status["item35_authority_shadow"] = "extraction_failed"
+        self._mark_performance("item35_shadow_complete")
 
         # Source-owned physical external net-wall LIVE firm output.
+        self._mark_performance("physical_net_wall_live_start")
         #
         # This is intentionally late: the complete source-owned
         # wall -> opening/void -> gross geometry -> whole-wall role ->
@@ -2913,10 +3093,7 @@ class GenericPlanReaderExtractor:
                 for page_index in target_pages
                 if (
                     0 <= page_index < len(doc)
-                    and self.is_drawing_page(
-                        doc[page_index].get_text("text"),
-                        doc[page_index],
-                    )
+                    and _is_drawing_page_index(page_index)
                 )
             ]
             if physical_net_pages:
@@ -3064,8 +3241,10 @@ class GenericPlanReaderExtractor:
             self.extraction_status["physical_net_wall_live"] = (
                 "extraction_failed"
             )
+        self._mark_performance("physical_net_wall_live_complete")
 
         # Source-owned ceiling-lining LIVE provisional output.
+        self._mark_performance("ceiling_lining_live_start")
         #
         # This is deliberately late and additive: it cannot feed any floor,
         # wall, opening-deduction, or legacy finish derivation above.  The
@@ -3143,9 +3322,12 @@ class GenericPlanReaderExtractor:
                 "claims": [],
             }
             self.extraction_status["ceiling_lining_live"] = "extraction_failed"
+        self._mark_performance("ceiling_lining_live_complete")
 
         # ------------------------------------------------------------------
         # Generic source-owned roof covering measurement (shadow mode)
+        # ------------------------------------------------------------------
+        self._mark_performance("roof_covering_shadow_start")
         # ------------------------------------------------------------------
         try:
             from pb_source_roof_covering_authority import (
@@ -3357,7 +3539,9 @@ class GenericPlanReaderExtractor:
                 "roof_covering_area_m2": None,
             }
             self.extraction_status["roof_covering_shadow"] = "failed"
+        self._mark_performance("roof_covering_shadow_complete")
 
+        self._mark_performance("extract_complete")
         doc.close()
         return list(pred_dict.values())
 
