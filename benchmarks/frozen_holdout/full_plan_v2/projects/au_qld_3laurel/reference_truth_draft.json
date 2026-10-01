@@ -35,7 +35,7 @@
     "secondary_fc_soffit_and_beam_faces_beyond_primary_ceiling_planes",
     "wet_area_tile_niche_returns_and_recess_deductions",
     "wet_area_non_shower_tile_skirtings_bath_surrounds_and_splashbacks",
-    "untyped_or_ambiguous_door_openings_and_internal_external_classification"
+    "internal_door_opening_universe_for_wall_face_deductions"
   ],
   "completion_rule": "Do not mark project VERIFIED until every in-scope family is independently closed and aggregate controls reconcile without double counting.",
   "verified_physical_candidates": [
@@ -1295,6 +1295,51 @@
         "material": "brick_pier_clad_in_stone",
         "crosscheck": "architectural:p4-p5:A0.4-A0.5:470x470_BRICK_PIER"
       }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200_main_entry_hinged:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 main entry hinged opening",
+      "expected_quantity": 2.52,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_entry_door",
+        "height_m": 2.1,
+        "width_m": 1.2,
+        "quantity_basis": "explicit floor-plan entry opening width x elevation joinery height 2100 AFL U.N.O."
+      },
+      "source_location": "architectural:p3:A0.3:ENTRY_PORCH_1200_opening; architectural:p4:A0.4:ALUMINIUM_ENTRY_DOOR_and_JOINERY_2100_AFL_UNO"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:0870_gf_entry_hinged:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "870 granny-flat porch entry hinged opening",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "hinged_external_entry_door",
+        "height_m": 2.1,
+        "width_m": 0.87,
+        "quantity_basis": "explicit perimeter door width x elevation joinery height 2100 AFL U.N.O."
+      },
+      "source_location": "architectural:p3:A0.3:GF_PORCH_entry_870; architectural:p4:A0.4:JOINERY_HEIGHTS_2100_AFL_UNO"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:0870_garage_personnel_hinged:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "870 garage personnel external hinged opening",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "hinged_external_personnel_door",
+        "height_m": 2.1,
+        "width_m": 0.87,
+        "quantity_basis": "explicit perimeter door width x elevation joinery height 2100 AFL U.N.O."
+      },
+      "source_location": "architectural:p3:A0.3:GARAGE_perimeter_870; architectural:p4:A0.4:JOINERY_HEIGHTS_2100_AFL_UNO"
     }
   ],
   "closure_checks": [
@@ -1376,7 +1421,8 @@
       "complete_for_typed_labels": true,
       "complete_for_all_openings": false,
       "source_location": "architectural:p3:A0.3:floor_plan",
-      "reason": "all explicitly typed ASW/ASD/ASSD/ADH/panel-lift labels admitted; generic door labels remain unresolved"
+      "reason": "typed-label subset only; separate full external census closes the three perimeter hinged doors",
+      "generic_external_hinged_doors_closed_by_separate_control": true
     },
     {
       "check_id": "3laurel:closure:wall_bracing_schedule",
@@ -1469,6 +1515,42 @@
       },
       "source_location": "architectural:p8:A0.8:BRACING_SCHEDULES_A_B_AU2_BU2",
       "note": "Independent source-declared resistance control over the closed 37-member bracing census; not a denominator quantity."
+    },
+    {
+      "check_id": "3laurel:closure:external_opening_census",
+      "component_object_refs": [
+        "3laurel:opening:p3:1200x1810_asw:01",
+        "3laurel:opening:p3:1200x1810_asw:02",
+        "3laurel:opening:p3:1200x1810_asw:03",
+        "3laurel:opening:p3:1200x1810_asw:04",
+        "3laurel:opening:p3:1800x2410_asw:01",
+        "3laurel:opening:p3:1800x2410_asw:02",
+        "3laurel:opening:p3:1800x2410_asw:03",
+        "3laurel:opening:p3:1800x2410_asw:04",
+        "3laurel:opening:p3:1800x610_asw_obs:01",
+        "3laurel:opening:p3:1800x900_adh:01",
+        "3laurel:opening:p3:1800x900_adh:02",
+        "3laurel:opening:p3:1800x910_asw:01",
+        "3laurel:opening:p3:2100x1500_asd:01",
+        "3laurel:opening:p3:2100x2100_asd:01",
+        "3laurel:opening:p3:2100x2700_assd:01",
+        "3laurel:opening:p3:2100x4800_panel_lift:01",
+        "3laurel:opening:p3:600x1210_asw_obs:01",
+        "3laurel:opening:p3:600x1210_asw_obs:02",
+        "3laurel:opening:p3:600x1510_asw:01",
+        "3laurel:opening:p3:600x1510_asw:02",
+        "3laurel:opening:p3:1200_main_entry_hinged:01",
+        "3laurel:opening:p3:0870_gf_entry_hinged:01",
+        "3laurel:opening:p3:0870_garage_personnel_hinged:01"
+      ],
+      "external_opening_count": 23,
+      "external_opening_area_m2": 64.764,
+      "complete_for_all_external_openings": true,
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:all_perimeter_typed_openings_plus_main_entry_GF_entry_and_garage_personnel_door",
+        "architectural:p4-p5:A0.4-A0.5:elevations:entry_door_crosscheck_and_JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "note": "Internal door openings remain a separate wall-face deduction universe and are not claimed closed here."
     }
   ]
 }
