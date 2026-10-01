@@ -32,7 +32,7 @@
     "external_wall_faces_and_cladding",
     "ceilings_including_raked_ceiling",
     "custom_front_glazing_measure_on_site_only",
-    "wet_area_wall_tiling",
+    "wet_area_wall_tiling_beyond_three_closed_bath_gross_faces_including_remaining_bath_face_and_raked_ensuite",
     "structural_members_beyond_closed_wall_bracing_and_explicit_architectural_supports",
     "roof_planes_final_crosscheck_against_engineering_stormwater_note"
   ],
@@ -1139,6 +1139,54 @@
         "raked_ceiling_extension_included": false,
         "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
       }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile_gross:bath:elev1",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "physical_kind": "surface",
+      "description": "Bath tiled wall gross face, elevation 1",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_Elevation_1:1200_finished_wall_dimension; architectural:p3:floor_plan:TILED_WALL_TO_CEILING; architectural:p4-p5:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.2,
+        "tile_height_to_top_plate_m": 2.59,
+        "calculation": "1.200m * 2.590m",
+        "quantity_basis": "gross explicitly tiled wall face to flat ceiling/top-plate datum",
+        "denominator_readiness": "draft_only_until_remaining_bath_face_niche_opening_and_return_deductions_are_closed"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile_gross:bath:shower",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "physical_kind": "surface",
+      "description": "Bath tiled shower wall gross face",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_SHR_Elev:1200_finished_wall_dimension; architectural:p3:floor_plan:TILED_WALL_TO_CEILING; architectural:p4-p5:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.2,
+        "tile_height_to_top_plate_m": 2.59,
+        "calculation": "1.200m * 2.590m",
+        "quantity_basis": "gross explicitly tiled wall face to flat ceiling/top-plate datum",
+        "denominator_readiness": "draft_only_until_remaining_bath_face_niche_opening_and_return_deductions_are_closed"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile_gross:bath:elev4",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "physical_kind": "surface",
+      "description": "Bath tiled wall gross face, elevation 4",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_Elevation_4:1200_finished_wall_dimension; architectural:p3:floor_plan:TILED_WALL_TO_CEILING; architectural:p4-p5:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.2,
+        "tile_height_to_top_plate_m": 2.59,
+        "calculation": "1.200m * 2.590m",
+        "quantity_basis": "gross explicitly tiled wall face to flat ceiling/top-plate datum",
+        "denominator_readiness": "draft_only_until_remaining_bath_face_niche_opening_and_return_deductions_are_closed"
+      }
     }
   ],
   "closure_checks": [
@@ -1419,6 +1467,23 @@
       "typical_detail_scaling_allowed": false,
       "reason": "the supplied engineering package closes the bracing instance universe but supplies generic/NTS details or by-others member categories for the remaining beam/lintel/truss families rather than a project instance schedule",
       "benchmark_rule": "do not instantiate generic or by-others structural members into truth without a project-specific tagged schedule or dimensioned layout"
+    },
+    {
+      "check_id": "lot16:control:explicit_bath_tile_gross_faces",
+      "component_object_refs": [
+        "lot16:surface:wall_tile_gross:bath:elev1",
+        "lot16:surface:wall_tile_gross:bath:shower",
+        "lot16:surface:wall_tile_gross:bath:elev4"
+      ],
+      "object_count": 3,
+      "component_sum_m2": 9.324,
+      "source_locations": [
+        "architectural:p11:Bath_Elevation_1_Bath_SHR_Elev_Bath_Elevation_4:1200_each",
+        "architectural:p3:floor_plan:TILED_WALL_TO_CEILING",
+        "architectural:p4-p5:FSL_68560_to_TP_71150"
+      ],
+      "net_denominator_ready": false,
+      "reason": "three explicitly dimensioned full-height bath tile faces are gross-source-closed; remaining bath face, niche/opening deductions and returns remain unresolved"
     }
   ]
 }
