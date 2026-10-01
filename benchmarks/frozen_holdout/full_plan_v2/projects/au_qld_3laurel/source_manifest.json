@@ -12,10 +12,488 @@
       "page_count": 18
     }
   ],
-  "reference_takeoff_documents": [],
-  "verified_takeoff_items": [],
+  "reference_takeoff_documents": [
+    {
+      "name": "reference_takeoff.json",
+      "role": "independent_verified_reference_takeoff",
+      "sha256": "ce9c9553c12c37e7d5486cc08445592161d2157f10bb5543c55f34c7d45f0f5c",
+      "size_bytes": 15250,
+      "page_count": null
+    }
+  ],
+  "verified_takeoff_items": [
+    {
+      "item_id": "3laurel-1200x1810-asw-01-area",
+      "description": "Bed 2 1200 x 1810 ASW area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 2.172,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1200x1810_asw:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed_2_external_1200x1810_ASW:bbox_663.3_463.1_718.8_470.9"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1200x1810-asw-02-area",
+      "description": "Bed 3 1200 x 1810 ASW area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 2.172,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1200x1810_asw:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed_3_external_1200x1810_ASW:bbox_576.3_463.1_631.7_470.9"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1200x1810-asw-03-area",
+      "description": "1200 x 1810 ASW #3 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 2.172,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1200x1810_asw:03"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:03"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1200x1810-asw-04-area",
+      "description": "1200 x 1810 ASW #4 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 2.172,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1200x1810_asw:04"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:04"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x2410-asw-01-area",
+      "description": "1800 x 2410 ASW #1 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 4.338,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x2410_asw:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x2410-asw-02-area",
+      "description": "1800 x 2410 ASW #2 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 4.338,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x2410_asw:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:02"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x2410-asw-03-area",
+      "description": "1800 x 2410 ASW #3 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 4.338,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x2410_asw:03"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:03"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x2410-asw-04-area",
+      "description": "1800 x 2410 ASW #4 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 4.338,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x2410_asw:04"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:04"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x610-asw-obs-01-area",
+      "description": "1800 x 610 ASW obs area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 1.098,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x610_asw_obs:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:1800_610_asw_obs"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x900-adh-01-area",
+      "description": "1800 x 900 ADH #1 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 1.62,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x900_adh:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x900-adh-02-area",
+      "description": "1800 x 900 ADH #2 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 1.62,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x900_adh:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:02"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x910-asw-01-area",
+      "description": "1800 x 910 ASW area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 1.638,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x910_asw:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:1800_910_asw"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-2100x1500-asd-01-area",
+      "description": "2100 x 1500 ASD area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 3.15,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:2100x1500_asd:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-2100x2100-asd-01-area",
+      "description": "2100 x 2100 ASD area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 4.41,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:2100x2100_asd:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-2100x2700-assd-01-area",
+      "description": "2100 x 2700 ASSD area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 5.67,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:2100x2700_assd:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:21_27_assd"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-2100x4800-panel-lift-01-area",
+      "description": "2100 x 4800 panel lift door area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 10.08,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:2100x4800_panel_lift:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-600x1210-asw-obs-01-area",
+      "description": "600 x 1210 ASW obs #1 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 0.726,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:600x1210_asw_obs:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:600_1210_asw_obs_01"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-600x1210-asw-obs-02-area",
+      "description": "600 x 1210 ASW obs #2 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 0.726,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:600x1210_asw_obs:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:600_1210_asw_obs_02"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-600x1510-asw-01-area",
+      "description": "600 x 1510 ASW #1 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 0.906,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:600x1510_asw:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-600x1510-asw-02-area",
+      "description": "600 x 1510 ASW #2 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 0.906,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:600x1510_asw:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:02"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1200-main-entry-hinged-01-area",
+      "description": "1200 main entry hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 2.52,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1200_main_entry_hinged:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:ENTRY_PORCH_1200_opening",
+        "architectural:p4:A0.4:ALUMINIUM_ENTRY_DOOR_and_JOINERY_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-0870-gf-entry-hinged-01-area",
+      "description": "870 granny-flat porch entry hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:0870_gf_entry_hinged:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:GF_PORCH_entry_870",
+        "architectural:p4:A0.4:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-0870-garage-personnel-hinged-01-area",
+      "description": "870 garage personnel external hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:0870_garage_personnel_hinged:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:GARAGE_perimeter_870",
+        "architectural:p4:A0.4:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    }
+  ],
   "reason_codes": [
-    "reference_takeoff_not_supplied",
-    "verified_surface_universe_not_built"
+    "remaining_internal_wall_faces_not_closed",
+    "external_wall_faces_and_cladding_not_closed",
+    "roof_surface_universe_not_closed",
+    "remaining_structural_member_universe_not_closed",
+    "secondary_fc_soffit_and_beam_faces_not_closed",
+    "wet_area_tile_niches_and_returns_not_closed",
+    "remaining_wet_area_tile_scope_not_closed",
+    "internal_opening_universe_not_closed"
   ]
 }
