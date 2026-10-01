@@ -84,6 +84,30 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
         "evidence_ids": ["gross-1", "void-1", "role-1"],
     }
     canonical_wall = SimpleNamespace(to_dict=lambda: canonical_wall_payload)
+    canonical_opening_payload = {
+        "canonical_opening_id": "opening-1",
+        "physical_opening_id": "opening-1",
+        "page_id": "1",
+        "viewport_id": "floor-plan-1",
+        "semantic_class": "opening",
+        "structural_pattern": "jamb_bounded_two_face_interruption",
+        "host_wall_id": "whole-wall-1",
+        "wall_local_frame_id": "whole-wall-1",
+        "u0": 4.0,
+        "u1": 5.0,
+        "z0": 0.0,
+        "z1": 2.5,
+        "width_m": 1.0,
+        "height_m": 2.5,
+        "area_m2": 2.5,
+        "geometry_complete": True,
+        "source_observation_ids": ["obs-a", "obs-b"],
+        "source_geometries": [[10.0, 20.0, 20.0, 20.0]],
+        "evidence_ids": ["opening-1", "void-1"],
+    }
+    canonical_opening = SimpleNamespace(
+        to_dict=lambda: canonical_opening_payload
+    )
 
     def fake_physical_wall_claim(pdf_path, *, pages=None):
         seen["pdf_path"] = pdf_path
@@ -94,6 +118,7 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
             quantity_m2=42.5,
             source_pages=(1,),
             canonical_walls=(canonical_wall,),
+            canonical_openings=(canonical_opening,),
             external_wall_ids=("whole-wall-1",),
             evidence_ids=("gross-1", "void-1", "role-1"),
             quantity_id="physical-net-wall-q1",
@@ -128,6 +153,14 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
     assert extractor.physical_net_wall_live["canonical_walls"] == [
         canonical_wall_payload
     ]
+    assert extractor.canonical_openings_live["status"] == "corroborated"
+    assert extractor.canonical_openings_live["openings"] == [
+        canonical_opening_payload
+    ]
+    assert wall.metadata["canonical_opening_ids"] == ["opening-1"]
+    assert wall.metadata["canonical_opening_objects"] == [
+        canonical_opening_payload
+    ]
     assert extractor.extraction_status["physical_net_wall_live"] == "corroborated"
 
 
@@ -137,6 +170,15 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
 ) -> None:
     path = tmp_path / "drawing.pdf"
     path.write_bytes(_drawing_and_boq_pdf())
+    canonical_opening_payload = {
+        "canonical_opening_id": "opening-1",
+        "physical_opening_id": "opening-1",
+        "host_wall_id": "whole-wall-1",
+        "geometry_complete": False,
+    }
+    canonical_opening = SimpleNamespace(
+        to_dict=lambda: canonical_opening_payload
+    )
 
     monkeypatch.setattr(
         GenericPlanReaderExtractor,
@@ -151,6 +193,7 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
             quantity_m2=None,
             source_pages=(),
             canonical_walls=(),
+            canonical_openings=(canonical_opening,),
             external_wall_ids=(),
             evidence_ids=(),
             quantity_id=None,
@@ -166,6 +209,10 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
     )
 
     assert extractor.physical_net_wall_live["status"] == "abstained"
+    assert extractor.canonical_openings_live["status"] == "corroborated"
+    assert extractor.canonical_openings_live["openings"] == [
+        canonical_opening_payload
+    ]
     physical_promotions = [
         pred
         for pred in predictions
