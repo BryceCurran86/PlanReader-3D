@@ -40,8 +40,11 @@ def _verified_item(raw: dict[str, Any], project_id: str) -> VerifiedTakeoffItemV
         trade_category=raw["trade_category"],
         unit=raw["unit"],
         expected_quantity=float(raw["expected_quantity"]),
+        tolerance_policy_id=raw["tolerance_policy_id"],
         tolerance_fraction=float(raw["tolerance_fraction"]),
         expected_object_refs=tuple(raw.get("expected_object_refs") or ()),
+        source_document_refs=tuple(raw.get("source_document_refs") or ()),
+        source_location_refs=tuple(raw.get("source_location_refs") or ()),
         denominator_eligible=bool(raw.get("denominator_eligible", True)),
         verification_status=str(raw.get("verification_status") or "VERIFIED"),
     )
