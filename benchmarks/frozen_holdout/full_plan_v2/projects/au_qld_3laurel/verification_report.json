@@ -67,6 +67,11 @@
       "evidence": "Fourteen labelled room-access openings are independently closed from explicit floor-plan widths and the 2100 mm joinery-height rule; combined opening area 25.011 m2. Wardrobe/linen joinery and unlabelled internal breaks remain outside this closed subset."
     },
     {
+      "proof": "labelled internal sliding-joinery subset source-closed",
+      "status": "PASS",
+      "evidence": "Four explicit VSD-labelled internal joinery openings are independently closed from source widths and the 2100 mm joinery-height rule; combined opening area 13.86 m2. Dimensioned archways and unlabelled internal breaks remain outside this subset."
+    },
+    {
       "proof": "full project surface universe complete",
       "status": "FAIL",
       "evidence": "External openings are source-closed, but multiple other in-scope families remain unresolved."
@@ -133,6 +138,18 @@
     "cavity_slider_count": 6,
     "joinery_height_m": 2.1,
     "complete_for_labelled_room_access_doors": true,
+    "complete_for_all_internal_wall_openings": false
+  },
+  "internal_sliding_joinery_closure_summary": {
+    "closure_check_id": "3laurel:closure:internal_sliding_joinery_opening_census",
+    "verified_opening_count": 4,
+    "verified_area_m2": 13.86,
+    "width_distribution_m": {
+      "1.20": 1,
+      "1.80": 3
+    },
+    "joinery_height_m": 2.1,
+    "complete_for_explicit_vsd_labels": true,
     "complete_for_all_internal_wall_openings": false
   }
 }
