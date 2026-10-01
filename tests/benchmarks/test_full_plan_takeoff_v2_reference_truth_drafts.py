@@ -1257,3 +1257,32 @@ def test_3laurel_laundry_D_tile_skirting_is_source_closed():
         "wet_area_non_shower_tile_skirtings_beyond_closed_laundry_D_plus_bath_surrounds_and_splashbacks"
         in draft["unresolved_surface_families"]
     )
+
+
+def test_3laurel_bathroom_C_shower_tile_face_is_net_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    gross_c = by_ref["3laurel:surface:wall_tile_gross:bath_shower_wall_1"]
+    gross_d = by_ref["3laurel:surface:wall_tile_gross:bath_shower_wall_2"]
+    net_c = by_ref["3laurel:surface:wall_tile:bathroom_C_shower_net"]
+
+    assert gross_c["attributes"]["host_elevation"] == "Bathroom C"
+    assert gross_c["attributes"]["niche_present"] is False
+    assert gross_d["attributes"]["host_elevation"] == "Bathroom D"
+    assert gross_d["attributes"]["niche_present"] is True
+    assert net_c["expected_quantity"] == pytest.approx(1.89)
+    assert net_c["attributes"]["host_gross_surface_ref"] == gross_c["object_ref"]
+    assert net_c["attributes"]["openings_in_host_face"] is False
+    assert net_c["attributes"]["niche_in_host_face"] is False
+    assert net_c["attributes"]["net_finish_area_ready"] is True
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:bathroom_C_shower_tile_face"
+    )
+    assert check["tile_area_m2"] == pytest.approx(1.89)
+    assert check["complete_for_this_explicit_face"] is True
+    assert check["complete_for_project_wet_area_tile_universe"] is False
