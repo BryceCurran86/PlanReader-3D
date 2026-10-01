@@ -5,7 +5,7 @@ pattern on an architectural plan:
 
 1. two independent, parallel figured-dimension chains describe the same
    repeated bay sequence and therefore the same N+1 support count;
-2. a named secondary area (currently a verandah/veranda) sits spatially
+2. a named secondary area (verandah/veranda, alfresco, porch, or patio) sits spatially
    between those two chains; and
 3. a short, explicit support specification (pole/column/pillar/post/pier)
    sits adjacent to the corroborating chain pair in the same horizontal band.
@@ -113,8 +113,12 @@ def _text_blocks(page: Any) -> list[_TextBlock]:
 
 
 def _zone_type(text: str) -> Optional[str]:
+    """Return a canonical secondary-area type from explicit source text only."""
     if re.search(r"\bveranda(?:h)?\b", text, re.IGNORECASE):
         return "verandah"
+    for zone_type in ("alfresco", "porch", "patio"):
+        if re.search(rf"\b{zone_type}\b", text, re.IGNORECASE):
+            return zone_type
     return None
 
 

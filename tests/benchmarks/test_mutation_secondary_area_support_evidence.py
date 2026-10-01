@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import fitz
+import pytest
 
 from pb_secondary_area_support_evidence import (
     SecondaryAreaSupportEvidence,
@@ -26,6 +27,7 @@ def _support_page(
     include_zone: bool = True,
     include_support: bool = True,
     support_text: str = "100mm Dia. RHS Steel Poles",
+    zone_text: str = "VERANDAH",
     x_offset: float = 0.0,
     y_offset: float = 0.0,
     scale: float = 1.0,
@@ -51,7 +53,7 @@ def _support_page(
     if include_upper:
         put_dims(220, bay_count)
     if include_zone:
-        page.insert_text(pos(chain_center_x - 25, 245), "VERANDAH", fontsize=10 * scale)
+        page.insert_text(pos(chain_center_x - 25, 245), zone_text, fontsize=10 * scale)
     if include_lower:
         put_dims(270, lower_count)
     if include_support:
@@ -76,6 +78,26 @@ def test_two_corroborating_bay_chains_with_verandah_and_support_spec_resolve() -
     assert evidence.support_count == 8
     assert evidence.bay_spans_m == (2.25,) * 7
     assert len(evidence.chain_ids) == 2
+
+
+@pytest.mark.parametrize(
+    ("zone_text", "zone_type"),
+    (
+        ("VERANDAH", "verandah"),
+        ("VERANDA", "verandah"),
+        ("ALFRESCO", "alfresco"),
+        ("PORCH", "porch"),
+        ("PATIO", "patio"),
+    ),
+)
+def test_secondary_area_vocabulary_resolves_without_changing_count_authority(
+    zone_text: str, zone_type: str
+) -> None:
+    evidence = _resolve(_support_page(zone_text=zone_text))
+    assert evidence is not None
+    assert evidence.zone_type == zone_type
+    assert evidence.support_count == 8
+    assert evidence.bay_spans_m == (2.25,) * 7
 
 
 def test_count_mutation_tracks_bay_count_plus_one_not_a_fixture() -> None:

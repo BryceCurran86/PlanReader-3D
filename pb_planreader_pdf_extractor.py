@@ -1168,10 +1168,7 @@ class GenericPlanReaderExtractor:
 
         pred_dict: Dict[str, ExtractedPrediction] = {}
 
-        if (
-            global_resolved_secondary_support is not None
-            and global_resolved_secondary_support.zone_type == "verandah"
-        ):
+        if global_resolved_secondary_support is not None:
             # Structural support quantity is live only after the producer-owned
             # physical-member authority resolves the complete source-visible
             # instance row. Corroborated text/dimension arithmetic may remain
@@ -1240,7 +1237,8 @@ class GenericPlanReaderExtractor:
                 }
 
             if (
-                structural_support.status is EvidenceResolutionStatus.CORROBORATED
+                global_resolved_secondary_support.zone_type == "verandah"
+                and structural_support.status is EvidenceResolutionStatus.CORROBORATED
                 and structural_support.quantity is not None
             ):
                 support_sheet_no = self.extract_sheet_number(
