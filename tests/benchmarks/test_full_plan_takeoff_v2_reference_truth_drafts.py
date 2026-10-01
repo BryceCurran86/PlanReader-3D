@@ -846,3 +846,32 @@ def test_lot16_partial_wet_area_tile_faces_and_known_niches_are_source_closed():
         "wet_area_wall_tiling_beyond_five_closed_gross_faces_and_known_niche_face_deductions"
         in draft["unresolved_surface_families"]
     )
+
+
+def test_lot16_garage_floor_and_flat_ceiling_close_to_same_figured_rectangle():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:garage_floor_flat_ceiling"
+    )
+    refs = set(check["component_object_refs"])
+    rows = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
+    assert len(rows) == 2
+    by_family = {row["object_family"]: row for row in rows}
+    assert by_family["floor"]["expected_quantity"] == pytest.approx(38.94)
+    assert by_family["ceiling_plane"]["expected_quantity"] == pytest.approx(38.94)
+    assert check["figured_dimensions_m"] == [6.0, 6.49]
+    assert check["calculated_plan_area_m2"] == pytest.approx(38.94)
+    assert check["floor_finish"] == "epoxy"
+    assert check["ceiling_geometry"] == "flat"
+    assert check["floor_surface_closed"] is True
+    assert check["ceiling_surface_closed"] is True
+    assert (
+        "ceilings_beyond_closed_garage_flat_ceiling_including_raked_ceiling"
+        in draft["unresolved_surface_families"]
+    )
