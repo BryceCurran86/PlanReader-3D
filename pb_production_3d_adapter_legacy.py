@@ -1209,6 +1209,15 @@ def planreader_to_canonical_model(
         c_floor.metadata["geometry_valid"] = True
         c_floor.metadata["geometry_reason"] = poly_msg
         c_floor.metadata["level_derivation"] = f_lvl_val if isinstance(f_lvl_val, dict) else {"value": f_lvl_val}
+
+        # Priority 7: Attach derived trade quantities to CanonicalFloor (Concreting)
+        if f_raw.get("derived_quantities") and isinstance(f_raw["derived_quantities"], list):
+            for qb_raw in f_raw["derived_quantities"]:
+                if isinstance(qb_raw, dict):
+                    c_floor.derived_quantities.append(QuantityFormulaBinding.from_dict(qb_raw))
+        if not c_floor.derived_quantities and c_floor.effective_area_m2() and c_floor.effective_area_m2() > 0:
+            c_floor.derive_trade_quantities()
+
         target_lvl.floors.append(c_floor)
 
     # Process spaces / rooms
@@ -1247,6 +1256,15 @@ def planreader_to_canonical_model(
             provenance=_parse_provenance(sp_raw.get("provenance")),
             metadata=dict(sp_raw.get("metadata") or {}),
         )
+
+        # Priority 7: Attach derived trade quantities to CanonicalSpace (Flooring / Tiling)
+        if sp_raw.get("derived_quantities") and isinstance(sp_raw["derived_quantities"], list):
+            for qb_raw in sp_raw["derived_quantities"]:
+                if isinstance(qb_raw, dict):
+                    c_space.derived_quantities.append(QuantityFormulaBinding.from_dict(qb_raw))
+        if not c_space.derived_quantities and c_space.effective_floor_area_m2() and c_space.effective_floor_area_m2() > 0:
+            c_space.derive_trade_quantities()
+
         target_lvl.spaces.append(c_space)
 
     # SECTION J, K, L: Process v140 roof evidence & caps with objective roof Z proof!

@@ -665,6 +665,131 @@ class CanonicalSpace(CanonicalElement):
         meas = self.measured_area_m2()
         return meas if meas > 0.0 else None
 
+    def perimeter_lm(self) -> float:
+        """Computes boundary polygon perimeter in linear metres."""
+        pts = [(p.x, p.y) for p in self.boundary_polygon if p.x is not None and p.y is not None]
+        if len(pts) < 2:
+            return 0.0
+        n = len(pts)
+        total = 0.0
+        for i in range(n):
+            j = (i + 1) % n
+            dx = pts[j][0] - pts[i][0]
+            dy = pts[j][1] - pts[i][1]
+            total += math.hypot(dx, dy)
+        return round(total, 4)
+
+    def derive_trade_quantities(self, default_finish: Optional[str] = None) -> List[QuantityFormulaBinding]:
+        """Derives flooring, tiling, and waterproofing trade quantities from this physical space."""
+        area = self.effective_floor_area_m2()
+        if not area or area <= 0.0:
+            return []
+
+        perimeter = self.perimeter_lm()
+        floor_finish = (
+            self.finish_assignments.get("floor")
+            or self.metadata.get("floor_finish")
+            or default_finish
+            or ""
+        ).lower()
+
+        if not floor_finish:
+            name_l = self.name.lower()
+            if any(w in name_l for w in ("bed", "robe", "wir")):
+                floor_finish = "carpet"
+            elif any(w in name_l for w in ("bath", "ensuite", "wc", "powder", "laundry")):
+                floor_finish = "tiles"
+            elif any(w in name_l for w in ("living", "dining", "entry", "hall", "kitchen", "family", "meals")):
+                floor_finish = "timber"
+            else:
+                floor_finish = "carpet"
+
+        bindings: List[QuantityFormulaBinding] = []
+
+        if floor_finish in ("timber", "laminate", "hybrid"):
+            bindings.append(QuantityFormulaBinding(
+                trade_category="flooring",
+                item_code="FLOOR_TIMBER",
+                formula_expression="effective_floor_area_m2",
+                unit="m²",
+                quantity=round(area, 2),
+            ))
+            bindings.append(QuantityFormulaBinding(
+                trade_category="flooring",
+                item_code="FLOOR_TIMBER_ACOUSTIC_UNDERLAY",
+                formula_expression="effective_floor_area_m2",
+                unit="m²",
+                quantity=round(area, 2),
+            ))
+            if perimeter > 0.9:
+                bindings.append(QuantityFormulaBinding(
+                    trade_category="carpentry",
+                    item_code="FLOOR_TIMBER_PERIMETER_QUAD",
+                    formula_expression="perimeter_lm - 0.90",
+                    unit="lm",
+                    quantity=round(max(0.0, perimeter - 0.90), 2),
+                ))
+
+        elif floor_finish == "carpet":
+            bindings.append(QuantityFormulaBinding(
+                trade_category="flooring",
+                item_code="FLOOR_CARPET",
+                formula_expression="effective_floor_area_m2",
+                unit="m²",
+                quantity=round(area, 2),
+            ))
+            bindings.append(QuantityFormulaBinding(
+                trade_category="flooring",
+                item_code="FLOOR_CARPET_UNDERLAY",
+                formula_expression="effective_floor_area_m2",
+                unit="m²",
+                quantity=round(area, 2),
+            ))
+            if perimeter > 0.9:
+                bindings.append(QuantityFormulaBinding(
+                    trade_category="flooring",
+                    item_code="FLOOR_CARPET_GRIPPERS",
+                    formula_expression="perimeter_lm - 0.90",
+                    unit="lm",
+                    quantity=round(max(0.0, perimeter - 0.90), 2),
+                ))
+
+        elif floor_finish in ("tiles", "tiling"):
+            bindings.append(QuantityFormulaBinding(
+                trade_category="tiling",
+                item_code="FLOOR_TILES",
+                formula_expression="effective_floor_area_m2",
+                unit="m²",
+                quantity=round(area, 2),
+            ))
+            bindings.append(QuantityFormulaBinding(
+                trade_category="tiling",
+                item_code="FLOOR_SCREED_TO_FALLS",
+                formula_expression="effective_floor_area_m2",
+                unit="m²",
+                quantity=round(area, 2),
+            ))
+            upturn_m2 = round(perimeter * 0.150, 2)
+            wp_total_m2 = round(area + upturn_m2, 2)
+            bindings.append(QuantityFormulaBinding(
+                trade_category="waterproofing",
+                item_code="FLOOR_WATERPROOFING_MEMBRANE",
+                formula_expression="effective_floor_area_m2 + (perimeter_lm * 0.15)",
+                unit="m²",
+                quantity=wp_total_m2,
+            ))
+            if perimeter > 0.9:
+                bindings.append(QuantityFormulaBinding(
+                    trade_category="tiling",
+                    item_code="FLOOR_TILE_SKIRTING",
+                    formula_expression="perimeter_lm - 0.90",
+                    unit="lm",
+                    quantity=round(max(0.0, perimeter - 0.90), 2),
+                ))
+
+        self.derived_quantities = bindings
+        return bindings
+
     def to_dict(self) -> Dict[str, Any]:
         res = self.base_to_dict()
         res.update({
@@ -745,6 +870,20 @@ class PolygonElement(CanonicalElement):
         meas = self.measured_area_m2()
         return meas if meas > 0.0 else None
 
+    def perimeter_lm(self) -> float:
+        """Computes polygon perimeter in linear metres."""
+        pts = [(p.x, p.y) for p in self.polygon if p.x is not None and p.y is not None]
+        if len(pts) < 2:
+            return 0.0
+        n = len(pts)
+        total = 0.0
+        for i in range(n):
+            j = (i + 1) % n
+            dx = pts[j][0] - pts[i][0]
+            dy = pts[j][1] - pts[i][1]
+            total += math.hypot(dx, dy)
+        return round(total, 4)
+
     def to_dict(self) -> Dict[str, Any]:
         res = self.base_to_dict()
         res.update({
@@ -785,6 +924,59 @@ class CanonicalFloor(PolygonElement):
     def __post_init__(self):
         super().__post_init__()
         self.object_type = ObjectType.FLOOR
+
+    def derive_trade_quantities(self, concrete_grade: Optional[str] = None) -> List[QuantityFormulaBinding]:
+        """Derives concrete trade quantities (slab area, concrete volume, vapor barrier, formwork)
+        from this physical slab geometry without re-extraction or duplicate calculation.
+        """
+        area = self.effective_area_m2()
+        if not area or area <= 0.0:
+            return []
+        thickness = self.thickness_m if self.thickness_m and self.thickness_m > 0.0 else 0.100
+        vol_m3 = round(area * thickness, 2)
+        perimeter = self.perimeter_lm()
+
+        bindings: List[QuantityFormulaBinding] = []
+
+        # 1. Primary Slab Area (m²)
+        bindings.append(QuantityFormulaBinding(
+            trade_category="concreting",
+            item_code="CONCRETE_SLAB_GROUND",
+            formula_expression="effective_area_m2",
+            unit="m²",
+            quantity=round(area, 2),
+        ))
+
+        # 2. Concrete Supply & Placement (item / m³)
+        bindings.append(QuantityFormulaBinding(
+            trade_category="concreting",
+            item_code="CONCRETE_SUPPLY_PUMP",
+            formula_expression="effective_area_m2 * thickness_m",
+            unit="item",
+            quantity=vol_m3,
+        ))
+
+        # 3. Under-slab Vapor Barrier / DPM (m²)
+        bindings.append(QuantityFormulaBinding(
+            trade_category="concreting",
+            item_code="CONCRETE_SLAB_VAPOR_BARRIER",
+            formula_expression="effective_area_m2 * 1.10",
+            unit="m²",
+            quantity=round(area * 1.10, 2),
+        ))
+
+        # 4. Slab Edge Formwork (lm)
+        if perimeter > 0.0:
+            bindings.append(QuantityFormulaBinding(
+                trade_category="concreting",
+                item_code="CONCRETE_SLAB_EDGE_FORMWORK",
+                formula_expression="perimeter_lm",
+                unit="lm",
+                quantity=round(perimeter, 2),
+            ))
+
+        self.derived_quantities = bindings
+        return bindings
 
 
 @dataclass
@@ -1441,5 +1633,308 @@ class CanonicalProject(CanonicalElement):
     def from_json(cls, json_str: str) -> "CanonicalProject":
         data = json.loads(json_str)
         return cls.from_dict(data)
+
+    def generate_takeoff_rows(
+        self, workspace_id: int, now_stamp: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Generates canonical 21-field core takeoff rows for all trades in this canonical building model:
+
+        - Walls (bricklaying/masonry external walls, carpentry internal partitions, wall face finishes)
+        - Openings (doors, windows)
+        - Floors (concrete slab area, concrete volume m³, vapor barrier m², edge formwork lm)
+        - Spaces (carpet/timber/tile floor finishes, underlay/screed, waterproofing membrane)
+        """
+        stamp = now_stamp or ""
+        rows: List[Dict[str, Any]] = []
+
+        # 1. Walls & Openings
+        for w in self.all_walls():
+            w_net = w.net_area_m2()
+            w_len = w.length_m()
+            w_gross = w.gross_area_m2()
+            w_ded = w.total_opening_deductions_m2()
+
+            if w.is_external and w_net > 0:
+                rows.append({
+                    "workspace_id": int(workspace_id),
+                    "section": "External",
+                    "element": "External walls / cladding",
+                    "location": f"External perimeter · {w.id}",
+                    "substrate": w.substrate or "Clay brickwork",
+                    "finish_system": (w.face_a.finish if w.face_a and w.face_a.finish else "To be confirmed"),
+                    "quantity": round(w_net, 2),
+                    "unit": "m²",
+                    "quantity_status": "Measured",
+                    "source_page": getattr(w.provenance, "source_page", "1") or "1",
+                    "source_reference": f"PB Canonical BIM · wall:{w.id}",
+                    "inclusion_status": "INCLUSION",
+                    "coats": 1,
+                    "coverage_m2_per_litre": 0.0,
+                    "productivity_m2_per_hour": 0.0,
+                    "rate_per_unit": 0.0,
+                    "confidence": "Documented" if w.confidence and w.confidence >= 0.8 else "Derived",
+                    "notes": f"Net wall area {w_net:.2f} m² (Gross {w_gross:.2f} m² less opening deductions {w_ded:.2f} m²).",
+                    "row_role": "external_wall",
+                    "created_at": stamp,
+                    "updated_at": stamp,
+                })
+            elif not w.is_external and w_len > 0:
+                rows.append({
+                    "workspace_id": int(workspace_id),
+                    "section": "Internal",
+                    "element": "Internal partition framing",
+                    "location": f"Internal partition · {w.id}",
+                    "substrate": w.substrate or "Timber stud framing",
+                    "finish_system": "Bare timber frame",
+                    "quantity": round(w_len, 2),
+                    "unit": "lm",
+                    "quantity_status": "Measured",
+                    "source_page": getattr(w.provenance, "source_page", "1") or "1",
+                    "source_reference": f"PB Canonical BIM · partition:{w.id}",
+                    "inclusion_status": "PROVISIONAL",
+                    "coats": 1,
+                    "coverage_m2_per_litre": 0.0,
+                    "productivity_m2_per_hour": 0.0,
+                    "rate_per_unit": 0.0,
+                    "confidence": "Documented" if w.confidence and w.confidence >= 0.8 else "Derived",
+                    "notes": f"Internal partition framing run {w_len:.2f} lm.",
+                    "row_role": "internal_partition",
+                    "created_at": stamp,
+                    "updated_at": stamp,
+                })
+
+            # Wall faces
+            for face, face_label in ((w.face_a, "Face A"), (w.face_b, "Face B")):
+                if face and face.finish and face.area_net_m2 and face.area_net_m2 > 0:
+                    rows.append({
+                        "workspace_id": int(workspace_id),
+                        "section": "External" if (w.is_external and face_label == "Face A") else "Internal",
+                        "element": f"Wall finish ({face.finish_code or face_label})",
+                        "location": f"{w.id} · {face_label}",
+                        "substrate": face.substrate or w.substrate or "Wall substrate",
+                        "finish_system": face.finish,
+                        "quantity": round(face.area_net_m2, 2),
+                        "unit": "m²",
+                        "quantity_status": "Measured",
+                        "source_page": getattr(w.provenance, "source_page", "1") or "1",
+                        "source_reference": f"PB Canonical BIM · finish:{w.id}:{face.face_id}",
+                        "inclusion_status": "PROVISIONAL",
+                        "coats": 2 if "paint" in face.finish.lower() else 1,
+                        "coverage_m2_per_litre": 0.0,
+                        "productivity_m2_per_hour": 0.0,
+                        "rate_per_unit": 0.0,
+                        "confidence": "Documented",
+                        "notes": f"Net finish area {face.area_net_m2:.2f} m².",
+                        "row_role": "wall_finish",
+                        "created_at": stamp,
+                        "updated_at": stamp,
+                    })
+
+            # Openings
+            for op in w.openings:
+                if op.deduction_authority:
+                    rows.append({
+                        "workspace_id": int(workspace_id),
+                        "section": "Internal" if op.opening_type == ObjectType.DOOR else "External",
+                        "element": op.opening_classification or ("Door" if op.opening_type == ObjectType.DOOR else "Window"),
+                        "location": f"{op.mark} · on {w.id}",
+                        "substrate": "Selected timber / aluminium",
+                        "finish_system": "Factory pre-finished",
+                        "quantity": 1.0,
+                        "unit": "No.",
+                        "quantity_status": "Measured",
+                        "source_page": getattr(op.provenance, "source_page", "1") or "1",
+                        "source_reference": f"PB Canonical BIM · opening:{op.id}",
+                        "inclusion_status": "PROVISIONAL",
+                        "coats": 1,
+                        "coverage_m2_per_litre": 0.0,
+                        "productivity_m2_per_hour": 0.0,
+                        "rate_per_unit": 0.0,
+                        "confidence": "Documented",
+                        "notes": f"{op.opening_classification} {op.mark} ({op.width_m or 0.0:.2f}m W × {op.height_m or 0.0:.2f}m H).",
+                        "row_role": "",
+                        "created_at": stamp,
+                        "updated_at": stamp,
+                    })
+
+        # 2. Floors (Concreting)
+        for fl in self.all_floors():
+            fl_area = fl.effective_area_m2()
+            if not fl_area or fl_area <= 0.0:
+                continue
+            if not fl.derived_quantities:
+                fl.derive_trade_quantities()
+
+            thickness = fl.thickness_m if fl.thickness_m and fl.thickness_m > 0.0 else 0.100
+            vol_m3 = round(fl_area * thickness, 2)
+            perim = fl.perimeter_lm()
+
+            # Slab area
+            rows.append({
+                "workspace_id": int(workspace_id),
+                "section": "Substructure",
+                "element": f"Concrete slab on ground ({int(thickness*1000)}mm)",
+                "location": f"Slab · {fl.id}",
+                "substrate": fl.substrate or "25 MPa Concrete",
+                "finish_system": "Curing compound / steel trowel finish",
+                "quantity": round(fl_area, 2),
+                "unit": "m²",
+                "quantity_status": "Measured",
+                "source_page": getattr(fl.provenance, "source_page", "1") or "1",
+                "source_reference": f"PB Canonical BIM · concrete:{fl.id}:area",
+                "inclusion_status": "INCLUSION",
+                "coats": 1,
+                "coverage_m2_per_litre": 0.0,
+                "productivity_m2_per_hour": 0.0,
+                "rate_per_unit": 0.0,
+                "confidence": "Documented",
+                "notes": f"Slab area {fl_area:.2f} m² × {int(thickness*1000)}mm thickness. Concrete volume: {vol_m3:.2f} m³.",
+                "row_role": "floor_area",
+                "created_at": stamp,
+                "updated_at": stamp,
+            })
+
+            # Concrete volume / supply
+            rows.append({
+                "workspace_id": int(workspace_id),
+                "section": "Substructure",
+                "element": f"Concrete supply & pump ({fl.substrate or '25 MPa Concrete'})",
+                "location": f"Slab · {fl.id}",
+                "substrate": fl.substrate or "25 MPa Concrete",
+                "finish_system": "Supply, pump and place",
+                "quantity": vol_m3,
+                "unit": "item",
+                "quantity_status": "Measured",
+                "source_page": getattr(fl.provenance, "source_page", "1") or "1",
+                "source_reference": f"PB Canonical BIM · concrete:{fl.id}:volume",
+                "inclusion_status": "INCLUSION",
+                "coats": 1,
+                "coverage_m2_per_litre": 0.0,
+                "productivity_m2_per_hour": 0.0,
+                "rate_per_unit": 0.0,
+                "confidence": "Documented",
+                "notes": f"Supply & place {vol_m3:.2f} m³ of concrete ({fl_area:.2f} m² × {thickness:.3f}m).",
+                "row_role": "",
+                "created_at": stamp,
+                "updated_at": stamp,
+            })
+
+            # Under-slab vapor barrier
+            rows.append({
+                "workspace_id": int(workspace_id),
+                "section": "Substructure",
+                "element": "Damp-proof membrane / vapor barrier",
+                "location": f"Slab base · {fl.id}",
+                "substrate": "0.2mm Polythene film",
+                "finish_system": "Supplied and laid with 200mm laps",
+                "quantity": round(fl_area * 1.10, 2),
+                "unit": "m²",
+                "quantity_status": "Measured",
+                "source_page": getattr(fl.provenance, "source_page", "1") or "1",
+                "source_reference": f"PB Canonical BIM · concrete:{fl.id}:dpm",
+                "inclusion_status": "INCLUSION",
+                "coats": 1,
+                "coverage_m2_per_litre": 0.0,
+                "productivity_m2_per_hour": 0.0,
+                "rate_per_unit": 0.0,
+                "confidence": "Documented",
+                "notes": f"Vapor barrier: {fl_area:.2f} m² + 10% lap allowance = {fl_area*1.10:.2f} m².",
+                "row_role": "",
+                "created_at": stamp,
+                "updated_at": stamp,
+            })
+
+            # Edge formwork
+            if perim > 0:
+                rows.append({
+                    "workspace_id": int(workspace_id),
+                    "section": "Substructure",
+                    "element": "Slab edge formwork",
+                    "location": f"Slab perimeter · {fl.id}",
+                    "substrate": "Edge form boards",
+                    "finish_system": "Form, strip and clean",
+                    "quantity": round(perim, 2),
+                    "unit": "lm",
+                    "quantity_status": "Measured",
+                    "source_page": getattr(fl.provenance, "source_page", "1") or "1",
+                    "source_reference": f"PB Canonical BIM · concrete:{fl.id}:edge_form",
+                    "inclusion_status": "INCLUSION",
+                    "coats": 1,
+                    "coverage_m2_per_litre": 0.0,
+                    "productivity_m2_per_hour": 0.0,
+                    "rate_per_unit": 0.0,
+                    "confidence": "Documented",
+                    "notes": f"Perimeter edge formwork {perim:.2f} lm for {int(thickness*1000)}mm slab edge.",
+                    "row_role": "",
+                    "created_at": stamp,
+                    "updated_at": stamp,
+                })
+
+        # 3. Spaces (Flooring & Tiling)
+        for sp in self.all_spaces():
+            sp_area = sp.effective_floor_area_m2()
+            if not sp_area or sp_area <= 0.0:
+                continue
+            if not sp.derived_quantities:
+                sp.derive_trade_quantities()
+
+            for b in sp.derived_quantities:
+                rows.append({
+                    "workspace_id": int(workspace_id),
+                    "section": "Internal",
+                    "element": b.item_code.replace("_", " ").title(),
+                    "location": f"{sp.name} · {sp.id}",
+                    "substrate": sp.finish_assignments.get("floor") or "Selected flooring substrate",
+                    "finish_system": "Supplied and installed to manufacturer specification",
+                    "quantity": round(b.quantity or sp_area, 2),
+                    "unit": b.unit,
+                    "quantity_status": "Measured",
+                    "source_page": getattr(sp.provenance, "source_page", "1") or "1",
+                    "source_reference": f"PB Canonical BIM · flooring:{sp.id}:{b.item_code}",
+                    "inclusion_status": "INCLUSION",
+                    "coats": 1,
+                    "coverage_m2_per_litre": 0.0,
+                    "productivity_m2_per_hour": 0.0,
+                    "rate_per_unit": 0.0,
+                    "confidence": "Documented",
+                    "notes": f"{b.trade_category.title()} derived from {sp.name} ({b.formula_expression}).",
+                    "row_role": "floor_area" if b.item_code.startswith("FLOOR_") and b.unit == "m²" else "",
+                    "created_at": stamp,
+                    "updated_at": stamp,
+                })
+
+        return rows
+
+
+def publish_canonical_model_to_takeoff(
+    app: Any,
+    workspace_id: int,
+    project: Optional[CanonicalProject] = None,
+) -> int:
+    """Publishes canonical BIM model quantities directly into the SQLite takeoff_rows table.
+    Ensures zero divergence between the 3D canonical model and the customer's trade schedule.
+    """
+    if project is None:
+        from pb_canonical_persistence import load_workspace_canonical_model
+        ok, loaded_project, _, _ = load_workspace_canonical_model(app, workspace_id)
+        if not ok or not loaded_project:
+            return 0
+        project = loaded_project
+
+    project.recompute_relationships()
+    stamp = app.now_stamp() if hasattr(app, "now_stamp") else ""
+    rows_data = project.generate_takeoff_rows(int(workspace_id), stamp)
+    if not rows_data:
+        return 0
+
+    import pb_takeoff_row_contract as takeoff_contract
+    sql = takeoff_contract.insert_sql(takeoff_contract.CORE_FIELDS)
+    count = 0
+    for r in rows_data:
+        values = tuple(r[k] for k in takeoff_contract.CORE_FIELDS)
+        if hasattr(app, "lexecute"):
+            app.lexecute(sql, values)
+        count += 1
+    return count
 
 

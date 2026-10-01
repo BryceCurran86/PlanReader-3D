@@ -29,6 +29,7 @@ from pb_canonical_building import (
     ReviewState,
     Vector2D,
     WallFace,
+    publish_canonical_model_to_takeoff,
 )
 
 
@@ -894,3 +895,227 @@ def test_canonical_floor_and_roof_areas():
         pitch_deg=None,
     )
     assert roof_no_pitch.surface_area_m2() == 100.0
+
+
+def test_canonical_floor_concreting_trade_derivation():
+    """CanonicalFloor derives complete concreting trade quantities (slab area, volume m3, vapor barrier, formwork)."""
+    floor_poly = [
+        Vector2D(x=0.0, y=0.0),
+        Vector2D(x=10.0, y=0.0),
+        Vector2D(x=10.0, y=8.0),
+        Vector2D(x=0.0, y=8.0),
+    ]
+    floor = CanonicalFloor(
+        id="flr_main",
+        name="Ground Floor Slab",
+        polygon=floor_poly,
+        thickness_m=0.100,
+        substrate="25 MPa Concrete",
+    )
+    assert floor.measured_area_m2() == 80.0
+    assert floor.perimeter_lm() == 36.0
+
+    bindings = floor.derive_trade_quantities()
+    assert len(bindings) == 4
+
+    b_map = {b.item_code: b for b in bindings}
+    assert "CONCRETE_SLAB_GROUND" in b_map
+    assert b_map["CONCRETE_SLAB_GROUND"].quantity == 80.0
+    assert b_map["CONCRETE_SLAB_GROUND"].unit == "m²"
+
+    assert "CONCRETE_SUPPLY_PUMP" in b_map
+    assert b_map["CONCRETE_SUPPLY_PUMP"].quantity == 8.0  # 80m2 * 0.1m = 8m3
+    assert b_map["CONCRETE_SUPPLY_PUMP"].unit == "item"
+
+    assert "CONCRETE_SLAB_VAPOR_BARRIER" in b_map
+    assert b_map["CONCRETE_SLAB_VAPOR_BARRIER"].quantity == 88.0  # 80m2 * 1.10 = 88m2
+    assert b_map["CONCRETE_SLAB_VAPOR_BARRIER"].unit == "m²"
+
+    assert "CONCRETE_SLAB_EDGE_FORMWORK" in b_map
+    assert b_map["CONCRETE_SLAB_EDGE_FORMWORK"].quantity == 36.0  # Perimeter 36 lm
+    assert b_map["CONCRETE_SLAB_EDGE_FORMWORK"].unit == "lm"
+
+
+def test_canonical_space_flooring_trade_derivation():
+    """CanonicalSpace derives accurate flooring, underlay, screed, and waterproofing quantities."""
+    # 1. Carpet in Bedroom 1 (5m x 4m = 20.0 m2, perimeter 18m)
+    bed_poly = [
+        Vector2D(x=0.0, y=0.0),
+        Vector2D(x=5.0, y=0.0),
+        Vector2D(x=5.0, y=4.0),
+        Vector2D(x=0.0, y=4.0),
+    ]
+    sp_bed = CanonicalSpace(
+        id="sp_bed1",
+        name="Bedroom 1",
+        boundary_polygon=bed_poly,
+        finish_assignments={"floor": "carpet"},
+    )
+    assert sp_bed.measured_area_m2() == 20.0
+    assert sp_bed.perimeter_lm() == 18.0
+
+    bed_bindings = sp_bed.derive_trade_quantities()
+    b_bed_map = {b.item_code: b for b in bed_bindings}
+    assert b_bed_map["FLOOR_CARPET"].quantity == 20.0
+    assert b_bed_map["FLOOR_CARPET"].unit == "m²"
+    assert b_bed_map["FLOOR_CARPET_UNDERLAY"].quantity == 20.0
+    assert b_bed_map["FLOOR_CARPET_GRIPPERS"].quantity == 17.10  # 18.0 - 0.90 door
+
+    # 2. Tiling & Waterproofing in Ensuite (3m x 2m = 6.0 m2, perimeter 10m)
+    ensuite_poly = [
+        Vector2D(x=0.0, y=0.0),
+        Vector2D(x=3.0, y=0.0),
+        Vector2D(x=3.0, y=2.0),
+        Vector2D(x=0.0, y=2.0),
+    ]
+    sp_ensuite = CanonicalSpace(
+        id="sp_ensuite",
+        name="Master Ensuite",
+        boundary_polygon=ensuite_poly,
+        finish_assignments={"floor": "tiles"},
+    )
+    ensuite_bindings = sp_ensuite.derive_trade_quantities()
+    b_ens_map = {b.item_code: b for b in ensuite_bindings}
+    assert b_ens_map["FLOOR_TILES"].quantity == 6.0
+    assert b_ens_map["FLOOR_SCREED_TO_FALLS"].quantity == 6.0
+    # Waterproofing: 6.0 m2 floor + (10m * 0.150m upturn = 1.5m2) = 7.50 m2
+    assert b_ens_map["FLOOR_WATERPROOFING_MEMBRANE"].quantity == 7.50
+    assert b_ens_map["FLOOR_TILE_SKIRTING"].quantity == 9.10  # 10.0 - 0.90 door
+
+    # 3. Timber in Living Room (8m x 5m = 40.0 m2, perimeter 26m)
+    living_poly = [
+        Vector2D(x=0.0, y=0.0),
+        Vector2D(x=8.0, y=0.0),
+        Vector2D(x=8.0, y=5.0),
+        Vector2D(x=0.0, y=5.0),
+    ]
+    sp_living = CanonicalSpace(
+        id="sp_living",
+        name="Living Room",
+        boundary_polygon=living_poly,
+        finish_assignments={"floor": "timber"},
+    )
+    living_bindings = sp_living.derive_trade_quantities()
+    b_liv_map = {b.item_code: b for b in living_bindings}
+    assert b_liv_map["FLOOR_TIMBER"].quantity == 40.0
+    assert b_liv_map["FLOOR_TIMBER_ACOUSTIC_UNDERLAY"].quantity == 40.0
+    assert b_liv_map["FLOOR_TIMBER_PERIMETER_QUAD"].quantity == 25.10  # 26.0 - 0.90 door
+
+
+def test_end_to_end_concreting_and_flooring_takeoff_publishing():
+    """End-to-end proof: Concrete slab volume, vapor barrier, and room floor coverings publish directly to customer takeoff rows."""
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+    import pb_planreader_3d_app as app_mod
+    import pb_takeoff_row_contract as takeoff_contract
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        db_path = Path(tmp) / "canonical_trade_pub_test.db"
+        with patch.object(app_mod, "DB_PATH", db_path):
+            setattr(app_mod, "_pb_local_db_initialized_v1215", False)
+            app_mod.init_local_db()
+
+            app_mod.lexecute("INSERT INTO workspaces(id, job_name, created_at, updated_at) VALUES(99, 'Trade Pub Test', 'x', 'x')")
+
+            # Build canonical project with 1 floor and 2 spaces
+            project = CanonicalProject(id="proj_trade_pub", name="Trade Publication Project")
+            building = CanonicalBuilding(id="bld_1", name="Main Building")
+            level = CanonicalLevel(id="lvl_0", name="Ground Floor", level_index=0, elevation_m=0.0)
+
+            # Ground slab: 10m x 10m = 100m2, 100mm thick
+            floor = CanonicalFloor(
+                id="flr_ground_01",
+                name="Ground Slab",
+                polygon=[
+                    Vector2D(x=0.0, y=0.0),
+                    Vector2D(x=10.0, y=0.0),
+                    Vector2D(x=10.0, y=10.0),
+                    Vector2D(x=0.0, y=10.0),
+                ],
+                thickness_m=0.100,
+                substrate="25 MPa Concrete",
+            )
+            level.floors.append(floor)
+
+            # Bedroom 1: 6m x 4m = 24m2, carpet
+            sp_bed = CanonicalSpace(
+                id="sp_bed_99",
+                name="Bedroom 1",
+                boundary_polygon=[
+                    Vector2D(x=0.0, y=0.0),
+                    Vector2D(x=6.0, y=0.0),
+                    Vector2D(x=6.0, y=4.0),
+                    Vector2D(x=0.0, y=4.0),
+                ],
+                finish_assignments={"floor": "carpet"},
+            )
+            level.spaces.append(sp_bed)
+
+            # Bathroom: 4m x 2m = 8m2, tiles
+            sp_bath = CanonicalSpace(
+                id="sp_bath_99",
+                name="Family Bathroom",
+                boundary_polygon=[
+                    Vector2D(x=6.0, y=0.0),
+                    Vector2D(x=10.0, y=0.0),
+                    Vector2D(x=10.0, y=2.0),
+                    Vector2D(x=6.0, y=2.0),
+                ],
+                finish_assignments={"floor": "tiles"},
+            )
+            level.spaces.append(sp_bath)
+
+            building.levels.append(level)
+            project.buildings.append(building)
+
+            # Recompute model relationships and derive quantities
+            project.recompute_relationships()
+
+            # Publish directly to customer takeoff schedule in SQLite
+            row_count = publish_canonical_model_to_takeoff(app_mod, workspace_id=99, project=project)
+            assert row_count > 0
+
+            # Query database takeoff_rows directly
+            db_rows = app_mod.lquery("SELECT section, element, location, substrate, quantity, unit, notes FROM takeoff_rows WHERE workspace_id=99")
+            assert len(db_rows) == row_count
+
+            # 1. Verify Concrete Slab Area (100.0 m2)
+            slab_row = next(r for r in db_rows if "Concrete slab on ground" in str(r.get("element") or ""))
+            assert slab_row["quantity"] == 100.0
+            assert slab_row["unit"] == "m²"
+            assert slab_row["section"] == "Substructure"
+
+            # 2. Verify Concrete Volume Supply (10.0 item / m3)
+            vol_row = next(r for r in db_rows if "Concrete supply & pump" in str(r.get("element") or ""))
+            assert vol_row["quantity"] == 10.0  # 100m2 * 0.100m = 10.0 m3
+            assert vol_row["unit"] == "item"
+            assert "10.00 m³" in vol_row["notes"]
+
+            # 3. Verify Under-slab Vapor Barrier (110.0 m2 with 10% laps)
+            dpm_row = next(r for r in db_rows if "vapor barrier" in str(r.get("element") or "").lower())
+            assert dpm_row["quantity"] == 110.0
+            assert dpm_row["unit"] == "m²"
+
+            # 4. Verify Bedroom Carpet (24.0 m2)
+            carpet_row = next(r for r in db_rows if "Floor Carpet" in str(r.get("element") or "") and "sp_bed_99" in str(r.get("location") or ""))
+            assert carpet_row["quantity"] == 24.0
+            assert carpet_row["unit"] == "m²"
+            assert carpet_row["section"] == "Internal"
+
+            # 5. Verify Bathroom Floor Tiles (8.0 m2)
+            tile_row = next(r for r in db_rows if "Floor Tiles" in str(r.get("element") or "") and "sp_bath_99" in str(r.get("location") or ""))
+            assert tile_row["quantity"] == 8.0
+            assert tile_row["unit"] == "m²"
+
+            # 6. Verify Bathroom Waterproofing Membrane
+            # Area 8.0 m2 + 12m perimeter * 0.15m upturn = 9.80 m2
+            wp_row = next(r for r in db_rows if "Waterproofing Membrane" in str(r.get("element") or ""))
+            assert wp_row["quantity"] == 9.80
+            assert wp_row["unit"] == "m²"
+
+            # 7. Verify all rows comply with canonical takeoff row units
+            for r in db_rows:
+                assert r["unit"] in takeoff_contract.TAKEOFF_UNITS
+                assert r["quantity"] >= 0.0
+
