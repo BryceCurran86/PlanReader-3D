@@ -399,6 +399,7 @@ class GenericPlanReaderExtractor:
             "reason_codes": ["not_collected"],
             "quantity_m2": None,
             "source_pages": [],
+            "canonical_walls": [],
             "external_wall_ids": [],
             "evidence_ids": [],
             "quantity_id": None,
@@ -967,6 +968,7 @@ class GenericPlanReaderExtractor:
             "reason_codes": ["not_collected"],
             "quantity_m2": None,
             "source_pages": [],
+            "canonical_walls": [],
             "external_wall_ids": [],
             "evidence_ids": [],
             "quantity_id": None,
@@ -2911,11 +2913,16 @@ class GenericPlanReaderExtractor:
                     p_path,
                     pages=physical_net_pages,
                 )
+                canonical_wall_objects = [
+                    wall.to_dict()
+                    for wall in physical_wall_result.canonical_walls
+                ]
                 self.physical_net_wall_live = {
                     "status": physical_wall_result.status.value,
                     "reason_codes": list(physical_wall_result.reason_codes),
                     "quantity_m2": physical_wall_result.quantity_m2,
                     "source_pages": list(physical_wall_result.source_pages),
+                    "canonical_walls": canonical_wall_objects,
                     "external_wall_ids": list(
                         physical_wall_result.external_wall_ids
                     ),
@@ -2973,6 +2980,11 @@ class GenericPlanReaderExtractor:
                             "external_wall_ids": list(
                                 physical_wall_result.external_wall_ids
                             ),
+                            "canonical_wall_ids": [
+                                wall["canonical_wall_id"]
+                                for wall in canonical_wall_objects
+                            ],
+                            "canonical_wall_objects": canonical_wall_objects,
                             "evidence_ids": list(
                                 physical_wall_result.evidence_ids
                             ),
