@@ -42,6 +42,11 @@
       "evidence": "unfinished wall, roof, structural, soffit/beam, wet-area tile and internal-opening families remain explicit unresolved work"
     },
     {
+      "proof": "primary ceiling planes source-closed",
+      "status": "PASS",
+      "evidence": "Seven horizontal primary ceiling planes reconcile exactly to the 297.5 m2 source-declared plan-area total; secondary FC soffit and beam faces remain unresolved."
+    },
+    {
       "proof": "full project surface universe complete",
       "status": "FAIL",
       "evidence": "External openings are source-closed, but multiple other in-scope families remain unresolved."
@@ -60,5 +65,14 @@
       "architectural:p3:A0.3:floor_plan:all_perimeter_typed_openings_plus_main_entry_GF_entry_and_garage_personnel_door",
       "architectural:p4-p5:A0.4-A0.5:elevations:entry_door_crosscheck_and_JOINERY_HEIGHTS_2100_AFL_UNO"
     ]
+  },
+  "primary_ceiling_closure_summary": {
+    "closure_check_id": "3laurel:closure:primary_ceiling_planes",
+    "verified_ceiling_plane_count": 7,
+    "verified_area_m2": 297.5,
+    "declared_reference_plan_area_m2": 297.5,
+    "difference_m2": 0,
+    "primary_ceiling_universe_complete": true,
+    "secondary_fc_soffit_and_beam_faces_complete": false
   }
 }

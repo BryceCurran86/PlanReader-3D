@@ -496,5 +496,134 @@
       ]
     }
   ],
-  "external_opening_universe_complete": true
+  "external_opening_universe_complete": true,
+  "primary_ceiling_planes": [
+    {
+      "object_ref": "3laurel:surface:ceiling:garage",
+      "physical_kind": "ceiling_finish_surface",
+      "object_family": "ceiling_plane",
+      "description": "Garage ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 36.4,
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "10mm Gyprock to truss bottom chord",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_area_region:garage",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:gf_alfresco",
+      "physical_kind": "ceiling_finish_surface",
+      "object_family": "ceiling_plane",
+      "description": "Granny-flat alfresco ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 10.5,
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "horizontal underside ceiling plane",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_area_region:gf_alfresco",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:gf_living",
+      "physical_kind": "ceiling_finish_surface",
+      "object_family": "ceiling_plane",
+      "description": "Granny-flat internal ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 60,
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "10mm Gyprock to truss bottom chord",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_area_region:gf_living",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:gf_porch",
+      "physical_kind": "ceiling_finish_surface",
+      "object_family": "ceiling_plane",
+      "description": "Granny-flat porch ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.4,
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "FC sheet to underside truss/joists",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_area_region:gf_porch",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:main_alfresco",
+      "physical_kind": "ceiling_finish_surface",
+      "object_family": "ceiling_plane",
+      "description": "Main-house alfresco ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 13.6,
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "plaster to underside of trusses",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_area_region:main_alfresco",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:main_living",
+      "physical_kind": "ceiling_finish_surface",
+      "object_family": "ceiling_plane",
+      "description": "Main-house internal ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 168.1,
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "10mm Gyprock to truss bottom chord",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_area_region:main_living",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:main_porch",
+      "physical_kind": "ceiling_finish_surface",
+      "object_family": "ceiling_plane",
+      "description": "Main-house porch ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 7.5,
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "FC sheet to underside truss/joists",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_area_region:main_porch",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ]
+    }
+  ],
+  "primary_ceiling_plane_universe_complete": true
 }
