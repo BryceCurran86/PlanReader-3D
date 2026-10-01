@@ -440,6 +440,12 @@ class GenericPlanReaderExtractor:
             "quantity_evidence": None,
             "coverage_registry_summary": None,
         }
+        self.canonical_structural_members_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "member_kind": None,
+            "members": [],
+        }
         self.physical_net_wall_live: Dict[str, Any] = {
             "status": "abstained",
             "reason_codes": ["not_collected"],
@@ -461,6 +467,16 @@ class GenericPlanReaderExtractor:
             "status": "abstained",
             "reason_codes": ["not_collected"],
             "openings": [],
+        }
+        self.canonical_doors_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "doors": [],
+        }
+        self.canonical_windows_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "windows": [],
         }
         self.canonical_rooms_live: Dict[str, Any] = {
             "status": "abstained",
@@ -1155,6 +1171,12 @@ class GenericPlanReaderExtractor:
             "quantity_evidence": None,
             "coverage_registry_summary": None,
         }
+        self.canonical_structural_members_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "member_kind": None,
+            "members": [],
+        }
 
         self.physical_net_wall_live = {
             "status": "abstained",
@@ -1170,6 +1192,16 @@ class GenericPlanReaderExtractor:
             "status": "abstained",
             "reason_codes": ["not_collected"],
             "openings": [],
+        }
+        self.canonical_doors_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "doors": [],
+        }
+        self.canonical_windows_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "windows": [],
         }
         self.canonical_walls_live = {
             "status": "abstained",
@@ -1414,6 +1446,28 @@ class GenericPlanReaderExtractor:
                 ),
             ).resolution
 
+            from pb_live_canonical_structural_member_projection import (
+                project_structural_member_resolution,
+            )
+
+            structural_projection = project_structural_member_resolution(
+                structural_support
+            )
+            canonical_structural_member_objects = [
+                member.to_dict()
+                for member in structural_projection.objects
+            ]
+            self.canonical_structural_members_live = {
+                "status": (
+                    "corroborated"
+                    if canonical_structural_member_objects
+                    else "abstained"
+                ),
+                "reason_codes": list(structural_projection.reason_codes),
+                "member_kind": structural_support.selector.member_kind,
+                "members": canonical_structural_member_objects,
+            }
+
             # Structural coverage SHADOW only. It reissues the already-resolved
             # producer-owned member universe and quantity trace. Failure here is
             # diagnostic only and must never change live prediction publication.
@@ -1470,6 +1524,13 @@ class GenericPlanReaderExtractor:
                             member.physical_member_id
                             for member in structural_support.members
                         ],
+                        "canonical_structural_member_ids": [
+                            member["canonical_structural_member_id"]
+                            for member in canonical_structural_member_objects
+                        ],
+                        "canonical_structural_member_objects": (
+                            canonical_structural_member_objects
+                        ),
                         "source_sha256": structural_source_sha256,
                         "zone_type": global_resolved_secondary_support.zone_type,
                         "support_kind": global_resolved_secondary_support.support_kind,
@@ -3278,6 +3339,34 @@ class GenericPlanReaderExtractor:
                     "reason_codes": list(physical_wall_result.reason_codes),
                     "openings": canonical_opening_objects,
                 }
+                canonical_door_objects = [
+                    opening
+                    for opening in canonical_opening_objects
+                    if opening.get("opening_kind") == "door"
+                ]
+                canonical_window_objects = [
+                    opening
+                    for opening in canonical_opening_objects
+                    if opening.get("opening_kind") == "window"
+                ]
+                self.canonical_doors_live = {
+                    "status": (
+                        "corroborated"
+                        if canonical_door_objects
+                        else "abstained"
+                    ),
+                    "reason_codes": list(physical_wall_result.reason_codes),
+                    "doors": canonical_door_objects,
+                }
+                self.canonical_windows_live = {
+                    "status": (
+                        "corroborated"
+                        if canonical_window_objects
+                        else "abstained"
+                    ),
+                    "reason_codes": list(physical_wall_result.reason_codes),
+                    "windows": canonical_window_objects,
+                }
                 room_status = getattr(
                     physical_wall_result,
                     "canonical_room_status",
@@ -3416,6 +3505,16 @@ class GenericPlanReaderExtractor:
                     "reason_codes": ["no_drawing_pages_selected"],
                     "openings": [],
                 }
+                self.canonical_doors_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "doors": [],
+                }
+                self.canonical_windows_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "windows": [],
+                }
                 self.canonical_rooms_live = {
                     "status": "abstained",
                     "reason_codes": ["no_drawing_pages_selected"],
@@ -3449,6 +3548,20 @@ class GenericPlanReaderExtractor:
                     f"live_canonical_opening_exception:{type(exc).__name__}"
                 ],
                 "openings": [],
+            }
+            self.canonical_doors_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_door_exception:{type(exc).__name__}"
+                ],
+                "doors": [],
+            }
+            self.canonical_windows_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_window_exception:{type(exc).__name__}"
+                ],
+                "windows": [],
             }
             self.canonical_rooms_live = {
                 "status": "abstained",

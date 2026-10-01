@@ -46,6 +46,10 @@ def test_reused_extractor_clears_all_live_canonical_object_state(
     extractor.canonical_slabs_live = {"status": "corroborated", "slabs": [{"id": "stale-slab"}]}
     extractor.canonical_ceilings_live = {"status": "corroborated", "ceilings": [{"id": "stale-ceiling"}]}
     extractor.canonical_roofs_live = {"status": "corroborated", "roofs": [{"id": "stale-roof"}]}
+    extractor.canonical_structural_members_live = {
+        "status": "corroborated",
+        "members": [{"id": "stale-structural-member"}],
+    }
 
     extractor.extract_from_pdf(
         path,
@@ -58,6 +62,7 @@ def test_reused_extractor_clears_all_live_canonical_object_state(
     assert extractor.canonical_slabs_live["slabs"] == []
     assert extractor.canonical_ceilings_live["ceilings"] == []
     assert extractor.canonical_roofs_live["roofs"] == []
+    assert extractor.canonical_structural_members_live["members"] == []
 
     assert extractor.canonical_walls_live["status"] == "abstained"
     assert extractor.canonical_openings_live["status"] == "abstained"
@@ -65,3 +70,4 @@ def test_reused_extractor_clears_all_live_canonical_object_state(
     assert extractor.canonical_slabs_live["status"] == "abstained"
     assert extractor.canonical_ceilings_live["status"] == "abstained"
     assert extractor.canonical_roofs_live["status"] == "abstained"
+    assert extractor.canonical_structural_members_live["status"] == "abstained"
