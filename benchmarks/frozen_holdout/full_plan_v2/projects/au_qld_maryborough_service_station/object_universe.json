@@ -622,6 +622,22 @@
         "A140:FOOD_PREP:4025x3297:FT3",
         "A110:FOOD_PREP:matching_physical_room_geometry"
       ]
+    },
+    {
+      "object_ref": "maryborough:surface:floor:office",
+      "physical_kind": "floor_finish_surface",
+      "room": "OFFICE",
+      "finish_mark": "FT3",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 9.05352,
+      "figured_dimensions_mm": [
+        3570,
+        2536
+      ],
+      "source_locations": [
+        "A140:OFFICE:3570x2536:FT3",
+        "A110:OFFICE:matching_physical_room_geometry"
+      ]
     }
   ],
   "wc_shower_floor_surface_universe_complete": true,
@@ -749,6 +765,23 @@
       "source_locations": [
         "A120:RCP:FOOD_PREP:3000_FPB",
         "A140:FOOD_PREP:4025x3297"
+      ]
+    },
+    {
+      "object_ref": "maryborough:surface:ceiling:office",
+      "physical_kind": "ceiling_finish_surface",
+      "room": "OFFICE",
+      "finish_mark": "GRID",
+      "ceiling_height_mm": 2400,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 9.05352,
+      "footprint_dimensions_mm": [
+        3570,
+        2536
+      ],
+      "source_locations": [
+        "A120:RCP:OFFICE:2400_GRID",
+        "A140:OFFICE:3570x2536"
       ]
     }
   ],
