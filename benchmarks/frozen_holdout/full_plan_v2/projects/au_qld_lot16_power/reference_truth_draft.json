@@ -30,7 +30,7 @@
   "unresolved_surface_families": [
     "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces",
     "external_wall_faces_and_cladding",
-    "ceilings_beyond_closed_bed1_raked_plane_including_entry_porch_ensuite_wir_and_flat_regions",
+    "ceilings_beyond_closed_bed1_raked_and_garage_flat_planes_including_entry_porch_ensuite_wir_and_other_flat_regions",
     "custom_front_glazing_measure_on_site_only",
     "wet_area_wall_tiling_beyond_three_closed_bath_gross_faces_including_remaining_bath_face_and_raked_ensuite",
     "structural_members_beyond_closed_wall_bracing_and_explicit_architectural_supports",
@@ -1289,6 +1289,24 @@
         "niche_return_depth_resolved": false,
         "denominator_readiness": "deduction_face_closed_but_niche_returns_unresolved"
       }
+    },
+    {
+      "object_ref": "lot16:surface:ceiling:garage_flat",
+      "object_family": "ceiling_plane",
+      "physical_kind": "surface",
+      "description": "Garage flat ceiling plane",
+      "expected_quantity": 38.94,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:GARAGE_[FLAT_CEILING]:6000x6490_figured_dimensions",
+      "attributes": {
+        "ceiling_type": "flat",
+        "plan_width_m": 6,
+        "plan_length_m": 6.49,
+        "calculation": "plan_width_m * plan_length_m",
+        "raked_adjustment_required": false,
+        "source_closed_plane": true,
+        "denominator_readiness": "source_closed_plane_candidate"
+      }
     }
   ],
   "closure_checks": [
@@ -1642,6 +1660,24 @@
         "architectural:p11:Ensuite_Elevation_1-2",
         "architectural:p11:two_900x500_niches",
         "architectural:p4-p5:FSL_68560_TP_71150"
+      ]
+    },
+    {
+      "check_id": "lot16:closure:garage_flat_ceiling_plane",
+      "component_object_refs": [
+        "lot16:surface:ceiling:garage_flat"
+      ],
+      "object_count": 1,
+      "ceiling_area_m2": 38.94,
+      "figured_dimensions_m": [
+        6,
+        6.49
+      ],
+      "complete_for_this_plane": true,
+      "complete_for_project_ceiling_universe": false,
+      "source_locations": [
+        "architectural:p3:floor_plan:GARAGE_[FLAT_CEILING]",
+        "architectural:p3:floor_plan:6000_and_6490_figured_dimensions"
       ]
     }
   ]
