@@ -1,0 +1,223 @@
+{
+  "schema_version": "v2-reference-truth-1.0",
+  "project_id": "au_qld_q5446_armstrong32_harlequin",
+  "status": "VERIFIED_CORE_ONLY",
+  "truth_policy": {
+    "planreader_output_used_as_truth": false,
+    "minimum_independent_routes": 2,
+    "note": "Only quantities independently closed by a second route enter the verified core."
+  },
+  "source_plan": {
+    "name": "Q5446_Standard_Plans_V1_20220320.pdf",
+    "sha256": "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0"
+  },
+  "items": [
+    {
+      "item_id": "q5446-alfresco-floor-area",
+      "description": "Alfresco floor area independently closed by 3000 x 4000 figured dimensions",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 12,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:alfresco"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p1:areas_table:ALFRESCO_12.00_m2",
+        "standard_plans:p1:figured_dimensions:3000x4000"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "q5446-ground-ensuite-floor-tiling-area",
+      "description": "Ground-floor ensuite tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 4.2224,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:ground_ensuite"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p1:figured_dimensions:ENS_2320x1820",
+        "standard_plans:p1:vector_inner_faces:2320x1820",
+        "standard_inclusions:p1:bathroom_ensuite_floor_tiles",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "q5446-first-ensuite-floor-tiling-area",
+      "description": "First-floor ensuite tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 5.9572,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:first_ensuite"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p2:figured_dimensions:ENS_2810x2120",
+        "standard_plans:p2:vector_inner_faces:2802.5x2116.7_mm",
+        "standard_inclusions:p1:bathroom_ensuite_floor_tiles",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "q5446-first-bath-floor-tiling-area",
+      "description": "First-floor bathroom tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 5.8446,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:first_bath"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p2:figured_dimensions:BATH_1910x3060",
+        "standard_plans:p2:vector_inner_faces:1913.5x3056.5_mm",
+        "standard_inclusions:p1:bathroom_ensuite_floor_tiles",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "q5446-ground-laundry-floor-tiling-area",
+      "description": "Ground-floor laundry tiled floor surface independently measured on architectural and electrical plans",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 4.1864,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:ground_laundry"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p1:architectural_vector_inner_faces:2616.2x1600.2_mm",
+        "standard_plans:p5:electrical_vector_inner_faces:2616.2x1600.2_mm",
+        "standard_inclusions:p1:laundry_floor_tiles_throughout",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    }
+  ],
+  "declared_area_controls_not_truth": [
+    {
+      "name": "ground_floor",
+      "quantity_m2": 123.89,
+      "reason": "Designer table only; no independent complete polygon closure."
+    },
+    {
+      "name": "first_floor",
+      "quantity_m2": 121.81,
+      "reason": "Designer table only; no independent complete polygon closure."
+    },
+    {
+      "name": "porch",
+      "quantity_m2": 4.08,
+      "reason": "Designer table only; independent geometric closure not frozen."
+    },
+    {
+      "name": "garage",
+      "quantity_m2": 36.4,
+      "reason": "Designer table and 6500x5600 arithmetic agree, but 6470/6500 plan-chain discrepancy remains unresolved."
+    },
+    {
+      "name": "total",
+      "quantity_m2": 298.19,
+      "reason": "Aggregate control; overlaps component areas."
+    }
+  ],
+  "independent_geometry_checks": [
+    {
+      "surface_ref": "q5446:surface:floor:ground_ensuite",
+      "figured_mm": [
+        2320,
+        1820
+      ],
+      "figured_area_m2": 4.2224,
+      "vector_mm": [
+        2319.87,
+        1820.33
+      ],
+      "vector_area_m2": 4.2229,
+      "agreement": "PASS"
+    },
+    {
+      "surface_ref": "q5446:surface:floor:first_ensuite",
+      "figured_mm": [
+        2810,
+        2120
+      ],
+      "figured_area_m2": 5.9572,
+      "vector_mm": [
+        2802.47,
+        2116.67
+      ],
+      "vector_area_m2": 5.9326,
+      "agreement": "PASS"
+    },
+    {
+      "surface_ref": "q5446:surface:floor:first_bath",
+      "figured_mm": [
+        1910,
+        3060
+      ],
+      "figured_area_m2": 5.8446,
+      "vector_mm": [
+        1913.47,
+        3056.47
+      ],
+      "vector_area_m2": 5.8485,
+      "agreement": "PASS"
+    },
+    {
+      "surface_ref": "q5446:surface:floor:ground_laundry",
+      "architectural_vector_mm": [
+        2616.2,
+        1600.2
+      ],
+      "electrical_vector_mm": [
+        2616.2,
+        1600.2
+      ],
+      "measured_area_m2": 4.1864,
+      "agreement": "PASS"
+    }
+  ],
+  "scope_evidence": {
+    "wet_area_floor_tiles": [
+      "Q5446_Standard_Inclusions_V1_20220313.pdf:p1: bathroom and ensuite floor tiles throughout",
+      "Q5446_Sales_Advice_Estimate_V1_20220320.pdf:p6: upgrade standard wet-area ceramic floor tiles to match"
+    ],
+    "laundry_floor_tiles": [
+      "Q5446_Standard_Inclusions_V1_20220313.pdf:p1: laundry floor tiles throughout",
+      "Q5446_Sales_Advice_Estimate_V1_20220320.pdf:p6: standard wet-area floor tiles upgraded to match"
+    ]
+  }
+}

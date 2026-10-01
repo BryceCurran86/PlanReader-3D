@@ -1,4 +1,4 @@
-﻿"""Producer-owned wall-thickness and authentic face-geometry authority (Item 27).
+"""Producer-owned wall-thickness and authentic face-geometry authority (Item 27).
 
 Proves the 2D physical face geometry and thickness for an exact physical wall:
 - Thickness derives strictly from source-backed evidence (figured dimension,

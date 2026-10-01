@@ -76,6 +76,13 @@ def _chain():
     void_record = void_result.record
 
     wall_id = void_record.wall_local_frame_id
+    host_frame_trace = next(
+        trace
+        for trace in wall_opening.host_frames
+        if trace.opening_identity_id == opening_id
+    )
+    member_wall_candidate_ids = tuple(host_frame_trace.whole_wall_candidate_ids)
+    assert member_wall_candidate_ids
     length_m = max(4.0, float(void_record.u1) + 1.0)
     height_m = max(3.0, float(void_record.z1) + 0.5)
 
@@ -102,7 +109,7 @@ def _chain():
         height_m=height_m,
         gross_area_m2=length_m * height_m,
         polygon_wkb_hex="01030000",
-        member_wall_candidate_ids=("candidate-external-wall",),
+        member_wall_candidate_ids=member_wall_candidate_ids,
     )
     gross_authority = GrossWallGeometryAuthority(
         {
@@ -136,7 +143,7 @@ def _chain():
                 gross_reason_codes=("test_gross_resolved",),
             ),
         ),
-        physical_wall_candidate_authority=None,
+        physical_wall_candidate_authority=wall_opening.physical_wall_candidate_authority,
         cross_sheet_registration_authority=None,
         physical_scale_authority=None,
         wall_height_authority=None,
@@ -163,7 +170,7 @@ def _chain():
         decision_scope_id=role_selector.decision_scope_id,
         physical_wall_id=wall_id,
         gross_geometry_record_id=gross_record.record_id,
-        member_wall_candidate_ids=("candidate-external-wall",),
+        member_wall_candidate_ids=member_wall_candidate_ids,
         member_wall_role_record_ids=("member-role-external-wall",),
         role=WallRoleClassification.EXTERNAL,
         _seal=ROLE_RECORD_SEAL,
@@ -215,6 +222,39 @@ def test_physical_external_net_wall_subtracts_authenticated_void_without_trade_r
         "physical_geometry_not_trade_finish_policy"
     )
     assert void_record.record_id in result.physical_void_record_ids
+
+    assert len(result.canonical_walls) == 1
+    wall = result.canonical_walls[0]
+    assert wall.canonical_wall_id == gross_record.physical_wall_id
+    assert wall.physical_wall_id == gross_record.physical_wall_id
+    assert wall.wall_local_frame_id == gross_record.wall_local_frame_id
+    assert wall.role == "external"
+    assert wall.length_m == gross_record.length_m
+    assert wall.height_m == gross_record.height_m
+    assert wall.gross_area_m2 == gross_record.gross_area_m2
+    assert wall.net_area_m2 == expected_net
+    assert wall.gross_polygon_wkb_hex == gross_record.polygon_wkb_hex
+    assert wall.net_polygon_wkb_hex
+    assert wall.member_wall_candidate_ids == gross_record.member_wall_candidate_ids
+    assert {member.wall_candidate_id for member in wall.plan_members} == set(
+        gross_record.member_wall_candidate_ids
+    )
+    assert all(member.centerline_pts for member in wall.plan_members)
+    assert wall.opening_identity_ids == (void_record.opening_identity_id,)
+    assert len(wall.opening_voids) == 1
+    opening_void = wall.opening_voids[0]
+    assert opening_void.opening_identity_id == void_record.opening_identity_id
+    assert opening_void.physical_void_record_id == void_record.record_id
+    assert opening_void.wall_local_frame_id == wall.canonical_wall_id
+    assert opening_void.u0 == void_record.u0
+    assert opening_void.u1 == void_record.u1
+    assert opening_void.z0 == void_record.z0
+    assert opening_void.z1 == void_record.z1
+    assert opening_void.width_m == float(void_record.u1) - float(void_record.u0)
+    assert opening_void.height_m == float(void_record.z1) - float(void_record.z0)
+    assert result.quantity_evidence.metadata["canonical_wall_object_ids"] == (
+        wall.canonical_wall_id,
+    )
 
 
 def test_expected_opening_with_missing_void_never_publishes_gross_as_net() -> None:

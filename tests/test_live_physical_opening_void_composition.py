@@ -120,6 +120,31 @@ def test_live_composition_resolves_sealed_physical_opening_void() -> None:
     assert replay.record.record_id == trace.void_record_id
     assert replay.record.coordinate_unit == "metre"
 
+    assert len(composition.canonical_openings) == 1
+    opening = composition.canonical_openings[0]
+    assert opening.canonical_opening_id == trace.opening_identity_id
+    assert opening.physical_opening_id == trace.opening_identity_id
+    assert opening.page_id == trace.page_id
+    assert opening.semantic_class == "opening"
+    assert opening.structural_pattern
+    assert opening.representative_observation_id == trace.representative_observation_id
+    assert opening.source_observation_ids
+    assert opening.source_lineage_root_ids
+    assert opening.source_geometries
+    assert opening.host_wall_id == replay.record.host_wall_id
+    assert opening.wall_local_frame_id == replay.record.wall_local_frame_id
+    assert opening.opening_void_record_id == replay.record.record_id
+    assert opening.u0 == replay.record.u0
+    assert opening.u1 == replay.record.u1
+    assert opening.z0 == replay.record.z0
+    assert opening.z1 == replay.record.z1
+    assert opening.width_m == replay.record.u1 - replay.record.u0
+    assert opening.height_m == replay.record.z1 - replay.record.z0
+    assert opening.area_m2 == opening.width_m * opening.height_m
+    assert opening.geometry_complete is True
+    assert opening.host_binding_record_id == replay.record.host_binding_record_id
+    assert replay.record.record_id in opening.evidence_ids
+
 
 def test_live_void_composition_never_uses_default_height_when_source_height_is_missing() -> None:
     source = SourceVisibilityProducer(
@@ -150,6 +175,17 @@ def test_live_void_composition_never_uses_default_height_when_source_height_is_m
     assert trace.height_record_id is None
     assert trace.void_status is not EvidenceResolutionStatus.CORROBORATED
     assert trace.void_record_id is None
+
+    # Physical identity persists even when later height/void geometry abstains.
+    assert len(composition.canonical_openings) == 1
+    opening = composition.canonical_openings[0]
+    assert opening.canonical_opening_id == trace.opening_identity_id
+    assert opening.source_observation_ids
+    assert opening.width_m is not None
+    assert opening.height_m is None
+    assert opening.area_m2 is None
+    assert opening.opening_void_record_id is None
+    assert opening.geometry_complete is False
 
 
 def test_live_void_composition_cannot_resolve_a_narrowed_opening_subset() -> None:
@@ -187,3 +223,4 @@ def test_live_void_composition_cannot_resolve_a_narrowed_opening_subset() -> Non
     assert composition.status is EvidenceResolutionStatus.ABSTAINED
     assert LIVE_PHYSICAL_OPENING_VOID_UPSTREAM_INCOMPLETE in composition.reason_codes
     assert composition.traces == ()
+    assert composition.canonical_openings == ()

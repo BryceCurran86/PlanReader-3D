@@ -1,0 +1,32 @@
+{
+  "schema_version": "v2-unresolved-items-1.0",
+  "project_id": "au_qld_maryborough_service_station",
+  "status": "INCOMPLETE",
+  "unresolved_families": [
+    {
+      "family": "remaining_room_floor_areas",
+      "reason": "The three FT2 WC & SHOWER floors are independently closed; all other room floor surfaces remain unresolved."
+    },
+    {
+      "family": "internal_wall_ipf2_areas",
+      "reason": "Wall-face universe not independently closed."
+    },
+    {
+      "family": "remaining_ceilings",
+      "reason": "The three WC & SHOWER WFPB ceilings are independently closed; all other ceiling surfaces remain unresolved."
+    },
+    {
+      "family": "wall_tiles",
+      "reason": "Tile surface universe not independently closed."
+    },
+    {
+      "family": "external_surfaces",
+      "reason": "External surface universe not independently closed."
+    },
+    {
+      "family": "window_areas",
+      "reason": "W01, W02, W05 and W06 nominal gross framed opening areas are source-closed from A610 and A110 identity reconciliation; W03 individual height/sill and W04 non-overlapping storefront/D01 area semantics remain unresolved.",
+      "status": "PARTIAL"
+    }
+  ]
+}

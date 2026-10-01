@@ -588,22 +588,10 @@ def test_page_ownership_accepts_trusted_multisource() -> None:
     assert [item.viewport_id for item in provenance.contributors] == ["vp_plan", "vp_sched"]
 
 
-def test_frozen_metrics_remain_unchanged() -> None:
-    headline = json.loads(
-        (REPO_ROOT / "benchmark_results" / "headline_accuracy_dashboard.json").read_text(encoding="utf-8")
-    )
-    metrics = headline["headline_metrics"]
-    accepted = int(metrics["exact_matches"]) + int(metrics["within_5_percent"])
-    assert accepted == 24
-    assert int(metrics["total_items_compared"]) == 61
-    assert pytest.approx(metrics["overall_accuracy_percentage"], rel=0, abs=0.01) == 39.34
-    shadow = json.loads(
-        (REPO_ROOT / "shadow_reports" / "opening_count_shadow_development.json").read_text(encoding="utf-8")
-    )
-    assert shadow["authority_state"] == "new_shadow"
-    assert shadow.get("holdout_scored") is False
-    assert int(shadow["metrics"]["eligible_opening_count_items"]) == 24
-    assert int(shadow["metrics"]["answered"]) == 15
+def test_retired_metrics_are_not_active_and_shadow_provider_remains_diagnostic() -> None:
+    assert not (
+        REPO_ROOT / "benchmark_results" / "headline_accuracy_dashboard.json"
+    ).exists()
     assert ShadowOpeningCountProvider is not None
     assert opening_count_descriptor().family == "opening_count"
     assert OpeningCountControlAdapter is not None
