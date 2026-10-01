@@ -159,6 +159,9 @@ class TestPhysicalVerandahSupportWiring:
         assert shadow["status"] == "corroborated"
         assert len(shadow["physical_member_ids"]) == 4
         assert shadow["quantity_evidence"]["value"] == pytest.approx(4.0)
+        assert shadow["quantity_evidence"]["metadata"]["decision_scope_id"] == (
+            f"secondary-area:{zone_type}:page:1"
+        )
         assert shadow["coverage_registry_summary"] is not None
 
     def test_incomplete_physical_support_row_fails_closed(
