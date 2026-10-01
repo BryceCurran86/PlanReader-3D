@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 
-from benchmarks.frozen_holdout.full_plan_v2.manifest_io import load_project_manifest
+_FROZEN_ROOT = Path(__file__).resolve().parents[2] / "benchmarks" / "frozen_holdout"
+sys.path.insert(0, str(_FROZEN_ROOT))
+
+from full_plan_v2.manifest_io import load_project_manifest
 
 ROOT = (
     Path(__file__).resolve().parents[2]
