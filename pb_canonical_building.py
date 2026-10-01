@@ -113,6 +113,36 @@ class Provenance:
     is_superseded: bool = False
     is_stale: bool = False
 
+    @property
+    def source_page(self) -> str:
+        if self.page_number is not None:
+            return str(self.page_number)
+        if self.page_id is not None:
+            return str(self.page_id)
+        return "1"
+
+    @source_page.setter
+    def source_page(self, val: Any) -> None:
+        if val is not None:
+            try:
+                self.page_number = int(val)
+            except (ValueError, TypeError):
+                self.page_id = str(val)
+
+    def summary_annotation(self) -> str:
+        """Constructs an audit trail string: SOURCE DOCUMENT -> PAGE/VIEW -> EVIDENCE."""
+        parts = []
+        if self.source_pdf:
+            parts.append(f"Doc: {self.source_pdf}")
+        if self.drawing_id:
+            parts.append(f"Sheet: {self.drawing_id}")
+        if self.contributing_evidence:
+            ev_str = ", ".join(str(e) for e in self.contributing_evidence[:3])
+            parts.append(f"Evidence: {ev_str}")
+        elif self.plan_geometry_signature:
+            parts.append(f"GeomSig: {self.plan_geometry_signature[:12]}")
+        return (" " + " · ".join(parts) + ".") if parts else ""
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "source_pdf": self.source_pdf,
@@ -2620,6 +2650,15 @@ class CanonicalProject(CanonicalElement):
         stamp = now_stamp or ""
         rows: List[Dict[str, Any]] = []
 
+        def _prov_notes(base: str, prov: Any) -> str:
+            if not prov:
+                return base
+            if hasattr(prov, "summary_annotation"):
+                ann = prov.summary_annotation()
+                if ann and "Doc:" not in base:
+                    return f"{base}{ann}"
+            return base
+
         # 1. Walls & Openings
         for w in self.all_walls():
             w_net = w.net_area_m2()
@@ -2646,7 +2685,7 @@ class CanonicalProject(CanonicalElement):
                     "productivity_m2_per_hour": 0.0,
                     "rate_per_unit": 0.0,
                     "confidence": "Documented" if w.confidence and w.confidence >= 0.8 else "Derived",
-                    "notes": f"Net wall area {w_net:.2f} m² (Gross {w_gross:.2f} m² less opening deductions {w_ded:.2f} m²).",
+                    "notes": _prov_notes(f"Net wall area {w_net:.2f} m² (Gross {w_gross:.2f} m² less opening deductions {w_ded:.2f} m²).", w.provenance),
                     "row_role": "external_wall",
                     "created_at": stamp,
                     "updated_at": stamp,
@@ -2670,7 +2709,7 @@ class CanonicalProject(CanonicalElement):
                     "productivity_m2_per_hour": 0.0,
                     "rate_per_unit": 0.0,
                     "confidence": "Documented" if w.confidence and w.confidence >= 0.8 else "Derived",
-                    "notes": f"Internal partition framing run {w_len:.2f} lm.",
+                    "notes": _prov_notes(f"Internal partition framing run {w_len:.2f} lm.", w.provenance),
                     "row_role": "internal_partition",
                     "created_at": stamp,
                     "updated_at": stamp,
@@ -2697,7 +2736,7 @@ class CanonicalProject(CanonicalElement):
                         "productivity_m2_per_hour": 0.0,
                         "rate_per_unit": 0.0,
                         "confidence": "Documented",
-                        "notes": f"Net finish area {face.area_net_m2:.2f} m².",
+                        "notes": _prov_notes(f"Net finish area {face.area_net_m2:.2f} m².", w.provenance),
                         "row_role": "wall_finish",
                         "created_at": stamp,
                         "updated_at": stamp,
@@ -2727,7 +2766,7 @@ class CanonicalProject(CanonicalElement):
                         "productivity_m2_per_hour": 0.0,
                         "rate_per_unit": 0.0,
                         "confidence": "Documented",
-                        "notes": f"Cavity wall ties {dq.quantity:.0f} No. (at 4.5 ties/m²).",
+                        "notes": _prov_notes(f"Cavity wall ties {dq.quantity:.0f} No. (at 4.5 ties/m²).", w.provenance),
                         "row_role": "",
                         "created_at": stamp,
                         "updated_at": stamp,
@@ -2751,7 +2790,7 @@ class CanonicalProject(CanonicalElement):
                         "productivity_m2_per_hour": 0.0,
                         "rate_per_unit": 0.0,
                         "confidence": "Documented",
-                        "notes": f"DPC and base flashing run {dq.quantity:.2f} lm.",
+                        "notes": _prov_notes(f"DPC and base flashing run {dq.quantity:.2f} lm.", w.provenance),
                         "row_role": "",
                         "created_at": stamp,
                         "updated_at": stamp,
@@ -2775,7 +2814,7 @@ class CanonicalProject(CanonicalElement):
                         "productivity_m2_per_hour": 0.0,
                         "rate_per_unit": 0.0,
                         "confidence": "Documented",
-                        "notes": f"Wall sarking {dq.quantity:.2f} m².",
+                        "notes": _prov_notes(f"Wall sarking {dq.quantity:.2f} m².", w.provenance),
                         "row_role": "",
                         "created_at": stamp,
                         "updated_at": stamp,
@@ -2799,7 +2838,7 @@ class CanonicalProject(CanonicalElement):
                         "productivity_m2_per_hour": 0.0,
                         "rate_per_unit": 0.0,
                         "confidence": "Documented",
-                        "notes": f"Partition top and bottom plates run {dq.quantity:.2f} lm.",
+                        "notes": _prov_notes(f"Partition top and bottom plates run {dq.quantity:.2f} lm.", w.provenance),
                         "row_role": "",
                         "created_at": stamp,
                         "updated_at": stamp,
@@ -2824,7 +2863,7 @@ class CanonicalProject(CanonicalElement):
                         "productivity_m2_per_hour": 0.0,
                         "rate_per_unit": 0.0,
                         "confidence": "Documented",
-                        "notes": f"Lintel {dq.quantity:.2f} lm ({dq.item_code}).",
+                        "notes": _prov_notes(f"Lintel {dq.quantity:.2f} lm ({dq.item_code}).", w.provenance),
                         "row_role": "",
                         "created_at": stamp,
                         "updated_at": stamp,
@@ -2872,7 +2911,7 @@ class CanonicalProject(CanonicalElement):
                         "productivity_m2_per_hour": 0.0,
                         "rate_per_unit": 0.0,
                         "confidence": "Documented",
-                        "notes": op_notes,
+                        "notes": _prov_notes(op_notes, op.provenance),
                         "row_role": "door" if op.object_type == ObjectType.DOOR else "window" if op.object_type == ObjectType.WINDOW else "opening",
                         "created_at": stamp,
                         "updated_at": stamp,
@@ -2902,7 +2941,7 @@ class CanonicalProject(CanonicalElement):
                                 "productivity_m2_per_hour": 0.0,
                                 "rate_per_unit": 0.0,
                                 "confidence": "Documented",
-                                "notes": f"Opening trim perimeter {dq.quantity:.2f} lm for {op.mark}.",
+                                "notes": _prov_notes(f"Opening trim perimeter {dq.quantity:.2f} lm for {op.mark}.", op.provenance),
                                 "row_role": "opening_trim",
                                 "created_at": stamp,
                                 "updated_at": stamp,
@@ -2939,7 +2978,7 @@ class CanonicalProject(CanonicalElement):
                 "productivity_m2_per_hour": 0.0,
                 "rate_per_unit": 0.0,
                 "confidence": "Documented",
-                "notes": f"Slab area {fl_area:.2f} m² × {int(thickness*1000)}mm thickness. Concrete volume: {vol_m3:.2f} m³.",
+                "notes": _prov_notes(f"Slab area {fl_area:.2f} m² × {int(thickness*1000)}mm thickness. Concrete volume: {vol_m3:.2f} m³.", fl.provenance),
                 "row_role": "floor_area",
                 "created_at": stamp,
                 "updated_at": stamp,
@@ -2964,7 +3003,7 @@ class CanonicalProject(CanonicalElement):
                 "productivity_m2_per_hour": 0.0,
                 "rate_per_unit": 0.0,
                 "confidence": "Documented",
-                "notes": f"Supply & place {vol_m3:.2f} m³ of concrete ({fl_area:.2f} m² × {thickness:.3f}m).",
+                "notes": _prov_notes(f"Supply & place {vol_m3:.2f} m³ of concrete ({fl_area:.2f} m² × {thickness:.3f}m).", fl.provenance),
                 "row_role": "",
                 "created_at": stamp,
                 "updated_at": stamp,
@@ -2989,7 +3028,7 @@ class CanonicalProject(CanonicalElement):
                 "productivity_m2_per_hour": 0.0,
                 "rate_per_unit": 0.0,
                 "confidence": "Documented",
-                "notes": f"Vapor barrier: {fl_area:.2f} m² + 10% lap allowance = {fl_area*1.10:.2f} m².",
+                "notes": _prov_notes(f"Vapor barrier: {fl_area:.2f} m² + 10% lap allowance = {fl_area*1.10:.2f} m².", fl.provenance),
                 "row_role": "",
                 "created_at": stamp,
                 "updated_at": stamp,
@@ -3015,7 +3054,7 @@ class CanonicalProject(CanonicalElement):
                     "productivity_m2_per_hour": 0.0,
                     "rate_per_unit": 0.0,
                     "confidence": "Documented",
-                    "notes": f"Perimeter edge formwork {perim:.2f} lm for {int(thickness*1000)}mm slab edge.",
+                    "notes": _prov_notes(f"Perimeter edge formwork {perim:.2f} lm for {int(thickness*1000)}mm slab edge.", fl.provenance),
                     "row_role": "",
                     "created_at": stamp,
                     "updated_at": stamp,
@@ -3048,7 +3087,7 @@ class CanonicalProject(CanonicalElement):
                     "productivity_m2_per_hour": 0.0,
                     "rate_per_unit": 0.0,
                     "confidence": "Documented",
-                    "notes": f"{b.trade_category.title()} derived from {sp.name} ({b.formula_expression}).",
+                    "notes": _prov_notes(f"{b.trade_category.title()} derived from {sp.name} ({b.formula_expression}).", sp.provenance),
                     "row_role": "floor_area" if b.item_code.startswith("FLOOR_") and b.unit == "m²" else "",
                     "created_at": stamp,
                     "updated_at": stamp,
@@ -3086,7 +3125,7 @@ class CanonicalProject(CanonicalElement):
                     "productivity_m2_per_hour": 0.0,
                     "rate_per_unit": 0.0,
                     "confidence": "Documented",
-                    "notes": f"Ceiling trade {elem_name} ({b.formula_expression} = {b.quantity:.2f} {b.unit}).",
+                    "notes": _prov_notes(f"Ceiling trade {elem_name} ({b.formula_expression} = {b.quantity:.2f} {b.unit}).", c.provenance),
                     "row_role": "ceiling_area" if b.item_code == "CEILING_PLASTERBOARD_LINING" else "",
                     "created_at": stamp,
                     "updated_at": stamp,
@@ -3125,7 +3164,7 @@ class CanonicalProject(CanonicalElement):
                     "productivity_m2_per_hour": 0.0,
                     "rate_per_unit": 0.0,
                     "confidence": "Documented",
-                    "notes": f"Roof trade {elem_name} (pitch {rf.pitch_deg or 0.0}°: {b.formula_expression} = {b.quantity:.2f} {b.unit}).",
+                    "notes": _prov_notes(f"Roof trade {elem_name} (pitch {rf.pitch_deg or 0.0}°: {b.formula_expression} = {b.quantity:.2f} {b.unit}).", rf.provenance),
                     "row_role": "roof_area" if b.item_code in ("ROOF_SHEET_METAL", "ROOF_TILES") else "",
                     "created_at": stamp,
                     "updated_at": stamp,
@@ -3159,7 +3198,7 @@ class CanonicalProject(CanonicalElement):
                     "productivity_m2_per_hour": 0.0,
                     "rate_per_unit": 0.0,
                     "confidence": "Documented",
-                    "notes": f"Column {col.id} ({col.width_m or 0.0:.2f}m × {col.depth_m or col.width_m or 0.0:.2f}m × {col.height_m or 0.0:.2f}m H).",
+                    "notes": _prov_notes(f"Column {col.id} ({col.width_m or 0.0:.2f}m × {col.depth_m or col.width_m or 0.0:.2f}m × {col.height_m or 0.0:.2f}m H).", col.provenance),
                     "row_role": "",
                     "created_at": stamp,
                     "updated_at": stamp,
@@ -3190,7 +3229,7 @@ class CanonicalProject(CanonicalElement):
                             "productivity_m2_per_hour": 0.0,
                             "rate_per_unit": 0.0,
                             "confidence": "Documented",
-                            "notes": f"Structural {sm.member_type}: {sm.section_spec or 'standard'} ({b_sm.quantity:.2f} {b_sm.unit}).",
+                            "notes": _prov_notes(f"Structural {sm.member_type}: {sm.section_spec or 'standard'} ({b_sm.quantity:.2f} {b_sm.unit}).", sm.provenance),
                             "row_role": "structural_member",
                             "created_at": stamp,
                             "updated_at": stamp,
@@ -3224,7 +3263,7 @@ class CanonicalProject(CanonicalElement):
                     "productivity_m2_per_hour": 0.0,
                     "rate_per_unit": 0.0,
                     "confidence": "Documented",
-                    "notes": f"Parapet {elem_name} ({b.formula_expression} = {b.quantity:.2f} {b.unit}).",
+                    "notes": _prov_notes(f"Parapet {elem_name} ({b.formula_expression} = {b.quantity:.2f} {b.unit}).", p.provenance),
                     "row_role": "",
                     "created_at": stamp,
                     "updated_at": stamp,
@@ -3258,7 +3297,7 @@ class CanonicalProject(CanonicalElement):
                     "productivity_m2_per_hour": 0.0,
                     "rate_per_unit": 0.0,
                     "confidence": "Documented",
-                    "notes": f"Balcony {elem_name} ({b.formula_expression} = {b.quantity:.2f} {b.unit}).",
+                    "notes": _prov_notes(f"Balcony {elem_name} ({b.formula_expression} = {b.quantity:.2f} {b.unit}).", b_elem.provenance),
                     "row_role": "",
                     "created_at": stamp,
                     "updated_at": stamp,
@@ -3290,7 +3329,7 @@ class CanonicalProject(CanonicalElement):
                     "productivity_m2_per_hour": 0.0,
                     "rate_per_unit": 0.0,
                     "confidence": "Documented",
-                    "notes": f"Soffit lining {b.quantity:.2f} m².",
+                    "notes": _prov_notes(f"Soffit lining {b.quantity:.2f} m².", s.provenance),
                     "row_role": "",
                     "created_at": stamp,
                     "updated_at": stamp,
@@ -3323,7 +3362,7 @@ class CanonicalProject(CanonicalElement):
                     "productivity_m2_per_hour": 0.0,
                     "rate_per_unit": 0.0,
                     "confidence": "Documented",
-                    "notes": f"Surface {s.id} ({s.orientation}): {b.quantity:.2f} {b.unit}.",
+                    "notes": _prov_notes(f"Surface {s.id} ({s.orientation}): {b.quantity:.2f} {b.unit}.", s.provenance),
                     "row_role": "finish_surface",
                     "created_at": stamp,
                     "updated_at": stamp,
