@@ -28,7 +28,7 @@
     }
   ],
   "unresolved_surface_families": [
-    "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces",
+    "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces_with_room_access_deductions_pending_joinery_and_open_archways",
     "external_wall_faces_and_cladding",
     "ceilings_beyond_closed_bed1_raked_and_garage_flat_planes_including_entry_porch_ensuite_wir_and_other_flat_regions",
     "custom_front_glazing_measure_on_site_only",
@@ -1323,6 +1323,204 @@
         "finish": "epoxy",
         "quantity_basis": "figured internal garage dimensions"
       }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_bed3",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: bed3",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_bed3:bbox_627.5_276.9_634.9_287.8; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          627.5,
+          276.9,
+          634.9,
+          287.8
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_bed2",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: bed2",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_bed2:bbox_593.8_276.9_601.1_287.8; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          593.8,
+          276.9,
+          601.1,
+          287.8
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_bath",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: bath",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_bath:bbox_586.7_374.9_594.1_385.8; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          586.7,
+          374.9,
+          594.1,
+          385.8
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_laundry",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: laundry",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_laundry:bbox_690.2_343.4_697.6_354.2; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          690.2,
+          343.4,
+          697.6,
+          354.2
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_bed1",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: bed1",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_bed1:bbox_415.6_276.5_423_287.3; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          415.6,
+          276.5,
+          423,
+          287.3
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_wir",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: wir",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_wir:bbox_439.7_253.8_450.6_261.2; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          439.7,
+          253.8,
+          450.6,
+          261.2
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_ensuite",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: ensuite",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_ensuite:bbox_439.7_240_450.6_247.4; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          439.7,
+          240,
+          450.6,
+          247.4
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_wc",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm cavity-slider room-access opening: wc",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_wc:bbox_638.6_324.2_655.3_329.9; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          638.6,
+          324.2,
+          655.3,
+          329.9
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_garage_to_entry",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: garage to entry",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_garage_to_entry:bbox_567_354.6_574.4_365.4; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          567,
+          354.6,
+          574.4,
+          365.4
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
     }
   ],
   "closure_checks": [
@@ -1712,6 +1910,41 @@
       "floor_surface_closed": true,
       "ceiling_surface_closed": true,
       "source_location": "architectural:p3:floor_plan:GARAGE:6000x6490:EPOXY:[FLAT_CEILING]"
+    },
+    {
+      "check_id": "lot16:closure:internal_room_access_opening_census",
+      "component_object_refs": [
+        "lot16:opening:p3:internal_access:0870_bed3",
+        "lot16:opening:p3:internal_access:0870_bed2",
+        "lot16:opening:p3:internal_access:0870_bath",
+        "lot16:opening:p3:internal_access:0870_laundry",
+        "lot16:opening:p3:internal_access:0870_bed1",
+        "lot16:opening:p3:internal_access:0870_wir",
+        "lot16:opening:p3:internal_access:0870_ensuite",
+        "lot16:opening:p3:internal_access:0870_wc",
+        "lot16:opening:p3:internal_access:0870_garage_to_entry"
+      ],
+      "internal_opening_count": 9,
+      "internal_opening_area_m2": 16.443,
+      "width_distribution_m": {
+        "0.87": 9
+      },
+      "joinery_height_m": 2.1,
+      "complete_for_explicit_internal_870_room_access_openings": true,
+      "complete_for_all_internal_wall_openings": false,
+      "residual_unresolved": [
+        "robe_sliding_joinery_openings",
+        "bifold_or_other_internal_joinery_openings",
+        "unlabelled_open_archways"
+      ],
+      "excluded_external_870_labels": [
+        "laundry_external_service_door",
+        "garage_external_service_door"
+      ],
+      "source_locations": [
+        "architectural:p3:floor_plan:nine_internal_870_labels_with_native_text_bboxes",
+        "architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ]
     }
   ]
 }
