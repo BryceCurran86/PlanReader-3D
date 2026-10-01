@@ -1,0 +1,21 @@
+{
+  "schema_version": "2.0",
+  "project_id": "au_qld_maryborough_service_station",
+  "status": "INCOMPLETE",
+  "source_package_complete": true,
+  "source_documents": [
+    {
+      "name": "Arch_Combined_Maryborough_Service_Station.pdf",
+      "role": "architectural_drawings",
+      "sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
+      "size_bytes": 5709675,
+      "page_count": 31
+    }
+  ],
+  "reference_takeoff_documents": [],
+  "verified_takeoff_items": [],
+  "reason_codes": [
+    "reference_takeoff_not_supplied",
+    "verified_surface_universe_not_built"
+  ]
+}

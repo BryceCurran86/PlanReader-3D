@@ -1,0 +1,28 @@
+{
+  "schema_version": "2.0",
+  "project_id": "au_qld_lot16_power",
+  "status": "INCOMPLETE",
+  "source_package_complete": true,
+  "source_documents": [
+    {
+      "name": "1. Construction Plans - Lot 16 Power (REV E).pdf",
+      "role": "architectural_drawings",
+      "sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+      "size_bytes": 7141615,
+      "page_count": 13
+    },
+    {
+      "name": "4. Structural Engineering - Lot 16 Power.pdf",
+      "role": "structural_drawings",
+      "sha256": "b40259589dd39a46e45d25e145cfa789d9a9415b50613ebc4fee01dceab6b3d6",
+      "size_bytes": 3590638,
+      "page_count": 11
+    }
+  ],
+  "reference_takeoff_documents": [],
+  "verified_takeoff_items": [],
+  "reason_codes": [
+    "reference_takeoff_not_supplied",
+    "verified_surface_universe_not_built"
+  ]
+}
