@@ -509,3 +509,28 @@ def test_3laurel_main_ensuite_gross_wall_faces_close_from_finished_dimensions():
     assert check["object_count"] == 5
     assert check["component_sum_m2"] == pytest.approx(29.916)
     assert check["net_denominator_ready"] is False
+
+
+def test_3laurel_main_wc_gross_wall_faces_close_from_finished_dimensions():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"].startswith(
+            "3laurel:surface:internal_wall_gross:main_wc:"
+        )
+    ]
+    assert len(faces) == 4
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(
+        14.418
+    )
+    widths = sorted(row["attributes"]["finished_face_width_m"] for row in faces)
+    assert widths == pytest.approx([1.11, 1.11, 1.56, 1.56])
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:main_wc_internal_wall_gross_faces"
+    )
+    assert check["object_count"] == 4
+    assert check["component_sum_m2"] == pytest.approx(14.418)
+    assert check["net_denominator_ready"] is False
