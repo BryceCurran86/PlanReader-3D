@@ -826,8 +826,8 @@ def planreader_to_canonical_model(
             if not isinstance(op_raw, dict):
                 continue
 
-            op_id = str(op_raw.get("id") or f"op_{wall_ref}_{op_idx+1}")
-            op_mark = str(op_raw.get("mark") or op_raw.get("label") or f"Opening {op_idx+1}")
+            op_id = str(op_raw.get("opening_instance_id") or op_raw.get("id") or f"op_{wall_ref}_{op_idx+1}")
+            op_mark = str(op_raw.get("type_mark") or op_raw.get("mark") or op_raw.get("label") or f"Opening {op_idx+1}")
             op_type_str = str(op_raw.get("opening_type") or op_raw.get("type") or "").upper().strip()
             if "DOOR" in op_type_str:
                 op_type = ObjectType.DOOR
@@ -837,10 +837,13 @@ def planreader_to_canonical_model(
                 op_type = ObjectType.OPENING
 
             # SECTION 3: Explicit key presence lookup (NO 0.0 false-falsy fallback bugs!)
-            offset_m = _get_present_float(op_raw, ["offset_along_wall_m", "offset_m", "position_along_wall_m"])
+            offset_m = _get_present_float(op_raw, ["offset_along_wall_m", "offset_m", "position_along_wall_m", "station_m"])
             sill_m = _get_present_float(op_raw, ["sill_height_m", "sill_m"])
             w_op = _get_present_float(op_raw, ["width_m", "width"])
             h_op = _get_present_float(op_raw, ["height_m", "height"])
+            head_m = _get_present_float(op_raw, ["head_height_m", "head_m"])
+            if head_m is None and sill_m is not None and h_op is not None:
+                head_m = round(sill_m + h_op, 4)
 
             op_prov = _parse_provenance(op_raw.get("provenance"))
             if not op_prov.wall_ref:
@@ -974,6 +977,36 @@ def planreader_to_canonical_model(
                 {"source": key, "value": value, "resolved": slug}
                 for key, value, slug in op_level_evidences
             ]
+            c_opening.metadata["opening_instance_id"] = op_id
+            c_opening.metadata["head_height_m"] = head_m
+            c_opening.metadata["schedule_ref"] = op_raw.get("schedule_ref") or op_raw.get("schedule_page_id")
+            c_opening.metadata["detail_record_id"] = op_raw.get("detail_record_id")
+            c_opening.metadata["detail_semantic_identity_id"] = op_raw.get("detail_semantic_identity_id")
+            c_opening.metadata["dimension_basis"] = op_raw.get("dimension_basis")
+            c_opening.metadata["dimension_source"] = op_raw.get("dimension_source")
+            c_opening.metadata["dimension_confidence"] = op_raw.get("dimension_confidence")
+            c_opening.metadata["plan_geometry_signature"] = op_raw.get("plan_geometry_signature")
+
+            # Derived quantities for trade estimating (Joinery / Doors / Windows supply and install)
+            if op_raw.get("derived_quantities") and isinstance(op_raw["derived_quantities"], list):
+                for qb_raw in op_raw["derived_quantities"]:
+                    if isinstance(qb_raw, dict):
+                        c_opening.derived_quantities.append(QuantityFormulaBinding.from_dict(qb_raw))
+            if not c_opening.derived_quantities:
+                trade_cat = "doors" if op_type == ObjectType.DOOR else "windows" if op_type == ObjectType.WINDOW else "openings"
+                c_opening.derived_quantities.append(
+                    QuantityFormulaBinding(
+                        trade_category=trade_cat,
+                        item_code=f"OPENING_{op_mark}",
+                        formula_expression="1.0",
+                        unit="No.",
+                        quantity=1.0,
+                    )
+                )
+
+            # Bidirectional parent/child relationship
+            if not is_wrong_host and c_opening.id not in c_wall.children_ids:
+                c_wall.children_ids.append(c_opening.id)
 
             c_wall.openings.append(c_opening)
 

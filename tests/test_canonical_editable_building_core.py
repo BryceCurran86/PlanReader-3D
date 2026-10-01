@@ -359,3 +359,294 @@ def test_collect_workspace_evidence_captures_auto_geometry_partitions_and_finish
     assert "internal_partition_evidence" in obs_kinds
     assert "bound_wall_finish_evidence" in obs_kinds
 
+
+def test_canonical_opening_enrichment_and_provenance():
+    """CanonicalOpening preserves stable physical opening identity, host wall, schedule mark, dimensions, and derived trade quantities."""
+    from pb_production_3d_adapter import planreader_to_canonical_model
+
+    payload = {
+        "workspace_id": 99,
+        "registered_walls": [
+            {
+                "wall_ref": "W_EXT_NORTH",
+                "a": {"x": 0.0, "y": 0.0},
+                "b": {"x": 10.0, "y": 0.0},
+                "height_m": 2.7,
+                "thickness_m": 0.24,
+                "is_external": True,
+                "level": {"id": "lvl_ground", "name": "Ground Floor", "level_index": 0},
+                "openings": [
+                    {
+                        "opening_instance_id": "op_inst_W01_gnd",
+                        "type_mark": "W01",
+                        "opening_type": "WINDOW",
+                        "opening_classification": "WINDOW",
+                        "width_m": 1.8,
+                        "height_m": 1.2,
+                        "sill_height_m": 0.9,
+                        "station_m": 2.5,
+                        "schedule_ref": "SCHED_PAGE_04",
+                        "detail_record_id": "DET_REC_W01",
+                        "detail_semantic_identity_id": "SEM_ID_W01_ALUM",
+                        "dimension_basis": "schedule_callout",
+                        "dimension_source": "window_schedule_table",
+                        "dimension_confidence": "high",
+                        "plan_geometry_signature": "SIG_W01_GROUND_N",
+                        "wall_ref": "W_EXT_NORTH",
+                    },
+                    {
+                        "opening_instance_id": "op_inst_D01_gnd",
+                        "type_mark": "D01",
+                        "opening_type": "DOOR",
+                        "opening_classification": "DOOR",
+                        "width_m": 0.92,
+                        "height_m": 2.1,
+                        "sill_height_m": 0.0,
+                        "offset_along_wall_m": 6.0,
+                        "schedule_ref": "SCHED_PAGE_04",
+                        "wall_ref": "W_EXT_NORTH",
+                    },
+                ],
+            }
+        ]
+    }
+
+    project, skipped = planreader_to_canonical_model(payload, is_validated_internal_workspace=True)
+    project.recompute_relationships()
+
+    walls = project.all_walls()
+    assert len(walls) == 1
+    wall = walls[0]
+
+    openings = project.all_openings()
+    assert len(openings) == 2
+
+    # Verify bidirectional topological linkage
+    assert wall.children_ids == ["op_inst_W01_gnd", "op_inst_D01_gnd"]
+
+    w01 = next(op for op in openings if op.id == "op_inst_W01_gnd")
+    assert w01.name == "W01"
+    assert w01.mark == "W01"
+    assert w01.opening_type == ObjectType.WINDOW
+    assert w01.opening_classification == "WINDOW"
+    assert w01.width_m == 1.8
+    assert w01.height_m == 1.2
+    assert w01.sill_height_m == 0.9
+    assert w01.metadata["head_height_m"] == 2.1  # 0.9 + 1.2
+    assert w01.offset_along_wall_m == 2.5
+    assert w01.host_wall_id == wall.id
+    assert w01.wall_id == wall.id
+    assert w01.parent_id == wall.id
+
+    # Verify schedule / detail provenance
+    assert w01.metadata["schedule_ref"] == "SCHED_PAGE_04"
+    assert w01.metadata["detail_record_id"] == "DET_REC_W01"
+    assert w01.metadata["detail_semantic_identity_id"] == "SEM_ID_W01_ALUM"
+    assert w01.metadata["dimension_basis"] == "schedule_callout"
+    assert w01.metadata["dimension_source"] == "window_schedule_table"
+    assert w01.metadata["dimension_confidence"] == "high"
+    assert w01.metadata["plan_geometry_signature"] == "SIG_W01_GROUND_N"
+
+    # Verify derived trade quantity binding (Windows No. 1.0)
+    assert len(w01.derived_quantities) == 1
+    binding = w01.derived_quantities[0]
+    assert binding.trade_category == "windows"
+    assert binding.item_code == "OPENING_W01"
+    assert binding.quantity == 1.0
+    assert binding.unit == "No."
+
+    # Test dynamic costing via user rates without re-extracting geometry
+    costs = project.recompute_quantities({"OPENING_W01": 650.0, "OPENING_D01": 1200.0})
+    assert costs["items_costed"] == 2
+    assert costs["total_cost"] == 1850.0
+    assert costs["by_trade"]["windows"] == 650.0
+    assert costs["by_trade"]["doors"] == 1200.0
+
+
+def test_consolidated_opening_detail_definitions_across_sheets_no_double_deduction():
+    """Opening detail bridge consolidates multi-sheet observations into physical opening instances with exact 1x area deduction."""
+    from pb_opening_detail_definition_authority import OpeningDetailDefinitionRecord
+    from pb_opening_detail_definition_bridge import (
+        consolidate_opening_identities,
+        enrich_openings_with_detail_definitions,
+        apply_opening_deductions_to_walls,
+    )
+
+    # Observations of the same opening "W01" across plan, elevation, schedule, and detail sheets
+    raw_observations = [
+        {
+            "opening_id": "op_W01_plan",
+            "type_mark": "W01",
+            "host_wall_id": "W-101",
+            "width_m": 1.8,
+            "height_m": 1.2,
+            "plan_page_id": "P_02",
+        },
+        {
+            "opening_id": "op_W01_plan",
+            "type_mark": "W01",
+            "host_wall_id": "W-101",
+            "elevation_page_id": "P_05",
+        },
+        {
+            "opening_id": "op_W01_plan",
+            "type_mark": "W01",
+            "host_wall_id": "W-101",
+            "schedule_page_id": "P_08",
+        },
+    ]
+
+    consolidated = consolidate_opening_identities(raw_observations)
+    assert len(consolidated) == 1
+    cop = consolidated[0]
+    assert cop.opening_id == "op_W01_plan"
+    assert cop.type_mark == "W01"
+    assert cop.host_wall_id == "W-101"
+    assert cop.width_m == 1.8
+    assert cop.height_m == 1.2
+    assert cop.area_m2 == 2.16
+    assert cop.plan_page_id == "P_02"
+    assert cop.elevation_page_id == "P_05"
+    assert cop.schedule_page_id == "P_08"
+
+    # Detail definition record
+    import pb_opening_detail_definition_authority as openmod
+    from pb_migration_contracts import EvidenceResolutionStatus
+    detail_rec = OpeningDetailDefinitionRecord(
+        record_id="det_W01",
+        semantic_identity_id="SEM_W01",
+        document_id="doc1",
+        revision_id="rev1",
+        source_sha256="a" * 64,
+        snapshot_id="snap1",
+        page_id="P_09",
+        source_partition_id="part1",
+        sequence_start=10,
+        sequence_end=20,
+        source_bbox=(100.0, 200.0, 300.0, 400.0),
+        family="window",
+        subtype="awning",
+        material="aluminium",
+        width_mm=1800,
+        height_mm=1200,
+        dimension_basis="detail_unspecified",
+        source_observation_ids=("obs-1",),
+        required_observation_ids=("obs-1",),
+        word_evidence=(),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=(openmod.OPENING_DETAIL_DEFINITION_RESOLVED,),
+        _seal=openmod._RECORD_SEAL,
+    )
+
+    enriched = enrich_openings_with_detail_definitions(consolidated, [detail_rec], mark_to_semantic_identity={"W01": "SEM_W01"})
+    assert len(enriched) == 1
+    eop = enriched[0]
+    assert eop.family == "window"
+    assert eop.subtype == "awning"
+    assert eop.material == "aluminium"
+    assert eop.detail_record_id == "det_W01"
+
+    # Apply deductions to host wall: 10m length * 2.7m height = 27.0 m2 gross
+    # Opening area = 1.8 * 1.2 = 2.16 m2. Net = 24.84 m2. Deducted exactly ONCE.
+    walls = [{"wall_ref": "W-101", "gross_m2": 27.0, "net_m2": 27.0}]
+    updated_walls = apply_opening_deductions_to_walls(walls, enriched)
+    assert len(updated_walls) == 1
+    w = updated_walls[0]
+    assert w["opening_deduction_m2"] == 2.16
+    assert w["net_m2"] == 24.84
+    assert w["consolidated_opening_ids"] == ["op_W01_plan"]
+
+
+def test_end_to_end_customer_upload_parity_with_canonical_model():
+    """End-to-end customer plan upload: auto geometry persists canonical model and customer takeoff rows match net quantities."""
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+    import pb_planreader_3d_app as app_mod
+    import pb_auto_geometry_v1219 as auto
+    from pb_canonical_persistence import load_workspace_canonical_model
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        db_path = Path(tmp) / "planreader_test.db"
+        with patch.object(app_mod, "DB_PATH", db_path):
+            setattr(app_mod, "_pb_local_db_initialized_v1215", False)
+            app_mod.init_local_db()
+
+            # Create workspace, document, and pages
+            app_mod.lexecute("INSERT INTO workspaces(id, job_name, created_at, updated_at) VALUES(1, 'Parity Test', 'x', 'x')")
+            app_mod.lexecute("INSERT INTO documents(id, workspace_id, file_name, path, sha256, page_count) VALUES(1, 1, 'plans.pdf', 'plans.pdf', 'sha', 1)")
+            app_mod.lexecute(
+                """INSERT INTO pages(id, document_id, workspace_id, page_no, page_label, page_type, scale_text, px_per_m, render_zoom, extracted_text, selected)
+                   VALUES(1, 1, 1, 1, 'Elevation North', 'Elevation', '1:100', 28.35, 1.0, 'ELEVATION', 1)"""
+            )
+
+            # Mock registered walls: wall with 1 window (1.8m x 1.2m = 2.16m2) on a 10m x 2.7m wall (gross 27.0m2, net 24.84m2)
+            reg_wall = {
+                "wall_ref": "W_NORTH_PARITY",
+                "side": "North",
+                "substrate": "Brick veneer",
+                "height_m": 2.7,
+                "height_status": "confirmed",
+                "height_confidence": "Verified",
+                "gross_m2": 27.0,
+                "opening_deduction_m2": 2.16,
+                "net_m2": 24.84,
+                "is_external": True,
+                "thickness_m": 0.24,
+                "a": {"x": 0.0, "y": 0.0},
+                "b": {"x": 10.0, "y": 0.0},
+                "level": {"id": "lvl_ground", "name": "Ground Floor", "level_index": 0},
+                "openings": [
+                    {
+                        "opening_instance_id": "op_W01_parity",
+                        "type_mark": "W01",
+                        "opening_type": "WINDOW",
+                        "width_m": 1.8,
+                        "height_m": 1.2,
+                        "sill_height_m": 0.9,
+                        "station_m": 3.0,
+                        "wall_ref": "W_NORTH_PARITY",
+                    }
+                ],
+            }
+
+            app_mod.build_registered_walls_v139 = lambda ws_id: [reg_wall]
+
+            # Run automatic plan geometry
+            report = auto.analyse_workspace(app_mod, 1)
+
+            assert report is not None
+            assert report["canonical_model_id"] == "ws_1_canonical"
+            assert report["canonical_wall_count"] == 1
+            assert report["canonical_opening_count"] == 1
+
+            # Verify canonical model persistence
+            ok, project, msg, payload = load_workspace_canonical_model(app_mod, 1)
+            assert ok is True
+            assert project is not None
+            assert project.id == "ws_1_canonical"
+
+            c_wall = project.all_walls()[0]
+            assert c_wall.id == "wall_W_NORTH_PARITY"
+            assert c_wall.length_m() == 10.0
+            assert c_wall.height_m == 2.7
+            assert c_wall.gross_area_m2() == 27.0
+            assert round(c_wall.net_area_m2(), 2) == 24.84
+            assert len(c_wall.openings) == 1
+
+            c_op = c_wall.openings[0]
+            assert c_op.mark == "W01"
+            assert c_op.width_m == 1.8
+            assert c_op.height_m == 1.2
+            assert c_op.host_wall_id == c_wall.id
+
+            # Verify customer takeoff rows directly in SQLite
+            rows = app_mod.lquery("SELECT section, element, location, substrate, quantity, unit, notes FROM takeoff_rows WHERE workspace_id=1")
+            assert len(rows) >= 1
+            wall_row = next(r for r in rows if "W_NORTH_PARITY" in str(r.get("notes") or "") or "W_NORTH_PARITY" in str(r.get("location") or "") or "W_NORTH_PARITY" in str(r.get("element") or ""))
+            assert wall_row["quantity"] == 24.84
+            assert wall_row["unit"] == "m²"
+            assert "Gross 27.00 m²" in wall_row["notes"]
+            assert "authenticated opening deductions 2.16 m²" in wall_row["notes"]
+
+
