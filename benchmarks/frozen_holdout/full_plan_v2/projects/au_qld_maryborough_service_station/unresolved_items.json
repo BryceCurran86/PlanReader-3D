@@ -12,8 +12,8 @@
       "reason": "Wall-face universe not independently closed."
     },
     {
-      "family": "ceilings",
-      "reason": "Ceiling surface universe not independently closed."
+      "family": "remaining_ceilings",
+      "reason": "The three WC & SHOWER WFPB ceilings are independently closed; all other ceiling surfaces remain unresolved."
     },
     {
       "family": "wall_tiles",
