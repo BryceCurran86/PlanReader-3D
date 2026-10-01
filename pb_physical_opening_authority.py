@@ -884,12 +884,17 @@ class PhysicalOpeningAuthority:
             ge = coord_bin(second_break.gap_end)
             ga = angle_bin(second_break.direction)
 
-            prior_indexes: set[int] = set()
+            # Each prior break is stored in exactly one (gap-start, gap-end,
+            # angle) bin, and the 27 neighbor keys below are distinct. A set
+            # therefore performs duplicate tracking that can never remove an
+            # item. Extend a list instead, then preserve the historical sorted
+            # first-index evaluation order exactly.
+            prior_indexes: list[int] = []
             for ds in (-1, 0, 1):
                 for de in (-1, 0, 1):
                     for da in (-1, 0, 1):
                         ak = (ga + da) % angle_bucket_count
-                        prior_indexes.update(
+                        prior_indexes.extend(
                             break_index.get((gs + ds, ge + de, ak), ())
                         )
 
