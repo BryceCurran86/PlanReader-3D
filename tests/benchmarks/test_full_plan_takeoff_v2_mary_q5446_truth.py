@@ -41,12 +41,13 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
 
     eligible = [item for item in manifest.verified_items if item.denominator_eligible]
     excluded = [item for item in manifest.verified_items if not item.denominator_eligible]
-    assert len(eligible) == 4
-    assert len(excluded) == 2
+    assert len(eligible) == 3
+    assert len(excluded) == 3
 
     by_id = {item.item_id: item for item in manifest.verified_items}
     assert by_id["maryborough-door-ipf3-count"].expected_quantity == 11
     assert by_id["maryborough-door-ipf3-leaf-area-one-face"].expected_quantity == 20.2368
+    assert not by_id["maryborough-door-ipf3-leaf-area-one-face"].denominator_eligible
     assert by_id["maryborough-door-laminex-partition-count"].expected_quantity == 3
     assert by_id["maryborough-door-aluminium-glazed-count"].expected_quantity == 2
     assert by_id["maryborough-door-coolroom-by-others-count"].expected_quantity == 2
