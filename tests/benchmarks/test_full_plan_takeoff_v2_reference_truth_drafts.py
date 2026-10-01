@@ -123,7 +123,7 @@ def test_3laurel_gross_shower_tile_faces_stay_out_of_net_denominator_until_deduc
     )
     assert check["net_denominator_ready"] is False
     assert "niche/recess returns and deductions remain unresolved" in check["reason"]
-    assert "wet_area_tile_niche_returns_and_recess_deductions" in draft["unresolved_surface_families"]
+    assert "wet_area_tile_bathroom_niche_face_and_all_niche_return_depths" in draft["unresolved_surface_families"]
 
 
 def test_3laurel_typed_external_opening_census_is_source_closed():
@@ -440,5 +440,36 @@ def test_3laurel_main_laundry_gross_wall_faces_are_dimension_closed_but_not_net_
     )
     assert (
         "internal_wall_faces_beyond_closed_bathroom_main_laundry_and_gf_ensuite_laundry_gross_faces"
+        in draft["unresolved_surface_families"]
+    )
+
+
+def test_3laurel_two_source_dimensioned_niche_face_deductions_are_closed_but_returns_are_not():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:source_dimensioned_niche_face_deductions"
+    )
+    refs = set(check["component_object_refs"])
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
+    assert len(openings) == check["niche_opening_count"] == 2
+    assert all(row["object_family"] == "wet_area_wall_tile_deduction_opening" for row in openings)
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(0.48)
+    assert check["flat_face_deduction_area_m2"] == pytest.approx(0.48)
+    assert check["main_ensuite_rear_flat_tile_area_after_niche_m2"] == pytest.approx(4.296)
+    assert check["gf_ensuite_rear_flat_tile_area_after_niche_m2"] == pytest.approx(4.809)
+    assert check["niche_return_depths_resolved"] is False
+    assert check["bathroom_niche_deduction_resolved"] is False
+    assert all(
+        row["attributes"]["niche_return_depth_resolved"] is False
+        for row in openings
+    )
+    assert (
+        "wet_area_tile_bathroom_niche_face_and_all_niche_return_depths"
         in draft["unresolved_surface_families"]
     )
