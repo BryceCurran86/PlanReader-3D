@@ -12,10 +12,180 @@
       "page_count": 31
     }
   ],
-  "reference_takeoff_documents": [],
-  "verified_takeoff_items": [],
+  "reference_takeoff_documents": [
+    {
+      "name": "reference_takeoff.json",
+      "role": "independent_verified_reference_takeoff",
+      "sha256": "5f8643d1a0efd67b15f0180c180c1c3bb9dcf7f83442d9e904e62445da41885e",
+      "size_bytes": 6555,
+      "page_count": null
+    }
+  ],
+  "verified_takeoff_items": [
+    {
+      "item_id": "maryborough-door-ipf3-count",
+      "description": "Solid-core flush timber doors with IPF3 paint finish",
+      "trade_category": "doors",
+      "unit": "nr",
+      "expected_quantity": 11,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:door:D03",
+        "maryborough:door:D07",
+        "maryborough:door:D08",
+        "maryborough:door:D09",
+        "maryborough:door:D10",
+        "maryborough:door:D11",
+        "maryborough:door:D12",
+        "maryborough:door:D13",
+        "maryborough:door:D14",
+        "maryborough:door:D15",
+        "maryborough:door:D28"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A600:door_schedule:D03,D07-D15,D28",
+        "A110:floor_plan:tags:D03,D07-D15,D28"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-door-ipf3-leaf-area-one-face",
+      "description": "One-face leaf area of IPF3 painted solid-core flush timber doors",
+      "trade_category": "painting",
+      "unit": "m2",
+      "expected_quantity": 20.2368,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:door:D03",
+        "maryborough:door:D07",
+        "maryborough:door:D08",
+        "maryborough:door:D09",
+        "maryborough:door:D10",
+        "maryborough:door:D11",
+        "maryborough:door:D12",
+        "maryborough:door:D13",
+        "maryborough:door:D14",
+        "maryborough:door:D15",
+        "maryborough:door:D28"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A600:door_schedule:9x920x2040_plus_2x820x2040",
+        "A110:floor_plan:matching_11_door_tags"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-door-laminex-partition-count",
+      "description": "Laminex partition-system swing doors",
+      "trade_category": "doors",
+      "unit": "nr",
+      "expected_quantity": 3,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:door:D04",
+        "maryborough:door:D05",
+        "maryborough:door:D06"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A600:door_schedule:D04-D06",
+        "A110:floor_plan:tags:D04-D06"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-door-aluminium-glazed-count",
+      "description": "Aluminium framed glazed doors",
+      "trade_category": "doors",
+      "unit": "nr",
+      "expected_quantity": 2,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:door:D01",
+        "maryborough:door:D02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A600:door_schedule:D01-D02",
+        "A110:floor_plan:tags:D01-D02"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-door-coolroom-by-others-count",
+      "description": "Coolroom-contractor doors excluded from builder denominator",
+      "trade_category": "doors",
+      "unit": "nr",
+      "expected_quantity": 2,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:door:D16",
+        "maryborough:door:D17"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A600:door_schedule:D16-D17:by_coolroom_contractor",
+        "A110:floor_plan:tags:D16-D17"
+      ],
+      "denominator_eligible": false,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-door-lessee-shelving-by-others-count",
+      "description": "Coldroom/freezer display shelving doors supplied and installed by lessee contractor",
+      "trade_category": "doors",
+      "unit": "nr",
+      "expected_quantity": 10,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:door:D18",
+        "maryborough:door:D19",
+        "maryborough:door:D20",
+        "maryborough:door:D21",
+        "maryborough:door:D22",
+        "maryborough:door:D23",
+        "maryborough:door:D24",
+        "maryborough:door:D25",
+        "maryborough:door:D26",
+        "maryborough:door:D27"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A600:door_schedule:D18-D27:lessee_contractor",
+        "A110:floor_plan:tags:D18-D27"
+      ],
+      "denominator_eligible": false,
+      "verification_status": "VERIFIED"
+    }
+  ],
   "reason_codes": [
-    "reference_takeoff_not_supplied",
-    "verified_surface_universe_not_built"
+    "room_area_universe_not_built",
+    "wall_ceiling_finish_surface_universe_not_built",
+    "window_surface_universe_not_built",
+    "external_surface_universe_not_built"
   ]
 }
