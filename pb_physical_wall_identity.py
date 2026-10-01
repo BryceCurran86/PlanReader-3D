@@ -333,18 +333,33 @@ class _PhysicalWallPairFeatures:
     segments: tuple[tuple[float, float, float, float], ...]
     axis_interval: Optional[tuple[str, float, float]]
     level_id: str
+    single_segment_unit: Optional[tuple[float, float]]
+    single_segment_bbox: Optional[tuple[float, float, float, float]]
 
 
 def _physical_wall_pair_features(
     identity: PhysicalWallIdentity,
 ) -> _PhysicalWallPairFeatures:
     path = tuple(identity.path_fingerprint or ())
+    segments = _segments(path)
+    single = segments[0] if len(segments) == 1 else None
     return _PhysicalWallPairFeatures(
         primitive_set=frozenset(identity.source_primitive_ids),
         path=path,
-        segments=_segments(path),
+        segments=segments,
         axis_interval=_axis_interval(path),
         level_id=str(identity.level_id or "").strip(),
+        single_segment_unit=None if single is None else _unit(single),
+        single_segment_bbox=(
+            None
+            if single is None
+            else (
+                min(single[0], single[2]),
+                min(single[1], single[3]),
+                max(single[0], single[2]),
+                max(single[1], single[3]),
+            )
+        ),
     )
 
 
@@ -610,6 +625,93 @@ def _parallel_overlap_separation(
     return overlap, separation
 
 
+def _single_segment_pair_identity_candidacy(
+    left_features: _PhysicalWallPairFeatures,
+    right_features: _PhysicalWallPairFeatures,
+    *,
+    points_per_mm: Optional[float],
+) -> tuple[bool, Optional[str]]:
+    """Exact candidacy fast-path for two straight one-segment identities.
+
+    The historical predicate recomputed units, endpoint distances and projected
+    intervals for every pair.  On dense CAD sheets that means millions of
+    repeated calculations.  This path reuses immutable per-identity direction
+    and bounds, but preserves the same orientation/contact/overlap/separation
+    decisions and the same exclusion reason codes.
+    """
+    left = left_features.segments[0]
+    right = right_features.segments[0]
+    lu = left_features.single_segment_unit
+    ru = right_features.single_segment_unit
+    if lu is None or ru is None:
+        return True, None
+
+    dot = max(-1.0, min(1.0, abs(lu[0] * ru[0] + lu[1] * ru[1])))
+    if math.degrees(math.acos(dot)) > _EQUIVALENCE_ANGLE_TOL_DEG:
+        return False, PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE
+
+    left_bbox = left_features.single_segment_bbox
+    right_bbox = right_features.single_segment_bbox
+    can_meet = True
+    if left_bbox is not None and right_bbox is not None:
+        tol = _EQUIVALENCE_LATERAL_TOL_PT
+        can_meet = not (
+            left_bbox[2] + tol < right_bbox[0]
+            or right_bbox[2] + tol < left_bbox[0]
+            or left_bbox[3] + tol < right_bbox[1]
+            or right_bbox[3] + tol < left_bbox[1]
+        )
+    if can_meet and _segments_meet_within(
+        left, right, _EQUIVALENCE_LATERAL_TOL_PT
+    ):
+        return True, None
+
+    axis = lu
+    left_values = sorted(
+        (
+            left[0] * axis[0] + left[1] * axis[1],
+            left[2] * axis[0] + left[3] * axis[1],
+        )
+    )
+    right_values = sorted(
+        (
+            right[0] * axis[0] + right[1] * axis[1],
+            right[2] * axis[0] + right[3] * axis[1],
+        )
+    )
+    overlap = min(left_values[1], right_values[1]) - max(
+        left_values[0], right_values[0]
+    )
+    if overlap <= _EQUIVALENCE_LATERAL_TOL_PT:
+        return False, PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP
+
+    band = max_plausible_wall_body_separation_pt(points_per_mm)
+    if band is None:
+        return True, None
+
+    normal = (-axis[1], axis[0])
+    mid = (
+        max(left_values[0], right_values[0])
+        + min(left_values[1], right_values[1])
+    ) / 2.0
+
+    def offset_at(seg):
+        a_long = seg[0] * axis[0] + seg[1] * axis[1]
+        b_long = seg[2] * axis[0] + seg[3] * axis[1]
+        a_perp = seg[0] * normal[0] + seg[1] * normal[1]
+        b_perp = seg[2] * normal[0] + seg[3] * normal[1]
+        span = b_long - a_long
+        if abs(span) <= _EQUIVALENCE_DEGENERATE_TOL:
+            return a_perp
+        t = max(0.0, min(1.0, (mid - a_long) / span))
+        return a_perp + t * (b_perp - a_perp)
+
+    separation = abs(offset_at(right) - offset_at(left))
+    if separation <= band:
+        return True, None
+    return False, PAIR_EXCLUDED_SEPARATION_BEYOND_BAND
+
+
 def _physical_wall_pair_identity_candidacy_with_features(
     left: PhysicalWallIdentity,
     right: PhysicalWallIdentity,
@@ -620,7 +722,7 @@ def _physical_wall_pair_identity_candidacy_with_features(
 ) -> tuple[bool, Optional[str]]:
     if not left.usable or not right.usable:
         return True, None
-    if left_features.primitive_set & right_features.primitive_set:
+    if not left_features.primitive_set.isdisjoint(right_features.primitive_set):
         return True, None
     if (
         left.path_fingerprint is not None
@@ -637,6 +739,37 @@ def _physical_wall_pair_identity_candidacy_with_features(
 
     if len(left_features.path) < 2 or len(right_features.path) < 2:
         return True, None
+
+    if len(left_features.segments) == 1 and len(right_features.segments) == 1:
+        # Preserve the legacy both-endpoints safety rule.  Use an axis-aligned
+        # prefilter first: Euclidean distance <= tol necessarily implies both
+        # coordinate deltas <= tol, so this can only skip impossible matches.
+        tol = _EQUIVALENCE_LATERAL_TOL_PT
+        lp0, lp1 = left_features.path[0], left_features.path[-1]
+        rp0, rp1 = right_features.path[0], right_features.path[-1]
+        direct_possible = (
+            abs(lp0[0] - rp0[0]) <= tol
+            and abs(lp0[1] - rp0[1]) <= tol
+            and abs(lp1[0] - rp1[0]) <= tol
+            and abs(lp1[1] - rp1[1]) <= tol
+        )
+        reverse_possible = (
+            abs(lp0[0] - rp1[0]) <= tol
+            and abs(lp0[1] - rp1[1]) <= tol
+            and abs(lp1[0] - rp0[0]) <= tol
+            and abs(lp1[1] - rp0[1]) <= tol
+        )
+        if (direct_possible or reverse_possible) and _paths_share_both_endpoints(
+            left_features.path,
+            right_features.path,
+            tol,
+        ):
+            return True, None
+        return _single_segment_pair_identity_candidacy(
+            left_features,
+            right_features,
+            points_per_mm=points_per_mm,
+        )
 
     if _paths_share_both_endpoints(
         left_features.path,

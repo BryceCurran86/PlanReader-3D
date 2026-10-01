@@ -408,13 +408,20 @@ def attach_lineage_to_split_fragments(
     source_segments: Sequence[Mapping[str, Any]],
     *,
     id_prefix: str = "split",
+    primary_source_indexes: Optional[Sequence[int]] = None,
 ) -> List[Dict[str, Any]]:
     """Rebuild the historical split-dict shape plus additive plural lineage.
 
     Official split geometry is caller-supplied. Extra parents are taken only
     from the same collinear bucket so this is not a second global n² pass.
+    When the splitter supplies the source index that emitted each fragment,
+    that guaranteed parent is preserved instead of being rediscovered.
     """
+    if primary_source_indexes is not None and len(primary_source_indexes) != len(split_pairs):
+        raise ValueError("primary_source_indexes must align 1:1 with split_pairs")
+
     buckets: Dict[Tuple[Any, ...], List[Mapping[str, Any]]] = {}
+    single_source_lineage: Dict[int, Dict[str, Any]] = {}
     for segment in source_segments:
         buckets.setdefault(source_line_bucket(segment), []).append(segment)
 
@@ -423,6 +430,14 @@ def attach_lineage_to_split_fragments(
         p1, p2 = pair
         seen_candidates: set[int] = set()
         candidates: List[Mapping[str, Any]] = []
+        if primary_source_indexes is not None:
+            primary_index = int(primary_source_indexes[idx])
+            if primary_index < 0 or primary_index >= len(source_segments):
+                raise ValueError("primary source index is outside source_segments")
+            primary = source_segments[primary_index]
+            marker = id(primary)
+            seen_candidates.add(marker)
+            candidates.append(primary)
         for neighbor_key in fragment_line_bucket_neighbors(pair):
             for candidate in buckets.get(neighbor_key, ()):
                 marker = id(candidate)
@@ -436,6 +451,15 @@ def attach_lineage_to_split_fragments(
             # leave its source's coarse line bucket while still lying on the
             # source. Scan sources only for that miss — not every fragment.
             parents = sources_for_fragment(pair, source_segments)
+        if len(parents) == 1 and primary_source_indexes is not None:
+            marker = id(parents[0])
+            cached = single_source_lineage.get(marker)
+            if cached is None:
+                cached = lineage_from_source_segments((parents[0],))
+                single_source_lineage[marker] = cached
+            lineage = isolated_lineage(cached)
+        else:
+            lineage = isolated_lineage(lineage_from_source_segments(parents))
         fragment = {
             "id": f"{id_prefix}_{idx}",
             "x1": p1[0],
@@ -443,7 +467,7 @@ def attach_lineage_to_split_fragments(
             "x2": p2[0],
             "y2": p2[1],
             **fabricated_live_fields(),
-            LINEAGE_KEY: isolated_lineage(lineage_from_source_segments(parents)),
+            LINEAGE_KEY: lineage,
         }
         out.append(fragment)
     return out
