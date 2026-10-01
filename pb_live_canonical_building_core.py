@@ -38,6 +38,7 @@ _FAMILY_ID_FIELD = MappingProxyType({
     "ceilings": "canonical_ceiling_id",
     "roofs": "canonical_roof_id",
     "structural_members": "canonical_structural_member_id",
+    "surfaces": "canonical_surface_id",
 })
 
 def _clean(value: object) -> str:
@@ -79,6 +80,7 @@ class LiveCanonicalLevelBucket:
     ceilings: tuple[Mapping[str, object], ...] = ()
     roofs: tuple[Mapping[str, object], ...] = ()
     structural_members: tuple[Mapping[str, object], ...] = ()
+    surfaces: tuple[Mapping[str, object], ...] = ()
     schema_version: str = LIVE_CANONICAL_BUILDING_CORE_SCHEMA_VERSION
 
     def to_dict(self) -> dict:
@@ -110,6 +112,7 @@ class LiveCanonicalLevelBucket:
             "structural_members": [
                 dict(item) for item in self.structural_members
             ],
+            "surfaces": [dict(item) for item in self.surfaces],
             "schema_version": self.schema_version,
         }
 
@@ -169,6 +172,7 @@ def assemble_live_canonical_building_core(
     ceilings: Sequence[Mapping[str, object]] = (),
     roofs: Sequence[Mapping[str, object]] = (),
     structural_members: Sequence[Mapping[str, object]] = (),
+    surfaces: Sequence[Mapping[str, object]] = (),
 ) -> LiveCanonicalBuildingCore:
     """Assemble one source-revision building graph without guessing storeys."""
 
@@ -186,6 +190,7 @@ def assemble_live_canonical_building_core(
         "ceilings": _dict_items(ceilings),
         "roofs": _dict_items(roofs),
         "structural_members": _dict_items(structural_members),
+        "surfaces": _dict_items(surfaces),
     }
     if not any(families.values()) and not source_levels:
         return _empty()
@@ -265,6 +270,13 @@ def assemble_live_canonical_building_core(
         if level_id:
             level_by_ceiling_id[_object_id("ceilings", ceiling)] = level_id
 
+    level_by_surface_id: dict[str, str] = {}
+    for surface in families["surfaces"]:
+        wall_id = _clean(surface.get("canonical_wall_id"))
+        level_id = level_by_wall_id.get(wall_id)
+        if level_id:
+            level_by_surface_id[_object_id("surfaces", surface)] = level_id
+
     explicit_maps: dict[str, dict[str, str]] = {
         "walls": level_by_wall_id,
         "openings": level_by_opening_id,
@@ -274,6 +286,7 @@ def assemble_live_canonical_building_core(
         "slabs": {},
         "roofs": {},
         "structural_members": {},
+        "surfaces": level_by_surface_id,
     }
 
     # Honor explicit level_id / single level_ids on any object family before
@@ -371,6 +384,7 @@ def assemble_live_canonical_building_core(
             ceilings=tuple(payload["ceilings"]),
             roofs=tuple(payload["roofs"]),
             structural_members=tuple(payload["structural_members"]),
+            surfaces=tuple(payload["surfaces"]),
         )
         for level_id, payload in sorted(bucket_payloads.items())
     )

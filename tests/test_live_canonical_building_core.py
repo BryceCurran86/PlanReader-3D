@@ -57,6 +57,18 @@ def _ceiling():
     }
 
 
+def _surface(*, wall_id="wall-1"):
+    return {
+        "canonical_surface_id": "surface-1",
+        "canonical_wall_id": wall_id,
+        "physical_wall_id": wall_id,
+        "physical_face_id": "face-1",
+        "trade_scope_id": "internal_paint",
+        "finish_material": "paint",
+        "commercial_quantity_authority": False,
+    }
+
+
 def test_no_level_evidence_never_invents_a_storey() -> None:
     result = assemble_live_canonical_building_core(
         source_sha256=SHA,
@@ -65,6 +77,7 @@ def test_no_level_evidence_never_invents_a_storey() -> None:
         rooms=(_room(),),
         floors=(_floor(),),
         ceilings=(_ceiling(),),
+        surfaces=(_surface(),),
     )
 
     assert result.status is EvidenceResolutionStatus.CORROBORATED
@@ -81,6 +94,7 @@ def test_no_level_evidence_never_invents_a_storey() -> None:
     assert len(result.unassigned["rooms"]) == 1
     assert len(result.unassigned["floors"]) == 1
     assert len(result.unassigned["ceilings"]) == 1
+    assert len(result.unassigned["surfaces"]) == 1
 
 
 def test_proven_wall_level_propagates_through_physical_relationships_only() -> None:
@@ -101,6 +115,7 @@ def test_proven_wall_level_propagates_through_physical_relationships_only() -> N
         slabs=(slab,),
         roofs=(roof,),
         structural_members=(structure,),
+        surfaces=(_surface(),),
     )
 
     assert result.status is EvidenceResolutionStatus.CORROBORATED
@@ -122,12 +137,18 @@ def test_proven_wall_level_propagates_through_physical_relationships_only() -> N
     assert [item["canonical_ceiling_id"] for item in level.ceilings] == [
         "ceiling-1"
     ]
+    assert [item["canonical_surface_id"] for item in level.surfaces] == [
+        "surface-1"
+    ]
 
     payload = level.to_dict()
     assert [item["canonical_opening_id"] for item in payload["doors"]] == [
         "opening-1"
     ]
     assert payload["windows"] == []
+    assert [item["canonical_surface_id"] for item in payload["surfaces"]] == [
+        "surface-1"
+    ]
 
     # No level is invented for unrelated objects that carry no proven level.
     assert result.unassigned["slabs"] == (slab,)
