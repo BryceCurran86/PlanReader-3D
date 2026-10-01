@@ -404,3 +404,110 @@ def test_security_malformed_inputs_fail_closed():
     project, _ = planreader_to_canonical_model(malformed_payload, is_validated_internal_workspace=False)
     assert project.deduction_authority is False
     assert len(project.buildings[0].levels[0].walls) == 0  # Invalid wall excluded!
+
+
+def test_adapter_ingests_multi_trade_elements_and_derives_quantities():
+    """Verifies that planreader_to_canonical_model ingests ceilings, columns, parapets,
+    balconies, and soffits, attaching full trade quantity derivations.
+    """
+    payload = {
+        "workspace_id": 105,
+        "project_name": "Full Multi-Trade Project",
+        "levels": [{"id": "lvl_ground", "name": "Ground Level", "elevation_m": 0.0}],
+        "walls": [
+            {
+                "wall_ref": "W_EXT_01",
+                "level": "lvl_ground",
+                "a": {"x": 0.0, "y": 0.0},
+                "b": {"x": 10.0, "y": 0.0},
+                "height_m": 2.70,
+                "is_external": True,
+                "substrate": "Face Brickwork",
+            }
+        ],
+        "ceilings": [
+            {
+                "id": "CEIL_01",
+                "name": "Ground Ceiling",
+                "level": "lvl_ground",
+                "polygon": [{"x": 0, "y": 0}, {"x": 6, "y": 0}, {"x": 6, "y": 5}, {"x": 0, "y": 5}],
+            }
+        ],
+        "columns": [
+            {
+                "id": "COL_01",
+                "name": "Porch Column",
+                "level": "lvl_ground",
+                "center": {"x": 1.0, "y": 1.0},
+                "width_m": 0.35,
+                "depth_m": 0.35,
+                "height_m": 2.70,
+            }
+        ],
+        "parapets": [
+            {
+                "id": "PAR_01",
+                "name": "Front Parapet",
+                "level": "lvl_ground",
+                "start_point": {"x": 0, "y": 0},
+                "end_point": {"x": 8, "y": 0},
+                "height_m": 0.60,
+            }
+        ],
+        "balconies": [
+            {
+                "id": "BALC_01",
+                "name": "External Balcony",
+                "level": "lvl_ground",
+                "polygon": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 2}, {"x": 0, "y": 2}],
+            }
+        ],
+        "soffits": [
+            {
+                "id": "SOF_01",
+                "name": "Eaves Soffit",
+                "level": "lvl_ground",
+                "polygon": [{"x": 0, "y": 0}, {"x": 8, "y": 0}, {"x": 8, "y": 0.6}, {"x": 0, "y": 0.6}],
+            }
+        ],
+    }
+
+    project, skipped = planreader_to_canonical_model(payload, is_validated_internal_workspace=True)
+    assert len(skipped) == 0
+
+    ceilings = project.all_ceilings()
+    assert len(ceilings) == 1
+    assert ceilings[0].measured_area_m2() == 30.0
+    c_codes = [q.item_code for q in ceilings[0].derived_quantities]
+    assert "CEILING_PLASTERBOARD_LINING" in c_codes
+
+    columns = project.all_columns()
+    assert len(columns) == 1
+    col_codes = [q.item_code for q in columns[0].derived_quantities]
+    assert "COLUMN_FORMWORK" in col_codes
+    assert "COLUMN_CONCRETE_SUPPLY" in col_codes
+
+    parapets = project.all_parapets()
+    assert len(parapets) == 1
+    p_codes = [q.item_code for q in parapets[0].derived_quantities]
+    assert "PARAPET_METAL_CAPPING" in p_codes
+
+    balconies = project.all_balconies()
+    assert len(balconies) == 1
+    b_codes = [q.item_code for q in balconies[0].derived_quantities]
+    assert "BALCONY_WATERPROOFING_MEMBRANE" in b_codes
+
+    soffits = project.all_soffits()
+    assert len(soffits) == 1
+    s_codes = [q.item_code for q in soffits[0].derived_quantities]
+    assert "EXTERNAL_SOFFIT_LINING" in s_codes
+
+    # Full takeoff generation test
+    rows = project.generate_takeoff_rows(workspace_id=105)
+    row_elements = [r["element"].lower() for r in rows]
+    assert any("ceiling" in elem for elem in row_elements)
+    assert any("column" in elem for elem in row_elements)
+    assert any("parapet" in elem for elem in row_elements)
+    assert any("balcony" in elem for elem in row_elements)
+    assert any("soffit" in elem for elem in row_elements)
+

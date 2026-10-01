@@ -1047,29 +1047,7 @@ def planreader_to_canonical_model(
                 if isinstance(qb_raw, dict):
                     c_wall.derived_quantities.append(QuantityFormulaBinding.from_dict(qb_raw))
         if not c_wall.derived_quantities and c_wall.takeoff_eligible and c_wall.length_m() > 0.0:
-            wall_sub = str(w_input.get("substrate") or "")
-            if c_wall.is_external:
-                sub_code = (wall_sub or "EXTERNAL_WALL").upper().replace(" ", "_")
-                c_wall.derived_quantities.append(
-                    QuantityFormulaBinding(
-                        trade_category="bricklaying" if "brick" in wall_sub.lower() else "masonry",
-                        item_code=f"WALL_{sub_code}",
-                        formula_expression="net_area_m2",
-                        unit="m2",
-                        quantity=round(c_wall.net_area_m2(), 2),
-                    )
-                )
-            else:
-                sub_code = (wall_sub or "INTERNAL_PARTITION").upper().replace(" ", "_")
-                c_wall.derived_quantities.append(
-                    QuantityFormulaBinding(
-                        trade_category="carpentry",
-                        item_code=f"PARTITION_{sub_code}",
-                        formula_expression="length_m",
-                        unit="lm",
-                        quantity=round(c_wall.length_m(), 2),
-                    )
-                )
+            c_wall.derive_trade_quantities()
 
         # Update / initialize WallFace areas and opening deductions
         w_gross = c_wall.gross_area_m2()
@@ -1408,7 +1386,174 @@ def planreader_to_canonical_model(
         c_roof.metadata["geometry_reason"] = roof_reason
         c_roof.metadata["level_identity_strong"] = cap_level_strong
         c_roof.metadata["v140_evidence_status"] = roof_evidence.get("status") or "Roof profile unresolved"
+
+        # Attach derived trade quantities to CanonicalRoof (Roofing)
+        if cap.get("derived_quantities") and isinstance(cap["derived_quantities"], list):
+            for qb_raw in cap["derived_quantities"]:
+                if isinstance(qb_raw, dict):
+                    c_roof.derived_quantities.append(QuantityFormulaBinding.from_dict(qb_raw))
+        if not c_roof.derived_quantities and c_roof.effective_area_m2() and c_roof.effective_area_m2() > 0:
+            c_roof.derive_trade_quantities()
+
         cap_lvl.roofs.append(c_roof)
+
+    # Process ceilings
+    raw_ceilings = payload.get("ceilings") or []
+    for c_idx, c_raw in enumerate(raw_ceilings):
+        if not isinstance(c_raw, dict):
+            continue
+        c_id = str(c_raw.get("id") or f"ceiling_{c_idx+1}")
+        c_name = str(c_raw.get("name") or f"Ceiling {c_idx+1}")
+        c_lvl_val = c_raw.get("level_id") or c_raw.get("level")
+        c_target_lvl, _ = resolve_canonical_level(c_lvl_val, levels_map)
+        poly_pts = [_parse_vector2d(pt) for pt in (c_raw.get("polygon") or []) if _parse_vector2d(pt) is not None]
+        poly_pts = [pt for pt in poly_pts if pt is not None]
+        if not poly_pts:
+            continue
+        c_elem = CanonicalCeiling(
+            id=c_id,
+            name=c_name,
+            level_id=c_target_lvl.id,
+            polygon=poly_pts,
+            thickness_m=_safe_float(c_raw.get("thickness_m")),
+            elevation_offset_m=_safe_float(c_raw.get("elevation_offset_m")),
+            review_state=ReviewState.CONFIRMED,
+            takeoff_eligible=bool(is_validated_internal_workspace),
+            provenance=_parse_provenance(c_raw.get("provenance")),
+        )
+        if c_raw.get("derived_quantities") and isinstance(c_raw["derived_quantities"], list):
+            for qb_raw in c_raw["derived_quantities"]:
+                if isinstance(qb_raw, dict):
+                    c_elem.derived_quantities.append(QuantityFormulaBinding.from_dict(qb_raw))
+        if not c_elem.derived_quantities and c_elem.effective_area_m2() and c_elem.effective_area_m2() > 0:
+            c_elem.derive_trade_quantities()
+        c_target_lvl.ceilings.append(c_elem)
+
+    # Process columns
+    raw_columns = payload.get("columns") or []
+    for col_idx, col_raw in enumerate(raw_columns):
+        if not isinstance(col_raw, dict):
+            continue
+        col_id = str(col_raw.get("id") or f"column_{col_idx+1}")
+        col_name = str(col_raw.get("name") or f"Column {col_idx+1}")
+        col_lvl_val = col_raw.get("level_id") or col_raw.get("level")
+        col_target_lvl, _ = resolve_canonical_level(col_lvl_val, levels_map)
+        center_vec = _parse_vector2d(col_raw.get("center")) or Vector2D(0, 0)
+        c_col = CanonicalColumn(
+            id=col_id,
+            name=col_name,
+            level_id=col_target_lvl.id,
+            center=center_vec,
+            width_m=_safe_float(col_raw.get("width_m")),
+            depth_m=_safe_float(col_raw.get("depth_m")),
+            height_m=_safe_float(col_raw.get("height_m")),
+            substrate=col_raw.get("substrate"),
+            review_state=ReviewState.CONFIRMED,
+            takeoff_eligible=bool(is_validated_internal_workspace),
+            provenance=_parse_provenance(col_raw.get("provenance")),
+        )
+        if col_raw.get("derived_quantities") and isinstance(col_raw["derived_quantities"], list):
+            for qb_raw in col_raw["derived_quantities"]:
+                if isinstance(qb_raw, dict):
+                    c_col.derived_quantities.append(QuantityFormulaBinding.from_dict(qb_raw))
+        if not c_col.derived_quantities and (c_col.width_m or 0.0) > 0.0 and (c_col.height_m or 0.0) > 0.0:
+            c_col.derive_trade_quantities()
+        col_target_lvl.columns.append(c_col)
+
+    # Process parapets
+    raw_parapets = payload.get("parapets") or []
+    for p_idx, p_raw in enumerate(raw_parapets):
+        if not isinstance(p_raw, dict):
+            continue
+        p_id = str(p_raw.get("id") or f"parapet_{p_idx+1}")
+        p_lvl_val = p_raw.get("level_id") or p_raw.get("level")
+        p_target_lvl, _ = resolve_canonical_level(p_lvl_val, levels_map)
+        sp_vec = _parse_vector2d(p_raw.get("start_point")) or Vector2D(0, 0)
+        ep_vec = _parse_vector2d(p_raw.get("end_point")) or Vector2D(0, 0)
+        c_parapet = CanonicalParapet(
+            id=p_id,
+            name=str(p_raw.get("name") or f"Parapet {p_idx+1}"),
+            level_id=p_target_lvl.id,
+            start_point=sp_vec,
+            end_point=ep_vec,
+            height_m=_safe_float(p_raw.get("height_m")),
+            thickness_m=_safe_float(p_raw.get("thickness_m")),
+            substrate=p_raw.get("substrate"),
+            review_state=ReviewState.CONFIRMED,
+            takeoff_eligible=bool(is_validated_internal_workspace),
+            provenance=_parse_provenance(p_raw.get("provenance")),
+        )
+        if p_raw.get("derived_quantities") and isinstance(p_raw["derived_quantities"], list):
+            for qb_raw in p_raw["derived_quantities"]:
+                if isinstance(qb_raw, dict):
+                    c_parapet.derived_quantities.append(QuantityFormulaBinding.from_dict(qb_raw))
+        if not c_parapet.derived_quantities and c_parapet.length_m() > 0.0:
+            c_parapet.derive_trade_quantities()
+        p_target_lvl.parapets.append(c_parapet)
+
+    # Process balconies
+    raw_balconies = payload.get("balconies") or []
+    for b_idx, b_raw in enumerate(raw_balconies):
+        if not isinstance(b_raw, dict):
+            continue
+        b_id = str(b_raw.get("id") or f"balcony_{b_idx+1}")
+        b_lvl_val = b_raw.get("level_id") or b_raw.get("level")
+        b_target_lvl, _ = resolve_canonical_level(b_lvl_val, levels_map)
+        b_poly = [_parse_vector2d(pt) for pt in (b_raw.get("polygon") or []) if _parse_vector2d(pt) is not None]
+        b_poly = [pt for pt in b_poly if pt is not None]
+        if not b_poly:
+            continue
+        c_balc = CanonicalBalcony(
+            id=b_id,
+            name=str(b_raw.get("name") or f"Balcony {b_idx+1}"),
+            level_id=b_target_lvl.id,
+            polygon=b_poly,
+            thickness_m=_safe_float(b_raw.get("thickness_m")),
+            elevation_offset_m=_safe_float(b_raw.get("elevation_offset_m")),
+            substrate=b_raw.get("substrate"),
+            review_state=ReviewState.CONFIRMED,
+            takeoff_eligible=bool(is_validated_internal_workspace),
+            provenance=_parse_provenance(b_raw.get("provenance")),
+        )
+        if b_raw.get("derived_quantities") and isinstance(b_raw["derived_quantities"], list):
+            for qb_raw in b_raw["derived_quantities"]:
+                if isinstance(qb_raw, dict):
+                    c_balc.derived_quantities.append(QuantityFormulaBinding.from_dict(qb_raw))
+        if not c_balc.derived_quantities and c_balc.effective_area_m2() and c_balc.effective_area_m2() > 0:
+            c_balc.derive_trade_quantities()
+        b_target_lvl.balconies.append(c_balc)
+
+    # Process soffits
+    raw_soffits = payload.get("soffits") or []
+    for s_idx, s_raw in enumerate(raw_soffits):
+        if not isinstance(s_raw, dict):
+            continue
+        s_id = str(s_raw.get("id") or f"soffit_{s_idx+1}")
+        s_lvl_val = s_raw.get("level_id") or s_raw.get("level")
+        s_target_lvl, _ = resolve_canonical_level(s_lvl_val, levels_map)
+        s_poly = [_parse_vector2d(pt) for pt in (s_raw.get("polygon") or []) if _parse_vector2d(pt) is not None]
+        s_poly = [pt for pt in s_poly if pt is not None]
+        if not s_poly:
+            continue
+        c_sof = CanonicalSoffit(
+            id=s_id,
+            name=str(s_raw.get("name") or f"Soffit {s_idx+1}"),
+            level_id=s_target_lvl.id,
+            polygon=s_poly,
+            thickness_m=_safe_float(s_raw.get("thickness_m")),
+            elevation_offset_m=_safe_float(s_raw.get("elevation_offset_m")),
+            substrate=s_raw.get("substrate"),
+            review_state=ReviewState.CONFIRMED,
+            takeoff_eligible=bool(is_validated_internal_workspace),
+            provenance=_parse_provenance(s_raw.get("provenance")),
+        )
+        if s_raw.get("derived_quantities") and isinstance(s_raw["derived_quantities"], list):
+            for qb_raw in s_raw["derived_quantities"]:
+                if isinstance(qb_raw, dict):
+                    c_sof.derived_quantities.append(QuantityFormulaBinding.from_dict(qb_raw))
+        if not c_sof.derived_quantities and c_sof.effective_area_m2() and c_sof.effective_area_m2() > 0:
+            c_sof.derive_trade_quantities()
+        s_target_lvl.soffits.append(c_sof)
 
     if not levels_map:
         resolve_canonical_level(None, levels_map)
