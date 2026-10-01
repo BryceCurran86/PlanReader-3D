@@ -1559,6 +1559,40 @@
         "source_closed_plane": true,
         "denominator_readiness": "source_closed_plane_candidate"
       }
+    },
+    {
+      "object_ref": "lot16:surface:floor:ensuite",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Ensuite tiled floor surface",
+      "expected_quantity": 5.491,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:ENS:TILES:2890x1900_figured_dimensions",
+      "attributes": {
+        "width_m": 2.89,
+        "length_m": 1.9,
+        "calculation": "2.890m * 1.900m",
+        "finish": "tiles",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "lot16_declared_floor_area"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:floor:wir",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "WIR vinyl floor surface",
+      "expected_quantity": 4.6818,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:WIR:VINYL:2890x1620_figured_dimensions",
+      "attributes": {
+        "width_m": 2.89,
+        "length_m": 1.62,
+        "calculation": "2.890m * 1.620m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "lot16_declared_floor_area"
+      }
     }
   ],
   "closure_checks": [
@@ -1995,6 +2029,17 @@
       "pitch_degrees": 12,
       "source_location": "architectural:p3:floor_plan:ENS_WIR_[RAKED_CEILING]_figured_dimensions; architectural:p7:Section_1:12deg_raked_ceiling",
       "source_closed": true
+    },
+    {
+      "check_id": "lot16:closure:ensuite_wir_floor_surfaces",
+      "component_object_refs": [
+        "lot16:surface:floor:ensuite",
+        "lot16:surface:floor:wir"
+      ],
+      "component_sum_m2": 10.1728,
+      "source_location": "architectural:p3:floor_plan:ENS_WIR_figured_dimensions_and_finish_labels",
+      "source_closed": true,
+      "overlap_note": "These atomic floor surfaces are components within the residence composite control; do not double-count the aggregate."
     }
   ]
 }
