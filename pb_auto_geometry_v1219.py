@@ -946,12 +946,12 @@ def _try_physical_net_wall_rows(
                         except Exception:
                             pass
                     reg_rows: List[Tuple[Any, ...]] = []
-                    for w in reg_walls:
+                    for w_idx, w in enumerate(reg_walls):
                         net_qty = round(max(0.0, float(w.get("net_m2") or 0.0)), 2)
                         if net_qty <= 0.0:
                             continue
                         sub = str(w.get("substrate") or "External walling")
-                        ref = str(w.get("wall_ref") or "wall")
+                        ref = str(w.get("wall_ref") or w.get("wall_id") or w.get("candidate_id") or w.get("id") or f"wall_{w_idx+1}")
                         side = str(w.get("side") or "Perimeter")
                         gross_val = float(w.get("gross_m2") or 0.0)
                         ded_val = float(w.get("opening_deduction_m2") or 0.0)

@@ -93,19 +93,21 @@ def consolidate_opening_identities(
     Prevents opening duplication where the same door or window appears across multiple sheets.
     Group key: (host_wall_id, type_mark). If host_wall_id is unknown or empty, falls back to opening_id.
     """
-    grouped: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    grouped: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}
 
     for raw in raw_openings:
         wall_id = str(raw.get("host_wall_id") or raw.get("wall_ref") or raw.get("wall_id") or "")
         mark = str(raw.get("type_mark") or raw.get("mark") or raw.get("opening_tag") or "").strip().upper()
         op_id = str(raw.get("opening_id") or raw.get("id") or "")
 
-        key = (wall_id, mark) if (wall_id and mark) else ("", op_id or mark)
+        # If op_id is present, it explicitly identifies the physical instance.
+        # Multiple cross-sheet observations of the same opening share op_id or (wall_id, mark).
+        key = (wall_id, mark, op_id) if op_id else (wall_id, mark, "")
         grouped.setdefault(key, []).append(dict(raw))
 
     consolidated: List[ConsolidatedPhysicalOpening] = []
 
-    for (wall_id, mark), items in sorted(grouped.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+    for (wall_id, mark, op_id_key), items in sorted(grouped.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2])):
         # Merge observations across sheets
         widths: List[float] = []
         heights: List[float] = []
