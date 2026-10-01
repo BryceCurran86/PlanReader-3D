@@ -54,6 +54,11 @@
     "window_glazing_area_m2": 35.28,
     "door_count": 7,
     "door_area_m2": 29.484,
-    "external_opening_universe_complete": true
+    "external_opening_universe_complete": true,
+    "closure_check_id": "3laurel:closure:external_opening_census",
+    "source_locations": [
+      "architectural:p3:A0.3:floor_plan:all_perimeter_typed_openings_plus_main_entry_GF_entry_and_garage_personnel_door",
+      "architectural:p4-p5:A0.4-A0.5:elevations:entry_door_crosscheck_and_JOINERY_HEIGHTS_2100_AFL_UNO"
+    ]
   }
 }
