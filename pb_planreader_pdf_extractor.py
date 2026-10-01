@@ -385,6 +385,15 @@ class GenericPlanReaderExtractor:
             "slope_length_m": None,
             "roof_covering_area_m2": None,
         }
+        self.structural_member_coverage_shadow: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "registry_run_id": None,
+            "physical_member_ids": [],
+            "quantity_id": None,
+            "object_universe_snapshot": None,
+            "quantity_evidence": None,
+        }
         self.physical_net_wall_live: Dict[str, Any] = {
             "status": "abstained",
             "reason_codes": ["not_collected"],
@@ -943,6 +952,15 @@ class GenericPlanReaderExtractor:
             "slope_length_m": None,
             "roof_covering_area_m2": None,
         }
+        self.structural_member_coverage_shadow = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "registry_run_id": None,
+            "physical_member_ids": [],
+            "quantity_id": None,
+            "object_universe_snapshot": None,
+            "quantity_evidence": None,
+        }
 
         self.physical_net_wall_live = {
             "status": "abstained",
@@ -1178,6 +1196,33 @@ class GenericPlanReaderExtractor:
                     and bool(global_resolved_secondary_support.support_symbol_ids)
                 ),
             ).resolution
+
+            # Structural coverage SHADOW only. It reissues the already-resolved
+            # producer-owned member universe and quantity trace. Failure here is
+            # diagnostic only and must never change live prediction publication.
+            try:
+                from pb_structural_member_coverage_shadow import (
+                    collect_structural_member_coverage_shadow,
+                )
+
+                self.structural_member_coverage_shadow = (
+                    collect_structural_member_coverage_shadow(
+                        structural_support,
+                        registry_run_id=(
+                            f"extractor-structural:{structural_source_sha256}"
+                        ),
+                    )
+                )
+            except Exception:
+                self.structural_member_coverage_shadow = {
+                    "status": "abstained",
+                    "reason_codes": ["shadow_collection_failed"],
+                    "registry_run_id": None,
+                    "physical_member_ids": [],
+                    "quantity_id": None,
+                    "object_universe_snapshot": None,
+                    "quantity_evidence": None,
+                }
 
             if (
                 structural_support.status is EvidenceResolutionStatus.CORROBORATED

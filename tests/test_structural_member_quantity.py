@@ -251,7 +251,10 @@ def test_module_is_shadow_only_no_live_non_test_importers():
         rel = path.relative_to(root)
         if rel.parts and rel.parts[0] == "tests":
             continue
-        if path.name == "pb_structural_member_quantity.py":
+        if path.name in {
+            "pb_structural_member_quantity.py",
+            "pb_structural_member_coverage_shadow.py",
+        }:
             continue
         text = path.read_text(encoding="utf-8-sig")
         if "pb_structural_member_quantity" in text or "build_structural_member_count_quantity" in text:
