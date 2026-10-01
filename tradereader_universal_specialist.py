@@ -221,13 +221,14 @@ def sync_to_takeoff(app: Any, workspace_id: int, trade_name: str) -> int:
     for record in _records(app, workspace_id, trade_name):
         row = _takeoff_row(record, trade_name)
         values = [row.get(col, "") for col in app.TAKEOFF_COLUMNS]
+        row_role = str(row.get("row_role") or "trade_takeoff")
         app.lexecute(
             """INSERT INTO takeoff_rows(
                workspace_id,section,element,location,substrate,finish_system,quantity,unit,
                quantity_status,source_page,source_reference,inclusion_status,coats,
                coverage_m2_per_litre,productivity_m2_per_hour,rate_per_unit,confidence,notes,
-               created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (workspace_id, *values, app.now_stamp(), app.now_stamp()),
+               row_role,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (workspace_id, *values, row_role, app.now_stamp(), app.now_stamp()),
         )
         count += 1
     return count

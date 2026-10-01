@@ -458,14 +458,15 @@ def _save_takeoff_rows(workspace_id: int, frame: pd.DataFrame) -> int:
             continue
         row["rate_per_unit"] = app.to_float(row.get("rate_per_unit"))
         values = [row.get(col, "") for col in app.TAKEOFF_COLUMNS]
+        row_role = str(row.get("row_role") or "trade_takeoff")
         app.lexecute(
             """INSERT INTO takeoff_rows(
                workspace_id,section,element,location,substrate,finish_system,quantity,unit,
                quantity_status,source_page,source_reference,inclusion_status,coats,
                coverage_m2_per_litre,productivity_m2_per_hour,rate_per_unit,confidence,notes,
-               created_at,updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (workspace_id, *values, app.now_stamp(), app.now_stamp()),
+               row_role,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (workspace_id, *values, row_role, app.now_stamp(), app.now_stamp()),
         )
         inserted += 1
     return inserted

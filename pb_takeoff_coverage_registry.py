@@ -1,4 +1,4 @@
-﻿"""Read-only take-off coverage registry v1.
+"""Read-only take-off coverage registry v1.
 
 This module implements the architecture approved in PR #1141 at
 8a21547cf2b4b5b8a607e546f8eadf43e12a4b99.
