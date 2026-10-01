@@ -385,3 +385,29 @@ def test_3laurel_partial_internal_wall_gross_faces_are_dimension_closed_but_not_
         in draft["unresolved_surface_families"]
     )
 
+
+
+def test_source_limitations_block_unverifiable_geometry_from_truth():
+    lot16 = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    lot_blocker = next(
+        row
+        for row in lot16["closure_checks"]
+        if row["check_id"] == "lot16:blocker:custom_front_glazing_measure_on_site"
+    )
+    assert lot_blocker["status"] == "UNRESOLVED_SOURCE_LIMITATION"
+    assert lot_blocker["exact_dimensions_available"] is False
+    assert lot_blocker["scaling_substitute_allowed"] is False
+    assert "custom_front_glazing_measure_on_site_only" in lot16["unresolved_surface_families"]
+
+    laurel = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    roof_blocker = next(
+        row
+        for row in laurel["closure_checks"]
+        if row["check_id"] == "3laurel:blocker:roof_plane_geometry"
+    )
+    assert roof_blocker["status"] == "UNRESOLVED_SOURCE_LIMITATION"
+    assert roof_blocker["roof_plan_sheet_present"] is False
+    assert roof_blocker["figured_roof_plane_dimensions_available"] is False
+    assert roof_blocker["scaling_substitute_allowed"] is False
+    assert roof_blocker["pitch_evidence_degrees"] == [25]
+    assert "roof_planes" in laurel["unresolved_surface_families"]
