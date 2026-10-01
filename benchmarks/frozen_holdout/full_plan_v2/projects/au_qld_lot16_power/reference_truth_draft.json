@@ -1402,6 +1402,23 @@
         "architectural:p3:floor_plan:BED_1:3510x3600_figured_dimensions_and_12.64m2_declared_area",
         "architectural:p4-p5:elevations:FSL_68560_to_TP_71150"
       ]
+    },
+    {
+      "check_id": "lot16:blocker:unscheduled_structural_members",
+      "status": "UNRESOLVED_SOURCE_LIMITATION",
+      "source_locations": [
+        "structural:p1:legend:L_LINTEL_BY_OTHERS_IF_NOT_DEFINED",
+        "structural:p1:legend:RB_ROOF_BEAM_BY_OTHERS_IF_NOT_DEFINED",
+        "structural:p1:legend:FB_FLOOR_BEAM_BY_OTHERS_IF_NOT_DEFINED",
+        "structural:p1:legend:GT_GIRDER_TRUSS_BY_OTHERS",
+        "structural:p3-p9:typical_NTS_connection_and_member_details",
+        "structural:p10:S10:closed_wall_bracing_plan"
+      ],
+      "instance_specific_bracing_schedule_available": true,
+      "remaining_instance_specific_beam_lintel_truss_schedule_available": false,
+      "typical_detail_scaling_allowed": false,
+      "reason": "the supplied engineering package closes the bracing instance universe but supplies generic/NTS details or by-others member categories for the remaining beam/lintel/truss families rather than a project instance schedule",
+      "benchmark_rule": "do not instantiate generic or by-others structural members into truth without a project-specific tagged schedule or dimensioned layout"
     }
   ]
 }
