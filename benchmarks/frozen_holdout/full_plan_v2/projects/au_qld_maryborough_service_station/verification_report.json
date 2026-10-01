@@ -59,6 +59,16 @@
       "evidence": "A501 gives AIRLOCK 1520 x 5044 FT2 and LAUNDRY 1655 x 5044 FT2; A140 independently shows matching room/finish geometry; A120 assigns 2400 WFPB ceilings to both rooms."
     },
     {
+      "proof": "PlanReader output not used as benchmark truth",
+      "status": "PASS",
+      "evidence": "Truth derived from source drawings and independent cross-check only"
+    },
+    {
+      "proof": "source-closed nominal gross window-area subset verified",
+      "status": "PASS",
+      "evidence": "A610 explicitly figures W01 3600x1900=6.84 m2, W02 4100x1900=7.79 m2, W05 7585x1900=14.4115 m2 and W06 sidelight 700x2100=1.47 m2; A110 independently reconciles each physical tag. W03/W04 remain unresolved."
+    },
+    {
       "proof": "Food Prep floor and ceiling independently closed",
       "status": "PASS",
       "evidence": "A140 gives 4025 x 3297 mm Food Prep FT3 geometry; A110 independently shows the same room footprint; A120 assigns a 3000 FPB ceiling."
@@ -69,19 +79,14 @@
       "evidence": "A140 gives 3570 x 2536 mm OFFICE FT3 geometry; A110 independently shows the same room; A120 assigns a 2400 GRID ceiling."
     },
     {
-      "proof": "PlanReader output not used as benchmark truth",
-      "status": "PASS",
-      "evidence": "Truth derived from source drawings and independent cross-check only"
-    },
-    {
       "proof": "unsupported surfaces are not silently excluded",
       "status": "PASS",
-      "evidence": "All unresolved families are explicit; by-others doors are explicit non-denominator items"
+      "evidence": "All unresolved families are explicit; by-others doors are explicit non-denominator items and W03/W04 window areas remain explicit unresolved geometry/overlap cases."
     },
     {
       "proof": "full project surface universe complete",
       "status": "FAIL",
-      "evidence": "WC/shower, PWD, airlock, laundry, Food Prep and Office floor/ceiling surfaces plus door/window identity universes are closed; remaining surfaces stay unresolved."
+      "evidence": "WC/shower, PWD, airlock, laundry, Food Prep and Office floor/ceiling surfaces, door/window identity universes, and the W01/W02/W05/W06 gross window-area subset are closed; W03/W04 window areas and remaining surfaces stay unresolved."
     }
   ],
   "food_prep_office_surface_closure_summary": {
