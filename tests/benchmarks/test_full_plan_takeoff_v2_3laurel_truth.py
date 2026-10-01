@@ -36,10 +36,13 @@ def test_3laurel_external_opening_truth_is_atomic_and_source_closed():
 
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
+    universe = _json(project / "object_universe.json")
+    external_refs = {row["object_ref"] for row in universe["external_openings"]}
     opening_items = [
         item
         for item in manifest.verified_items
-        if item.trade_category in {"windows", "doors"}
+        if item.expected_object_refs
+        and item.expected_object_refs[0] in external_refs
     ]
     assert len(opening_items) == 23
     assert all(item.denominator_eligible for item in opening_items)
@@ -56,7 +59,6 @@ def test_3laurel_external_opening_truth_is_atomic_and_source_closed():
     assert by_trade == {"windows": 16, "doors": 7}
     assert sum(item.expected_quantity for item in opening_items) == pytest.approx(64.764)
 
-    universe = _json(project / "object_universe.json")
     openings = universe["external_openings"]
     assert len(openings) == 23
     assert {row["object_ref"] for row in openings} == {
