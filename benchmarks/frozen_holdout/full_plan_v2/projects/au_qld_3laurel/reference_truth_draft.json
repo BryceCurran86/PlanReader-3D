@@ -28,7 +28,7 @@
     }
   ],
   "unresolved_surface_families": [
-    "internal_wall_faces_beyond_closed_bathroom_main_laundry_and_gf_ensuite_laundry_gross_faces",
+    "internal_wall_faces_beyond_closed_bathroom_main_ensuite_main_laundry_and_gf_ensuite_laundry_gross_faces",
     "external_wall_faces_and_cladding",
     "roof_planes",
     "structural_members_beyond_closed_wall_bracing_and_explicit_140x140_posts_470x470_piers",
@@ -1566,6 +1566,86 @@
         "niche_return_depth_resolved": false,
         "denominator_readiness": "deduction_face_closed_but_niche_returns_unresolved"
       }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_ensuite:A",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main ensuite gross internal wall face A",
+      "expected_quantity": 4.536,
+      "unit": "m2",
+      "source_location": "architectural:p12:A0.12:A_elevation:1680_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.68,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_ensuite:B",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main ensuite gross internal wall face B",
+      "expected_quantity": 7.668,
+      "unit": "m2",
+      "source_location": "architectural:p12:A0.12:B_elevation:2840_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 2.84,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_ensuite:C",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main ensuite gross internal wall face C",
+      "expected_quantity": 5.022,
+      "unit": "m2",
+      "source_location": "architectural:p12:A0.12:C_elevation:1860_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.86,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_ensuite:D",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main ensuite gross internal wall face D",
+      "expected_quantity": 7.668,
+      "unit": "m2",
+      "source_location": "architectural:p12:A0.12:D_elevation:2840_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 2.84,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_ensuite:E",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main ensuite gross internal wall face E",
+      "expected_quantity": 5.022,
+      "unit": "m2",
+      "source_location": "architectural:p12:A0.12:E_elevation:1860_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.86,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
     }
   ],
   "closure_checks": [
@@ -1864,6 +1944,24 @@
         "architectural:p15:A0.15:GF_Ensuite_plan_and_C-D",
         "architectural:p11:A0.11:bathroom_niche_remains_unresolved"
       ]
+    },
+    {
+      "check_id": "3laurel:control:main_ensuite_internal_wall_gross_faces",
+      "component_object_refs": [
+        "3laurel:surface:internal_wall_gross:main_ensuite:A",
+        "3laurel:surface:internal_wall_gross:main_ensuite:B",
+        "3laurel:surface:internal_wall_gross:main_ensuite:C",
+        "3laurel:surface:internal_wall_gross:main_ensuite:D",
+        "3laurel:surface:internal_wall_gross:main_ensuite:E"
+      ],
+      "object_count": 5,
+      "component_sum_m2": 29.916,
+      "source_locations": [
+        "architectural:p12:A0.12:Ensuite_A-E_finished_wall_dimensions",
+        "architectural:p7:A0.7:FCL_2700"
+      ],
+      "net_denominator_ready": false,
+      "reason": "gross physical wall faces are source-closed; door/opening deductions and finish-scope partitioning remain unresolved"
     }
   ]
 }
