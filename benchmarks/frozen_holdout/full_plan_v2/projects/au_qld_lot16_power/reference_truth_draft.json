@@ -30,7 +30,7 @@
   "unresolved_surface_families": [
     "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces",
     "external_wall_faces_and_cladding",
-    "ceilings_including_raked_ceiling",
+    "ceilings_beyond_closed_bed1_raked_plane_including_entry_porch_ensuite_wir_and_flat_regions",
     "custom_front_glazing_measure_on_site_only",
     "wet_area_wall_tiling_beyond_three_closed_bath_gross_faces_including_remaining_bath_face_and_raked_ensuite",
     "structural_members_beyond_closed_wall_bracing_and_explicit_architectural_supports",
@@ -1205,6 +1205,22 @@
         "openings_in_host_face": false,
         "net_finish_area_ready": true
       }
+    },
+    {
+      "object_ref": "lot16:surface:ceiling:bed1_raked_12deg",
+      "object_family": "ceiling_plane",
+      "physical_kind": "surface",
+      "description": "Bed 1 raked ceiling plane following 12 degree roof pitch",
+      "expected_quantity": 12.922385,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_1_12.64_m2_and_RAKED_CEILING; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof",
+      "attributes": {
+        "plan_projection_area_m2": 12.64,
+        "pitch_degrees": 12,
+        "calculation": "12.64 / cos(12deg)",
+        "ceiling_geometry": "raked",
+        "denominator_readiness": "draft_only_until_remaining_ceiling_planes_and_raked_intersections_are_closed"
+      }
     }
   ],
   "closure_checks": [
@@ -1518,6 +1534,19 @@
         "architectural:p11:Bath_SHR_Elev:1200_finished_wall_dimension",
         "architectural:p4-p5:elevations:FSL_68560_to_TP_71150"
       ]
+    },
+    {
+      "check_id": "lot16:control:bed1_raked_ceiling",
+      "component_object_refs": [
+        "lot16:surface:ceiling:bed1_raked_12deg"
+      ],
+      "component_sum_m2": 12.922385,
+      "source_locations": [
+        "architectural:p3:BED_1:12.64_m2_and_RAKED_CEILING",
+        "architectural:p7:Section_1:12deg_roof_with_raked_ceiling"
+      ],
+      "net_denominator_ready": false,
+      "reason": "Bed 1 raked ceiling is source-closed; remaining raked/flat ceiling regions are unresolved."
     }
   ]
 }
