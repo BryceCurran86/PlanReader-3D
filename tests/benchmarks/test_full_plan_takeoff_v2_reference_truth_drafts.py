@@ -568,3 +568,34 @@ def test_lot16_bed2_bed3_gross_wall_faces_are_dimension_closed_but_not_net_ready
         "internal_wall_faces_beyond_closed_bed2_bed3_top_plate_gross_faces"
         in draft["unresolved_surface_families"]
     )
+
+def test_3laurel_internal_room_access_door_census_is_source_closed_but_joinery_stays_open():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "internal_room_access_opening"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:internal_room_access_door_census"
+    )
+    assert len(openings) == check["room_access_opening_count"] == 14
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(25.011)
+    assert check["hinged_count"] == 8
+    assert check["cavity_slider_count"] == 6
+    assert check["width_distribution_m"] == {"0.72": 4, "0.87": 9, "1.20": 1}
+    assert check["joinery_height_m"] == pytest.approx(2.1)
+    assert check["complete_for_labelled_room_access_doors"] is True
+    assert check["complete_for_all_internal_wall_openings"] is False
+    assert "robe_and_linen_sliding_joinery_openings" in check["residual_unresolved"]
+    assert all(
+        row["attributes"]["wall_deduction_scope"] == "room_access_opening_only"
+        for row in openings
+    )
+    assert (
+        "internal_wall_openings_beyond_closed_room_access_doors_including_robe_linen_joinery"
+        in draft["unresolved_surface_families"]
+    )
+
