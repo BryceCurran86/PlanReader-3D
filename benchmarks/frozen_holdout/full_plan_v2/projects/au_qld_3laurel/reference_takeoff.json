@@ -701,6 +701,66 @@
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-vinyl-floor-media-area",
+      "description": "Media room vinyl floor surface area",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 13.146,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:media"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:MEDIA:4200x3130_figured_dimensions:VINYL"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-vinyl-floor-bed2-area",
+      "description": "Bed 2 vinyl floor surface area",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 12.6,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:bed2"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:BED_2:3000x4200_figured_dimensions:VINYL"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-vinyl-floor-bed3-area",
+      "description": "Bed 3 vinyl floor surface area",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 12.6,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:bed3"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:BED_3:3000x4200_figured_dimensions:VINYL"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "external_opening_reconciliation": {
@@ -771,6 +831,25 @@
         "3laurel:surface:floor:gf_ensuite_laundry"
       ],
       "rule": "These atomic wet-area floor items are denominator truth; the overlapping declared living composite regions remain non-denominator controls."
+    }
+  },
+  "vinyl_floor_reconciliation": {
+    "closure_check_ids": [
+      "3laurel:closure:media_floor_and_gross_wall_faces",
+      "3laurel:closure:bed2_bed3_floor_surfaces"
+    ],
+    "component_object_refs": [
+      "3laurel:surface:floor:media",
+      "3laurel:surface:floor:bed2",
+      "3laurel:surface:floor:bed3"
+    ],
+    "object_count": 3,
+    "component_sum_m2": 38.346,
+    "source_closed": true,
+    "finish": "vinyl",
+    "aggregate_overlap": {
+      "aggregate_ref": "3laurel:surface:floor:main_living_composite_region",
+      "rule": "These three atomic vinyl floor items are denominator truth; the overlapping main living composite region remains a non-denominator control."
     }
   }
 }
