@@ -1557,10 +1557,11 @@ class CanonicalProject(CanonicalElement):
         """Generic constructability, consistency, and clash checks for the canonical model."""
         issues: List[CanonicalConstructabilityIssue] = []
 
-        # 1. Check for walls with openings larger than the wall itself
+        # 1. Wall and Opening Geometric Clashes & Boundary Checks
         for w in self.all_walls():
             w_len = w.length_m()
             for op in w.openings:
+                # Width exceeds host wall length
                 if op.width_m is not None and w_len > 0.0 and float(op.width_m) > w_len:
                     issue = CanonicalConstructabilityIssue(
                         category="opening_width_exceeds_wall",
@@ -1572,6 +1573,7 @@ class CanonicalProject(CanonicalElement):
                     )
                     issues.append(issue)
 
+                # Height exceeds host wall height
                 if op.height_m is not None and w.height_m is not None and float(op.height_m) > float(w.height_m):
                     issue = CanonicalConstructabilityIssue(
                         category="opening_height_exceeds_wall",
@@ -1583,9 +1585,56 @@ class CanonicalProject(CanonicalElement):
                     )
                     issues.append(issue)
 
-        # 2. Check for level elevation continuity
-        prev_elev = None
+                # Head height (sill + height) exceeds host wall height
+                if op.sill_height_m is not None and op.height_m is not None and w.height_m is not None:
+                    head_h = float(op.sill_height_m) + float(op.height_m)
+                    if head_h > float(w.height_m) + 1e-3:
+                        issue = CanonicalConstructabilityIssue(
+                            category="opening_head_exceeds_wall_height",
+                            severity="ERROR",
+                            description=f"Opening {op.id} ({op.mark or op.name}) head height {head_h:.2f}m (sill {op.sill_height_m}m + height {op.height_m}m) exceeds host wall {w.id} height {w.height_m}m",
+                            affected_element_ids=[w.id, op.id],
+                            review_state=ReviewState.REVIEW_REQUIRED,
+                            recommended_action="Verify opening vertical placement, sill height, and lintel datum",
+                        )
+                        issues.append(issue)
+
+                # Offset + width extends past host wall end
+                if op.offset_along_wall_m is not None and op.width_m is not None and w_len > 0.0:
+                    op_end = float(op.offset_along_wall_m) + float(op.width_m)
+                    if op_end > w_len + 1e-3:
+                        issue = CanonicalConstructabilityIssue(
+                            category="opening_extends_past_wall_end",
+                            severity="ERROR",
+                            description=f"Opening {op.id} ({op.mark or op.name}) extents (offset {op.offset_along_wall_m}m + width {op.width_m}m = {op_end:.2f}m) extend past host wall {w.id} length {w_len:.2f}m",
+                            affected_element_ids=[w.id, op.id],
+                            review_state=ReviewState.REVIEW_REQUIRED,
+                            recommended_action="Verify opening offset position along wall baseline",
+                        )
+                        issues.append(issue)
+
+            # Overlapping openings along host wall
+            if len(w.openings) >= 2:
+                try:
+                    from pb_geometry_services import detect_opening_overlaps
+                    has_overlaps, pairs = detect_opening_overlaps(w.openings)
+                    if has_overlaps:
+                        for op1_id, op2_id in pairs:
+                            issue = CanonicalConstructabilityIssue(
+                                category="overlapping_openings",
+                                severity="ERROR",
+                                description=f"Overlapping openings detected on host wall {w.id}: {op1_id} and {op2_id} clash along wall baseline",
+                                affected_element_ids=[w.id, op1_id, op2_id],
+                                review_state=ReviewState.REVIEW_REQUIRED,
+                                recommended_action="Resolve clashing opening locations or marks on host wall",
+                            )
+                            issues.append(issue)
+                except ImportError:
+                    pass
+
+        # 2. Level Vertical Datum Continuity & Ordering
         for b in self.buildings:
+            prev_elev = None
             for lvl in sorted(b.levels, key=lambda l: l.level_index):
                 if lvl.elevation_m is None and lvl.review_state == ReviewState.REVIEW_REQUIRED:
                     issue = CanonicalConstructabilityIssue(
@@ -1597,6 +1646,44 @@ class CanonicalProject(CanonicalElement):
                         recommended_action="Confirm finish floor level from section drawing",
                     )
                     issues.append(issue)
+
+                if prev_elev is not None and lvl.elevation_m is not None and lvl.elevation_m < prev_elev:
+                    issue = CanonicalConstructabilityIssue(
+                        category="inverted_level_elevation",
+                        severity="ERROR",
+                        description=f"Level {lvl.name} ({lvl.id}) elevation ({lvl.elevation_m}m) is lower than preceding level ({prev_elev}m)",
+                        affected_element_ids=[lvl.id],
+                        review_state=ReviewState.REVIEW_REQUIRED,
+                        recommended_action="Verify vertical level sequencing in section/elevation drawings",
+                    )
+                    issues.append(issue)
+
+                if lvl.elevation_m is not None:
+                    prev_elev = lvl.elevation_m
+
+                # 3. Spaces Boundary & Slab Linkage Validation
+                for sp in lvl.spaces:
+                    if len(sp.boundary_polygon) < 3:
+                        issue = CanonicalConstructabilityIssue(
+                            category="invalid_space_boundary",
+                            severity="ERROR",
+                            description=f"Space {sp.id} ({sp.name}) has invalid boundary polygon ({len(sp.boundary_polygon)} vertices)",
+                            affected_element_ids=[sp.id, lvl.id],
+                            review_state=ReviewState.REVIEW_REQUIRED,
+                            recommended_action="Supply valid closed polygon boundary for room space",
+                        )
+                        issues.append(issue)
+
+                    if len(lvl.floors) > 0 and not sp.floor_element_id:
+                        issue = CanonicalConstructabilityIssue(
+                            category="unassigned_floor_slab",
+                            severity="WARNING",
+                            description=f"Space {sp.id} ({sp.name}) on level {lvl.name} is not assigned to a floor slab element",
+                            affected_element_ids=[sp.id, lvl.id],
+                            review_state=ReviewState.REVIEW_REQUIRED,
+                            recommended_action="Link space to bounding floor slab element for accurate structural and flooring takeoff",
+                        )
+                        issues.append(issue)
 
         self.constructability_issues = issues
         return issues

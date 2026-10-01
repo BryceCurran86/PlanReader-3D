@@ -380,3 +380,41 @@ def test_complete_declared_types_and_finish_surface():
     assert ObjectType.CEILING.value in types_in_payload
     assert ObjectType.SCREEN.value in types_in_payload
     assert ObjectType.SURFACE.value in types_in_payload
+
+
+def test_space_payload_and_bim_viewer_integration():
+    """Verify CanonicalSpace is translated into viewer payload and rendered in 3D viewer HTML."""
+    lvl = CanonicalLevel(id="LVL-01", name="Ground Floor", elevation_m=0.0, height_m=2.7)
+    space = CanonicalSpace(
+        id="SP-BED1",
+        name="Bedroom 1",
+        room_number="101",
+        boundary_polygon=[Vector2D(0, 0), Vector2D(4, 0), Vector2D(4, 3), Vector2D(0, 3)],
+        finish_assignments={"floor": "carpet", "walls": "plasterboard", "ceiling": "flat_white"},
+        bounding_wall_ids=["W-01", "W-02"],
+    )
+    space.derive_trade_quantities()
+    lvl.spaces = [space]
+
+    proj = CanonicalProject(name="Space Viewer Project", buildings=[CanonicalBuilding(name="House", levels=[lvl])])
+    payload = project_to_viewer_payload(proj)
+
+    space_objs = [o for o in payload["objects"] if o["type"] == ObjectType.SPACE.value]
+    assert len(space_objs) == 1
+    sp = space_objs[0]
+    assert sp["id"] == "SP-BED1"
+    assert sp["name"] == "Bedroom 1"
+    assert sp["room_number"] == "101"
+    assert sp["floor_area_m2"] == 12.0
+    assert sp["measured_area_m2"] == 12.0
+    assert sp["perimeter_lm"] == 14.0
+    assert sp["finish_assignments"]["floor"] == "carpet"
+    assert len(sp["derived_quantities"]) > 0
+    assert "W-01" in sp["bounding_wall_ids"]
+
+    html = generate_bim_viewer_html(payload)
+    assert "createSpaceMesh" in html
+    assert "SPACE" in html
+    assert "Derived Trade Quantities" in html
+    assert "Room Finishes" in html
+

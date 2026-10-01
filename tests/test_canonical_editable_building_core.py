@@ -192,6 +192,91 @@ def test_constructability_checks_detect_oversized_openings():
     assert "D-OVERSIZED" in oversized.affected_element_ids
 
 
+def test_constructability_checks_detect_head_height_and_wall_end_violations():
+    """Detects opening head height exceeding wall height and extents extending past wall end."""
+    project = CanonicalProject(id="PRJ-HEAD-EXT")
+    building = CanonicalBuilding(id="BLD-01")
+    level = CanonicalLevel(id="LVL-01", elevation_m=0.0)
+
+    wall = CanonicalWall(id="W-01", start_point=Vector2D(0, 0), end_point=Vector2D(4, 0), height_m=2.4)
+    op1 = CanonicalOpening(id="OP-HIGH", sill_height_m=1.0, height_m=1.6, width_m=1.0, offset_along_wall_m=1.0)
+    op2 = CanonicalOpening(id="OP-PAST-END", sill_height_m=0.0, height_m=2.1, width_m=1.2, offset_along_wall_m=3.5)
+    wall.openings.extend([op1, op2])
+
+    level.walls.append(wall)
+    building.levels.append(level)
+    project.buildings.append(building)
+
+    issues = project.check_constructability()
+    categories = [i.category for i in issues]
+    assert "opening_head_exceeds_wall_height" in categories
+    assert "opening_extends_past_wall_end" in categories
+
+
+def test_constructability_checks_detect_overlapping_openings_on_host_wall():
+    """Detects physically overlapping openings along the baseline of the same host wall."""
+    project = CanonicalProject(id="PRJ-CLASH")
+    building = CanonicalBuilding(id="BLD-01")
+    level = CanonicalLevel(id="LVL-01", elevation_m=0.0)
+
+    wall = CanonicalWall(id="W-01", start_point=Vector2D(0, 0), end_point=Vector2D(6, 0), height_m=2.7)
+    door1 = CanonicalOpening(id="D01", mark="D01", offset_along_wall_m=1.0, width_m=1.0, height_m=2.1, sill_height_m=0.0)
+    door2 = CanonicalOpening(id="D02", mark="D02", offset_along_wall_m=1.5, width_m=1.0, height_m=2.1, sill_height_m=0.0)
+    wall.openings.extend([door1, door2])
+
+    level.walls.append(wall)
+    building.levels.append(level)
+    project.buildings.append(building)
+
+    issues = project.check_constructability()
+    clash = next((i for i in issues if i.category == "overlapping_openings"), None)
+    assert clash is not None
+    assert clash.severity == "ERROR"
+    assert "D01" in clash.affected_element_ids
+    assert "D02" in clash.affected_element_ids
+
+
+def test_constructability_checks_detect_inverted_level_elevations():
+    """Detects impossible vertical sequencing where a higher level index has lower elevation."""
+    project = CanonicalProject(id="PRJ-LEVELS")
+    building = CanonicalBuilding(id="BLD-01")
+    lvl1 = CanonicalLevel(id="LVL-01", name="Ground Floor", level_index=0, elevation_m=3.0)
+    lvl2 = CanonicalLevel(id="LVL-02", name="First Floor", level_index=1, elevation_m=1.5)
+    building.levels.extend([lvl1, lvl2])
+    project.buildings.append(building)
+
+    issues = project.check_constructability()
+    inverted = next((i for i in issues if i.category == "inverted_level_elevation"), None)
+    assert inverted is not None
+    assert inverted.severity == "ERROR"
+    assert "LVL-02" in inverted.affected_element_ids
+
+
+def test_constructability_checks_detect_space_boundary_and_slab_issues():
+    """Detects degenerate room space boundaries and unassigned floor slabs."""
+    project = CanonicalProject(id="PRJ-SPACES")
+    building = CanonicalBuilding(id="BLD-01")
+    level = CanonicalLevel(id="LVL-01", name="Ground Floor", level_index=0, elevation_m=0.0)
+
+    floor = CanonicalFloor(id="FL-01", name="Slab", polygon=[Vector2D(0, 0), Vector2D(10, 0), Vector2D(10, 10), Vector2D(0, 10)])
+    level.floors.append(floor)
+
+    sp_invalid = CanonicalSpace(id="SP-BAD", name="Corridor", boundary_polygon=[Vector2D(0, 0), Vector2D(2, 0)])
+    sp_unassigned = CanonicalSpace(
+        id="SP-ROBE", name="WIR",
+        boundary_polygon=[Vector2D(0, 0), Vector2D(2, 0), Vector2D(2, 2), Vector2D(0, 2)],
+        floor_element_id=None
+    )
+    level.spaces.extend([sp_invalid, sp_unassigned])
+    building.levels.append(level)
+    project.buildings.append(building)
+
+    issues = project.check_constructability()
+    categories = [i.category for i in issues]
+    assert "invalid_space_boundary" in categories
+    assert "unassigned_floor_slab" in categories
+
+
 def test_canonical_project_json_roundtrip():
     """Verifies complete serialization and deserialization fidelity for all new semantic fields."""
     project = CanonicalProject(id="PRJ-ROUNDTRIP", name="Roundtrip Test Project")

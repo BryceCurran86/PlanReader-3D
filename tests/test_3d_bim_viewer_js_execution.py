@@ -58,6 +58,7 @@ def test_phase5m_js_runtime_executes_polygon_and_opening_functions(tmp_path):
     html = generate_bim_viewer_html({})
     polygon_fn = _extract_function(html, "createPolygonMesh")
     opening_fn = _extract_function(html, "createOpeningMesh")
+    space_fn = _extract_function(html, "createSpaceMesh")
 
     script = f"""
 class Position {{
@@ -88,6 +89,7 @@ const THREE = {{ Shape, Path, ShapeGeometry, ExtrudeGeometry, BoxGeometry, Mesh 
 const objectDataMap = new Map();
 {polygon_fn}
 {opening_fn}
+{space_fn}
 function check(cond, msg) {{ if (!cond) throw new Error(msg); }}
 const tri = [{{x:0,y:0}},{{x:4,y:0}},{{x:0,y:3}}];
 let floor = createPolygonMesh({{type:'FLOOR', polygon:tri, thickness_m:null, elevation:null, elevation_offset_m:0}}, 2.5, {{}});
@@ -110,7 +112,12 @@ let wrong = createOpeningMesh({{...valid, id:'op2', wall_id:null, is_host_attach
 check(wrong === null, 'wrong-host opening created a mesh');
 let wrongLevel = createOpeningMesh({{...valid, id:'op3', physical_state:'wrong_level'}}, 0, {{}});
 check(wrongLevel === null, 'wrong-level opening created a mesh');
-console.log(JSON.stringify({{floorY:floor.position.y, thickY:thick.position.y, roofY:roof.position.y, openingY:opMesh.position.y, wrongHost:null}}));
+let space = createSpaceMesh({{type:'SPACE', polygon:tri}}, 2.5, {{}});
+check(space !== null, 'space polygon returned null');
+check(Math.abs(space.position.y - 2.51) < 1e-9, 'space position.y wrong');
+let invalidSpace = createSpaceMesh({{type:'SPACE', polygon:[{{x:0,y:0}},{{x:1,y:1}}]}}, 2.5, {{}});
+check(invalidSpace === null, 'space with < 3 points must return null');
+console.log(JSON.stringify({{floorY:floor.position.y, thickY:thick.position.y, roofY:roof.position.y, openingY:opMesh.position.y, spaceY:space.position.y, wrongHost:null}}));
 """
     js_path = tmp_path / "phase5m_viewer_runtime.js"
     js_path.write_text(script, encoding="utf-8")
@@ -122,5 +129,6 @@ console.log(JSON.stringify({{floorY:floor.position.y, thickY:thick.position.y, r
         "thickY": 2.9,
         "roofY": 6.4,
         "openingY": 1.05,
+        "spaceY": 2.51,
         "wrongHost": None,
     }

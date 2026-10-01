@@ -184,6 +184,36 @@ def project_to_viewer_payload(project: CanonicalProject) -> Dict[str, Any]:
                         item_data["pitch_deg"] = item.pitch_deg
                     objects_payload.append(item_data)
 
+            # Spaces (Rooms / Architectural Zones)
+            for sp in lvl.spaces:
+                poly_pts = [pt.to_dict() for pt in getattr(sp, "boundary_polygon", []) if pt and pt.is_valid()]
+                if len(poly_pts) < 3:
+                    continue
+                sp_rev = sp.review_state.value if isinstance(sp.review_state, ReviewState) else str(sp.review_state or "REVIEW_REQUIRED")
+                sp_area = sp.effective_floor_area_m2() or sp.measured_area_m2()
+                sp_data = {
+                    "id": sp.id,
+                    "name": sp.name,
+                    "type": ObjectType.SPACE.value,
+                    "level_id": lvl.id,
+                    "parent_id": sp.parent_id or lvl.id,
+                    "polygon": poly_pts,
+                    "boundary_polygon": poly_pts,
+                    "room_number": sp.room_number,
+                    "floor_area_m2": round(sp_area, 2) if sp_area else None,
+                    "measured_area_m2": round(sp.measured_area_m2(), 2),
+                    "specified_area_m2": sp.specified_floor_area_m2,
+                    "perimeter_lm": round(sp.perimeter_lm(), 2),
+                    "height_m": sp.height_m,
+                    "bounding_wall_ids": list(sp.bounding_wall_ids),
+                    "finish_assignments": dict(sp.finish_assignments),
+                    "derived_quantities": [q.to_dict() for q in sp.derived_quantities],
+                    "confidence": sp.confidence,
+                    "review_state": sp_rev,
+                    "provenance": sp.provenance.to_dict() if sp.provenance else {},
+                }
+                objects_payload.append(sp_data)
+
             # Parapets
             for p in lvl.parapets:
                 p_len = math.hypot(p.end_point.x - p.start_point.x, p.end_point.y - p.start_point.y) if (p.start_point and p.start_point.is_valid() and p.end_point and p.end_point.is_valid()) else 0.0
@@ -416,7 +446,7 @@ def generate_bim_viewer_html(payload: Dict[str, Any], height_px: int = 750) -> s
             </div>
 
             <div id="tab-overview" class="tab-content">
-                <div class="empty-state">Click any 3D element (wall, window, door, balcony, roof, ceiling, screen) in the viewer to inspect provenance, dimensions, substrate, and review state.</div>
+                <div class="empty-state">Click any 3D element (wall, window, door, room space, floor, balcony, roof, ceiling, screen) in the viewer to inspect provenance, dimensions, substrate, and review state.</div>
             </div>
             <div id="tab-advanced" class="tab-content" style="display:none;">
                 <div class="empty-state">Select an object to inspect structural hierarchy and bounding geometry.</div>
@@ -455,6 +485,7 @@ def generate_bim_viewer_html(payload: Dict[str, Any], height_px: int = 750) -> s
             else if (type === 'DOOR') baseColor = 0xb45309;
             else if (type === 'WINDOW') {{ baseColor = 0x38bdf8; opacity = 0.55; transparent = true; }}
             else if (type === 'FLOOR') baseColor = 0x64748b;
+            else if (type === 'SPACE') {{ baseColor = 0x10b981; opacity = 0.28; transparent = true; }}
             else if (type === 'CEILING') {{ baseColor = 0xf8fafc; opacity = 0.65; transparent = true; }}
             else if (type === 'BALCONY') baseColor = 0x0ea5e9;
             else if (type === 'SOFFIT') baseColor = 0x94a3b8;
@@ -465,12 +496,12 @@ def generate_bim_viewer_html(payload: Dict[str, Any], height_px: int = 750) -> s
             else if (type === 'SCREEN') {{ baseColor = 0xd97706; opacity = 0.75; transparent = true; }}
 
             if (rev === 'REVIEW_REQUIRED') {{
-                baseColor = (type === 'WINDOW' || type === 'CEILING') ? 0xf87171 : 0xef4444;
-                opacity = 0.85;
+                baseColor = (type === 'WINDOW' || type === 'CEILING' || type === 'SPACE') ? 0xf87171 : 0xef4444;
+                opacity = (type === 'SPACE') ? 0.32 : 0.85;
                 transparent = true;
             }} else if (rev === 'INFERRED') {{
-                baseColor = (type === 'WINDOW' || type === 'CEILING') ? 0x38bdf8 : 0x38bdf8;
-                opacity = 0.75;
+                baseColor = (type === 'WINDOW' || type === 'CEILING' || type === 'SPACE') ? 0x38bdf8 : 0x38bdf8;
+                opacity = (type === 'SPACE') ? 0.32 : 0.75;
                 transparent = true;
             }}
 
@@ -480,7 +511,8 @@ def generate_bim_viewer_html(payload: Dict[str, Any], height_px: int = 750) -> s
                 metalness: 0.1,
                 opacity: opacity,
                 transparent: transparent,
-                wireframe: isWireframeActive
+                wireframe: isWireframeActive,
+                side: THREE.DoubleSide
             }});
         }}
 
@@ -580,6 +612,8 @@ def generate_bim_viewer_html(payload: Dict[str, Any], height_px: int = 750) -> s
                     mesh = createWallMeshWithHoles(obj, zElev, mat);
                 }} else if (obj.type === 'DOOR' || obj.type === 'WINDOW' || obj.type === 'OPENING') {{
                     mesh = createOpeningMesh(obj, zElev, mat);
+                }} else if (obj.type === 'SPACE') {{
+                    mesh = createSpaceMesh(obj, zElev, mat);
                 }} else if (obj.type === 'FLOOR' || obj.type === 'CEILING' || obj.type === 'ROOF' || obj.type === 'BALCONY' || obj.type === 'SOFFIT') {{
                     mesh = createPolygonMesh(obj, zElev, mat);
                 }} else if (obj.type === 'PARAPET') {{
@@ -771,6 +805,24 @@ def generate_bim_viewer_html(payload: Dict[str, Any], height_px: int = 750) -> s
             return mesh;
         }}
 
+        function createSpaceMesh(sp, zElev, mat) {{
+            const poly = sp.polygon || sp.boundary_polygon;
+            if (!poly || poly.length < 3) return null;
+            const shape = new THREE.Shape();
+            poly.forEach((pt, idx) => {{
+                if (pt.x !== null && pt.y !== null) {{
+                    if (idx === 0) shape.moveTo(pt.x, -pt.y);
+                    else shape.lineTo(pt.x, -pt.y);
+                }}
+            }});
+            const geom = new THREE.ShapeGeometry(shape);
+            geom.rotateX(Math.PI / 2);
+            const mesh = new THREE.Mesh(geom, mat);
+            mesh.position.y = zElev + 0.01;
+            mesh.receiveShadow = false;
+            return mesh;
+        }}
+
         function createParapetMesh(p, zElev, mat) {{
             if (p.height_m === null || p.height_m <= 0) return null;
             if (p.length_m === null || p.length_m === undefined || isNaN(p.length_m) || p.length_m <= 0) return null;
@@ -874,7 +926,7 @@ def generate_bim_viewer_html(payload: Dict[str, Any], height_px: int = 750) -> s
 
             const catContainer = document.getElementById('category-filters');
             catContainer.innerHTML = '';
-            const cats = ['WALL', 'DOOR', 'WINDOW', 'FLOOR', 'CEILING', 'BALCONY', 'SOFFIT', 'PARAPET', 'ROOF', 'COLUMN', 'BALUSTRADE', 'SCREEN', 'SURFACE'];
+            const cats = ['WALL', 'DOOR', 'WINDOW', 'FLOOR', 'SPACE', 'CEILING', 'BALCONY', 'SOFFIT', 'PARAPET', 'ROOF', 'COLUMN', 'BALUSTRADE', 'SCREEN', 'SURFACE'];
             cats.forEach(cat => {{
                 const lbl = document.createElement('label');
                 lbl.className = 'checkbox-label';
@@ -886,7 +938,7 @@ def generate_bim_viewer_html(payload: Dict[str, Any], height_px: int = 750) -> s
                 chk.addEventListener('change', (e) => toggleCategory(cat, e.target.checked));
                 
                 lbl.appendChild(chk);
-                lbl.appendChild(document.createTextNode(' ' + cat + 's'));
+                lbl.appendChild(document.createTextNode(' ' + (cat === 'SPACE' ? 'Spaces' : cat + 's')));
                 catContainer.appendChild(lbl);
             }});
         }}
@@ -1042,6 +1094,34 @@ def generate_bim_viewer_html(payload: Dict[str, Any], height_px: int = 750) -> s
                     addInfoRow(container, 'Height', 'Not Specified');
                 }}
 
+                if (obj.type === 'SPACE') {{
+                    if (obj.room_number) addInfoRow(container, 'Room Number', String(obj.room_number));
+                    if (obj.floor_area_m2 !== undefined && obj.floor_area_m2 !== null && !isNaN(obj.floor_area_m2)) {{
+                        addInfoRow(container, 'Floor Area', obj.floor_area_m2.toFixed(2) + ' m²');
+                    }}
+                    if (obj.measured_area_m2 !== undefined && obj.measured_area_m2 !== null && !isNaN(obj.measured_area_m2)) {{
+                        addInfoRow(container, 'Measured Area', obj.measured_area_m2.toFixed(2) + ' m²');
+                    }}
+                    if (obj.specified_area_m2 !== undefined && obj.specified_area_m2 !== null && !isNaN(obj.specified_area_m2)) {{
+                        addInfoRow(container, 'Specified Area', obj.specified_area_m2.toFixed(2) + ' m²');
+                    }}
+                    if (obj.perimeter_lm !== undefined && obj.perimeter_lm !== null && !isNaN(obj.perimeter_lm)) {{
+                        addInfoRow(container, 'Perimeter', obj.perimeter_lm.toFixed(2) + ' lm');
+                    }}
+                    if (obj.finish_assignments && Object.keys(obj.finish_assignments).length > 0) {{
+                        addSectionTitle(container, 'Room Finishes');
+                        Object.entries(obj.finish_assignments).forEach(([k, v]) => {{
+                            addInfoRow(container, k.charAt(0).toUpperCase() + k.slice(1), String(v));
+                        }});
+                    }}
+                    if (obj.derived_quantities && obj.derived_quantities.length > 0) {{
+                        addSectionTitle(container, 'Derived Trade Quantities');
+                        obj.derived_quantities.forEach(q => {{
+                            addInfoRow(container, (q.trade_category || '') + ': ' + (q.item_code || ''), (q.quantity || 0) + ' ' + (q.unit || ''));
+                        }});
+                    }}
+                }}
+
             }} else if (activeTab === 'advanced') {{
                 addInfoRow(container, 'Object ID', obj.id);
                 addInfoRow(container, 'Parent ID', obj.parent_id || 'None');
@@ -1058,6 +1138,9 @@ def generate_bim_viewer_html(payload: Dict[str, Any], height_px: int = 750) -> s
                     addInfoRow(container, 'Thickness', 'Not Specified');
                 }}
                 if (obj.is_external !== undefined) addInfoRow(container, 'Is External', String(obj.is_external));
+                if (obj.bounding_wall_ids && obj.bounding_wall_ids.length > 0) {{
+                    addInfoRow(container, 'Bounding Walls', obj.bounding_wall_ids.join(', '));
+                }}
 
             }} else if (activeTab === 'evidence') {{
                 const p = obj.provenance || {{}};

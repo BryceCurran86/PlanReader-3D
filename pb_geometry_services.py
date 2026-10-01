@@ -382,6 +382,10 @@ def level_extents(level: CanonicalLevel) -> Optional[BoundingBox3D]:
             for pt in getattr(item, "polygon", []):
                 include_pt(pt.x, pt.y)
 
+    for sp in getattr(level, "spaces", []):
+        for pt in getattr(sp, "boundary_polygon", []):
+            include_pt(pt.x, pt.y)
+
     for col in level.columns:
         if col.center and col.width_m and col.depth_m:
             w2, d2 = col.width_m / 2.0, col.depth_m / 2.0
