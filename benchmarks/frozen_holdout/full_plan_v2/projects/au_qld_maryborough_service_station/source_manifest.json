@@ -16,8 +16,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "bf4a49a372ce8904f6f9874d3c5d69f7517b2032b412f1a65698de0673c06d69",
-      "size_bytes": 6579,
+      "sha256": "ff4a6b73ac1e75f0f28afd2d20033867cfb0c157f4b3eaaa9d086e0db6bd7f44",
+      "size_bytes": 7900,
       "page_count": null
     }
   ],
@@ -180,12 +180,38 @@
       ],
       "denominator_eligible": false,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-window-tagged-count",
+      "description": "Tagged external window/glazing objects W01-W06 reconciled between A110 floor plan and A610 window elevations",
+      "trade_category": "windows",
+      "unit": "nr",
+      "expected_quantity": 6,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:window:W01",
+        "maryborough:window:W02",
+        "maryborough:window:W03",
+        "maryborough:window:W04",
+        "maryborough:window:W05",
+        "maryborough:window:W06"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A110:floor_plan:tags:W01-W06",
+        "A610:window_elevations:W01-W06"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "reason_codes": [
     "room_area_universe_not_built",
     "wall_ceiling_finish_surface_universe_not_built",
-    "window_surface_universe_not_built",
+    "window_area_universe_not_built",
     "external_surface_universe_not_built"
   ]
 }
