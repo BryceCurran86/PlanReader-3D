@@ -1646,6 +1646,70 @@
         "openings_deducted": false,
         "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
       }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_wc:long_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main WC gross internal wall face, 1.560m side 1",
+      "expected_quantity": 4.212,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:WC_E-F_and_plan:1560_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.56,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_wc:long_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main WC gross internal wall face, 1.560m side 2",
+      "expected_quantity": 4.212,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:WC_E-F_and_plan:1560_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.56,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_wc:short_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main WC gross internal wall face, 1.110m side 1",
+      "expected_quantity": 2.997,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:WC_E-F_and_plan:1110_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.11,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_wc:short_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main WC gross internal wall face, 1.110m side 2",
+      "expected_quantity": 2.997,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:WC_E-F_and_plan:1110_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.11,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
     }
   ],
   "closure_checks": [
@@ -1962,6 +2026,23 @@
       ],
       "net_denominator_ready": false,
       "reason": "gross physical wall faces are source-closed; door/opening deductions and finish-scope partitioning remain unresolved"
+    },
+    {
+      "check_id": "3laurel:control:main_wc_internal_wall_gross_faces",
+      "component_object_refs": [
+        "3laurel:surface:internal_wall_gross:main_wc:long_1",
+        "3laurel:surface:internal_wall_gross:main_wc:long_2",
+        "3laurel:surface:internal_wall_gross:main_wc:short_1",
+        "3laurel:surface:internal_wall_gross:main_wc:short_2"
+      ],
+      "object_count": 4,
+      "component_sum_m2": 14.418,
+      "source_locations": [
+        "architectural:p11:A0.11:WC_plan_and_elevations_E-F:1560_x_1110_finished_dimensions",
+        "architectural:p7:A0.7:FCL_2700"
+      ],
+      "net_denominator_ready": false,
+      "reason": "gross physical WC wall faces are source-closed; door deduction and finish-scope partitioning remain unresolved"
     }
   ]
 }
