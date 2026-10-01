@@ -207,7 +207,7 @@ def test_dangling_bookkeeping_rows_carry_no_decisions_for_non_dangling_ends():
 
 # ---- negative paths of the label / equivalence helpers -----------------------------------------------------------
 def _stub(decisions):
-    return {"walls": [{"ends": [{"label": k, "dangling": True, "decision": v} for k, v in decisions.items()]}]}
+    return {"comparison_valid": True, "walls": [{"ends": [{"label": k, "dangling": True, "decision": v} for k, v in decisions.items()]}]}
 
 
 def test_rotation_equivalence_detects_disagreement_and_missing_labels():
@@ -219,13 +219,13 @@ def test_rotation_equivalence_detects_disagreement_and_missing_labels():
     missing = D.rotation_equivalence({0: _stub({"a": "x", "b": "y"}), 90: _stub({"a": "x"})}, column="decision")
     assert not missing["equivalent"] and missing["mismatches"][0]["decisions"] == {"0": "y", "90": "absent"}
     # a non-dangling end is not compared
-    mixed = {"walls": [{"ends": [{"label": "a", "dangling": True, "decision": "x"}, {"label": "z", "dangling": False, "decision": "q"}]}]}
-    only = {"walls": [{"ends": [{"label": "a", "dangling": True, "decision": "x"}]}]}
+    mixed = {"comparison_valid": True, "walls": [{"ends": [{"label": "a", "dangling": True, "decision": "x"}, {"label": "z", "dangling": False, "decision": "q"}]}]}
+    only = {"comparison_valid": True, "walls": [{"ends": [{"label": "a", "dangling": True, "decision": "x"}]}]}
     assert D.rotation_equivalence({0: mixed, 90: only}, column="decision")["equivalent"]
 
 
 def test_label_page_report_rejects_ambiguous_and_unmatched_ends_and_does_not_mutate_its_input():
-    page = {"walls": [{"ends": [{"point": [10.0, 10.0], "dangling": True}]}]}
+    page = {"comparison_valid": True, "walls": [{"ends": [{"point": [10.0, 10.0], "dangling": True}]}]}
     before = json.dumps(page, sort_keys=True)
     ok = D.label_page_report(page, {"w": ((10.0, 10.0), (500.0, 500.0), "EI")})
     assert ok["walls"][0]["ends"][0]["label"] == "w:0" and ok["walls"][0]["ends"][0]["truth_class"] == "E"

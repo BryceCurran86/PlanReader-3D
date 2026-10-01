@@ -25,6 +25,19 @@ recomputation. That is what the ``cross_check`` field reports (``mismatch``); it
 is not hidden. Observed in the committed fixtures: the 2383.94 x 1683.78 cm-authored
 sheet at /Rotate 270.
 
+SNAPSHOT / SCOPE FAIL-CLOSED: building the wall authority runs raster augmentation,
+which can publish a NEWER snapshot for the same revision; wall scopes are keyed by
+that snapshot. Every page therefore re-reads the producer's current published
+snapshot (``published_snapshot_for_revision``) and selects its scope from it, and
+reports ``snapshot_id_at_ingest`` / ``snapshot_id_consumed``. A missing or
+ownership-mismatched snapshot (``snapshot_unresolved:...``) or a scope that is not
+``physical_wall_candidate_scope_resolved`` (``scope_unresolved``) is NOT a
+comparison: ``comparison_valid`` is false, ``cross_check`` is ``not_run`` and there
+are no walls, so it can never read as a matching zero-difference result.
+``label_page_report`` / ``rotation_equivalence`` refuse such pages. Zero divergence
+on a resolved page is still vacuous when no wall end touches a page edge: check
+``current_at_boundary`` / ``shadow_*_at_boundary`` before reading anything into it.
+
 It changes no authority, publishes no quantity, writes nothing (the CLI prints
 JSON to stdout only) and is imported by no production module. Synthetic
 validation only: see the PROMOTION GATE in ``pb_page_frame_shadow``.
@@ -55,11 +68,18 @@ from pb_physical_wall_candidate_authority import (  # noqa: E402
 )
 from pb_source_visibility_authority import SourceVisibilityProducer  # noqa: E402
 
-SHADOW_DIFF_SCHEMA_VERSION = "1.0.0"
+SHADOW_DIFF_SCHEMA_VERSION = "1.1.0"
 DECISION_BOUNDARY = "at_page_boundary"
 DECISION_INTERIOR = "interior"
 PRODUCER_METHOD = "page_frame_wall_boundary_shadow_diff"
 SOURCE_LOCATOR = "memory://page_frame_wall_boundary_shadow_diff"
+# Scope-resolution statuses. Only SCOPE_RESOLVED pages carry a comparison.
+SCOPE_RESOLVED = "resolved"
+SCOPE_UNRESOLVED = "unresolved"
+SCOPE_SNAPSHOT_UNRESOLVED = "snapshot_unresolved"
+SCOPE_NOT_EVALUATED = "not_evaluated"
+PIPELINE_SCOPE_UNRESOLVED = "scope_unresolved"
+PIPELINE_SNAPSHOT_UNRESOLVED = "snapshot_unresolved"
 
 
 def _decision(flag: bool) -> str:
@@ -86,6 +106,44 @@ def _wall_ends(wall) -> list:
     return ends
 
 
+def _current_published(src, pub):
+    """Re-read the producer's CURRENT published snapshot for ``pub``'s revision.
+
+    ``pub`` is what ``ingest_native_pdf_bytes`` returned. Building the wall
+    authority runs ``augment_with_raster_visible_segments``, which can publish a
+    NEWER snapshot for the same revision, and the wall scopes are keyed by that
+    newer snapshot id. A selector built from the ingest-time ``pub`` therefore
+    resolves to ``scope_unavailable`` with no walls. Returns ``(published, None)``
+    or ``(None, reason)``; anything unexpected fails closed.
+    """
+    try:
+        current = src.published_snapshot_for_revision(pub.revision.revision_id)
+    except Exception as exc:  # report, never raise: diagnostic tool
+        return None, f"published_snapshot_lookup_error:{type(exc).__name__}"
+    if current is None:
+        return None, "published_snapshot_missing"
+    owner = (current.revision.document_id, current.revision.source_sha256, current.revision.revision_id)
+    if owner != (pub.revision.document_id, pub.revision.source_sha256, pub.revision.revision_id):
+        return None, "published_snapshot_ownership_mismatch"
+    return current, None
+
+
+def _no_comparison(report: dict, *, pipeline_status: str, scope_resolution_status: str, **scope_fields) -> dict:
+    """Mark a page as NOT compared. It can never read as a successful or matching result."""
+    fields = {"consumer_width": None, "consumer_height": None, "scope_complete": None, "scope_reason_codes": []}
+    fields.update(scope_fields)
+    report.update(
+        pipeline_status=pipeline_status,
+        scope_resolution_status=scope_resolution_status,
+        comparison_valid=False,
+        cross_check="not_run",
+        walls=[],
+        summary=_summarise([]),
+        **fields,
+    )
+    return report
+
+
 def _page_report(*, src, pub, pdf_bytes: bytes, document, page_no: int, auth) -> dict:
     page_id = str(page_no)
     scope_id = f"wall-source:page-{page_no}"
@@ -96,40 +154,63 @@ def _page_report(*, src, pub, pdf_bytes: bytes, document, page_no: int, auth) ->
         revision=pub.revision.revision_id,
         page_no=page_no,
     )
+    current, snapshot_error = _current_published(src, pub)
     report: dict = {
         "page_no": page_no,
         "frame": frame.to_plain(),
         "pipeline_status": "ok",
+        "snapshot_id_at_ingest": pub.snapshot.snapshot_id,
+        "snapshot_id_consumed": None if current is None else current.snapshot.snapshot_id,
+        "snapshot_refreshed": None if current is None else current.snapshot.snapshot_id != pub.snapshot.snapshot_id,
+        "scope_resolution_status": SCOPE_NOT_EVALUATED,
+        "comparison_valid": False,
     }
+    if current is None:
+        return _no_comparison(
+            report,
+            pipeline_status=f"{PIPELINE_SNAPSHOT_UNRESOLVED}:{snapshot_error}",
+            scope_resolution_status=SCOPE_SNAPSHOT_UNRESOLVED,
+        )
+    scope_resolved = False
     try:
         selector = PhysicalWallCandidateSelector(
-            document_id=pub.revision.document_id,
-            revision_id=pub.revision.revision_id,
-            source_sha256=pub.revision.source_sha256,
-            snapshot_id=pub.snapshot.snapshot_id,
+            document_id=current.revision.document_id,
+            revision_id=current.revision.revision_id,
+            source_sha256=current.revision.source_sha256,
+            snapshot_id=current.snapshot.snapshot_id,
             page_id=page_id,
             decision_scope_id=scope_id,
         )
         result = auth.resolve_scope(selector)
-        _segments, _ids, consumer_w, consumer_h = pw._source_page_segments(
-            source_producer=src,
-            published=pub,
-            source_bytes=pdf_bytes,
-            page_id=page_id,
-            decision_scope_id=scope_id,
+        scope_codes = tuple(str(code) for code in result.reason_codes)
+        scope_resolved = (
+            pw.PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED in scope_codes
+            and pw.PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE not in scope_codes
         )
+        if scope_resolved:
+            _segments, _ids, consumer_w, consumer_h = pw._source_page_segments(
+                source_producer=src,
+                published=current,
+                source_bytes=pdf_bytes,
+                page_id=page_id,
+                decision_scope_id=scope_id,
+            )
     except Exception as exc:  # report, never raise: diagnostic tool
-        report.update(
+        return _no_comparison(
+            report,
             pipeline_status=f"pipeline_error:{type(exc).__name__}",
-            consumer_width=None,
-            consumer_height=None,
-            scope_complete=None,
-            scope_reason_codes=[],
-            cross_check="not_run",
-            walls=[],
-            summary=_summarise([]),
+            scope_resolution_status=SCOPE_NOT_EVALUATED,
         )
-        return report
+    if not scope_resolved:
+        # e.g. physical_wall_candidate_scope_unavailable: no wall scope exists for this exact selector.
+        # An empty result is NOT "zero differences".
+        return _no_comparison(
+            report,
+            pipeline_status=PIPELINE_SCOPE_UNRESOLVED,
+            scope_resolution_status=SCOPE_UNRESOLVED,
+            scope_complete=bool(result.scope_complete),
+            scope_reason_codes=sorted(scope_codes),
+        )
 
     native = frame.native_extent
     quant = frame.edge_quantisation_pt
@@ -196,6 +277,8 @@ def _page_report(*, src, pub, pdf_bytes: bytes, document, page_no: int, auth) ->
         consumer_height=float(consumer_h),
         scope_complete=bool(result.scope_complete),
         scope_reason_codes=sorted(str(c) for c in result.reason_codes),
+        scope_resolution_status=SCOPE_RESOLVED,
+        comparison_valid=True,
         cross_check="match" if public_cropped == any_current_cropped else "mismatch",
         walls=walls,
     )
@@ -239,6 +322,7 @@ def run_shadow_diff(
         ]
     finally:
         document.close()
+    current, _snapshot_error = _current_published(src, pub)
     return {
         "schema_version": SHADOW_DIFF_SCHEMA_VERSION,
         "shadow_only": True,
@@ -247,8 +331,20 @@ def run_shadow_diff(
         "document_id": pub.revision.document_id,
         "source_sha256": hashlib.sha256(data).hexdigest(),
         "revision": pub.revision.revision_id,
+        "snapshot_id_at_ingest": pub.snapshot.snapshot_id,
+        "snapshot_id_consumed": None if current is None else current.snapshot.snapshot_id,
+        "unresolved_pages": [p["page_no"] for p in pages if not p["comparison_valid"]],
         "pages": pages,
     }
+
+
+def _require_valid_comparison(page_report: Mapping[str, Any]) -> None:
+    if page_report.get("comparison_valid") is not True:
+        raise ValueError(
+            "page report is not a valid comparison "
+            f"(pipeline_status={page_report.get('pipeline_status')!r}, "
+            f"scope_resolution_status={page_report.get('scope_resolution_status')!r})"
+        )
 
 
 # ---- fixture-label helpers (semantic labels, exact endpoint match, no nearest) ----
@@ -258,8 +354,11 @@ def label_page_report(page_report: Mapping[str, Any], expected_faces: Mapping[st
     ``expected_faces``: {label: (native_end_0, native_end_1, "EI"-style classes)}
     where ``E`` is a true page-edge end and ``I`` an interior end. Each wall end
     must match exactly ONE expected (label, end) within ``tol`` (about 30 float32
-    ulp at page scale); zero or several matches raise ValueError (fail closed).
+    ulp at page scale); zero or several matches raise ValueError (fail closed). A
+    page report that is not a valid comparison (unresolved scope / snapshot) is
+    refused: an empty wall list there is not "no ends to label".
     """
+    _require_valid_comparison(page_report)
     targets = []
     for label, (p, q, classes) in expected_faces.items():
         targets.append((f"{label}:0", p, classes[0]))
@@ -285,7 +384,11 @@ def rotation_equivalence(labelled: Mapping[int, Mapping[str, Any]], *, column: s
     ``current_decision``, ``shadow_decision_default_tol``,
     ``shadow_decision_quantised_tol``. Equivalent iff every rotation has the same
     set of dangling labelled ends with the same decision as every other rotation.
+    Every report must be a valid comparison, otherwise ValueError: pages without a
+    resolved scope would otherwise look vacuously "equivalent".
     """
+    for report in labelled.values():
+        _require_valid_comparison(report)
     per_rotation = {
         int(rot): {
             e["label"]: e[column]
@@ -316,7 +419,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
     data = Path(args.pdf).read_bytes()
     pages = [int(p) for p in args.pages.split(",") if p.strip()] or None
-    sys.stdout.write(render_json(run_shadow_diff(data, document_id=args.document_id, page_numbers=pages)) + "\n")
+    report = run_shadow_diff(data, document_id=args.document_id, page_numbers=pages)
+    sys.stdout.write(render_json(report) + "\n")
+    if report["unresolved_pages"]:
+        sys.stderr.write(
+            f"WARNING: pages {report['unresolved_pages']} have NO resolved wall scope; "
+            "their entries are not comparisons (comparison_valid=false).\n"
+        )
     return 0
 
 
