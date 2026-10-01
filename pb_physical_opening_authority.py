@@ -1668,7 +1668,7 @@ class PhysicalOpeningAuthority:
             source_sha256=candidate.source_sha256,
             snapshot_id=candidate.snapshot_id,
             page_id=candidate.page_id,
-            viewport_id=None,
+            viewport_id=candidate.viewport_id,
             semantic_class="opening",
             status=EvidenceResolutionStatus.CORROBORATED,
             proposition=PHYSICAL_OPENING_EXISTS,
