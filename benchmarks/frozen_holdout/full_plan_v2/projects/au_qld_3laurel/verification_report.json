@@ -47,6 +47,11 @@
       "evidence": "Seven horizontal primary ceiling planes reconcile exactly to the 297.5 m2 source-declared plan-area total; secondary FC soffit and beam faces remain unresolved."
     },
     {
+      "proof": "wet-area tiled floor surfaces source-closed",
+      "status": "PASS",
+      "evidence": "Bathroom, main WC, main laundry and granny-flat ensuite/laundry floor surfaces are independently dimension-closed and explicitly tiled; combined area 18.5649 m2."
+    },
+    {
       "proof": "full project surface universe complete",
       "status": "FAIL",
       "evidence": "External openings are source-closed, but multiple other in-scope families remain unresolved."
@@ -74,5 +79,12 @@
     "difference_m2": 0,
     "primary_ceiling_universe_complete": true,
     "secondary_fc_soffit_and_beam_faces_complete": false
+  },
+  "wet_area_floor_closure_summary": {
+    "closure_check_id": "3laurel:closure:wet_area_atomic_floor_surfaces",
+    "verified_floor_count": 4,
+    "verified_area_m2": 18.5649,
+    "source_closed": true,
+    "overlapping_living_aggregate_regions_denominator_eligible": false
   }
 }
