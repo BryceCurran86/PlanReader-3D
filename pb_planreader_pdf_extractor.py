@@ -457,6 +457,11 @@ class GenericPlanReaderExtractor:
             "evidence_ids": [],
             "quantity_id": None,
         }
+        self.canonical_levels_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "levels": [],
+        }
         self.canonical_walls_live: Dict[str, Any] = {
             "status": "abstained",
             "reason_codes": ["not_collected"],
@@ -1221,6 +1226,11 @@ class GenericPlanReaderExtractor:
             "status": "abstained",
             "reason_codes": ["not_collected"],
             "windows": [],
+        }
+        self.canonical_levels_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "levels": [],
         }
         self.canonical_walls_live = {
             "status": "abstained",
@@ -3270,6 +3280,67 @@ class GenericPlanReaderExtractor:
                 self.extraction_status["item35_authority_shadow"] = "extraction_failed"
         self._mark_performance("item35_shadow_complete")
 
+        # Source-owned floor-plan level identity. Only authoritative F.07
+        # floor-plan viewport labels can mint a level scope; no default
+        # "Ground" level is introduced for unlabeled geometry.
+        _live_level_records = ()
+        try:
+            from pb_live_floor_plan_level_identity import (
+                LIVE_FLOOR_PLAN_LEVEL_RESOLVED,
+                LIVE_FLOOR_PLAN_LEVEL_UNAVAILABLE,
+                collect_source_owned_floor_plan_levels,
+            )
+
+            _level_source_sha = hashlib.sha256(p_path.read_bytes()).hexdigest()
+            _level_pages = [
+                page_index
+                for page_index in target_pages
+                if (
+                    0 <= page_index < len(doc)
+                    and self.is_drawing_page(
+                        doc[page_index].get_text("text"),
+                        doc[page_index],
+                    )
+                )
+            ]
+            _live_level_records = collect_source_owned_floor_plan_levels(
+                doc,
+                page_indices=_level_pages,
+                source_sha256=_level_source_sha,
+            )
+            self.canonical_levels_live = {
+                "status": (
+                    "corroborated"
+                    if _live_level_records
+                    else "abstained"
+                ),
+                "reason_codes": [
+                    (
+                        LIVE_FLOOR_PLAN_LEVEL_RESOLVED
+                        if _live_level_records
+                        else LIVE_FLOOR_PLAN_LEVEL_UNAVAILABLE
+                    )
+                ],
+                "levels": [
+                    record.to_dict() for record in _live_level_records
+                ],
+            }
+            self.extraction_status["canonical_levels_live"] = (
+                self.canonical_levels_live["status"]
+            )
+        except Exception as _level_exc:  # noqa: BLE001
+            _live_level_records = ()
+            self.canonical_levels_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_floor_plan_level_exception:{type(_level_exc).__name__}"
+                ],
+                "levels": [],
+            }
+            self.extraction_status["canonical_levels_live"] = (
+                "extraction_failed"
+            )
+
         # Source-owned physical external net-wall LIVE firm output.
         self._mark_performance("physical_net_wall_live_start")
         #
@@ -3300,6 +3371,16 @@ class GenericPlanReaderExtractor:
                     wall.to_dict()
                     for wall in physical_wall_result.canonical_walls
                 ]
+                from pb_live_floor_plan_level_identity import (
+                    enrich_live_wall_level_ownership,
+                )
+
+                canonical_wall_objects = list(
+                    enrich_live_wall_level_ownership(
+                        canonical_wall_objects,
+                        levels=_live_level_records,
+                    )
+                )
                 wall_status = getattr(
                     physical_wall_result,
                     "canonical_wall_status",
@@ -3980,6 +4061,7 @@ class GenericPlanReaderExtractor:
 
             _building_core = assemble_live_canonical_building_core(
                 source_sha256=hashlib.sha256(p_path.read_bytes()).hexdigest(),
+                levels=self.canonical_levels_live.get("levels", ()),
                 walls=self.canonical_walls_live.get("walls", ()),
                 openings=self.canonical_openings_live.get("openings", ()),
                 rooms=self.canonical_rooms_live.get("rooms", ()),

@@ -64,6 +64,12 @@ def _one_level_id(values: object) -> str | None:
 @dataclass(frozen=True)
 class LiveCanonicalLevelBucket:
     level_id: str
+    level_label: str | None = None
+    normalized_level_label: str | None = None
+    level_index: int | None = None
+    source_page: int | None = None
+    source_viewport_id: str | None = None
+    cross_view_identity_resolved: bool = False
     walls: tuple[Mapping[str, object], ...] = ()
     openings: tuple[Mapping[str, object], ...] = ()
     rooms: tuple[Mapping[str, object], ...] = ()
@@ -76,6 +82,12 @@ class LiveCanonicalLevelBucket:
     def to_dict(self) -> dict:
         return {
             "level_id": self.level_id,
+            "level_label": self.level_label,
+            "normalized_level_label": self.normalized_level_label,
+            "level_index": self.level_index,
+            "source_page": self.source_page,
+            "source_viewport_id": self.source_viewport_id,
+            "cross_view_identity_resolved": self.cross_view_identity_resolved,
             "walls": [dict(item) for item in self.walls],
             "openings": [dict(item) for item in self.openings],
             "doors": [
@@ -145,6 +157,7 @@ def _empty() -> LiveCanonicalBuildingCore:
 def assemble_live_canonical_building_core(
     *,
     source_sha256: str,
+    levels: Sequence[Mapping[str, object]] = (),
     walls: Sequence[Mapping[str, object]] = (),
     openings: Sequence[Mapping[str, object]] = (),
     rooms: Sequence[Mapping[str, object]] = (),
@@ -159,6 +172,7 @@ def assemble_live_canonical_building_core(
     if len(source_sha) != 64 or any(ch not in "0123456789abcdef" for ch in source_sha):
         return _empty()
 
+    source_levels = _dict_items(levels)
     families: dict[str, tuple[dict, ...]] = {
         "walls": _dict_items(walls),
         "openings": _dict_items(openings),
@@ -168,8 +182,15 @@ def assemble_live_canonical_building_core(
         "roofs": _dict_items(roofs),
         "structural_members": _dict_items(structural_members),
     }
-    if not any(families.values()):
+    if not any(families.values()) and not source_levels:
         return _empty()
+
+    level_metadata_by_id: dict[str, dict] = {}
+    for level in source_levels:
+        level_id = _clean(level.get("canonical_level_id"))
+        if not level_id or level_id in level_metadata_by_id:
+            return _empty()
+        level_metadata_by_id[level_id] = level
 
     # Reject duplicate canonical IDs within a family. Different families may
     # legitimately share related identities (for example door/window views are
@@ -258,7 +279,10 @@ def assemble_live_canonical_building_core(
                 elif prior != explicit:
                     return _empty()
 
-    bucket_payloads: dict[str, dict[str, list[dict]]] = {}
+    bucket_payloads: dict[str, dict[str, list[dict]]] = {
+        level_id: {name: [] for name in families}
+        for level_id in level_metadata_by_id
+    }
     unassigned: dict[str, list[dict]] = {family: [] for family in families}
     for family, items in families.items():
         mapping = explicit_maps[family]
@@ -277,6 +301,55 @@ def assemble_live_canonical_building_core(
     levels = tuple(
         LiveCanonicalLevelBucket(
             level_id=level_id,
+            level_label=(
+                _clean(level_metadata_by_id[level_id].get("level_label")) or None
+                if level_id in level_metadata_by_id
+                else None
+            ),
+            normalized_level_label=(
+                _clean(
+                    level_metadata_by_id[level_id].get(
+                        "normalized_level_label"
+                    )
+                )
+                or None
+                if level_id in level_metadata_by_id
+                else None
+            ),
+            level_index=(
+                int(level_metadata_by_id[level_id]["level_index"])
+                if level_id in level_metadata_by_id
+                and level_metadata_by_id[level_id].get("level_index")
+                is not None
+                else None
+            ),
+            source_page=(
+                int(level_metadata_by_id[level_id]["source_page"])
+                if level_id in level_metadata_by_id
+                and level_metadata_by_id[level_id].get("source_page")
+                is not None
+                else None
+            ),
+            source_viewport_id=(
+                _clean(
+                    level_metadata_by_id[level_id].get(
+                        "source_viewport_id"
+                    )
+                )
+                or None
+                if level_id in level_metadata_by_id
+                else None
+            ),
+            cross_view_identity_resolved=(
+                bool(
+                    level_metadata_by_id[level_id].get(
+                        "cross_view_identity_resolved",
+                        False,
+                    )
+                )
+                if level_id in level_metadata_by_id
+                else False
+            ),
             walls=tuple(payload["walls"]),
             openings=tuple(payload["openings"]),
             rooms=tuple(payload["rooms"]),
@@ -295,7 +368,10 @@ def assemble_live_canonical_building_core(
         }
     )
     counts = MappingProxyType(
-        {family: len(items) for family, items in families.items()}
+        {
+            **{family: len(items) for family, items in families.items()},
+            "levels": len(source_levels),
+        }
     )
     unassigned_count = sum(len(items) for items in unassigned.values())
     level_assignment_complete = unassigned_count == 0
