@@ -732,3 +732,37 @@ def test_lot16_unscheduled_structural_members_stay_out_of_truth():
         "structural_members_beyond_closed_wall_bracing_and_explicit_architectural_supports"
         in draft["unresolved_surface_families"]
     )
+
+
+def test_lot16_source_closed_bath_tile_faces_stay_gross_until_deductions_close():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    refs = {
+        "lot16:surface:wall_tile_gross:bath:elev1",
+        "lot16:surface:wall_tile_gross:bath:shower",
+        "lot16:surface:wall_tile_gross:bath:elev4",
+    }
+    faces = [
+        row for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
+    assert len(faces) == 3
+    assert {row["object_ref"] for row in faces} == refs
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(
+        9.324
+    )
+    assert all(
+        row["attributes"]["tile_height_to_top_plate_m"] == pytest.approx(2.59)
+        for row in faces
+    )
+    assert all(
+        "draft_only_until_remaining_bath_face_niche_opening_and_return_deductions_are_closed"
+        == row["attributes"]["denominator_readiness"]
+        for row in faces
+    )
+    check = next(
+        row for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:explicit_bath_tile_gross_faces"
+    )
+    assert check["object_count"] == 3
+    assert check["component_sum_m2"] == pytest.approx(9.324)
+    assert check["net_denominator_ready"] is False
