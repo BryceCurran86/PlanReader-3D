@@ -69,6 +69,11 @@
       "evidence": "GF ensuite 2320x1820, FF ensuite 2810x2120, FF bath 1910x3060; all cross-checked against 1:100 vector inner faces and wet-area tiling scope documents"
     },
     {
+      "proof": "laundry floor tiling surface independently closed",
+      "status": "PASS",
+      "evidence": "Architectural and electrical ground-floor vectors independently measure the same 2616.2 x 1600.2 mm inner-face rectangle; standard inclusions explicitly tile the laundry floor."
+    },
+    {
       "proof": "every denominator item has exact physical object refs",
       "status": "PASS",
       "evidence": "q5446:surface:floor:alfresco"
@@ -89,10 +94,20 @@
     {
       "proof": "full project surface universe complete",
       "status": "FAIL",
-      "evidence": "Alfresco and three wet-area floor surfaces are closed; remaining floor, opening, wall, ceiling, roof and wall-tile universes remain incomplete."
+      "evidence": "Alfresco, three bathroom/ensuite wet-area floor surfaces, and laundry floor are closed; remaining floor, opening, wall, ceiling, roof and wall-tile universes remain incomplete."
     }
   ],
   "measurement_closure_checks": [
+    {
+      "object_ref": "q5446:surface:floor:ground_laundry",
+      "status": "PASS",
+      "independent_routes": [
+        "architectural ground-floor vector inner faces 2616.2 x 1600.2 mm",
+        "electrical ground-floor vector inner faces 2616.2 x 1600.2 mm"
+      ],
+      "independently_computed_m2": 4.1864,
+      "decision": "VERIFIED_CORE"
+    },
     {
       "object_ref": "q5446:surface:floor:alfresco",
       "status": "PASS",

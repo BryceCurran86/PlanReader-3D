@@ -51,8 +51,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "2dd8654a1717ef30c68b1689b0ace576d806a29113f6b8a9baf621968c4b3181",
-      "size_bytes": 5688,
+      "sha256": "faffaf2e0424b29c8da3deac26d3e9577d72858272a6443a44f02801ccd827ca",
+      "size_bytes": 7120,
       "page_count": null
     }
   ],
@@ -142,6 +142,29 @@
         "standard_plans:p2:figured_dimensions:BATH_1910x3060",
         "standard_plans:p2:vector_inner_faces:1913.5x3056.5_mm",
         "standard_inclusions:p1:bathroom_ensuite_floor_tiles",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "q5446-ground-laundry-floor-tiling-area",
+      "description": "Ground-floor laundry tiled floor surface independently measured on architectural and electrical plans",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 4.1864,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:ground_laundry"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p1:architectural_vector_inner_faces:2616.2x1600.2_mm",
+        "standard_plans:p5:electrical_vector_inner_faces:2616.2x1600.2_mm",
+        "standard_inclusions:p1:laundry_floor_tiles_throughout",
         "sales_advice:p6:wet_area_floor_tiles_upgrade"
       ],
       "denominator_eligible": true,
