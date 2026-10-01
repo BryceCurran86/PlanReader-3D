@@ -393,6 +393,7 @@ class GenericPlanReaderExtractor:
             "quantity_id": None,
             "object_universe_snapshot": None,
             "quantity_evidence": None,
+            "coverage_registry_summary": None,
         }
         self.physical_net_wall_live: Dict[str, Any] = {
             "status": "abstained",
@@ -960,6 +961,7 @@ class GenericPlanReaderExtractor:
             "quantity_id": None,
             "object_universe_snapshot": None,
             "quantity_evidence": None,
+            "coverage_registry_summary": None,
         }
 
         self.physical_net_wall_live = {
@@ -1222,6 +1224,7 @@ class GenericPlanReaderExtractor:
                     "quantity_id": None,
                     "object_universe_snapshot": None,
                     "quantity_evidence": None,
+                    "coverage_registry_summary": None,
                 }
 
             if (
