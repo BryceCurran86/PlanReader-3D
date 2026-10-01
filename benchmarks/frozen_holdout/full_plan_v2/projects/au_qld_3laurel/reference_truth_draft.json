@@ -33,7 +33,7 @@
     "roof_planes",
     "structural_members_beyond_closed_wall_bracing_and_explicit_140x140_posts_470x470_piers",
     "secondary_fc_soffit_and_beam_faces_beyond_primary_ceiling_planes",
-    "wet_area_tile_bathroom_niche_width_and_all_niche_return_depths",
+    "wet_area_tile_all_niche_return_depths",
     "wet_area_non_shower_tile_skirtings_beyond_closed_laundry_D_plus_bath_surrounds_and_splashbacks",
     "unlabelled_internal_wall_breaks_beyond_two_closed_dimensioned_open_archways_for_wall_face_deductions"
   ],
@@ -1114,11 +1114,11 @@
         "tile_height_m": 2.1,
         "calculation": "width_m * tile_height_m",
         "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
-        "denominator_readiness": "draft_only_until_bathroom_niche_width_and_return_depth_are_resolved",
+        "denominator_readiness": "deduction_face_closed_but_niche_returns_unresolved",
         "host_elevation": "Bathroom D",
         "niche_present": true
       },
-      "source_location": "architectural:p11:A0.11:Bathroom_D:900_SHW_x_2100_TILES:1100_sill_400_high_niche_width_unresolved"
+      "source_location": "architectural:p11:A0.11:Bathroom_D:900_SHW_x_2100_TILES:1100_sill_400_high_niche; architectural:p3:A0.3:floor_plan:04-06_Niche"
     },
     {
       "object_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_rear",
@@ -1575,6 +1575,23 @@
         "height_m": 0.4,
         "calculation": "width_m * height_m",
         "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_rear",
+        "niche_return_depth_resolved": false,
+        "denominator_readiness": "deduction_face_closed_but_niche_returns_unresolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p11:bathroom_niche:01",
+      "object_family": "wet_area_wall_tile_deduction_opening",
+      "physical_kind": "opening_surface",
+      "description": "Main bathroom shower niche face opening",
+      "expected_quantity": 0.24,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:04-06_Niche; architectural:p11:A0.11:Bathroom_D:400_niche_height",
+      "attributes": {
+        "width_m": 0.6,
+        "height_m": 0.4,
+        "calculation": "width_m * height_m",
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_2",
         "niche_return_depth_resolved": false,
         "denominator_readiness": "deduction_face_closed_but_niche_returns_unresolved"
       }
@@ -2618,6 +2635,24 @@
         "niche_returns_included": false,
         "net_flat_face_area_ready": true
       }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:bath_D_flat_after_niche",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Main bathroom D shower wall flat tile face after niche opening deduction",
+      "expected_quantity": 1.65,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:Bathroom_D:900x2100_gross; architectural:p3:A0.3:floor_plan:04-06_Niche",
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_2",
+        "niche_deduction_ref": "3laurel:opening:p11:bathroom_niche:01",
+        "gross_area_m2": 1.89,
+        "niche_face_deduction_m2": 0.24,
+        "calculation": "1.890 - 0.240",
+        "niche_returns_included": false,
+        "net_flat_face_area_ready": true
+      }
     }
   ],
   "closure_checks": [
@@ -2668,7 +2703,7 @@
       "component_sum_m2": 23.085,
       "net_denominator_ready": false,
       "source_location": "architectural:p11:A0.11; architectural:p12:A0.12; architectural:p15:A0.15",
-      "reason": "gross designated shower tile faces only; niche/recess returns and deductions remain unresolved"
+      "reason": "gross designated shower tile faces only; all three source-dimensioned niche flat-face deductions are closed, while niche/recess return depths remain unresolved"
     },
     {
       "check_id": "3laurel:control:typed_external_opening_census",
@@ -2898,23 +2933,27 @@
       "check_id": "3laurel:control:source_dimensioned_niche_face_deductions",
       "component_object_refs": [
         "3laurel:opening:p12:main_ensuite_niche:01",
-        "3laurel:opening:p15:gf_ensuite_niche:01"
+        "3laurel:opening:p15:gf_ensuite_niche:01",
+        "3laurel:opening:p11:bathroom_niche:01"
       ],
-      "niche_opening_count": 2,
-      "flat_face_deduction_area_m2": 0.48,
+      "niche_opening_count": 3,
+      "flat_face_deduction_area_m2": 0.72,
       "affected_gross_surface_refs": [
         "3laurel:surface:wall_tile_gross:ensuite_shower_rear",
-        "3laurel:surface:wall_tile_gross:gf_ensuite_shower_rear"
+        "3laurel:surface:wall_tile_gross:gf_ensuite_shower_rear",
+        "3laurel:surface:wall_tile_gross:bath_shower_wall_2"
       ],
       "main_ensuite_rear_flat_tile_area_after_niche_m2": 4.296,
       "gf_ensuite_rear_flat_tile_area_after_niche_m2": 4.809,
+      "bathroom_D_flat_tile_area_after_niche_m2": 1.65,
       "niche_return_depths_resolved": false,
-      "bathroom_niche_deduction_resolved": false,
-      "reason": "A0.12 and A0.15 explicitly dimension 600mm niche width and 400mm niche height; niche depths/returns are not figured, and A0.11 bathroom niche width is not independently figured on that detail.",
+      "bathroom_niche_deduction_resolved": true,
+      "reason": "A0.12 and A0.15 explicitly dimension 600mm niche width and 400mm niche height. A0.3 independently labels the bathroom niche 04-06 while A0.11 dimensions its 400mm height, closing a 600x400 flat face. Niche depths/returns are not figured.",
       "source_locations": [
         "architectural:p12:A0.12:Ensuite_A-D",
         "architectural:p15:A0.15:GF_Ensuite_plan_and_C-D",
-        "architectural:p11:A0.11:bathroom_niche_remains_unresolved"
+        "architectural:p3:A0.3:floor_plan:04-06_Niche",
+        "architectural:p11:A0.11:Bathroom_D:400_niche_height"
       ]
     },
     {
@@ -3127,17 +3166,17 @@
       "source_location": "architectural:p11:A0.11:Bathroom_D_and_Bathroom_plan",
       "explicit_dimensions_available": {
         "sill_height_mm": 1100,
-        "niche_height_mm": 400
+        "niche_height_mm": 400,
+        "bathroom_niche_width_mm": 600
       },
       "missing_dimensions": [
-        "bathroom_niche_width",
         "bathroom_niche_return_depth",
         "main_ensuite_niche_return_depth",
         "gf_ensuite_niche_return_depth"
       ],
       "drawing_instruction": "Dimensions shall not be obtained by scaling.",
       "scaling_substitute_allowed": false,
-      "conclusion": "Bathroom niche face area and all niche return areas remain unresolved until independent dimensions are supplied."
+      "conclusion": "Bathroom niche flat face is closed at 600x400 from A0.3 plus A0.11; all niche return areas remain unresolved until independent depth dimensions are supplied."
     },
     {
       "check_id": "3laurel:closure:wet_area_atomic_floor_surfaces",
@@ -3207,13 +3246,14 @@
       "check_id": "3laurel:closure:ensuite_rear_flat_faces_after_niche_deductions",
       "component_object_refs": [
         "3laurel:surface:wall_tile:ensuite_rear_flat_after_niche",
-        "3laurel:surface:wall_tile:gf_ensuite_rear_flat_after_niche"
+        "3laurel:surface:wall_tile:gf_ensuite_rear_flat_after_niche",
+        "3laurel:surface:wall_tile:bath_D_flat_after_niche"
       ],
-      "object_count": 2,
-      "component_sum_m2": 9.105,
-      "flat_face_niche_deduction_sum_m2": 0.48,
+      "object_count": 3,
+      "component_sum_m2": 10.755,
+      "flat_face_niche_deduction_sum_m2": 0.72,
       "niche_returns_resolved": false,
-      "complete_for_two_flat_host_faces": true,
+      "complete_for_three_flat_host_faces": true,
       "complete_for_full_niche_tile_assemblies": false
     },
     {

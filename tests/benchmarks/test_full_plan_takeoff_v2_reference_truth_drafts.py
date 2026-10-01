@@ -136,7 +136,7 @@ def test_3laurel_gross_shower_tile_faces_preserve_closed_vs_niche_blocked_state(
     ) == 2
     assert readiness[
         "3laurel:surface:wall_tile_gross:bath_shower_wall_2"
-    ] == "draft_only_until_bathroom_niche_width_and_return_depth_are_resolved"
+    ] == "deduction_face_closed_but_niche_returns_unresolved"
 
     check = next(
         row
@@ -144,10 +144,8 @@ def test_3laurel_gross_shower_tile_faces_preserve_closed_vs_niche_blocked_state(
         if row["check_id"] == "3laurel:control:gross_shower_tile_faces"
     )
     assert check["net_denominator_ready"] is False
-    assert "niche/recess returns and deductions remain unresolved" in check["reason"]
-    assert "wet_area_tile_bathroom_niche_width_and_all_niche_return_depths" in (
-        draft["unresolved_surface_families"]
-    )
+    assert "all three source-dimensioned niche flat-face deductions are closed" in check["reason"]
+    assert "wet_area_tile_all_niche_return_depths" in draft["unresolved_surface_families"]
 
 
 def test_3laurel_typed_external_opening_census_is_source_closed():
@@ -481,7 +479,7 @@ def test_3laurel_main_laundry_gross_wall_faces_are_dimension_closed_but_not_net_
     )
 
 
-def test_3laurel_two_source_dimensioned_niche_face_deductions_are_closed_but_returns_are_not():
+def test_3laurel_three_source_dimensioned_niche_face_deductions_are_closed_but_returns_are_not():
     draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
     check = next(
         row
@@ -494,22 +492,20 @@ def test_3laurel_two_source_dimensioned_niche_face_deductions_are_closed_but_ret
         for row in draft["verified_physical_candidates"]
         if row["object_ref"] in refs
     ]
-    assert len(openings) == check["niche_opening_count"] == 2
+    assert len(openings) == check["niche_opening_count"] == 3
     assert all(row["object_family"] == "wet_area_wall_tile_deduction_opening" for row in openings)
-    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(0.48)
-    assert check["flat_face_deduction_area_m2"] == pytest.approx(0.48)
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(0.72)
+    assert check["flat_face_deduction_area_m2"] == pytest.approx(0.72)
     assert check["main_ensuite_rear_flat_tile_area_after_niche_m2"] == pytest.approx(4.296)
     assert check["gf_ensuite_rear_flat_tile_area_after_niche_m2"] == pytest.approx(4.809)
+    assert check["bathroom_D_flat_tile_area_after_niche_m2"] == pytest.approx(1.65)
     assert check["niche_return_depths_resolved"] is False
-    assert check["bathroom_niche_deduction_resolved"] is False
+    assert check["bathroom_niche_deduction_resolved"] is True
     assert all(
         row["attributes"]["niche_return_depth_resolved"] is False
         for row in openings
     )
-    assert (
-        "wet_area_tile_bathroom_niche_width_and_all_niche_return_depths"
-        in draft["unresolved_surface_families"]
-    )
+    assert "wet_area_tile_all_niche_return_depths" in draft["unresolved_surface_families"]
 
 
 def test_3laurel_main_ensuite_gross_wall_faces_close_from_finished_dimensions():
@@ -1168,7 +1164,7 @@ def test_3laurel_bed2_bed3_floor_surfaces_are_source_closed():
     assert "must not be double-counted" in check["overlap_note"]
 
 
-def test_3laurel_bathroom_niche_dimensions_fail_closed_without_width_or_returns():
+def test_3laurel_bathroom_niche_flat_face_closes_but_returns_fail_closed():
     draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
     blocker = next(
         row
@@ -1180,17 +1176,15 @@ def test_3laurel_bathroom_niche_dimensions_fail_closed_without_width_or_returns(
     assert blocker["explicit_dimensions_available"] == {
         "sill_height_mm": 1100,
         "niche_height_mm": 400,
+        "bathroom_niche_width_mm": 600,
     }
-    assert "bathroom_niche_width" in blocker["missing_dimensions"]
+    assert "bathroom_niche_width" not in blocker["missing_dimensions"]
     assert "bathroom_niche_return_depth" in blocker["missing_dimensions"]
     assert "main_ensuite_niche_return_depth" in blocker["missing_dimensions"]
     assert "gf_ensuite_niche_return_depth" in blocker["missing_dimensions"]
     assert blocker["scaling_substitute_allowed"] is False
-    assert "remain unresolved" in blocker["conclusion"]
-    assert (
-        "wet_area_tile_bathroom_niche_width_and_all_niche_return_depths"
-        in draft["unresolved_surface_families"]
-    )
+    assert "Bathroom niche flat face is closed at 600x400" in blocker["conclusion"]
+    assert "wet_area_tile_all_niche_return_depths" in draft["unresolved_surface_families"]
 
 
 def test_3laurel_wet_area_atomic_floors_are_source_closed_without_double_counting():
@@ -1355,13 +1349,14 @@ def test_3laurel_niche_free_ensuite_shower_returns_are_net_closed():
     assert check["complete_for_project_wet_area_tile_universe"] is False
 
 
-def test_3laurel_ensuite_rear_flat_faces_close_after_known_niche_deductions():
+def test_3laurel_dimensioned_flat_faces_close_after_known_niche_deductions():
     draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
     by_ref = {
         row["object_ref"]: row for row in draft["verified_physical_candidates"]
     }
     main = by_ref["3laurel:surface:wall_tile:ensuite_rear_flat_after_niche"]
     gf = by_ref["3laurel:surface:wall_tile:gf_ensuite_rear_flat_after_niche"]
+    bath = by_ref["3laurel:surface:wall_tile:bath_D_flat_after_niche"]
 
     assert main["expected_quantity"] == pytest.approx(4.296)
     assert main["attributes"]["gross_area_m2"] == pytest.approx(4.536)
@@ -1375,17 +1370,23 @@ def test_3laurel_ensuite_rear_flat_faces_close_after_known_niche_deductions():
     assert gf["attributes"]["niche_returns_included"] is False
     assert gf["attributes"]["net_flat_face_area_ready"] is True
 
+    assert bath["expected_quantity"] == pytest.approx(1.65)
+    assert bath["attributes"]["gross_area_m2"] == pytest.approx(1.89)
+    assert bath["attributes"]["niche_face_deduction_m2"] == pytest.approx(0.24)
+    assert bath["attributes"]["niche_returns_included"] is False
+    assert bath["attributes"]["net_flat_face_area_ready"] is True
+
     check = next(
         row
         for row in draft["closure_checks"]
         if row["check_id"]
         == "3laurel:closure:ensuite_rear_flat_faces_after_niche_deductions"
     )
-    assert check["object_count"] == 2
-    assert check["component_sum_m2"] == pytest.approx(9.105)
-    assert check["flat_face_niche_deduction_sum_m2"] == pytest.approx(0.48)
+    assert check["object_count"] == 3
+    assert check["component_sum_m2"] == pytest.approx(10.755)
+    assert check["flat_face_niche_deduction_sum_m2"] == pytest.approx(0.72)
     assert check["niche_returns_resolved"] is False
-    assert check["complete_for_two_flat_host_faces"] is True
+    assert check["complete_for_three_flat_host_faces"] is True
     assert check["complete_for_full_niche_tile_assemblies"] is False
 
 
