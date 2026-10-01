@@ -18,7 +18,7 @@ SCHEMA_VERSION = "2.0"
 def _load_json(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise ValueError(f"{path} must contain a JSON object")
+        raise TypeError(f"{path} must contain a JSON object")
     if str(data.get("schema_version")) != SCHEMA_VERSION:
         raise ValueError(f"{path} has unsupported schema_version")
     return data
@@ -86,7 +86,7 @@ def load_produced_items(path: Path) -> tuple[ProducedTakeoffItemV2, ...]:
         return ()
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, list):
-        raise ValueError(f"{path} must contain a JSON list")
+        raise TypeError(f"{path} must contain a JSON list")
     return tuple(
         ProducedTakeoffItemV2(
             quantity_id=value["quantity_id"],

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 MATCHED_WITHIN_TOLERANCE = "MATCHED_WITHIN_TOLERANCE"
 MATCHED_OUTSIDE_TOLERANCE = "MATCHED_OUTSIDE_TOLERANCE"
