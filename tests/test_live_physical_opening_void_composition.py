@@ -17,7 +17,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-def _complete_void_pdf(*, include_height: bool = True) -> bytes:
+def _complete_void_pdf(*, include_height: bool = True, tag: str = "W1") -> bytes:
     doc = fitz.open()
     try:
         page = doc.new_page(width=760.0, height=650.0)
@@ -34,7 +34,7 @@ def _complete_void_pdf(*, include_height: bool = True) -> bytes:
         ):
             page.draw_line(fitz.Point(*first), fitz.Point(*second), width=1.0)
         page.insert_text(fitz.Point(112.0, 65.0), "900")
-        page.insert_text(fitz.Point(112.0, 106.0), "W1")
+        page.insert_text(fitz.Point(112.0, 106.0), tag)
 
         headings = (
             "MARK",
@@ -43,7 +43,7 @@ def _complete_void_pdf(*, include_height: bool = True) -> bytes:
             "ROUGH-OPENING-SILL-MM",
             "ROUGH-OPENING-HEAD-MM",
         )
-        values = ("W1", "900", "2100" if include_height else "", "900", "3000")
+        values = (tag, "900", "2100" if include_height else "", "900", "3000")
         xs = (50.0, 150.0, 250.0, 350.0, 550.0)
         for text, x in zip(headings, xs):
             page.insert_text(fitz.Point(x, 500.0), text)
@@ -143,7 +143,52 @@ def test_live_composition_resolves_sealed_physical_opening_void() -> None:
     assert opening.area_m2 == opening.width_m * opening.height_m
     assert opening.geometry_complete is True
     assert opening.host_binding_record_id == replay.record.host_binding_record_id
+    assert opening.opening_kind == "window"
+    assert opening.type_mark == "W1"
+    assert opening.schedule_page_id == "1"
+    assert opening.schedule_declared_width_mm == 900
+    assert opening.schedule_declared_height_mm == 2100
+    assert opening.schedule_declared_count is None
+    assert opening.schedule_count_explicit is False
+    assert opening.schedule_row_observation_ids
+    assert opening.tag_observation_id
+    assert opening.tag_observation_id in opening.evidence_ids
+    assert set(opening.schedule_row_observation_ids).issubset(
+        set(opening.evidence_ids)
+    )
     assert replay.record.record_id in opening.evidence_ids
+
+
+def test_schedule_bound_door_reuses_the_same_physical_opening_identity() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="live-physical-opening-door-subtype-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="live-physical-opening-door-subtype",
+        source_bytes=_complete_void_pdf(tag="D1"),
+        source_locator="memory://live-physical-opening-door-subtype.pdf",
+    )
+    wall_opening = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    assert wall_opening.status is EvidenceResolutionStatus.CORROBORATED
+
+    composition = compose_live_physical_opening_voids(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    assert len(composition.canonical_openings) == 1
+    opening = composition.canonical_openings[0]
+    assert opening.canonical_opening_id == opening.physical_opening_id
+    assert opening.opening_kind == "door"
+    assert opening.type_mark == "D1"
+    assert opening.schedule_declared_width_mm == 900
+    assert opening.schedule_declared_height_mm == 2100
+    assert opening.geometry_complete is True
 
 
 def test_live_void_composition_never_uses_default_height_when_source_height_is_missing() -> None:
