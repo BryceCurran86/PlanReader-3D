@@ -34,7 +34,8 @@
     "custom_front_glazing_measure_on_site_only",
     "wet_area_wall_tiling_beyond_three_closed_bath_gross_faces_including_remaining_bath_face_and_raked_ensuite",
     "structural_members_beyond_closed_wall_bracing_and_explicit_architectural_supports",
-    "roof_planes_final_crosscheck_blocked_by_missing_engineering_stormwater_drainage_plan"
+    "roof_planes_final_crosscheck_blocked_by_missing_engineering_stormwater_drainage_plan",
+    "site_retaining_wall_final_extent_and_profile"
   ],
   "completion_rule": "Do not mark project VERIFIED until every in-scope family is independently closed and aggregate controls reconcile without double counting.",
   "verified_physical_candidates": [
@@ -2055,6 +2056,34 @@
       "source_location": "architectural:p3:floor_plan:ENS_WIR_figured_dimensions_and_finish_labels",
       "source_closed": true,
       "overlap_note": "These atomic floor surfaces are components within the residence composite control; do not double-count the aggregate."
+    },
+    {
+      "check_id": "lot16:blocker:retaining_wall_final_extent",
+      "status": "UNRESOLVED_SOURCE_LIMITATION",
+      "source_location": "architectural:p13:RETAINING_A_profile_and_plan",
+      "profile_segment_lengths_m": [
+        6.1,
+        1.4,
+        3,
+        1.8,
+        2.8,
+        2.5,
+        2.8,
+        5.9,
+        2.7,
+        1.8,
+        1.9,
+        3.689
+      ],
+      "profile_chain_length_m": 36.389,
+      "plan_label_approx_length_m": 36.5,
+      "profile_vs_plan_approx_difference_m": -0.111,
+      "plan_note": "TO BE EXTENDED AS NEEDED TO REDUCE SLOPE",
+      "final_installed_length_resolved": false,
+      "source_closed_profile_chain": true,
+      "scaling_substitute_allowed": false,
+      "denominator_ready": false,
+      "conclusion": "The drawn profile chain is measurable, but the final installed retaining-wall extent is expressly variable and must remain unresolved."
     }
   ]
 }
