@@ -328,6 +328,50 @@
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-office-ft3-floor-area",
+      "description": "Office FT3 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 9.05352,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:office"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A140:floor_finishes:OFFICE:FT3",
+        "A140:figured_dimensions:OFFICE_3570x2536",
+        "A110:physical_room_geometry:OFFICE:entry_D15"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-office-grid-ceiling-area",
+      "description": "Office 2400 GRID ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 9.05352,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:office"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:OFFICE:2400_GRID",
+        "A140:figured_dimensions:OFFICE_3570x2536",
+        "A110:physical_room_geometry:OFFICE:entry_D15"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "door_universe_reconciliation": {
@@ -476,5 +520,18 @@
       "expected_area_m2": 4.7547,
       "agreement": "PASS"
     }
-  ]
+  ],
+  "office_surface_geometry_check": {
+    "room_ref": "maryborough:room:office",
+    "entry_door_tag": "D15",
+    "figured_dimensions_mm": [
+      3570,
+      2536
+    ],
+    "expected_area_m2": 9.05352,
+    "a110_geometry_status": "PASS_WITHIN_DRAWING_TOLERANCE",
+    "floor_finish": "FT3",
+    "ceiling_finish": "GRID",
+    "ceiling_height_mm": 2400
+  }
 }
