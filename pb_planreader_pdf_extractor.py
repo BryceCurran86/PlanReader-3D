@@ -422,6 +422,12 @@ class GenericPlanReaderExtractor:
             "source_pages": [],
             "rooms": [],
         }
+        self.canonical_slabs_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "source_pages": [],
+            "slabs": [],
+        }
         # Live extraction visibility: distinguish absence from failure/conflict.
         self.extraction_status: Dict[str, str] = {}
 
@@ -1705,6 +1711,52 @@ class GenericPlanReaderExtractor:
                             ]
                             if len(resolved_slabs) == 1:
                                 slab = resolved_slabs[0]
+                                from pb_live_canonical_slab_projection import (
+                                    project_resolved_slab_entity,
+                                )
+
+                                slab_projection = project_resolved_slab_entity(
+                                    slab=slab,
+                                    boundary=slab_boundary,
+                                )
+                                canonical_slab_payload = None
+                                if slab_projection.object is not None:
+                                    canonical_slab_payload = (
+                                        slab_projection.object.to_dict()
+                                    )
+                                    existing_slabs = list(
+                                        self.canonical_slabs_live.get(
+                                            "slabs",
+                                            [],
+                                        )
+                                    )
+                                    if not any(
+                                        existing.get("canonical_slab_id")
+                                        == canonical_slab_payload[
+                                            "canonical_slab_id"
+                                        ]
+                                        for existing in existing_slabs
+                                    ):
+                                        existing_slabs.append(
+                                            canonical_slab_payload
+                                        )
+                                    source_pages = sorted(
+                                        {
+                                            int(existing.get("source_page"))
+                                            for existing in existing_slabs
+                                            if existing.get("source_page")
+                                            is not None
+                                        }
+                                    )
+                                    self.canonical_slabs_live = {
+                                        "status": "corroborated",
+                                        "reason_codes": list(
+                                            slab_projection.reason_codes
+                                        ),
+                                        "source_pages": source_pages,
+                                        "slabs": existing_slabs,
+                                    }
+
                                 pred_dict["reinforced_floor_slab"] = ExtractedPrediction(
                                     tag="reinforced_floor_slab",
                                     trade_type="structure",
@@ -1728,6 +1780,17 @@ class GenericPlanReaderExtractor:
                                         "boundary_id": slab_boundary.boundary_id,
                                         "resolution_state": slab.resolution_state,
                                         "provenance": slab.provenance,
+                                        "canonical_slab_id": (
+                                            canonical_slab_payload[
+                                                "canonical_slab_id"
+                                            ]
+                                            if canonical_slab_payload
+                                            is not None
+                                            else None
+                                        ),
+                                        "canonical_slab_object": (
+                                            canonical_slab_payload
+                                        ),
                                     },
                                 )
 

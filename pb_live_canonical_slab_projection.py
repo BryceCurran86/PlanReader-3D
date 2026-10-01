@@ -1,0 +1,158 @@
+"""Canonical slab projection from the existing source-bound slab resolver.
+
+This module does not detect slabs, bind annotations, derive boundaries, infer
+thickness, or compute area. It preserves an already-RESOLVED ResolvedSlabEntity
+as a reusable semantic object after re-checking that the exact authoritative
+CandidateBoundary used by the resolver still matches its provenance.
+"""
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+import math
+from typing import Mapping, Optional
+
+from pb_slab_classification_geometry import (
+    CandidateBoundary,
+    ResolvedSlabEntity,
+    SlabResolutionState,
+    validate_boundary_polygon,
+)
+
+
+LIVE_CANONICAL_SLAB_SCHEMA_VERSION = "1.0.0"
+LIVE_CANONICAL_SLAB_RESOLVED = "live_canonical_slab_resolved"
+LIVE_CANONICAL_SLAB_UNAVAILABLE = "live_canonical_slab_unavailable"
+LIVE_CANONICAL_SLAB_BOUNDARY_MISMATCH = "live_canonical_slab_boundary_mismatch"
+
+
+@dataclass(frozen=True)
+class LiveCanonicalSlabObject:
+    canonical_slab_id: str
+    slab_id: str
+    slab_type: str
+    source_page: int
+    boundary_id: str
+    polygon_m: tuple[tuple[float, float], ...]
+    area_m2: float
+    thickness_m: float
+    reinforcement: tuple[Mapping[str, object], ...]
+    provenance: Mapping[str, object]
+    geometry_complete: bool = True
+    thickness_complete: bool = True
+    coordinate_space: str = "metres"
+    schema_version: str = LIVE_CANONICAL_SLAB_SCHEMA_VERSION
+
+    def to_dict(self) -> dict:
+        return {
+            "canonical_slab_id": self.canonical_slab_id,
+            "slab_id": self.slab_id,
+            "slab_type": self.slab_type,
+            "source_page": self.source_page,
+            "boundary_id": self.boundary_id,
+            "polygon_m": [list(point) for point in self.polygon_m],
+            "area_m2": self.area_m2,
+            "thickness_m": self.thickness_m,
+            "reinforcement": [dict(item) for item in self.reinforcement],
+            "provenance": dict(self.provenance),
+            "geometry_complete": self.geometry_complete,
+            "thickness_complete": self.thickness_complete,
+            "coordinate_space": self.coordinate_space,
+            "schema_version": self.schema_version,
+        }
+
+
+@dataclass(frozen=True)
+class LiveCanonicalSlabProjection:
+    object: Optional[LiveCanonicalSlabObject]
+    reason_codes: tuple[str, ...]
+
+
+def project_resolved_slab_entity(
+    *,
+    slab: ResolvedSlabEntity,
+    boundary: CandidateBoundary,
+) -> LiveCanonicalSlabProjection:
+    """Preserve one already-resolved slab without strengthening its authority."""
+
+    if type(slab) is not ResolvedSlabEntity or type(boundary) is not CandidateBoundary:
+        raise TypeError("slab and boundary must use the existing slab resolver contracts")
+
+    if (
+        slab.resolution_state != SlabResolutionState.RESOLVED.value
+        or slab.area_m2 is None
+        or slab.thickness_mm is None
+        or slab.boundary_polygon is None
+    ):
+        return LiveCanonicalSlabProjection(
+            object=None,
+            reason_codes=(LIVE_CANONICAL_SLAB_UNAVAILABLE,),
+        )
+
+    provenance = dict(slab.provenance or {})
+    provenance_boundary_id = str(provenance.get("boundary_id") or "").strip()
+    if (
+        not provenance_boundary_id
+        or provenance_boundary_id != str(boundary.boundary_id)
+        or not boundary.units_authoritative
+        or not validate_boundary_polygon(boundary.polygon)
+        or not math.isfinite(float(boundary.area_m2))
+        or float(boundary.area_m2) <= 0.0
+        or not math.isclose(
+            float(boundary.area_m2),
+            float(slab.area_m2),
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        )
+        or tuple(tuple(float(v) for v in point) for point in boundary.polygon)
+        != tuple(tuple(float(v) for v in point) for point in slab.boundary_polygon)
+    ):
+        return LiveCanonicalSlabProjection(
+            object=None,
+            reason_codes=(LIVE_CANONICAL_SLAB_BOUNDARY_MISMATCH,),
+        )
+
+    thickness_mm = float(slab.thickness_mm)
+    if not math.isfinite(thickness_mm) or thickness_mm <= 0.0:
+        return LiveCanonicalSlabProjection(
+            object=None,
+            reason_codes=(LIVE_CANONICAL_SLAB_UNAVAILABLE,),
+        )
+
+    source_page_raw = provenance.get("annotation_source_page", boundary.source_page)
+    try:
+        source_page = int(source_page_raw)
+    except (TypeError, ValueError):
+        return LiveCanonicalSlabProjection(
+            object=None,
+            reason_codes=(LIVE_CANONICAL_SLAB_UNAVAILABLE,),
+        )
+
+    canonical = LiveCanonicalSlabObject(
+        canonical_slab_id=str(slab.slab_id),
+        slab_id=str(slab.slab_id),
+        slab_type=str(slab.slab_type),
+        source_page=source_page,
+        boundary_id=str(boundary.boundary_id),
+        polygon_m=tuple(
+            (float(point[0]), float(point[1])) for point in slab.boundary_polygon
+        ),
+        area_m2=float(slab.area_m2),
+        thickness_m=thickness_mm / 1000.0,
+        reinforcement=tuple(asdict(item) for item in slab.reinforcement),
+        provenance=provenance,
+    )
+    return LiveCanonicalSlabProjection(
+        object=canonical,
+        reason_codes=(LIVE_CANONICAL_SLAB_RESOLVED,),
+    )
+
+
+__all__ = [
+    "LIVE_CANONICAL_SLAB_BOUNDARY_MISMATCH",
+    "LIVE_CANONICAL_SLAB_RESOLVED",
+    "LIVE_CANONICAL_SLAB_SCHEMA_VERSION",
+    "LIVE_CANONICAL_SLAB_UNAVAILABLE",
+    "LiveCanonicalSlabObject",
+    "LiveCanonicalSlabProjection",
+    "project_resolved_slab_entity",
+]
