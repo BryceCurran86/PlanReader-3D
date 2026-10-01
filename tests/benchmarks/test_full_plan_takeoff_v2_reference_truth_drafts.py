@@ -998,3 +998,28 @@ def test_lot16_ensuite_and_wir_floor_surfaces_are_source_closed():
     assert check["component_sum_m2"] == pytest.approx(10.1728)
     assert check["source_closed"] is True
     assert "do not double-count" in check["overlap_note"]
+
+
+def test_lot16_roof_final_crosscheck_stays_blocked_without_stormwater_plan():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:roof_sheathing_geometry"
+    )
+    search = check["engineering_crosscheck_search"]
+    assert search["supplied_document"] == "4. Structural Engineering - Lot 16 Power.pdf"
+    assert search["supplied_document_sha256"] == (
+        "add9dd4b0bd11554a13562ad0830e80847db1dcb043489e452a6c8d95a3b6cda"
+    )
+    assert search["matches_found"] == {
+        "stormwater": 0,
+        "catchment": 0,
+        "downpipe": 0,
+    }
+    assert check["final_engineering_crosscheck_complete"] is False
+    assert "must remain unresolved" in check["blocker"]
+    assert (
+        "roof_planes_final_crosscheck_blocked_by_missing_engineering_stormwater_drainage_plan"
+        in draft["unresolved_surface_families"]
+    )
