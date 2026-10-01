@@ -24,6 +24,7 @@ import json
 import math
 import numbers
 import re
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -791,7 +792,7 @@ def _setting_set(app: Any, workspace_id: int, data: Dict[str, Any]) -> None:
     )
 
 
-def _runtime_coverage_registry_summaries(app: Any) -> List[Any]:
+def _runtime_coverage_registry_summaries(app: Any, workspace_id: Optional[int] = None) -> List[Any]:
     """Return only live typed coverage registries explicitly attached to runtime.
 
     AG-09 never rebuilds a registry from customer rows or infers missing object
@@ -801,6 +802,11 @@ def _runtime_coverage_registry_summaries(app: Any) -> List[Any]:
     from pb_takeoff_coverage_registry import CoverageRegistrySummaryV1
 
     candidates: List[Any] = []
+    workspace_coverage = getattr(app, "_ag09_family_coverage_by_workspace", {})
+    if isinstance(workspace_coverage, Mapping) and workspace_id is not None:
+        current = workspace_coverage.get(int(workspace_id), {})
+        if isinstance(current, Mapping):
+            candidates.extend(current.get("summaries", ()))
     for attr in (
         "takeoff_coverage_registry_summaries",
         "coverage_registry_summaries",
@@ -831,15 +837,12 @@ def _runtime_coverage_registry_summaries(app: Any) -> List[Any]:
         elif isinstance(value, (list, tuple)):
             candidates.extend(value)
 
-    unique: Dict[Tuple[str, str, str], Any] = {}
+    unique: Dict[str, Any] = {}
     for summary in candidates:
         if not isinstance(summary, CoverageRegistrySummaryV1):
             continue
-        key = (
-            summary.manifest.source_sha256,
-            summary.manifest.registry_run_id,
-            summary.manifest.snapshot_id,
-        )
+        # Never let the first of two conflicting snapshots hide the second.
+        key = json.dumps(summary.to_dict(), sort_keys=True, separators=(",", ":"))
         unique.setdefault(key, summary)
     return [unique[key] for key in sorted(unique)]
 
@@ -853,7 +856,21 @@ def _runtime_coverage_lifecycle_report(
         build_runtime_coverage_publication,
     )
 
-    summaries = _runtime_coverage_registry_summaries(app)
+    summaries = _runtime_coverage_registry_summaries(app, workspace_id)
+    gaps: Dict[str, set[str]] = {}
+    holders = [app] + [getattr(app, name, None) for name in (
+        "planreader_extractor", "generic_planreader_extractor", "extractor",
+    )]
+    gap_sources = [getattr(holder, "coverage_family_gaps_live", {}) for holder in holders if holder is not None]
+    workspace_coverage = getattr(app, "_ag09_family_coverage_by_workspace", {})
+    if isinstance(workspace_coverage, Mapping):
+        current = workspace_coverage.get(int(workspace_id), {})
+        if isinstance(current, Mapping):
+            gap_sources.append(current.get("family_gaps", {}))
+    for source in gap_sources:
+        if isinstance(source, Mapping):
+            for category, reasons in source.items():
+                gaps.setdefault(category, set()).update(reasons)
     published_rows = app.lquery(
         """SELECT id,source_reference,quantity,unit,quantity_status,row_role
            FROM takeoff_rows WHERE workspace_id=? ORDER BY id""",
@@ -862,6 +879,7 @@ def _runtime_coverage_lifecycle_report(
     return build_runtime_coverage_publication(
         summaries,
         published_takeoff_rows=[dict(row) for row in published_rows],
+        family_gaps={category: sorted(reasons) for category, reasons in gaps.items()},
     )
 
 
@@ -913,6 +931,47 @@ def _try_physical_net_wall_rows(
     Returns canonical 21-field takeoff rows if authenticated evidence exists,
     or None to signal that the caller must fall back to gross elevation rows.
     """
+    # This producer collection belongs to this workspace and this invocation.
+    # A rerun cannot carry an old source's admitted objects into new coverage.
+    workspace_coverage = getattr(app, "_ag09_family_coverage_by_workspace", None)
+    if not isinstance(workspace_coverage, dict):
+        workspace_coverage = {}
+        app._ag09_family_coverage_by_workspace = workspace_coverage
+    current_coverage: Dict[str, Any] = {"summaries": [], "family_gaps": {}}
+    workspace_coverage[int(workspace_id)] = current_coverage
+
+    def record_coverage(claim: Any, row: Optional[Tuple[Any, ...]] = None) -> None:
+        from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+
+        if type(claim) is not LivePhysicalNetWallClaim:
+            return
+        try:
+            from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
+            from pb_takeoff_output_authority import TakeoffOutputRow
+
+            quantity = claim.publication.quantity_evidence
+            output = ()
+            if row is not None:
+                named = dict(zip(TAKEOFF_ROW_FIELDS, row))
+                output = (TakeoffOutputRow(
+                    quantity_id=claim.quantity_id, description=named["element"],
+                    value=named["quantity"], unit=named["unit"],
+                    source_page=named["source_page"], is_publishable=False,
+                ),)
+            summaries, family_gaps = collect_live_canonical_coverage(
+                objects=(*claim.canonical_walls, *claim.canonical_openings,
+                         *claim.canonical_rooms, *claim.canonical_floors),
+                quantities=(quantity,) if quantity is not None else (),
+                output_rows=output,
+                registry_run_scope=f"customer_workspace:{int(workspace_id)}",
+            )
+            current_coverage["summaries"].extend(summaries)
+            for category, reasons in family_gaps.items():
+                current_coverage["family_gaps"].setdefault(category, []).extend(reasons)
+        except Exception as exc:
+            current_coverage["family_gaps"].setdefault("wall", []).append(
+                f"live_coverage_collection_failed:{type(exc).__name__}"
+            )
     # 1. Check live physical net-wall integration
     doc_paths: List[Tuple[int, Path]] = []
     if hasattr(app, "lquery"):
@@ -979,7 +1038,9 @@ def _try_physical_net_wall_rows(
                     notes=notes,
                     row_role="external_wall",
                 )
+                record_coverage(claim, row)
                 return [row]
+            record_coverage(claim)
         except Exception:
             pass
 

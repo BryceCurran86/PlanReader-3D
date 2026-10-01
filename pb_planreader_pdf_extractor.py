@@ -513,6 +513,8 @@ class GenericPlanReaderExtractor:
         }
         # Live extraction visibility: distinguish absence from failure/conflict.
         self.extraction_status: Dict[str, str] = {}
+        self.coverage_registry_summaries_live: tuple[Any, ...] = ()
+        self.coverage_family_gaps_live: Dict[str, list[str]] = {}
         # Diagnostic-only extractor observability. This trace must never feed
         # authority, prediction publication, or benchmark truth.
         self.performance_trace: Dict[str, Any] = {
@@ -1128,6 +1130,10 @@ class GenericPlanReaderExtractor:
         self._ocr_text_by_page = {}
         self._ocr_pages_attempted = set()
         self.extraction_status = {}
+        self.coverage_registry_summaries_live = ()
+        self.coverage_family_gaps_live = {}
+        _coverage_objects: list[Any] = []
+        _coverage_quantities: list[Any] = []
         self.hosted_opening_shadow = {
             "status": "abstained",
             "reason": "not_collected",
@@ -1488,6 +1494,7 @@ class GenericPlanReaderExtractor:
             structural_projection = project_structural_member_resolution(
                 structural_support
             )
+            _coverage_objects.extend(structural_projection.objects)
             canonical_structural_member_objects = [
                 member.to_dict()
                 for member in structural_projection.objects
@@ -1507,9 +1514,12 @@ class GenericPlanReaderExtractor:
             # producer-owned member universe and quantity trace. Failure here is
             # diagnostic only and must never change live prediction publication.
             try:
+                from pb_structural_member_quantity import build_structural_member_count_quantity
                 from pb_structural_member_coverage_shadow import (
                     collect_structural_member_coverage_shadow,
                 )
+
+                _coverage_quantities.append(build_structural_member_count_quantity(structural_support))
 
                 self.structural_member_coverage_shadow = (
                     collect_structural_member_coverage_shadow(
@@ -2011,6 +2021,7 @@ class GenericPlanReaderExtractor:
                                 )
                                 canonical_slab_payload = None
                                 if slab_projection.object is not None:
+                                    _coverage_objects.append(slab_projection.object)
                                     canonical_slab_payload = (
                                         slab_projection.object.to_dict()
                                     )
@@ -3370,6 +3381,13 @@ class GenericPlanReaderExtractor:
                     p_path,
                     pages=physical_net_pages,
                 )
+                _coverage_objects.extend(physical_wall_result.canonical_walls)
+                _coverage_objects.extend(physical_wall_result.canonical_openings)
+                _coverage_objects.extend(getattr(physical_wall_result, "canonical_rooms", ()))
+                _coverage_objects.extend(getattr(physical_wall_result, "canonical_floors", ()))
+                _wall_quantity = getattr(getattr(physical_wall_result, "publication", None), "quantity_evidence", None)
+                if _wall_quantity is not None:
+                    _coverage_quantities.append(_wall_quantity)
                 canonical_wall_objects = [
                     wall.to_dict()
                     for wall in physical_wall_result.canonical_walls
@@ -3785,6 +3803,7 @@ class GenericPlanReaderExtractor:
                 ],
             }
             self.extraction_status["ceiling_lining_live"] = ceiling_result.status.value
+            _coverage_objects.extend(ceiling_result.canonical_ceilings)
 
             for claim in ceiling_result.claims:
                 claim_ceiling_objects = [
@@ -3971,6 +3990,10 @@ class GenericPlanReaderExtractor:
                 )
 
                 _roof_projection = project_source_gable_roof(_roof_meas)
+                if _roof_projection.object is not None:
+                    _coverage_objects.append(_roof_projection.object)
+                    if _roof_meas.quantity_evidence is not None:
+                        _coverage_quantities.append(_roof_meas.quantity_evidence)
                 _canonical_roof_payload = (
                     _roof_projection.object.to_dict()
                     if _roof_projection.object is not None
@@ -4149,6 +4172,22 @@ class GenericPlanReaderExtractor:
                 "extraction_failed"
             )
 
+        # Read-only exact producer coverage. A diagnostic failure cannot change
+        # predictions or promote a canonical candidate into physical authority.
+        try:
+            from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
+
+            self.coverage_registry_summaries_live, self.coverage_family_gaps_live = (
+                collect_live_canonical_coverage(
+                    objects=_coverage_objects, quantities=_coverage_quantities,
+                    registry_run_scope="generic_pdf_extractor",
+                )
+            )
+        except Exception as _coverage_exc:
+            self.coverage_registry_summaries_live = ()
+            self.coverage_family_gaps_live = {
+                "wall": [f"live_coverage_collection_failed:{type(_coverage_exc).__name__}"]
+            }
         self._mark_performance("extract_complete")
         doc.close()
         return list(pred_dict.values())
