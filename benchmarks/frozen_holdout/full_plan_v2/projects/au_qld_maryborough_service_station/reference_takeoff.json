@@ -5,7 +5,7 @@
   "truth_policy": {
     "planreader_output_used_as_truth": false,
     "minimum_independent_routes": 2,
-    "note": "Only independently cross-checked opening identities/counts and physical floor surfaces are admitted; remaining room, wall, ceiling, external and window-area surfaces stay unresolved."
+    "note": "Only independently cross-checked opening identities/counts and physical floor/ceiling surfaces are admitted; remaining room, wall, external, tile-wall and window-area surfaces stay unresolved."
   },
   "source_plan": {
     "name": "Arch_Combined_Maryborough_Service_Station.pdf",
@@ -262,6 +262,72 @@
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-wc-shower-north-wfpb-ceiling-area",
+      "description": "North WC & SHOWER WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 4.7547,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:wc_shower_north"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:WC_SHOWER_north:2400_WFPB",
+        "A140:figured_dimensions:WC_SHOWER_2935x1620",
+        "A110:physical_room_geometry:WC_SHOWER_north:entry_D07"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-wc-shower-middle-wfpb-ceiling-area",
+      "description": "Middle WC & SHOWER WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 4.7547,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:wc_shower_middle"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:WC_SHOWER_middle:2400_WFPB",
+        "A140:figured_dimensions:WC_SHOWER_2935x1620",
+        "A110:physical_room_geometry:WC_SHOWER_middle:entry_D08"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-wc-shower-south-wfpb-ceiling-area",
+      "description": "South WC & SHOWER WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 4.7547,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:wc_shower_south"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:WC_SHOWER_south:2400_WFPB",
+        "A140:figured_dimensions:WC_SHOWER_2935x1620",
+        "A110:physical_room_geometry:WC_SHOWER_south:entry_D09"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "door_universe_reconciliation": {
@@ -371,6 +437,44 @@
         1634
       ],
       "agreement": "PASS_WITHIN_DRAWING_TOLERANCE"
+    }
+  ],
+  "wc_shower_ceiling_geometry_checks": [
+    {
+      "surface_ref": "maryborough:surface:ceiling:wc_shower_north",
+      "entry_door_tag": "D07",
+      "a120_ceiling_finish": "WFPB",
+      "a120_ceiling_height_mm": 2400,
+      "footprint_figured_mm": [
+        2935,
+        1620
+      ],
+      "expected_area_m2": 4.7547,
+      "agreement": "PASS"
+    },
+    {
+      "surface_ref": "maryborough:surface:ceiling:wc_shower_middle",
+      "entry_door_tag": "D08",
+      "a120_ceiling_finish": "WFPB",
+      "a120_ceiling_height_mm": 2400,
+      "footprint_figured_mm": [
+        2935,
+        1620
+      ],
+      "expected_area_m2": 4.7547,
+      "agreement": "PASS"
+    },
+    {
+      "surface_ref": "maryborough:surface:ceiling:wc_shower_south",
+      "entry_door_tag": "D09",
+      "a120_ceiling_finish": "WFPB",
+      "a120_ceiling_height_mm": 2400,
+      "footprint_figured_mm": [
+        2935,
+        1620
+      ],
+      "expected_area_m2": 4.7547,
+      "agreement": "PASS"
     }
   ]
 }
