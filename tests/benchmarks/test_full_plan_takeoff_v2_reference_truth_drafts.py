@@ -684,3 +684,34 @@ def test_lot16_explicit_internal_elevation_wall_faces_close_to_top_plate():
     assert check["object_count"] == 8
     assert check["component_sum_m2"] == pytest.approx(35.3794)
     assert check["net_denominator_ready"] is False
+
+def test_lot16_bed1_gross_wall_faces_are_dimension_closed_but_raked_extension_stays_open():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:bed1_gross_wall_faces"
+    )
+    refs = set(check["component_object_refs"])
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
+    assert len(faces) == check["object_count"] == 4
+    floor = check["bed1_floor_dimension_closure"]
+    assert floor["figured_dimensions_m"] == pytest.approx([3.51, 3.60])
+    assert floor["calculated_floor_area_m2"] == pytest.approx(12.636)
+    assert floor["source_declared_floor_area_m2"] == pytest.approx(12.64)
+    assert floor["rounding_difference_m2"] == pytest.approx(0.004)
+    assert check["wall_height_to_top_plate_m"] == pytest.approx(2.59)
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(36.8298)
+    assert check["gross_wall_area_m2"] == pytest.approx(36.8298)
+    assert check["complete_for_bed1_top_plate_rectangular_wall_faces"] is True
+    assert check["openings_and_raked_ceiling_intersection_resolved"] is False
+    assert all(row["attributes"]["raked_ceiling_extension_included"] is False for row in faces)
+    assert (
+        "internal_wall_faces_beyond_closed_bed1_bed2_bed3_top_plate_gross_faces"
+        in draft["unresolved_surface_families"]
+    )
+
