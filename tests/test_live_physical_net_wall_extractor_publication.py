@@ -130,6 +130,10 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
             quantity_m2=42.5,
             source_pages=(1,),
             canonical_walls=(canonical_wall,),
+            canonical_wall_status=EvidenceResolutionStatus.CORROBORATED,
+            canonical_wall_reason_codes=("test_canonical_wall_resolved",),
+            canonical_wall_source_pages=(1,),
+            unresolved_wall_candidate_ids=(),
             canonical_openings=(canonical_opening,),
             canonical_rooms=(canonical_room,),
             canonical_room_status=EvidenceResolutionStatus.CORROBORATED,
@@ -169,6 +173,10 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
     assert extractor.physical_net_wall_live["canonical_walls"] == [
         canonical_wall_payload
     ]
+    assert extractor.canonical_walls_live["status"] == "corroborated"
+    assert extractor.canonical_walls_live["source_pages"] == [1]
+    assert extractor.canonical_walls_live["unresolved_wall_candidate_ids"] == []
+    assert extractor.canonical_walls_live["walls"] == [canonical_wall_payload]
     assert extractor.canonical_openings_live["status"] == "corroborated"
     assert extractor.canonical_openings_live["openings"] == [
         canonical_opening_payload
@@ -210,6 +218,16 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
         "metric_geometry_complete": False,
     }
     canonical_room = SimpleNamespace(to_dict=lambda: canonical_room_payload)
+    canonical_wall_payload = {
+        "canonical_wall_id": "wall2-candidate-1",
+        "physical_wall_id": None,
+        "identity_status": "candidate_physical_equivalence_unresolved",
+        "physical_identity_resolved": False,
+        "geometry_complete": True,
+        "metric_geometry_complete": False,
+        "quantity_complete": False,
+    }
+    canonical_wall = SimpleNamespace(to_dict=lambda: canonical_wall_payload)
 
     monkeypatch.setattr(
         GenericPlanReaderExtractor,
@@ -223,7 +241,11 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
             reason_codes=("test_physical_net_wall_unavailable",),
             quantity_m2=None,
             source_pages=(),
-            canonical_walls=(),
+            canonical_walls=(canonical_wall,),
+            canonical_wall_status=EvidenceResolutionStatus.CANDIDATE,
+            canonical_wall_reason_codes=("test_canonical_wall_candidate",),
+            canonical_wall_source_pages=(1,),
+            unresolved_wall_candidate_ids=("wall-candidate-1",),
             canonical_openings=(canonical_opening,),
             canonical_rooms=(canonical_room,),
             canonical_room_status=EvidenceResolutionStatus.CORROBORATED,
@@ -244,6 +266,11 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
     )
 
     assert extractor.physical_net_wall_live["status"] == "abstained"
+    assert extractor.canonical_walls_live["status"] == "candidate"
+    assert extractor.canonical_walls_live["walls"] == [canonical_wall_payload]
+    assert extractor.canonical_walls_live["unresolved_wall_candidate_ids"] == [
+        "wall-candidate-1"
+    ]
     assert extractor.canonical_openings_live["status"] == "corroborated"
     assert extractor.canonical_openings_live["openings"] == [
         canonical_opening_payload

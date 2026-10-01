@@ -404,6 +404,13 @@ class GenericPlanReaderExtractor:
             "evidence_ids": [],
             "quantity_id": None,
         }
+        self.canonical_walls_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "source_pages": [],
+            "unresolved_wall_candidate_ids": [],
+            "walls": [],
+        }
         self.canonical_openings_live: Dict[str, Any] = {
             "status": "abstained",
             "reason_codes": ["not_collected"],
@@ -412,6 +419,7 @@ class GenericPlanReaderExtractor:
         self.canonical_rooms_live: Dict[str, Any] = {
             "status": "abstained",
             "reason_codes": ["not_collected"],
+            "source_pages": [],
             "rooms": [],
         }
         # Live extraction visibility: distinguish absence from failure/conflict.
@@ -2932,6 +2940,43 @@ class GenericPlanReaderExtractor:
                     wall.to_dict()
                     for wall in physical_wall_result.canonical_walls
                 ]
+                wall_status = getattr(
+                    physical_wall_result,
+                    "canonical_wall_status",
+                    None,
+                )
+                wall_status_value = getattr(wall_status, "value", None)
+                if wall_status_value is None:
+                    wall_status_value = (
+                        "corroborated"
+                        if canonical_wall_objects
+                        else "abstained"
+                    )
+                self.canonical_walls_live = {
+                    "status": wall_status_value,
+                    "reason_codes": list(
+                        getattr(
+                            physical_wall_result,
+                            "canonical_wall_reason_codes",
+                            (),
+                        )
+                    ),
+                    "source_pages": list(
+                        getattr(
+                            physical_wall_result,
+                            "canonical_wall_source_pages",
+                            (),
+                        )
+                    ),
+                    "unresolved_wall_candidate_ids": list(
+                        getattr(
+                            physical_wall_result,
+                            "unresolved_wall_candidate_ids",
+                            (),
+                        )
+                    ),
+                    "walls": canonical_wall_objects,
+                }
                 canonical_opening_objects = [
                     opening.to_dict()
                     for opening in physical_wall_result.canonical_openings
@@ -3079,6 +3124,13 @@ class GenericPlanReaderExtractor:
                     "evidence_ids": [],
                     "quantity_id": None,
                 }
+                self.canonical_walls_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "source_pages": [],
+                    "unresolved_wall_candidate_ids": [],
+                    "walls": [],
+                }
                 self.canonical_openings_live = {
                     "status": "abstained",
                     "reason_codes": ["no_drawing_pages_selected"],
@@ -3101,6 +3153,15 @@ class GenericPlanReaderExtractor:
                 "external_wall_ids": [],
                 "evidence_ids": [],
                 "quantity_id": None,
+            }
+            self.canonical_walls_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_wall_exception:{type(exc).__name__}"
+                ],
+                "source_pages": [],
+                "unresolved_wall_candidate_ids": [],
+                "walls": [],
             }
             self.canonical_openings_live = {
                 "status": "abstained",
