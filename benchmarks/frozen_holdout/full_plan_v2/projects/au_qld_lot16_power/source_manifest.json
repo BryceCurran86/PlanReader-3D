@@ -23,8 +23,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "14e313390748c15498296700d68509b8dc9898ad7693befcd3dae5d309a62b2f",
-      "size_bytes": 16938,
+      "sha256": "933720c2ebaebdbada4ebfc4cdc96c116f55c53185bc23c97f9398f8371d2ecc",
+      "size_bytes": 19823,
       "page_count": null
     }
   ],
@@ -469,6 +469,66 @@
       ],
       "source_location_refs": [
         "architectural:p3:floor_plan:870_garage_to_entry:bbox_567_354.6_574.4_365.4; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-ceiling-garage-flat-area",
+      "description": "Garage flat ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 38.94,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:surface:ceiling:garage_flat"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:GARAGE_[FLAT_CEILING]:6000x6490_figured_dimensions"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-ceiling-ensuite-raked-12deg-area",
+      "description": "Ensuite raked ceiling plane following 12 degree roof pitch area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 5.613672,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:surface:ceiling:ensuite_raked_12deg"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:ENS_[RAKED_CEILING]:2890x1900_figured_dimensions; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-ceiling-wir-raked-12deg-area",
+      "description": "WIR raked ceiling plane following 12 degree roof pitch area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 4.786394,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:surface:ceiling:wir_raked_12deg"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:WIR_[RAKED_CEILING]:2890x1620_figured_dimensions; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof"
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"

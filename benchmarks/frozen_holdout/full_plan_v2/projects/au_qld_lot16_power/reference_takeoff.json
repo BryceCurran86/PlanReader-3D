@@ -451,6 +451,66 @@
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-ceiling-garage-flat-area",
+      "description": "Garage flat ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 38.94,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:surface:ceiling:garage_flat"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:GARAGE_[FLAT_CEILING]:6000x6490_figured_dimensions"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-ceiling-ensuite-raked-12deg-area",
+      "description": "Ensuite raked ceiling plane following 12 degree roof pitch area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 5.613672,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:surface:ceiling:ensuite_raked_12deg"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:ENS_[RAKED_CEILING]:2890x1900_figured_dimensions; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-ceiling-wir-raked-12deg-area",
+      "description": "WIR raked ceiling plane following 12 degree roof pitch area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 4.786394,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:surface:ceiling:wir_raked_12deg"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:WIR_[RAKED_CEILING]:2890x1620_figured_dimensions; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "external_opening_reconciliation": {
@@ -492,5 +552,21 @@
       "laundry_external_service_door",
       "garage_external_service_door"
     ]
+  },
+  "source_closed_ceiling_plane_reconciliation": {
+    "closure_check_ids": [
+      "lot16:closure:garage_flat_ceiling_plane",
+      "lot16:closure:ensuite_wir_raked_ceiling_planes"
+    ],
+    "component_object_refs": [
+      "lot16:surface:ceiling:garage_flat",
+      "lot16:surface:ceiling:ensuite_raked_12deg",
+      "lot16:surface:ceiling:wir_raked_12deg"
+    ],
+    "object_count": 3,
+    "component_sum_m2": 49.340066,
+    "source_closed_for_promoted_planes": true,
+    "complete_for_project_ceiling_universe": false,
+    "excluded_bed1_raked_ceiling_reason": "Draft marks Bed 1 raked ceiling as not denominator-ready until remaining ceiling regions/intersections are resolved."
   }
 }
