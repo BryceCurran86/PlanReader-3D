@@ -28,7 +28,7 @@
     }
   ],
   "unresolved_surface_families": [
-    "internal_wall_faces_beyond_closed_bed2_bed3_top_plate_gross_faces",
+    "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces",
     "external_wall_faces_and_cladding",
     "ceilings_including_raked_ceiling",
     "custom_front_glazing_measure_on_site_only",
@@ -935,6 +935,142 @@
         "raked_ceiling_extension_included": false,
         "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
       }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bath:elev1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bath gross internal wall face, elevation 1",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_Elevation_1:1200_finished_wall_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.2,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bath:shower",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bath gross internal shower wall face",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_SHR_Elev:1200_finished_wall_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.2,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bath:elev4",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bath gross internal wall face, elevation 4",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_Elevation_4:1200_finished_wall_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.2,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:ensuite:elev1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Ensuite gross internal wall face, elevation 1",
+      "expected_quantity": 4.7138,
+      "unit": "m2",
+      "source_location": "architectural:p11:Ensuite_Elevation_1:1820_finished_wall_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.82,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:ensuite:elev2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Ensuite gross internal wall face, elevation 2",
+      "expected_quantity": 4.3771,
+      "unit": "m2",
+      "source_location": "architectural:p11:Ensuite_Elevation_2:1690_finished_wall_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.69,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:wc:elev1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "WC gross internal wall face, elevation 1",
+      "expected_quantity": 2.6677,
+      "unit": "m2",
+      "source_location": "architectural:p11:WC_Elevation_1:1030_finished_wall_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.03,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:laundry:elev1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Laundry gross internal wall face, elevation 1",
+      "expected_quantity": 8.5729,
+      "unit": "m2",
+      "source_location": "architectural:p10:Laundry_Elevation_1:3310_finished_wall_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 3.31,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:laundry:elev2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Laundry gross internal wall face, elevation 2",
+      "expected_quantity": 5.7239,
+      "unit": "m2",
+      "source_location": "architectural:p10:Laundry_Elevation_2:1090+70+1050_finished_dimension_chain=2210; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 2.21,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
     }
   ],
   "closure_checks": [
@@ -1149,6 +1285,28 @@
         "architectural:p3:floor_plan:BED_3_3250x3600_and_11.70m2",
         "architectural:p4-p5:elevations:FSL_68560_TP_71150"
       ]
+    },
+    {
+      "check_id": "lot16:control:explicit_internal_elevation_wall_faces",
+      "component_object_refs": [
+        "lot16:surface:internal_wall_gross:bath:elev1",
+        "lot16:surface:internal_wall_gross:bath:shower",
+        "lot16:surface:internal_wall_gross:bath:elev4",
+        "lot16:surface:internal_wall_gross:ensuite:elev1",
+        "lot16:surface:internal_wall_gross:ensuite:elev2",
+        "lot16:surface:internal_wall_gross:wc:elev1",
+        "lot16:surface:internal_wall_gross:laundry:elev1",
+        "lot16:surface:internal_wall_gross:laundry:elev2"
+      ],
+      "object_count": 8,
+      "component_sum_m2": 35.3794,
+      "source_locations": [
+        "architectural:p10:Internal_Elevations:Laundry_1-2",
+        "architectural:p11:Internal_Elevations_2:Bath_1_SHR_4;Ensuite_1-2;WC_1",
+        "architectural:p4-p5:elevations:FSL_68560_to_TP_71150"
+      ],
+      "net_denominator_ready": false,
+      "reason": "source-dimensioned gross wall faces close to the 2.590m top-plate datum; openings, finish partitioning and any raked-ceiling extensions remain unresolved"
     }
   ]
 }
