@@ -16,8 +16,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "bc40d0917aea52e2076fd1555203a101137bfbbe8f459700343e724c2b2432d0",
-      "size_bytes": 25516,
+      "sha256": "794bc8852c9bd88feac1b0025448f2a4428334991ebaf7c4d4f63a950bc995d4",
+      "size_bytes": 28166,
       "page_count": null
     }
   ],
@@ -712,6 +712,66 @@
       "source_location_refs": [
         "architectural:p15:A0.15:GF_Ensuite_Laundry:1870x3470_finished_dimensions",
         "architectural:p3:A0.3:GF_wet_area:TILES"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-vinyl-floor-media-area",
+      "description": "Media room vinyl floor surface area",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 13.146,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:media"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:MEDIA:4200x3130_figured_dimensions:VINYL"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-vinyl-floor-bed2-area",
+      "description": "Bed 2 vinyl floor surface area",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 12.6,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:bed2"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:BED_2:3000x4200_figured_dimensions:VINYL"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-vinyl-floor-bed3-area",
+      "description": "Bed 3 vinyl floor surface area",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 12.6,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:bed3"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:BED_3:3000x4200_figured_dimensions:VINYL"
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
