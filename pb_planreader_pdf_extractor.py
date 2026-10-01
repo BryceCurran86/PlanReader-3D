@@ -390,6 +390,11 @@ class GenericPlanReaderExtractor:
             "slope_length_m": None,
             "roof_covering_area_m2": None,
         }
+        self.canonical_roofs_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "roofs": [],
+        }
         self.structural_member_coverage_shadow: Dict[str, Any] = {
             "status": "abstained",
             "reason_codes": ["not_collected"],
@@ -973,6 +978,22 @@ class GenericPlanReaderExtractor:
             "reason_codes": ["not_collected"],
             "claims": [],
         }
+        self.canonical_ceilings_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "ceilings": [],
+        }
+        self.canonical_slabs_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "source_pages": [],
+            "slabs": [],
+        }
+        self.canonical_roofs_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "roofs": [],
+        }
         self.roof_covering_shadow = {
             "status": "abstained",
             "reason": "not_collected",
@@ -1006,6 +1027,19 @@ class GenericPlanReaderExtractor:
             "status": "abstained",
             "reason_codes": ["not_collected"],
             "openings": [],
+        }
+        self.canonical_walls_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "source_pages": [],
+            "unresolved_wall_candidate_ids": [],
+            "walls": [],
+        }
+        self.canonical_rooms_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "source_pages": [],
+            "rooms": [],
         }
 
         # ------------------------------------------------------------------
@@ -3481,6 +3515,30 @@ class GenericPlanReaderExtractor:
                             if len(_axis_trials) == 1:
                                 _roof_meas = _axis_trials[0]
 
+                from pb_live_canonical_roof_projection import (
+                    project_source_gable_roof,
+                )
+
+                _roof_projection = project_source_gable_roof(_roof_meas)
+                _canonical_roof_payload = (
+                    _roof_projection.object.to_dict()
+                    if _roof_projection.object is not None
+                    else None
+                )
+                self.canonical_roofs_live = {
+                    "status": (
+                        "corroborated"
+                        if _canonical_roof_payload is not None
+                        else "abstained"
+                    ),
+                    "reason_codes": list(_roof_projection.reason_codes),
+                    "roofs": (
+                        [_canonical_roof_payload]
+                        if _canonical_roof_payload is not None
+                        else []
+                    ),
+                }
+
                 self.roof_covering_shadow = {
                     "status": _roof_meas.status.value,
                     "reason_codes": list(_roof_meas.reason_codes),
@@ -3494,6 +3552,12 @@ class GenericPlanReaderExtractor:
                         if _roof_meas.quantity_evidence
                         else None
                     ),
+                    "canonical_roof_id": (
+                        _canonical_roof_payload["canonical_roof_id"]
+                        if _canonical_roof_payload is not None
+                        else None
+                    ),
+                    "canonical_roof_object": _canonical_roof_payload,
                 }
                 self.extraction_status["roof_covering_shadow"] = _roof_meas.status.value
 
@@ -3555,6 +3619,11 @@ class GenericPlanReaderExtractor:
                         }
                     )
             else:
+                self.canonical_roofs_live = {
+                    "status": "abstained",
+                    "reason_codes": ["footprint_envelope_unavailable"],
+                    "roofs": [],
+                }
                 self.roof_covering_shadow = {
                     "status": "abstained",
                     "reason": "footprint_envelope_unavailable",
@@ -3566,6 +3635,13 @@ class GenericPlanReaderExtractor:
                 }
                 self.extraction_status["roof_covering_shadow"] = "abstained"
         except Exception as _exc:  # noqa: BLE001
+            self.canonical_roofs_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_roof_exception:{type(_exc).__name__}"
+                ],
+                "roofs": [],
+            }
             self.roof_covering_shadow = {
                 "status": "abstained",
                 "reason": f"roof_covering_shadow_exception:{type(_exc).__name__}",
