@@ -532,5 +532,74 @@
     }
   ],
   "internal_room_access_labelled_subset_complete": true,
-  "project_internal_opening_universe_complete": false
+  "project_internal_opening_universe_complete": false,
+  "source_closed_ceiling_planes": [
+    {
+      "object_ref": "lot16:surface:ceiling:garage_flat",
+      "physical_kind": "ceiling_surface",
+      "object_family": "ceiling_plane",
+      "description": "Garage flat ceiling plane",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 38.94,
+      "attributes": {
+        "ceiling_type": "flat",
+        "plan_width_m": 6,
+        "plan_length_m": 6.49,
+        "calculation": "plan_width_m * plan_length_m",
+        "raked_adjustment_required": false,
+        "source_closed_plane": true,
+        "denominator_readiness": "source_closed_plane_candidate"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:GARAGE_[FLAT_CEILING]:6000x6490_figured_dimensions"
+      ]
+    },
+    {
+      "object_ref": "lot16:surface:ceiling:ensuite_raked_12deg",
+      "physical_kind": "ceiling_surface",
+      "object_family": "ceiling_plane",
+      "description": "Ensuite raked ceiling plane following 12 degree roof pitch",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 5.613672,
+      "attributes": {
+        "plan_width_m": 2.89,
+        "plan_length_m": 1.9,
+        "plan_projection_area_m2": 5.491,
+        "pitch_degrees": 12,
+        "calculation": "2.890m * 1.900m / cos(12deg)",
+        "ceiling_geometry": "raked",
+        "source_closed_plane": true,
+        "denominator_readiness": "source_closed_plane_candidate"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:ENS_[RAKED_CEILING]:2890x1900_figured_dimensions; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof"
+      ]
+    },
+    {
+      "object_ref": "lot16:surface:ceiling:wir_raked_12deg",
+      "physical_kind": "ceiling_surface",
+      "object_family": "ceiling_plane",
+      "description": "WIR raked ceiling plane following 12 degree roof pitch",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.786394,
+      "attributes": {
+        "plan_width_m": 2.89,
+        "plan_length_m": 1.62,
+        "plan_projection_area_m2": 4.6818,
+        "pitch_degrees": 12,
+        "calculation": "2.890m * 1.620m / cos(12deg)",
+        "ceiling_geometry": "raked",
+        "source_closed_plane": true,
+        "denominator_readiness": "source_closed_plane_candidate"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:WIR_[RAKED_CEILING]:2890x1620_figured_dimensions; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof"
+      ]
+    }
+  ],
+  "promoted_ceiling_plane_subset_source_closed": true,
+  "project_ceiling_universe_complete": false
 }
