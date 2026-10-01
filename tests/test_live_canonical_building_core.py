@@ -40,6 +40,15 @@ def _room():
     }
 
 
+def _floor():
+    return {
+        "canonical_floor_id": "floor-1",
+        "room_entity_id": "room-1",
+        "polygon_pdf_pts": [[0, 0], [10, 0], [10, 8], [0, 8]],
+        "commercial_quantity_authority": False,
+    }
+
+
 def _ceiling():
     return {
         "canonical_ceiling_id": "ceiling-1",
@@ -54,6 +63,7 @@ def test_no_level_evidence_never_invents_a_storey() -> None:
         walls=(_wall(),),
         openings=(_opening(),),
         rooms=(_room(),),
+        floors=(_floor(),),
         ceilings=(_ceiling(),),
     )
 
@@ -69,6 +79,7 @@ def test_no_level_evidence_never_invents_a_storey() -> None:
     assert len(result.unassigned["walls"]) == 1
     assert len(result.unassigned["openings"]) == 1
     assert len(result.unassigned["rooms"]) == 1
+    assert len(result.unassigned["floors"]) == 1
     assert len(result.unassigned["ceilings"]) == 1
 
 
@@ -85,6 +96,7 @@ def test_proven_wall_level_propagates_through_physical_relationships_only() -> N
         walls=(_wall(level_ids=("L1",)),),
         openings=(_opening(kind="door"),),
         rooms=(_room(),),
+        floors=(_floor(),),
         ceilings=(_ceiling(),),
         slabs=(slab,),
         roofs=(roof,),
@@ -104,6 +116,9 @@ def test_proven_wall_level_propagates_through_physical_relationships_only() -> N
         "opening-1"
     ]
     assert [item["canonical_room_id"] for item in level.rooms] == ["room-1"]
+    assert [item["canonical_floor_id"] for item in level.floors] == [
+        "floor-1"
+    ]
     assert [item["canonical_ceiling_id"] for item in level.ceilings] == [
         "ceiling-1"
     ]

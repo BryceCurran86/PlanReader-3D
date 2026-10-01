@@ -33,6 +33,7 @@ _FAMILY_ID_FIELD = MappingProxyType({
     "walls": "canonical_wall_id",
     "openings": "canonical_opening_id",
     "rooms": "canonical_room_id",
+    "floors": "canonical_floor_id",
     "slabs": "canonical_slab_id",
     "ceilings": "canonical_ceiling_id",
     "roofs": "canonical_roof_id",
@@ -73,6 +74,7 @@ class LiveCanonicalLevelBucket:
     walls: tuple[Mapping[str, object], ...] = ()
     openings: tuple[Mapping[str, object], ...] = ()
     rooms: tuple[Mapping[str, object], ...] = ()
+    floors: tuple[Mapping[str, object], ...] = ()
     slabs: tuple[Mapping[str, object], ...] = ()
     ceilings: tuple[Mapping[str, object], ...] = ()
     roofs: tuple[Mapping[str, object], ...] = ()
@@ -101,6 +103,7 @@ class LiveCanonicalLevelBucket:
                 if item.get("opening_kind") == "window"
             ],
             "rooms": [dict(item) for item in self.rooms],
+            "floors": [dict(item) for item in self.floors],
             "slabs": [dict(item) for item in self.slabs],
             "ceilings": [dict(item) for item in self.ceilings],
             "roofs": [dict(item) for item in self.roofs],
@@ -161,6 +164,7 @@ def assemble_live_canonical_building_core(
     walls: Sequence[Mapping[str, object]] = (),
     openings: Sequence[Mapping[str, object]] = (),
     rooms: Sequence[Mapping[str, object]] = (),
+    floors: Sequence[Mapping[str, object]] = (),
     slabs: Sequence[Mapping[str, object]] = (),
     ceilings: Sequence[Mapping[str, object]] = (),
     roofs: Sequence[Mapping[str, object]] = (),
@@ -177,6 +181,7 @@ def assemble_live_canonical_building_core(
         "walls": _dict_items(walls),
         "openings": _dict_items(openings),
         "rooms": _dict_items(rooms),
+        "floors": _dict_items(floors),
         "slabs": _dict_items(slabs),
         "ceilings": _dict_items(ceilings),
         "roofs": _dict_items(roofs),
@@ -246,6 +251,13 @@ def assemble_live_canonical_building_core(
         if len(unique) == 1:
             level_by_room_id[_object_id("rooms", room)] = unique[0]
 
+    level_by_floor_id: dict[str, str] = {}
+    for floor in families["floors"]:
+        room_id = _clean(floor.get("room_entity_id"))
+        level_id = level_by_room_id.get(room_id)
+        if level_id:
+            level_by_floor_id[_object_id("floors", floor)] = level_id
+
     level_by_ceiling_id: dict[str, str] = {}
     for ceiling in families["ceilings"]:
         room_id = _clean(ceiling.get("room_entity_id"))
@@ -257,6 +269,7 @@ def assemble_live_canonical_building_core(
         "walls": level_by_wall_id,
         "openings": level_by_opening_id,
         "rooms": level_by_room_id,
+        "floors": level_by_floor_id,
         "ceilings": level_by_ceiling_id,
         "slabs": {},
         "roofs": {},
@@ -353,6 +366,7 @@ def assemble_live_canonical_building_core(
             walls=tuple(payload["walls"]),
             openings=tuple(payload["openings"]),
             rooms=tuple(payload["rooms"]),
+            floors=tuple(payload["floors"]),
             slabs=tuple(payload["slabs"]),
             ceilings=tuple(payload["ceilings"]),
             roofs=tuple(payload["roofs"]),
