@@ -1230,3 +1230,30 @@ def test_lot16_retaining_wall_profile_is_measured_but_final_extent_stays_open():
     assert "site_retaining_wall_final_extent_and_profile" in draft[
         "unresolved_surface_families"
     ]
+
+
+def test_3laurel_laundry_D_tile_skirting_is_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    row = next(
+        item
+        for item in draft["verified_physical_candidates"]
+        if item["object_ref"] == "3laurel:surface:wall_tile:laundry_D_skirting"
+    )
+    assert row["object_family"] == "wet_area_wall_tile_finish"
+    assert row["expected_quantity"] == pytest.approx(0.5852)
+    assert row["attributes"]["finished_face_width_m"] == pytest.approx(3.08)
+    assert row["attributes"]["tile_height_m"] == pytest.approx(0.19)
+    assert row["attributes"]["net_finish_area_ready"] is True
+
+    check = next(
+        item
+        for item in draft["closure_checks"]
+        if item["check_id"] == "3laurel:closure:laundry_D_tile_skirting"
+    )
+    assert check["tile_area_m2"] == pytest.approx(0.5852)
+    assert check["complete_for_this_explicit_strip"] is True
+    assert check["complete_for_project_non_shower_tile_universe"] is False
+    assert (
+        "wet_area_non_shower_tile_skirtings_beyond_closed_laundry_D_plus_bath_surrounds_and_splashbacks"
+        in draft["unresolved_surface_families"]
+    )
