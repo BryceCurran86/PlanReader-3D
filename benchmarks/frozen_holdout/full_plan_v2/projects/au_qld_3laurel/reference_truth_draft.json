@@ -28,7 +28,7 @@
     }
   ],
   "unresolved_surface_families": [
-    "internal_wall_faces_beyond_closed_bathroom_and_gf_ensuite_laundry_gross_faces",
+    "internal_wall_faces_beyond_closed_bathroom_main_laundry_and_gf_ensuite_laundry_gross_faces",
     "external_wall_faces_and_cladding",
     "roof_planes",
     "structural_members_beyond_closed_wall_bracing_and_explicit_140x140_posts_470x470_piers",
@@ -1468,6 +1468,70 @@
         "openings_deducted": false,
         "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
       }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:laundry:long_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main laundry gross internal wall face, 3.080m side 1",
+      "expected_quantity": 8.316,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_Layout:3080_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 3.08,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:laundry:long_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main laundry gross internal wall face, 3.080m side 2",
+      "expected_quantity": 8.316,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_Layout:3080_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 3.08,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:laundry:short_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main laundry gross internal wall face, 1.680m side 1",
+      "expected_quantity": 4.536,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_Layout:1680_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.68,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:laundry:short_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main laundry gross internal wall face, 1.680m side 2",
+      "expected_quantity": 4.536,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_Layout:1680_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.68,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
     }
   ],
   "closure_checks": [
@@ -1721,6 +1785,28 @@
       "scaling_substitute_allowed": false,
       "reason": "the frozen construction set supplies elevation/section pitch but no dimensioned roof-plan geometry; source notes expressly prohibit obtaining dimensions by scaling",
       "benchmark_rule": "keep roof_planes unresolved until an independent dimensioned roof/framing source is supplied"
+    },
+    {
+      "check_id": "3laurel:control:main_laundry_internal_wall_gross_faces",
+      "component_object_refs": [
+        "3laurel:surface:internal_wall_gross:laundry:long_1",
+        "3laurel:surface:internal_wall_gross:laundry:long_2",
+        "3laurel:surface:internal_wall_gross:laundry:short_1",
+        "3laurel:surface:internal_wall_gross:laundry:short_2"
+      ],
+      "object_count": 4,
+      "gross_area_m2": 25.704,
+      "room_finished_dimensions_m": [
+        3.08,
+        1.68
+      ],
+      "finished_ceiling_height_m": 2.7,
+      "complete_for_main_laundry_finished_room_perimeter": true,
+      "openings_and_finish_deductions_resolved": false,
+      "source_locations": [
+        "architectural:p13:A0.13:Laundry_Layout:3080x1680_finished_internal_dimensions",
+        "architectural:p7:A0.7:FCL_2700"
+      ]
     }
   ]
 }
