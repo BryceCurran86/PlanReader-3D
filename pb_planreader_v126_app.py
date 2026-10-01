@@ -45,6 +45,7 @@ from pb_substrate_qa_v131 import apply as apply_substrate_qa_v131
 from pb_precision_3d_v132 import apply as apply_precision_3d_v132
 from pb_opening_deductions_v134 import apply as apply_opening_deductions_v134
 from pb_elevation_registration_v135 import apply as apply_elevation_registration_v135
+from pb_opening_production_v175 import apply as apply_opening_production_v175
 from pb_room_face_takeoff import apply as apply_room_face_takeoff
 from pb_surface_evidence_v160 import apply as apply_surface_evidence_v160
 
@@ -104,6 +105,8 @@ apply_opening_deductions_v134(launcher.app)
 # Plan geometry supplies X/Y wall lengths; elevations become cross-view evidence
 # for orientation, vertical geometry, openings and substrate assignment.
 apply_elevation_registration_v135(launcher.app)
+# Phase 5: enforce fail-closed opening deduction safety fence and native vector bridge
+apply_opening_production_v175(launcher.app)
 launcher.app.APP_VERSION = "1.3.5"
 
 

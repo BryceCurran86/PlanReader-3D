@@ -33,7 +33,7 @@ def normalise_opening(raw: Dict[str, Any]) -> Dict[str, Any]:
     width = max(0.0, _num(raw.get("width_m")))
     height = max(0.0, _num(raw.get("height_m")))
     quantity = max(1, int(_num(raw.get("quantity"), 1)))
-    return {
+    norm = {
         "id": str(raw.get("id") or uuid.uuid4().hex[:12]),
         "kind": kind,
         "label": str(raw.get("label") or kind).strip(),
@@ -45,6 +45,15 @@ def normalise_opening(raw: Dict[str, Any]) -> Dict[str, Any]:
         "source_reference": str(raw.get("source_reference") or "").strip(),
         "confidence": str(raw.get("confidence") or "To review").strip(),
     }
+    for k in (
+        "manual_override_confirmed", "opening_instance_id", "page_id", "page_no",
+        "position_along_wall_m", "reconciliation_complete", "deduction_status",
+        "deduction_decision", "dimension_basis", "geometry_confidence",
+        "dimension_confidence", "association_confidence",
+    ):
+        if k in raw:
+            norm[k] = raw[k]
+    return norm
 
 
 def opening_area_m2(opening: Dict[str, Any]) -> float:
@@ -53,7 +62,31 @@ def opening_area_m2(opening: Dict[str, Any]) -> float:
 
 
 def deducted_area_m2(openings: Iterable[Dict[str, Any]]) -> float:
-    return round(sum(opening_area_m2(item) for item in openings or [] if normalise_opening(item)["deduct"]), 4)
+    """Calculates authorized deducted area for openings.
+    Bridges directly to canonical P5 opening production authority (pb_opening_production_v175),
+    ensuring unauthenticated openings are never subtracted. Also deduplicates identical opening
+    instances so an opening is deducted at most once per host wall.
+    """
+    total = 0.0
+    seen_ids = set()
+    for raw in openings or []:
+        item = normalise_opening(raw)
+        row_id = str(item.get("opening_instance_id") or item.get("id") or "")
+        if row_id and row_id in seen_ids:
+            continue
+
+        is_auth = False
+        try:
+            from pb_opening_production_v175 import is_authorised_deduction
+            is_auth = is_authorised_deduction(item)
+        except Exception:
+            is_auth = bool(item.get("deduct", False)) and bool(item.get("manual_override_confirmed", False))
+
+        if is_auth:
+            if row_id:
+                seen_ids.add(row_id)
+            total += opening_area_m2(item)
+    return round(total, 4)
 
 
 def net_wall_area_m2(gross_wall_m2: float, openings: Iterable[Dict[str, Any]]) -> float:

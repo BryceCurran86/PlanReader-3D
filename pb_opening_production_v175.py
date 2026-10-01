@@ -168,9 +168,15 @@ def _safe_legacy_save(original_save, safe_normalise):
 
 def _safe_deducted_area(openings: Iterable[Dict[str, Any]]) -> float:
     total = 0.0
+    seen_ids = set()
     for raw in openings or []:
         row = dict(raw or {})
+        row_id = str(row.get("opening_instance_id") or row.get("id") or "")
+        if row_id and row_id in seen_ids:
+            continue
         if is_authorised_deduction(row):
+            if row_id:
+                seen_ids.add(row_id)
             total += _num(row.get("width_m")) * _num(row.get("height_m")) * max(1, int(_num(row.get("quantity"), 1)))
     return round(total, 4)
 
