@@ -473,3 +473,39 @@ def test_3laurel_two_source_dimensioned_niche_face_deductions_are_closed_but_ret
         "wet_area_tile_bathroom_niche_face_and_all_niche_return_depths"
         in draft["unresolved_surface_families"]
     )
+
+
+def test_3laurel_main_ensuite_gross_wall_faces_close_from_finished_dimensions():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"].startswith(
+            "3laurel:surface:internal_wall_gross:main_ensuite:"
+        )
+    ]
+    assert len(faces) == 5
+    assert {row["object_ref"].rsplit(":", 1)[1] for row in faces} == {
+        "A", "B", "C", "D", "E"
+    }
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(
+        29.916
+    )
+    assert all(
+        row["attributes"]["finished_ceiling_height_m"] == pytest.approx(2.7)
+        for row in faces
+    )
+    assert all(
+        row["attributes"]["denominator_readiness"]
+        == "draft_only_until_openings_and_finish_scope_are_resolved"
+        for row in faces
+    )
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"]
+        == "3laurel:control:main_ensuite_internal_wall_gross_faces"
+    )
+    assert check["object_count"] == 5
+    assert check["component_sum_m2"] == pytest.approx(29.916)
+    assert check["net_denominator_ready"] is False
