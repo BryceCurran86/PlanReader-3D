@@ -454,6 +454,12 @@ class GenericPlanReaderExtractor:
             "source_pages": [],
             "rooms": [],
         }
+        self.canonical_floors_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "source_pages": [],
+            "floors": [],
+        }
         self.canonical_slabs_live: Dict[str, Any] = {
             "status": "abstained",
             "reason_codes": ["not_collected"],
@@ -3252,6 +3258,14 @@ class GenericPlanReaderExtractor:
                         (),
                     )
                 ]
+                canonical_floor_objects = [
+                    floor.to_dict()
+                    for floor in getattr(
+                        physical_wall_result,
+                        "canonical_floors",
+                        (),
+                    )
+                ]
                 self.canonical_openings_live = {
                     "status": (
                         "corroborated"
@@ -3319,6 +3333,36 @@ class GenericPlanReaderExtractor:
                         )
                     ),
                     "rooms": canonical_room_objects,
+                }
+                floor_status = getattr(
+                    physical_wall_result,
+                    "canonical_floor_status",
+                    None,
+                )
+                floor_status_value = getattr(floor_status, "value", None)
+                if floor_status_value is None:
+                    floor_status_value = (
+                        "corroborated"
+                        if canonical_floor_objects
+                        else "abstained"
+                    )
+                self.canonical_floors_live = {
+                    "status": floor_status_value,
+                    "reason_codes": list(
+                        getattr(
+                            physical_wall_result,
+                            "canonical_floor_reason_codes",
+                            (),
+                        )
+                    ),
+                    "source_pages": list(
+                        getattr(
+                            physical_wall_result,
+                            "canonical_floor_source_pages",
+                            (),
+                        )
+                    ),
+                    "floors": canonical_floor_objects,
                 }
                 self.physical_net_wall_live = {
                     "status": physical_wall_result.status.value,
@@ -3442,6 +3486,12 @@ class GenericPlanReaderExtractor:
                     "reason_codes": ["no_drawing_pages_selected"],
                     "rooms": [],
                 }
+                self.canonical_floors_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "source_pages": [],
+                    "floors": [],
+                }
                 self.extraction_status["physical_net_wall_live"] = "abstained"
         except Exception as exc:
             self.physical_net_wall_live = {
@@ -3491,6 +3541,14 @@ class GenericPlanReaderExtractor:
                     f"live_canonical_room_exception:{type(exc).__name__}"
                 ],
                 "rooms": [],
+            }
+            self.canonical_floors_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_floor_exception:{type(exc).__name__}"
+                ],
+                "source_pages": [],
+                "floors": [],
             }
             self.extraction_status["physical_net_wall_live"] = (
                 "extraction_failed"
@@ -3881,6 +3939,7 @@ class GenericPlanReaderExtractor:
                 walls=self.canonical_walls_live.get("walls", ()),
                 openings=self.canonical_openings_live.get("openings", ()),
                 rooms=self.canonical_rooms_live.get("rooms", ()),
+                floors=self.canonical_floors_live.get("floors", ()),
                 slabs=self.canonical_slabs_live.get("slabs", ()),
                 ceilings=self.canonical_ceilings_live.get("ceilings", ()),
                 roofs=self.canonical_roofs_live.get("roofs", ()),

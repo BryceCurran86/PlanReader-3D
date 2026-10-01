@@ -45,6 +45,7 @@ def test_reused_extractor_clears_all_live_canonical_object_state(
     extractor.canonical_doors_live = {"status": "corroborated", "doors": [{"id": "stale-door"}]}
     extractor.canonical_windows_live = {"status": "corroborated", "windows": [{"id": "stale-window"}]}
     extractor.canonical_rooms_live = {"status": "corroborated", "rooms": [{"id": "stale-room"}]}
+    extractor.canonical_floors_live = {"status": "corroborated", "floors": [{"id": "stale-floor"}]}
     extractor.canonical_slabs_live = {"status": "corroborated", "slabs": [{"id": "stale-slab"}]}
     extractor.canonical_ceilings_live = {"status": "corroborated", "ceilings": [{"id": "stale-ceiling"}]}
     extractor.canonical_roofs_live = {"status": "corroborated", "roofs": [{"id": "stale-roof"}]}
@@ -63,6 +64,7 @@ def test_reused_extractor_clears_all_live_canonical_object_state(
     assert extractor.canonical_doors_live["doors"] == []
     assert extractor.canonical_windows_live["windows"] == []
     assert extractor.canonical_rooms_live["rooms"] == []
+    assert extractor.canonical_floors_live["floors"] == []
     assert extractor.canonical_slabs_live["slabs"] == []
     assert extractor.canonical_ceilings_live["ceilings"] == []
     assert extractor.canonical_roofs_live["roofs"] == []
@@ -73,6 +75,7 @@ def test_reused_extractor_clears_all_live_canonical_object_state(
     assert extractor.canonical_doors_live["status"] == "abstained"
     assert extractor.canonical_windows_live["status"] == "abstained"
     assert extractor.canonical_rooms_live["status"] == "abstained"
+    assert extractor.canonical_floors_live["status"] == "abstained"
     assert extractor.canonical_slabs_live["status"] == "abstained"
     assert extractor.canonical_ceilings_live["status"] == "abstained"
     assert extractor.canonical_roofs_live["status"] == "abstained"
