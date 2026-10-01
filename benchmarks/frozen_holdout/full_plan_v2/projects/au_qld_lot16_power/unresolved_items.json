@@ -1,0 +1,42 @@
+{
+  "schema_version": "v2-unresolved-items-1.0",
+  "project_id": "au_qld_lot16_power",
+  "project_status": "INCOMPLETE",
+  "items": [
+    {
+      "family": "external_openings",
+      "status": "PARTIAL",
+      "reason": "13 dimensioned/plan-width external openings are source-closed; custom front glazing marked MEASURE ON SITE remains unresolved."
+    },
+    {
+      "family": "internal_wall_faces",
+      "status": "UNRESOLVED",
+      "reason": "Remaining internal wall faces and opening/joinery deductions are not fully closed."
+    },
+    {
+      "family": "external_wall_faces_and_cladding",
+      "status": "UNRESOLVED",
+      "reason": "External wall-face and cladding surface universe is not fully closed."
+    },
+    {
+      "family": "ceilings",
+      "status": "UNRESOLVED",
+      "reason": "Ceiling and raked-ceiling surface universe is not fully closed."
+    },
+    {
+      "family": "wet_area_wall_tiling",
+      "status": "UNRESOLVED",
+      "reason": "Wet-area wall tiling remains incomplete."
+    },
+    {
+      "family": "structural_members",
+      "status": "UNRESOLVED",
+      "reason": "Structural member universe is not fully closed."
+    },
+    {
+      "family": "roof_surfaces",
+      "status": "UNRESOLVED",
+      "reason": "Final roof cross-check remains blocked by the missing engineering stormwater drainage plan referenced by the architectural set."
+    }
+  ]
+}

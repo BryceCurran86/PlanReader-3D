@@ -1,0 +1,1456 @@
+{
+  "schema_version": "2.0",
+  "project_id": "au_qld_3laurel",
+  "status": "INCOMPLETE",
+  "truth_policy": "verified-only core from source drawings and independently closed dimensions; never PlanReader output",
+  "source_plan": {
+    "name": "3LAUREL - Construction Plan Set Rev3 08.05.26.pdf",
+    "sha256": "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+  },
+  "items": [
+    {
+      "item_id": "3laurel-1200x1810-asw-01-area",
+      "description": "Bed 2 1200 x 1810 ASW area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 2.172,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1200x1810_asw:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed_2_external_1200x1810_ASW:bbox_663.3_463.1_718.8_470.9"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1200x1810-asw-02-area",
+      "description": "Bed 3 1200 x 1810 ASW area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 2.172,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1200x1810_asw:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed_3_external_1200x1810_ASW:bbox_576.3_463.1_631.7_470.9"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1200x1810-asw-03-area",
+      "description": "1200 x 1810 ASW #3 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 2.172,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1200x1810_asw:03"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:03"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1200x1810-asw-04-area",
+      "description": "1200 x 1810 ASW #4 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 2.172,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1200x1810_asw:04"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:04"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x2410-asw-01-area",
+      "description": "1800 x 2410 ASW #1 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 4.338,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x2410_asw:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x2410-asw-02-area",
+      "description": "1800 x 2410 ASW #2 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 4.338,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x2410_asw:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:02"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x2410-asw-03-area",
+      "description": "1800 x 2410 ASW #3 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 4.338,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x2410_asw:03"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:03"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x2410-asw-04-area",
+      "description": "1800 x 2410 ASW #4 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 4.338,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x2410_asw:04"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:04"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x610-asw-obs-01-area",
+      "description": "1800 x 610 ASW obs area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 1.098,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x610_asw_obs:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:1800_610_asw_obs"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x900-adh-01-area",
+      "description": "1800 x 900 ADH #1 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 1.62,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x900_adh:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x900-adh-02-area",
+      "description": "1800 x 900 ADH #2 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 1.62,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x900_adh:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:02"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1800x910-asw-01-area",
+      "description": "1800 x 910 ASW area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 1.638,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1800x910_asw:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:1800_910_asw"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-2100x1500-asd-01-area",
+      "description": "2100 x 1500 ASD area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 3.15,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:2100x1500_asd:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-2100x2100-asd-01-area",
+      "description": "2100 x 2100 ASD area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 4.41,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:2100x2100_asd:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-2100x2700-assd-01-area",
+      "description": "2100 x 2700 ASSD area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 5.67,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:2100x2700_assd:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:21_27_assd"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-2100x4800-panel-lift-01-area",
+      "description": "2100 x 4800 panel lift door area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 10.08,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:2100x4800_panel_lift:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-600x1210-asw-obs-01-area",
+      "description": "600 x 1210 ASW obs #1 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 0.726,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:600x1210_asw_obs:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:600_1210_asw_obs_01"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-600x1210-asw-obs-02-area",
+      "description": "600 x 1210 ASW obs #2 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 0.726,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:600x1210_asw_obs:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:600_1210_asw_obs_02"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-600x1510-asw-01-area",
+      "description": "600 x 1510 ASW #1 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 0.906,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:600x1510_asw:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:01"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-600x1510-asw-02-area",
+      "description": "600 x 1510 ASW #2 area",
+      "trade_category": "windows",
+      "unit": "m2",
+      "expected_quantity": 0.906,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:600x1510_asw:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:02"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-1200-main-entry-hinged-01-area",
+      "description": "1200 main entry hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 2.52,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:1200_main_entry_hinged:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:ENTRY_PORCH_1200_opening",
+        "architectural:p4:A0.4:ALUMINIUM_ENTRY_DOOR_and_JOINERY_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-0870-gf-entry-hinged-01-area",
+      "description": "870 granny-flat porch entry hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:0870_gf_entry_hinged:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:GF_PORCH_entry_870",
+        "architectural:p4:A0.4:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-0870-garage-personnel-hinged-01-area",
+      "description": "870 garage personnel external hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:0870_garage_personnel_hinged:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:GARAGE_perimeter_870",
+        "architectural:p4:A0.4:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-ceiling-garage-area",
+      "description": "Garage ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 36.4,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:ceiling:garage"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_area_region:garage",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-ceiling-gf-alfresco-area",
+      "description": "Granny-flat alfresco ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 10.5,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:ceiling:gf_alfresco"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_area_region:gf_alfresco",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-ceiling-gf-living-area",
+      "description": "Granny-flat internal ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 60,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:ceiling:gf_living"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_area_region:gf_living",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-ceiling-gf-porch-area",
+      "description": "Granny-flat porch ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 1.4,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:ceiling:gf_porch"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_area_region:gf_porch",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-ceiling-main-alfresco-area",
+      "description": "Main-house alfresco ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 13.6,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:ceiling:main_alfresco"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_area_region:main_alfresco",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-ceiling-main-living-area",
+      "description": "Main-house internal ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 168.1,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:ceiling:main_living"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_area_region:main_living",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-ceiling-main-porch-area",
+      "description": "Main-house porch ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 7.5,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:ceiling:main_porch"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_area_region:main_porch",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wet-floor-bathroom-area",
+      "description": "Main bathroom tiled floor surface area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 5.17,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:bathroom"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p11:A0.11:Bathroom_Layout:1880x2750_finished_dimensions",
+        "architectural:p3:A0.3:BATH:TILES"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wet-floor-main-wc-area",
+      "description": "Main WC tiled floor surface area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 1.7316,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:main_wc"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p11:A0.11:WC_plan:1560x1110_finished_dimensions",
+        "architectural:p3:A0.3:WC:TILES"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wet-floor-laundry-area",
+      "description": "Main laundry tiled floor surface area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 5.1744,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:laundry"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p13:A0.13:Laundry_Layout:3080x1680_finished_dimensions",
+        "architectural:p3:A0.3:LDY:TILES"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wet-floor-gf-ensuite-laundry-area",
+      "description": "Granny-flat ensuite/laundry tiled floor surface area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 6.4889,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:gf_ensuite_laundry"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p15:A0.15:GF_Ensuite_Laundry:1870x3470_finished_dimensions",
+        "architectural:p3:A0.3:GF_wet_area:TILES"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-vinyl-floor-media-area",
+      "description": "Media room vinyl floor surface area",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 13.146,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:media"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:MEDIA:4200x3130_figured_dimensions:VINYL"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-vinyl-floor-bed2-area",
+      "description": "Bed 2 vinyl floor surface area",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 12.6,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:bed2"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:BED_2:3000x4200_figured_dimensions:VINYL"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-vinyl-floor-bed3-area",
+      "description": "Bed 3 vinyl floor surface area",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 12.6,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:bed3"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:BED_3:3000x4200_figured_dimensions:VINYL"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wall-tile-laundry-D-skirting-area",
+      "description": "Laundry D tile skirting strip area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 0.5852,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:wall_tile:laundry_D_skirting"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p13:A0.13:Laundry_D:3080_finished_wall_width_x_190_TILE_SKIRTING_height"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wall-tile-bathroom-C-shower-net-area",
+      "description": "Main bathroom C shower tile finish area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 1.89,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:wall_tile:bathroom_C_shower_net"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p11:A0.11:Bathroom_C:900_SHW_x_2100_TILES:no_niche"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wall-tile-ensuite-B-shower-return-net-area",
+      "description": "Ensuite B full-height shower return tile finish area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 2.43,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:wall_tile:ensuite_B_shower_return_net"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p12:A0.12:Ensuite_B:900_SHW:SHOWER_TILES_TO_RUN_UP_TO_CEILING"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wall-tile-ensuite-D-shower-return-net-area",
+      "description": "Ensuite D full-height shower return tile finish area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 2.43,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:wall_tile:ensuite_D_shower_return_net"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p12:A0.12:Ensuite_D:900_SHW:full_height_shower_tiling_scope"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wall-tile-gf-ensuite-B-shower-return-net-area",
+      "description": "GF Ens/Ldry B full-height shower return tile finish area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 2.43,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:wall_tile:gf_ensuite_B_shower_return_net"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p15:A0.15:GF_Ens_Ldry_B:900_SHW:SHOWER_TILES_TO_RUN_UP_TO_CEILING"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wall-tile-gf-ensuite-D-shower-return-net-area",
+      "description": "GF Ens/Ldry D full-height shower return tile finish area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 2.43,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:wall_tile:gf_ensuite_D_shower_return_net"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p15:A0.15:GF_Ens_Ldry_D:900_SHW:SHOWER_TILES_TO_RUN_UP_TO_CEILING"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wall-tile-ensuite-rear-flat-after-niche-area",
+      "description": "Main ensuite rear shower wall flat tile face after niche opening deduction area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 4.296,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:wall_tile:ensuite_rear_flat_after_niche"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p12:A0.12:Ensuite_A:1680x2700_gross_less_600x400_niche_face"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wall-tile-gf-ensuite-rear-flat-after-niche-area",
+      "description": "GF ensuite rear shower wall flat tile face after niche opening deduction area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 4.809,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:wall_tile:gf_ensuite_rear_flat_after_niche"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p15:A0.15:GF_Ens_Ldry_C:1870x2700_gross_less_600x400_niche_face"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0720-cs-01-area",
+      "description": "Internal room-access 720 mm cavity-slider opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.512,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0720_cs:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:WIP-side 720 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-cs-01-area",
+      "description": "Internal room-access 870 mm cavity-slider opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_cs:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:ENS/WIR-side 870 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-swing-01-area",
+      "description": "Internal room-access 870 mm hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_swing:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:master/WIR-entry zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-1200-cs-01-area",
+      "description": "Internal room-access 1200 mm cavity-slider opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 2.52,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:1200_cs:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:media-side 1200 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-cs-02-area",
+      "description": "Internal room-access 870 mm cavity-slider opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_cs:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:granny-flat wet-area zone 870 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-swing-02-area",
+      "description": "Internal room-access 870 mm hinged opening: Bed 3 area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_swing:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed_3_hall_870:bbox_559.4_347.5_567.2_359.1; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-swing-03-area",
+      "description": "Internal room-access 870 mm hinged opening: Bed 2 area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_swing:03"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed_2_hall_870:bbox_722.8_347.5_730.6_359.1; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-swing-04-area",
+      "description": "Internal room-access 870 mm hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_swing:04"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:laundry/hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0720-cs-02-area",
+      "description": "Internal room-access 720 mm cavity-slider opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.512,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0720_cs:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:granny-flat bathroom-side 720 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-swing-05-area",
+      "description": "Internal room-access 870 mm hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_swing:05"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed 5/WIR zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-swing-06-area",
+      "description": "Internal room-access 870 mm hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_swing:06"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:laundry/bedroom hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0720-cs-03-area",
+      "description": "Internal room-access 720 mm cavity-slider opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.512,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0720_cs:03"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:main WC-side 720 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-swing-07-area",
+      "description": "Internal room-access 870 mm hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_swing:07"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed 3/4 hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0720-swing-01-area",
+      "description": "Internal room-access 720 mm hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.512,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0720_swing:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:main bathroom 720 hinged opening; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-joinery-1200-vsd-laundry-linen-01-area",
+      "description": "Internal 1200 mm vertical sliding joinery opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 2.52,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_joinery:1200_vsd_laundry_linen:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:laundry/linen 1200 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-joinery-1800-vsd-bed3-robe-01-area",
+      "description": "Internal 1800 mm vertical sliding joinery opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 3.78,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_joinery:1800_vsd_bed3_robe:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed 3 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-joinery-1800-vsd-bed2-robe-01-area",
+      "description": "Internal 1800 mm vertical sliding joinery opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 3.78,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_joinery:1800_vsd_bed2_robe:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed 2 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-joinery-1800-vsd-bed4-robe-01-area",
+      "description": "Internal 1800 mm vertical sliding joinery opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 3.78,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_joinery:1800_vsd_bed4_robe:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed 4 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    }
+  ],
+  "external_opening_reconciliation": {
+    "verified_external_opening_count": 23,
+    "verified_external_opening_area_m2": 64.764,
+    "typed_opening_subset": {
+      "count": 20,
+      "area_m2": 58.59,
+      "complete_for_typed_labels": true,
+      "complete_for_all_external_openings": false
+    },
+    "separately_closed_perimeter_hinged_doors": {
+      "count": 3,
+      "area_m2": 6.174,
+      "object_refs": [
+        "3laurel:opening:p3:1200_main_entry_hinged:01",
+        "3laurel:opening:p3:0870_gf_entry_hinged:01",
+        "3laurel:opening:p3:0870_garage_personnel_hinged:01"
+      ]
+    },
+    "external_opening_universe_status": "SOURCE_CLOSED",
+    "external_opening_universe_complete": true,
+    "source_locations": [
+      "architectural:p3:A0.3:floor_plan:all_perimeter_typed_openings_plus_main_entry_GF_entry_and_garage_personnel_door",
+      "architectural:p4-p5:A0.4-A0.5:elevations:entry_door_crosscheck_and_JOINERY_HEIGHTS_2100_AFL_UNO"
+    ],
+    "note": "Internal door openings remain a separate wall-face deduction universe and are not claimed closed here."
+  },
+  "primary_ceiling_reconciliation": {
+    "closure_check_id": "3laurel:closure:primary_ceiling_planes",
+    "component_object_refs": [
+      "3laurel:surface:ceiling:garage",
+      "3laurel:surface:ceiling:gf_alfresco",
+      "3laurel:surface:ceiling:gf_living",
+      "3laurel:surface:ceiling:gf_porch",
+      "3laurel:surface:ceiling:main_alfresco",
+      "3laurel:surface:ceiling:main_living",
+      "3laurel:surface:ceiling:main_porch"
+    ],
+    "component_sum_m2": 297.5,
+    "declared_reference_plan_area_m2": 297.5,
+    "difference_m2": 0,
+    "source_locations": [
+      "architectural:p3:A0.3:area_table",
+      "architectural:p7:A0.7:ceilings_to_truss_bottom_chord"
+    ],
+    "primary_ceiling_universe_complete": true,
+    "note": "Primary horizontal ceiling planes only; secondary FC soffit and beam faces remain a separate unresolved family."
+  },
+  "wet_area_floor_reconciliation": {
+    "closure_check_id": "3laurel:closure:wet_area_atomic_floor_surfaces",
+    "component_object_refs": [
+      "3laurel:surface:floor:bathroom",
+      "3laurel:surface:floor:main_wc",
+      "3laurel:surface:floor:laundry",
+      "3laurel:surface:floor:gf_ensuite_laundry"
+    ],
+    "object_count": 4,
+    "component_sum_m2": 18.5649,
+    "source_closed": true,
+    "aggregate_overlap": {
+      "main_living_refs": [
+        "3laurel:surface:floor:bathroom",
+        "3laurel:surface:floor:main_wc",
+        "3laurel:surface:floor:laundry"
+      ],
+      "gf_living_refs": [
+        "3laurel:surface:floor:gf_ensuite_laundry"
+      ],
+      "rule": "These atomic wet-area floor items are denominator truth; the overlapping declared living composite regions remain non-denominator controls."
+    }
+  },
+  "vinyl_floor_reconciliation": {
+    "closure_check_ids": [
+      "3laurel:closure:media_floor_and_gross_wall_faces",
+      "3laurel:closure:bed2_bed3_floor_surfaces"
+    ],
+    "component_object_refs": [
+      "3laurel:surface:floor:media",
+      "3laurel:surface:floor:bed2",
+      "3laurel:surface:floor:bed3"
+    ],
+    "object_count": 3,
+    "component_sum_m2": 38.346,
+    "source_closed": true,
+    "finish": "vinyl",
+    "aggregate_overlap": {
+      "aggregate_ref": "3laurel:surface:floor:main_living_composite_region",
+      "rule": "These three atomic vinyl floor items are denominator truth; the overlapping main living composite region remains a non-denominator control."
+    }
+  },
+  "wall_tile_face_subset_reconciliation": {
+    "closure_check_ids": [
+      "3laurel:closure:laundry_D_tile_skirting",
+      "3laurel:closure:bathroom_C_shower_tile_face",
+      "3laurel:closure:niche_free_ensuite_shower_returns",
+      "3laurel:closure:ensuite_rear_flat_faces_after_niche_deductions"
+    ],
+    "component_object_refs": [
+      "3laurel:surface:wall_tile:laundry_D_skirting",
+      "3laurel:surface:wall_tile:bathroom_C_shower_net",
+      "3laurel:surface:wall_tile:ensuite_B_shower_return_net",
+      "3laurel:surface:wall_tile:ensuite_D_shower_return_net",
+      "3laurel:surface:wall_tile:gf_ensuite_B_shower_return_net",
+      "3laurel:surface:wall_tile:gf_ensuite_D_shower_return_net",
+      "3laurel:surface:wall_tile:ensuite_rear_flat_after_niche",
+      "3laurel:surface:wall_tile:gf_ensuite_rear_flat_after_niche"
+    ],
+    "object_count": 8,
+    "component_sum_m2": 21.3002,
+    "source_closed_for_promoted_faces": true,
+    "complete_for_project_wet_area_tile_universe": false,
+    "niche_return_depths_resolved": false,
+    "note": "The two rear flat host faces deduct the source-dimensioned 600 x 400 mm niche openings only. Niche returns/depths remain unresolved and are not included in these denominator items."
+  },
+  "internal_room_access_reconciliation": {
+    "closure_check_id": "3laurel:closure:internal_room_access_door_census",
+    "component_object_refs": [
+      "3laurel:opening:p3:internal_access:0720_cs:01",
+      "3laurel:opening:p3:internal_access:0870_cs:01",
+      "3laurel:opening:p3:internal_access:0870_swing:01",
+      "3laurel:opening:p3:internal_access:1200_cs:01",
+      "3laurel:opening:p3:internal_access:0870_cs:02",
+      "3laurel:opening:p3:internal_access:0870_swing:02",
+      "3laurel:opening:p3:internal_access:0870_swing:03",
+      "3laurel:opening:p3:internal_access:0870_swing:04",
+      "3laurel:opening:p3:internal_access:0720_cs:02",
+      "3laurel:opening:p3:internal_access:0870_swing:05",
+      "3laurel:opening:p3:internal_access:0870_swing:06",
+      "3laurel:opening:p3:internal_access:0720_cs:03",
+      "3laurel:opening:p3:internal_access:0870_swing:07",
+      "3laurel:opening:p3:internal_access:0720_swing:01"
+    ],
+    "room_access_opening_count": 14,
+    "room_access_opening_area_m2": 25.011,
+    "hinged_count": 8,
+    "cavity_slider_count": 6,
+    "width_distribution_m": {
+      "0.72": 4,
+      "0.87": 9,
+      "1.20": 1
+    },
+    "joinery_height_m": 2.1,
+    "complete_for_labelled_room_access_doors": true,
+    "complete_for_all_internal_wall_openings": false,
+    "residual_unresolved": [
+      "robe_and_linen_sliding_joinery_openings",
+      "unlabelled_internal_wall_openings"
+    ]
+  },
+  "internal_sliding_joinery_reconciliation": {
+    "closure_check_id": "3laurel:closure:internal_sliding_joinery_opening_census",
+    "component_object_refs": [
+      "3laurel:opening:p3:internal_joinery:1200_vsd_laundry_linen:01",
+      "3laurel:opening:p3:internal_joinery:1800_vsd_bed3_robe:01",
+      "3laurel:opening:p3:internal_joinery:1800_vsd_bed2_robe:01",
+      "3laurel:opening:p3:internal_joinery:1800_vsd_bed4_robe:01"
+    ],
+    "labelled_vsd_opening_count": 4,
+    "labelled_vsd_opening_area_m2": 13.86,
+    "width_distribution_m": {
+      "1.20": 1,
+      "1.80": 3
+    },
+    "joinery_height_m": 2.1,
+    "complete_for_explicit_vsd_labels": true,
+    "complete_for_all_internal_wall_openings": false,
+    "residual_unresolved": [
+      "dimensioned_open_archways",
+      "unlabelled_internal_wall_breaks"
+    ]
+  }
+}

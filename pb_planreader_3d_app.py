@@ -2322,14 +2322,16 @@ def process_document(
         if failures:
             return created, f"Processed with {len(failures)} page(s) that failed to render: {'; '.join(failures[:5])}"
     elif suffix in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}:
-        img = Image.open(path).convert("RGB")
-        image_path = pages_dir / f"doc_{document_id}_page_1.png"
-        img.save(image_path)
+        with Image.open(path) as img_raw:
+            img = img_raw.convert("RGB")
+            image_path = pages_dir / f"doc_{document_id}_page_1.png"
+            img.save(image_path)
+            width, height = img.width, img.height
         page_type, label = classify_page("", path.name, 1)
         lexecute(
             """INSERT INTO pages(document_id,workspace_id,page_no,page_label,page_type,scale_text,px_per_m,image_path,width_px,height_px,extracted_text,selected,created_at)
                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (document_id, workspace_id, 1, label, page_type, "", None, str(image_path), img.width, img.height, "", 1, now_stamp()),
+            (document_id, workspace_id, 1, label, page_type, "", None, str(image_path), width, height, "", 1, now_stamp()),
         )
         created = 1
     elif suffix == ".docx":
@@ -5552,14 +5554,14 @@ def page_thumbnail_bytes(path: str, max_w: int = 320) -> bytes | None:
         p = Path(path)
         if not p.exists():
             return None
-        img = Image.open(p)
-        img = img.convert("RGB")
-        ratio = max_w / float(img.width)
-        if ratio < 1:
-            img = img.resize((max_w, max(1, int(img.height * ratio))))
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        return buf.getvalue()
+        with Image.open(p) as img_raw:
+            img = img_raw.convert("RGB")
+            ratio = max_w / float(img.width)
+            if ratio < 1:
+                img = img.resize((max_w, max(1, int(img.height * ratio))))
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
     except Exception:
         return None
 
@@ -5572,20 +5574,20 @@ def page_thumbnail(path: str, max_w: int = 320) -> bytes | None:
     return _page_thumb(path, mtime, max_w)
 
 
-@lru_cache(maxsize=512)
+@lru_cache(maxsize=256)
 def _page_thumb(path: str, mtime: float, max_w: int) -> bytes | None:
     try:
         p = Path(path)
         if not p.exists():
             return None
-        img = Image.open(p)
-        img = img.convert("RGB")
-        ratio = max_w / float(img.width)
-        if ratio < 1:
-            img = img.resize((max_w, max(1, int(img.height * ratio))))
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        return buf.getvalue()
+        with Image.open(p) as img_raw:
+            img = img_raw.convert("RGB")
+            ratio = max_w / float(img.width)
+            if ratio < 1:
+                img = img.resize((max_w, max(1, int(img.height * ratio))))
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
     except Exception:
         return None
 

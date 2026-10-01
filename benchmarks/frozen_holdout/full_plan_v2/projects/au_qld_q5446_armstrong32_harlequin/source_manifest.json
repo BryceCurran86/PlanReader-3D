@@ -51,8 +51,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "0ed5147d60b469e53b456d2796da46d5a274536f55487a8557baf1cb57cb1875",
-      "size_bytes": 2038,
+      "sha256": "faffaf2e0424b29c8da3deac26d3e9577d72858272a6443a44f02801ccd827ca",
+      "size_bytes": 7120,
       "page_count": null
     }
   ],
@@ -77,12 +77,104 @@
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "q5446-ground-ensuite-floor-tiling-area",
+      "description": "Ground-floor ensuite tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 4.2224,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:ground_ensuite"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p1:figured_dimensions:ENS_2320x1820",
+        "standard_plans:p1:vector_inner_faces:2320x1820",
+        "standard_inclusions:p1:bathroom_ensuite_floor_tiles",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "q5446-first-ensuite-floor-tiling-area",
+      "description": "First-floor ensuite tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 5.9572,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:first_ensuite"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p2:figured_dimensions:ENS_2810x2120",
+        "standard_plans:p2:vector_inner_faces:2802.5x2116.7_mm",
+        "standard_inclusions:p1:bathroom_ensuite_floor_tiles",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "q5446-first-bath-floor-tiling-area",
+      "description": "First-floor bathroom tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 5.8446,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:first_bath"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p2:figured_dimensions:BATH_1910x3060",
+        "standard_plans:p2:vector_inner_faces:1913.5x3056.5_mm",
+        "standard_inclusions:p1:bathroom_ensuite_floor_tiles",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "q5446-ground-laundry-floor-tiling-area",
+      "description": "Ground-floor laundry tiled floor surface independently measured on architectural and electrical plans",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 4.1864,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:ground_laundry"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p1:architectural_vector_inner_faces:2616.2x1600.2_mm",
+        "standard_plans:p5:electrical_vector_inner_faces:2616.2x1600.2_mm",
+        "standard_inclusions:p1:laundry_floor_tiles_throughout",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "reason_codes": [
     "sales_estimate_is_not_complete_measured_takeoff",
     "ground_first_porch_garage_area_routes_not_independently_closed",
     "window_door_opening_universe_not_reconciled",
-    "wall_ceiling_finish_surface_universe_not_built"
+    "remaining_wall_ceiling_finish_surface_universe_not_built"
   ]
 }

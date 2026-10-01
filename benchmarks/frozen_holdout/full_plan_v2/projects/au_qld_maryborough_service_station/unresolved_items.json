@@ -4,16 +4,16 @@
   "status": "INCOMPLETE",
   "unresolved_families": [
     {
-      "family": "room_floor_areas",
-      "reason": "Room geometry route not independently closed."
+      "family": "remaining_room_floor_areas",
+      "reason": "The three FT2 WC & SHOWER floors are independently closed; all other room floor surfaces remain unresolved."
     },
     {
       "family": "internal_wall_ipf2_areas",
       "reason": "Wall-face universe not independently closed."
     },
     {
-      "family": "ceilings",
-      "reason": "Ceiling surface universe not independently closed."
+      "family": "remaining_ceilings",
+      "reason": "The three WC & SHOWER WFPB ceilings are independently closed; all other ceiling surfaces remain unresolved."
     },
     {
       "family": "wall_tiles",
@@ -24,8 +24,9 @@
       "reason": "External surface universe not independently closed."
     },
     {
-      "family": "windows",
-      "reason": "W01-W06 identity is corroborated but exact size/surface truth is not yet independently verified."
+      "family": "window_areas",
+      "reason": "W01, W02, W05 and W06 nominal gross framed opening areas are source-closed from A610 and A110 identity reconciliation; W03 individual height/sill and W04 non-overlapping storefront/D01 area semantics remain unresolved.",
+      "status": "PARTIAL"
     }
   ]
 }

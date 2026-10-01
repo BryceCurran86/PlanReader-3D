@@ -399,9 +399,15 @@ class GenericPlanReaderExtractor:
             "reason_codes": ["not_collected"],
             "quantity_m2": None,
             "source_pages": [],
+            "canonical_walls": [],
             "external_wall_ids": [],
             "evidence_ids": [],
             "quantity_id": None,
+        }
+        self.canonical_openings_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "openings": [],
         }
         # Live extraction visibility: distinguish absence from failure/conflict.
         self.extraction_status: Dict[str, str] = {}
@@ -967,9 +973,15 @@ class GenericPlanReaderExtractor:
             "reason_codes": ["not_collected"],
             "quantity_m2": None,
             "source_pages": [],
+            "canonical_walls": [],
             "external_wall_ids": [],
             "evidence_ids": [],
             "quantity_id": None,
+        }
+        self.canonical_openings_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "openings": [],
         }
 
         # ------------------------------------------------------------------
@@ -2911,11 +2923,29 @@ class GenericPlanReaderExtractor:
                     p_path,
                     pages=physical_net_pages,
                 )
+                canonical_wall_objects = [
+                    wall.to_dict()
+                    for wall in physical_wall_result.canonical_walls
+                ]
+                canonical_opening_objects = [
+                    opening.to_dict()
+                    for opening in physical_wall_result.canonical_openings
+                ]
+                self.canonical_openings_live = {
+                    "status": (
+                        "corroborated"
+                        if canonical_opening_objects
+                        else "abstained"
+                    ),
+                    "reason_codes": list(physical_wall_result.reason_codes),
+                    "openings": canonical_opening_objects,
+                }
                 self.physical_net_wall_live = {
                     "status": physical_wall_result.status.value,
                     "reason_codes": list(physical_wall_result.reason_codes),
                     "quantity_m2": physical_wall_result.quantity_m2,
                     "source_pages": list(physical_wall_result.source_pages),
+                    "canonical_walls": canonical_wall_objects,
                     "external_wall_ids": list(
                         physical_wall_result.external_wall_ids
                     ),
@@ -2973,6 +3003,16 @@ class GenericPlanReaderExtractor:
                             "external_wall_ids": list(
                                 physical_wall_result.external_wall_ids
                             ),
+                            "canonical_wall_ids": [
+                                wall["canonical_wall_id"]
+                                for wall in canonical_wall_objects
+                            ],
+                            "canonical_wall_objects": canonical_wall_objects,
+                            "canonical_opening_ids": [
+                                opening["canonical_opening_id"]
+                                for opening in canonical_opening_objects
+                            ],
+                            "canonical_opening_objects": canonical_opening_objects,
                             "evidence_ids": list(
                                 physical_wall_result.evidence_ids
                             ),
@@ -2995,6 +3035,11 @@ class GenericPlanReaderExtractor:
                     "evidence_ids": [],
                     "quantity_id": None,
                 }
+                self.canonical_openings_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "openings": [],
+                }
                 self.extraction_status["physical_net_wall_live"] = "abstained"
         except Exception as exc:
             self.physical_net_wall_live = {
@@ -3007,6 +3052,13 @@ class GenericPlanReaderExtractor:
                 "external_wall_ids": [],
                 "evidence_ids": [],
                 "quantity_id": None,
+            }
+            self.canonical_openings_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_opening_exception:{type(exc).__name__}"
+                ],
+                "openings": [],
             }
             self.extraction_status["physical_net_wall_live"] = (
                 "extraction_failed"

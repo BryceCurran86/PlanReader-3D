@@ -1,4 +1,4 @@
-﻿"""Producer-owned wall-role classification authority (Item 26).
+"""Producer-owned wall-role classification authority (Item 26).
 
 Classifies each physical wall as exactly one of:
   - EXTERNAL: proven to bound the external building envelope.
