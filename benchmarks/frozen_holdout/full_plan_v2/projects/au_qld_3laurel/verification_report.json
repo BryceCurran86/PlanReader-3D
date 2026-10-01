@@ -1,0 +1,64 @@
+{
+  "schema_version": "v2-verification-report-1.0",
+  "project_id": "au_qld_3laurel",
+  "project_status": "INCOMPLETE",
+  "source_hash_verification": {
+    "status": "PASS",
+    "documents": [
+      {
+        "name": "3LAUREL - Construction Plan Set Rev3 08.05.26.pdf",
+        "expected_sha256": "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e",
+        "observed_sha256": "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+      }
+    ]
+  },
+  "proofs": [
+    {
+      "proof": "independent reference quantity exists for every admitted core item",
+      "status": "PASS",
+      "evidence": "23 source-dimensioned external openings, 64.764 m2 total, each mapped to one exact physical opening ref"
+    },
+    {
+      "proof": "external opening universe source-closed",
+      "status": "PASS",
+      "evidence": "23 external openings reconciled from the architectural plan set"
+    },
+    {
+      "proof": "every denominator item has exact physical object refs",
+      "status": "PASS",
+      "evidence": "23 atomic denominator items each carry exactly one external-opening object ref"
+    },
+    {
+      "proof": "source lineage complete for admitted core",
+      "status": "PASS"
+    },
+    {
+      "proof": "PlanReader output not used as benchmark truth",
+      "status": "PASS"
+    },
+    {
+      "proof": "unsupported surfaces are not silently excluded",
+      "status": "PASS",
+      "evidence": "unfinished wall, roof, structural, soffit/beam, wet-area tile and internal-opening families remain explicit unresolved work"
+    },
+    {
+      "proof": "full project surface universe complete",
+      "status": "FAIL",
+      "evidence": "External openings are source-closed, but multiple other in-scope families remain unresolved."
+    }
+  ],
+  "opening_closure_summary": {
+    "verified_opening_count": 23,
+    "verified_area_m2": 64.764,
+    "window_glazing_count": 16,
+    "window_glazing_area_m2": 35.28,
+    "door_count": 7,
+    "door_area_m2": 29.484,
+    "external_opening_universe_complete": true,
+    "closure_check_id": "3laurel:closure:external_opening_census",
+    "source_locations": [
+      "architectural:p3:A0.3:floor_plan:all_perimeter_typed_openings_plus_main_entry_GF_entry_and_garage_personnel_door",
+      "architectural:p4-p5:A0.4-A0.5:elevations:entry_door_crosscheck_and_JOINERY_HEIGHTS_2100_AFL_UNO"
+    ]
+  }
+}

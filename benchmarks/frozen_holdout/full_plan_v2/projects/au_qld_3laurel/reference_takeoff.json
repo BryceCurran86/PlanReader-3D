@@ -2,26 +2,12 @@
   "schema_version": "2.0",
   "project_id": "au_qld_3laurel",
   "status": "INCOMPLETE",
-  "source_package_complete": true,
-  "source_documents": [
-    {
-      "name": "3LAUREL - Construction Plan Set Rev3 08.05.26.pdf",
-      "role": "architectural_drawings",
-      "sha256": "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e",
-      "size_bytes": 5157446,
-      "page_count": 18
-    }
-  ],
-  "reference_takeoff_documents": [
-    {
-      "name": "reference_takeoff.json",
-      "role": "independent_verified_reference_takeoff",
-      "sha256": "961ab34644d548b45402beb64dea25a7798cceca312d6ce926950e47668e6814",
-      "size_bytes": 16099,
-      "page_count": null
-    }
-  ],
-  "verified_takeoff_items": [
+  "truth_policy": "verified-only core from source drawings and independently closed dimensions; never PlanReader output",
+  "source_plan": {
+    "name": "3LAUREL - Construction Plan Set Rev3 08.05.26.pdf",
+    "sha256": "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+  },
+  "items": [
     {
       "item_id": "3laurel-1200x1810-asw-01-area",
       "description": "Bed 2 1200 x 1810 ASW area",
@@ -486,14 +472,30 @@
       "verification_status": "VERIFIED"
     }
   ],
-  "reason_codes": [
-    "remaining_internal_wall_faces_not_closed",
-    "external_wall_faces_and_cladding_not_closed",
-    "roof_surface_universe_not_closed",
-    "remaining_structural_member_universe_not_closed",
-    "secondary_fc_soffit_and_beam_faces_not_closed",
-    "wet_area_tile_niches_and_returns_not_closed",
-    "remaining_wet_area_tile_scope_not_closed",
-    "internal_opening_universe_not_closed"
-  ]
+  "external_opening_reconciliation": {
+    "verified_external_opening_count": 23,
+    "verified_external_opening_area_m2": 64.764,
+    "typed_opening_subset": {
+      "count": 20,
+      "area_m2": 58.59,
+      "complete_for_typed_labels": true,
+      "complete_for_all_external_openings": false
+    },
+    "separately_closed_perimeter_hinged_doors": {
+      "count": 3,
+      "area_m2": 6.174,
+      "object_refs": [
+        "3laurel:opening:p3:1200_main_entry_hinged:01",
+        "3laurel:opening:p3:0870_gf_entry_hinged:01",
+        "3laurel:opening:p3:0870_garage_personnel_hinged:01"
+      ]
+    },
+    "external_opening_universe_status": "SOURCE_CLOSED",
+    "external_opening_universe_complete": true,
+    "source_locations": [
+      "architectural:p3:A0.3:floor_plan:all_perimeter_typed_openings_plus_main_entry_GF_entry_and_garage_personnel_door",
+      "architectural:p4-p5:A0.4-A0.5:elevations:entry_door_crosscheck_and_JOINERY_HEIGHTS_2100_AFL_UNO"
+    ],
+    "note": "Internal door openings remain a separate wall-face deduction universe and are not claimed closed here."
+  }
 }
