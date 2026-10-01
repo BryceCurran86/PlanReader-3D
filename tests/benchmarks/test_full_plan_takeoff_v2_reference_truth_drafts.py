@@ -939,3 +939,34 @@ def test_lot16_ensuite_and_wir_raked_ceiling_planes_are_source_closed():
     assert check["raked_surface_sum_m2"] == pytest.approx(10.400066, abs=1e-6)
     assert check["pitch_degrees"] == 12
     assert check["source_closed"] is True
+
+
+def test_3laurel_dimensioned_internal_open_archways_are_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    archways = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "internal_open_archway"
+    ]
+    assert len(archways) == 2
+    by_ref = {row["object_ref"]: row for row in archways}
+
+    first = by_ref["3laurel:opening:p3:internal_archway:2100x1030:01"]
+    second = by_ref["3laurel:opening:p3:internal_archway:2100x1000:01"]
+    assert first["expected_quantity"] == pytest.approx(2.163)
+    assert second["expected_quantity"] == pytest.approx(2.1)
+    assert first["attributes"]["source_closed_opening"] is True
+    assert second["attributes"]["source_closed_opening"] is True
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:dimensioned_internal_open_archways"
+    )
+    assert check["object_count"] == 2
+    assert check["total_opening_area_m2"] == pytest.approx(4.263)
+    assert check["source_closed"] is True
+    assert (
+        "unlabelled_internal_wall_breaks_beyond_two_closed_dimensioned_open_archways_for_wall_face_deductions"
+        in draft["unresolved_surface_families"]
+    )
