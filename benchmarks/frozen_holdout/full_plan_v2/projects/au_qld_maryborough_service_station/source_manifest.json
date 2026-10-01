@@ -16,8 +16,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "5f8643d1a0efd67b15f0180c180c1c3bb9dcf7f83442d9e904e62445da41885e",
-      "size_bytes": 6555,
+      "sha256": "bf4a49a372ce8904f6f9874d3c5d69f7517b2032b412f1a65698de0673c06d69",
+      "size_bytes": 6579,
       "page_count": null
     }
   ],
@@ -55,7 +55,7 @@
     },
     {
       "item_id": "maryborough-door-ipf3-leaf-area-one-face",
-      "description": "One-face leaf area of IPF3 painted solid-core flush timber doors",
+      "description": "One-face geometric leaf-area control for IPF3 doors; not a full painting-scope quantity",
       "trade_category": "painting",
       "unit": "m2",
       "expected_quantity": 20.2368,
@@ -81,7 +81,7 @@
         "A600:door_schedule:9x920x2040_plus_2x820x2040",
         "A110:floor_plan:matching_11_door_tags"
       ],
-      "denominator_eligible": true,
+      "denominator_eligible": false,
       "verification_status": "VERIFIED"
     },
     {
