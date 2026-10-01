@@ -41,11 +41,11 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     manifest = load_project_manifest(project / "source_manifest.json")
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
-    assert len(manifest.verified_items) == 21
+    assert len(manifest.verified_items) == 23
 
     eligible = [item for item in manifest.verified_items if item.denominator_eligible]
     excluded = [item for item in manifest.verified_items if not item.denominator_eligible]
-    assert len(eligible) == 18
+    assert len(eligible) == 20
     assert len(excluded) == 3
 
     by_id = {item.item_id: item for item in manifest.verified_items}
@@ -101,6 +101,8 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     assert ceilings["maryborough:surface:ceiling:laundry"]["expected_area_m2"] == 8.34782
     assert floors["maryborough:surface:floor:food_prep"]["expected_area_m2"] == 13.270425
     assert ceilings["maryborough:surface:ceiling:food_prep"]["expected_area_m2"] == 13.270425
+    assert floors["maryborough:surface:floor:office"]["expected_area_m2"] == 9.05352
+    assert ceilings["maryborough:surface:ceiling:office"]["expected_area_m2"] == 9.05352
     _assert_reference_hash("au_qld_maryborough_service_station")
 
 
@@ -238,4 +240,16 @@ def test_maryborough_food_prep_truth_is_closed():
     assert check["a110_geometry_status"] == "MATCHING_PHYSICAL_ROOM"
     assert check["a120_ceiling_finish"] == "FPB"
     assert check["a120_ceiling_height_mm"] == 3000
+    assert check["agreement"] == "PASS"
+
+
+def test_maryborough_office_truth_is_closed():
+    ref = _json(ROOT / "au_qld_maryborough_service_station" / "reference_takeoff.json")
+    check = ref["office_geometry_check"]
+    assert check["a140_figured_mm"] == [3570, 2536]
+    assert check["area_m2"] == 9.05352
+    assert check["a140_floor_finish"] == "FT3"
+    assert check["a110_geometry_status"] == "MATCHING_PHYSICAL_ROOM"
+    assert check["a120_ceiling_finish"] == "GRID"
+    assert check["a120_ceiling_height_mm"] == 2400
     assert check["agreement"] == "PASS"
