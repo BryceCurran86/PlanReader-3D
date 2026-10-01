@@ -88,6 +88,7 @@ apply_mapper_hard_guard_v1228(launcher.app)
 apply_persistent_login_v1229(launcher.app)
 apply_vector_geometry_v130(launcher.app)
 apply_room_face_takeoff(launcher.app)
+# Retired legacy benchmark modules: deactivated per permanent project directive.
 apply_accuracy_benchmark_v130(launcher.app)
 apply_accuracy_ui_v130(launcher.app)
 apply_substrate_qa_v131(launcher.app)

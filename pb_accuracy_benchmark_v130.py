@@ -247,12 +247,13 @@ def import_truth(app: Any, workspace_id: int, payload: Dict[str, Any]) -> int:
 
 
 def apply(app: Any) -> None:
-    if getattr(app, "_pb_accuracy_benchmark_v130_applied", False): return
-    app._pb_accuracy_benchmark_v130_applied = True; ensure_schema(app)
-    app.accuracy_upsert_truth_v130 = lambda *args, **kwargs: upsert_truth(app, *args, **kwargs)
-    app.accuracy_record_prediction_v130 = lambda *args, **kwargs: record_prediction(app, *args, **kwargs)
-    app.accuracy_record_correction_v130 = lambda *args, **kwargs: record_correction(app, *args, **kwargs)
-    app.accuracy_evaluate_workspace_v130 = lambda *args, **kwargs: evaluate_workspace(app, *args, **kwargs)
-    app.accuracy_record_vector_analysis_v130 = lambda *args, **kwargs: record_vector_analysis(app, *args, **kwargs)
-    app.accuracy_export_truth_v130 = lambda workspace_id: export_truth(app, workspace_id)
-    app.accuracy_import_truth_v130 = lambda workspace_id, payload: import_truth(app, workspace_id, payload)
+    """RETIRED LEGACY BENCHMARK ENGINE.
+
+    Per permanent project directive, the legacy canonical-five percentage benchmark
+    is completely retired. Active validation is governed by the V2 full-plan truth framework.
+    """
+    if getattr(app, "_pb_accuracy_benchmark_v130_applied", False):
+        return
+    app._pb_accuracy_benchmark_v130_applied = True
+    return
+

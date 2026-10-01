@@ -15,6 +15,7 @@ import pb_accuracy_benchmark_v130 as benchmark
 
 app.init_local_db()
 benchmark.apply(app)
+benchmark.ensure_schema(app)
 
 
 class VectorGeometryTests(unittest.TestCase):

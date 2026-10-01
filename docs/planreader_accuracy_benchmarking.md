@@ -1,4 +1,10 @@
-# PlanReader Accuracy Benchmarking Framework
+# PlanReader Accuracy Benchmarking Framework [HISTORICAL / RETIRED]
+
+> [!WARNING]
+> **PERMANENT PROJECT DIRECTIVE — OLD BENCHMARK RETIRED**  
+> The previous canonical-five / legacy percentage benchmark is **COMPLETELY RETIRED**.  
+> It must not be run, reported, used as a headline, or used as a production gate.  
+> The active validation system is now the **V2 full-plan, independently source-closed truth framework** (`benchmarks/frozen_holdout/full_plan_v2/`).
 
 ## Overview
 The PlanReader Accuracy Benchmarking Framework provides an independent, reproducible, ground-truth-backed evaluation system for architectural plan interpretation, quantity takeoff, and project validation.

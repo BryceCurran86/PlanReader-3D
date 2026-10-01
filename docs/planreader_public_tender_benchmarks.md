@@ -1,4 +1,10 @@
-# PlanReader Public Tender Benchmark Expansion
+# PlanReader Public Tender Benchmark Expansion [HISTORICAL / RETIRED]
+
+> [!WARNING]
+> **PERMANENT PROJECT DIRECTIVE — OLD BENCHMARK RETIRED**  
+> The previous canonical-five / legacy percentage benchmark (KSTVET, Murera, Ghazi, Umma, Lamu) is **COMPLETELY RETIRED**.  
+> It must not be run, reported, used as a headline, or used as a production gate.  
+> The active validation system is now the **V2 full-plan, independently source-closed truth framework** (`benchmarks/frozen_holdout/full_plan_v2/`).
 
 ## 1. Overview and Rationale
 PlanReader accuracy verification has historically relied on internal benchmark datasets (e.g. 60–62 School Rd, 92–94 School Rd, LAGO / Birtinya). While these benchmarks provide high-confidence ground truth from real-world projects, external public tender benchmarks provide independent proof that PlanReader is not tuned solely to internal estimating styles or single-contractor drafting practices.
