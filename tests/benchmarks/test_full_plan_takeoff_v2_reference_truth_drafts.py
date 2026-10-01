@@ -1325,3 +1325,37 @@ def test_3laurel_niche_free_ensuite_shower_returns_are_net_closed():
     assert check["component_sum_m2"] == pytest.approx(9.72)
     assert check["complete_for_these_four_faces"] is True
     assert check["complete_for_project_wet_area_tile_universe"] is False
+
+
+def test_3laurel_ensuite_rear_flat_faces_close_after_known_niche_deductions():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    main = by_ref["3laurel:surface:wall_tile:ensuite_rear_flat_after_niche"]
+    gf = by_ref["3laurel:surface:wall_tile:gf_ensuite_rear_flat_after_niche"]
+
+    assert main["expected_quantity"] == pytest.approx(4.296)
+    assert main["attributes"]["gross_area_m2"] == pytest.approx(4.536)
+    assert main["attributes"]["niche_face_deduction_m2"] == pytest.approx(0.24)
+    assert main["attributes"]["niche_returns_included"] is False
+    assert main["attributes"]["net_flat_face_area_ready"] is True
+
+    assert gf["expected_quantity"] == pytest.approx(4.809)
+    assert gf["attributes"]["gross_area_m2"] == pytest.approx(5.049)
+    assert gf["attributes"]["niche_face_deduction_m2"] == pytest.approx(0.24)
+    assert gf["attributes"]["niche_returns_included"] is False
+    assert gf["attributes"]["net_flat_face_area_ready"] is True
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"]
+        == "3laurel:closure:ensuite_rear_flat_faces_after_niche_deductions"
+    )
+    assert check["object_count"] == 2
+    assert check["component_sum_m2"] == pytest.approx(9.105)
+    assert check["flat_face_niche_deduction_sum_m2"] == pytest.approx(0.48)
+    assert check["niche_returns_resolved"] is False
+    assert check["complete_for_two_flat_host_faces"] is True
+    assert check["complete_for_full_niche_tile_assemblies"] is False
