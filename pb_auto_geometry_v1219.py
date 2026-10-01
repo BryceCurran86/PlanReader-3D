@@ -1365,16 +1365,23 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
     finish_rows, finishes = _build_bound_wall_finish_rows(app, int(workspace_id), [dict(p) for p in pages])
     all_auto_rows = unit_rows + facade_rows + partition_rows + finish_rows
 
-    # AG-08: Run semantic conflict diagnostic guard across candidates
-    conflicts = []
-    try:
-        from pb_semantic_conflict_guard import annotate_rows_with_conflicts
-        explicit_conflicts = getattr(app, "detected_semantic_conflicts", []) or []
-        conflicts.extend(explicit_conflicts)
-        if conflicts:
-            all_auto_rows = annotate_rows_with_conflicts(all_auto_rows, conflicts)
-    except Exception:
-        pass
+    # AG-08: Collect identity-proven semantic conflicts from live runtime
+    # evidence and annotate only the affected canonical takeoff rows. No
+    # proximity/count heuristics and no benchmark truth are consulted here.
+    from pb_semantic_conflict_guard import (
+        annotate_rows_with_conflicts,
+        collect_runtime_semantic_conflicts,
+    )
+
+    conflicts = collect_runtime_semantic_conflicts(
+        app,
+        finishes=finishes,
+    )
+    if conflicts:
+        all_auto_rows = annotate_rows_with_conflicts(
+            all_auto_rows,
+            conflicts,
+        )
 
     # Rows, envelope and report are one publication: all commit or none do.
     with _auto_publication(app, int(workspace_id), all_auto_rows) as publication:
