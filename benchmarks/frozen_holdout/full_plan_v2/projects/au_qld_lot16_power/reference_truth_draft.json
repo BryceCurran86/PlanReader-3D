@@ -1594,6 +1594,43 @@
         "quantity_basis": "figured finished room dimensions",
         "closure_group": "lot16_declared_floor_area"
       }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile:bath_elev4_flat_after_niche",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Bath elevation 4 flat tile face after niche opening deduction",
+      "expected_quantity": 2.658,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_Elevation_4:1200x2590_gross_less_900x500_niche_face",
+      "attributes": {
+        "host_gross_surface_ref": "lot16:surface:wall_tile_gross:bath:elev4",
+        "niche_deduction_ref": "lot16:opening:p11:bath_elev4_niche:01",
+        "gross_area_m2": 3.108,
+        "niche_face_deduction_m2": 0.45,
+        "calculation": "3.108 - 0.450",
+        "niche_returns_included": false,
+        "net_flat_face_area_ready": true
+      }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile:ensuite_elev2_topplate_flat_after_niche",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Ensuite elevation 2 tile face to top-plate datum after niche opening deduction",
+      "expected_quantity": 3.9271,
+      "unit": "m2",
+      "source_location": "architectural:p11:Ensuite_Elevation_2:1690x2590_gross_less_900x500_niche_face",
+      "attributes": {
+        "host_gross_surface_ref": "lot16:surface:wall_tile_gross:ensuite:elev2",
+        "niche_deduction_ref": "lot16:opening:p11:ensuite_elev2_niche:01",
+        "gross_area_to_top_plate_m2": 4.3771,
+        "niche_face_deduction_m2": 0.45,
+        "calculation": "4.3771 - 0.450",
+        "niche_returns_included": false,
+        "raked_extension_above_top_plate_included": false,
+        "top_plate_flat_portion_ready": true
+      }
     }
   ],
   "closure_checks": [
@@ -2084,6 +2121,21 @@
       "scaling_substitute_allowed": false,
       "denominator_ready": false,
       "conclusion": "The drawn profile chain is measurable, but the final installed retaining-wall extent is expressly variable and must remain unresolved."
+    },
+    {
+      "check_id": "lot16:closure:known_niche_flat_tile_faces",
+      "component_object_refs": [
+        "lot16:surface:wall_tile:bath_elev4_flat_after_niche",
+        "lot16:surface:wall_tile:ensuite_elev2_topplate_flat_after_niche"
+      ],
+      "object_count": 2,
+      "component_sum_m2": 6.5851,
+      "flat_niche_face_deduction_sum_m2": 0.9,
+      "bath_face_complete_excluding_niche_returns": true,
+      "ensuite_top_plate_portion_complete_excluding_niche_returns": true,
+      "ensuite_raked_extension_resolved": false,
+      "niche_returns_resolved": false,
+      "complete_for_project_wet_area_tile_universe": false
     }
   ]
 }
