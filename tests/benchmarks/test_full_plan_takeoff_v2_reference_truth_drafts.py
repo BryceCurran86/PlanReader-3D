@@ -534,3 +534,37 @@ def test_3laurel_main_wc_gross_wall_faces_close_from_finished_dimensions():
     assert check["object_count"] == 4
     assert check["component_sum_m2"] == pytest.approx(14.418)
     assert check["net_denominator_ready"] is False
+
+
+def test_lot16_bed2_bed3_gross_wall_faces_are_dimension_closed_but_not_net_ready():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:bed2_bed3_gross_wall_faces"
+    )
+    refs = set(check["component_object_refs"])
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
+    assert len(faces) == check["object_count"] == 8
+    assert check["bed2_floor_dimension_closure"]["calculated_floor_area_m2"] == pytest.approx(11.88)
+    assert check["bed2_floor_dimension_closure"]["source_declared_floor_area_m2"] == pytest.approx(11.88)
+    assert check["bed3_floor_dimension_closure"]["calculated_floor_area_m2"] == pytest.approx(11.70)
+    assert check["bed3_floor_dimension_closure"]["source_declared_floor_area_m2"] == pytest.approx(11.70)
+    assert check["wall_height_to_top_plate_m"] == pytest.approx(2.59)
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(71.225)
+    assert check["gross_wall_area_m2"] == pytest.approx(71.225)
+    assert check["complete_for_bed2_bed3_top_plate_rectangular_wall_faces"] is True
+    assert check["openings_and_ceiling_intersections_resolved"] is False
+    assert all(
+        row["attributes"]["denominator_readiness"]
+        == "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+        for row in faces
+    )
+    assert (
+        "internal_wall_faces_beyond_closed_bed2_bed3_top_plate_gross_faces"
+        in draft["unresolved_surface_families"]
+    )
