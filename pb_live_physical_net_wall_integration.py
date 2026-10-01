@@ -18,11 +18,13 @@ from typing import Optional, Sequence
 import fitz
 
 from pb_live_external_physical_net_wall_publication import (
+    LiveCanonicalWallObject,
     LiveExternalPhysicalNetWallPublication,
     compose_live_external_physical_net_wall_publication,
 )
 from pb_live_gross_wall_geometry_composition import compose_live_gross_wall_geometry
 from pb_live_physical_opening_void_composition import (
+    LiveCanonicalOpeningObject,
     compose_live_physical_opening_voids,
 )
 from pb_live_wall_opening_authority_composition import (
@@ -33,7 +35,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION = "1.0.0"
+LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION = "1.2.0"
 LIVE_PHYSICAL_NET_WALL_INTEGRATION_RESOLVED = (
     "live_physical_net_wall_integration_resolved"
 )
@@ -48,6 +50,8 @@ class LivePhysicalNetWallClaim:
     reason_codes: tuple[str, ...]
     quantity_m2: Optional[float]
     source_pages: tuple[int, ...]
+    canonical_walls: tuple[LiveCanonicalWallObject, ...]
+    canonical_openings: tuple[LiveCanonicalOpeningObject, ...]
     external_wall_ids: tuple[str, ...]
     evidence_ids: tuple[str, ...]
     quantity_id: Optional[str]
@@ -156,6 +160,8 @@ def collect_live_physical_net_wall_claim(
             ),
             quantity_m2=float(evidence.value),
             source_pages=source_pages,
+            canonical_walls=publication.canonical_walls,
+            canonical_openings=physical_void.canonical_openings,
             external_wall_ids=publication.external_wall_ids,
             evidence_ids=tuple(evidence.evidence_ids),
             quantity_id=evidence.quantity_id,
@@ -171,6 +177,8 @@ def collect_live_physical_net_wall_claim(
         ),
         quantity_m2=None,
         source_pages=(),
+        canonical_walls=(),
+        canonical_openings=physical_void.canonical_openings,
         external_wall_ids=(),
         evidence_ids=(),
         quantity_id=None,

@@ -23,8 +23,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "30b118e56395c61c7499e7305d203b77d4b6e62cd1df3977c3112a4920070a85",
-      "size_bytes": 9038,
+      "sha256": "b1e26a082366bb6a26309d4715096f710d2474fb29ebee0d528b598ca98de5c8",
+      "size_bytes": 21653,
       "page_count": null
     }
   ],
@@ -289,6 +289,286 @@
       "source_location_refs": [
         "architectural:p3:floor_plan:GARAGE_external_870",
         "architectural:p4-p5:elevations:FSL_to_JL_2100"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-internal-access-0870-bed3-area",
+      "description": "Internal 870 mm hinged room-access opening: bed3 area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:opening:p3:internal_access:0870_bed3"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:870_bed3:bbox_627.5_276.9_634.9_287.8; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-internal-access-0870-bed2-area",
+      "description": "Internal 870 mm hinged room-access opening: bed2 area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:opening:p3:internal_access:0870_bed2"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:870_bed2:bbox_593.8_276.9_601.1_287.8; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-internal-access-0870-bath-area",
+      "description": "Internal 870 mm hinged room-access opening: bath area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:opening:p3:internal_access:0870_bath"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:870_bath:bbox_586.7_374.9_594.1_385.8; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-internal-access-0870-laundry-area",
+      "description": "Internal 870 mm hinged room-access opening: laundry area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:opening:p3:internal_access:0870_laundry"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:870_laundry:bbox_690.2_343.4_697.6_354.2; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-internal-access-0870-bed1-area",
+      "description": "Internal 870 mm hinged room-access opening: bed1 area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:opening:p3:internal_access:0870_bed1"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:870_bed1:bbox_415.6_276.5_423_287.3; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-internal-access-0870-wir-area",
+      "description": "Internal 870 mm hinged room-access opening: wir area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:opening:p3:internal_access:0870_wir"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:870_wir:bbox_439.7_253.8_450.6_261.2; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-internal-access-0870-ensuite-area",
+      "description": "Internal 870 mm hinged room-access opening: ensuite area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:opening:p3:internal_access:0870_ensuite"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:870_ensuite:bbox_439.7_240_450.6_247.4; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-internal-access-0870-wc-area",
+      "description": "Internal 870 mm cavity-slider room-access opening: wc area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:opening:p3:internal_access:0870_wc"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:870_wc:bbox_638.6_324.2_655.3_329.9; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-internal-access-0870-garage-to-entry-area",
+      "description": "Internal 870 mm hinged room-access opening: garage to entry area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:opening:p3:internal_access:0870_garage_to_entry"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:870_garage_to_entry:bbox_567_354.6_574.4_365.4; architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-ceiling-garage-flat-area",
+      "description": "Garage flat ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 38.94,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:surface:ceiling:garage_flat"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:GARAGE_[FLAT_CEILING]:6000x6490_figured_dimensions"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-ceiling-ensuite-raked-12deg-area",
+      "description": "Ensuite raked ceiling plane following 12 degree roof pitch area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 5.613672,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:surface:ceiling:ensuite_raked_12deg"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:ENS_[RAKED_CEILING]:2890x1900_figured_dimensions; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-ceiling-wir-raked-12deg-area",
+      "description": "WIR raked ceiling plane following 12 degree roof pitch area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 4.786394,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:surface:ceiling:wir_raked_12deg"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:WIR_[RAKED_CEILING]:2890x1620_figured_dimensions; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-floor-ensuite-area",
+      "description": "Ensuite tiled floor surface area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 5.491,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:surface:floor:ensuite"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:ENS:TILES:2890x1900_figured_dimensions"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "lot16-floor-wir-area",
+      "description": "WIR vinyl floor surface area",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 4.6818,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "lot16:surface:floor:wir"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:floor_plan:WIR:VINYL:2890x1620_figured_dimensions"
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"

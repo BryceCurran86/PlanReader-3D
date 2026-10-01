@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
 
 import fitz
 
@@ -16,6 +17,9 @@ from pb_structural_member_definition_source_shadow import (
     STRUCTURAL_DEFINITION_SOURCE_SHADOW_PAGE_UNAVAILABLE,
     STRUCTURAL_DEFINITION_SOURCE_SHADOW_RESOLVED,
     STRUCTURAL_DEFINITION_SOURCE_SHADOW_SCOPE_MISMATCH,
+    _boq_commercial_columns,
+    _is_ignorable_standalone_untrusted_marker,
+    _is_ignorable_untrusted_commercial_cell,
     compile_structural_definition_source_shadow,
 )
 
@@ -197,3 +201,187 @@ def test_shadow_module_has_no_benchmark_or_commercial_imports():
         any(token in name.lower() for token in forbidden)
         for name in names
     )
+
+
+
+def _marker_receipt(
+    *,
+    raw_text="-",
+    page_id="47",
+    block_no=11,
+    line_no=0,
+    word_no=0,
+):
+    return SimpleNamespace(
+        raw_text=raw_text,
+        page_id=page_id,
+        block_no=block_no,
+        line_no=line_no,
+        word_no=word_no,
+    )
+
+
+def test_only_source_isolated_decorative_marker_line_can_be_omitted():
+    receipt = _marker_receipt()
+    counts = {("47", 11, 0): 1}
+    assert _is_ignorable_standalone_untrusted_marker(receipt, counts)
+
+
+def test_marker_sharing_a_semantic_line_still_blocks_completeness():
+    receipt = _marker_receipt()
+    counts = {("47", 11, 0): 2}
+    assert not _is_ignorable_standalone_untrusted_marker(receipt, counts)
+
+
+def test_semantic_or_nonleading_untrusted_tokens_still_block_completeness():
+    counts = {("47", 11, 0): 1}
+    assert not _is_ignorable_standalone_untrusted_marker(
+        _marker_receipt(raw_text="CHS"),
+        counts,
+    )
+    assert not _is_ignorable_standalone_untrusted_marker(
+        _marker_receipt(word_no=1),
+        counts,
+    )
+    assert not _is_ignorable_standalone_untrusted_marker(
+        _marker_receipt(line_no=None),
+        counts,
+    )
+
+
+
+def _trusted_header_row(
+    text,
+    *,
+    x0,
+    x1,
+    line_no,
+    page_id="47",
+    block_no=0,
+):
+    receipt = SimpleNamespace(
+        raw_text=text,
+        page_id=page_id,
+        block_no=block_no,
+        line_no=line_no,
+        word_no=0,
+        geometry=(x0, 10.0, x1, 20.0),
+    )
+    result = SimpleNamespace(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        trusted_text=text,
+    )
+    return f"obs-{text}-{line_no}", result, receipt
+
+
+def _complete_boq_header_rows():
+    return [
+        _trusted_header_row("Description", x0=100, x1=160, line_no=0),
+        _trusted_header_row("Quantity", x0=200, x1=240, line_no=1),
+        _trusted_header_row("Unit", x0=260, x1=280, line_no=2),
+        _trusted_header_row("Rate", x0=300, x1=320, line_no=3),
+        _trusted_header_row("Amount", x0=360, x1=400, line_no=4),
+    ]
+
+
+def _commercial_cell(
+    text,
+    *,
+    x0,
+    x1,
+    line_no=4,
+    word_no=0,
+    y0=100.0,
+):
+    return SimpleNamespace(
+        raw_text=text,
+        page_id="47",
+        block_no=12,
+        line_no=line_no,
+        word_no=word_no,
+        geometry=(x0, y0, x1, y0 + 12.0),
+    )
+
+
+def test_complete_trusted_boq_header_proves_rate_and_amount_columns():
+    columns = _boq_commercial_columns(_complete_boq_header_rows())
+    assert set(columns) == {"47"}
+
+    counts = {
+        ("47", 12, 4): 1,
+        ("47", 12, 5): 1,
+    }
+    assert _is_ignorable_untrusted_commercial_cell(
+        _commercial_cell("2,200", x0=300, x1=330, line_no=4),
+        counts,
+        columns,
+    )
+    assert _is_ignorable_untrusted_commercial_cell(
+        _commercial_cell("8,800", x0=370, x1=410, line_no=5),
+        counts,
+        columns,
+    )
+
+
+def test_quantity_or_semantic_numeric_text_is_not_ignored_as_commercial():
+    columns = _boq_commercial_columns(_complete_boq_header_rows())
+    counts = {
+        ("47", 12, 2): 1,
+        ("47", 12, 4): 1,
+    }
+    assert not _is_ignorable_untrusted_commercial_cell(
+        _commercial_cell("4", x0=210, x1=230, line_no=2),
+        counts,
+        columns,
+    )
+    assert not _is_ignorable_untrusted_commercial_cell(
+        _commercial_cell("2200mm", x0=300, x1=330, line_no=4),
+        counts,
+        columns,
+    )
+
+
+def test_commercial_cell_omission_requires_isolated_first_token_below_header():
+    columns = _boq_commercial_columns(_complete_boq_header_rows())
+    receipt = _commercial_cell("2,200", x0=300, x1=330, line_no=4)
+    assert not _is_ignorable_untrusted_commercial_cell(
+        receipt,
+        {("47", 12, 4): 2},
+        columns,
+    )
+    assert not _is_ignorable_untrusted_commercial_cell(
+        _commercial_cell(
+            "2,200",
+            x0=300,
+            x1=330,
+            line_no=4,
+            word_no=1,
+        ),
+        {("47", 12, 4): 1},
+        columns,
+    )
+    assert not _is_ignorable_untrusted_commercial_cell(
+        _commercial_cell(
+            "2,200",
+            x0=300,
+            x1=330,
+            line_no=4,
+            y0=15.0,
+        ),
+        {("47", 12, 4): 1},
+        columns,
+    )
+
+
+def test_incomplete_or_misordered_boq_header_proves_no_commercial_columns():
+    incomplete = _complete_boq_header_rows()[:-1]
+    assert _boq_commercial_columns(incomplete) == {}
+
+    misordered = [
+        _trusted_header_row("Description", x0=100, x1=160, line_no=0),
+        _trusted_header_row("Quantity", x0=200, x1=240, line_no=1),
+        _trusted_header_row("Unit", x0=260, x1=280, line_no=2),
+        _trusted_header_row("Rate", x0=380, x1=400, line_no=3),
+        _trusted_header_row("Amount", x0=300, x1=320, line_no=4),
+    ]
+    assert _boq_commercial_columns(misordered) == {}

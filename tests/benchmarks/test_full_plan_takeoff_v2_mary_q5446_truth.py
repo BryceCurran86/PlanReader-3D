@@ -41,14 +41,25 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     manifest = load_project_manifest(project / "source_manifest.json")
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
-    assert len(manifest.verified_items) == 19
+    door_items = [
+        item for item in manifest.verified_items
+        if item.item_id.startswith("maryborough-door-")
+    ]
+    assert {item.item_id for item in door_items} == {
+        "maryborough-door-ipf3-count",
+        "maryborough-door-ipf3-leaf-area-one-face",
+        "maryborough-door-laminex-partition-count",
+        "maryborough-door-aluminium-glazed-count",
+        "maryborough-door-coolroom-by-others-count",
+        "maryborough-door-lessee-shelving-by-others-count",
+    }
 
-    eligible = [item for item in manifest.verified_items if item.denominator_eligible]
-    excluded = [item for item in manifest.verified_items if not item.denominator_eligible]
-    assert len(eligible) == 16
+    eligible = [item for item in door_items if item.denominator_eligible]
+    excluded = [item for item in door_items if not item.denominator_eligible]
+    assert len(eligible) == 3
     assert len(excluded) == 3
 
-    by_id = {item.item_id: item for item in manifest.verified_items}
+    by_id = {item.item_id: item for item in door_items}
     assert by_id["maryborough-door-ipf3-count"].expected_quantity == 11
     assert by_id["maryborough-door-ipf3-leaf-area-one-face"].expected_quantity == 20.2368
     assert not by_id["maryborough-door-ipf3-leaf-area-one-face"].denominator_eligible
@@ -102,20 +113,27 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     _assert_reference_hash("au_qld_maryborough_service_station")
 
 
-def test_q5446_only_independently_closed_alfresco_enters_verified_core():
+def test_q5446_existing_floor_core_stays_scoped_and_project_incomplete():
     project = ROOT / "au_qld_q5446_armstrong32_harlequin"
     manifest = load_project_manifest(project / "source_manifest.json")
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
-    assert len(manifest.verified_items) == 5
 
-    item = manifest.verified_items[0]
-    assert item.item_id == "q5446-alfresco-floor-area"
+    by_id = {row.item_id: row for row in manifest.verified_items}
+    expected_existing_ids = {
+        "q5446-alfresco-floor-area",
+        "q5446-ground-ensuite-floor-tiling-area",
+        "q5446-first-ensuite-floor-tiling-area",
+        "q5446-first-bath-floor-tiling-area",
+        "q5446-ground-laundry-floor-tiling-area",
+    }
+    assert expected_existing_ids <= set(by_id)
+
+    item = by_id["q5446-alfresco-floor-area"]
     assert item.expected_quantity == 12.0
     assert item.unit == "m2"
     assert item.expected_object_refs == ("q5446:surface:floor:alfresco",)
 
-    by_id = {row.item_id: row for row in manifest.verified_items}
     assert by_id["q5446-ground-ensuite-floor-tiling-area"].expected_quantity == 4.2224
     assert by_id["q5446-first-ensuite-floor-tiling-area"].expected_quantity == 5.9572
     assert by_id["q5446-first-bath-floor-tiling-area"].expected_quantity == 5.8446
@@ -134,8 +152,103 @@ def test_q5446_only_independently_closed_alfresco_enters_verified_core():
     }
     assert controls["garage"]["quantity_m2"] == 36.40
     assert controls["total"]["quantity_m2"] == 298.19
-    assert len(ref["independent_geometry_checks"]) == 4
+    geometry_by_ref = {
+        row["surface_ref"]: row
+        for row in ref["independent_geometry_checks"]
+        if "surface_ref" in row
+    }
+    assert {
+        "q5446:surface:floor:ground_ensuite",
+        "q5446:surface:floor:first_ensuite",
+        "q5446:surface:floor:first_bath",
+    } <= set(geometry_by_ref)
+    assert any(
+        row.get("surface_ref") == "q5446:surface:floor:ground_laundry"
+        or row.get("architectural_vector_mm") == [2616.2, 1600.2]
+        for row in ref["independent_geometry_checks"]
+    )
     _assert_reference_hash("au_qld_q5446_armstrong32_harlequin")
+
+
+def test_q5446_ground_living_porcelain_floor_is_source_closed():
+    project = ROOT / "au_qld_q5446_armstrong32_harlequin"
+    manifest = load_project_manifest(project / "source_manifest.json")
+    by_id = {row.item_id: row for row in manifest.verified_items}
+
+    item = by_id["q5446-ground-living-floor-tiling-area"]
+    assert item.expected_quantity == 12.92
+    assert item.unit == "m2"
+    assert item.trade_category == "tiling"
+    assert item.expected_object_refs == (
+        "q5446:surface:floor:ground_living",
+    )
+    assert item.denominator_eligible is True
+
+    universe = _json(project / "object_universe.json")
+    obj = next(
+        row for row in universe["verified_objects"]
+        if row["object_ref"] == "q5446:surface:floor:ground_living"
+    )
+    assert obj["figured_dimensions_mm"] == [4000, 3230]
+    assert obj["vector_inner_faces_mm"] == [3996.27, 3234.27]
+    assert obj["expected_area_m2"] == 12.92
+    assert obj["finish_scope"] == "porcelain_floor_tile"
+
+    verification = obj["verification"]
+    assert verification["object_exists"] is True
+    assert verification["object_identified"] is True
+    assert verification["geometry_verified"] is True
+    assert verification["geometry_scope"] == "2D rectangular room extents only"
+    assert verification["quantity_verified"] is True
+    assert verification["fully_source_closed"] is True
+
+    provenance = obj["provenance"]
+    assert provenance["document_refs"] == [
+        "Q5446_Standard_Plans_V1_20220320.pdf",
+        "Q5446_Sales_Advice_Estimate_V1_20220320.pdf",
+    ]
+    assert provenance["sheet_page_refs"] == [
+        "standard_plans:p1",
+        "sales_advice:p6",
+    ]
+
+    ref = _json(project / "reference_takeoff.json")
+    geometry = next(
+        row for row in ref["independent_geometry_checks"]
+        if row.get("surface_ref") == "q5446:surface:floor:ground_living"
+    )
+    assert geometry["figured_mm"] == [4000, 3230]
+    assert geometry["figured_area_m2"] == 12.92
+    assert geometry["vector_mm"] == [3996.27, 3234.27]
+    assert geometry["vector_area_m2"] == 12.924992
+    assert geometry["relative_difference"] == 0.000386
+    assert geometry["agreement"] == "PASS"
+
+    assert ref["scope_evidence"]["living_floor_tile"] == [
+        "Q5446_Sales_Advice_Estimate_V1_20220320.pdf:p6: builders range 600x600 porcelain floor tiles to entry, kitchen and living areas"
+    ]
+
+    unresolved = _json(project / "unresolved_items.json")
+    remaining = next(
+        row for row in unresolved["unresolved_families"]
+        if row["family"] == "remaining_floor_finishes"
+    )
+    assert "Ground Living" in remaining["reason"]
+    assert "entry" in remaining["reason"]
+    assert "kitchen" in remaining["reason"]
+
+    report = _json(project / "verification_report.json")
+    proof = {
+        row["proof"]: row for row in report["proofs"]
+    }["ground Living porcelain tile surface independently closed"]
+    assert proof["status"] == "PASS"
+    closure = next(
+        row for row in report["measurement_closure_checks"]
+        if row.get("object_ref") == "q5446:surface:floor:ground_living"
+    )
+    assert closure["decision"] == "VERIFIED_CORE"
+    assert closure["figured_area_m2"] == 12.92
+    assert closure["vector_area_m2"] == 12.924992
 
 
 def test_verified_items_have_exact_refs_reference_doc_and_lineage():
@@ -225,3 +338,104 @@ def test_maryborough_airlock_laundry_truth_is_closed():
         assert row["a120_ceiling_finish"] == "WFPB"
         assert row["a120_ceiling_height_mm"] == 2400
         assert row["agreement"] == "PASS"
+
+
+def test_maryborough_food_prep_office_family_is_scoped_and_source_closed():
+    project = ROOT / "au_qld_maryborough_service_station"
+    manifest = load_project_manifest(project / "source_manifest.json")
+    universe = _json(project / "object_universe.json")
+    manifest_json = _json(project / "source_manifest.json")
+
+    expected_refs = {
+        "maryborough:surface:floor:food_prep",
+        "maryborough:surface:ceiling:food_prep",
+        "maryborough:surface:floor:office",
+        "maryborough:surface:ceiling:office",
+    }
+    expected_ids = {
+        "maryborough-food-prep-ft3-floor-area",
+        "maryborough-food-prep-fpb-ceiling-area",
+        "maryborough-office-ft3-floor-area",
+        "maryborough-office-grid-ceiling-area",
+    }
+
+    family_items = [
+        item
+        for item in manifest.verified_items
+        if len(item.expected_object_refs) == 1
+        and item.expected_object_refs[0] in expected_refs
+    ]
+    assert {item.item_id for item in family_items} == expected_ids
+    assert {item.expected_object_refs[0] for item in family_items} == expected_refs
+    assert all(item.denominator_eligible for item in family_items)
+    assert all(item.unit == "m2" for item in family_items)
+    assert {item.trade_category for item in family_items} == {"tiling", "ceilings"}
+
+    objects = {
+        row["object_ref"]: row
+        for row in (
+            universe["verified_floor_surfaces"]
+            + universe["verified_ceiling_surfaces"]
+        )
+        if row["object_ref"] in expected_refs
+    }
+    assert set(objects) == expected_refs
+
+    source_docs = {row["name"] for row in manifest_json["source_documents"]}
+    for obj in objects.values():
+        verification = obj["verification"]
+        assert verification["object_exists"] is True
+        assert verification["object_identified"] is True
+        assert verification["geometry_verified"] is True
+        assert verification["quantity_verified"] is True
+        assert verification["fully_source_closed"] is True
+
+        provenance = obj["provenance"]
+        assert provenance["document_ref"] == (
+            "Arch_Combined_Maryborough_Service_Station.pdf"
+        )
+        assert provenance["document_ref"] in source_docs
+        assert set(provenance["source_evidence_refs"]) == set(
+            obj["source_locations"]
+        )
+        assert all(
+            any(
+                evidence.startswith(sheet + ":")
+                for sheet in provenance["sheet_page_refs"]
+            )
+            for evidence in provenance["source_evidence_refs"]
+        )
+
+    report = _json(project / "verification_report.json")
+    summary = report["food_prep_office_surface_closure_summary"]
+    assert set(summary["object_refs"]) == expected_refs
+    assert summary["source_closed_object_count"] == 4
+    assert summary["object_identity_available"] is True
+    assert summary["geometry_verified"] is True
+    assert summary["quantity_verified"] is True
+    assert summary["provenance_chain_complete"] is True
+    assert summary["project_surface_universe_complete"] is False
+
+
+def test_maryborough_food_prep_truth_is_closed():
+    ref = _json(ROOT / "au_qld_maryborough_service_station" / "reference_takeoff.json")
+    check = ref["food_prep_geometry_check"]
+    assert check["a140_figured_mm"] == [4025, 3297]
+    assert check["area_m2"] == 13.270425
+    assert check["a140_floor_finish"] == "FT3"
+    assert check["a110_geometry_status"] == "MATCHING_PHYSICAL_ROOM"
+    assert check["a120_ceiling_finish"] == "FPB"
+    assert check["a120_ceiling_height_mm"] == 3000
+    assert check["agreement"] == "PASS"
+
+
+def test_maryborough_office_truth_is_closed():
+    ref = _json(ROOT / "au_qld_maryborough_service_station" / "reference_takeoff.json")
+    check = ref["office_geometry_check"]
+    assert check["a140_figured_mm"] == [3570, 2536]
+    assert check["area_m2"] == 9.05352
+    assert check["a140_floor_finish"] == "FT3"
+    assert check["a110_geometry_status"] == "MATCHING_PHYSICAL_ROOM"
+    assert check["a120_ceiling_finish"] == "GRID"
+    assert check["a120_ceiling_height_mm"] == 2400
+    assert check["agreement"] == "PASS"

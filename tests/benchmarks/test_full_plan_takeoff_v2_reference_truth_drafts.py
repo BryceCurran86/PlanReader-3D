@@ -1,0 +1,1576 @@
+from __future__ import annotations
+
+import json
+import math
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2] / "benchmarks" / "frozen_holdout" / "full_plan_v2" / "projects"
+PROJECTS = ("au_qld_lot16_power", "au_qld_3laurel")
+
+
+def _load(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("project_id", PROJECTS)
+def test_reference_truth_draft_is_fail_closed_and_source_locked(project_id: str):
+    project_root = ROOT / project_id
+    manifest = _load(project_root / "source_manifest.json")
+    draft = _load(project_root / "reference_truth_draft.json")
+
+    assert draft["schema_version"] == "draft-reference-truth-v1"
+    assert draft["project_id"] == project_id == manifest["project_id"]
+    assert draft["status"] == "DRAFT_INCOMPLETE"
+    assert "never PlanReader output" in draft["truth_source_policy"]
+    assert draft["unresolved_surface_families"]
+    assert "Do not mark project VERIFIED" in draft["completion_rule"]
+
+    frozen_docs = {doc["name"]: doc["sha256"] for doc in manifest["source_documents"]}
+    assert draft["source_documents"]
+    for source in draft["source_documents"]:
+        assert frozen_docs[source["name"]] == source["sha256"]
+
+
+@pytest.mark.parametrize("project_id", PROJECTS)
+def test_reference_truth_candidates_have_unique_positive_source_lineage(project_id: str):
+    draft = _load(ROOT / project_id / "reference_truth_draft.json")
+    candidates = draft["verified_physical_candidates"]
+    assert candidates
+
+    refs = [row["object_ref"] for row in candidates]
+    assert len(refs) == len(set(refs))
+
+    for row in candidates:
+        assert row["physical_kind"] in {"surface", "opening_surface", "structural_member"}
+        assert row["object_family"]
+        assert row["description"]
+        quantity = float(row["expected_quantity"])
+        assert math.isfinite(quantity) and quantity > 0
+        assert row["unit"] in {"m", "m2", "count"}
+        assert row["source_location"]
+        assert "planreader" not in row["source_location"].lower()
+
+
+@pytest.mark.parametrize("project_id", PROJECTS)
+def test_aggregate_controls_are_explicitly_separate_from_physical_candidates(project_id: str):
+    draft = _load(ROOT / project_id / "reference_truth_draft.json")
+    candidate_refs = {row["object_ref"] for row in draft["verified_physical_candidates"]}
+    controls = draft["aggregate_controls_not_denominator"]
+    assert controls
+
+    for control in controls:
+        assert control["control_id"] not in candidate_refs
+        assert math.isfinite(float(control["expected_quantity"]))
+        assert float(control["expected_quantity"]) > 0
+        assert control["source_location"]
+        assert control["reason"]
+
+
+def test_lot16_and_3laurel_truth_drafts_do_not_modify_live_v2_denominator():
+    for project_id in PROJECTS:
+        manifest = _load(ROOT / project_id / "source_manifest.json")
+        assert manifest["status"] == "INCOMPLETE"
+
+        active_document_names = {
+            row["name"]
+            for row in (
+                manifest["source_documents"]
+                + manifest["reference_takeoff_documents"]
+            )
+        }
+        assert "reference_truth_draft.json" not in active_document_names
+
+        for item in manifest["verified_takeoff_items"]:
+            assert "reference_truth_draft.json" not in item["source_document_refs"]
+
+
+@pytest.mark.parametrize(
+    ("project_id", "check_id"),
+    (
+        ("au_qld_lot16_power", "lot16:closure:declared_floor_area"),
+        ("au_qld_3laurel", "3laurel:closure:declared_floor_area"),
+    ),
+)
+def test_declared_floor_area_components_close_exactly_to_source_total(project_id: str, check_id: str):
+    draft = _load(ROOT / project_id / "reference_truth_draft.json")
+    check = next(row for row in draft["closure_checks"] if row["check_id"] == check_id)
+    by_ref = {row["object_ref"]: row for row in draft["verified_physical_candidates"]}
+    calculated = sum(float(by_ref[ref]["expected_quantity"]) for ref in check["component_object_refs"])
+    assert calculated == pytest.approx(float(check["declared_total_m2"]), abs=1e-9)
+    assert float(check["difference_m2"]) == pytest.approx(0.0, abs=1e-9)
+
+
+
+def test_3laurel_primary_ceiling_planes_close_to_declared_plan_area():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    check = next(row for row in draft["closure_checks"] if row["check_id"] == "3laurel:closure:primary_ceiling_planes")
+    by_ref = {row["object_ref"]: row for row in draft["verified_physical_candidates"]}
+    calculated = sum(float(by_ref[ref]["expected_quantity"]) for ref in check["component_object_refs"])
+    assert calculated == pytest.approx(297.50, abs=1e-9)
+    assert calculated == pytest.approx(float(check["declared_reference_plan_area_m2"]), abs=1e-9)
+
+
+def test_3laurel_gross_shower_tile_faces_preserve_closed_vs_niche_blocked_state():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "wet_area_wall_tile_gross_face"
+    ]
+    assert len(faces) == 8
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(23.085)
+
+    readiness = {
+        row["object_ref"]: row["attributes"]["denominator_readiness"]
+        for row in faces
+    }
+    assert sum(
+        value == "gross_face_is_also_net_finish_face_no_opening_or_niche"
+        for value in readiness.values()
+    ) == 5
+    assert sum(
+        value == "draft_only_until_niche_and_return_adjustments_are_resolved"
+        for value in readiness.values()
+    ) == 2
+    assert readiness[
+        "3laurel:surface:wall_tile_gross:bath_shower_wall_2"
+    ] == "deduction_face_closed_but_niche_returns_unresolved"
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:gross_shower_tile_faces"
+    )
+    assert check["net_denominator_ready"] is False
+    assert "all three source-dimensioned niche flat-face deductions are closed" in check["reason"]
+    assert "wet_area_tile_all_niche_return_depths" in draft["unresolved_surface_families"]
+
+
+def test_3laurel_typed_external_opening_census_is_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:typed_external_opening_census"
+    )
+    typed_refs = set(check["component_object_refs"])
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in typed_refs
+    ]
+    assert len(openings) == 20
+    assert check["typed_opening_count"] == 20
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(58.59)
+    assert check["typed_opening_area_m2"] == pytest.approx(58.59)
+    assert check["complete_for_typed_labels"] is True
+    assert check["complete_for_all_openings"] is False
+
+    completed = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:external_opening_census"
+    )
+    assert completed["complete_for_all_external_openings"] is True
+    assert "external_wall_faces_and_cladding" in draft["unresolved_surface_families"]
+
+
+@pytest.mark.parametrize(
+    ("project_id", "check_id", "expected_count", "expected_length"),
+    (
+        ("au_qld_lot16_power", "lot16:closure:wall_bracing_schedule", 24, 27.9),
+        ("au_qld_3laurel", "3laurel:closure:wall_bracing_schedule", 37, 45.75),
+    ),
+)
+def test_wall_bracing_schedule_closure(project_id: str, check_id: str, expected_count: int, expected_length: float):
+    draft = _load(ROOT / project_id / "reference_truth_draft.json")
+    braces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "wall_bracing"
+    ]
+    check = next(row for row in draft["closure_checks"] if row["check_id"] == check_id)
+    assert len(braces) == expected_count == check["object_count"]
+    assert sum(float(row["expected_quantity"]) for row in braces) == pytest.approx(expected_length)
+    assert check["total_length_m"] == pytest.approx(expected_length)
+
+def test_lot16_typed_external_opening_census_closes_without_guessing_custom_front_glazing():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:typed_external_opening_census"
+    )
+    typed_refs = set(check["component_object_refs"])
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in typed_refs
+    ]
+    assert len(openings) == check["typed_opening_count"] == 10
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(31.41)
+    assert check["typed_opening_area_m2"] == pytest.approx(31.41)
+    assert check["complete_for_typed_dimensioned_labels"] is True
+    assert check["complete_for_all_openings"] is False
+    assert "custom_front_windows_measure_on_site" in check["residual_unresolved"]
+    assert (
+        "custom_front_glazing_measure_on_site_only"
+        in draft["unresolved_surface_families"]
+    )
+
+
+def test_3laurel_explicit_external_post_and_pier_census_is_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    posts = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "external_structural_post"
+    ]
+    piers = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "external_structural_pier"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:external_post_pier_census"
+    )
+    assert len(posts) == check["timber_post_count"] == 2
+    assert len(piers) == check["brick_pier_count"] == 4
+    assert len(posts) + len(piers) == check["object_count"] == 6
+    assert all(row["attributes"]["section_mm"] == "140x140" for row in posts)
+    assert all(row["attributes"]["section_mm"] == "470x470" for row in piers)
+    assert check["complete_for_explicitly_dimensioned_posts_and_piers"] is True
+    assert (
+        "structural_members_beyond_closed_wall_bracing_and_explicit_140x140_posts_470x470_piers"
+        in draft["unresolved_surface_families"]
+    )
+
+def test_lot16_bracing_resistance_control_matches_engineering_schedule():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:wall_bracing_resistance"
+    )
+    assert check["direction_A"]["required_kN"] == pytest.approx(98.90)
+    assert check["direction_A"]["provided_kN"] == pytest.approx(104.96)
+    assert check["direction_A"]["margin_kN"] == pytest.approx(6.06)
+    assert check["direction_B"]["required_kN"] == pytest.approx(45.70)
+    assert check["direction_B"]["provided_kN"] == pytest.approx(51.48)
+    assert check["direction_B"]["margin_kN"] == pytest.approx(5.78)
+    assert check["direction_A"]["provided_kN"] > check["direction_A"]["required_kN"]
+    assert check["direction_B"]["provided_kN"] > check["direction_B"]["required_kN"]
+
+
+def test_3laurel_bracing_resistance_controls_match_source_schedules():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:wall_bracing_resistance"
+    )
+    expected = {
+        "A": (93.71, 97.84, 4.13),
+        "B": (44.66, 49.68, 5.02),
+        "A_U2": (25.41, 30.70, 5.29),
+        "B_U2": (31.20, 33.60, 2.40),
+    }
+    for key, (required, provided, margin) in expected.items():
+        row = check["schedules"][key]
+        assert row["required_kN"] == pytest.approx(required)
+        assert row["provided_kN"] == pytest.approx(provided)
+        assert row["margin_kN"] == pytest.approx(margin)
+        assert row["provided_kN"] > row["required_kN"]
+
+def test_lot16_explicit_architectural_support_census_is_source_closed():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    supports = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "architectural_support_member"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:explicit_architectural_support_census"
+    )
+    assert len(supports) == check["object_count"] == 3
+    assert check["telescopic_pier_count"] == 2
+    assert check["hardwood_post_count"] == 1
+    assert sum(
+        row["attributes"]["member_type"] == "telescopic_pier" for row in supports
+    ) == 2
+    post = next(
+        row for row in supports if row["attributes"]["member_type"] == "timber_post"
+    )
+    assert post["attributes"]["section_mm"] == "90x90"
+    assert post["attributes"]["material"] == "hardwood"
+    assert check["complete_for_explicitly_labelled_architectural_supports"] is True
+    assert check["structural_engineering_instance_schedule_available"] is False
+    assert (
+        "structural_members_beyond_closed_wall_bracing_and_explicit_architectural_supports"
+        in draft["unresolved_surface_families"]
+    )
+
+
+
+def test_lot16_known_external_openings_close_except_measure_on_site_glazing():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "external_opening"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:known_external_opening_census"
+    )
+    assert len(openings) == check["known_opening_count"] == 13
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(37.584)
+    assert check["known_opening_area_m2"] == pytest.approx(37.584)
+    assert check["complete_for_all_dimensioned_and_plan_width_openings"] is True
+    assert check["complete_for_all_external_openings"] is False
+    assert check["residual_unresolved"] == ["custom_front_windows_measure_on_site"]
+    assert "custom_front_glazing_measure_on_site_only" in draft["unresolved_surface_families"]
+
+
+def test_3laurel_external_opening_universe_is_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "external_opening"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:external_opening_census"
+    )
+    assert len(openings) == check["external_opening_count"] == 23
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(64.764)
+    assert check["external_opening_area_m2"] == pytest.approx(64.764)
+    assert check["complete_for_all_external_openings"] is True
+    assert "external_wall_faces_and_cladding" in draft["unresolved_surface_families"]
+    assert all(
+        "external_opening" not in item
+        for item in draft["unresolved_surface_families"]
+    )
+
+
+def test_lot16_roof_sheathing_geometry_is_closed_but_engineering_crosscheck_blocks_finality():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    roof = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "roof_sheathing"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:roof_sheathing_geometry"
+    )
+    assert len(roof) == check["roof_plane_count"] == 4
+    assert sum(float(row["attributes"]["projected_area_m2"]) for row in roof) == pytest.approx(252.04696)
+    assert sum(float(row["expected_quantity"]) for row in roof) == pytest.approx(255.250323)
+    assert check["total_projected_plan_area_m2"] == pytest.approx(252.04696)
+    assert check["total_sloped_sheathing_area_m2"] == pytest.approx(255.250323)
+    assert check["pitch_groups_degrees"] == [5, 12]
+    assert check["complete_for_architectural_guide_geometry"] is True
+    assert check["final_engineering_crosscheck_complete"] is False
+    assert (
+        "roof_planes_final_crosscheck_blocked_by_missing_engineering_stormwater_drainage_plan"
+        in draft["unresolved_surface_families"]
+    )
+
+def test_3laurel_partial_internal_wall_gross_faces_are_dimension_closed_but_not_net_ready():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:partial_internal_wall_gross_faces"
+    )
+    refs = set(check["component_object_refs"])
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
+    assert len(faces) == check["object_count"] == 8
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(53.838)
+    assert check["bathroom_gross_area_m2"] == pytest.approx(25.002)
+    assert check["gf_ensuite_laundry_gross_area_m2"] == pytest.approx(28.836)
+    assert check["complete_for_these_two_finished_room_perimeters"] is True
+    assert check["complete_for_project_internal_wall_universe"] is False
+    assert check["openings_and_finish_deductions_resolved"] is False
+    assert all(
+        row["attributes"]["denominator_readiness"]
+        == "draft_only_until_openings_and_finish_scope_are_resolved"
+        for row in faces
+    )
+    assert (
+        any(
+            item.startswith("internal_wall_faces_beyond_closed_")
+            for item in draft["unresolved_surface_families"]
+        )
+    )
+
+
+
+def test_source_limitations_block_unverifiable_geometry_from_truth():
+    lot16 = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    lot_blocker = next(
+        row
+        for row in lot16["closure_checks"]
+        if row["check_id"] == "lot16:blocker:custom_front_glazing_measure_on_site"
+    )
+    assert lot_blocker["status"] == "UNRESOLVED_SOURCE_LIMITATION"
+    assert lot_blocker["exact_dimensions_available"] is False
+    assert lot_blocker["scaling_substitute_allowed"] is False
+    assert "custom_front_glazing_measure_on_site_only" in lot16["unresolved_surface_families"]
+
+    laurel = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    roof_blocker = next(
+        row
+        for row in laurel["closure_checks"]
+        if row["check_id"] == "3laurel:blocker:roof_plane_geometry"
+    )
+    assert roof_blocker["status"] == "UNRESOLVED_SOURCE_LIMITATION"
+    assert roof_blocker["roof_plan_sheet_present"] is False
+    assert roof_blocker["figured_roof_plane_dimensions_available"] is False
+    assert roof_blocker["scaling_substitute_allowed"] is False
+    assert roof_blocker["pitch_evidence_degrees"] == [25]
+    assert "roof_planes" in laurel["unresolved_surface_families"]
+
+
+def test_3laurel_main_laundry_gross_wall_faces_are_dimension_closed_but_not_net_ready():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:main_laundry_internal_wall_gross_faces"
+    )
+    refs = set(check["component_object_refs"])
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
+    assert len(faces) == check["object_count"] == 4
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(25.704)
+    assert check["room_finished_dimensions_m"] == [3.08, 1.68]
+    assert check["finished_ceiling_height_m"] == pytest.approx(2.7)
+    assert check["complete_for_main_laundry_finished_room_perimeter"] is True
+    assert check["openings_and_finish_deductions_resolved"] is False
+    assert all(
+        row["attributes"]["denominator_readiness"]
+        == "draft_only_until_openings_and_finish_scope_are_resolved"
+        for row in faces
+    )
+    assert (
+        any(
+            item.startswith("internal_wall_faces_beyond_closed_")
+            for item in draft["unresolved_surface_families"]
+        )
+    )
+
+
+def test_3laurel_three_source_dimensioned_niche_face_deductions_are_closed_but_returns_are_not():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:source_dimensioned_niche_face_deductions"
+    )
+    refs = set(check["component_object_refs"])
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
+    assert len(openings) == check["niche_opening_count"] == 3
+    assert all(row["object_family"] == "wet_area_wall_tile_deduction_opening" for row in openings)
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(0.72)
+    assert check["flat_face_deduction_area_m2"] == pytest.approx(0.72)
+    assert check["main_ensuite_rear_flat_tile_area_after_niche_m2"] == pytest.approx(4.296)
+    assert check["gf_ensuite_rear_flat_tile_area_after_niche_m2"] == pytest.approx(4.809)
+    assert check["bathroom_D_flat_tile_area_after_niche_m2"] == pytest.approx(1.65)
+    assert check["niche_return_depths_resolved"] is False
+    assert check["bathroom_niche_deduction_resolved"] is True
+    assert all(
+        row["attributes"]["niche_return_depth_resolved"] is False
+        for row in openings
+    )
+    assert "wet_area_tile_all_niche_return_depths" in draft["unresolved_surface_families"]
+
+
+def test_3laurel_main_ensuite_gross_wall_faces_close_from_finished_dimensions():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"].startswith(
+            "3laurel:surface:internal_wall_gross:main_ensuite:"
+        )
+    ]
+    assert len(faces) == 5
+    assert {row["object_ref"].rsplit(":", 1)[1] for row in faces} == {
+        "A", "B", "C", "D", "E"
+    }
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(
+        29.916
+    )
+    assert all(
+        row["attributes"]["finished_ceiling_height_m"] == pytest.approx(2.7)
+        for row in faces
+    )
+    assert all(
+        row["attributes"]["denominator_readiness"]
+        == "draft_only_until_openings_and_finish_scope_are_resolved"
+        for row in faces
+    )
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"]
+        == "3laurel:control:main_ensuite_internal_wall_gross_faces"
+    )
+    assert check["object_count"] == 5
+    assert check["component_sum_m2"] == pytest.approx(29.916)
+    assert check["net_denominator_ready"] is False
+
+
+def test_3laurel_main_wc_gross_wall_faces_close_from_finished_dimensions():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"].startswith(
+            "3laurel:surface:internal_wall_gross:main_wc:"
+        )
+    ]
+    assert len(faces) == 4
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(
+        14.418
+    )
+    widths = sorted(row["attributes"]["finished_face_width_m"] for row in faces)
+    assert widths == pytest.approx([1.11, 1.11, 1.56, 1.56])
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:main_wc_internal_wall_gross_faces"
+    )
+    assert check["object_count"] == 4
+    assert check["component_sum_m2"] == pytest.approx(14.418)
+    assert check["net_denominator_ready"] is False
+
+
+def test_lot16_bed2_bed3_gross_wall_faces_are_dimension_closed_but_not_net_ready():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:bed2_bed3_gross_wall_faces"
+    )
+    refs = set(check["component_object_refs"])
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
+    assert len(faces) == check["object_count"] == 8
+    assert check["bed2_floor_dimension_closure"]["calculated_floor_area_m2"] == pytest.approx(11.88)
+    assert check["bed2_floor_dimension_closure"]["source_declared_floor_area_m2"] == pytest.approx(11.88)
+    assert check["bed3_floor_dimension_closure"]["calculated_floor_area_m2"] == pytest.approx(11.70)
+    assert check["bed3_floor_dimension_closure"]["source_declared_floor_area_m2"] == pytest.approx(11.70)
+    assert check["wall_height_to_top_plate_m"] == pytest.approx(2.59)
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(71.225)
+    assert check["gross_wall_area_m2"] == pytest.approx(71.225)
+    assert check["complete_for_bed2_bed3_top_plate_rectangular_wall_faces"] is True
+    assert check["openings_and_ceiling_intersections_resolved"] is False
+    assert all(
+        row["attributes"]["denominator_readiness"]
+        == "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+        for row in faces
+    )
+    assert (
+        "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces_with_room_access_robe_and_2110_square_set_deductions_pending_linen_broom_joinery_and_unlabelled_archways"
+        in draft["unresolved_surface_families"]
+    )
+
+def test_3laurel_internal_room_access_door_census_is_source_closed_but_joinery_stays_open():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "internal_room_access_opening"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:internal_room_access_door_census"
+    )
+    assert len(openings) == check["room_access_opening_count"] == 14
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(25.011)
+    assert check["hinged_count"] == 8
+    assert check["cavity_slider_count"] == 6
+    assert check["width_distribution_m"] == {"0.72": 4, "0.87": 9, "1.20": 1}
+    assert check["joinery_height_m"] == pytest.approx(2.1)
+    assert check["complete_for_labelled_room_access_doors"] is True
+    assert check["complete_for_all_internal_wall_openings"] is False
+    assert "robe_and_linen_sliding_joinery_openings" in check["residual_unresolved"]
+    assert all(
+        row["attributes"]["wall_deduction_scope"] == "room_access_opening_only"
+        for row in openings
+    )
+    assert (
+        "unlabelled_internal_wall_breaks_beyond_two_closed_dimensioned_open_archways_for_wall_face_deductions"
+        in draft["unresolved_surface_families"]
+    )
+
+def test_3laurel_labelled_internal_joinery_openings_are_closed_but_unlabelled_breaks_stay_open():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "internal_sliding_joinery_opening"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:internal_sliding_joinery_opening_census"
+    )
+    assert len(openings) == check["labelled_vsd_opening_count"] == 4
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(13.86)
+    assert check["width_distribution_m"] == {"1.20": 1, "1.80": 3}
+    assert check["joinery_height_m"] == pytest.approx(2.1)
+    assert check["complete_for_explicit_vsd_labels"] is True
+    assert check["complete_for_all_internal_wall_openings"] is False
+    assert check["residual_unresolved"] == [
+        "unlabelled_internal_wall_breaks_or_open_archways"
+    ]
+    assert (
+        "unlabelled_internal_wall_breaks_beyond_two_closed_dimensioned_open_archways_for_wall_face_deductions"
+        in draft["unresolved_surface_families"]
+    )
+
+
+
+def test_3laurel_bathroom_wc_room_access_deductions_are_mapped_but_not_full_net_walls():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:bathroom_wc_room_access_deductions"
+    )
+    assert check["mapped_room_access_opening_count"] == 2
+    assert check["mapped_room_access_opening_area_m2"] == pytest.approx(3.024)
+    by_room = {row["room"]: row for row in check["room_controls"]}
+    assert by_room["main_bathroom"]["gross_wall_area_m2"] == pytest.approx(25.002)
+    assert by_room["main_bathroom"]["access_opening_area_m2"] == pytest.approx(1.512)
+    assert by_room["main_bathroom"]["gross_less_room_access_opening_m2"] == pytest.approx(23.49)
+    assert by_room["main_wc"]["gross_wall_area_m2"] == pytest.approx(14.418)
+    assert by_room["main_wc"]["access_opening_area_m2"] == pytest.approx(1.512)
+    assert by_room["main_wc"]["gross_less_room_access_opening_m2"] == pytest.approx(12.906)
+    assert check["complete_for_these_room_access_openings"] is True
+    assert check["complete_for_all_wall_openings"] is False
+    assert check["finish_scope_resolved"] is False
+
+
+def test_lot16_explicit_internal_elevation_wall_faces_close_to_top_plate():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    refs = {
+        "lot16:surface:internal_wall_gross:bath:elev1",
+        "lot16:surface:internal_wall_gross:bath:shower",
+        "lot16:surface:internal_wall_gross:bath:elev4",
+        "lot16:surface:internal_wall_gross:ensuite:elev1",
+        "lot16:surface:internal_wall_gross:ensuite:elev2",
+        "lot16:surface:internal_wall_gross:wc:elev1",
+        "lot16:surface:internal_wall_gross:laundry:elev1",
+        "lot16:surface:internal_wall_gross:laundry:elev2",
+    }
+    faces = [
+        row for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
+    assert len(faces) == 8
+    assert {row["object_ref"] for row in faces} == refs
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(
+        35.3794
+    )
+    assert all(
+        row["attributes"]["wall_height_to_top_plate_m"] == pytest.approx(2.59)
+        for row in faces
+    )
+    assert all(
+        row["attributes"]["raked_ceiling_extension_included"] is False
+        for row in faces
+    )
+    check = next(
+        row for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:explicit_internal_elevation_wall_faces"
+    )
+    assert check["object_count"] == 8
+    assert check["component_sum_m2"] == pytest.approx(35.3794)
+    assert check["net_denominator_ready"] is False
+
+def test_lot16_bed1_gross_wall_faces_are_dimension_closed_but_raked_extension_stays_open():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:bed1_gross_wall_faces"
+    )
+    refs = set(check["component_object_refs"])
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
+    assert len(faces) == check["object_count"] == 4
+    floor = check["bed1_floor_dimension_closure"]
+    assert floor["figured_dimensions_m"] == pytest.approx([3.51, 3.60])
+    assert floor["calculated_floor_area_m2"] == pytest.approx(12.636)
+    assert floor["source_declared_floor_area_m2"] == pytest.approx(12.64)
+    assert floor["rounding_difference_m2"] == pytest.approx(0.004)
+    assert check["wall_height_to_top_plate_m"] == pytest.approx(2.59)
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(36.8298)
+    assert check["gross_wall_area_m2"] == pytest.approx(36.8298)
+    assert check["complete_for_bed1_top_plate_rectangular_wall_faces"] is True
+    assert check["openings_and_raked_ceiling_intersection_resolved"] is False
+    assert all(row["attributes"]["raked_ceiling_extension_included"] is False for row in faces)
+    assert (
+        "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces_with_room_access_robe_and_2110_square_set_deductions_pending_linen_broom_joinery_and_unlabelled_archways"
+        in draft["unresolved_surface_families"]
+    )
+
+
+
+def test_lot16_unscheduled_structural_members_stay_out_of_truth():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    blocker = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:blocker:unscheduled_structural_members"
+    )
+    assert blocker["status"] == "UNRESOLVED_SOURCE_LIMITATION"
+    assert blocker["instance_specific_bracing_schedule_available"] is True
+    assert blocker["remaining_instance_specific_beam_lintel_truss_schedule_available"] is False
+    assert blocker["typical_detail_scaling_allowed"] is False
+    assert (
+        "structural_members_beyond_closed_wall_bracing_and_explicit_architectural_supports"
+        in draft["unresolved_surface_families"]
+    )
+
+
+def test_lot16_source_closed_bath_tile_faces_stay_gross_until_deductions_close():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    refs = {
+        "lot16:surface:wall_tile_gross:bath:elev1",
+        "lot16:surface:wall_tile_gross:bath:shower",
+        "lot16:surface:wall_tile_gross:bath:elev4",
+    }
+    faces = [
+        row for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
+    assert len(faces) == 3
+    assert {row["object_ref"] for row in faces} == refs
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(
+        9.324
+    )
+    assert all(
+        row["attributes"]["tile_height_to_top_plate_m"] == pytest.approx(2.59)
+        for row in faces
+    )
+    assert all(
+        "draft_only_until_remaining_bath_face_niche_opening_and_return_deductions_are_closed"
+        == row["attributes"]["denominator_readiness"]
+        for row in faces
+    )
+    check = next(
+        row for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:explicit_bath_tile_gross_faces"
+    )
+    assert check["object_count"] == 3
+    assert check["component_sum_m2"] == pytest.approx(9.324)
+    assert check["net_denominator_ready"] is False
+
+def test_lot16_explicit_bath_shower_tile_face_is_net_closed_but_wet_area_universe_stays_open():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    tile = next(
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] == "lot16:surface:wall_tile:bath_shower_full_height:01"
+    )
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:bath_shower_full_height_tile_face"
+    )
+    assert tile["expected_quantity"] == pytest.approx(3.108)
+    assert tile["attributes"]["finished_face_width_m"] == pytest.approx(1.2)
+    assert tile["attributes"]["tile_height_m"] == pytest.approx(2.59)
+    assert tile["attributes"]["openings_in_host_face"] is False
+    assert tile["attributes"]["net_finish_area_ready"] is True
+    assert check["tile_area_m2"] == pytest.approx(3.108)
+    assert check["complete_for_this_explicit_face"] is True
+    assert check["complete_for_project_wet_area_tile_universe"] is False
+    assert (
+        "wet_area_wall_tiling_beyond_three_closed_bath_gross_faces_including_remaining_bath_face_and_raked_ensuite"
+        in draft["unresolved_surface_families"]
+    )
+
+
+
+def test_lot16_bed1_raked_ceiling_closes_from_area_and_section_pitch():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    row = next(
+        item for item in draft["verified_physical_candidates"]
+        if item["object_ref"] == "lot16:surface:ceiling:bed1_raked_12deg"
+    )
+    assert row["object_family"] == "ceiling_plane"
+    assert row["expected_quantity"] == pytest.approx(12.922385)
+    assert row["attributes"]["plan_projection_area_m2"] == pytest.approx(12.64)
+    assert row["attributes"]["pitch_degrees"] == 12
+    assert row["attributes"]["ceiling_geometry"] == "raked"
+    check = next(
+        item for item in draft["closure_checks"]
+        if item["check_id"] == "lot16:control:bed1_raked_ceiling"
+    )
+    assert check["component_sum_m2"] == pytest.approx(12.922385)
+    assert check["net_denominator_ready"] is False
+
+
+def test_lot16_porch_raked_ceiling_closes_from_declared_area_and_front_pitch():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    row = next(
+        item for item in draft["verified_physical_candidates"]
+        if item["object_ref"] == "lot16:surface:ceiling:porch_raked_12deg"
+    )
+    assert row["object_family"] == "ceiling_plane"
+    assert row["expected_quantity"] == pytest.approx(3.087469)
+    assert row["attributes"]["plan_projection_area_m2"] == pytest.approx(3.02)
+    assert row["attributes"]["pitch_degrees"] == 12
+    assert row["attributes"]["source_closed_plane"] is True
+    check = next(
+        item for item in draft["closure_checks"]
+        if item["check_id"] == "lot16:closure:porch_raked_ceiling"
+    )
+    assert check["raked_surface_area_m2"] == pytest.approx(3.087469)
+    assert check["source_closed"] is True
+    assert check["complete_for_project_ceiling_universe"] is False
+
+
+def test_lot16_partial_wet_area_tile_faces_and_known_niches_are_source_closed():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:partial_wet_area_tile_faces"
+    )
+    tile_refs = set(check["component_object_refs"])
+    niche_refs = set(check["niche_deduction_object_refs"])
+    tiles = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in tile_refs
+    ]
+    niches = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in niche_refs
+    ]
+    assert len(tiles) == check["gross_tile_face_count"] == 5
+    assert sum(float(row["expected_quantity"]) for row in tiles) == pytest.approx(18.4149)
+    assert check["gross_tile_area_m2"] == pytest.approx(18.4149)
+    assert len(niches) == check["source_dimensioned_niche_count"] == 2
+    assert sum(float(row["expected_quantity"]) for row in niches) == pytest.approx(0.9)
+    assert check["flat_niche_face_deduction_area_m2"] == pytest.approx(0.9)
+    assert check["flat_tile_area_after_known_niche_face_deductions_m2"] == pytest.approx(17.5149)
+    assert check["complete_for_these_five_source_tiled_elevations"] is True
+    assert check["complete_for_project_wet_area_tile_universe"] is False
+    assert check["niche_return_depths_resolved"] is False
+    assert (
+        "wet_area_wall_tiling_beyond_three_closed_bath_gross_faces_including_remaining_bath_face_and_raked_ensuite"
+        in draft["unresolved_surface_families"]
+    )
+
+
+def test_lot16_garage_floor_and_flat_ceiling_close_to_same_figured_rectangle():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:garage_floor_flat_ceiling"
+    )
+    refs = set(check["component_object_refs"])
+    rows = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
+    assert len(rows) == 2
+    by_family = {row["object_family"]: row for row in rows}
+    assert by_family["floor"]["expected_quantity"] == pytest.approx(38.94)
+    assert by_family["ceiling_plane"]["expected_quantity"] == pytest.approx(38.94)
+    assert check["figured_dimensions_m"] == [6.0, 6.49]
+    assert check["calculated_plan_area_m2"] == pytest.approx(38.94)
+    assert check["floor_finish"] == "epoxy"
+    assert check["ceiling_geometry"] == "flat"
+    assert check["floor_surface_closed"] is True
+    assert check["ceiling_surface_closed"] is True
+    assert (
+        "ceilings_beyond_closed_bed1_ensuite_wir_porch_raked_and_garage_flat_planes_including_entry_and_other_flat_regions"
+        in draft["unresolved_surface_families"]
+    )
+
+
+def test_lot16_internal_room_access_opening_census_closes_nine_870_openings():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "internal_room_access_opening"
+    ]
+    assert len(openings) == 9
+    assert all(row["expected_quantity"] == pytest.approx(1.827) for row in openings)
+    assert all(row["attributes"]["width_m"] == pytest.approx(0.87) for row in openings)
+    assert all(row["attributes"]["height_m"] == pytest.approx(2.1) for row in openings)
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(
+        16.443
+    )
+    assert sum(
+        row["attributes"]["opening_type"] == "cavity_slider" for row in openings
+    ) == 1
+    check = next(
+        row for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:internal_room_access_opening_census"
+    )
+    assert check["internal_opening_count"] == 9
+    assert check["internal_opening_area_m2"] == pytest.approx(16.443)
+    assert check["complete_for_explicit_internal_870_room_access_openings"] is True
+    assert check["complete_for_all_internal_wall_openings"] is False
+    assert check["residual_unresolved"] == [
+        "linen_broom_or_other_internal_joinery_openings",
+        "unlabelled_open_archways_beyond_explicit_2110_square_set",
+    ]
+    assert set(check["excluded_external_870_labels"]) == {
+        "laundry_external_service_door",
+        "garage_external_service_door",
+    }
+
+
+def test_lot16_labelled_robe_and_square_set_openings_are_source_closed():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    by_ref = {row["object_ref"]: row for row in draft["verified_physical_candidates"]}
+    bed2 = by_ref["lot16:opening:p3:internal_joinery:1765_bed2_robe_sliding"]
+    bed3 = by_ref["lot16:opening:p3:internal_joinery:1765_bed3_robe_sliding"]
+    square = by_ref["lot16:opening:p3:internal_open_archway:2110_square_set"]
+
+    assert bed2["expected_quantity"] == pytest.approx(3.7065)
+    assert bed3["expected_quantity"] == pytest.approx(3.7065)
+    assert bed2["attributes"]["width_m"] == pytest.approx(1.765)
+    assert bed3["attributes"]["width_m"] == pytest.approx(1.765)
+    assert square["expected_quantity"] == pytest.approx(2.1)
+
+    check = next(
+        row for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:labelled_internal_joinery_and_square_set_openings"
+    )
+    assert check["object_count"] == 3
+    assert check["component_sum_m2"] == pytest.approx(9.513)
+    assert check["source_closed_for_these_labelled_openings"] is True
+    assert check["complete_for_all_internal_wall_openings"] is False
+
+
+def test_lot16_ensuite_and_wir_raked_ceiling_planes_are_source_closed():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    ens = by_ref["lot16:surface:ceiling:ensuite_raked_12deg"]
+    wir = by_ref["lot16:surface:ceiling:wir_raked_12deg"]
+
+    assert ens["expected_quantity"] == pytest.approx(5.613672, abs=1e-6)
+    assert ens["attributes"]["plan_projection_area_m2"] == pytest.approx(5.491)
+    assert ens["attributes"]["pitch_degrees"] == 12
+    assert ens["attributes"]["source_closed_plane"] is True
+
+    assert wir["expected_quantity"] == pytest.approx(4.786394, abs=1e-6)
+    assert wir["attributes"]["plan_projection_area_m2"] == pytest.approx(4.6818)
+    assert wir["attributes"]["pitch_degrees"] == 12
+    assert wir["attributes"]["source_closed_plane"] is True
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:ensuite_wir_raked_ceiling_planes"
+    )
+    assert check["component_object_refs"] == [
+        "lot16:surface:ceiling:ensuite_raked_12deg",
+        "lot16:surface:ceiling:wir_raked_12deg",
+    ]
+    assert check["plan_projection_sum_m2"] == pytest.approx(10.1728)
+    assert check["raked_surface_sum_m2"] == pytest.approx(10.400066, abs=1e-6)
+    assert check["pitch_degrees"] == 12
+    assert check["source_closed"] is True
+
+
+def test_3laurel_dimensioned_internal_open_archways_are_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    archways = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "internal_open_archway"
+    ]
+    assert len(archways) == 2
+    by_ref = {row["object_ref"]: row for row in archways}
+
+    first = by_ref["3laurel:opening:p3:internal_archway:2100x1030:01"]
+    second = by_ref["3laurel:opening:p3:internal_archway:2100x1000:01"]
+    assert first["expected_quantity"] == pytest.approx(2.163)
+    assert second["expected_quantity"] == pytest.approx(2.1)
+    assert first["attributes"]["source_closed_opening"] is True
+    assert second["attributes"]["source_closed_opening"] is True
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:dimensioned_internal_open_archways"
+    )
+    assert check["object_count"] == 2
+    assert check["total_opening_area_m2"] == pytest.approx(4.263)
+    assert check["source_closed"] is True
+    assert (
+        "unlabelled_internal_wall_breaks_beyond_two_closed_dimensioned_open_archways_for_wall_face_deductions"
+        in draft["unresolved_surface_families"]
+    )
+
+
+def test_lot16_ensuite_and_wir_floor_surfaces_are_source_closed():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    ens = by_ref["lot16:surface:floor:ensuite"]
+    wir = by_ref["lot16:surface:floor:wir"]
+
+    assert ens["expected_quantity"] == pytest.approx(5.491)
+    assert ens["attributes"]["finish"] == "tiles"
+    assert ens["attributes"]["width_m"] == pytest.approx(2.89)
+    assert ens["attributes"]["length_m"] == pytest.approx(1.9)
+
+    assert wir["expected_quantity"] == pytest.approx(4.6818)
+    assert wir["attributes"]["finish"] == "vinyl"
+    assert wir["attributes"]["width_m"] == pytest.approx(2.89)
+    assert wir["attributes"]["length_m"] == pytest.approx(1.62)
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:ensuite_wir_floor_surfaces"
+    )
+    assert check["component_sum_m2"] == pytest.approx(10.1728)
+    assert check["source_closed"] is True
+    assert "do not double-count" in check["overlap_note"]
+
+
+def test_lot16_roof_final_crosscheck_stays_blocked_without_stormwater_plan():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:roof_sheathing_geometry"
+    )
+    search = check["engineering_crosscheck_search"]
+    assert search["supplied_document"] == "4. Structural Engineering - Lot 16 Power.pdf"
+    assert search["supplied_document_sha256"] == (
+        "add9dd4b0bd11554a13562ad0830e80847db1dcb043489e452a6c8d95a3b6cda"
+    )
+    assert search["matches_found"] == {
+        "stormwater": 0,
+        "catchment": 0,
+        "downpipe": 0,
+    }
+    assert check["final_engineering_crosscheck_complete"] is False
+    assert "must remain unresolved" in check["blocker"]
+    assert (
+        "roof_planes_final_crosscheck_blocked_by_missing_engineering_stormwater_drainage_plan"
+        in draft["unresolved_surface_families"]
+    )
+
+
+def test_3laurel_bed2_bed3_gross_wall_faces_are_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"].startswith(
+            ("3laurel:surface:internal_wall_gross:bed2:",
+             "3laurel:surface:internal_wall_gross:bed3:")
+        )
+    ]
+    assert len(faces) == 8
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(
+        77.76
+    )
+    assert {row["attributes"]["finished_room_face_width_m"] for row in faces} == {
+        3.0,
+        4.2,
+    }
+    assert all(
+        row["attributes"]["finished_ceiling_height_m"] == pytest.approx(2.7)
+        for row in faces
+    )
+    assert all(row["attributes"]["openings_deducted"] is False for row in faces)
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:bed2_bed3_gross_wall_faces"
+    )
+    assert check["room_count"] == 2
+    assert check["object_count"] == 8
+    assert check["gross_wall_area_m2"] == pytest.approx(77.76)
+    assert check["source_closed_gross_geometry"] is True
+
+
+def test_3laurel_media_floor_and_gross_walls_are_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+
+    floor = by_ref["3laurel:surface:floor:media"]
+    assert floor["expected_quantity"] == pytest.approx(13.146)
+    assert floor["attributes"]["finish"] == "vinyl"
+    assert floor["attributes"]["width_m"] == pytest.approx(4.2)
+    assert floor["attributes"]["length_m"] == pytest.approx(3.13)
+    assert (
+        floor["attributes"]["overlaps_aggregate_ref"]
+        == "3laurel:surface:floor:main_living_composite_region"
+    )
+
+    wall_refs = [
+        "3laurel:surface:internal_wall_gross:media:4200_side_1",
+        "3laurel:surface:internal_wall_gross:media:4200_side_2",
+        "3laurel:surface:internal_wall_gross:media:3130_side_1",
+        "3laurel:surface:internal_wall_gross:media:3130_side_2",
+    ]
+    walls = [by_ref[ref] for ref in wall_refs]
+    assert sum(float(row["expected_quantity"]) for row in walls) == pytest.approx(
+        39.582
+    )
+    assert all(row["attributes"]["openings_deducted"] is False for row in walls)
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:media_floor_and_gross_wall_faces"
+    )
+    assert check["figured_room_dimensions_m"] == [4.2, 3.13]
+    assert check["floor_area_m2"] == pytest.approx(13.146)
+    assert check["gross_wall_area_m2"] == pytest.approx(39.582)
+    assert check["source_closed_gross_geometry"] is True
+    assert check["openings_deducted"] is False
+    assert "must not be double-counted" in check["overlap_note"]
+
+
+def test_3laurel_bed2_bed3_floor_surfaces_are_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    bed2 = by_ref["3laurel:surface:floor:bed2"]
+    bed3 = by_ref["3laurel:surface:floor:bed3"]
+
+    for floor in (bed2, bed3):
+        assert floor["expected_quantity"] == pytest.approx(12.6)
+        assert floor["attributes"]["width_m"] == pytest.approx(3.0)
+        assert floor["attributes"]["length_m"] == pytest.approx(4.2)
+        assert floor["attributes"]["finish"] == "vinyl"
+        assert (
+            floor["attributes"]["overlaps_aggregate_ref"]
+            == "3laurel:surface:floor:main_living_composite_region"
+        )
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:bed2_bed3_floor_surfaces"
+    )
+    assert check["room_count"] == 2
+    assert check["floor_area_each_m2"] == pytest.approx(12.6)
+    assert check["component_sum_m2"] == pytest.approx(25.2)
+    assert check["source_closed"] is True
+    assert "must not be double-counted" in check["overlap_note"]
+
+
+def test_3laurel_bathroom_niche_flat_face_closes_but_returns_fail_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    blocker = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"]
+        == "3laurel:blocker:bathroom_niche_width_and_niche_return_depths"
+    )
+    assert blocker["status"] == "UNRESOLVED_SOURCE_LIMITATION"
+    assert blocker["explicit_dimensions_available"] == {
+        "sill_height_mm": 1100,
+        "niche_height_mm": 400,
+        "bathroom_niche_width_mm": 600,
+    }
+    assert "bathroom_niche_width" not in blocker["missing_dimensions"]
+    assert "bathroom_niche_return_depth" in blocker["missing_dimensions"]
+    assert "main_ensuite_niche_return_depth" in blocker["missing_dimensions"]
+    assert "gf_ensuite_niche_return_depth" in blocker["missing_dimensions"]
+    assert blocker["scaling_substitute_allowed"] is False
+    assert "Bathroom niche flat face is closed at 600x400" in blocker["conclusion"]
+    assert "wet_area_tile_all_niche_return_depths" in draft["unresolved_surface_families"]
+
+
+def test_3laurel_wet_area_atomic_floors_are_source_closed_without_double_counting():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    expected = {
+        "3laurel:surface:floor:bathroom": 5.17,
+        "3laurel:surface:floor:main_wc": 1.7316,
+        "3laurel:surface:floor:laundry": 5.1744,
+        "3laurel:surface:floor:gf_ensuite_laundry": 6.4889,
+    }
+    for ref, area in expected.items():
+        row = by_ref[ref]
+        assert row["expected_quantity"] == pytest.approx(area)
+        assert row["attributes"]["finish"] == "tiles"
+        assert row["attributes"]["overlaps_aggregate_ref"] in {
+            "3laurel:surface:floor:main_living_composite_region",
+            "3laurel:surface:floor:gf_living_composite_region",
+        }
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:wet_area_atomic_floor_surfaces"
+    )
+    assert check["object_count"] == 4
+    assert check["component_sum_m2"] == pytest.approx(18.5649)
+    assert check["source_closed"] is True
+    assert "must not be double-counted" in check["aggregate_overlap"]["rule"]
+
+
+def test_lot16_retaining_wall_profile_is_measured_but_final_extent_stays_open():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    blocker = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:blocker:retaining_wall_final_extent"
+    )
+    assert blocker["status"] == "UNRESOLVED_SOURCE_LIMITATION"
+    assert blocker["profile_segment_lengths_m"] == [
+        6.1,
+        1.4,
+        3.0,
+        1.8,
+        2.8,
+        2.5,
+        2.8,
+        5.9,
+        2.7,
+        1.8,
+        1.9,
+        3.689,
+    ]
+    assert sum(blocker["profile_segment_lengths_m"]) == pytest.approx(36.389)
+    assert blocker["profile_chain_length_m"] == pytest.approx(36.389)
+    assert blocker["plan_label_approx_length_m"] == pytest.approx(36.5)
+    assert blocker["profile_vs_plan_approx_difference_m"] == pytest.approx(-0.111)
+    assert blocker["source_closed_profile_chain"] is True
+    assert blocker["final_installed_length_resolved"] is False
+    assert blocker["denominator_ready"] is False
+    assert blocker["scaling_substitute_allowed"] is False
+    assert "TO BE EXTENDED AS NEEDED" in blocker["plan_note"]
+    assert "site_retaining_wall_final_extent_and_profile" in draft[
+        "unresolved_surface_families"
+    ]
+
+
+def test_3laurel_laundry_A_B_tile_skirtings_and_splashbacks_are_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    by_ref = {row["object_ref"]: row for row in draft["verified_physical_candidates"]}
+    expected = {
+        "3laurel:surface:wall_tile:laundry_A_skirting": 0.2052,
+        "3laurel:surface:wall_tile:laundry_A_splashback": 0.36,
+        "3laurel:surface:wall_tile:laundry_B_skirting": 0.0285,
+        "3laurel:surface:wall_tile:laundry_B_splashback": 0.9684,
+    }
+    for ref, area in expected.items():
+        row = by_ref[ref]
+        assert row["object_family"] == "wet_area_wall_tile_finish"
+        assert row["expected_quantity"] == pytest.approx(area)
+        assert row["attributes"]["net_finish_area_ready"] is True
+
+    check = next(
+        row for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:laundry_A_B_explicit_tile_finishes"
+    )
+    assert check["object_count"] == 4
+    assert check["component_sum_m2"] == pytest.approx(1.5621)
+    assert check["source_closed"] is True
+    assert check["complete_for_project_non_shower_tile_universe"] is False
+
+
+def test_3laurel_laundry_D_tile_skirting_is_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    row = next(
+        item
+        for item in draft["verified_physical_candidates"]
+        if item["object_ref"] == "3laurel:surface:wall_tile:laundry_D_skirting"
+    )
+    assert row["object_family"] == "wet_area_wall_tile_finish"
+    assert row["expected_quantity"] == pytest.approx(0.5852)
+    assert row["attributes"]["finished_face_width_m"] == pytest.approx(3.08)
+    assert row["attributes"]["tile_height_m"] == pytest.approx(0.19)
+    assert row["attributes"]["net_finish_area_ready"] is True
+
+    check = next(
+        item
+        for item in draft["closure_checks"]
+        if item["check_id"] == "3laurel:closure:laundry_D_tile_skirting"
+    )
+    assert check["tile_area_m2"] == pytest.approx(0.5852)
+    assert check["complete_for_this_explicit_strip"] is True
+    assert check["complete_for_project_non_shower_tile_universe"] is False
+    assert (
+        "wet_area_non_shower_tile_scope_beyond_closed_laundry_A_B_D_skirtings_and_A_B_splashbacks"
+        in draft["unresolved_surface_families"]
+    )
+
+
+def test_3laurel_bathroom_C_shower_tile_face_is_net_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    gross_c = by_ref["3laurel:surface:wall_tile_gross:bath_shower_wall_1"]
+    gross_d = by_ref["3laurel:surface:wall_tile_gross:bath_shower_wall_2"]
+    net_c = by_ref["3laurel:surface:wall_tile:bathroom_C_shower_net"]
+
+    assert gross_c["attributes"]["host_elevation"] == "Bathroom C"
+    assert gross_c["attributes"]["niche_present"] is False
+    assert gross_d["attributes"]["host_elevation"] == "Bathroom D"
+    assert gross_d["attributes"]["niche_present"] is True
+    assert net_c["expected_quantity"] == pytest.approx(1.89)
+    assert net_c["attributes"]["host_gross_surface_ref"] == gross_c["object_ref"]
+    assert net_c["attributes"]["openings_in_host_face"] is False
+    assert net_c["attributes"]["niche_in_host_face"] is False
+    assert net_c["attributes"]["net_finish_area_ready"] is True
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:bathroom_C_shower_tile_face"
+    )
+    assert check["tile_area_m2"] == pytest.approx(1.89)
+    assert check["complete_for_this_explicit_face"] is True
+    assert check["complete_for_project_wet_area_tile_universe"] is False
+
+
+def test_3laurel_niche_free_ensuite_shower_returns_are_net_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    refs = [
+        "3laurel:surface:wall_tile:ensuite_B_shower_return_net",
+        "3laurel:surface:wall_tile:ensuite_D_shower_return_net",
+        "3laurel:surface:wall_tile:gf_ensuite_B_shower_return_net",
+        "3laurel:surface:wall_tile:gf_ensuite_D_shower_return_net",
+    ]
+    rows = [by_ref[ref] for ref in refs]
+    assert len(rows) == 4
+    assert all(row["expected_quantity"] == pytest.approx(2.43) for row in rows)
+    assert all(
+        row["attributes"]["finished_face_width_m"] == pytest.approx(0.9)
+        for row in rows
+    )
+    assert all(
+        row["attributes"]["tile_height_m"] == pytest.approx(2.7)
+        for row in rows
+    )
+    assert all(row["attributes"]["niche_in_host_face"] is False for row in rows)
+    assert all(
+        row["attributes"]["net_finish_area_ready"] is True for row in rows
+    )
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:niche_free_ensuite_shower_returns"
+    )
+    assert check["object_count"] == 4
+    assert check["tile_area_each_m2"] == pytest.approx(2.43)
+    assert check["component_sum_m2"] == pytest.approx(9.72)
+    assert check["complete_for_these_four_faces"] is True
+    assert check["complete_for_project_wet_area_tile_universe"] is False
+
+
+def test_3laurel_dimensioned_flat_faces_close_after_known_niche_deductions():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    main = by_ref["3laurel:surface:wall_tile:ensuite_rear_flat_after_niche"]
+    gf = by_ref["3laurel:surface:wall_tile:gf_ensuite_rear_flat_after_niche"]
+    bath = by_ref["3laurel:surface:wall_tile:bath_D_flat_after_niche"]
+
+    assert main["expected_quantity"] == pytest.approx(4.296)
+    assert main["attributes"]["gross_area_m2"] == pytest.approx(4.536)
+    assert main["attributes"]["niche_face_deduction_m2"] == pytest.approx(0.24)
+    assert main["attributes"]["niche_returns_included"] is False
+    assert main["attributes"]["net_flat_face_area_ready"] is True
+
+    assert gf["expected_quantity"] == pytest.approx(4.809)
+    assert gf["attributes"]["gross_area_m2"] == pytest.approx(5.049)
+    assert gf["attributes"]["niche_face_deduction_m2"] == pytest.approx(0.24)
+    assert gf["attributes"]["niche_returns_included"] is False
+    assert gf["attributes"]["net_flat_face_area_ready"] is True
+
+    assert bath["expected_quantity"] == pytest.approx(1.65)
+    assert bath["attributes"]["gross_area_m2"] == pytest.approx(1.89)
+    assert bath["attributes"]["niche_face_deduction_m2"] == pytest.approx(0.24)
+    assert bath["attributes"]["niche_returns_included"] is False
+    assert bath["attributes"]["net_flat_face_area_ready"] is True
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"]
+        == "3laurel:closure:ensuite_rear_flat_faces_after_niche_deductions"
+    )
+    assert check["object_count"] == 3
+    assert check["component_sum_m2"] == pytest.approx(10.755)
+    assert check["flat_face_niche_deduction_sum_m2"] == pytest.approx(0.72)
+    assert check["niche_returns_resolved"] is False
+    assert check["complete_for_three_flat_host_faces"] is True
+    assert check["complete_for_full_niche_tile_assemblies"] is False
+
+
+def test_lot16_known_niche_flat_tile_faces_close_without_guessing_returns():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    bath = by_ref["lot16:surface:wall_tile:bath_elev4_flat_after_niche"]
+    ens = by_ref[
+        "lot16:surface:wall_tile:ensuite_elev2_topplate_flat_after_niche"
+    ]
+
+    assert bath["expected_quantity"] == pytest.approx(2.658)
+    assert bath["attributes"]["gross_area_m2"] == pytest.approx(3.108)
+    assert bath["attributes"]["niche_face_deduction_m2"] == pytest.approx(0.45)
+    assert bath["attributes"]["niche_returns_included"] is False
+    assert bath["attributes"]["net_flat_face_area_ready"] is True
+
+    assert ens["expected_quantity"] == pytest.approx(3.9271)
+    assert ens["attributes"]["gross_area_to_top_plate_m2"] == pytest.approx(
+        4.3771
+    )
+    assert ens["attributes"]["niche_face_deduction_m2"] == pytest.approx(0.45)
+    assert ens["attributes"]["niche_returns_included"] is False
+    assert ens["attributes"]["raked_extension_above_top_plate_included"] is False
+    assert ens["attributes"]["top_plate_flat_portion_ready"] is True
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:known_niche_flat_tile_faces"
+    )
+    assert check["object_count"] == 2
+    assert check["component_sum_m2"] == pytest.approx(6.5851)
+    assert check["flat_niche_face_deduction_sum_m2"] == pytest.approx(0.9)
+    assert check["ensuite_raked_extension_resolved"] is False
+    assert check["niche_returns_resolved"] is False
+    assert check["complete_for_project_wet_area_tile_universe"] is False
+
+
+def test_lot16_niche_free_explicit_tile_faces_are_closed_to_source_datum():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    bath = by_ref["lot16:surface:wall_tile:bath_elev1_net"]
+    ens = by_ref["lot16:surface:wall_tile:ensuite_elev1_topplate_net"]
+
+    assert bath["expected_quantity"] == pytest.approx(3.108)
+    assert bath["attributes"]["openings_in_host_face"] is False
+    assert bath["attributes"]["niche_in_host_face"] is False
+    assert bath["attributes"]["net_finish_area_ready"] is True
+
+    assert ens["expected_quantity"] == pytest.approx(4.7138)
+    assert ens["attributes"]["openings_in_host_face"] is False
+    assert ens["attributes"]["niche_in_host_face"] is False
+    assert ens["attributes"]["raked_extension_above_top_plate_included"] is False
+    assert ens["attributes"]["top_plate_flat_portion_ready"] is True
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:niche_free_explicit_tile_faces"
+    )
+    assert check["object_count"] == 2
+    assert check["component_sum_m2"] == pytest.approx(7.8218)
+    assert check["bath_face_complete"] is True
+    assert check["ensuite_top_plate_portion_complete"] is True
+    assert check["ensuite_raked_extension_resolved"] is False
+    assert check["complete_for_project_wet_area_tile_universe"] is False
+
+
+def test_3laurel_bed2_bed3_net_wall_geometry_closes_against_exact_openings():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+
+    assert (
+        by_ref["3laurel:opening:p3:internal_access:0870_swing:02"]["description"]
+        == "Internal room-access 870 mm hinged opening: Bed 3"
+    )
+    assert (
+        by_ref["3laurel:opening:p3:internal_access:0870_swing:03"]["description"]
+        == "Internal room-access 870 mm hinged opening: Bed 2"
+    )
+    assert (
+        by_ref["3laurel:opening:p3:1200x1810_asw:01"]["description"]
+        == "Bed 2 1200 x 1810 ASW"
+    )
+    assert (
+        by_ref["3laurel:opening:p3:1200x1810_asw:02"]["description"]
+        == "Bed 3 1200 x 1810 ASW"
+    )
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:bed2_bed3_net_wall_geometry"
+    )
+    assert check["combined_gross_wall_area_m2"] == pytest.approx(77.76)
+    assert check["combined_opening_deduction_area_m2"] == pytest.approx(15.558)
+    assert check["combined_net_wall_geometry_m2"] == pytest.approx(62.202)
+    assert check["complete_for_bed2_bed3_known_opening_geometry"] is True
+    assert check["finish_scope_resolved"] is False
+
+    for room in check["rooms"]:
+        assert room["gross_wall_area_m2"] == pytest.approx(38.88)
+        assert room["opening_deduction_area_m2"] == pytest.approx(7.779)
+        assert room["net_wall_geometry_m2"] == pytest.approx(31.101)
+        assert len(room["gross_surface_refs"]) == 4
+        assert len(room["deduction_opening_refs"]) == 3
+        for ref in room["gross_surface_refs"] + room["deduction_opening_refs"]:
+            assert ref in by_ref

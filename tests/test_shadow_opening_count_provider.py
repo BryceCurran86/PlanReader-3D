@@ -521,13 +521,8 @@ def test_shadow_runner_accepts_provider_without_gold(tmp_path: Path) -> None:
     assert new_w1 and new_w1[0].value == 6.0
 
 
-def test_committed_headline_benchmark_is_unchanged() -> None:
-    dashboard = json.loads(Path("benchmark_results/headline_accuracy_dashboard.json").read_text(encoding="utf-8"))
-    metrics = dashboard["headline_metrics"]
-    accepted = int(metrics["exact_matches"]) + int(metrics["within_5_percent"])
-    assert accepted == 24
-    assert int(metrics["total_items_compared"]) == 61
-    assert pytest.approx(metrics["overall_accuracy_percentage"], rel=0, abs=0.01) == 39.34
+def test_retired_headline_dashboard_is_absent() -> None:
+    assert not Path("benchmark_results/headline_accuracy_dashboard.json").exists()
 
 
 def test_legacy_extractor_source_was_not_edited_for_this_family() -> None:

@@ -31,12 +31,12 @@
     {
       "family": "wet_area_tile_niches_and_returns",
       "status": "UNRESOLVED",
-      "reason": "Bathroom niche width and niche-return depths remain unresolved."
+      "reason": "All three dimensioned niche flat-face deductions are closed; niche-return depths remain unresolved."
     },
     {
       "family": "remaining_wet_area_tile_scope",
       "status": "UNRESOLVED",
-      "reason": "Non-shower tile skirtings, surrounds and splashbacks are not fully closed."
+      "reason": "Laundry A/B/D skirting extents and Laundry A/B splashbacks are source-closed; Laundry C and remaining non-shower skirtings, surrounds and splashbacks are not fully closed."
     },
     {
       "family": "internal_opening_universe",

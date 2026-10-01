@@ -1,8 +1,8 @@
-"""PlanReader v1.3.0 benchmark and correction-learning framework.
+"""PlanReader v1.3.0 workspace verification and correction-learning framework.
 
-Stores estimator-verified ground truth separately from predictions, records manual
-corrections as reusable evidence, and reports category-specific error instead of one
-misleading global accuracy percentage.
+Stores estimator-verified checks separately from predictions, records manual
+corrections as reusable evidence, and reports local category QA. It is not the
+Full Plan V2 benchmark or a PlanReader headline score.
 """
 from __future__ import annotations
 

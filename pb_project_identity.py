@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional, Tuple
 import fitz  # PyMuPDF
 import openpyxl
 
-from pb_benchmark_schema import ProjectIdentity, SourceManifest
+from pb_project_identity_models import ProjectIdentity, SourceManifest
 
 
 # ---------------------------------------------------------------------------

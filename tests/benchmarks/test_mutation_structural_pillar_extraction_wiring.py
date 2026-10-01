@@ -86,11 +86,12 @@ def _make_physical_verandah_pdf(
     tmp_path: Path,
     *,
     centers: tuple[float, ...] = (160.0, 260.0, 360.0, 460.0),
+    zone_text: str = "VERANDAH",
 ) -> Path:
     doc = fitz.open()
     page = doc.new_page(width=842, height=595)
     page.insert_text((72, 72), "GROUND FLOOR PLAN\nSCALE 1:100", fontsize=10)
-    page.insert_text((275, 226), "VERANDAH", fontsize=10)
+    page.insert_text((275, 226), zone_text, fontsize=10)
     for x in (198.0, 298.0, 398.0):
         page.insert_text((x, 275), "2,500", fontsize=8)
     for x in centers:
@@ -134,6 +135,31 @@ class TestPhysicalVerandahSupportWiring:
         # No textual support keyword exists, so the older dimension+keyword
         # structural_columns path must remain locked.
         assert "structural_columns" not in pred_map
+
+    @pytest.mark.parametrize(
+        ("zone_text", "zone_type"),
+        (
+            ("ALFRESCO", "alfresco"),
+            ("PORCH", "porch"),
+            ("PATIO", "patio"),
+        ),
+    )
+    def test_non_verandah_secondary_area_populates_coverage_trace_only(
+        self, tmp_path: Path, zone_text: str, zone_type: str
+    ) -> None:
+        pdf_path = _make_physical_verandah_pdf(tmp_path, zone_text=zone_text)
+        extractor = GenericPlanReaderExtractor()
+        pred_map = {
+            prediction.tag: prediction
+            for prediction in extractor.extract_from_pdf(pdf_path)
+        }
+
+        assert "verandah_pillars" not in pred_map
+        shadow = extractor.structural_member_coverage_shadow
+        assert shadow["status"] == "corroborated"
+        assert len(shadow["physical_member_ids"]) == 4
+        assert shadow["quantity_evidence"]["value"] == pytest.approx(4.0)
+        assert shadow["coverage_registry_summary"] is not None
 
     def test_incomplete_physical_support_row_fails_closed(
         self, tmp_path: Path
