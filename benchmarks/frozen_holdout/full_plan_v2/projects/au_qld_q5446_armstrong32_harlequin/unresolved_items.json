@@ -1,0 +1,47 @@
+{
+  "schema_version": "v2-unresolved-items-1.0",
+  "project_id": "au_qld_q5446_armstrong32_harlequin",
+  "status": "INCOMPLETE",
+  "unresolved_families": [
+    {
+      "family": "ground_floor_area",
+      "reason": "Declared quantity lacks frozen independent full-polygon closure."
+    },
+    {
+      "family": "first_floor_area",
+      "reason": "Declared quantity lacks frozen independent full-polygon closure."
+    },
+    {
+      "family": "porch_area",
+      "reason": "Declared quantity lacks frozen independent geometric closure."
+    },
+    {
+      "family": "garage_area",
+      "reason": "6500x5600 matches declared area but conflicts with a 6470 plan chain; unresolved."
+    },
+    {
+      "family": "doors_and_windows",
+      "reason": "Door arc observations are incomplete and window census is unreconciled."
+    },
+    {
+      "family": "internal_wall_faces",
+      "reason": "Surface universe not built."
+    },
+    {
+      "family": "ceilings",
+      "reason": "Scope documents identify ceiling treatments/heights but measured surface universe is not built."
+    },
+    {
+      "family": "roof",
+      "reason": "Sales advice selects Colorbond roof but measured roof-plane universe is not built."
+    },
+    {
+      "family": "remaining_floor_finishes",
+      "reason": "Ground and first ensuite, first bathroom, and ground-floor laundry tiled floors are independently closed; remaining tiled/carpet/other floor surfaces are not fully measured."
+    },
+    {
+      "family": "wall_tiling",
+      "reason": "Sales advice specifies full-height master ensuite tiling but measured wall surface universe is not built."
+    }
+  ]
+}

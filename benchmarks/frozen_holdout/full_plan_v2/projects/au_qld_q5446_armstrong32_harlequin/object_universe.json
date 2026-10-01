@@ -1,0 +1,93 @@
+{
+  "schema_version": "v2-object-universe-1.0",
+  "project_id": "au_qld_q5446_armstrong32_harlequin",
+  "scope": "verified-only core",
+  "verified_objects": [
+    {
+      "object_ref": "q5446:surface:floor:alfresco",
+      "physical_kind": "floor_surface",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 12,
+      "source_locations": [
+        "standard_plans:p1:areas_table",
+        "standard_plans:p1:3000x4000_figured_dimensions"
+      ]
+    },
+    {
+      "object_ref": "q5446:surface:floor:ground_ensuite",
+      "physical_kind": "floor_finish_surface",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "finish_scope": "ceramic_floor_tile",
+      "expected_area_m2": 4.2224,
+      "source_locations": [
+        "standard_plans:p1:ENS_2320x1820",
+        "standard_inclusions:p1:bathroom_ensuite_floor_tiles",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ]
+    },
+    {
+      "object_ref": "q5446:surface:floor:first_ensuite",
+      "physical_kind": "floor_finish_surface",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "finish_scope": "ceramic_floor_tile",
+      "expected_area_m2": 5.9572,
+      "source_locations": [
+        "standard_plans:p2:ENS_2810x2120",
+        "standard_inclusions:p1:bathroom_ensuite_floor_tiles",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ]
+    },
+    {
+      "object_ref": "q5446:surface:floor:first_bath",
+      "physical_kind": "floor_finish_surface",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "finish_scope": "ceramic_floor_tile",
+      "expected_area_m2": 5.8446,
+      "source_locations": [
+        "standard_plans:p2:BATH_1910x3060",
+        "standard_inclusions:p1:bathroom_ensuite_floor_tiles",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ]
+    },
+    {
+      "object_ref": "q5446:surface:floor:ground_laundry",
+      "physical_kind": "floor_finish_surface",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "finish_scope": "ceramic_floor_tile",
+      "expected_area_m2": 4.1864,
+      "source_locations": [
+        "standard_plans:p1:architectural_vector_inner_faces:2616.2x1600.2_mm",
+        "standard_plans:p5:electrical_vector_inner_faces:2616.2x1600.2_mm",
+        "standard_inclusions:p1:laundry_floor_tiles_throughout"
+      ]
+    }
+  ],
+  "unverified_area_candidates": [
+    {
+      "object_ref": "q5446:candidate:ground_floor",
+      "declared_area_m2": 123.89,
+      "classification": "UNVERIFIED_CANDIDATE"
+    },
+    {
+      "object_ref": "q5446:candidate:first_floor",
+      "declared_area_m2": 121.81,
+      "classification": "UNVERIFIED_CANDIDATE"
+    },
+    {
+      "object_ref": "q5446:candidate:porch",
+      "declared_area_m2": 4.08,
+      "classification": "UNVERIFIED_CANDIDATE"
+    },
+    {
+      "object_ref": "q5446:candidate:garage",
+      "declared_area_m2": 36.4,
+      "classification": "UNVERIFIED_CANDIDATE"
+    }
+  ],
+  "door_swing_observations": {
+    "classification": "VERIFIED_OBSERVATIONS_NOT_COMPLETE_DOOR_UNIVERSE",
+    "ground_floor_leaf_arcs": 11,
+    "first_floor_leaf_arcs": 8,
+    "reason": "Swing arcs omit sliding/cavity/robe doors and do not by themselves establish the full tagged door universe."
+  }
+}

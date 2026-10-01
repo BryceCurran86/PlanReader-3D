@@ -1,155 +1,18 @@
-#!/usr/bin/env python3
-"""scripts/run_planreader_benchmarks.py — CLI Benchmark Runner for PlanReader.
-
-Executes accuracy benchmarks against golden benchmark plans, enforces source project
-matching, evaluates tolerances, and writes machine-readable benchmark reports.
-"""
+"""Retired legacy benchmark CLI guard."""
 from __future__ import annotations
 
-import argparse
-import os
-from pathlib import Path
 import sys
-
-# Ensure repository root is on sys.path
-REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from pb_benchmark_runner import PlanReaderBenchmarkRunner
-
-
-def print_result_summary(result) -> None:
-    """Print human-readable summary of benchmark execution."""
-    d = result.to_dict()
-    summary = d["summary"]
-
-    print("=" * 70)
-    print(f"Benchmark:           {d['benchmark_id']}")
-    print(f"Source PDF:          {d['source_pdf'] or 'Not supplied (synthetic fallback)'}")
-    print(f"Source takeoff:      {d['source_takeoff'] or 'Not supplied (unmatched/none)'}")
-    print(f"Project identity:    {d['project_identity'].get('project_name')} [{d['project_identity'].get('project_number')}]")
-    print(f"Comparison allowed:  {d['comparison_allowed']}" + (f" (BLOCKED: {d['rejection_reason']})" if not d['comparison_allowed'] else " (CONFIRMED)"))
-    
-    pages_cls = d.get("pages_classified", {})
-    if pages_cls and "total_pages" in pages_cls:
-        print(f"Pages classified:    {pages_cls['total_pages']} total sheets | {len(pages_cls.get('render_pages_detected', []))} render sheets")
-    else:
-        print("Pages classified:    None (PDF not available in current environment)")
-
-    print(f"Quantities compared: {len(d['quantities_compared'])}")
-    print(f"Pass:                {summary['pass_count']}")
-    print(f"Fail:                {summary['fail_count']}")
-    print(f"Warnings:            {summary['warnings_count']}")
-    print(f"Provisional:         {summary['provisional_count']}")
-    print(f"Exact match:         {summary['exact_match_count']}")
-    print(f"Within tolerance:    {summary['within_tolerance_count']}")
-    print(f"Outside tolerance:   {summary['outside_tolerance_count']}")
-    print(f"Missing:             {summary['missing_count']}")
-    print(f"Accuracy score:      {summary['accuracy_score'] * 100:.1f}%")
-    print(f"Readiness score:     {summary['readiness_score'] * 100:.1f}%")
-    print("=" * 70)
-    print()
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="PlanReader Accuracy Benchmark CLI Runner")
-    parser.add_argument("--benchmark", help="Benchmark ID to run (e.g. school_rd_60_62, lago_britinya)")
-    parser.add_argument("--public-tender", help="Run public tender benchmark evaluation (e.g. tenders_ke_kstvet_cbc_classroom)")
-    parser.add_argument("--all", action="store_true", help="Run all available benchmark seeds")
-    parser.add_argument("--report", action="store_true", help="Generate consolidated golden plan accuracy report")
-    parser.add_argument("--pdf", help="Optional override path to source PDF")
-    parser.add_argument("--takeoff", help="Optional override path to source takeoff workbook")
-    parser.add_argument("--benchmarks-dir", default="benchmarks/plans", help="Directory containing benchmark folders")
-    parser.add_argument("--results-dir", default="benchmark_results", help="Directory to save benchmark reports")
-    args = parser.parse_args()
-
-    if args.public_tender:
-        from pb_benchmark_accuracy_engine import run_public_tender_benchmark
-        p_dir = args.benchmarks_dir if args.benchmarks_dir != "benchmarks/plans" else "benchmarks/public_tenders"
-        report = run_public_tender_benchmark(
-            benchmark_id=args.public_tender,
-            pdf_path=args.pdf,
-            auto_extract=True,
-            benchmarks_dir=p_dir,
-            output_dir=args.results_dir,
-        )
-        print("=" * 70)
-        print(f"Public Tender Benchmark: {report.benchmark_id}")
-        print(f"Project Name:            {report.project_name}")
-        print(f"Status:                  {report.status}")
-        print(f"Overall Accuracy:        " + (f"{report.overall_accuracy_percentage:.1f}%" if report.overall_accuracy_percentage is not None else "N/A"))
-        print(f"Exact Matches:           {report.exact_matches}")
-        print(f"Within 5%:               {report.within_5_percent}")
-        print(f"Gross Mismatches:        {report.gross_mismatches}")
-        print(f"Missed Items:            {report.missed_items}")
-        print(f"Hallucinated Items:      {report.hallucinated_items}")
-        print("=" * 70)
-        return 0 if report.is_scored else 1
-
-    runner = PlanReaderBenchmarkRunner(
-        benchmarks_dir=args.benchmarks_dir,
-        results_dir=args.results_dir,
+    print(
+        "Legacy PlanReader benchmark CLI is retired. "
+        "Use benchmarks/frozen_holdout/full_plan_v2/run_baseline.py "
+        "and V2 truth/coverage tooling.",
+        file=sys.stderr,
     )
-
-    benchmarks_to_run = []
-    if args.all:
-        bench_dir = Path(args.benchmarks_dir)
-        for child in sorted(bench_dir.iterdir()):
-            if child.is_dir() and (child / "source_manifest.json").exists():
-                benchmarks_to_run.append(child.name)
-    elif args.benchmark:
-        benchmarks_to_run.append(args.benchmark)
-    elif args.report:
-        pass
-    else:
-        parser.print_help()
-        return 1
-
-    if benchmarks_to_run:
-        print(f"Running PlanReader Benchmarks: {', '.join(benchmarks_to_run)}")
-    all_passed = True
-    benchmark_results = []
-
-    for bid in benchmarks_to_run:
-        try:
-            res = runner.run_benchmark(
-                benchmark_id=bid,
-                pdf_path_override=args.pdf,
-                takeoff_path_override=args.takeoff,
-            )
-            print_result_summary(res)
-            benchmark_results.append(res)
-            # If comparison blocked on a benchmark that expects allowed comparison, flag failure
-            if bid == "school_rd_60_62" and not res.comparison_allowed:
-                all_passed = False
-        except Exception as exc:
-            print(f"Error running benchmark {bid}: {exc}")
-            import traceback
-            traceback.print_exc()
-            all_passed = False
-
-    if args.all or args.report:
-        from pb_takeoff_learning_ledger import generate_golden_plan_accuracy_report
-        report = generate_golden_plan_accuracy_report(
-            benchmark_dir=args.benchmarks_dir,
-            output_dir=args.results_dir,
-            results=benchmark_results if benchmark_results else None,
-        )
-        report_md_path = Path(args.results_dir) / "accuracy_report.md"
-        print("=" * 70)
-        print(f"Consolidated Golden Plan Accuracy Report written to: {report_md_path}")
-        print(f"Total Evaluated:      {report['total_benchmarks_evaluated']} benchmarks ({report['total_expected_quantities']} expected quantities)")
-        print(f"Exact Matches:        {report['exact_matches']}")
-        print(f"Within Tolerance:     {report['within_tolerance']}")
-        print(f"Outside Tolerance:    {report['outside_tolerance']}")
-        print(f"Provisional / Ref:    {report['provisional']}")
-        print(f"Overall Accuracy:     {report['accuracy_percentage']}%")
-        print(f"Commercial Readiness: {report['commercial_readiness_percentage']}%")
-        print("=" * 70)
-
-    return 0 if all_passed else 1
+    return 2
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

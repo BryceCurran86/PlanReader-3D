@@ -1,0 +1,47 @@
+{
+  "schema_version": "v2-unresolved-items-1.0",
+  "project_id": "au_qld_3laurel",
+  "project_status": "INCOMPLETE",
+  "items": [
+    {
+      "family": "internal_wall_faces",
+      "status": "UNRESOLVED",
+      "reason": "Remaining internal wall faces and internal opening/joinery deductions are not fully closed."
+    },
+    {
+      "family": "external_wall_faces_and_cladding",
+      "status": "UNRESOLVED",
+      "reason": "External wall-face and cladding surface universe is not fully closed."
+    },
+    {
+      "family": "roof_surfaces",
+      "status": "UNRESOLVED",
+      "reason": "Roof-plane surface universe is not fully closed."
+    },
+    {
+      "family": "structural_members",
+      "status": "UNRESOLVED",
+      "reason": "Structural member universe beyond closed bracing/posts/piers remains incomplete."
+    },
+    {
+      "family": "secondary_fc_soffit_and_beam_faces",
+      "status": "UNRESOLVED",
+      "reason": "Secondary FC soffit and beam-face surfaces remain incomplete."
+    },
+    {
+      "family": "wet_area_tile_niches_and_returns",
+      "status": "UNRESOLVED",
+      "reason": "Bathroom niche width and niche-return depths remain unresolved."
+    },
+    {
+      "family": "remaining_wet_area_tile_scope",
+      "status": "UNRESOLVED",
+      "reason": "Non-shower tile skirtings, surrounds and splashbacks are not fully closed."
+    },
+    {
+      "family": "internal_opening_universe",
+      "status": "UNRESOLVED",
+      "reason": "Unlabelled internal wall breaks beyond the closed dimensioned archways remain unresolved."
+    }
+  ]
+}

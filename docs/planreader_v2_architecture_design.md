@@ -3,7 +3,7 @@
 **Status:** Design document. No production code or benchmark gold changed by this document.
 **Scope:** The accuracy/benchmark extraction subsystem (`pb_planreader_pdf_extractor.py` and the ~20
 evidence/geometry helper modules it imports, `pb_raster_schedule_extractor.py`,
-`pb_opening_deduction_pipeline.py`, `pb_benchmark_accuracy_engine.py`). The separate commercial
+`pb_opening_deduction_pipeline.py` and the active Full Plan V2 validation seam). The separate commercial
 3D-viewer/BIM subsystem (`pb_planreader_3d_app.py`, `pb_canonical_building.py`,
 `pb_editable_3d_*.py`, `pb_production_3d_adapter*.py`) is treated as an architectural boundary, not
 audited file-by-file — see §1.2.
@@ -39,9 +39,7 @@ own dependents produced a second finding that reshapes the whole design: this mo
 completely separate ~140-file subsystem exists (`pb_planreader_3d_app.py`,
 `pb_canonical_building.py`, `pb_geometry_services.py`, `pb_editable_3d_*.py`,
 `pb_production_3d_adapter*.py`, `pb_bim_viewer.py`, the `pb_opening_*_v17x.py` family, and dozens
-of version-suffixed files) — call it **the 3D/BIM subsystem**. A repo-wide grep confirms neither
-`pb_planreader_pdf_extractor.py` nor `pb_benchmark_accuracy_engine.py` imports
-`pb_canonical_building` or `pb_canonical_persistence` at all, in either direction.
+of version-suffixed files) — call it **the 3D/BIM subsystem**. A repo-wide audit confirms the production extraction path does not yet populate the canonical building graph end-to-end. The retired legacy evaluator is not part of the active architecture.
 
 This matters enormously for the design, because **the 3D/BIM subsystem already contains almost
 exactly the canonical building graph this document was asked to design**:
@@ -558,11 +556,11 @@ provenance schema is needed, only consistent population of the one that exists.
 
 Recommendation: **do not reach for an end-to-end multimodal LLM as the first move.** The existing
 pipeline's strength is deterministic, auditable, cheap evidence extraction (native text/vector),
-and that should stay the default path for the large majority of drawings that are native-vector
-PDFs (every benchmark project registered this session — KSTVET, Murera, Ghazi, Umma, Lamu — has
-been native-vector with real extractable text and geometry, not scanned raster). Reserve
-model-based perception for the genuinely hard remainder: scanned/rasterized sheets, hand-drawn
-annotations, and symbol detection where no native evidence exists at all.
+and that should stay the default path for native-vector drawings. Current V2 plan sets and
+source-backed production regression fixtures provide real extractable text/geometry examples;
+historical source documents may still be useful as regression fixtures but are not benchmark
+authority. Reserve model-based perception for the genuinely hard remainder: scanned/rasterized
+sheets, hand-drawn annotations, and symbol detection where no native evidence exists at all.
 
 | Task | Candidate approach | Accuracy | Latency | GPU | Training needed | Windows/offline | Verdict |
 |---|---|---|---|---|---|---|---|
@@ -583,25 +581,18 @@ a privileged "AI said so" override of a conflicting native-vector or figured-dim
 
 ### 9.1 Splits and leakage prevention
 
-`TRAIN` / `VALIDATION` / `FROZEN HOLDOUT`, with **project-family leakage** prevented explicitly:
-KSTVET and the "Kirudi Junior School" candidate rejected earlier this session for being a
-byte-identical reused standard-design template are the concrete cautionary example already in
-`ACCURACY_GAP_LEDGER.md` — the same discipline (SHA-256 + architect/consultant identity + plan
-geometry cross-check against every other registered project) that this session already applies
-manually to benchmark acquisition should become an automated pre-registration check as the
-dataset grows past what one person can eyeball.
+V2 truth development must prevent **project-family leakage** explicitly. Source packages should
+be fingerprinted by file hash, project identity and drawing/template characteristics before being
+admitted as an independent plan set.
 
-- **Development** (KSTVET, Murera, Ghazi, Umma, Lamu currently): failures here are allowed to
-  directly influence implementation. Never call this "unseen."
-- **Validation**: independent projects used to decide whether a migration gate (§ below, adapted
-  from the migration analysis's per-family gates) is met — used to gate readiness decisions, not
-  repeatedly hand-tuned against at the individual-item level, or it silently becomes development
-  data.
-- **Frozen holdout**: `tenders_ke_olv_laboratory_complex`, already sealed this session with only a
-  `source_manifest.json` (no gold, no `.holdout_lock.json`, correctly excluded from all scoring
-  paths per `pb_holdout_suite_registry.list_registered_holdout_projects()`). A second holdout
-  candidate is worth acquiring before the first real "unseen" evaluation, so that a single
-  project's idiosyncrasies don't dominate the final claim.
+- **Truth development**: independently source-close physical objects, geometry, quantities and
+  provenance without looking at PlanReader output as the source of expected values.
+- **Validation**: use independent V2 plan sets to exercise detection, authentication,
+  canonicalization, quantity and publication coverage. Do not repeatedly tune implementation to
+  one item's expected result.
+- **Future unseen evaluation**: add genuinely new V2 plan sets with source packages sealed before
+  production output is inspected. This is a V2 process; the retired holdout registry and legacy
+  percentage scorer are not part of it.
 
 ### 9.2 Intermediate annotations needed
 
@@ -762,18 +753,14 @@ Concrete deliverables for this workstream:
   `CanonicalWall` id, using real spatial proximity to a wall centerline (not bbox overlap with
   first-match), and identity via `pb_opening_tag_normalization.normalize_opening_tag` uniformly
   (fixing the independent, less-guarded OCR-layer tag regex along the way, per P9 above).
-- All three run **in shadow only** (P4-P7 in §12) against the same PDFs already registered as
-  development benchmarks (KSTVET, Murera, Ghazi, Umma, Lamu) plus at minimum one genuinely
-  multi-wing/multi-room drawing (Ghazi already qualifies) and one with a disconnected secondary
-  building (Lamu's twin-toilet block, currently explicitly out of scope for scoring precisely
-  because no multi-building graph exists — this workstream is what would let that gap finally
-  close).
+- All three run **in shadow only** (P4-P7 in §12) against V2 plan sets and source-backed
+  production regression fixtures spanning multi-room, multi-wing and disconnected-building
+  geometry. Historical source documents may be reused as engineering fixtures, but never as
+  active benchmark authority or product headline inputs.
 - Ambiguity (two equally-plausible wall interpretations, an opening equidistant from two walls)
   must produce an explicit `AMBIGUOUS`/`UNRESOLVED` graph state, never a best-guess pick — matching
   the existing `pb_contextual_wd_card_evidence.py` near-tie abstention pattern exactly.
-- Zero changes to `pb_planreader_pdf_extractor.py`'s live wiring, `pb_benchmark_accuracy_engine.py`,
-  or any benchmark gold file in this workstream — it is infrastructure, evaluated by shadow-mode
-  comparison and synthetic/metamorphic tests (§11), not by development-benchmark score movement.
+- Zero changes to `pb_planreader_pdf_extractor.py` live wiring or Full Plan V2 truth in this workstream — it is infrastructure, evaluated by shadow-mode comparison and synthetic/metamorphic tests (§11), not by movement of a retired benchmark score.
 
 ---
 

@@ -1,0 +1,180 @@
+{
+  "schema_version": "2.0",
+  "project_id": "au_qld_q5446_armstrong32_harlequin",
+  "status": "INCOMPLETE",
+  "source_package_complete": true,
+  "source_documents": [
+    {
+      "name": "Q5446_Standard_Plans_V1_20220320.pdf",
+      "role": "architectural_drawings",
+      "sha256": "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0",
+      "size_bytes": 1769126,
+      "page_count": 10
+    },
+    {
+      "name": "Q5446_Siting_V1_20220313.pdf",
+      "role": "siting",
+      "sha256": "80f30567db613e44af18998e82ee9e044513a7c1393dc9b9c5aa0ecd82685900",
+      "size_bytes": 287367,
+      "page_count": 1
+    },
+    {
+      "name": "Q5446_Standard_Inclusions_V1_20220313.pdf",
+      "role": "standard_inclusions",
+      "sha256": "db0af9871032e9b77f151cd2f8bddf171aa10ad3a3c975abba0d24a020e0bd63",
+      "size_bytes": 179662,
+      "page_count": 2
+    },
+    {
+      "name": "mysimonds_specificationdocumentqld.pdf",
+      "role": "specification",
+      "sha256": "a4217d18de87e5b4deb545fe511b6cf480c499844b1a4e8415e929c3c9051bbc",
+      "size_bytes": 54029,
+      "page_count": 1
+    },
+    {
+      "name": "Colour Boards.pdf",
+      "role": "finish_selection_reference",
+      "sha256": "425b554664061b9fca04b4511572f80ee76dc55f000b2907241272f687a85b0e",
+      "size_bytes": 2702439,
+      "page_count": 6
+    },
+    {
+      "name": "Q5446_Sales_Advice_Estimate_V1_20220320.pdf",
+      "role": "scope_and_allowance_reference",
+      "sha256": "a2b134a0bca2b314737e2f58351018b65e0ff011774780f3e5758e9f576444dd",
+      "size_bytes": 475217,
+      "page_count": 6
+    }
+  ],
+  "reference_takeoff_documents": [
+    {
+      "name": "reference_takeoff.json",
+      "role": "independent_verified_reference_takeoff",
+      "sha256": "faffaf2e0424b29c8da3deac26d3e9577d72858272a6443a44f02801ccd827ca",
+      "size_bytes": 7120,
+      "page_count": null
+    }
+  ],
+  "verified_takeoff_items": [
+    {
+      "item_id": "q5446-alfresco-floor-area",
+      "description": "Alfresco floor area independently closed by 3000 x 4000 figured dimensions",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 12,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:alfresco"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p1:areas_table:ALFRESCO_12.00_m2",
+        "standard_plans:p1:figured_dimensions:3000x4000"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "q5446-ground-ensuite-floor-tiling-area",
+      "description": "Ground-floor ensuite tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 4.2224,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:ground_ensuite"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p1:figured_dimensions:ENS_2320x1820",
+        "standard_plans:p1:vector_inner_faces:2320x1820",
+        "standard_inclusions:p1:bathroom_ensuite_floor_tiles",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "q5446-first-ensuite-floor-tiling-area",
+      "description": "First-floor ensuite tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 5.9572,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:first_ensuite"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p2:figured_dimensions:ENS_2810x2120",
+        "standard_plans:p2:vector_inner_faces:2802.5x2116.7_mm",
+        "standard_inclusions:p1:bathroom_ensuite_floor_tiles",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "q5446-first-bath-floor-tiling-area",
+      "description": "First-floor bathroom tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 5.8446,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:first_bath"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p2:figured_dimensions:BATH_1910x3060",
+        "standard_plans:p2:vector_inner_faces:1913.5x3056.5_mm",
+        "standard_inclusions:p1:bathroom_ensuite_floor_tiles",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "q5446-ground-laundry-floor-tiling-area",
+      "description": "Ground-floor laundry tiled floor surface independently measured on architectural and electrical plans",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 4.1864,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:ground_laundry"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p1:architectural_vector_inner_faces:2616.2x1600.2_mm",
+        "standard_plans:p5:electrical_vector_inner_faces:2616.2x1600.2_mm",
+        "standard_inclusions:p1:laundry_floor_tiles_throughout",
+        "sales_advice:p6:wet_area_floor_tiles_upgrade"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    }
+  ],
+  "reason_codes": [
+    "sales_estimate_is_not_complete_measured_takeoff",
+    "ground_first_porch_garage_area_routes_not_independently_closed",
+    "window_door_opening_universe_not_reconciled",
+    "remaining_wall_ceiling_finish_surface_universe_not_built"
+  ]
+}

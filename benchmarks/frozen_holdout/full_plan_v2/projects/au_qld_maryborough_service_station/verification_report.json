@@ -1,0 +1,77 @@
+{
+  "schema_version": "v2-verification-report-1.0",
+  "project_id": "au_qld_maryborough_service_station",
+  "project_status": "INCOMPLETE",
+  "source_hash_verification": {
+    "status": "PASS",
+    "documents": [
+      {
+        "name": "Arch_Combined_Maryborough_Service_Station.pdf",
+        "expected_sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
+        "observed_sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+      }
+    ]
+  },
+  "proofs": [
+    {
+      "proof": "independent reference quantity exists for every admitted core item",
+      "status": "PASS",
+      "evidence": "A600 schedule plus A110 tag census"
+    },
+    {
+      "proof": "every denominator item has exact physical object refs",
+      "status": "PASS",
+      "evidence": "Exact D-tag object sets"
+    },
+    {
+      "proof": "source lineage complete for admitted core",
+      "status": "PASS",
+      "evidence": "A600 and A110 locations retained per item"
+    },
+    {
+      "proof": "door object universe reconciled",
+      "status": "PASS",
+      "evidence": "28 schedule rows = 28 distinct A110 door tags; 11+3+2+2+10=28"
+    },
+    {
+      "proof": "window identity universe reconciled",
+      "status": "PASS",
+      "evidence": "A110 has exactly W01-W06 once each; A610 provides elevations for W01-W06"
+    },
+    {
+      "proof": "WC shower FT2 floor surfaces independently closed",
+      "status": "PASS",
+      "evidence": "A140 gives FT2 and 2935 x 1620 figured dimensions for each of three rooms; A110 independently reproduces the same physical room geometry within drawing tolerance."
+    },
+    {
+      "proof": "WC shower WFPB ceiling surfaces independently closed",
+      "status": "PASS",
+      "evidence": "A120 assigns 2400 WFPB ceilings to all three WC/shower rooms; their 2935 x 1620 footprints are already independently closed by A140 figured dimensions and A110 geometry."
+    },
+    {
+      "proof": "PWD floor and ceiling independently closed",
+      "status": "PASS",
+      "evidence": "A502 gives 3570 x 2200 mm PWD geometry and FT2 floor; A140 confirms PWD FT2; A120 assigns 2400 WFPB ceiling to the same room."
+    },
+    {
+      "proof": "Airlock and laundry floor/ceiling surfaces independently closed",
+      "status": "PASS",
+      "evidence": "A501 gives AIRLOCK 1520 x 5044 FT2 and LAUNDRY 1655 x 5044 FT2; A140 independently shows matching room/finish geometry; A120 assigns 2400 WFPB ceilings to both rooms."
+    },
+    {
+      "proof": "PlanReader output not used as benchmark truth",
+      "status": "PASS",
+      "evidence": "Truth derived from source drawings and independent cross-check only"
+    },
+    {
+      "proof": "unsupported surfaces are not silently excluded",
+      "status": "PASS",
+      "evidence": "All unresolved families are explicit; by-others doors are explicit non-denominator items"
+    },
+    {
+      "proof": "full project surface universe complete",
+      "status": "FAIL",
+      "evidence": "WC/shower floor/ceilings, PWD floor/ceiling, airlock floor/ceiling, laundry floor/ceiling, and door/window identity universes are closed; remaining surfaces stay unresolved."
+    }
+  ]
+}

@@ -1,8 +1,8 @@
-"""Transitive gold-isolation integrity for registered production providers.
+"""Transitive isolation from retired benchmark truth for production providers.
 
-M3 itself is gold-free.  This module inspects the *transitive local import
-closure* of a registered provider so a helper cannot quietly pull in
-benchmark, gold, mapping, scoring, or holdout modules.
+This module inspects the *transitive local import closure* of a registered
+provider so a helper cannot quietly pull in retired benchmark, expected-value,
+mapping, scoring, or holdout modules.
 
 Inspection is deterministic AST / import-graph analysis.  It does not execute
 provider code and does not load expected quantities.
@@ -234,7 +234,7 @@ def walk_local_import_graph(root_module: str) -> tuple[tuple[str, ...], tuple[Im
         if path_reason:
             findings.append(ImportGraphFinding(module=module, via=via, reason=path_reason))
             continue
-        imported = _imported_names(path.read_text(encoding="utf-8"), current_module=module)
+        imported = _imported_names(path.read_text(encoding="utf-8-sig"), current_module=module)
         for name in imported:
             forbidden = _forbidden_reason(name)
             if forbidden:

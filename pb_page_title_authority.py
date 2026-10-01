@@ -549,6 +549,7 @@ class Candidate:
     box: Box = (0.0, 0.0, 0.0, 0.0)   # relative to the page (0-1)
     rejected: str = ""
     lines: Tuple[str, ...] = ()       # the text lines a heading was merged from
+    label_strength: str = ""          # for a label-bound value: the strength of the field label that bound it
 
     def as_dict(self) -> Dict[str, Any]:
         out = {"text": self.text, "kind": self.kind, "score": round(self.score, 1), "region": self.region, "reason": self.reason}
@@ -838,7 +839,8 @@ def analyse_cells(cells: Sequence[Cell], width: float, height: float, page_no: i
         if how.endswith(_OCR_NOTE):
             score -= 6.0  # a label binds it, but the letters themselves are read, not extracted
         box = _rel(_union(parts), width, height)
-        analysis.candidates.append(Candidate(value, "label", score, region, f"value of '{label.cell.text}' ({how})", box))
+        analysis.candidates.append(Candidate(value, "label", score, region, f"value of '{label.cell.text}' ({how})", box,
+                                             label_strength=label.strength))
         analysis.learned.setdefault("title", box)
         claimed.update(id(part) for part in parts)
 
