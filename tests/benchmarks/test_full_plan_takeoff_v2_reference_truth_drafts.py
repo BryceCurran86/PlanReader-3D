@@ -165,3 +165,56 @@ def test_wall_bracing_schedule_closure(project_id: str, check_id: str, expected_
     assert len(braces) == expected_count == check["object_count"]
     assert sum(float(row["expected_quantity"]) for row in braces) == pytest.approx(expected_length)
     assert check["total_length_m"] == pytest.approx(expected_length)
+
+def test_lot16_typed_external_opening_census_closes_without_guessing_custom_front_glazing():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "external_opening"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:typed_external_opening_census"
+    )
+    assert len(openings) == check["typed_opening_count"] == 10
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(31.41)
+    assert check["typed_opening_area_m2"] == pytest.approx(31.41)
+    assert check["complete_for_typed_dimensioned_labels"] is True
+    assert check["complete_for_all_openings"] is False
+    assert "custom_front_windows_measure_on_site" in check["residual_unresolved"]
+    assert (
+        "custom_front_glazing_and_untyped_external_door_elements"
+        in draft["unresolved_surface_families"]
+    )
+
+
+def test_3laurel_explicit_external_post_and_pier_census_is_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    posts = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "external_structural_post"
+    ]
+    piers = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "external_structural_pier"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:external_post_pier_census"
+    )
+    assert len(posts) == check["timber_post_count"] == 2
+    assert len(piers) == check["brick_pier_count"] == 4
+    assert len(posts) + len(piers) == check["object_count"] == 6
+    assert all(row["attributes"]["section_mm"] == "140x140" for row in posts)
+    assert all(row["attributes"]["section_mm"] == "470x470" for row in piers)
+    assert check["complete_for_explicitly_dimensioned_posts_and_piers"] is True
+    assert (
+        "structural_members_beyond_closed_wall_bracing_and_explicit_140x140_posts_470x470_piers"
+        in draft["unresolved_surface_families"]
+    )
+
