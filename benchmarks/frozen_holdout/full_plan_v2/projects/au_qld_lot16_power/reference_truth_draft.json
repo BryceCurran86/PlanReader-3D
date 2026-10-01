@@ -1221,6 +1221,74 @@
         "ceiling_geometry": "raked",
         "denominator_readiness": "draft_only_until_remaining_ceiling_planes_and_raked_intersections_are_closed"
       }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile_gross:ensuite:elev1",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "physical_kind": "surface",
+      "description": "Ensuite elevation 1 full-height gross tiled wall face",
+      "expected_quantity": 4.7138,
+      "unit": "m2",
+      "source_location": "architectural:p11:Ensuite_Elevation_1:full_height_tile_grid; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "width_m": 1.82,
+        "tile_height_to_top_plate_m": 2.59,
+        "host_gross_wall_surface_ref": "lot16:surface:internal_wall_gross:ensuite:elev1",
+        "quantity_basis": "full-height tile grid shown on source internal elevation",
+        "deductions_applied": false,
+        "denominator_readiness": "draft_only_until_all_niches_fixtures_returns_and_wet_area_faces_are_closed"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile_gross:ensuite:elev2",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "physical_kind": "surface",
+      "description": "Ensuite elevation 2 full-height gross tiled wall face",
+      "expected_quantity": 4.3771,
+      "unit": "m2",
+      "source_location": "architectural:p11:Ensuite_Elevation_2:full_height_tile_grid; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "width_m": 1.69,
+        "tile_height_to_top_plate_m": 2.59,
+        "host_gross_wall_surface_ref": "lot16:surface:internal_wall_gross:ensuite:elev2",
+        "quantity_basis": "full-height tile grid shown on source internal elevation",
+        "deductions_applied": false,
+        "denominator_readiness": "draft_only_until_all_niches_fixtures_returns_and_wet_area_faces_are_closed"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p11:bath_elev4_niche:01",
+      "object_family": "wet_area_wall_tile_deduction_opening",
+      "physical_kind": "opening_surface",
+      "description": "Bath elevation 4 niche face opening",
+      "expected_quantity": 0.45,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_Elevation_4:900_wide_x_500_high_niche",
+      "attributes": {
+        "width_m": 0.9,
+        "height_m": 0.5,
+        "calculation": "width_m * height_m",
+        "host_gross_surface_ref": "lot16:surface:wall_tile_gross:bath:elev4",
+        "niche_return_depth_resolved": false,
+        "denominator_readiness": "deduction_face_closed_but_niche_returns_unresolved"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p11:ensuite_elev2_niche:01",
+      "object_family": "wet_area_wall_tile_deduction_opening",
+      "physical_kind": "opening_surface",
+      "description": "Ensuite elevation 2 niche face opening",
+      "expected_quantity": 0.45,
+      "unit": "m2",
+      "source_location": "architectural:p11:Ensuite_Elevation_2:900_wide_x_500_high_niche",
+      "attributes": {
+        "width_m": 0.9,
+        "height_m": 0.5,
+        "calculation": "width_m * height_m",
+        "host_gross_surface_ref": "lot16:surface:wall_tile_gross:ensuite:elev2",
+        "niche_return_depth_resolved": false,
+        "denominator_readiness": "deduction_face_closed_but_niche_returns_unresolved"
+      }
     }
   ],
   "closure_checks": [
@@ -1547,6 +1615,34 @@
       ],
       "net_denominator_ready": false,
       "reason": "Bed 1 raked ceiling is source-closed; remaining raked/flat ceiling regions are unresolved."
+    },
+    {
+      "check_id": "lot16:control:partial_wet_area_tile_faces",
+      "component_object_refs": [
+        "lot16:surface:wall_tile_gross:bath:elev1",
+        "lot16:surface:wall_tile_gross:bath:shower",
+        "lot16:surface:wall_tile_gross:bath:elev4",
+        "lot16:surface:wall_tile_gross:ensuite:elev1",
+        "lot16:surface:wall_tile_gross:ensuite:elev2"
+      ],
+      "niche_deduction_object_refs": [
+        "lot16:opening:p11:bath_elev4_niche:01",
+        "lot16:opening:p11:ensuite_elev2_niche:01"
+      ],
+      "gross_tile_face_count": 5,
+      "gross_tile_area_m2": 18.4149,
+      "source_dimensioned_niche_count": 2,
+      "flat_niche_face_deduction_area_m2": 0.9,
+      "flat_tile_area_after_known_niche_face_deductions_m2": 17.5149,
+      "complete_for_these_five_source_tiled_elevations": true,
+      "complete_for_project_wet_area_tile_universe": false,
+      "niche_return_depths_resolved": false,
+      "source_locations": [
+        "architectural:p11:Bath_Elevation_1_Bath_SHR_Elev_Bath_Elevation_4",
+        "architectural:p11:Ensuite_Elevation_1-2",
+        "architectural:p11:two_900x500_niches",
+        "architectural:p4-p5:FSL_68560_TP_71150"
+      ]
     }
   ]
 }
