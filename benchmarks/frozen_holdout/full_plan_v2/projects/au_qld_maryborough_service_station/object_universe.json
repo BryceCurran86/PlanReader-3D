@@ -606,6 +606,22 @@
       ],
       "physical_kind": "floor_finish_surface",
       "classification": "VERIFIED_CORE_OBJECT"
+    },
+    {
+      "object_ref": "maryborough:surface:floor:food_prep",
+      "physical_kind": "floor_finish_surface",
+      "room": "FOOD PREP",
+      "finish_mark": "FT3",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 13.270425,
+      "figured_dimensions_mm": [
+        4025,
+        3297
+      ],
+      "source_locations": [
+        "A140:FOOD_PREP:4025x3297:FT3",
+        "A110:FOOD_PREP:matching_physical_room_geometry"
+      ]
     }
   ],
   "wc_shower_floor_surface_universe_complete": true,
@@ -717,6 +733,23 @@
       ],
       "physical_kind": "ceiling_finish_surface",
       "classification": "VERIFIED_CORE_OBJECT"
+    },
+    {
+      "object_ref": "maryborough:surface:ceiling:food_prep",
+      "physical_kind": "ceiling_finish_surface",
+      "room": "FOOD PREP",
+      "finish_mark": "FPB",
+      "ceiling_height_mm": 3000,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 13.270425,
+      "footprint_dimensions_mm": [
+        4025,
+        3297
+      ],
+      "source_locations": [
+        "A120:RCP:FOOD_PREP:3000_FPB",
+        "A140:FOOD_PREP:4025x3297"
+      ]
     }
   ],
   "wc_shower_ceiling_surface_universe_complete": true
