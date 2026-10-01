@@ -62,6 +62,11 @@
       "evidence": "Eight explicitly dimensioned wall-tile finish faces are independently quantity-closed for 21.3002 m2 total. Niche returns/depths and the remaining project wet-area tile universe stay unresolved."
     },
     {
+      "proof": "labelled internal room-access door subset source-closed",
+      "status": "PASS",
+      "evidence": "Fourteen labelled room-access openings are independently closed from explicit floor-plan widths and the 2100 mm joinery-height rule; combined opening area 25.011 m2. Wardrobe/linen joinery and unlabelled internal breaks remain outside this closed subset."
+    },
+    {
       "proof": "full project surface universe complete",
       "status": "FAIL",
       "evidence": "External openings are source-closed, but multiple other in-scope families remain unresolved."
@@ -119,5 +124,15 @@
     "source_closed_for_promoted_faces": true,
     "complete_for_project_wet_area_tile_universe": false,
     "niche_returns_resolved": false
+  },
+  "internal_room_access_closure_summary": {
+    "closure_check_id": "3laurel:closure:internal_room_access_door_census",
+    "verified_opening_count": 14,
+    "verified_area_m2": 25.011,
+    "hinged_count": 8,
+    "cavity_slider_count": 6,
+    "joinery_height_m": 2.1,
+    "complete_for_labelled_room_access_doors": true,
+    "complete_for_all_internal_wall_openings": false
   }
 }
