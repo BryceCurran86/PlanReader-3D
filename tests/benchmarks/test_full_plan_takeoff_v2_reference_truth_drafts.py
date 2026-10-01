@@ -906,3 +906,36 @@ def test_lot16_internal_room_access_opening_census_closes_nine_870_openings():
         "laundry_external_service_door",
         "garage_external_service_door",
     }
+
+
+def test_lot16_ensuite_and_wir_raked_ceiling_planes_are_source_closed():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    ens = by_ref["lot16:surface:ceiling:ensuite_raked_12deg"]
+    wir = by_ref["lot16:surface:ceiling:wir_raked_12deg"]
+
+    assert ens["expected_quantity"] == pytest.approx(5.613672, abs=1e-6)
+    assert ens["attributes"]["plan_projection_area_m2"] == pytest.approx(5.491)
+    assert ens["attributes"]["pitch_degrees"] == 12
+    assert ens["attributes"]["source_closed_plane"] is True
+
+    assert wir["expected_quantity"] == pytest.approx(4.786394, abs=1e-6)
+    assert wir["attributes"]["plan_projection_area_m2"] == pytest.approx(4.6818)
+    assert wir["attributes"]["pitch_degrees"] == 12
+    assert wir["attributes"]["source_closed_plane"] is True
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:ensuite_wir_raked_ceiling_planes"
+    )
+    assert check["component_object_refs"] == [
+        "lot16:surface:ceiling:ensuite_raked_12deg",
+        "lot16:surface:ceiling:wir_raked_12deg",
+    ]
+    assert check["plan_projection_sum_m2"] == pytest.approx(10.1728)
+    assert check["raked_surface_sum_m2"] == pytest.approx(10.400066, abs=1e-6)
+    assert check["pitch_degrees"] == 12
+    assert check["source_closed"] is True
