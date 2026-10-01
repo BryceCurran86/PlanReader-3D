@@ -376,6 +376,11 @@ class GenericPlanReaderExtractor:
             "reason_codes": ["not_collected"],
             "claims": [],
         }
+        self.canonical_ceilings_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "ceilings": [],
+        }
         self.roof_covering_shadow: Dict[str, Any] = {
             "status": "abstained",
             "reason": "not_collected",
@@ -3262,6 +3267,23 @@ class GenericPlanReaderExtractor:
                 p_path,
                 pages=target_pages,
             )
+            canonical_ceiling_objects = [
+                ceiling.to_dict()
+                for ceiling in getattr(
+                    ceiling_result,
+                    "canonical_ceilings",
+                    (),
+                )
+            ]
+            self.canonical_ceilings_live = {
+                "status": (
+                    "corroborated"
+                    if canonical_ceiling_objects
+                    else "abstained"
+                ),
+                "reason_codes": list(ceiling_result.reason_codes),
+                "ceilings": canonical_ceiling_objects,
+            }
             self.ceiling_lining_live = {
                 "status": ceiling_result.status.value,
                 "reason_codes": list(ceiling_result.reason_codes),
@@ -3283,6 +3305,12 @@ class GenericPlanReaderExtractor:
             self.extraction_status["ceiling_lining_live"] = ceiling_result.status.value
 
             for claim in ceiling_result.claims:
+                claim_ceiling_objects = [
+                    ceiling
+                    for ceiling in canonical_ceiling_objects
+                    if ceiling.get("room_entity_id")
+                    in set(claim.room_entity_ids)
+                ]
                 merge_extracted_prediction(
                     pred_dict,
                     ExtractedPrediction(
@@ -3308,6 +3336,11 @@ class GenericPlanReaderExtractor:
                             "finish_descriptor": claim.finish_descriptor,
                             "room_quantity_ids": list(claim.room_quantity_ids),
                             "room_entity_ids": list(claim.room_entity_ids),
+                            "canonical_ceiling_ids": [
+                                ceiling["canonical_ceiling_id"]
+                                for ceiling in claim_ceiling_objects
+                            ],
+                            "canonical_ceiling_objects": claim_ceiling_objects,
                             "evidence_ids": list(claim.evidence_ids),
                             "physical_scale_record_id": claim.physical_scale_record_id,
                             "raw_evidence_ref": claim.claim_id,
@@ -3320,6 +3353,13 @@ class GenericPlanReaderExtractor:
                 "status": "abstained",
                 "reason_codes": [f"live_ceiling_exception:{type(exc).__name__}"],
                 "claims": [],
+            }
+            self.canonical_ceilings_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_ceiling_exception:{type(exc).__name__}"
+                ],
+                "ceilings": [],
             }
             self.extraction_status["ceiling_lining_live"] = "extraction_failed"
 
