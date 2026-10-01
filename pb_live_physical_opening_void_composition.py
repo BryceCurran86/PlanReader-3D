@@ -45,11 +45,95 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION = "1.0.0"
+LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION = "1.1.0"
 LIVE_PHYSICAL_OPENING_VOID_RESOLVED = "live_physical_opening_void_composition_resolved"
 LIVE_PHYSICAL_OPENING_VOID_PARTIAL = "live_physical_opening_void_composition_partial"
 LIVE_PHYSICAL_OPENING_VOID_UNAVAILABLE = "live_physical_opening_void_composition_unavailable"
 LIVE_PHYSICAL_OPENING_VOID_UPSTREAM_INCOMPLETE = "live_physical_opening_void_upstream_incomplete"
+
+
+@dataclass(frozen=True)
+class LiveCanonicalOpeningObject:
+    """Persistent physical opening identity with optional authenticated geometry."""
+
+    canonical_opening_id: str
+    physical_opening_id: str
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    snapshot_id: str
+    page_id: str
+    viewport_id: Optional[str]
+    semantic_class: str
+    structural_pattern: str
+    representative_observation_id: str
+    source_observation_ids: tuple[str, ...]
+    source_lineage_root_ids: tuple[str, ...]
+    source_geometries: tuple[tuple[float, ...], ...]
+    host_wall_id: Optional[str]
+    host_binding_record_id: Optional[str]
+    host_frame_record_id: Optional[str]
+    wall_local_frame_id: Optional[str]
+    profile_kind: Optional[str]
+    coordinate_unit: Optional[str]
+    u0: Optional[float]
+    u1: Optional[float]
+    z0: Optional[float]
+    z1: Optional[float]
+    width_m: Optional[float]
+    height_m: Optional[float]
+    area_m2: Optional[float]
+    opening_void_record_id: Optional[str]
+    opening_universe_record_id: Optional[str]
+    width_record_id: Optional[str]
+    height_record_id: Optional[str]
+    vertical_placement_record_id: Optional[str]
+    scale_record_id: Optional[str]
+    schedule_binding_record_id: Optional[str]
+    evidence_ids: tuple[str, ...]
+    geometry_complete: bool
+    schema_version: str = "1.0.0"
+
+    def to_dict(self) -> dict:
+        return {
+            "canonical_opening_id": self.canonical_opening_id,
+            "physical_opening_id": self.physical_opening_id,
+            "document_id": self.document_id,
+            "revision_id": self.revision_id,
+            "source_sha256": self.source_sha256,
+            "snapshot_id": self.snapshot_id,
+            "page_id": self.page_id,
+            "viewport_id": self.viewport_id,
+            "semantic_class": self.semantic_class,
+            "structural_pattern": self.structural_pattern,
+            "representative_observation_id": self.representative_observation_id,
+            "source_observation_ids": list(self.source_observation_ids),
+            "source_lineage_root_ids": list(self.source_lineage_root_ids),
+            "source_geometries": [list(g) for g in self.source_geometries],
+            "host_wall_id": self.host_wall_id,
+            "host_binding_record_id": self.host_binding_record_id,
+            "host_frame_record_id": self.host_frame_record_id,
+            "wall_local_frame_id": self.wall_local_frame_id,
+            "profile_kind": self.profile_kind,
+            "coordinate_unit": self.coordinate_unit,
+            "u0": self.u0,
+            "u1": self.u1,
+            "z0": self.z0,
+            "z1": self.z1,
+            "width_m": self.width_m,
+            "height_m": self.height_m,
+            "area_m2": self.area_m2,
+            "opening_void_record_id": self.opening_void_record_id,
+            "opening_universe_record_id": self.opening_universe_record_id,
+            "width_record_id": self.width_record_id,
+            "height_record_id": self.height_record_id,
+            "vertical_placement_record_id": self.vertical_placement_record_id,
+            "scale_record_id": self.scale_record_id,
+            "schedule_binding_record_id": self.schedule_binding_record_id,
+            "evidence_ids": list(self.evidence_ids),
+            "geometry_complete": self.geometry_complete,
+            "schema_version": self.schema_version,
+        }
 
 
 @dataclass(frozen=True)
@@ -84,6 +168,7 @@ class LivePhysicalOpeningVoidComposition:
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
     traces: tuple[LivePhysicalOpeningVoidTrace, ...]
+    canonical_openings: tuple[LiveCanonicalOpeningObject, ...]
     physical_opening_void_authorities: Mapping[str, PhysicalOpeningVoidAuthority]
     void_selectors: Mapping[str, PhysicalOpeningVoidSelector]
     schema_version: str = LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION
@@ -115,6 +200,7 @@ def compose_live_physical_opening_voids(
             status=EvidenceResolutionStatus.ABSTAINED,
             reason_codes=(LIVE_PHYSICAL_OPENING_VOID_UNAVAILABLE,),
             traces=(),
+            canonical_openings=(),
             physical_opening_void_authorities=MappingProxyType({}),
             void_selectors=MappingProxyType({}),
         )
@@ -129,6 +215,7 @@ def compose_live_physical_opening_voids(
                 *wall_opening_composition.semantic_enumeration_result.reason_codes,
             ),
             traces=(),
+            canonical_openings=(),
             physical_opening_void_authorities=MappingProxyType({}),
             void_selectors=MappingProxyType({}),
         )
@@ -162,6 +249,7 @@ def compose_live_physical_opening_voids(
             status=EvidenceResolutionStatus.ABSTAINED,
             reason_codes=(LIVE_PHYSICAL_OPENING_VOID_UNAVAILABLE,),
             traces=(),
+            canonical_openings=(),
             physical_opening_void_authorities=MappingProxyType({}),
             void_selectors=MappingProxyType({}),
         )
@@ -308,7 +396,19 @@ def compose_live_physical_opening_voids(
         void_producers[page_id] = producer
 
     traces: list[LivePhysicalOpeningVoidTrace] = []
+    canonical_openings: list[LiveCanonicalOpeningObject] = []
     void_selectors: dict[str, PhysicalOpeningVoidSelector] = {}
+    binding_by_opening = {
+        str(trace.opening_identity_id): trace
+        for trace in wall_opening_composition.opening_bindings
+        if trace.opening_identity_id
+    }
+    frame_by_opening = {
+        str(trace.opening_identity_id): trace
+        for trace in wall_opening_composition.host_frames
+        if trace.opening_identity_id
+    }
+    visibility_authority = source_visibility_producer.authority()
     for opening_id, opening_selector in opening_selectors.items():
         page_id = opening_pages[opening_id]
         binding_selector = wall_opening_composition.binding_selectors.get(opening_id)
@@ -360,6 +460,187 @@ def compose_live_physical_opening_voids(
             if vertical_evidence is not None
             else None
         )
+        existence_record = existence_by_opening[opening_id].existence_record
+        void_record = void.record
+        binding_trace = binding_by_opening.get(opening_id)
+        frame_trace = frame_by_opening.get(opening_id)
+
+        source_geometries: list[tuple[float, ...]] = []
+        if existence_record is not None:
+            for source_observation_id in existence_record.source_observation_ids:
+                visible = visibility_authority.resolve_visible(
+                    ObservationSelector(
+                        document_id=existence_record.document_id,
+                        revision_id=existence_record.revision_id,
+                        source_sha256=existence_record.source_sha256,
+                        snapshot_id=existence_record.snapshot_id,
+                        observation_id=source_observation_id,
+                    )
+                )
+                observation = getattr(visible, "observation", None)
+                if (
+                    visible.status is EvidenceResolutionStatus.CORROBORATED
+                    and observation is not None
+                    and getattr(observation, "geometry", None)
+                ):
+                    source_geometries.append(
+                        tuple(float(value) for value in observation.geometry)
+                    )
+
+        host_wall_id = None
+        host_binding_record_id = None
+        host_frame_record_id = None
+        if (
+            binding_trace is not None
+            and binding_trace.status is EvidenceResolutionStatus.CORROBORATED
+            and binding_trace.host_wall_id
+        ):
+            host_wall_id = str(binding_trace.host_wall_id)
+            host_binding_record_id = binding_trace.record_id
+        if (
+            frame_trace is not None
+            and frame_trace.status is EvidenceResolutionStatus.CORROBORATED
+            and frame_trace.host_wall_id
+        ):
+            host_wall_id = str(frame_trace.host_wall_id)
+            host_frame_record_id = frame_trace.record_id
+
+        if void_record is not None:
+            host_wall_id = str(void_record.host_wall_id)
+            host_binding_record_id = str(void_record.host_binding_record_id)
+
+        width_m = None
+        if (
+            width.status is EvidenceResolutionStatus.CORROBORATED
+            and getattr(width, "value_mm", None) is not None
+        ):
+            width_m = float(width.value_mm) / 1000.0
+        height_m = None
+        if (
+            height is not None
+            and height.status is EvidenceResolutionStatus.CORROBORATED
+            and height_evidence is not None
+        ):
+            height_m = float(height_evidence.height_mm) / 1000.0
+
+        u0 = float(void_record.u0) if void_record is not None else None
+        u1 = float(void_record.u1) if void_record is not None else None
+        z0 = float(void_record.z0) if void_record is not None else None
+        z1 = float(void_record.z1) if void_record is not None else None
+        if void_record is not None:
+            width_m = u1 - u0
+            height_m = z1 - z0
+        area_m2 = (
+            width_m * height_m
+            if width_m is not None and height_m is not None
+            else None
+        )
+
+        if existence_record is not None:
+            evidence_ids = tuple(
+                dict.fromkeys(
+                    str(value)
+                    for value in (
+                        existence_record.record_id,
+                        *existence_record.source_observation_ids,
+                        *existence_record.source_lineage_root_ids,
+                        host_binding_record_id,
+                        host_frame_record_id,
+                        width_record_id,
+                        height_record_id,
+                        vertical_record_id,
+                        (
+                            scale_evidence.record_id
+                            if scale_evidence is not None
+                            else None
+                        ),
+                        (
+                            schedule_record.record_id
+                            if schedule_record is not None
+                            else None
+                        ),
+                        (
+                            void_record.record_id
+                            if void_record is not None
+                            else None
+                        ),
+                    )
+                    if value
+                )
+            )
+            canonical_openings.append(
+                LiveCanonicalOpeningObject(
+                    canonical_opening_id=existence_record.record_id,
+                    physical_opening_id=existence_record.record_id,
+                    document_id=existence_record.document_id,
+                    revision_id=existence_record.revision_id,
+                    source_sha256=existence_record.source_sha256,
+                    snapshot_id=existence_record.snapshot_id,
+                    page_id=existence_record.page_id,
+                    viewport_id=existence_record.viewport_id,
+                    semantic_class=existence_record.semantic_class,
+                    structural_pattern=existence_record.structural_pattern,
+                    representative_observation_id=representative_by_opening[opening_id],
+                    source_observation_ids=tuple(
+                        existence_record.source_observation_ids
+                    ),
+                    source_lineage_root_ids=tuple(
+                        existence_record.source_lineage_root_ids
+                    ),
+                    source_geometries=tuple(source_geometries),
+                    host_wall_id=host_wall_id,
+                    host_binding_record_id=host_binding_record_id,
+                    host_frame_record_id=host_frame_record_id,
+                    wall_local_frame_id=(
+                        str(void_record.wall_local_frame_id)
+                        if void_record is not None
+                        else None
+                    ),
+                    profile_kind=(
+                        str(void_record.profile_kind)
+                        if void_record is not None
+                        else None
+                    ),
+                    coordinate_unit=(
+                        str(void_record.coordinate_unit)
+                        if void_record is not None
+                        else None
+                    ),
+                    u0=u0,
+                    u1=u1,
+                    z0=z0,
+                    z1=z1,
+                    width_m=width_m,
+                    height_m=height_m,
+                    area_m2=area_m2,
+                    opening_void_record_id=(
+                        str(void_record.record_id)
+                        if void_record is not None
+                        else None
+                    ),
+                    opening_universe_record_id=(
+                        str(void_record.opening_universe_record_id)
+                        if void_record is not None
+                        else None
+                    ),
+                    width_record_id=width_record_id,
+                    height_record_id=height_record_id,
+                    vertical_placement_record_id=vertical_record_id,
+                    scale_record_id=(
+                        str(scale_evidence.record_id)
+                        if scale_evidence is not None
+                        else None
+                    ),
+                    schedule_binding_record_id=(
+                        str(schedule_record.record_id)
+                        if schedule_record is not None
+                        else None
+                    ),
+                    evidence_ids=evidence_ids,
+                    geometry_complete=void_record is not None,
+                )
+            )
+
         traces.append(
             LivePhysicalOpeningVoidTrace(
                 opening_identity_id=opening_id,
@@ -463,6 +744,7 @@ def compose_live_physical_opening_voids(
         status=status,
         reason_codes=_reason_tuple(reasons),
         traces=tuple(traces),
+        canonical_openings=tuple(canonical_openings),
         physical_opening_void_authorities=MappingProxyType(dict(void_authorities)),
         void_selectors=MappingProxyType(dict(void_selectors)),
     )
@@ -474,6 +756,7 @@ __all__ = [
     "LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION",
     "LIVE_PHYSICAL_OPENING_VOID_UNAVAILABLE",
     "LIVE_PHYSICAL_OPENING_VOID_UPSTREAM_INCOMPLETE",
+    "LiveCanonicalOpeningObject",
     "LivePhysicalOpeningVoidComposition",
     "LivePhysicalOpeningVoidTrace",
     "compose_live_physical_opening_voids",
