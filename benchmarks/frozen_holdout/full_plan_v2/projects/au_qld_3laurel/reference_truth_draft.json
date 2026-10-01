@@ -34,7 +34,7 @@
     "structural_members_beyond_closed_wall_bracing_and_explicit_140x140_posts_470x470_piers",
     "secondary_fc_soffit_and_beam_faces_beyond_primary_ceiling_planes",
     "wet_area_tile_bathroom_niche_width_and_all_niche_return_depths",
-    "wet_area_non_shower_tile_skirtings_bath_surrounds_and_splashbacks",
+    "wet_area_non_shower_tile_skirtings_beyond_closed_laundry_D_plus_bath_surrounds_and_splashbacks",
     "unlabelled_internal_wall_breaks_beyond_two_closed_dimensioned_open_archways_for_wall_face_deductions"
   ],
   "completion_rule": "Do not mark project VERIFIED until every in-scope family is independently closed and aggregate controls reconcile without double counting.",
@@ -2458,6 +2458,23 @@
         "closure_group": "3laurel_declared_floor_area",
         "overlaps_aggregate_ref": "3laurel:surface:floor:gf_living_composite_region"
       }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:laundry_D_skirting",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Laundry D tile skirting strip",
+      "expected_quantity": 0.5852,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_D:3080_finished_wall_width_x_190_TILE_SKIRTING_height",
+      "attributes": {
+        "finished_face_width_m": 3.08,
+        "tile_height_m": 0.19,
+        "calculation": "3.080m * 0.190m",
+        "finish_scope": "tile_skirting",
+        "floor_level_openings_in_host_face": false,
+        "net_finish_area_ready": true
+      }
     }
   ],
   "closure_checks": [
@@ -3001,6 +3018,17 @@
         ],
         "rule": "Atomic wet-area floor surfaces are components of the declared living aggregates and must not be double-counted with those aggregate controls."
       }
+    },
+    {
+      "check_id": "3laurel:closure:laundry_D_tile_skirting",
+      "component_object_refs": [
+        "3laurel:surface:wall_tile:laundry_D_skirting"
+      ],
+      "object_count": 1,
+      "tile_area_m2": 0.5852,
+      "source_location": "architectural:p13:A0.13:Laundry_D",
+      "complete_for_this_explicit_strip": true,
+      "complete_for_project_non_shower_tile_universe": false
     }
   ]
 }
