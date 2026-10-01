@@ -32,9 +32,10 @@
     "external_wall_faces_and_cladding",
     "roof_planes",
     "doors_and_windows",
-    "wet_area_wall_tiling",
     "structural_members_other_than_scheduled_wall_bracing",
-    "secondary_fc_soffit_and_beam_faces_beyond_primary_ceiling_planes"
+    "secondary_fc_soffit_and_beam_faces_beyond_primary_ceiling_planes",
+    "wet_area_tile_niche_returns_and_recess_deductions",
+    "wet_area_non_shower_tile_skirtings_bath_surrounds_and_splashbacks"
   ],
   "completion_rule": "Do not mark project VERIFIED until every in-scope family is independently closed and aggregate controls reconcile without double counting.",
   "verified_physical_candidates": [
@@ -132,7 +133,7 @@
         "source_bbox_pdf_pt": [
           275.6,
           180.5,
-          331.0,
+          331,
           188.3
         ]
       },
@@ -213,7 +214,7 @@
           994.8,
           200.7,
           1002.6,
-          236.0
+          236
         ]
       },
       "source_location": "architectural:p3:A0.3:floor_plan:01"
@@ -250,7 +251,7 @@
         "height_m": 2.1,
         "width_m": 1.5,
         "source_bbox_pdf_pt": [
-          740.0,
+          740,
           460.5,
           779.2,
           468.3
@@ -852,7 +853,7 @@
       "physical_kind": "surface",
       "object_family": "ceiling_plane",
       "description": "Granny-flat internal ceiling plane",
-      "expected_quantity": 60.0,
+      "expected_quantity": 60,
       "unit": "m2",
       "attributes": {
         "ceiling_geometry": "horizontal",
@@ -940,7 +941,7 @@
       "physical_kind": "surface",
       "object_family": "floor",
       "description": "Source-defined granny-flat living floor region",
-      "expected_quantity": 60.0,
+      "expected_quantity": 60,
       "unit": "m2",
       "attributes": {
         "region_granularity": "source_area_schedule_composite",
@@ -1007,6 +1008,134 @@
       "source_location": "architectural:p2:site_plan:PATH_TOTAL_26.7_m2",
       "physical_kind": "surface",
       "object_family": "site_concrete"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_1",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "Main bathroom shower wall 1",
+      "expected_quantity": 1.89,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 0.9,
+        "tile_height_m": 2.1,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "draft_only_until_niche_and_return_adjustments_are_resolved"
+      },
+      "source_location": "architectural:p11:A0.11:bathroom_C_or_D:900_SHW_x_2100_TILES"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_2",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "Main bathroom shower wall 2",
+      "expected_quantity": 1.89,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 0.9,
+        "tile_height_m": 2.1,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "draft_only_until_niche_and_return_adjustments_are_resolved"
+      },
+      "source_location": "architectural:p11:A0.11:bathroom_C_or_D:900_SHW_x_2100_TILES"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_rear",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "Main ensuite shower rear wall",
+      "expected_quantity": 4.536,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 1.68,
+        "tile_height_m": 2.7,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "draft_only_until_niche_and_return_adjustments_are_resolved"
+      },
+      "source_location": "architectural:p12:A0.12:ensuite_A:1680_wall:shower_tiles_to_ceiling; architectural:p7:A0.7:FCL_2700"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_return_1",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "Main ensuite shower return wall 1",
+      "expected_quantity": 2.43,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "draft_only_until_niche_and_return_adjustments_are_resolved"
+      },
+      "source_location": "architectural:p12:A0.12:ensuite_B:900_SHW:shower_tiles_to_ceiling; architectural:p7:A0.7:FCL_2700"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_return_2",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "Main ensuite shower return wall 2",
+      "expected_quantity": 2.43,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "draft_only_until_niche_and_return_adjustments_are_resolved"
+      },
+      "source_location": "architectural:p12:A0.12:ensuite_D:900_SHW:shower_tiles_to_ceiling; architectural:p7:A0.7:FCL_2700"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_rear",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "GF ensuite shower rear wall",
+      "expected_quantity": 5.049,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 1.87,
+        "tile_height_m": 2.7,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "draft_only_until_niche_and_return_adjustments_are_resolved"
+      },
+      "source_location": "architectural:p15:A0.15:GF_Ens_Ldry_C:1870_wall:shower_tiles_to_ceiling; architectural:p7:A0.7:FCL_2700"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_return_1",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "GF ensuite shower return wall 1",
+      "expected_quantity": 2.43,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "draft_only_until_niche_and_return_adjustments_are_resolved"
+      },
+      "source_location": "architectural:p15:A0.15:GF_Ens_Ldry_B:900_SHW:shower_tiles_to_ceiling; architectural:p7:A0.7:FCL_2700"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_return_2",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "GF ensuite shower return wall 2",
+      "expected_quantity": 2.43,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "draft_only_until_niche_and_return_adjustments_are_resolved"
+      },
+      "source_location": "architectural:p15:A0.15:GF_Ens_Ldry_D:900_SHW:shower_tiles_to_ceiling; architectural:p7:A0.7:FCL_2700"
     }
   ],
   "closure_checks": [
@@ -1023,7 +1152,7 @@
       ],
       "component_sum_m2": 297.5,
       "declared_total_m2": 297.5,
-      "difference_m2": 0.0,
+      "difference_m2": 0,
       "source_location": "architectural:p3:floor_plan:area_table"
     },
     {
@@ -1039,8 +1168,25 @@
       ],
       "component_sum_m2": 297.5,
       "declared_reference_plan_area_m2": 297.5,
-      "difference_m2": 0.0,
+      "difference_m2": 0,
       "source_location": "architectural:p3:A0.3:area_table; architectural:p7:A0.7:ceilings_to_truss_bottom_chord"
+    },
+    {
+      "check_id": "3laurel:control:gross_shower_tile_faces",
+      "component_object_refs": [
+        "3laurel:surface:wall_tile_gross:bath_shower_wall_1",
+        "3laurel:surface:wall_tile_gross:bath_shower_wall_2",
+        "3laurel:surface:wall_tile_gross:ensuite_shower_rear",
+        "3laurel:surface:wall_tile_gross:ensuite_shower_return_1",
+        "3laurel:surface:wall_tile_gross:ensuite_shower_return_2",
+        "3laurel:surface:wall_tile_gross:gf_ensuite_shower_rear",
+        "3laurel:surface:wall_tile_gross:gf_ensuite_shower_return_1",
+        "3laurel:surface:wall_tile_gross:gf_ensuite_shower_return_2"
+      ],
+      "component_sum_m2": 23.085,
+      "net_denominator_ready": false,
+      "source_location": "architectural:p11:A0.11; architectural:p12:A0.12; architectural:p15:A0.15",
+      "reason": "gross designated shower tile faces only; niche/recess returns and deductions remain unresolved"
     }
   ]
 }
