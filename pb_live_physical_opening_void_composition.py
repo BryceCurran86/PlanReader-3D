@@ -19,6 +19,7 @@ from pb_opening_height_authority import (
     OpeningHeightProducer,
     OpeningHeightSelector,
 )
+from pb_opening_tag_normalization import normalize_opening_tag
 from pb_opening_vertical_placement_authority import (
     OpeningVerticalPlacementProducer,
     OpeningVerticalPlacementSelector,
@@ -90,9 +91,18 @@ class LiveCanonicalOpeningObject:
     vertical_placement_record_id: Optional[str]
     scale_record_id: Optional[str]
     schedule_binding_record_id: Optional[str]
+    opening_kind: Optional[str]
+    type_mark: Optional[str]
+    schedule_page_id: Optional[str]
+    schedule_declared_width_mm: Optional[int]
+    schedule_declared_height_mm: Optional[int]
+    schedule_declared_count: Optional[int]
+    schedule_count_explicit: bool
+    schedule_row_observation_ids: tuple[str, ...]
+    tag_observation_id: Optional[str]
     evidence_ids: tuple[str, ...]
     geometry_complete: bool
-    schema_version: str = "1.0.0"
+    schema_version: str = LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION
 
     def to_dict(self) -> dict:
         return {
@@ -130,6 +140,15 @@ class LiveCanonicalOpeningObject:
             "vertical_placement_record_id": self.vertical_placement_record_id,
             "scale_record_id": self.scale_record_id,
             "schedule_binding_record_id": self.schedule_binding_record_id,
+            "opening_kind": self.opening_kind,
+            "type_mark": self.type_mark,
+            "schedule_page_id": self.schedule_page_id,
+            "schedule_declared_width_mm": self.schedule_declared_width_mm,
+            "schedule_declared_height_mm": self.schedule_declared_height_mm,
+            "schedule_declared_count": self.schedule_declared_count,
+            "schedule_count_explicit": self.schedule_count_explicit,
+            "schedule_row_observation_ids": list(self.schedule_row_observation_ids),
+            "tag_observation_id": self.tag_observation_id,
             "evidence_ids": list(self.evidence_ids),
             "geometry_complete": self.geometry_complete,
             "schema_version": self.schema_version,
@@ -438,6 +457,40 @@ def compose_live_physical_opening_voids(
 
         width_record_id = getattr(width, "dimension_record_id", None)
         schedule_record = getattr(schedule, "record", None)
+        normalized_schedule_tag = (
+            normalize_opening_tag(schedule_record.tag_mark)
+            if schedule_record is not None
+            else None
+        )
+        opening_kind = None
+        type_mark = None
+        schedule_page_id = None
+        schedule_declared_width_mm = None
+        schedule_declared_height_mm = None
+        schedule_declared_count = None
+        schedule_count_explicit = False
+        schedule_row_observation_ids: tuple[str, ...] = ()
+        tag_observation_id = None
+        if schedule_record is not None and normalized_schedule_tag is not None:
+            opening_kind = (
+                "door"
+                if normalized_schedule_tag.trade_type == "doors"
+                else "window"
+                if normalized_schedule_tag.trade_type == "windows"
+                else None
+            )
+            type_mark = normalized_schedule_tag.tag
+            schedule_page_id = str(schedule_record.schedule_page_id)
+            schedule_declared_width_mm = schedule_record.schedule_row_width_mm
+            schedule_declared_height_mm = schedule_record.schedule_row_height_mm
+            schedule_declared_count = schedule_record.schedule_row_count
+            schedule_count_explicit = bool(
+                schedule_record.schedule_row_count_explicit
+            )
+            schedule_row_observation_ids = tuple(
+                schedule_record.schedule_row_observation_ids
+            )
+            tag_observation_id = str(schedule_record.tag_observation_id)
         height_evidence = getattr(height, "evidence", None)
         vertical_evidence = getattr(vertical, "evidence", None)
         scale_evidence = getattr(scale, "evidence", None)
@@ -555,6 +608,8 @@ def compose_live_physical_opening_voids(
                             if schedule_record is not None
                             else None
                         ),
+                        tag_observation_id,
+                        *schedule_row_observation_ids,
                         (
                             void_record.record_id
                             if void_record is not None
@@ -632,6 +687,15 @@ def compose_live_physical_opening_voids(
                         if schedule_record is not None
                         else None
                     ),
+                    opening_kind=opening_kind,
+                    type_mark=type_mark,
+                    schedule_page_id=schedule_page_id,
+                    schedule_declared_width_mm=schedule_declared_width_mm,
+                    schedule_declared_height_mm=schedule_declared_height_mm,
+                    schedule_declared_count=schedule_declared_count,
+                    schedule_count_explicit=schedule_count_explicit,
+                    schedule_row_observation_ids=schedule_row_observation_ids,
+                    tag_observation_id=tag_observation_id,
                     evidence_ids=evidence_ids,
                     geometry_complete=void_record is not None,
                 )

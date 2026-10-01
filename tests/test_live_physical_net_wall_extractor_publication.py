@@ -90,6 +90,8 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
         "page_id": "1",
         "viewport_id": "floor-plan-1",
         "semantic_class": "opening",
+        "opening_kind": "window",
+        "type_mark": "W1",
         "structural_pattern": "jamb_bounded_two_face_interruption",
         "host_wall_id": "whole-wall-1",
         "wall_local_frame_id": "whole-wall-1",
