@@ -39,10 +39,14 @@ from full_plan_takeoff_v2_evaluator import (
 SHA = "a" * 64
 
 
-def doc(name: str = "plans.pdf") -> SourceDocumentV2:
+def doc(
+    name: str = "plans.pdf",
+    *,
+    role: str = "architectural_drawings",
+) -> SourceDocumentV2:
     return SourceDocumentV2(
         name=name,
-        role="architectural_drawings",
+        role=role,
         sha256=SHA,
         size_bytes=100,
         page_count=2,
@@ -64,8 +68,11 @@ def item(
         trade_category=trade,
         unit=unit,
         expected_quantity=expected,
+        tolerance_policy_id="relative-tolerance-v1",
         tolerance_fraction=tolerance,
         expected_object_refs=refs,
+        source_document_refs=("takeoff.pdf",),
+        source_location_refs=("reference:item",),
         denominator_eligible=denominator_eligible,
     )
 
@@ -76,7 +83,9 @@ def verified_manifest(*items: VerifiedTakeoffItemV2) -> ProjectBenchmarkManifest
         status=PROJECT_VERIFIED,
         source_package_complete=True,
         source_documents=(doc(),),
-        reference_takeoff_documents=(doc("takeoff.pdf"),),
+        reference_takeoff_documents=(
+            doc("takeoff.pdf", role="reference_takeoff"),
+        ),
         verified_items=items or (item(),),
     )
 
@@ -216,7 +225,9 @@ def test_verified_manifest_requires_complete_source_package():
             status=PROJECT_VERIFIED,
             source_package_complete=False,
             source_documents=(doc(),),
-            reference_takeoff_documents=(doc("takeoff.pdf"),),
+            reference_takeoff_documents=(
+                doc("takeoff.pdf", role="reference_takeoff"),
+            ),
             verified_items=(item(),),
         )
 
@@ -253,15 +264,20 @@ def _manifest_for(project_id: str, status: str) -> ProjectBenchmarkManifestV2:
             trade_category="painting",
             unit="m2",
             expected_quantity=10.0,
+            tolerance_policy_id="relative-tolerance-v1",
             tolerance_fraction=0.05,
             expected_object_refs=(f"{project_id}-surface",),
+            source_document_refs=(f"{project_id}-takeoff.pdf",),
+            source_location_refs=("reference:item",),
         )
         return ProjectBenchmarkManifestV2(
             project_id=project_id,
             status=status,
             source_package_complete=True,
             source_documents=(doc(f"{project_id}.pdf"),),
-            reference_takeoff_documents=(doc(f"{project_id}-takeoff.pdf"),),
+            reference_takeoff_documents=(
+                doc(f"{project_id}-takeoff.pdf", role="reference_takeoff"),
+            ),
             verified_items=(verified_item,),
         )
     return ProjectBenchmarkManifestV2(
@@ -448,6 +464,9 @@ def test_denominator_item_requires_verified_surface_object_refs():
             trade_category="painting",
             unit="m2",
             expected_quantity=10.0,
+            tolerance_policy_id="relative-tolerance-v1",
             tolerance_fraction=0.05,
             expected_object_refs=(),
+            source_document_refs=("takeoff.pdf",),
+            source_location_refs=("reference:item",),
         )
