@@ -17,18 +17,28 @@ as unavailable rather than zero.
 from __future__ import annotations
 
 import copy
+import json
+import math
 import re
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
+from pb_geometry_takeoff_model import AuthorityStatus
+from pb_migration_contracts import EvidenceResolutionStatus
 from pb_audit_coverage_record import (
     AuditObjectRecord,
     CoverageState,
     REFUSED_PHYSICAL_STATES,
 )
-from pb_takeoff_coverage_registry import CoverageObjectRecordV1, CoverageRegistrySummaryV1
+from pb_takeoff_coverage_registry import (
+    ENUMERATION_COMPLETE,
+    ENUMERATION_NOT_ENUMERATED,
+    ENUMERATION_UNAVAILABLE,
+    CoverageObjectRecordV1,
+    CoverageRegistrySummaryV1,
+)
 
 
 REASON_NOT_IN_REGISTRY_UNIVERSE = "not_in_registry_admitted_object_universe"
@@ -142,6 +152,21 @@ RUNTIME_COVERAGE_UNAVAILABLE = "coverage_registry_summary_unavailable"
 RUNTIME_COVERAGE_PARTIAL = "coverage_registry_scope_partial"
 RUNTIME_COVERAGE_AVAILABLE = "coverage_registry_scope_available"
 
+RUNTIME_COVERAGE_FAMILIES = (
+    "wall", "opening", "door_window", "room", "floor_slab", "ceiling",
+    "roof", "finish_surface", "structural_member",
+)
+_CATEGORY_FAMILY = {
+    "wall": "wall", "opening": "opening", "door": "door_window",
+    "window": "door_window", "door_window": "door_window", "room": "room",
+    "space": "room", "floor": "floor_slab", "slab": "floor_slab",
+    "floor_slab": "floor_slab", "ceiling": "ceiling", "roof": "roof",
+    "finish_surface": "finish_surface", "surface": "finish_surface",
+    "structural_member": "structural_member", "beam": "structural_member",
+    "column": "structural_member", "pier": "structural_member",
+    "pillar": "structural_member", "footing": "structural_member",
+}
+
 
 @dataclass(frozen=True)
 class RuntimeCoverageObjectReport:
@@ -233,17 +258,66 @@ def _row_publishes_identifier(row: Mapping[str, Any], identifier: str) -> bool:
 def _record_is_published(
     record: CoverageObjectRecordV1,
     published_takeoff_rows: Sequence[Mapping[str, Any]],
+    valid_quantity_ids: Sequence[str],
 ) -> bool:
     if not record.takeoff_row_ids:
         return False
     for row_id in record.takeoff_row_ids:
+        if row_id not in valid_quantity_ids or any(
+            reason.startswith("takeoff_row_")
+            or reason == "duplicate_or_conflicting_takeoff_row_quantity_id"
+            for reason in _quantity_dependency_reasons(record, row_id)
+        ):
+            continue
         if any(
             _row_publishes_identifier(row, row_id)
+            and _row_preserves_quantity(record, row_id, row)
             for row in published_takeoff_rows
             if isinstance(row, Mapping)
         ):
             return True
     return False
+
+
+def _quantity_dependency_reasons(record: CoverageObjectRecordV1, quantity_id: str) -> tuple[str, ...]:
+    # Contract ids may themselves contain colons. Remove the exact id suffix.
+    suffix = ":" + quantity_id
+    return tuple(reason[:-len(suffix)] for reason in record.reason_codes if reason.endswith(suffix))
+
+
+def _valid_quantity_ids(record: CoverageObjectRecordV1) -> tuple[str, ...]:
+    blockers = {
+        "quantity_abstained", "duplicate_or_conflicting_quantity_evidence_id",
+        "quantity_evidence_record_missing", "quantity_evidence_object_link_conflict",
+        "quantity_input_entity_not_admitted",
+    }
+    statuses = record.provenance.get("quantity_evidence_statuses")
+    verified_statuses = {EvidenceResolutionStatus.CORROBORATED.value, AuthorityStatus.FIRM.value}
+    return tuple(quantity_id for quantity_id in record.quantity_ids if not any(
+        reason in blockers or (reason.startswith("quantity_") and reason.endswith("_lineage_conflict"))
+        for reason in _quantity_dependency_reasons(record, quantity_id)
+    ) and (not isinstance(statuses, Mapping) or statuses.get(quantity_id) in verified_statuses))
+
+
+def _row_preserves_quantity(record: CoverageObjectRecordV1, quantity_id: str, row: Mapping[str, Any]) -> bool:
+    values = record.provenance.get("quantity_evidence_values")
+    units = record.provenance.get("quantity_evidence_units")
+    if not isinstance(values, Mapping):
+        return True  # Legacy registries provide dependency ids only.
+    expected = values.get(quantity_id)
+    actual = row.get("quantity")
+    try:
+        if isinstance(actual, bool) or actual is None or expected is None:
+            return False
+        if not math.isfinite(float(actual)) or float(actual) != float(expected):
+            return False
+    except (TypeError, ValueError, OverflowError):
+        return False
+    aliases = {"m2": "m²", "m²": "m²", "m3": "m³", "m³": "m³"}
+    def unit(value: object) -> str:
+        text = str(value or "").strip().lower()
+        return aliases.get(text, text)
+    return isinstance(units, Mapping) and unit(row.get("unit")) == unit(units.get(quantity_id))
 
 
 def audit_registry_runtime_lifecycle(
@@ -258,7 +332,7 @@ def audit_registry_runtime_lifecycle(
     exact dependency checks only:
 
     CANONICALIZED: one-or-more explicit geometry ids
-    QUANTIFIED: one-or-more explicit quantity ids
+    QUANTIFIED: a quantity dependency without abstention or quantity conflicts
     PUBLISHED: a registry takeoff-row id is present in the customer row source
                identity or explicit quantity-id field
     """
@@ -291,16 +365,18 @@ def audit_registry_runtime_lifecycle(
             stage_counts[RuntimeCoverageStage.CANONICALIZED.value] += 1
             highest = RuntimeCoverageStage.CANONICALIZED
 
-            quantified = bool(record.quantity_ids)
+            valid_quantity_ids = _valid_quantity_ids(record)
+            quantified = bool(valid_quantity_ids)
             flags[RuntimeCoverageStage.QUANTIFIED.value] = quantified
             if not quantified:
                 died_at = RuntimeCoverageStage.QUANTIFIED
-                death_reason = "explicit_quantity_link_unavailable"
+                death_reason = ("explicit_quantity_dependency_invalid" if record.quantity_ids
+                                else "explicit_quantity_link_unavailable")
             else:
                 stage_counts[RuntimeCoverageStage.QUANTIFIED.value] += 1
                 highest = RuntimeCoverageStage.QUANTIFIED
 
-                published = _record_is_published(record, published_takeoff_rows)
+                published = _record_is_published(record, published_takeoff_rows, valid_quantity_ids)
                 flags[RuntimeCoverageStage.PUBLISHED.value] = published
                 if not published:
                     died_at = RuntimeCoverageStage.PUBLISHED
@@ -356,19 +432,28 @@ def build_runtime_coverage_publication(
     summaries: Sequence[CoverageRegistrySummaryV1],
     *,
     published_takeoff_rows: Sequence[Mapping[str, Any]] = (),
+    family_gaps: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, Any]:
     """Build customer-safe AG-09 coverage metadata from supplied live registries."""
-    valid = tuple(
-        summary
-        for summary in summaries
-        if isinstance(summary, CoverageRegistrySummaryV1)
-    )
+    # Aliased attachments of the SAME immutable snapshot are one path. Two
+    # different summaries sharing an identity are retained and diagnosed below.
+    valid_list: list[CoverageRegistrySummaryV1] = []
+    seen: set[str] = set()
+    for summary in summaries:
+        if not isinstance(summary, CoverageRegistrySummaryV1):
+            continue
+        key = json.dumps(summary.to_dict(), sort_keys=True, separators=(",", ":"))
+        if key not in seen:
+            seen.add(key)
+            valid_list.append(summary)
+    valid = tuple(valid_list)
     if not valid:
         return {
             "status": "unavailable",
             "reason_codes": [RUNTIME_COVERAGE_UNAVAILABLE],
             "stage_counts": {stage.value: None for stage in RUNTIME_COVERAGE_STAGE_ORDER},
             "registry_reports": [],
+            "family_reports": _runtime_family_reports((), (), family_gaps),
             "coverage_basis": None,
             "expected_family_completeness": "UNKNOWN",
         }
@@ -396,20 +481,103 @@ def build_runtime_coverage_publication(
             for reason in report.reason_codes
         )
     )
+    families = _runtime_family_reports(valid, reports, family_gaps)
+    duplicate_path = any(
+        family["classification"] == "WRONG / DUPLICATE PATH"
+        for family in families.values()
+    )
     return {
-        "status": status,
-        "reason_codes": list(reasons),
-        "stage_counts": counts,
+        "status": RUNTIME_COVERAGE_PARTIAL if duplicate_path else status,
+        "reason_codes": list(reasons) + (["wrong_or_duplicate_family_path"] if duplicate_path else []),
+        "stage_counts": ({stage.value: None for stage in RUNTIME_COVERAGE_STAGE_ORDER}
+                         if duplicate_path else counts),
         "registry_reports": [report.to_dict() for report in reports],
+        "family_reports": families,
         "coverage_basis": "EXPLICIT_DEPENDENCIES_ONLY",
         "expected_family_completeness": "UNKNOWN",
     }
+
+
+def _runtime_family_reports(
+    summaries: Sequence[CoverageRegistrySummaryV1],
+    reports: Sequence[RuntimeCoverageLifecycleReport],
+    family_gaps: Mapping[str, Sequence[str]] | None,
+) -> dict[str, dict[str, Any]]:
+    """Census all mature families using explicit producer snapshots only."""
+    entries: dict[str, list] = {family: [] for family in RUNTIME_COVERAGE_FAMILIES}
+    gaps: dict[str, set[str]] = {family: set() for family in RUNTIME_COVERAGE_FAMILIES}
+    for category, reasons in (family_gaps or {}).items():
+        family = _CATEGORY_FAMILY.get(category)
+        if family:
+            gaps[family].update(str(reason) for reason in reasons)
+    identity_paths: dict[tuple[str, str, str], list[str]] = {}
+    for summary, report in zip(summaries, reports):
+        for snapshot in summary.object_universe_snapshots:
+            family = _CATEGORY_FAMILY.get(snapshot.category.strip().lower())
+            if family is None:
+                continue
+            objects = tuple(obj for obj in report.object_reports
+                            if obj.producer == snapshot.producer
+                            and obj.object_id in snapshot.admitted_object_ids)
+            entries[family].append((snapshot, report, objects))
+            for obj in objects:
+                key = (obj.source_sha256, summary.manifest.revision_id, obj.object_id)
+                identity_paths.setdefault(key, []).append(family)
+    duplicates: set[str] = set()
+    for paths in identity_paths.values():
+        if len(paths) > 1:
+            duplicates.update(paths)
+
+    output: dict[str, dict[str, Any]] = {}
+    for family in RUNTIME_COVERAGE_FAMILIES:
+        paths = entries[family]
+        reasons = set(gaps[family])
+        if family in duplicates:
+            reasons.add("physical_identity_has_duplicate_registry_paths")
+        wrong_path = family in duplicates or (
+            "door_window_reuses_opening_identity_without_filling_identity" in reasons
+        )
+        available = tuple(path for path in paths if path[0].enumeration_status not in {
+            ENUMERATION_UNAVAILABLE, ENUMERATION_NOT_ENUMERATED,
+        })
+        objects = tuple(obj for _, _, records in available for obj in records)
+        if wrong_path:
+            classification, status = "WRONG / DUPLICATE PATH", "wrong_or_duplicate_path"
+        elif not available:
+            classification, status = "UNAVAILABLE", "unavailable"
+            reasons.add("family_live_producer_registry_unavailable")
+        elif reasons or len(available) != len(paths) or any(
+            snapshot.enumeration_status != ENUMERATION_COMPLETE
+            or report.status != RUNTIME_COVERAGE_AVAILABLE
+            or any(obj.highest_stage_reached is not RuntimeCoverageStage.PUBLISHED for obj in records)
+            for snapshot, report, records in available
+        ):
+            classification, status = "PARTIAL", "partial"
+        else:
+            classification, status = "CONNECTED", "connected"
+        for snapshot, _, records in paths:
+            reasons.update(snapshot.reason_codes)
+            reasons.update(obj.death_reason for obj in records if obj.death_reason)
+        counts = {stage.value: sum(obj.stage_evaluations[stage.value] for obj in objects)
+                  for stage in RUNTIME_COVERAGE_STAGE_ORDER}
+        if status in {"unavailable", "wrong_or_duplicate_path"}:
+            counts = {stage.value: None for stage in RUNTIME_COVERAGE_STAGE_ORDER}
+        output[family] = {
+            "classification": classification, "status": status,
+            "reason_codes": sorted(reasons), "stage_counts": counts,
+            "object_ids": sorted({obj.object_id for obj in objects}),
+            "producer_paths": sorted({snapshot.producer for snapshot, _, _ in paths}),
+            "coverage_basis": "EXPLICIT_DEPENDENCIES_ONLY" if available else None,
+            "expected_family_completeness": "UNKNOWN",
+        }
+    return output
 
 
 __all__ = [
     "REASON_NOT_IN_REGISTRY_UNIVERSE",
     "REASON_SCENE_OBJECT_ID_MISSING",
     "RUNTIME_COVERAGE_AVAILABLE",
+    "RUNTIME_COVERAGE_FAMILIES",
     "RUNTIME_COVERAGE_PARTIAL",
     "RUNTIME_COVERAGE_STAGE_ORDER",
     "RUNTIME_COVERAGE_UNAVAILABLE",
