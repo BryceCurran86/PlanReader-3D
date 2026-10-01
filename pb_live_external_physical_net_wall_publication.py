@@ -31,7 +31,7 @@ from pb_net_wall_boolean_union_authority import subtract_void_union_from_wall_po
 from pb_wall_role_authority import WallRoleClassification
 
 
-LIVE_EXTERNAL_PHYSICAL_NET_WALL_SCHEMA_VERSION = "1.0.0"
+LIVE_EXTERNAL_PHYSICAL_NET_WALL_SCHEMA_VERSION = "1.1.0"
 
 LIVE_EXTERNAL_PHYSICAL_NET_WALL_RESOLVED = (
     "live_external_physical_net_wall_publication_resolved"
