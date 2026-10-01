@@ -1400,6 +1400,14 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
         canonical_model_id = None
         canonical_wall_count = 0
         canonical_opening_count = 0
+        canonical_floor_count = 0
+        canonical_space_count = 0
+        canonical_ceiling_count = 0
+        canonical_roof_count = 0
+        canonical_soffit_count = 0
+        canonical_balcony_count = 0
+        canonical_parapet_count = 0
+        canonical_column_count = 0
         constructability_issue_count = 0
         try:
             from pb_production_3d_adapter import planreader_workspace_to_canonical
@@ -1418,6 +1426,14 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
                 canonical_model_id = project.id
                 canonical_wall_count = len(project.all_walls())
                 canonical_opening_count = len(project.all_openings())
+                canonical_floor_count = len(project.all_floors())
+                canonical_space_count = len(project.all_spaces())
+                canonical_ceiling_count = len(project.all_ceilings())
+                canonical_roof_count = len(project.all_roofs())
+                canonical_soffit_count = len(project.all_soffits())
+                canonical_balcony_count = len(project.all_balconies())
+                canonical_parapet_count = len(project.all_parapets())
+                canonical_column_count = len(project.all_columns())
                 constructability_issue_count = len(project.constructability_issues)
         except Exception:
             pass
@@ -1431,6 +1447,14 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             "canonical_model_id": canonical_model_id,
             "canonical_wall_count": canonical_wall_count,
             "canonical_opening_count": canonical_opening_count,
+            "canonical_floor_count": canonical_floor_count,
+            "canonical_space_count": canonical_space_count,
+            "canonical_ceiling_count": canonical_ceiling_count,
+            "canonical_roof_count": canonical_roof_count,
+            "canonical_soffit_count": canonical_soffit_count,
+            "canonical_balcony_count": canonical_balcony_count,
+            "canonical_parapet_count": canonical_parapet_count,
+            "canonical_column_count": canonical_column_count,
             "constructability_issue_count": constructability_issue_count,
         }
         _setting_set(publication, int(workspace_id), report)
@@ -1469,11 +1493,29 @@ def auto_geometry_panel(app: Any, workspace: Dict[str, Any]) -> None:
                 methods[method] = methods.get(method, 0) + 1
             if methods:
                 app.st.caption("Calibration: " + " · ".join(f"{name} {count}" for name, count in methods.items()))
+            # Canonical model element count summary
+            c_wall = report.get("canonical_wall_count", 0)
+            c_open = report.get("canonical_opening_count", 0)
+            c_floor = report.get("canonical_floor_count", 0)
+            c_ceil = report.get("canonical_ceiling_count", 0)
+            c_roof = report.get("canonical_roof_count", 0)
+            c_col = report.get("canonical_column_count", 0)
+            c_par = report.get("canonical_parapet_count", 0)
+            c_bal = report.get("canonical_balcony_count", 0)
+            c_issue = report.get("constructability_issue_count", 0)
+            if any([c_wall, c_open, c_floor, c_ceil, c_roof, c_col, c_par, c_bal]):
+                app.st.caption(
+                    f"Canonical model: {c_wall} wall(s) · {c_open} opening(s) · {c_floor} floor(s) · "
+                    f"{c_ceil} ceiling(s) · {c_roof} roof(s) · {c_col} column(s) · "
+                    f"{c_par} parapet(s) · {c_bal} balcony(ies)"
+                    + (f" · ⚠️ {c_issue} constructability issue(s)" if c_issue else "")
+                )
             unresolved = [f for f in report.get("facades") or [] if len(f.get("substrates") or []) != 1 and not f.get("explicit_areas")]
             if unresolved:
                 app.st.info(
                     f"{len(unresolved)} elevation(s) contain mixed/unclear substrate information. PlanReader keeps those gross areas provisional instead of inventing a material split."
                 )
+
 
 
 def apply(app: Any) -> None:
