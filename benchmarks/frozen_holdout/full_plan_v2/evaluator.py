@@ -332,8 +332,12 @@ def evaluate_suite_v2(
     if len({manifest.project_id for manifest in manifest_tuple}) != len(manifest_tuple):
         raise ValueError("project ids must be unique")
 
+    produced_map = {
+        str(project_id): tuple(rows)
+        for project_id, rows in produced_by_project.items()
+    }
     results = tuple(
-        evaluate_project_v2(manifest, produced_by_project.get(manifest.project_id, ()))
+        evaluate_project_v2(manifest, produced_map.get(manifest.project_id, ()))
         for manifest in manifest_tuple
     )
     verified = sum(manifest.status == PROJECT_VERIFIED for manifest in manifest_tuple)
@@ -345,14 +349,28 @@ def evaluate_suite_v2(
     run_blocked = False
     source_hashes = evaluated_source_sha256s_by_project or {}
     reconciliation = reconciliation_complete_by_project or {}
+    manifest_ids = {manifest.project_id for manifest in manifest_tuple}
+    unexpected_project_ids = tuple(sorted(set(produced_map) - manifest_ids))
+    if unexpected_project_ids:
+        run_blocked = True
+        for project_id in unexpected_project_ids:
+            reasons.append(f"{project_id}:unexpected_produced_project")
+            extras += sum(
+                1
+                for row in produced_map[project_id]
+                if not row.abstained and row.lineage_ok
+            )
     if len(manifest_tuple) != required_project_count:
         reasons.append("required_project_count_not_met")
     for manifest in manifest_tuple:
         if manifest.status != PROJECT_VERIFIED:
             reasons.extend(f"{manifest.project_id}:{reason}" for reason in manifest.reason_codes)
             continue
-        if manifest.project_id not in produced_by_project:
+        if manifest.project_id not in produced_map:
             reasons.append(f"{manifest.project_id}:extraction_not_complete")
+            run_blocked = True
+        elif any(not row.lineage_ok for row in produced_map[manifest.project_id]):
+            reasons.append(f"{manifest.project_id}:lineage_conflict")
             run_blocked = True
         expected_hashes = tuple(sorted(doc.sha256 for doc in manifest.source_documents))
         actual_hashes = tuple(
