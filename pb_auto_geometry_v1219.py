@@ -663,7 +663,7 @@ def _is_finite_number(value: Any) -> bool:
 
 # What an automatic row may carry: the roles _takeoff_row() assigns, text in
 # every text column (required ones non-empty), and finite non-negative numbers.
-AUTO_ROW_ROLES = ("", "floor_area", "external_wall", "internal_partition")
+AUTO_ROW_ROLES = ("", "floor_area", "external_wall", "internal_partition", "wall_finish")
 _AUTO_REQUIRED_TEXT = ("section", "element", "location", "substrate", "unit", "quantity_status",
                        "source_reference", "inclusion_status", "confidence")
 _AUTO_OPTIONAL_TEXT = ("finish_system", "source_page", "notes", "row_role")
@@ -1233,6 +1233,23 @@ def _ensure_opening_evidence_v175(app: Any, workspace_id: int, pages: Sequence[D
                 pass
 
 
+def _build_bound_wall_finish_rows(
+    app: Any,
+    workspace_id: int,
+    pages: Sequence[Dict[str, Any]],
+) -> Tuple[List[Tuple[Any, ...]], List[Dict[str, Any]]]:
+    """Extract source-bound wall finish rows via SourceBoundWallFinishQuantityAuthority.
+
+    Consumes authenticated net-wall geometry directly via face/finish binding without
+    reinventing or duplicating wall geometry (AG-04).
+    """
+    try:
+        from pb_bound_wall_finish_customer_bridge import build_bound_wall_finish_rows
+        return build_bound_wall_finish_rows(app, workspace_id, pages)
+    except Exception:
+        return [], []
+
+
 def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
     """Run the automatic non-AI geometry pipeline on selected, rendered sheets."""
     pages = app.lquery(
@@ -1266,14 +1283,15 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
     unit_rows, units = _build_unit_rows(app, int(workspace_id), [dict(p) for p in pages])
     facade_rows, facades = _build_facade_rows(app, int(workspace_id), [dict(p) for p in pages])
     partition_rows, partitions = _build_internal_partition_rows(app, int(workspace_id), [dict(p) for p in pages], footprint)
-    all_auto_rows = unit_rows + facade_rows + partition_rows
+    finish_rows, finishes = _build_bound_wall_finish_rows(app, int(workspace_id), [dict(p) for p in pages])
+    all_auto_rows = unit_rows + facade_rows + partition_rows + finish_rows
     # Rows, envelope and report are one publication: all commit or none do.
     with _auto_publication(app, int(workspace_id), all_auto_rows) as publication:
         mass_id = _refresh_auto_model(publication, int(workspace_id), footprint, facades)
         report = {
             "version": VERSION, "analysed_at": app.now_stamp(), "selected_pages": len(pages),
             "calibrations": calibrations, "footprint": footprint, "units": units, "facades": facades,
-            "partitions": partitions,
+            "partitions": partitions, "finishes": finishes,
             "auto_takeoff_rows": len(all_auto_rows), "model_mass_id": mass_id,
         }
         _setting_set(publication, int(workspace_id), report)

@@ -24,6 +24,8 @@ import fitz
 
 import pb_auto_geometry_guard_v1219 as guard
 import pb_auto_geometry_v1219 as auto
+import pb_bound_wall_finish_quantity_authority as quantmod
+import pb_net_wall_boolean_union_authority as netmod
 import pb_planreader_3d_app as app_mod
 from pb_migration_contracts import EvidenceResolutionStatus
 
@@ -430,6 +432,535 @@ class CustomerRuntimeNetWallParityTests(unittest.TestCase):
             self.assertEqual(len(rows), 0)
             self.assertEqual(len(partitions), 0)
 
+    # -------------------------------------------------------------------------
+    # AG-04: Bound Wall-Finish Quantity Authority Integration Tests
+    # -------------------------------------------------------------------------
+
+    def test_ag04_bound_wall_finish_chain_proof_physical_wall_to_openings_to_net_wall_to_finish_binding(self):
+        """Prove the complete chain: physical wall -> openings -> net wall -> face/finish binding -> takeoff quantity."""
+        from pb_bound_wall_finish_customer_bridge import bound_wall_finish_record_to_takeoff_row
+        from pb_bound_wall_finish_quantity_authority import (
+            FINISH_QUANTITY_RESOLVED,
+            SourceBoundWallFinishQuantityProducer,
+            SourceBoundWallFinishQuantitySelector,
+        )
+        import pb_wall_finish_face_binding_authority as finishmod
+        from pb_wall_finish_face_binding_authority import (
+            FinishScopeStatus,
+            PhysicalFaceRole,
+            WallFinishCompleteScopeRecord,
+            WallFinishFaceBindingAuthority,
+            WallFinishFaceBindingRecord,
+            WallFinishFaceBindingScopeResult,
+            WallFinishFaceBindingScopeSelector,
+        )
+        from pb_net_wall_boolean_union_authority import (
+            NetWallBooleanUnionAuthority,
+            NetWallBooleanUnionRecord,
+            NetWallBooleanUnionResult,
+            NetWallBooleanUnionSelector,
+        )
+        from pb_wall_role_authority import WallRoleClassification
+
+        doc_id = "doc1"
+        rev_id = "rev1"
+        sha = "a" * 64
+        snap = "snap1"
+        page_id = "1"
+        vp = "vp1"
+        scope_id = "scope1"
+        trade = "external_key_pointing"
+        material = "key_pointing"
+        wall_id = "W100"
+        face_id = "F100_ext"
+
+        # 1. Face binding record: exterior face of W100 bound to key_pointing
+        binding = WallFinishFaceBindingRecord(
+            binding_id="bind-100",
+            document_id=doc_id,
+            revision_id=rev_id,
+            source_sha256=sha,
+            snapshot_id=snap,
+            page_id=page_id,
+            viewport_id=vp,
+            decision_scope_id=scope_id,
+            physical_wall_id=wall_id,
+            physical_face_id=face_id,
+            physical_face_role=PhysicalFaceRole.EXTERIOR_FACE,
+            source_face_segment_ids=(f"seg-{wall_id}",),
+            trade_scope_id=trade,
+            finish_material=material,
+            annotation_observation_ids=("ann-1",),
+            leader_path_ids=("leader-1",),
+            terminator_primitive_ids=("term-1",),
+            wall_role_record_id=f"role-{wall_id}",
+            wall_role=WallRoleClassification.EXTERNAL,
+            source_evidence_ids=("ann-1", f"role-{wall_id}"),
+            source_evidence_kind="native_direct_finish_callout",
+            decision_scope_complete=False,
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("wall_finish_face_binding_resolved",),
+            _seal=finishmod._RECORD_SEAL,
+        )
+        complete_scope = WallFinishCompleteScopeRecord(
+            scope_id="scope-rec-1",
+            document_id=doc_id,
+            revision_id=rev_id,
+            source_sha256=sha,
+            snapshot_id=snap,
+            page_id=page_id,
+            viewport_id=vp,
+            decision_scope_id=scope_id,
+            trade_scope_id=trade,
+            finish_material=material,
+            target_face_ids=(face_id,),
+            covered_face_ids=(face_id,),
+            binding_ids=("bind-100",),
+            decision_scope_complete=True,
+            scope_status=FinishScopeStatus.COMPLETE,
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("wall_finish_scope_complete",),
+            _seal=finishmod._RECORD_SEAL,
+        )
+        finish_scope_sel = WallFinishFaceBindingScopeSelector(
+            document_id=doc_id, revision_id=rev_id, source_sha256=sha,
+            snapshot_id=snap, page_id=page_id, viewport_id=vp, decision_scope_id=scope_id,
+        )
+        finish_authority = WallFinishFaceBindingAuthority(
+            {finish_scope_sel.key: WallFinishFaceBindingScopeResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=("ok",),
+                bindings=(binding,),
+                scope_records=(complete_scope,),
+            )},
+            _seal=finishmod._AUTHORITY_SEAL,
+        )
+
+        # 2. Net wall authority: Physical wall W100 with gross 30.0 m2, void 6.0 m2 deducted = net 24.0 m2
+        net_sel = NetWallBooleanUnionSelector(
+            document_id=doc_id, revision_id=rev_id, source_sha256=sha,
+            snapshot_id=snap, page_id=page_id, decision_scope_id=scope_id,
+            physical_wall_id=wall_id, trade_scope_id=trade,
+        )
+        net_rec = NetWallBooleanUnionRecord(
+            record_id=f"net-{wall_id}",
+            document_id=doc_id,
+            revision_id=rev_id,
+            source_sha256=sha,
+            snapshot_id=snap,
+            page_id=page_id,
+            decision_scope_id=scope_id,
+            physical_wall_id=wall_id,
+            gross_geometry_record_id=f"gross-{wall_id}",
+            opening_universe_record_id="opening-universe",
+            deduction_record_ids=("ded-1",),
+            union_geometry_id=f"union-{wall_id}",
+            net_area_m2=24.0,
+            gross_area_m2=30.0,
+            void_union_area_m2=6.0,
+            trade_scope_id=trade,
+        )
+        import pb_net_wall_boolean_union_authority as netmod
+        net_authority = NetWallBooleanUnionAuthority(
+            {net_sel.key: NetWallBooleanUnionResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=("NET_WALL_BOOLEAN_UNION_RESOLVED",),
+                record=net_rec,
+            )},
+            _seal=netmod._AUTHORITY_SEAL,
+        )
+
+        # 3. SourceBoundWallFinishQuantityProducer publishes finish quantity
+        producer = SourceBoundWallFinishQuantityProducer.from_authorities(
+            finish_binding_authority=finish_authority,
+            net_wall_authority=net_authority,
+        )
+        finish_quantity_sel = SourceBoundWallFinishQuantitySelector(
+            document_id=doc_id, revision_id=rev_id, source_sha256=sha,
+            snapshot_id=snap, page_id=page_id, viewport_id=vp,
+            decision_scope_id=scope_id, trade_scope_id=trade, finish_material=material,
+        )
+        pub_result = producer.publish(finish_quantity_sel)
+        self.assertEqual(pub_result.status, EvidenceResolutionStatus.CORROBORATED)
+        self.assertIn(FINISH_QUANTITY_RESOLVED, pub_result.reason_codes)
+        self.assertIsNotNone(pub_result.record)
+        record = pub_result.record
+        self.assertEqual(record.quantity_m2, 24.0)
+        self.assertEqual(record.physical_face_ids, (face_id,))
+        self.assertEqual(record.physical_wall_ids, (wall_id,))
+
+        # 4. Bridge converts record into canonical 21-field takeoff row
+        row = bound_wall_finish_record_to_takeoff_row(1, record)
+        self.assertEqual(len(row), 21)
+        row_dict = dict(zip(auto.TAKEOFF_ROW_FIELDS, row))
+        self.assertEqual(row_dict["quantity"], 24.0)
+        self.assertEqual(row_dict["unit"], "m²")
+        self.assertEqual(row_dict["section"], "External")
+        self.assertEqual(row_dict["element"], "External wall finishes")
+        self.assertEqual(row_dict["row_role"], "wall_finish")
+        self.assertEqual(row_dict["quantity_status"], "Measured")
+        self.assertIn("W100", row_dict["notes"])
+        self.assertIn("24.00 m²", row_dict["notes"])
+
+        # Row passes auto-geometry validation without error
+        auto._validate_auto_rows([row], 1)
+
+    def test_ag04_multi_face_finish_support_different_finishes_on_different_wall_faces(self):
+        """Prove support for different finishes on different faces of the same physical wall without duplicate wall geometry."""
+        from pb_bound_wall_finish_customer_bridge import bound_wall_finish_record_to_takeoff_row
+        from pb_bound_wall_finish_quantity_authority import (
+            SourceBoundWallFinishQuantityProducer,
+            SourceBoundWallFinishQuantitySelector,
+        )
+        import pb_wall_finish_face_binding_authority as finishmod
+        from pb_wall_finish_face_binding_authority import (
+            FinishScopeStatus,
+            PhysicalFaceRole,
+            WallFinishCompleteScopeRecord,
+            WallFinishFaceBindingAuthority,
+            WallFinishFaceBindingRecord,
+            WallFinishFaceBindingScopeResult,
+            WallFinishFaceBindingScopeSelector,
+        )
+        from pb_net_wall_boolean_union_authority import (
+            NetWallBooleanUnionAuthority,
+            NetWallBooleanUnionRecord,
+            NetWallBooleanUnionResult,
+            NetWallBooleanUnionSelector,
+        )
+        from pb_wall_role_authority import WallRoleClassification
+
+        doc_id = "doc2"
+        rev_id = "rev2"
+        sha = "b" * 64
+        snap = "snap2"
+        page_id = "2"
+        vp = "vp2"
+        scope_id = "scope2"
+        wall_id = "W200"
+
+        # Face 1: Exterior face with acrylic render
+        trade_ext = "external_rendering"
+        material_ext = "acrylic_render"
+        face_ext = "F200_ext"
+
+        # Face 2: Interior face with plasterboard
+        trade_int = "internal_plastering"
+        material_int = "plasterboard"
+        face_int = "F200_int"
+
+        binding_ext = WallFinishFaceBindingRecord(
+            binding_id="bind-ext", document_id=doc_id, revision_id=rev_id, source_sha256=sha,
+            snapshot_id=snap, page_id=page_id, viewport_id=vp, decision_scope_id=scope_id,
+            physical_wall_id=wall_id, physical_face_id=face_ext,
+            physical_face_role=PhysicalFaceRole.EXTERIOR_FACE,
+            source_face_segment_ids=(f"seg-{wall_id}",),
+            trade_scope_id=trade_ext, finish_material=material_ext,
+            annotation_observation_ids=("ann-ext",), leader_path_ids=("lead-ext",),
+            terminator_primitive_ids=("term-ext",), wall_role_record_id=f"role-{wall_id}",
+            wall_role=WallRoleClassification.EXTERNAL,
+            source_evidence_ids=("ann-ext",), source_evidence_kind="native_direct_finish_callout",
+            decision_scope_complete=False, status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("wall_finish_face_binding_resolved",), _seal=finishmod._RECORD_SEAL,
+        )
+        scope_ext = WallFinishCompleteScopeRecord(
+            scope_id="scope-ext", document_id=doc_id, revision_id=rev_id, source_sha256=sha,
+            snapshot_id=snap, page_id=page_id, viewport_id=vp, decision_scope_id=scope_id,
+            trade_scope_id=trade_ext, finish_material=material_ext,
+            target_face_ids=(face_ext,), covered_face_ids=(face_ext,),
+            binding_ids=("bind-ext",), decision_scope_complete=True,
+            scope_status=FinishScopeStatus.COMPLETE, status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("wall_finish_scope_complete",), _seal=finishmod._RECORD_SEAL,
+        )
+
+        binding_int = WallFinishFaceBindingRecord(
+            binding_id="bind-int", document_id=doc_id, revision_id=rev_id, source_sha256=sha,
+            snapshot_id=snap, page_id=page_id, viewport_id=vp, decision_scope_id=scope_id,
+            physical_wall_id=wall_id, physical_face_id=face_int,
+            physical_face_role=PhysicalFaceRole.ROOM_FACING_INTERIOR_FACE,
+            source_face_segment_ids=(f"seg-{wall_id}",),
+            trade_scope_id=trade_int, finish_material=material_int,
+            annotation_observation_ids=("ann-int",), leader_path_ids=("lead-int",),
+            terminator_primitive_ids=("term-int",), wall_role_record_id=f"role-{wall_id}",
+            wall_role=WallRoleClassification.EXTERNAL,
+            source_evidence_ids=("ann-int",), source_evidence_kind="native_direct_finish_callout",
+            decision_scope_complete=False, status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("wall_finish_face_binding_resolved",), _seal=finishmod._RECORD_SEAL,
+        )
+        scope_int = WallFinishCompleteScopeRecord(
+            scope_id="scope-int", document_id=doc_id, revision_id=rev_id, source_sha256=sha,
+            snapshot_id=snap, page_id=page_id, viewport_id=vp, decision_scope_id=scope_id,
+            trade_scope_id=trade_int, finish_material=material_int,
+            target_face_ids=(face_int,), covered_face_ids=(face_int,),
+            binding_ids=("bind-int",), decision_scope_complete=True,
+            scope_status=FinishScopeStatus.COMPLETE, status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("wall_finish_scope_complete",), _seal=finishmod._RECORD_SEAL,
+        )
+
+        finish_scope_sel = WallFinishFaceBindingScopeSelector(
+            document_id=doc_id, revision_id=rev_id, source_sha256=sha,
+            snapshot_id=snap, page_id=page_id, viewport_id=vp, decision_scope_id=scope_id,
+        )
+        finish_authority = WallFinishFaceBindingAuthority(
+            {finish_scope_sel.key: WallFinishFaceBindingScopeResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=("ok",),
+                bindings=(binding_ext, binding_int),
+                scope_records=(scope_ext, scope_int),
+            )},
+            _seal=finishmod._AUTHORITY_SEAL,
+        )
+
+        # Net wall authority provides net area for wall W200 for both trades
+        net_sel_ext = NetWallBooleanUnionSelector(
+            document_id=doc_id, revision_id=rev_id, source_sha256=sha,
+            snapshot_id=snap, page_id=page_id, decision_scope_id=scope_id,
+            physical_wall_id=wall_id, trade_scope_id=trade_ext,
+        )
+        net_sel_int = NetWallBooleanUnionSelector(
+            document_id=doc_id, revision_id=rev_id, source_sha256=sha,
+            snapshot_id=snap, page_id=page_id, decision_scope_id=scope_id,
+            physical_wall_id=wall_id, trade_scope_id=trade_int,
+        )
+        net_authority = NetWallBooleanUnionAuthority(
+            {
+                net_sel_ext.key: NetWallBooleanUnionResult(
+                    status=EvidenceResolutionStatus.CORROBORATED,
+                    reason_codes=("NET_WALL_BOOLEAN_UNION_RESOLVED",),
+                    record=NetWallBooleanUnionRecord(
+                        record_id=f"net-{wall_id}-ext", document_id=doc_id, revision_id=rev_id,
+                        source_sha256=sha, snapshot_id=snap, page_id=page_id, decision_scope_id=scope_id,
+                        physical_wall_id=wall_id, gross_geometry_record_id=f"gross-{wall_id}",
+                        opening_universe_record_id="ou", deduction_record_ids=(),
+                        union_geometry_id="u", net_area_m2=32.5, gross_area_m2=40.0,
+                        void_union_area_m2=7.5, trade_scope_id=trade_ext,
+                    ),
+                ),
+                net_sel_int.key: NetWallBooleanUnionResult(
+                    status=EvidenceResolutionStatus.CORROBORATED,
+                    reason_codes=("NET_WALL_BOOLEAN_UNION_RESOLVED",),
+                    record=NetWallBooleanUnionRecord(
+                        record_id=f"net-{wall_id}-int", document_id=doc_id, revision_id=rev_id,
+                        source_sha256=sha, snapshot_id=snap, page_id=page_id, decision_scope_id=scope_id,
+                        physical_wall_id=wall_id, gross_geometry_record_id=f"gross-{wall_id}",
+                        opening_universe_record_id="ou", deduction_record_ids=(),
+                        union_geometry_id="u", net_area_m2=32.5, gross_area_m2=40.0,
+                        void_union_area_m2=7.5, trade_scope_id=trade_int,
+                    ),
+                ),
+            },
+            _seal=netmod._AUTHORITY_SEAL,
+        )
+
+        producer = SourceBoundWallFinishQuantityProducer.from_authorities(
+            finish_binding_authority=finish_authority,
+            net_wall_authority=net_authority,
+        )
+
+        # Resolve exterior finish
+        res_ext = producer.publish(SourceBoundWallFinishQuantitySelector(
+            document_id=doc_id, revision_id=rev_id, source_sha256=sha, snapshot_id=snap,
+            page_id=page_id, viewport_id=vp, decision_scope_id=scope_id,
+            trade_scope_id=trade_ext, finish_material=material_ext,
+        ))
+        self.assertEqual(res_ext.status, EvidenceResolutionStatus.CORROBORATED)
+        row_ext = bound_wall_finish_record_to_takeoff_row(1, res_ext.record)
+
+        # Resolve interior finish
+        res_int = producer.publish(SourceBoundWallFinishQuantitySelector(
+            document_id=doc_id, revision_id=rev_id, source_sha256=sha, snapshot_id=snap,
+            page_id=page_id, viewport_id=vp, decision_scope_id=scope_id,
+            trade_scope_id=trade_int, finish_material=material_int,
+        ))
+        self.assertEqual(res_int.status, EvidenceResolutionStatus.CORROBORATED)
+        row_int = bound_wall_finish_record_to_takeoff_row(1, res_int.record)
+
+        # Verify distinct takeoff rows for each face from same physical wall
+        d_ext = dict(zip(auto.TAKEOFF_ROW_FIELDS, row_ext))
+        d_int = dict(zip(auto.TAKEOFF_ROW_FIELDS, row_int))
+
+        self.assertEqual(d_ext["section"], "External")
+        self.assertEqual(d_ext["element"], "External wall finishes")
+        self.assertEqual(d_ext["substrate"], "acrylic_render")
+        self.assertEqual(d_ext["quantity"], 32.5)
+
+        self.assertEqual(d_int["section"], "Internal")
+        self.assertEqual(d_int["element"], "Internal wall finishes")
+        self.assertEqual(d_int["substrate"], "plasterboard")
+        self.assertEqual(d_int["quantity"], 32.5)
+
+        # Both rows reference the same host physical wall W200 without creating duplicate wall geometry
+        self.assertIn("W200", d_ext["notes"])
+        self.assertIn("W200", d_int["notes"])
+        auto._validate_auto_rows([row_ext, row_int], 1)
+
+    def test_ag04_fail_closed_unresolved_net_wall_abstains(self):
+        """Negative test: If net wall geometry is unresolved, finish quantity abstains fail-closed."""
+        from pb_bound_wall_finish_customer_bridge import build_bound_wall_finish_rows
+        from pb_bound_wall_finish_quantity_authority import (
+            FINISH_QUANTITY_NET_WALL_UNRESOLVED,
+            SourceBoundWallFinishQuantityProducer,
+            SourceBoundWallFinishQuantitySelector,
+        )
+        import pb_wall_finish_face_binding_authority as finishmod
+        from pb_wall_finish_face_binding_authority import (
+            FinishScopeStatus,
+            PhysicalFaceRole,
+            WallFinishCompleteScopeRecord,
+            WallFinishFaceBindingAuthority,
+            WallFinishFaceBindingRecord,
+            WallFinishFaceBindingScopeResult,
+            WallFinishFaceBindingScopeSelector,
+        )
+        from pb_net_wall_boolean_union_authority import (
+            NetWallBooleanUnionAuthority,
+            NetWallBooleanUnionResult,
+            NetWallBooleanUnionSelector,
+        )
+        from pb_wall_role_authority import WallRoleClassification
+
+        doc_id = "doc3"
+        rev_id = "rev3"
+        sha = "c" * 64
+        snap = "snap3"
+        page_id = "3"
+        vp = "vp3"
+        scope_id = "scope3"
+        trade = "external_painting"
+        material = "external_paint"
+        wall_id = "W300"
+        face_id = "F300_ext"
+
+        binding = WallFinishFaceBindingRecord(
+            binding_id="bind-300", document_id=doc_id, revision_id=rev_id, source_sha256=sha,
+            snapshot_id=snap, page_id=page_id, viewport_id=vp, decision_scope_id=scope_id,
+            physical_wall_id=wall_id, physical_face_id=face_id,
+            physical_face_role=PhysicalFaceRole.EXTERIOR_FACE,
+            source_face_segment_ids=(f"seg-{wall_id}",), trade_scope_id=trade,
+            finish_material=material, annotation_observation_ids=("ann-3",),
+            leader_path_ids=("lead-3",), terminator_primitive_ids=("term-3",),
+            wall_role_record_id=f"role-{wall_id}", wall_role=WallRoleClassification.EXTERNAL,
+            source_evidence_ids=("ann-3",), source_evidence_kind="native_direct_finish_callout",
+            decision_scope_complete=False, status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("wall_finish_face_binding_resolved",), _seal=finishmod._RECORD_SEAL,
+        )
+        scope_rec = WallFinishCompleteScopeRecord(
+            scope_id="scope-rec-3", document_id=doc_id, revision_id=rev_id, source_sha256=sha,
+            snapshot_id=snap, page_id=page_id, viewport_id=vp, decision_scope_id=scope_id,
+            trade_scope_id=trade, finish_material=material,
+            target_face_ids=(face_id,), covered_face_ids=(face_id,), binding_ids=("bind-300",),
+            decision_scope_complete=True, scope_status=FinishScopeStatus.COMPLETE,
+            status=EvidenceResolutionStatus.CORROBORATED, reason_codes=("wall_finish_scope_complete",),
+            _seal=finishmod._RECORD_SEAL,
+        )
+        finish_scope_sel = WallFinishFaceBindingScopeSelector(
+            document_id=doc_id, revision_id=rev_id, source_sha256=sha,
+            snapshot_id=snap, page_id=page_id, viewport_id=vp, decision_scope_id=scope_id,
+        )
+        finish_authority = WallFinishFaceBindingAuthority(
+            {finish_scope_sel.key: WallFinishFaceBindingScopeResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=("ok",), bindings=(binding,), scope_records=(scope_rec,),
+            )},
+            _seal=finishmod._AUTHORITY_SEAL,
+        )
+
+        # Net wall authority abstains for W300 (e.g. void unresolved)
+        net_sel = NetWallBooleanUnionSelector(
+            document_id=doc_id, revision_id=rev_id, source_sha256=sha,
+            snapshot_id=snap, page_id=page_id, decision_scope_id=scope_id,
+            physical_wall_id=wall_id, trade_scope_id=trade,
+        )
+        net_authority = NetWallBooleanUnionAuthority(
+            {net_sel.key: NetWallBooleanUnionResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=("upstream_opening_universe_incomplete",),
+            )},
+            _seal=netmod._AUTHORITY_SEAL,
+        )
+
+        producer = SourceBoundWallFinishQuantityProducer.from_authorities(
+            finish_binding_authority=finish_authority,
+            net_wall_authority=net_authority,
+        )
+        res = producer.publish(SourceBoundWallFinishQuantitySelector(
+            document_id=doc_id, revision_id=rev_id, source_sha256=sha, snapshot_id=snap,
+            page_id=page_id, viewport_id=vp, decision_scope_id=scope_id,
+            trade_scope_id=trade, finish_material=material,
+        ))
+
+        # Authority abstains fail-closed
+        self.assertEqual(res.status, EvidenceResolutionStatus.ABSTAINED)
+        self.assertIn(FINISH_QUANTITY_NET_WALL_UNRESOLVED, res.reason_codes)
+        self.assertIsNone(res.record)
+
+        # Bridge produces 0 rows
+        app_mock = SimpleNamespace(source_bound_wall_finish_authority=producer.authority())
+        rows, records = build_bound_wall_finish_rows(app_mock, 1, [])
+        self.assertEqual(len(rows), 0)
+        self.assertEqual(len(records), 0)
+
+    def test_ag04_workspace_end_to_end_auto_geometry_publishes_wall_finishes(self):
+        """Prove end-to-end integration: analyse_workspace publishes bound wall finish rows into SQLite."""
+        from pb_bound_wall_finish_quantity_authority import (
+            SourceBoundWallFinishQuantityRecord,
+        )
+        import pb_bound_wall_finish_quantity_authority as quantmod
+
+        with _test_workspace() as ws:
+            pdf_path = ws.root / "drawing.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4 mock drawing")
+            ws.add_document(pdf_path)
+            ws.add_page(1, "Elevation", "North Elevation", "NORTH ELEVATION", px_per_m=28.35)
+
+            # Mock a corroborated bound wall finish record
+            fake_record = SourceBoundWallFinishQuantityRecord(
+                record_id="rec-400",
+                document_id="doc4",
+                revision_id="rev4",
+                source_sha256="d" * 64,
+                snapshot_id="snap4",
+                page_id="1",
+                viewport_id="vp4",
+                decision_scope_id="scope4",
+                trade_scope_id="external_key_pointing",
+                finish_material="key_pointing",
+                quantity_m2=48.25,
+                physical_face_ids=("F400_ext",),
+                physical_wall_ids=("W400",),
+                finish_binding_ids=("bind-400",),
+                net_wall_record_ids=("net-400",),
+                finish_scope_record_id="scope-rec-4",
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=("source_bound_wall_finish_quantity_resolved",),
+                _seal=quantmod._RECORD_SEAL,
+            )
+            # Use resolve_bound_wall_finishes method on app
+            ws.app.resolve_bound_wall_finishes = lambda ws_id: [fake_record]
+
+            # Run automatic geometry analysis
+            report = auto.analyse_workspace(ws.app, 1)
+
+            # Verify report contains finishes
+            self.assertIn("finishes", report)
+            self.assertEqual(len(report["finishes"]), 1)
+            self.assertEqual(report["finishes"][0]["finish_material"], "key_pointing")
+            self.assertEqual(report["finishes"][0]["quantity_m2"], 48.25)
+
+            # Query published rows directly from SQLite takeoff_rows
+            stored = app_mod.lquery(
+                "SELECT * FROM takeoff_rows WHERE workspace_id=1 AND row_role='wall_finish'"
+            )
+            self.assertEqual(len(stored), 1)
+            finish_row = stored[0]
+            self.assertEqual(finish_row["section"], "External")
+            self.assertEqual(finish_row["element"], "External wall finishes")
+            self.assertEqual(finish_row["quantity"], 48.25)
+            self.assertEqual(finish_row["unit"], "m²")
+            self.assertEqual(finish_row["row_role"], "wall_finish")
+            self.assertIn("rec-400", finish_row["source_reference"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
