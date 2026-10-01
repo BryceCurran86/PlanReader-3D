@@ -355,3 +355,33 @@ def test_lot16_roof_sheathing_geometry_is_closed_but_engineering_crosscheck_bloc
     assert check["complete_for_architectural_guide_geometry"] is True
     assert check["final_engineering_crosscheck_complete"] is False
     assert "roof_planes_final_crosscheck_against_engineering_stormwater_note" in draft["unresolved_surface_families"]
+
+def test_3laurel_partial_internal_wall_gross_faces_are_dimension_closed_but_not_net_ready():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "internal_wall_gross_face"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:partial_internal_wall_gross_faces"
+    )
+    assert len(faces) == check["object_count"] == 8
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(53.838)
+    assert check["bathroom_gross_area_m2"] == pytest.approx(25.002)
+    assert check["gf_ensuite_laundry_gross_area_m2"] == pytest.approx(28.836)
+    assert check["complete_for_these_two_finished_room_perimeters"] is True
+    assert check["complete_for_project_internal_wall_universe"] is False
+    assert check["openings_and_finish_deductions_resolved"] is False
+    assert all(
+        row["attributes"]["denominator_readiness"]
+        == "draft_only_until_openings_and_finish_scope_are_resolved"
+        for row in faces
+    )
+    assert (
+        "internal_wall_faces_beyond_closed_bathroom_and_gf_ensuite_laundry_gross_faces"
+        in draft["unresolved_surface_families"]
+    )
+
