@@ -86,6 +86,7 @@ class ObjectType(str, Enum):
     BALCONY = "BALCONY"
     PARAPET = "PARAPET"
     COLUMN = "COLUMN"
+    STRUCTURAL_MEMBER = "STRUCTURAL_MEMBER"
     BALUSTRADE = "BALUSTRADE"
     SCREEN = "SCREEN"
     SURFACE = "SURFACE"
@@ -1404,7 +1405,11 @@ class CanonicalCeiling(PolygonElement):
             polygon=poly,
             thickness_m=parse_optional_float(data.get("thickness_m")),
             elevation_offset_m=parse_optional_float(data.get("elevation_offset_m")),
+            specified_floor_area_m2=parse_optional_float(data.get("specified_floor_area_m2")),
+            bounded_space_ids=list(data.get("bounded_space_ids", []) or []),
             derived_quantities=d_quants,
+            is_user_edited=parse_strict_bool(data.get("is_user_edited")),
+            revision_id=data.get("revision_id"),
         )
 
 
@@ -1786,6 +1791,73 @@ class CanonicalScreen(CanonicalLinearElement):
 
 
 @dataclass
+class CanonicalStructuralMember(CanonicalLinearElement):
+    member_type: str = "BEAM"  # BEAM, COLUMN, POST, LINTEL, TRUSS
+    section_spec: Optional[str] = None
+    length_m: Optional[float] = None
+    depth_m: Optional[float] = None
+    width_m: Optional[float] = None
+    material: Optional[str] = None
+    host_wall_id: Optional[str] = None
+    derived_quantities: List[QuantityFormulaBinding] = field(default_factory=list)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.object_type = ObjectType.STRUCTURAL_MEMBER
+
+    def derive_trade_quantities(self) -> List[QuantityFormulaBinding]:
+        bindings = []
+        len_m = self.length_m
+        if len_m is None and self.start_point and self.end_point:
+            if self.start_point.x is not None and self.end_point.x is not None and self.start_point.y is not None and self.end_point.y is not None:
+                len_m = round(math.hypot(self.end_point.x - self.start_point.x, self.end_point.y - self.start_point.y), 3)
+        if len_m and len_m > 0:
+            bindings.append(QuantityFormulaBinding(
+                trade_category="structural_steel" if (self.material or "").lower() == "steel" else "carpentry",
+                item_code=f"STRUCTURAL_{self.member_type.upper()}",
+                formula_expression=f"length_m ({len_m:.2f} lm)",
+                unit="lm",
+                quantity=round(len_m, 2),
+            ))
+        self.derived_quantities = bindings
+        return bindings
+
+    def to_dict(self) -> Dict[str, Any]:
+        res = super().to_dict()
+        res.update({
+            "member_type": self.member_type,
+            "section_spec": self.section_spec,
+            "length_m": self.length_m,
+            "depth_m": self.depth_m,
+            "width_m": self.width_m,
+            "material": self.material,
+            "host_wall_id": self.host_wall_id,
+            "derived_quantities": [q.to_dict() for q in self.derived_quantities],
+        })
+        return res
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "CanonicalStructuralMember":
+        base_args = cls.base_from_dict_args(data)
+        d_quants_raw = data.get("derived_quantities", []) or []
+        d_quants = [QuantityFormulaBinding.from_dict(q) for q in d_quants_raw if isinstance(q, dict)]
+        return cls(
+            **base_args,
+            start_point=Vector2D.from_dict(data.get("start_point")),
+            end_point=Vector2D.from_dict(data.get("end_point")),
+            height_m=parse_optional_float(data.get("height_m")),
+            member_type=str(data.get("member_type") or "BEAM"),
+            section_spec=data.get("section_spec"),
+            length_m=parse_optional_float(data.get("length_m")),
+            depth_m=parse_optional_float(data.get("depth_m")),
+            width_m=parse_optional_float(data.get("width_m")),
+            material=data.get("material"),
+            host_wall_id=data.get("host_wall_id"),
+            derived_quantities=d_quants,
+        )
+
+
+@dataclass
 class CanonicalFinishSurface(CanonicalElement):
     parent_element_id: Optional[str] = None
     surface_area_m2: Optional[float] = None
@@ -1858,6 +1930,7 @@ class CanonicalLevel(CanonicalElement):
     balustrades: List[CanonicalBalustrade] = field(default_factory=list)
     screens: List[CanonicalScreen] = field(default_factory=list)
     surfaces: List[CanonicalFinishSurface] = field(default_factory=list)
+    structural_members: List[CanonicalStructuralMember] = field(default_factory=list)
 
     def __post_init__(self):
         super().__post_init__()
@@ -1881,6 +1954,7 @@ class CanonicalLevel(CanonicalElement):
             "balustrades": [bal.to_dict() for bal in self.balustrades],
             "screens": [scr.to_dict() for scr in self.screens],
             "surfaces": [s.to_dict() for s in self.surfaces],
+            "structural_members": [sm.to_dict() for sm in self.structural_members],
         })
         return res
 
@@ -1904,6 +1978,7 @@ class CanonicalLevel(CanonicalElement):
             balustrades=[CanonicalBalustrade.from_dict(bal) for bal in data.get("balustrades", []) or [] if isinstance(bal, dict)],
             screens=[CanonicalScreen.from_dict(scr) for scr in data.get("screens", []) or [] if isinstance(scr, dict)],
             surfaces=[CanonicalFinishSurface.from_dict(s) for s in data.get("surfaces", []) or [] if isinstance(s, dict)],
+            structural_members=[CanonicalStructuralMember.from_dict(sm) for sm in data.get("structural_members", []) or [] if isinstance(sm, dict)],
         )
 
 
@@ -2136,6 +2211,15 @@ class CanonicalProject(CanonicalElement):
                 surfaces.extend(lvl.surfaces)
         return surfaces
 
+    def all_structural_members(self) -> List[Any]:
+        """Returns all structural members (columns, beams, structural framing) in the project."""
+        members: List[Any] = []
+        for b in self.buildings:
+            for lvl in b.levels:
+                members.extend(lvl.columns)
+                members.extend(getattr(lvl, "structural_members", []))
+        return members
+
     def find_element(self, element_id: str) -> Optional[CanonicalElement]:
         """Finds any element in the canonical building hierarchy by id."""
         if not element_id:
@@ -2187,6 +2271,9 @@ class CanonicalProject(CanonicalElement):
                 for s in lvl.surfaces:
                     if s.id == element_id:
                         return s
+                for sm in getattr(lvl, "structural_members", []):
+                    if sm.id == element_id:
+                        return sm
         return None
 
     def recompute_relationships(self) -> None:
@@ -2200,7 +2287,7 @@ class CanonicalProject(CanonicalElement):
                 lvl.parent_id = b.id
                 lvl_id = lvl.id
 
-                # Link walls and openings
+                # Link walls, faces, and openings
                 for w in lvl.walls:
                     w.level_id = lvl_id
                     w.parent_id = lvl_id
@@ -2233,13 +2320,34 @@ class CanonicalProject(CanonicalElement):
                                 elif target_wall.face_b and not target_wall.face_b.bounded_space_id and target_wall.face_a and target_wall.face_a.bounded_space_id != sp.id:
                                     target_wall.face_b.bounded_space_id = sp.id
 
-                # Link horizontal and structural elements
+                # Link horizontal elements to level
                 for fl in lvl.floors:
                     fl.level_id = lvl_id
                     fl.parent_id = lvl_id
                 for cl in lvl.ceilings:
                     cl.level_id = lvl_id
                     cl.parent_id = lvl_id
+
+                # Link spaces to floors and ceilings (room -> floor, room -> ceiling)
+                for sp in lvl.spaces:
+                    if sp.floor_element_id:
+                        target_fl = self.find_element(sp.floor_element_id)
+                        if isinstance(target_fl, CanonicalFloor) and sp.id not in target_fl.bounded_space_ids:
+                            target_fl.bounded_space_ids.append(sp.id)
+                    elif len(lvl.floors) == 1:
+                        sp.floor_element_id = lvl.floors[0].id
+                        if sp.id not in lvl.floors[0].bounded_space_ids:
+                            lvl.floors[0].bounded_space_ids.append(sp.id)
+
+                    if sp.ceiling_element_id:
+                        target_cl = self.find_element(sp.ceiling_element_id)
+                        if isinstance(target_cl, CanonicalCeiling) and sp.id not in target_cl.bounded_space_ids:
+                            target_cl.bounded_space_ids.append(sp.id)
+                    elif len(lvl.ceilings) == 1:
+                        sp.ceiling_element_id = lvl.ceilings[0].id
+                        if sp.id not in lvl.ceilings[0].bounded_space_ids:
+                            lvl.ceilings[0].bounded_space_ids.append(sp.id)
+
                 for rf in lvl.roofs:
                     rf.level_id = lvl_id
                     rf.parent_id = lvl_id
@@ -2255,6 +2363,13 @@ class CanonicalProject(CanonicalElement):
                 for col in lvl.columns:
                     col.level_id = lvl_id
                     col.parent_id = lvl_id
+                for sm in getattr(lvl, "structural_members", []):
+                    sm.level_id = lvl_id
+                    sm.parent_id = lvl_id
+                    if sm.host_wall_id:
+                        host_w = self.find_element(sm.host_wall_id)
+                        if isinstance(host_w, CanonicalWall) and sm.id not in host_w.children_ids:
+                            host_w.children_ids.append(sm.id)
                 for bld in lvl.balustrades:
                     bld.level_id = lvl_id
                     bld.parent_id = lvl_id
@@ -3049,6 +3164,37 @@ class CanonicalProject(CanonicalElement):
                     "created_at": stamp,
                     "updated_at": stamp,
                 })
+
+        # 6B. General Structural Members (Beams, Posts, Lintels)
+        for b in self.buildings:
+            for lvl in b.levels:
+                for sm in getattr(lvl, "structural_members", []):
+                    if not sm.derived_quantities:
+                        sm.derive_trade_quantities()
+                    for b_sm in sm.derived_quantities:
+                        rows.append({
+                            "workspace_id": int(workspace_id),
+                            "section": "Structure",
+                            "element": f"Structural {sm.member_type.lower()} ({sm.section_spec or 'standard'})",
+                            "location": f"Level {lvl.level_index} · {sm.id}",
+                            "substrate": sm.material or "Structural Steel",
+                            "finish_system": "Fabricate, deliver and erect",
+                            "quantity": round(b_sm.quantity, 2),
+                            "unit": b_sm.unit,
+                            "quantity_status": "Measured",
+                            "source_page": str(getattr(sm.provenance, "source_page", "") or "1"),
+                            "source_reference": f"PB Canonical BIM · structural_member:{sm.id}:{b_sm.item_code}",
+                            "inclusion_status": "INCLUSION",
+                            "coats": 1,
+                            "coverage_m2_per_litre": 0.0,
+                            "productivity_m2_per_hour": 0.0,
+                            "rate_per_unit": 0.0,
+                            "confidence": "Documented",
+                            "notes": f"Structural {sm.member_type}: {sm.section_spec or 'standard'} ({b_sm.quantity:.2f} {b_sm.unit}).",
+                            "row_role": "structural_member",
+                            "created_at": stamp,
+                            "updated_at": stamp,
+                        })
 
         # 7. Parapets, Balconies, and Soffits
         for p in self.all_parapets():

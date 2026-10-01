@@ -2573,6 +2573,224 @@ class CustomerRuntimeNetWallParityTests(unittest.TestCase):
             self.assertIn("COL-PORT-01", decoded_ids)
             self.assertIn("SURF-FEAT-01", decoded_ids)
 
+    def test_ag13_canonical_relationship_publication_and_persistence(self):
+        """AG-13: Assert all 8 canonical relationships survive SQLite save/load without rediscovery:
+        1. building -> level (level.parent_id == building.id)
+        2. level -> room/space (space.level_id == level.id, space.parent_id == level.id)
+        3. room <-> wall (space.bounding_wall_ids contains wall.id, wall.bounded_space_ids contains space.id)
+        4. wall -> opening (opening.host_wall_id == wall.id, wall.children_ids contains opening.id)
+        5. room -> floor (space.floor_element_id == floor.id, floor.bounded_space_ids contains space.id)
+        6. room -> ceiling (space.ceiling_element_id == ceiling.id, ceiling.bounded_space_ids contains space.id)
+        7. wall -> finish face (wall.face_b.bounded_space_id == space.id)
+        8. structural member (sm.level_id == level.id, sm.host_wall_id == wall.id, wall.children_ids contains sm.id)
+        """
+        from pb_canonical_building import (
+            CanonicalProject,
+            CanonicalBuilding,
+            CanonicalLevel,
+            CanonicalWall,
+            CanonicalOpening,
+            CanonicalSpace,
+            CanonicalFloor,
+            CanonicalCeiling,
+            CanonicalStructuralMember,
+            Vector2D,
+            WallFace,
+            publish_canonical_model_to_takeoff,
+        )
+        from pb_canonical_persistence import (
+            save_workspace_canonical_model,
+            load_workspace_canonical_model,
+        )
+
+        with _test_workspace() as ws:
+            doc = fitz.open()
+            p1 = doc.new_page(width=842, height=595)
+            p1.insert_text(fitz.Point(100, 100), "AG-13 RELATIONSHIP PUBLICATION SET", fontsize=14)
+            pdf_path = ws.root / "ag13_relationship_project.pdf"
+            doc.save(str(pdf_path))
+            doc.close()
+
+            ws.add_document(pdf_path)
+            ws.add_page(1, "floor_plan", "Ground Plan", "GROUND FLOOR PLAN")
+
+            project = CanonicalProject(id="PRJ-AG13", name="AG-13 Relational Hierarchy Project")
+            building = CanonicalBuilding(id="BLD-01", name="Main Complex")
+            level = CanonicalLevel(id="LVL-01", name="Level 0", level_index=0, elevation_m=0.0, height_m=2.7)
+
+            wall = CanonicalWall(
+                id="W-NORTH-01",
+                name="North External Wall",
+                start_point=Vector2D(0.0, 0.0),
+                end_point=Vector2D(8.0, 0.0),
+                height_m=2.7,
+                thickness_m=0.25,
+                is_external=True,
+                substrate="Brick Veneer",
+            )
+            face_a = WallFace(
+                face_id="A",
+                finish="Face Brickwork",
+                substrate="Clay Brick",
+            )
+            face_b = WallFace(
+                face_id="B",
+                finish="Plasterboard",
+                substrate="10mm Plasterboard",
+            )
+            wall.face_a = face_a
+            wall.face_b = face_b
+
+            opening = CanonicalOpening(
+                id="OP-D01",
+                mark="D01",
+                opening_type="DOOR",
+                width_m=0.92,
+                height_m=2.10,
+                host_wall_id="W-NORTH-01",
+                plan_page_id="1",
+                deduction_authority=True,
+            )
+            wall.openings.append(opening)
+
+            space = CanonicalSpace(
+                id="SP-MAIN-01",
+                name="Main Gallery",
+                room_number="101",
+                boundary_polygon=[Vector2D(0.0, 0.0), Vector2D(8.0, 0.0), Vector2D(8.0, 5.0), Vector2D(0.0, 5.0)],
+                height_m=2.7,
+                bounding_wall_ids=["W-NORTH-01"],
+            )
+
+            floor = CanonicalFloor(
+                id="FL-SLAB-01",
+                name="Ground Reinforced Slab",
+                polygon=[Vector2D(0.0, 0.0), Vector2D(8.0, 0.0), Vector2D(8.0, 5.0), Vector2D(0.0, 5.0)],
+                thickness_m=0.10,
+                substrate="Reinforced Concrete",
+            )
+
+            ceiling = CanonicalCeiling(
+                id="CL-SUSP-01",
+                name="Suspended Plasterboard Ceiling",
+                polygon=[Vector2D(0.0, 0.0), Vector2D(8.0, 0.0), Vector2D(8.0, 5.0), Vector2D(0.0, 5.0)],
+                substrate="Plasterboard",
+            )
+
+            sm = CanonicalStructuralMember(
+                id="SM-BEAM-01",
+                name="Structural Lintel Beam",
+                member_type="BEAM",
+                section_spec="200UB25",
+                length_m=8.0,
+                material="Structural Steel",
+                host_wall_id="W-NORTH-01",
+            )
+
+            level.walls.append(wall)
+            level.spaces.append(space)
+            level.floors.append(floor)
+            level.ceilings.append(ceiling)
+            level.structural_members.append(sm)
+            building.levels.append(level)
+            project.buildings.append(building)
+
+            # Recompute explicit relationships
+            project.recompute_relationships()
+
+            # Pre-persistence verification of 8 relationships
+            self.assertEqual(level.parent_id, "BLD-01", "Rel 1: building -> level")
+            self.assertEqual(space.level_id, "LVL-01", "Rel 2: level -> space level_id")
+            self.assertEqual(space.parent_id, "LVL-01", "Rel 2: level -> space parent_id")
+            self.assertIn("W-NORTH-01", space.bounding_wall_ids, "Rel 3: room -> wall")
+            self.assertIn("SP-MAIN-01", wall.bounded_space_ids, "Rel 3: wall -> room")
+            self.assertEqual(opening.host_wall_id, "W-NORTH-01", "Rel 4: wall -> opening host")
+            self.assertEqual(opening.wall_id, "W-NORTH-01", "Rel 4: wall -> opening wall_id")
+            self.assertIn("OP-D01", wall.children_ids, "Rel 4: wall -> opening children_ids")
+            self.assertEqual(space.floor_element_id, "FL-SLAB-01", "Rel 5: room -> floor")
+            self.assertIn("SP-MAIN-01", floor.bounded_space_ids, "Rel 5: floor -> room")
+            self.assertEqual(space.ceiling_element_id, "CL-SUSP-01", "Rel 6: room -> ceiling")
+            self.assertIn("SP-MAIN-01", ceiling.bounded_space_ids, "Rel 6: ceiling -> room")
+            self.assertEqual(wall.face_b.bounded_space_id, "SP-MAIN-01", "Rel 7: wall face -> space")
+            self.assertEqual(sm.level_id, "LVL-01", "Rel 8: level -> structural member")
+            self.assertEqual(sm.host_wall_id, "W-NORTH-01", "Rel 8: structural member -> host wall")
+            self.assertIn("SM-BEAM-01", wall.children_ids, "Rel 8: wall -> structural member children_ids")
+
+            # Persist to SQLite
+            save_workspace_canonical_model(
+                ws.app,
+                1,
+                project,
+                snapshot={"source_pdf": str(pdf_path), "status": "ag13_verified"},
+            )
+
+            # Load back roundtrip
+            ok, loaded_project, msg, _ = load_workspace_canonical_model(ws.app, 1)
+            self.assertTrue(ok, f"Failed to load canonical model: {msg}")
+            self.assertIsNotNone(loaded_project)
+
+            # Assert all 8 relationships survived serialization WITHOUT running recompute_relationships()
+            loaded_b = loaded_project.buildings[0]
+            loaded_lvl = loaded_b.levels[0]
+            self.assertEqual(loaded_lvl.parent_id, "BLD-01", "Rel 1 survived: building -> level")
+
+            loaded_sp = loaded_project.find_element("SP-MAIN-01")
+            self.assertIsNotNone(loaded_sp)
+            self.assertEqual(loaded_sp.level_id, "LVL-01", "Rel 2 survived: level -> space level_id")
+            self.assertEqual(loaded_sp.parent_id, "LVL-01", "Rel 2 survived: level -> space parent_id")
+
+            loaded_wall = loaded_project.find_element("W-NORTH-01")
+            self.assertIsNotNone(loaded_wall)
+            self.assertIn("W-NORTH-01", loaded_sp.bounding_wall_ids, "Rel 3 survived: room -> wall")
+            self.assertIn("SP-MAIN-01", loaded_wall.bounded_space_ids, "Rel 3 survived: wall -> room")
+
+            loaded_op = loaded_project.find_element("OP-D01")
+            self.assertIsNotNone(loaded_op)
+            self.assertEqual(loaded_op.host_wall_id, "W-NORTH-01", "Rel 4 survived: wall -> opening host")
+            self.assertEqual(loaded_op.wall_id, "W-NORTH-01", "Rel 4 survived: wall -> opening wall_id")
+            self.assertIn("OP-D01", loaded_wall.children_ids, "Rel 4 survived: wall -> opening children_ids")
+
+            loaded_floor = loaded_project.find_element("FL-SLAB-01")
+            self.assertIsNotNone(loaded_floor)
+            self.assertEqual(loaded_sp.floor_element_id, "FL-SLAB-01", "Rel 5 survived: room -> floor")
+            self.assertIn("SP-MAIN-01", loaded_floor.bounded_space_ids, "Rel 5 survived: floor -> room")
+
+            loaded_ceiling = loaded_project.find_element("CL-SUSP-01")
+            self.assertIsNotNone(loaded_ceiling)
+            self.assertEqual(loaded_sp.ceiling_element_id, "CL-SUSP-01", "Rel 6 survived: room -> ceiling")
+            self.assertIn("SP-MAIN-01", loaded_ceiling.bounded_space_ids, "Rel 6 survived: ceiling -> room")
+
+            self.assertIsNotNone(loaded_wall.face_b, "Face B survived")
+            self.assertEqual(loaded_wall.face_b.bounded_space_id, "SP-MAIN-01", "Rel 7 survived: wall face -> space")
+
+            loaded_sm = loaded_project.find_element("SM-BEAM-01")
+            self.assertIsNotNone(loaded_sm, "Structural member survived")
+            self.assertEqual(loaded_sm.level_id, "LVL-01", "Rel 8 survived: level -> structural member")
+            self.assertEqual(loaded_sm.host_wall_id, "W-NORTH-01", "Rel 8 survived: structural member -> host wall")
+            self.assertIn("SM-BEAM-01", loaded_wall.children_ids, "Rel 8 survived: wall -> structural member children_ids")
+
+            # Verify structural member is included in project.all_structural_members()
+            all_structural = loaded_project.all_structural_members()
+            self.assertIn(loaded_sm, all_structural)
+
+            # Publish to customer SQLite takeoff table and verify structural member takeoff row
+            published_count = publish_canonical_model_to_takeoff(ws.app, 1, loaded_project)
+            self.assertGreater(published_count, 0)
+
+            db_rows = [
+                dict(r) for r in app_mod.lquery(
+                    "SELECT * FROM takeoff_rows WHERE workspace_id=1 ORDER BY id"
+                )
+            ]
+            beam_rows = [r for r in db_rows if r.get("row_role") == "structural_member"]
+            self.assertEqual(len(beam_rows), 1)
+            b_row = beam_rows[0]
+            self.assertEqual(b_row["section"], "Structure")
+            self.assertIn("200UB25", b_row["element"])
+            self.assertAlmostEqual(b_row["quantity"], 8.0, places=2)
+            self.assertEqual(b_row["unit"], "lm")
+            self.assertEqual(b_row["confidence"], "Documented")
+
 
 if __name__ == "__main__":
     unittest.main()
