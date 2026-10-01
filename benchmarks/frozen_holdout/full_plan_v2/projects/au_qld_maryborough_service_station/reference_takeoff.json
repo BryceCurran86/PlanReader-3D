@@ -1,27 +1,17 @@
 {
-  "schema_version": "2.0",
+  "schema_version": "v2-reference-truth-1.0",
   "project_id": "au_qld_maryborough_service_station",
-  "status": "INCOMPLETE",
-  "source_package_complete": true,
-  "source_documents": [
-    {
-      "name": "Arch_Combined_Maryborough_Service_Station.pdf",
-      "role": "architectural_drawings",
-      "sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
-      "size_bytes": 5709675,
-      "page_count": 31
-    }
-  ],
-  "reference_takeoff_documents": [
-    {
-      "name": "reference_takeoff.json",
-      "role": "independent_verified_reference_takeoff",
-      "sha256": "bf4a49a372ce8904f6f9874d3c5d69f7517b2032b412f1a65698de0673c06d69",
-      "size_bytes": 6579,
-      "page_count": null
-    }
-  ],
-  "verified_takeoff_items": [
+  "status": "VERIFIED_CORE_ONLY",
+  "truth_policy": {
+    "planreader_output_used_as_truth": false,
+    "minimum_independent_routes": 2,
+    "note": "Only the door core proven by A600 schedule rows and A110 physical tags is admitted here."
+  },
+  "source_plan": {
+    "name": "Arch_Combined_Maryborough_Service_Station.pdf",
+    "sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+  },
+  "items": [
     {
       "item_id": "maryborough-door-ipf3-count",
       "description": "Solid-core flush timber doors with IPF3 paint finish",
@@ -182,10 +172,54 @@
       "verification_status": "VERIFIED"
     }
   ],
-  "reason_codes": [
-    "room_area_universe_not_built",
-    "wall_ceiling_finish_surface_universe_not_built",
-    "window_surface_universe_not_built",
-    "external_surface_universe_not_built"
-  ]
+  "door_universe_reconciliation": {
+    "schedule_rows": 28,
+    "distinct_A110_tags": 28,
+    "expected_ids": [
+      "D01",
+      "D02",
+      "D03",
+      "D04",
+      "D05",
+      "D06",
+      "D07",
+      "D08",
+      "D09",
+      "D10",
+      "D11",
+      "D12",
+      "D13",
+      "D14",
+      "D15",
+      "D16",
+      "D17",
+      "D18",
+      "D19",
+      "D20",
+      "D21",
+      "D22",
+      "D23",
+      "D24",
+      "D25",
+      "D26",
+      "D27",
+      "D28"
+    ],
+    "class_counts": {
+      "painted_ipf3": 11,
+      "laminex_partition": 3,
+      "aluminium_glazed": 2,
+      "by_others_coolroom": 2,
+      "by_others_lessee_shelving": 10,
+      "total": 28
+    },
+    "partition_check": {
+      "painted_ipf3": 11,
+      "laminex_partition": 3,
+      "aluminium_glazed": 2,
+      "by_others_coolroom": 2,
+      "by_others_lessee_shelving": 10,
+      "sum": 28
+    }
+  }
 }

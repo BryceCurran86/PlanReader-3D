@@ -47,11 +47,42 @@
       "page_count": 6
     }
   ],
-  "reference_takeoff_documents": [],
-  "verified_takeoff_items": [],
+  "reference_takeoff_documents": [
+    {
+      "name": "reference_takeoff.json",
+      "role": "independent_verified_reference_takeoff",
+      "sha256": "0ed5147d60b469e53b456d2796da46d5a274536f55487a8557baf1cb57cb1875",
+      "size_bytes": 2038,
+      "page_count": null
+    }
+  ],
+  "verified_takeoff_items": [
+    {
+      "item_id": "q5446-alfresco-floor-area",
+      "description": "Alfresco floor area independently closed by 3000 x 4000 figured dimensions",
+      "trade_category": "flooring",
+      "unit": "m2",
+      "expected_quantity": 12,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "q5446:surface:floor:alfresco"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "standard_plans:p1:areas_table:ALFRESCO_12.00_m2",
+        "standard_plans:p1:figured_dimensions:3000x4000"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    }
+  ],
   "reason_codes": [
     "sales_estimate_is_not_complete_measured_takeoff",
-    "reference_takeoff_not_supplied",
-    "verified_surface_universe_not_built"
+    "ground_first_porch_garage_area_routes_not_independently_closed",
+    "window_door_opening_universe_not_reconciled",
+    "wall_ceiling_finish_surface_universe_not_built"
   ]
 }
