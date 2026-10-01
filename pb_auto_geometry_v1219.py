@@ -957,7 +957,47 @@ def _try_physical_net_wall_rows(
                         ded_val = float(w.get("opening_deduction_m2") or 0.0)
                         h_status = str(w.get("height_status") or "")
                         callout_note = f" Authenticated callout finish: {sub}." if w.get("callout_bound") else ""
-                        note_text = f"Gross {gross_val:.2f} m²; authenticated opening deductions {ded_val:.2f} m². {h_status}{callout_note}".strip()
+                        ded_details = ""
+                        if w.get("openings"):
+                            op_summaries = []
+                            for op in w.get("openings"):
+                                op_mark = (
+                                    (getattr(op, "type_mark", None) or getattr(op, "mark", None) or getattr(op, "opening_id", None))
+                                    if hasattr(op, "type_mark") or hasattr(op, "mark")
+                                    else (op.get("type_mark") or op.get("mark") or op.get("opening_id") or "opening")
+                                    if isinstance(op, dict)
+                                    else "opening"
+                                )
+                                op_area = (
+                                    float(getattr(op, "area_m2", 0.0) or 0.0)
+                                    if hasattr(op, "area_m2")
+                                    else float(op.get("area_m2") or op.get("deduction_m2") or 0.0)
+                                    if isinstance(op, dict)
+                                    else 0.0
+                                )
+                                if op_area > 0.0:
+                                    op_summaries.append(f"{op_mark} ({op_area:.2f} m²)")
+                            if op_summaries:
+                                ded_details = f" Deductions: {', '.join(op_summaries)}."
+
+                        doc_provenance = ""
+                        if w.get("source_document") or w.get("document_name"):
+                            doc_provenance = f" Doc: {w.get('source_document') or w.get('document_name')}."
+                        elif doc_paths:
+                            doc_provenance = f" Doc: {doc_paths[0][1].name}."
+
+                        source_page_str = (
+                            str(w.get("source_page") or "")
+                            or (
+                                f"Plan p.{w.get('plan_page_id')} / Elev p.{w.get('elevation_page_id')}"
+                                if w.get("plan_page_id") and w.get("elevation_page_id")
+                                else f"Page {w.get('plan_page_id') or w.get('page_id') or w.get('page_no')}"
+                                if (w.get("plan_page_id") or w.get("page_id") or w.get("page_no"))
+                                else "Registered plan/elevation geometry"
+                            )
+                        )
+
+                        note_text = f"Gross {gross_val:.2f} m²; authenticated opening deductions {ded_val:.2f} m².{ded_details} {h_status}{callout_note}{doc_provenance}".strip()
                         source_ref = (
                             f"{SOURCE_PREFIX} · registered_wall:{ref} · {w.get('finish_callout_binding_id')}"
                             if w.get("callout_bound")
@@ -971,7 +1011,7 @@ def _try_physical_net_wall_rows(
                             substrate=sub,
                             quantity=net_qty,
                             status="Measured",
-                            source_page="Registered plan/elevation geometry",
+                            source_page=source_page_str,
                             source_reference=source_ref,
                             confidence="Documented" if (w.get("height_confidence") in {"Verified", "High"} or w.get("callout_bound")) else "Derived",
                             notes=note_text,
