@@ -791,6 +791,80 @@ def _setting_set(app: Any, workspace_id: int, data: Dict[str, Any]) -> None:
     )
 
 
+def _runtime_coverage_registry_summaries(app: Any) -> List[Any]:
+    """Return only live typed coverage registries explicitly attached to runtime.
+
+    AG-09 never rebuilds a registry from customer rows or infers missing object
+    identities. Authorities/extractors must supply CoverageRegistrySummaryV1
+    instances directly.
+    """
+    from pb_takeoff_coverage_registry import CoverageRegistrySummaryV1
+
+    candidates: List[Any] = []
+    for attr in (
+        "takeoff_coverage_registry_summaries",
+        "coverage_registry_summaries",
+        "coverage_registry_summaries_live",
+    ):
+        value = getattr(app, attr, None)
+        if isinstance(value, CoverageRegistrySummaryV1):
+            candidates.append(value)
+        elif isinstance(value, (list, tuple)):
+            candidates.extend(value)
+
+    for attr in ("takeoff_coverage_registry_summary", "coverage_registry_summary"):
+        value = getattr(app, attr, None)
+        if isinstance(value, CoverageRegistrySummaryV1):
+            candidates.append(value)
+
+    for holder_name in (
+        "planreader_extractor",
+        "generic_planreader_extractor",
+        "extractor",
+    ):
+        holder = getattr(app, holder_name, None)
+        if holder is None:
+            continue
+        value = getattr(holder, "coverage_registry_summaries_live", None)
+        if isinstance(value, CoverageRegistrySummaryV1):
+            candidates.append(value)
+        elif isinstance(value, (list, tuple)):
+            candidates.extend(value)
+
+    unique: Dict[Tuple[str, str, str], Any] = {}
+    for summary in candidates:
+        if not isinstance(summary, CoverageRegistrySummaryV1):
+            continue
+        key = (
+            summary.manifest.source_sha256,
+            summary.manifest.registry_run_id,
+            summary.manifest.snapshot_id,
+        )
+        unique.setdefault(key, summary)
+    return [unique[key] for key in sorted(unique)]
+
+
+def _runtime_coverage_lifecycle_report(
+    app: Any,
+    workspace_id: int,
+) -> Dict[str, Any]:
+    """Build customer-safe AG-09 stage metadata from the current transaction."""
+    from pb_takeoff_coverage_audit_adapter import (
+        build_runtime_coverage_publication,
+    )
+
+    summaries = _runtime_coverage_registry_summaries(app)
+    published_rows = app.lquery(
+        """SELECT id,source_reference,quantity,unit,quantity_status,row_role
+           FROM takeoff_rows WHERE workspace_id=? ORDER BY id""",
+        (int(workspace_id),),
+    )
+    return build_runtime_coverage_publication(
+        summaries,
+        published_takeoff_rows=[dict(row) for row in published_rows],
+    )
+
+
 def _build_unit_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, Any]]) -> Tuple[List[Tuple[Any, ...]], List[Dict[str, Any]]]:
     rows: List[Tuple[Any, ...]] = []
     summary: List[Dict[str, Any]] = []
@@ -1386,11 +1460,16 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
     # Rows, envelope and report are one publication: all commit or none do.
     with _auto_publication(app, int(workspace_id), all_auto_rows) as publication:
         mass_id = _refresh_auto_model(publication, int(workspace_id), footprint, facades)
+        coverage_lifecycle = _runtime_coverage_lifecycle_report(
+            publication,
+            int(workspace_id),
+        )
         report = {
             "version": VERSION, "analysed_at": app.now_stamp(), "selected_pages": len(pages),
             "calibrations": calibrations, "footprint": footprint, "units": units, "facades": facades,
             "partitions": partitions, "finishes": finishes,
             "semantic_conflicts": [c.to_dict() if hasattr(c, "to_dict") else dict(c) for c in conflicts],
+            "coverage_lifecycle": coverage_lifecycle,
             "auto_takeoff_rows": len(all_auto_rows), "model_mass_id": mass_id,
         }
         _setting_set(publication, int(workspace_id), report)
@@ -1414,6 +1493,30 @@ def auto_geometry_panel(app: Any, workspace: Dict[str, Any]) -> None:
         c2.metric("Auto-discarded", discarded)
         c3.metric("Unit areas found", len(report.get("units") or []))
         c4.metric("External rows", len([f for f in report.get("facades") or [] if _num(f.get("gross_m2")) > 0 or f.get("explicit_areas")]))
+        coverage = report.get("coverage_lifecycle") or {}
+        coverage_status = str(coverage.get("status") or "")
+        stage_counts = coverage.get("stage_counts") or {}
+        if coverage_status and coverage_status != "unavailable":
+            stage_text = " · ".join(
+                f"{stage.title()} {stage_counts.get(stage)}"
+                for stage in (
+                    "DETECTED",
+                    "AUTHENTICATED",
+                    "CANONICALIZED",
+                    "QUANTIFIED",
+                    "PUBLISHED",
+                )
+                if stage_counts.get(stage) is not None
+            )
+            app.st.caption(
+                "Coverage lifecycle — explicit dependency links only; "
+                f"family completeness remains UNKNOWN. {stage_text}"
+            )
+        elif report:
+            app.st.caption(
+                "Coverage lifecycle unavailable for object families that have not "
+                "published a live coverage registry."
+            )
         if app.st.button("Re-run automatic geometry", type="secondary", use_container_width=True, key=f"auto_geometry_refresh_{workspace_id}"):
             with app.st.spinner("Cross-referencing selected plans and elevations…"):
                 result = analyse_workspace(app, workspace_id)
