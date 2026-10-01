@@ -168,9 +168,9 @@ class LivePhysicalOpeningVoidComposition:
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
     traces: tuple[LivePhysicalOpeningVoidTrace, ...]
-    canonical_openings: tuple[LiveCanonicalOpeningObject, ...]
     physical_opening_void_authorities: Mapping[str, PhysicalOpeningVoidAuthority]
     void_selectors: Mapping[str, PhysicalOpeningVoidSelector]
+    canonical_openings: tuple[LiveCanonicalOpeningObject, ...] = ()
     schema_version: str = LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION
 
 
