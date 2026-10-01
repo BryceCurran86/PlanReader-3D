@@ -1307,6 +1307,22 @@
         "source_closed_plane": true,
         "denominator_readiness": "source_closed_plane_candidate"
       }
+    },
+    {
+      "object_ref": "lot16:surface:floor:garage",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Garage epoxy floor surface",
+      "expected_quantity": 38.94,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:GARAGE:6000x6490_figured_dimensions:EPOXY",
+      "attributes": {
+        "width_m": 6,
+        "length_m": 6.49,
+        "calculation": "width_m * length_m",
+        "finish": "epoxy",
+        "quantity_basis": "figured internal garage dimensions"
+      }
     }
   ],
   "closure_checks": [
@@ -1679,6 +1695,23 @@
         "architectural:p3:floor_plan:GARAGE_[FLAT_CEILING]",
         "architectural:p3:floor_plan:6000_and_6490_figured_dimensions"
       ]
+    },
+    {
+      "check_id": "lot16:closure:garage_floor_flat_ceiling",
+      "component_object_refs": [
+        "lot16:surface:floor:garage",
+        "lot16:surface:ceiling:garage_flat"
+      ],
+      "figured_dimensions_m": [
+        6,
+        6.49
+      ],
+      "calculated_plan_area_m2": 38.94,
+      "floor_finish": "epoxy",
+      "ceiling_geometry": "flat",
+      "floor_surface_closed": true,
+      "ceiling_surface_closed": true,
+      "source_location": "architectural:p3:floor_plan:GARAGE:6000x6490:EPOXY:[FLAT_CEILING]"
     }
   ]
 }
