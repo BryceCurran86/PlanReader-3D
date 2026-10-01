@@ -6,7 +6,7 @@ member authority.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
 from pb_structural_member_authority import StructuralMemberResolution
@@ -133,8 +133,13 @@ def collect_structural_member_coverage_shadow(
     resolution: StructuralMemberResolution,
     *,
     registry_run_id: str,
+    quantity_evidence_sink: Callable[[QuantityEvidence], None] | None = None,
 ) -> dict[str, Any]:
-    """Serialize exact structural producer coverage records for diagnostics."""
+    """Serialize diagnostics, optionally retaining the original typed evidence.
+
+    The sink is a diagnostic consumer only; it does not publish a takeoff row or
+    allow the live extractor to recalculate this shadow quantity.
+    """
     if type(resolution) is not StructuralMemberResolution:
         raise TypeError("resolution must be StructuralMemberResolution")
 
@@ -163,6 +168,8 @@ def collect_structural_member_coverage_shadow(
         *quantity.reason_codes,
         *quantity.blocking_reasons,
     )))
+    if quantity_evidence_sink is not None:
+        quantity_evidence_sink(quantity)
     return {
         "status": status.value,
         "reason_codes": list(reasons),

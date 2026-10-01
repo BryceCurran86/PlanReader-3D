@@ -175,6 +175,24 @@ def test_abstained_dependency_cannot_publish_on_behalf_of_valid_sibling_dependen
     assert counts["PUBLISHED"] == 0
 
 
+@pytest.mark.parametrize("status,verified", [
+    ("firm", True), ("corroborated", True), ("provisional", False),
+    ("review_required", False), ("user_approved", False), ("blocked", False),
+    ("unknown", False), ("FIRM", False),
+])
+def test_quantity_stage_respects_the_existing_exact_status_vocabularies(status, verified):
+    resolution = _resolved(with_geometry=True)
+    members = project_structural_member_resolution(resolution).objects
+    quantity = replace(build_structural_member_count_quantity(resolution), status=status)
+    summaries, _ = collect_live_canonical_coverage(
+        objects=members, quantities=(quantity,), output_rows=(), registry_run_scope="status-contract",
+    )
+    report = build_runtime_coverage_publication(summaries)
+    counts = report["family_reports"]["structural_member"]["stage_counts"]
+    assert counts["QUANTIFIED"] == (len(members) if verified else 0)
+    assert counts["PUBLISHED"] == 0
+
+
 def test_source_authenticated_rooms_are_partial_without_metric_quantity_and_inputs_stay_unchanged():
     rooms = _rooms().rooms
     before = copy.deepcopy([room.to_dict() for room in rooms])
