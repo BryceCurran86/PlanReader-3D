@@ -16,8 +16,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "50abdaabb043d221a649e8c9e45fc606c125ac6e0eff83ac48f9cf8745ac1061",
-      "size_bytes": 11286,
+      "sha256": "e5b10be96ff3a46de3a2cc4d3b0a292d009ba38df2e0a9e06841d131009b3fe5",
+      "size_bytes": 14608,
       "page_count": null
     }
   ],
@@ -272,11 +272,77 @@
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-wc-shower-north-wfpb-ceiling-area",
+      "description": "North WC & SHOWER WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 4.7547,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:wc_shower_north"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:WC_SHOWER_north:2400_WFPB",
+        "A140:figured_dimensions:WC_SHOWER_2935x1620",
+        "A110:physical_room_geometry:WC_SHOWER_north:entry_D07"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-wc-shower-middle-wfpb-ceiling-area",
+      "description": "Middle WC & SHOWER WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 4.7547,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:wc_shower_middle"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:WC_SHOWER_middle:2400_WFPB",
+        "A140:figured_dimensions:WC_SHOWER_2935x1620",
+        "A110:physical_room_geometry:WC_SHOWER_middle:entry_D08"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-wc-shower-south-wfpb-ceiling-area",
+      "description": "South WC & SHOWER WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 4.7547,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:wc_shower_south"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:WC_SHOWER_south:2400_WFPB",
+        "A140:figured_dimensions:WC_SHOWER_2935x1620",
+        "A110:physical_room_geometry:WC_SHOWER_south:entry_D09"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "reason_codes": [
     "remaining_room_area_universe_not_built",
-    "wall_ceiling_finish_surface_universe_not_built",
+    "remaining_wall_ceiling_finish_surface_universe_not_built",
     "window_area_universe_not_built",
     "external_surface_universe_not_built"
   ]
