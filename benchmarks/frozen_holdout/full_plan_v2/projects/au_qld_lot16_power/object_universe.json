@@ -601,5 +601,51 @@
     }
   ],
   "promoted_ceiling_plane_subset_source_closed": true,
-  "project_ceiling_universe_complete": false
+  "project_ceiling_universe_complete": false,
+  "ensuite_wir_floor_surfaces": [
+    {
+      "object_ref": "lot16:surface:floor:ensuite",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Ensuite tiled floor surface",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 5.491,
+      "attributes": {
+        "width_m": 2.89,
+        "length_m": 1.9,
+        "calculation": "2.890m * 1.900m",
+        "finish": "tiles",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "lot16_declared_floor_area"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:ENS:TILES:2890x1900_figured_dimensions"
+      ]
+    },
+    {
+      "object_ref": "lot16:surface:floor:wir",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "WIR vinyl floor surface",
+      "finish": "vinyl",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 4.6818,
+      "attributes": {
+        "width_m": 2.89,
+        "length_m": 1.62,
+        "calculation": "2.890m * 1.620m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "lot16_declared_floor_area"
+      },
+      "source_locations": [
+        "architectural:p3:floor_plan:WIR:VINYL:2890x1620_figured_dimensions"
+      ]
+    }
+  ],
+  "promoted_atomic_floor_subset_source_closed": true,
+  "project_floor_universe_complete": false
 }
