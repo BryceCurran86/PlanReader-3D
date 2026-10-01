@@ -646,3 +646,41 @@ def test_3laurel_bathroom_wc_room_access_deductions_are_mapped_but_not_full_net_
     assert check["complete_for_these_room_access_openings"] is True
     assert check["complete_for_all_wall_openings"] is False
     assert check["finish_scope_resolved"] is False
+
+
+def test_lot16_explicit_internal_elevation_wall_faces_close_to_top_plate():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    refs = {
+        "lot16:surface:internal_wall_gross:bath:elev1",
+        "lot16:surface:internal_wall_gross:bath:shower",
+        "lot16:surface:internal_wall_gross:bath:elev4",
+        "lot16:surface:internal_wall_gross:ensuite:elev1",
+        "lot16:surface:internal_wall_gross:ensuite:elev2",
+        "lot16:surface:internal_wall_gross:wc:elev1",
+        "lot16:surface:internal_wall_gross:laundry:elev1",
+        "lot16:surface:internal_wall_gross:laundry:elev2",
+    }
+    faces = [
+        row for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
+    assert len(faces) == 8
+    assert {row["object_ref"] for row in faces} == refs
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(
+        35.3794
+    )
+    assert all(
+        row["attributes"]["wall_height_to_top_plate_m"] == pytest.approx(2.59)
+        for row in faces
+    )
+    assert all(
+        row["attributes"]["raked_ceiling_extension_included"] is False
+        for row in faces
+    )
+    check = next(
+        row for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:explicit_internal_elevation_wall_faces"
+    )
+    assert check["object_count"] == 8
+    assert check["component_sum_m2"] == pytest.approx(35.3794)
+    assert check["net_denominator_ready"] is False
