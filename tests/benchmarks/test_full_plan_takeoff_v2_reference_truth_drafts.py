@@ -285,3 +285,50 @@ def test_lot16_explicit_architectural_support_census_is_source_closed():
         in draft["unresolved_surface_families"]
     )
 
+
+
+def test_lot16_known_external_openings_close_except_measure_on_site_glazing():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "external_opening"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:known_external_opening_census"
+    )
+    assert len(openings) == check["known_opening_count"] == 13
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(37.584)
+    assert check["known_opening_area_m2"] == pytest.approx(37.584)
+    assert check["complete_for_all_dimensioned_and_plan_width_openings"] is True
+    assert check["complete_for_all_external_openings"] is False
+    assert check["residual_unresolved"] == ["custom_front_windows_measure_on_site"]
+    assert "custom_front_glazing_measure_on_site_only" in draft["unresolved_surface_families"]
+
+
+def test_3laurel_external_opening_universe_is_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "external_opening"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:external_opening_census"
+    )
+    assert len(openings) == check["external_opening_count"] == 23
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(64.764)
+    assert check["external_opening_area_m2"] == pytest.approx(64.764)
+    assert check["complete_for_all_external_openings"] is True
+    assert (
+        "internal_door_opening_universe_for_wall_face_deductions"
+        in draft["unresolved_surface_families"]
+    )
+    assert (
+        "untyped_or_ambiguous_door_openings_and_internal_external_classification"
+        not in draft["unresolved_surface_families"]
+    )
