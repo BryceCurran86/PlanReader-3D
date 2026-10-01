@@ -64,6 +64,8 @@ class AuditObjectRecord:
     provenance: Mapping[str, Any] = field(default_factory=dict)
     takeoff_row_ids: Tuple[str, ...] = ()
     geometry_basis: str = "none"
+    coverage_basis: Optional[str] = None
+    expected_family_completeness: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -75,6 +77,8 @@ class AuditObjectRecord:
             "provenance": copy.deepcopy(dict(self.provenance)),
             "takeoff_row_ids": list(self.takeoff_row_ids),
             "geometry_basis": self.geometry_basis,
+            "coverage_basis": self.coverage_basis,
+            "expected_family_completeness": self.expected_family_completeness,
         }
 
 
