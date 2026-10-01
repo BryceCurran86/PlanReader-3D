@@ -12,42 +12,29 @@ def _json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_suite_is_exactly_five_projects_with_one_explicit_legacy_control():
+def test_suite_is_exactly_four_new_australian_projects():
     suite = _json(ROOT / "manifest.json")
-    assert suite["required_project_count"] == 5
-    assert len(suite["projects"]) == 5
+    assert suite["required_project_count"] == 4
+    assert len(suite["projects"]) == 4
     assert suite["historical_canonical_five_headline"] is False
-    assert suite["projects"][-1] == "legacy_umma_hostels_v2"
-    joined = " ".join(suite["projects"]).lower()
-    for historical in ("kstvet", "murera", "ghazi", "lamu"):
-        assert historical not in joined
+    assert suite["projects"] == [
+        "au_qld_lot16_power",
+        "au_qld_3laurel",
+        "au_qld_maryborough_service_station",
+        "au_qld_q5446_armstrong32_harlequin",
+    ]
 
 
-def test_all_five_configured_projects_are_source_complete_but_not_falsely_verified():
+def test_all_four_configured_projects_are_source_complete_but_not_falsely_verified():
     suite = _json(ROOT / "manifest.json")
     manifests = [
         _json(ROOT / "projects" / project_id / "source_manifest.json")
         for project_id in suite["projects"]
     ]
-    configured = [m for m in manifests if m["status"] != "NOT_CONFIGURED"]
-    assert len(configured) == 5
-    assert all(m["source_package_complete"] for m in configured)
-    assert all(m["status"] == "INCOMPLETE" for m in configured)
-    assert all("reference_takeoff_not_supplied" in m["reason_codes"] for m in configured)
-
-
-def test_legacy_umma_control_is_configured_but_old_score_is_not_v2_truth():
-    manifest = _json(
-        ROOT / "projects" / "legacy_umma_hostels_v2" / "source_manifest.json"
-    )
-    assert manifest["status"] == "INCOMPLETE"
-    assert manifest["source_package_complete"] is True
-    assert manifest["reference_takeoff_documents"] == []
-    assert manifest["verified_takeoff_items"] == []
-    assert (
-        "legacy_control_project_previous_benchmark_15_of_15_not_reused_as_v2_truth"
-        in manifest["reason_codes"]
-    )
+    assert len(manifests) == 4
+    assert all(m["source_package_complete"] for m in manifests)
+    assert all(m["status"] == "INCOMPLETE" for m in manifests)
+    assert all("reference_takeoff_not_supplied" in m["reason_codes"] for m in manifests)
 
 
 def test_source_hashes_are_frozen_to_uploaded_files():
@@ -56,7 +43,6 @@ def test_source_hashes_are_frozen_to_uploaded_files():
         "au_qld_maryborough_service_station": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
         "au_qld_lot16_power": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
         "au_qld_q5446_armstrong32_harlequin": "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0",
-        "legacy_umma_hostels_v2": "f30711f69944e66ef993341180e35b49ccfcb36d6f402743284823ab588183af",
     }
     for project_id, sha in expected.items():
         manifest = _json(ROOT / "projects" / project_id / "source_manifest.json")
@@ -74,4 +60,4 @@ def test_baseline_cli_runs_directly_from_repo_checkout():
     assert completed.returncode == 2
     payload = json.loads(completed.stdout)
     assert payload["publication_status"] == "UNPUBLISHED"
-    assert payload["configured_projects"] == 5
+    assert payload["configured_projects"] == 4

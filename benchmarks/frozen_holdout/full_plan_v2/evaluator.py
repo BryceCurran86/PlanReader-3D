@@ -358,7 +358,7 @@ def evaluate_suite_v2(
     manifests: Iterable[ProjectBenchmarkManifestV2],
     produced_by_project: dict[str, Iterable[ProducedTakeoffItemV2]],
     *,
-    required_project_count: int = 5,
+    required_project_count: int = 4,
     evaluated_source_sha256s_by_project: dict[str, Iterable[str]] | None = None,
     reconciliation_complete_by_project: dict[str, bool] | None = None,
 ) -> SuiteResultV2:

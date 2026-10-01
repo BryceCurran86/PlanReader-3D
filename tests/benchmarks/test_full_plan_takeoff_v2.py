@@ -303,10 +303,10 @@ def _manifest_for(project_id: str, status: str) -> ProjectBenchmarkManifestV2:
     )
 
 
-def test_four_of_five_never_publishes_a_five_project_headline():
+def test_three_of_four_never_publishes_a_four_project_headline():
     manifests = tuple(
-        _manifest_for(f"p{i}", PROJECT_VERIFIED) for i in range(1, 5)
-    ) + (_manifest_for("p5", PROJECT_NOT_CONFIGURED),)
+        _manifest_for(f"p{i}", PROJECT_VERIFIED) for i in range(1, 4)
+    ) + (_manifest_for("p4", PROJECT_NOT_CONFIGURED),)
     produced_by_project = {
         f"p{i}": (
             ProducedTakeoffItemV2(
@@ -315,6 +315,80 @@ def test_four_of_five_never_publishes_a_five_project_headline():
                 value=10.0,
                 unit="m2",
                 object_refs=(f"p{i}-surface",),
+            ),
+        )
+        for i in range(1, 4)
+    }
+    result = evaluate_suite_v2(
+        manifests,
+        produced_by_project,
+        evaluated_source_sha256s_by_project={
+            f"p{i}": (SHA,) for i in range(1, 4)
+        },
+        reconciliation_complete_by_project={
+            f"p{i}": True for i in range(1, 4)
+        },
+    )
+    assert result.publication_status == "UNPUBLISHED"
+    assert result.development_status == "PROVISIONAL_3_OF_4"
+    assert result.verified_projects == 3
+    assert result.coverage_accuracy == pytest.approx(1.0)
+    assert any("p4:new_project_not_supplied" in reason for reason in result.reason_codes)
+def test_required_project_count_mismatch_fails_closed():
+    manifests = tuple(_manifest_for(f"p{i}", PROJECT_VERIFIED) for i in range(1, 4))
+    result = evaluate_suite_v2(manifests, {})
+    assert result.publication_status == "UNPUBLISHED"
+    assert "required_project_count_not_met" in result.reason_codes
+
+
+def test_four_verified_projects_require_run_integrity_before_publish():
+    manifests = tuple(_manifest_for(f"p{i}", PROJECT_VERIFIED) for i in range(1, 5))
+    produced_by_project = {
+        f"p{i}": (
+            ProducedTakeoffItemV2(
+                quantity_id=f"q{i}",
+                trade_category="painting",
+                value=10.0,
+                unit="m2",
+                object_refs=(f"p{i}-surface",),
+            ),
+        )
+        for i in range(1, 5)
+    }
+
+    blocked = evaluate_suite_v2(manifests, produced_by_project)
+    assert blocked.publication_status == "UNPUBLISHED"
+    assert blocked.development_status == "VERIFIED_MANIFESTS_RUN_INCOMPLETE"
+    assert blocked.coverage_accuracy is None
+    assert any("source_hashes_not_verified" in reason for reason in blocked.reason_codes)
+    assert any("object_reconciliation_incomplete" in reason for reason in blocked.reason_codes)
+
+    published = evaluate_suite_v2(
+        manifests,
+        produced_by_project,
+        evaluated_source_sha256s_by_project={
+            f"p{i}": (SHA,) for i in range(1, 5)
+        },
+        reconciliation_complete_by_project={
+            f"p{i}": True for i in range(1, 5)
+        },
+    )
+    assert published.publication_status == "PUBLISHED"
+    assert published.development_status == "COMPLETE"
+    assert published.coverage_accuracy == pytest.approx(1.0)
+
+
+def test_lineage_conflict_blocks_suite_headline():
+    manifests = tuple(_manifest_for(f"p{i}", PROJECT_VERIFIED) for i in range(1, 5))
+    produced_by_project = {
+        f"p{i}": (
+            ProducedTakeoffItemV2(
+                quantity_id=f"q{i}",
+                trade_category="painting",
+                value=10.0,
+                unit="m2",
+                object_refs=(f"p{i}-surface",),
+                lineage_ok=i != 3,
             ),
         )
         for i in range(1, 5)
@@ -330,86 +404,12 @@ def test_four_of_five_never_publishes_a_five_project_headline():
         },
     )
     assert result.publication_status == "UNPUBLISHED"
-    assert result.development_status == "PROVISIONAL_4_OF_5"
-    assert result.verified_projects == 4
-    assert result.coverage_accuracy == pytest.approx(1.0)
-    assert any("p5:new_project_not_supplied" in reason for reason in result.reason_codes)
-def test_required_project_count_mismatch_fails_closed():
-    manifests = tuple(_manifest_for(f"p{i}", PROJECT_VERIFIED) for i in range(1, 5))
-    result = evaluate_suite_v2(manifests, {})
-    assert result.publication_status == "UNPUBLISHED"
-    assert "required_project_count_not_met" in result.reason_codes
-
-
-def test_five_verified_projects_require_run_integrity_before_publish():
-    manifests = tuple(_manifest_for(f"p{i}", PROJECT_VERIFIED) for i in range(1, 6))
-    produced_by_project = {
-        f"p{i}": (
-            ProducedTakeoffItemV2(
-                quantity_id=f"q{i}",
-                trade_category="painting",
-                value=10.0,
-                unit="m2",
-                object_refs=(f"p{i}-surface",),
-            ),
-        )
-        for i in range(1, 6)
-    }
-
-    blocked = evaluate_suite_v2(manifests, produced_by_project)
-    assert blocked.publication_status == "UNPUBLISHED"
-    assert blocked.development_status == "VERIFIED_MANIFESTS_RUN_INCOMPLETE"
-    assert blocked.coverage_accuracy is None
-    assert any("source_hashes_not_verified" in reason for reason in blocked.reason_codes)
-    assert any("object_reconciliation_incomplete" in reason for reason in blocked.reason_codes)
-
-    published = evaluate_suite_v2(
-        manifests,
-        produced_by_project,
-        evaluated_source_sha256s_by_project={
-            f"p{i}": (SHA,) for i in range(1, 6)
-        },
-        reconciliation_complete_by_project={
-            f"p{i}": True for i in range(1, 6)
-        },
-    )
-    assert published.publication_status == "PUBLISHED"
-    assert published.development_status == "COMPLETE"
-    assert published.coverage_accuracy == pytest.approx(1.0)
-
-
-def test_lineage_conflict_blocks_suite_headline():
-    manifests = tuple(_manifest_for(f"p{i}", PROJECT_VERIFIED) for i in range(1, 6))
-    produced_by_project = {
-        f"p{i}": (
-            ProducedTakeoffItemV2(
-                quantity_id=f"q{i}",
-                trade_category="painting",
-                value=10.0,
-                unit="m2",
-                object_refs=(f"p{i}-surface",),
-                lineage_ok=i != 3,
-            ),
-        )
-        for i in range(1, 6)
-    }
-    result = evaluate_suite_v2(
-        manifests,
-        produced_by_project,
-        evaluated_source_sha256s_by_project={
-            f"p{i}": (SHA,) for i in range(1, 6)
-        },
-        reconciliation_complete_by_project={
-            f"p{i}": True for i in range(1, 6)
-        },
-    )
-    assert result.publication_status == "UNPUBLISHED"
     assert result.coverage_accuracy is None
     assert "p3:lineage_conflict" in result.reason_codes
 
 
 def test_unexpected_project_output_blocks_suite_headline_and_counts_extra():
-    manifests = tuple(_manifest_for(f"p{i}", PROJECT_VERIFIED) for i in range(1, 6))
+    manifests = tuple(_manifest_for(f"p{i}", PROJECT_VERIFIED) for i in range(1, 5))
     produced_by_project = {
         f"p{i}": (
             ProducedTakeoffItemV2(
@@ -420,7 +420,7 @@ def test_unexpected_project_output_blocks_suite_headline_and_counts_extra():
                 object_refs=(f"p{i}-surface",),
             ),
         )
-        for i in range(1, 6)
+        for i in range(1, 5)
     }
     produced_by_project["unknown-project"] = (
         ProducedTakeoffItemV2(
@@ -435,10 +435,10 @@ def test_unexpected_project_output_blocks_suite_headline_and_counts_extra():
         manifests,
         produced_by_project,
         evaluated_source_sha256s_by_project={
-            f"p{i}": (SHA,) for i in range(1, 6)
+            f"p{i}": (SHA,) for i in range(1, 5)
         },
         reconciliation_complete_by_project={
-            f"p{i}": True for i in range(1, 6)
+            f"p{i}": True for i in range(1, 5)
         },
     )
     assert result.publication_status == "UNPUBLISHED"

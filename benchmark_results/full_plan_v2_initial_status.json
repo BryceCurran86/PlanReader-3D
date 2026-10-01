@@ -1,8 +1,8 @@
 {
-  "configured_projects": 5,
+  "configured_projects": 4,
   "coverage_accuracy": null,
   "denominator": 0,
-  "development_status": "INCOMPLETE_0_OF_5",
+  "development_status": "INCOMPLETE_0_OF_4",
   "matched_within_tolerance": 0,
   "precision_adjusted_accuracy": null,
   "project_results": [
@@ -65,21 +65,6 @@
       "unresolved": 0,
       "unsupported_extra": 0,
       "unsupported_quantity_ids": []
-    },
-    {
-      "coverage_accuracy": null,
-      "denominator": 0,
-      "item_results": [],
-      "manifest_status": "INCOMPLETE",
-      "matched_outside_tolerance": 0,
-      "matched_within_tolerance": 0,
-      "missed": 0,
-      "partial": 0,
-      "precision_adjusted_accuracy": null,
-      "project_id": "legacy_umma_hostels_v2",
-      "unresolved": 0,
-      "unsupported_extra": 0,
-      "unsupported_quantity_ids": []
     }
   ],
   "publication_status": "UNPUBLISHED",
@@ -92,11 +77,7 @@
     "au_qld_maryborough_service_station:verified_surface_universe_not_built",
     "au_qld_q5446_armstrong32_harlequin:reference_takeoff_not_supplied",
     "au_qld_q5446_armstrong32_harlequin:sales_estimate_is_not_complete_measured_takeoff",
-    "au_qld_q5446_armstrong32_harlequin:verified_surface_universe_not_built",
-    "legacy_umma_hostels_v2:legacy_control_project_previous_benchmark_15_of_15_not_reused_as_v2_truth",
-    "legacy_umma_hostels_v2:reference_takeoff_not_supplied",
-    "legacy_umma_hostels_v2:source_package_contains_schedule_sheets_and_boq_but_no_architectural_floor_plan_or_elevation_sheets",
-    "legacy_umma_hostels_v2:verified_surface_universe_not_built"
+    "au_qld_q5446_armstrong32_harlequin:verified_surface_universe_not_built"
   ],
   "unsupported_extra": 0,
   "verified_projects": 0

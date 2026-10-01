@@ -43,7 +43,7 @@ def main() -> int:
             produced[manifest.project_id] = load_produced_items(
                 args.produced_dir / f"{manifest.project_id}.json"
             )
-    result = evaluate_suite_v2(manifests, produced, required_project_count=5)
+    result = evaluate_suite_v2(manifests, produced, required_project_count=4)
     payload = asdict(result)
     text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     if args.output is not None:

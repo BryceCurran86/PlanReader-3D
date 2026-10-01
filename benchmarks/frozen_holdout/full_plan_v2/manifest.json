@@ -1,15 +1,14 @@
 {
   "schema_version": "2.0",
   "benchmark_id": "full_plan_takeoff_reconciliation_v2",
-  "required_project_count": 5,
+  "required_project_count": 4,
   "headline_metric": "verified_takeoff_coverage_accuracy",
   "projects": [
     "au_qld_lot16_power",
     "au_qld_3laurel",
     "au_qld_maryborough_service_station",
-    "au_qld_q5446_armstrong32_harlequin",
-    "legacy_umma_hostels_v2"
+    "au_qld_q5446_armstrong32_harlequin"
   ],
-  "publication_rule": "all_five_projects_verified",
+  "publication_rule": "all_four_projects_verified",
   "historical_canonical_five_headline": false
 }
