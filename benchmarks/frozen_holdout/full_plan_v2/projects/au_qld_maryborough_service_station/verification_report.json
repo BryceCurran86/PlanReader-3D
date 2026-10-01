@@ -54,6 +54,11 @@
       "evidence": "A502 gives 3570 x 2200 mm PWD geometry and FT2 floor; A140 confirms PWD FT2; A120 assigns 2400 WFPB ceiling to the same room."
     },
     {
+      "proof": "Airlock and laundry floor/ceiling surfaces independently closed",
+      "status": "PASS",
+      "evidence": "A501 gives AIRLOCK 1520 x 5044 FT2 and LAUNDRY 1655 x 5044 FT2; A140 independently shows matching room/finish geometry; A120 assigns 2400 WFPB ceilings to both rooms."
+    },
+    {
       "proof": "PlanReader output not used as benchmark truth",
       "status": "PASS",
       "evidence": "Truth derived from source drawings and independent cross-check only"
@@ -66,7 +71,7 @@
     {
       "proof": "full project surface universe complete",
       "status": "FAIL",
-      "evidence": "Three WC/shower floors, three WC/shower ceilings, PWD floor and PWD ceiling, plus door/window identity universes are closed; remaining surfaces stay unresolved."
+      "evidence": "WC/shower floor/ceilings, PWD floor/ceiling, airlock floor/ceiling, laundry floor/ceiling, and door/window identity universes are closed; remaining surfaces stay unresolved."
     }
   ]
 }
