@@ -79,6 +79,11 @@
       "evidence": "q5446:surface:floor:alfresco"
     },
     {
+      "proof": "ground Living porcelain tile surface independently closed",
+      "status": "PASS",
+      "evidence": "Standard plan p1 figures Living at 4000x3230 = 12.92 m2; independent 1:100 vector inner faces measure 3996.27x3234.27 = 12.924992 m2 (0.039% difference); sales advice p6 explicitly specifies 600x600 porcelain floor tiles to Living."
+    },
+    {
       "proof": "source lineage complete for admitted core",
       "status": "PASS"
     },
@@ -94,10 +99,22 @@
     {
       "proof": "full project surface universe complete",
       "status": "FAIL",
-      "evidence": "Alfresco, three bathroom/ensuite wet-area floor surfaces, and laundry floor are closed; remaining floor, opening, wall, ceiling, roof and wall-tile universes remain incomplete."
+      "evidence": "Alfresco, Ground Living, three bathroom/ensuite wet-area floor surfaces, and ground laundry are closed; remaining entry/kitchen/carpet/opening/wall/ceiling/roof/wall-tile universes remain incomplete."
     }
   ],
   "measurement_closure_checks": [
+    {
+      "object_ref": "q5446:surface:floor:ground_living",
+      "status": "PASS",
+      "independent_routes": [
+        "standard plan p1 figured dimensions 4000 x 3230 mm",
+        "standard plan p1 vector inner faces 3996.27 x 3234.27 mm",
+        "sales advice p6 porcelain-tile scope to Living"
+      ],
+      "figured_area_m2": 12.92,
+      "vector_area_m2": 12.924992,
+      "decision": "VERIFIED_CORE"
+    },
     {
       "object_ref": "q5446:surface:floor:ground_laundry",
       "status": "PASS",

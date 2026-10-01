@@ -113,20 +113,27 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     _assert_reference_hash("au_qld_maryborough_service_station")
 
 
-def test_q5446_only_independently_closed_alfresco_enters_verified_core():
+def test_q5446_existing_floor_core_stays_scoped_and_project_incomplete():
     project = ROOT / "au_qld_q5446_armstrong32_harlequin"
     manifest = load_project_manifest(project / "source_manifest.json")
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
-    assert len(manifest.verified_items) == 5
 
-    item = manifest.verified_items[0]
-    assert item.item_id == "q5446-alfresco-floor-area"
+    by_id = {row.item_id: row for row in manifest.verified_items}
+    expected_existing_ids = {
+        "q5446-alfresco-floor-area",
+        "q5446-ground-ensuite-floor-tiling-area",
+        "q5446-first-ensuite-floor-tiling-area",
+        "q5446-first-bath-floor-tiling-area",
+        "q5446-ground-laundry-floor-tiling-area",
+    }
+    assert expected_existing_ids <= set(by_id)
+
+    item = by_id["q5446-alfresco-floor-area"]
     assert item.expected_quantity == 12.0
     assert item.unit == "m2"
     assert item.expected_object_refs == ("q5446:surface:floor:alfresco",)
 
-    by_id = {row.item_id: row for row in manifest.verified_items}
     assert by_id["q5446-ground-ensuite-floor-tiling-area"].expected_quantity == 4.2224
     assert by_id["q5446-first-ensuite-floor-tiling-area"].expected_quantity == 5.9572
     assert by_id["q5446-first-bath-floor-tiling-area"].expected_quantity == 5.8446
@@ -145,8 +152,103 @@ def test_q5446_only_independently_closed_alfresco_enters_verified_core():
     }
     assert controls["garage"]["quantity_m2"] == 36.40
     assert controls["total"]["quantity_m2"] == 298.19
-    assert len(ref["independent_geometry_checks"]) == 4
+    geometry_by_ref = {
+        row["surface_ref"]: row
+        for row in ref["independent_geometry_checks"]
+        if "surface_ref" in row
+    }
+    assert {
+        "q5446:surface:floor:ground_ensuite",
+        "q5446:surface:floor:first_ensuite",
+        "q5446:surface:floor:first_bath",
+    } <= set(geometry_by_ref)
+    assert any(
+        row.get("surface_ref") == "q5446:surface:floor:ground_laundry"
+        or row.get("architectural_vector_mm") == [2616.2, 1600.2]
+        for row in ref["independent_geometry_checks"]
+    )
     _assert_reference_hash("au_qld_q5446_armstrong32_harlequin")
+
+
+def test_q5446_ground_living_porcelain_floor_is_source_closed():
+    project = ROOT / "au_qld_q5446_armstrong32_harlequin"
+    manifest = load_project_manifest(project / "source_manifest.json")
+    by_id = {row.item_id: row for row in manifest.verified_items}
+
+    item = by_id["q5446-ground-living-floor-tiling-area"]
+    assert item.expected_quantity == 12.92
+    assert item.unit == "m2"
+    assert item.trade_category == "tiling"
+    assert item.expected_object_refs == (
+        "q5446:surface:floor:ground_living",
+    )
+    assert item.denominator_eligible is True
+
+    universe = _json(project / "object_universe.json")
+    obj = next(
+        row for row in universe["verified_objects"]
+        if row["object_ref"] == "q5446:surface:floor:ground_living"
+    )
+    assert obj["figured_dimensions_mm"] == [4000, 3230]
+    assert obj["vector_inner_faces_mm"] == [3996.27, 3234.27]
+    assert obj["expected_area_m2"] == 12.92
+    assert obj["finish_scope"] == "porcelain_floor_tile"
+
+    verification = obj["verification"]
+    assert verification["object_exists"] is True
+    assert verification["object_identified"] is True
+    assert verification["geometry_verified"] is True
+    assert verification["geometry_scope"] == "2D rectangular room extents only"
+    assert verification["quantity_verified"] is True
+    assert verification["fully_source_closed"] is True
+
+    provenance = obj["provenance"]
+    assert provenance["document_refs"] == [
+        "Q5446_Standard_Plans_V1_20220320.pdf",
+        "Q5446_Sales_Advice_Estimate_V1_20220320.pdf",
+    ]
+    assert provenance["sheet_page_refs"] == [
+        "standard_plans:p1",
+        "sales_advice:p6",
+    ]
+
+    ref = _json(project / "reference_takeoff.json")
+    geometry = next(
+        row for row in ref["independent_geometry_checks"]
+        if row.get("surface_ref") == "q5446:surface:floor:ground_living"
+    )
+    assert geometry["figured_mm"] == [4000, 3230]
+    assert geometry["figured_area_m2"] == 12.92
+    assert geometry["vector_mm"] == [3996.27, 3234.27]
+    assert geometry["vector_area_m2"] == 12.924992
+    assert geometry["relative_difference"] == 0.000386
+    assert geometry["agreement"] == "PASS"
+
+    assert ref["scope_evidence"]["living_floor_tile"] == [
+        "Q5446_Sales_Advice_Estimate_V1_20220320.pdf:p6: builders range 600x600 porcelain floor tiles to entry, kitchen and living areas"
+    ]
+
+    unresolved = _json(project / "unresolved_items.json")
+    remaining = next(
+        row for row in unresolved["unresolved_families"]
+        if row["family"] == "remaining_floor_finishes"
+    )
+    assert "Ground Living" in remaining["reason"]
+    assert "entry" in remaining["reason"]
+    assert "kitchen" in remaining["reason"]
+
+    report = _json(project / "verification_report.json")
+    proof = {
+        row["proof"]: row for row in report["proofs"]
+    }["ground Living porcelain tile surface independently closed"]
+    assert proof["status"] == "PASS"
+    closure = next(
+        row for row in report["measurement_closure_checks"]
+        if row.get("object_ref") == "q5446:surface:floor:ground_living"
+    )
+    assert closure["decision"] == "VERIFIED_CORE"
+    assert closure["figured_area_m2"] == 12.92
+    assert closure["vector_area_m2"] == 12.924992
 
 
 def test_verified_items_have_exact_refs_reference_doc_and_lineage():
