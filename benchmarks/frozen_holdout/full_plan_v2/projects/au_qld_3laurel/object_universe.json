@@ -973,5 +973,359 @@
     }
   ],
   "wall_tile_face_subset_source_closed": true,
-  "project_wet_area_tile_universe_complete": false
+  "project_wet_area_tile_universe_complete": false,
+  "internal_room_access_openings": [
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0720_cs:01",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 720 mm cavity-slider opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.512,
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.72,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          739.1,
+          219.6,
+          750.8,
+          227.4
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:WIP-side 720 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_cs:01",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm cavity-slider opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          814.2,
+          276.3,
+          825.9,
+          284.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:ENS/WIR-side 870 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:01",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          894.3,
+          285.2,
+          905.9,
+          293
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:master/WIR-entry zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:1200_cs:01",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 1200 mm cavity-slider opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 2.52,
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 1.2,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          470.6,
+          302.8,
+          478.4,
+          329.2
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:media-side 1200 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_cs:02",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm cavity-slider opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          249,
+          330.5,
+          256.8,
+          351.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:granny-flat wet-area zone 870 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:02",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm hinged opening: Bed 3",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          559.4,
+          347.5,
+          567.2,
+          359.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:Bed_3_hall_870:bbox_559.4_347.5_567.2_359.1; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:03",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm hinged opening: Bed 2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          722.8,
+          347.5,
+          730.6,
+          359.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:Bed_2_hall_870:bbox_722.8_347.5_730.6_359.1; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:04",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          783.6,
+          347.5,
+          791.4,
+          359.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:laundry/hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0720_cs:02",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 720 mm cavity-slider opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.512,
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.72,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          222.7,
+          347.9,
+          243.2,
+          355.7
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:granny-flat bathroom-side 720 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:05",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          155.3,
+          356.7,
+          166.9,
+          364.5
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:Bed 5/WIR zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:06",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          744.2,
+          367.8,
+          755.8,
+          375.6
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:laundry/bedroom hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0720_cs:03",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 720 mm cavity-slider opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.512,
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.72,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          506.1,
+          372.9,
+          526.7,
+          380.7
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:main WC-side 720 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:07",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 870 mm hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.827,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          468.3,
+          381.5,
+          476.1,
+          393.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:Bed 3/4 hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0720_swing:01",
+      "physical_kind": "internal_door_opening",
+      "object_family": "internal_room_access_opening",
+      "description": "Internal room-access 720 mm hinged opening",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.512,
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.72,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          514,
+          401.8,
+          525.6,
+          409.6
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      },
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:main bathroom 720 hinged opening; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    }
+  ],
+  "internal_room_access_labelled_subset_complete": true,
+  "project_internal_opening_universe_complete": false
 }
