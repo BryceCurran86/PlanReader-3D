@@ -5,7 +5,7 @@
   "truth_policy": {
     "planreader_output_used_as_truth": false,
     "minimum_independent_routes": 2,
-    "note": "Only the door core proven by A600 schedule rows and A110 physical tags is admitted here."
+    "note": "Only independently cross-checked door and window identity/count truth is admitted; window areas and other surfaces remain unresolved."
   },
   "source_plan": {
     "name": "Arch_Combined_Maryborough_Service_Station.pdf",
@@ -170,6 +170,32 @@
       ],
       "denominator_eligible": false,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-window-tagged-count",
+      "description": "Tagged external window/glazing objects W01-W06 reconciled between A110 floor plan and A610 window elevations",
+      "trade_category": "windows",
+      "unit": "nr",
+      "expected_quantity": 6,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:window:W01",
+        "maryborough:window:W02",
+        "maryborough:window:W03",
+        "maryborough:window:W04",
+        "maryborough:window:W05",
+        "maryborough:window:W06"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A110:floor_plan:tags:W01-W06",
+        "A610:window_elevations:W01-W06"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "door_universe_reconciliation": {
@@ -221,5 +247,20 @@
       "by_others_lessee_shelving": 10,
       "sum": 28
     }
+  },
+  "window_universe_reconciliation": {
+    "distinct_A110_tags": 6,
+    "distinct_A610_elevation_tags": 6,
+    "expected_ids": [
+      "W01",
+      "W02",
+      "W03",
+      "W04",
+      "W05",
+      "W06"
+    ],
+    "count": 6,
+    "area_status": "UNRESOLVED",
+    "note": "A610 nominal dimensions are retained as evidence but full glazing/opening area semantics are not yet frozen."
   }
 }
