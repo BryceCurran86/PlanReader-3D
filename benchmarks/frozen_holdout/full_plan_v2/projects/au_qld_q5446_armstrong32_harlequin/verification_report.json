@@ -91,5 +91,49 @@
       "status": "FAIL",
       "evidence": "Alfresco and three wet-area floor surfaces are closed; remaining floor, opening, wall, ceiling, roof and wall-tile universes remain incomplete."
     }
+  ],
+  "measurement_closure_checks": [
+    {
+      "object_ref": "q5446:surface:floor:alfresco",
+      "status": "PASS",
+      "declared_quantity_m2": 12,
+      "independent_route": "3000 mm x 4000 mm figured dimensions",
+      "independently_computed_m2": 12,
+      "decision": "VERIFIED_CORE"
+    },
+    {
+      "object_ref": "q5446:candidate:garage",
+      "status": "UNRESOLVED",
+      "declared_quantity_m2": 36.4,
+      "evidence": [
+        "area table 36.40 m2",
+        "ground-floor plan shows 6470 garage chain",
+        "ground-floor plan also shows 6000 garage dimension",
+        "5600 overall vertical dimension"
+      ],
+      "decision": "Do not promote until the applicable gross/net/centreline boundary convention is independently resolved."
+    },
+    {
+      "object_ref": "q5446:candidate:porch",
+      "status": "UNRESOLVED",
+      "declared_quantity_m2": 4.08,
+      "evidence": [
+        "area table 4.08 m2",
+        "porch/beam/wall dimensions use different reference faces on the ground-floor plan"
+      ],
+      "decision": "Do not infer a rectangle or face convention; retain outside denominator."
+    },
+    {
+      "object_ref": "q5446:candidate:ground_floor",
+      "status": "UNRESOLVED",
+      "declared_quantity_m2": 123.89,
+      "decision": "No independently closed full polygon yet."
+    },
+    {
+      "object_ref": "q5446:candidate:first_floor",
+      "status": "UNRESOLVED",
+      "declared_quantity_m2": 121.81,
+      "decision": "No independently closed full polygon yet."
+    }
   ]
 }
