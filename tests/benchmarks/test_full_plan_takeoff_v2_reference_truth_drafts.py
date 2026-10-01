@@ -218,3 +218,40 @@ def test_3laurel_explicit_external_post_and_pier_census_is_source_closed():
         in draft["unresolved_surface_families"]
     )
 
+def test_lot16_bracing_resistance_control_matches_engineering_schedule():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:wall_bracing_resistance"
+    )
+    assert check["direction_A"]["required_kN"] == pytest.approx(98.90)
+    assert check["direction_A"]["provided_kN"] == pytest.approx(104.96)
+    assert check["direction_A"]["margin_kN"] == pytest.approx(6.06)
+    assert check["direction_B"]["required_kN"] == pytest.approx(45.70)
+    assert check["direction_B"]["provided_kN"] == pytest.approx(51.48)
+    assert check["direction_B"]["margin_kN"] == pytest.approx(5.78)
+    assert check["direction_A"]["provided_kN"] > check["direction_A"]["required_kN"]
+    assert check["direction_B"]["provided_kN"] > check["direction_B"]["required_kN"]
+
+
+def test_3laurel_bracing_resistance_controls_match_source_schedules():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:wall_bracing_resistance"
+    )
+    expected = {
+        "A": (93.71, 97.84, 4.13),
+        "B": (44.66, 49.68, 5.02),
+        "A_U2": (25.41, 30.70, 5.29),
+        "B_U2": (31.20, 33.60, 2.40),
+    }
+    for key, (required, provided, margin) in expected.items():
+        row = check["schedules"][key]
+        assert row["required_kN"] == pytest.approx(required)
+        assert row["provided_kN"] == pytest.approx(provided)
+        assert row["margin_kN"] == pytest.approx(margin)
+        assert row["provided_kN"] > row["required_kN"]
+
