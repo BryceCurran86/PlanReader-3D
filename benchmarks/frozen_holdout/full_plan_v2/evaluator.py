@@ -226,12 +226,13 @@ def evaluate_project_v2(
         )
         exact = tuple(row for row in compatible if set(row.object_refs) == expected_refs)
         overlap = tuple(row for row in compatible if set(row.object_refs) & expected_refs)
-        related.update(row.quantity_id for row in overlap)
 
         if len(exact) > 1:
+            related.update(row.quantity_id for row in exact)
             results.append(ItemResultV2(item.item_id, UNRESOLVED, None, None, ()))
             continue
         if len(exact) == 0:
+            related.update(row.quantity_id for row in overlap)
             state = PARTIAL if overlap else MISSED
             matched_refs = tuple(sorted(set().union(*(set(row.object_refs) for row in overlap)))) if overlap else ()
             results.append(ItemResultV2(item.item_id, state, None, None, matched_refs))
