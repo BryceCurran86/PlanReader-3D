@@ -48,6 +48,18 @@
         "standard_inclusions:p1:bathroom_ensuite_floor_tiles",
         "sales_advice:p6:wet_area_floor_tiles_upgrade"
       ]
+    },
+    {
+      "object_ref": "q5446:surface:floor:ground_laundry",
+      "physical_kind": "floor_finish_surface",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "finish_scope": "ceramic_floor_tile",
+      "expected_area_m2": 4.1864,
+      "source_locations": [
+        "standard_plans:p1:architectural_vector_inner_faces:2616.2x1600.2_mm",
+        "standard_plans:p5:electrical_vector_inner_faces:2616.2x1600.2_mm",
+        "standard_inclusions:p1:laundry_floor_tiles_throughout"
+      ]
     }
   ],
   "unverified_area_candidates": [
