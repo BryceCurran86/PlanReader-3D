@@ -747,13 +747,19 @@ def test_30_unrelated_family_unaffected_by_rollback(tmp_path: Path) -> None:
     assert router.current_state("other_family") == MigrationAuthorityState.NEW_SELECTIVE.value
 
 
-def test_headline_dashboard_still_canonical() -> None:
-    data = json.loads((REPO_ROOT / "benchmark_results/headline_accuracy_dashboard.json").read_text(encoding="utf-8"))
-    metrics = data["headline_metrics"]
-    accepted = int(metrics["exact_matches"]) + int(metrics["within_5_percent"])
-    assert accepted == 24
-    assert int(metrics["total_items_compared"]) == 61
-    assert pytest.approx(metrics["overall_accuracy_percentage"], rel=0, abs=0.01) == 39.34
+def test_retired_headline_dashboard_is_not_an_active_control_surface() -> None:
+    assert not (REPO_ROOT / "benchmark_results/headline_accuracy_dashboard.json").exists()
+    v2_manifest = json.loads(
+        (
+            REPO_ROOT
+            / "benchmarks"
+            / "frozen_holdout"
+            / "full_plan_v2"
+            / "manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert v2_manifest["primary_milestone"] == "V2_CANONICAL_BUILDING_CORE"
+    assert "headline_metric" not in v2_manifest
 
 
 def _assert_rejected(module: str, token: str, via_token: str | None = None) -> None:

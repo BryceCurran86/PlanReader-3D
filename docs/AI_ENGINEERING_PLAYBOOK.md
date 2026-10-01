@@ -263,7 +263,7 @@ For every geometric hypothesis:
 - no-mutation checks on inputs
 - proof that live predictions and commercial quantities are unchanged in shadow mode
 
-Do not tune thresholds against known development projects. Do not change gold, mappings, or scorer tolerances to make a hypothesis look better.
+Do not tune thresholds against known V2 projects. Do not change source-closed V2 truth, object identity, geometry, quantities, provenance, or validation policy to make a hypothesis look better.
 
 ---
 
@@ -275,7 +275,7 @@ Reject the work if any of these fail:
 - Recommendation lacks `file` + `function`.
 - Evidence that cannot raise authority is used as if it could.
 - Expected abstentions were not predicted before tests were written.
-- Production code and benchmark-defining files (`expected_*.json`, `tolerances.json`, `benchmark_rules.json`, manifests under `benchmarks/public_tenders/` or `benchmarks/plans/`) appear in one PR.
+- Production code and Full Plan V2 truth files (`source_manifest.json`, `reference_takeoff.json`, `object_universe.json`, `verification_report.json`, `unresolved_items.json`, or the V2 suite manifest) appear in one PR.
 - A second scale resolver, quantity schema, evidence enum, or canonical graph was added.
 - Commercial rows, JobHub payload, or `takeoff_eligible=True` changed without an authority-promotion review.
 - After implementation, an independent pass must inspect for leakage, duplicated authority, and hidden project/filename special cases.
@@ -287,8 +287,8 @@ Reject the work if any of these fail:
 - `pb_planreader_pdf_extractor.py` and other live commercial writers
 - `pb_planreader_jobhub_publish_contract.py` production payload behavior
 - `pb_opening_production_v175.py` / `pb_opening_deduction_pipeline.py` live deduction gates
-- `benchmarks/**` gold, mappings, tolerances, manifests
-- `pb_benchmark_accuracy_engine.py` scoring rules
+- `benchmarks/frozen_holdout/full_plan_v2/**` source-closed truth unless the PR is explicitly a truth-only change
+- V2 integrity/separation policy in `scripts/check_full_plan_v2_integrity.py` and `scripts/check_v2_truth_separation.py`
 - W10 `takeoff_eligible` / `deduction_authority` defaults
 - `#273` ranking thresholds, unless a later research task is explicitly about those constants
 
@@ -302,7 +302,7 @@ Safe first homes for new topology work: diagnostic harnesses, shadow providers, 
 
 **INFERRED smallest next step, not a change order:** keep new signals in shadow. If a later task consumes ranked walls, consume only after an independent validation that the tier means “physical wall,” and still leave W10 `takeoff_eligible=False`. Do not feed `#273` tiers into hosted-opening diagnostics until that review happens.
 
-Governing accuracy target (**BENCHMARK**, not an implementation knob): there is still no frozen unseen project-level holdout showing ≥99.0% within ±5%. Moving a development score is not progress toward that target.
+Governing validation target: increase the V2 multi-metric scoreboard through source-closed object truth, canonicalization, geometry/quantity correctness, provenance, correct abstention and customer publication. No retired percentage is an implementation knob or roadmap headline.
 
 ---
 

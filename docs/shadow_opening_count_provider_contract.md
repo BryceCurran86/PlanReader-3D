@@ -129,13 +129,10 @@ A 100% precision / 62.5% coverage shadow family is the intended stop.
 - Legacy/new agreement on answered type keys: 15/15
 - Gate: **PASS**
 - Recommendation: **remain NEW_SHADOW**
-- Legacy headline (authoritative): **24 / 61 = 39.34%** (unchanged)
+- Retired legacy percentage: not an active gate, headline, or authority input
 
 ## Why authority must remain NEW_SHADOW
 
 The gate measures precision and exactness **among answered items**. Nine
 eligible items remain unanswered because the drawings do not supply a general,
-independently defensible identity. Promoting the family would put incomplete
-shadow coverage into production while legacy still answers the commercial
-headline. Coverage was never a gate requirement and must not be used to
-justify `NEW_SELECTIVE`.
+independently defensible identity. Promoting the family would put incomplete shadow coverage into production. Promotion must instead be justified by source-backed V2 object/provenance/publication evidence; this historical shadow result alone cannot justify `NEW_SELECTIVE`.
