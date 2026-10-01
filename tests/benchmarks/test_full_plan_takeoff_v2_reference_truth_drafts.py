@@ -875,3 +875,34 @@ def test_lot16_garage_floor_and_flat_ceiling_close_to_same_figured_rectangle():
         "ceilings_beyond_closed_garage_flat_ceiling_including_raked_ceiling"
         in draft["unresolved_surface_families"]
     )
+
+
+def test_lot16_internal_room_access_opening_census_closes_nine_870_openings():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "internal_room_access_opening"
+    ]
+    assert len(openings) == 9
+    assert all(row["expected_quantity"] == pytest.approx(1.827) for row in openings)
+    assert all(row["attributes"]["width_m"] == pytest.approx(0.87) for row in openings)
+    assert all(row["attributes"]["height_m"] == pytest.approx(2.1) for row in openings)
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(
+        16.443
+    )
+    assert sum(
+        row["attributes"]["opening_type"] == "cavity_slider" for row in openings
+    ) == 1
+    check = next(
+        row for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:closure:internal_room_access_opening_census"
+    )
+    assert check["internal_opening_count"] == 9
+    assert check["internal_opening_area_m2"] == pytest.approx(16.443)
+    assert check["complete_for_explicit_internal_870_room_access_openings"] is True
+    assert check["complete_for_all_internal_wall_openings"] is False
+    assert set(check["excluded_external_870_labels"]) == {
+        "laundry_external_service_door",
+        "garage_external_service_door",
+    }
