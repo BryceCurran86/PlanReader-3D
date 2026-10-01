@@ -167,8 +167,94 @@ def build_bound_wall_finish_rows(
     return rows, finish_records
 
 
+def apply_finish_callout_bindings_to_walls(
+    walls: Sequence[Dict[str, Any]],
+    callout_bindings: Sequence[Any],
+) -> List[Dict[str, Any]]:
+    """Bind authenticated finish callouts to candidate walls deterministically (AG-05).
+
+    Invariants:
+    1. Deterministic wall binding: matches host wall ID or equivalence group.
+    2. Local scope: does not apply a local callout note globally to other walls.
+    3. Provenance preservation: records callout_binding_id, finish_material,
+       trade_scope_id, and source_evidence_ids on the matched wall object.
+    4. Ambiguity abstention: if a callout was ambiguous across multiple distinct
+       walls, the upstream authority abstained and produced no binding; this function
+       never guesses or proximity-assigns.
+    5. Walls with no callout maintain their unconfirmed/gross status.
+    """
+    from pb_wall_finish_callout_wall_authority import WallFinishCalloutWallBindingRecord
+
+    updated_walls: List[Dict[str, Any]] = [dict(w) for w in walls]
+
+    for binding in callout_bindings:
+        if not isinstance(binding, WallFinishCalloutWallBindingRecord):
+            continue
+        if binding.status is not EvidenceResolutionStatus.CORROBORATED:
+            continue
+
+        target_ids = set(binding.equivalence_group_wall_ids) if binding.equivalence_group_wall_ids else {binding.physical_wall_id}
+        target_ids.add(binding.physical_wall_id)
+
+        for wall in updated_walls:
+            wid = str(wall.get("id") or wall.get("wall_id") or wall.get("wall_ref") or "")
+            if wid in target_ids:
+                wall["finish_material"] = binding.finish_material
+                wall["trade_scope_id"] = binding.trade_scope_id
+                wall["finish_callout_binding_id"] = binding.binding_id
+                wall["finish_source_evidence_ids"] = list(binding.source_evidence_ids)
+                wall["finish_semantic_direction"] = binding.semantic_direction
+                # Update substrate if default
+                current_sub = str(wall.get("substrate") or "")
+                if not current_sub or current_sub in {"Other", "External walling", "Internal walling"}:
+                    wall["substrate"] = binding.finish_material
+                wall["callout_bound"] = True
+
+    return updated_walls
+
+
+def resolve_pdf_finish_callouts(
+    pdf_path: Any,
+    page_ids: Optional[Sequence[str]] = None,
+) -> List[Any]:
+    """Extract authenticated finish callouts from a PDF using WallFinishCalloutWallProducer."""
+    try:
+        from pathlib import Path
+        from pb_source_visibility_authority import SourceVisibilityProducer
+        from pb_wall_finish_callout_wall_authority import WallFinishCalloutWallProducer
+
+        p = Path(pdf_path)
+        if not p.is_file():
+            return []
+
+        source = SourceVisibilityProducer(
+            producer_method="customer-runtime-callout-wall",
+            producer_version="1.0",
+        )
+        source.ingest_native_pdf_bytes(
+            document_id=f"doc:{p.name}",
+            source_bytes=p.read_bytes(),
+            source_locator=str(p),
+        )
+        producer = WallFinishCalloutWallProducer.from_source_visibility_producer(
+            source,
+            page_ids=page_ids,
+        )
+        bindings: List[Any] = []
+        for result in producer.published_results():
+            if result.status is EvidenceResolutionStatus.CORROBORATED:
+                for b in result.bindings:
+                    if b.status is EvidenceResolutionStatus.CORROBORATED:
+                        bindings.append(b)
+        return bindings
+    except Exception:
+        return []
+
+
 __all__ = [
     "SOURCE_PREFIX",
+    "apply_finish_callout_bindings_to_walls",
     "bound_wall_finish_record_to_takeoff_row",
     "build_bound_wall_finish_rows",
+    "resolve_pdf_finish_callouts",
 ]

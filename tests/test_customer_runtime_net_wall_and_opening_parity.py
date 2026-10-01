@@ -960,7 +960,256 @@ class CustomerRuntimeNetWallParityTests(unittest.TestCase):
             self.assertEqual(finish_row["row_role"], "wall_finish")
             self.assertIn("rec-400", finish_row["source_reference"])
 
+    # -------------------------------------------------------------------------
+    # AG-05: Wall-Finish Callout Authority Tests
+    # -------------------------------------------------------------------------
+
+    def test_ag05_deterministic_wall_finish_callout_binding_and_provenance(self):
+        """Prove deterministic wall binding and full provenance preservation for finish callouts (AG-05)."""
+        from pb_bound_wall_finish_customer_bridge import apply_finish_callout_bindings_to_walls
+        from pb_wall_finish_callout_wall_authority import WallFinishCalloutWallBindingRecord
+        import pb_wall_finish_callout_wall_authority as callmod
+
+        binding = WallFinishCalloutWallBindingRecord(
+            binding_id="call-bind-1",
+            document_id="doc5",
+            revision_id="rev5",
+            source_sha256="e" * 64,
+            snapshot_id="snap5",
+            page_id="1",
+            viewport_id="vp5",
+            decision_scope_id="scope5",
+            physical_wall_decision_scope_id="pw-scope5",
+            physical_wall_id="W501",
+            raw_owner_wall_ids=("W501",),
+            equivalence_group_wall_ids=("W501",),
+            equivalence_pair_classifications=(),
+            source_wall_primitive_ids=("prim-1",),
+            source_execution_callout_record_id="exec-call-1",
+            source_execution_sequence_start=100,
+            source_execution_sequence_end=105,
+            trade_scope_id="external_rendering",
+            finish_material="acrylic_render",
+            semantic_direction="externally",
+            annotation_observation_ids=("ann-501",),
+            leader_path_ids=("lead-501",),
+            terminator_primitive_ids=("term-501",),
+            source_evidence_ids=("ann-501", "lead-501", "term-501", "prim-1"),
+            source_evidence_kind="native_direct_finish_callout",
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("wall_finish_callout_wall_binding_resolved",),
+            _seal=callmod._RECORD_SEAL,
+        )
+
+        walls = [
+            {"wall_ref": "W501", "substrate": "External walling", "net_m2": 25.0},
+        ]
+
+        updated = apply_finish_callout_bindings_to_walls(walls, [binding])
+        self.assertEqual(len(updated), 1)
+        w = updated[0]
+        self.assertTrue(w.get("callout_bound"))
+        self.assertEqual(w["finish_material"], "acrylic_render")
+        self.assertEqual(w["substrate"], "acrylic_render")
+        self.assertEqual(w["finish_callout_binding_id"], "call-bind-1")
+        self.assertEqual(w["finish_source_evidence_ids"], ["ann-501", "lead-501", "term-501", "prim-1"])
+        self.assertEqual(w["finish_semantic_direction"], "externally")
+
+    def test_ag05_local_callout_does_not_apply_globally(self):
+        """Negative test: a callout on Wall W1 must NOT apply globally to W2 or W3 (AG-05)."""
+        from pb_bound_wall_finish_customer_bridge import apply_finish_callout_bindings_to_walls
+        from pb_wall_finish_callout_wall_authority import WallFinishCalloutWallBindingRecord
+        import pb_wall_finish_callout_wall_authority as callmod
+
+        # Callout specifically bound to W601 only
+        binding = WallFinishCalloutWallBindingRecord(
+            binding_id="call-bind-601",
+            document_id="doc6",
+            revision_id="rev6",
+            source_sha256="f" * 64,
+            snapshot_id="snap6",
+            page_id="1",
+            viewport_id="vp6",
+            decision_scope_id="scope6",
+            physical_wall_decision_scope_id="pw-scope6",
+            physical_wall_id="W601",
+            raw_owner_wall_ids=("W601",),
+            equivalence_group_wall_ids=("W601",),
+            equivalence_pair_classifications=(),
+            source_wall_primitive_ids=("prim-601",),
+            source_execution_callout_record_id="exec-call-601",
+            source_execution_sequence_start=200,
+            source_execution_sequence_end=205,
+            trade_scope_id="external_painting",
+            finish_material="Dulux Monument Paint",
+            semantic_direction="externally",
+            annotation_observation_ids=("ann-601",),
+            leader_path_ids=("lead-601",),
+            terminator_primitive_ids=("term-601",),
+            source_evidence_ids=("ann-601",),
+            source_evidence_kind="native_direct_finish_callout",
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("wall_finish_callout_wall_binding_resolved",),
+            _seal=callmod._RECORD_SEAL,
+        )
+
+        walls = [
+            {"wall_ref": "W601", "substrate": "External walling", "net_m2": 15.0},
+            {"wall_ref": "W602", "substrate": "External walling", "net_m2": 20.0},
+            {"wall_ref": "W603", "substrate": "External walling", "net_m2": 18.0},
+        ]
+
+        updated = apply_finish_callout_bindings_to_walls(walls, [binding])
+
+        # W601 is updated with the callout finish
+        self.assertTrue(updated[0].get("callout_bound"))
+        self.assertEqual(updated[0]["finish_material"], "Dulux Monument Paint")
+        self.assertEqual(updated[0]["substrate"], "Dulux Monument Paint")
+
+        # W602 and W603 are NOT updated (no global spillover)
+        self.assertFalse(updated[1].get("callout_bound", False))
+        self.assertEqual(updated[1]["substrate"], "External walling")
+        self.assertNotIn("finish_material", updated[1])
+
+        self.assertFalse(updated[2].get("callout_bound", False))
+        self.assertEqual(updated[2]["substrate"], "External walling")
+        self.assertNotIn("finish_material", updated[2])
+
+    def test_ag05_multi_wall_ambiguity_abstains(self):
+        """Negative test: When callout terminator touches multiple non-equivalent walls, authority abstains (AG-05)."""
+        from pb_wall_finish_face_binding_authority import _target_from_terminator, _Line, _Terminator
+        from pb_migration_contracts import EvidenceResolutionStatus
+
+        # Two distinct walls: wall-A and wall-B (not in same equivalence group)
+        rec_a = SimpleNamespace(
+            wall_candidate_id="wall-A",
+            physical_identity=SimpleNamespace(source_primitive_ids=("raw-A",)),
+        )
+        rec_b = SimpleNamespace(
+            wall_candidate_id="wall-B",
+            physical_identity=SimpleNamespace(source_primitive_ids=("raw-B",)),
+        )
+        scope = SimpleNamespace(
+            records=(rec_a, rec_b),
+            equivalence=SimpleNamespace(
+                equivalence_groups=(("wall-A",), ("wall-B",)),
+                pair_classifications=(),
+            ),
+        )
+
+        # Lines for both walls both intersect the terminator bbox
+        lines = (
+            _Line(observation_id="obs-A", raw_id="raw-A", geometry=(10.0, 0.0, 10.0, 20.0)),
+            _Line(observation_id="obs-B", raw_id="raw-B", geometry=(10.0, 0.0, 10.0, 20.0)),
+        )
+        terminator = _Terminator(
+            primitive_id="term-ambig",
+            bbox=(8.0, 8.0, 12.0, 12.0),
+            center=(10.0, 10.0),
+        )
+
+        # _target_from_terminator must ABSTAIN due to multi-wall ambiguity
+        target, hits, status = _target_from_terminator(terminator, lines, scope)
+        self.assertEqual(status, EvidenceResolutionStatus.ABSTAINED)
+        self.assertIsNone(target)
+
+    def test_ag05_no_callout_preserves_default_state(self):
+        """Negative test: Walls with no callout maintain unconfirmed/gross state without modification (AG-05)."""
+        from pb_bound_wall_finish_customer_bridge import apply_finish_callout_bindings_to_walls
+
+        walls = [
+            {"wall_ref": "W701", "substrate": "External walling", "net_m2": 30.0},
+            {"wall_ref": "W702", "substrate": "Brick veneer", "net_m2": 25.0},
+        ]
+
+        # Empty callout bindings
+        updated = apply_finish_callout_bindings_to_walls(walls, [])
+        self.assertEqual(len(updated), 2)
+        self.assertEqual(updated[0]["substrate"], "External walling")
+        self.assertEqual(updated[1]["substrate"], "Brick veneer")
+        self.assertFalse(updated[0].get("callout_bound", False))
+        self.assertFalse(updated[1].get("callout_bound", False))
+
+    def test_ag05_registered_wall_takeoff_rows_reflect_callout_finish(self):
+        """Prove registered wall takeoff rows consume authenticated callout finishes with provenance (AG-05)."""
+        from pb_wall_finish_callout_wall_authority import WallFinishCalloutWallBindingRecord
+        import pb_wall_finish_callout_wall_authority as callmod
+
+        binding = WallFinishCalloutWallBindingRecord(
+            binding_id="call-bind-801",
+            document_id="doc8",
+            revision_id="rev8",
+            source_sha256="8" * 64,
+            snapshot_id="snap8",
+            page_id="1",
+            viewport_id="vp8",
+            decision_scope_id="scope8",
+            physical_wall_decision_scope_id="pw-scope8",
+            physical_wall_id="wall-801",
+            raw_owner_wall_ids=("wall-801",),
+            equivalence_group_wall_ids=("wall-801",),
+            equivalence_pair_classifications=(),
+            source_wall_primitive_ids=("prim-801",),
+            source_execution_callout_record_id="exec-call-801",
+            source_execution_sequence_start=300,
+            source_execution_sequence_end=305,
+            trade_scope_id="external_rendering",
+            finish_material="Sand-cement render",
+            semantic_direction="externally",
+            annotation_observation_ids=("ann-801",),
+            leader_path_ids=("lead-801",),
+            terminator_primitive_ids=("term-801",),
+            source_evidence_ids=("ann-801", "prim-801"),
+            source_evidence_kind="native_direct_finish_callout",
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("wall_finish_callout_wall_binding_resolved",),
+            _seal=callmod._RECORD_SEAL,
+        )
+
+        with _test_workspace() as ws:
+            ws.app.build_registered_walls_v139 = lambda ws_id: [
+                {
+                    "wall_ref": "wall-801",
+                    "side": "North",
+                    "gross_m2": 40.0,
+                    "opening_deduction_m2": 8.0,
+                    "net_m2": 32.0,
+                    "substrate": "External walling",
+                    "height_confidence": "Verified",
+                },
+                {
+                    "wall_ref": "wall-802",
+                    "side": "South",
+                    "gross_m2": 35.0,
+                    "opening_deduction_m2": 5.0,
+                    "net_m2": 30.0,
+                    "substrate": "External walling",
+                    "height_confidence": "Verified",
+                },
+            ]
+            ws.app.wall_finish_callout_bindings = [binding]
+
+            rows = auto._try_physical_net_wall_rows(ws.app, 1, [], [])
+            self.assertIsNotNone(rows)
+            self.assertEqual(len(rows), 2)
+
+            d1 = dict(zip(auto.TAKEOFF_ROW_FIELDS, rows[0]))
+            d2 = dict(zip(auto.TAKEOFF_ROW_FIELDS, rows[1]))
+
+            # wall-801 got the callout finish and provenance
+            self.assertEqual(d1["substrate"], "Sand-cement render")
+            self.assertEqual(d1["quantity"], 32.0)
+            self.assertIn("call-bind-801", d1["source_reference"])
+            self.assertIn("Authenticated callout finish: Sand-cement render", d1["notes"])
+
+            # wall-802 did NOT get the callout finish (local scope preserved)
+            self.assertEqual(d2["substrate"], "External walling")
+            self.assertEqual(d2["quantity"], 30.0)
+            self.assertNotIn("call-bind-801", d2["source_reference"])
+            self.assertNotIn("Sand-cement render", d2["notes"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

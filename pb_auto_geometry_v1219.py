@@ -914,6 +914,12 @@ def _try_physical_net_wall_rows(
                     for w in reg_walls
                 )
                 if has_authenticated_openings or has_verified_height:
+                    if hasattr(app, "wall_finish_callout_bindings"):
+                        try:
+                            from pb_bound_wall_finish_customer_bridge import apply_finish_callout_bindings_to_walls
+                            reg_walls = apply_finish_callout_bindings_to_walls(reg_walls, app.wall_finish_callout_bindings)
+                        except Exception:
+                            pass
                     reg_rows: List[Tuple[Any, ...]] = []
                     for w in reg_walls:
                         net_qty = round(max(0.0, float(w.get("net_m2") or 0.0)), 2)
@@ -925,7 +931,13 @@ def _try_physical_net_wall_rows(
                         gross_val = float(w.get("gross_m2") or 0.0)
                         ded_val = float(w.get("opening_deduction_m2") or 0.0)
                         h_status = str(w.get("height_status") or "")
-                        note_text = f"Gross {gross_val:.2f} m²; authenticated opening deductions {ded_val:.2f} m². {h_status}".strip()
+                        callout_note = f" Authenticated callout finish: {sub}." if w.get("callout_bound") else ""
+                        note_text = f"Gross {gross_val:.2f} m²; authenticated opening deductions {ded_val:.2f} m². {h_status}{callout_note}".strip()
+                        source_ref = (
+                            f"{SOURCE_PREFIX} · registered_wall:{ref} · {w.get('finish_callout_binding_id')}"
+                            if w.get("callout_bound")
+                            else f"{SOURCE_PREFIX} · registered_wall:{ref}"
+                        )
                         reg_rows.append(_takeoff_row(
                             workspace_id=workspace_id,
                             section="External",
@@ -935,8 +947,8 @@ def _try_physical_net_wall_rows(
                             quantity=net_qty,
                             status="Measured",
                             source_page="Registered plan/elevation geometry",
-                            source_reference=f"{SOURCE_PREFIX} · registered_wall:{ref}",
-                            confidence="Documented" if w.get("height_confidence") in {"Verified", "High"} else "Derived",
+                            source_reference=source_ref,
+                            confidence="Documented" if (w.get("height_confidence") in {"Verified", "High"} or w.get("callout_bound")) else "Derived",
                             notes=note_text,
                             row_role="external_wall",
                         ))
