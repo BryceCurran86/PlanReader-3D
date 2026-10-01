@@ -91,13 +91,18 @@ def test_q5446_only_independently_closed_alfresco_enters_verified_core():
     manifest = load_project_manifest(project / "source_manifest.json")
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
-    assert len(manifest.verified_items) == 1
+    assert len(manifest.verified_items) == 4
 
     item = manifest.verified_items[0]
     assert item.item_id == "q5446-alfresco-floor-area"
     assert item.expected_quantity == 12.0
     assert item.unit == "m2"
     assert item.expected_object_refs == ("q5446:surface:floor:alfresco",)
+
+    by_id = {row.item_id: row for row in manifest.verified_items}
+    assert by_id["q5446-ground-ensuite-floor-tiling-area"].expected_quantity == 4.2224
+    assert by_id["q5446-first-ensuite-floor-tiling-area"].expected_quantity == 5.9572
+    assert by_id["q5446-first-bath-floor-tiling-area"].expected_quantity == 5.8446
 
     ref = _json(project / "reference_takeoff.json")
     controls = {
@@ -112,6 +117,7 @@ def test_q5446_only_independently_closed_alfresco_enters_verified_core():
     }
     assert controls["garage"]["quantity_m2"] == 36.40
     assert controls["total"]["quantity_m2"] == 298.19
+    assert len(ref["independent_geometry_checks"]) == 3
     _assert_reference_hash("au_qld_q5446_armstrong32_harlequin")
 
 
