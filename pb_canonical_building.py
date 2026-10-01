@@ -1747,7 +1747,7 @@ class CanonicalColumn(CanonicalElement):
                 trade_category="concreting",
                 item_code="COLUMN_CONCRETE_SUPPLY",
                 formula_expression="width_m * depth_m * height_m",
-                unit="item",
+                unit="m³",
                 quantity=vol_m3,
             ),
         ]
@@ -2993,7 +2993,7 @@ class CanonicalProject(CanonicalElement):
                 "substrate": fl.substrate or "25 MPa Concrete",
                 "finish_system": "Supply, pump and place",
                 "quantity": vol_m3,
-                "unit": "item",
+                "unit": "m³",
                 "quantity_status": "Measured",
                 "source_page": getattr(fl.provenance, "source_page", "1") or "1",
                 "source_reference": f"PB Canonical BIM · concrete:{fl.id}:volume",
