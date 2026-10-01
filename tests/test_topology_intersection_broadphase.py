@@ -74,3 +74,20 @@ def test_broadphase_does_not_drop_endpoint_touch_intersections() -> None:
         ((10.0, -5.0), (10.0, 10.0)),
     ]
     assert split_segments_at_intersections(segments) == _quadratic_reference(segments)
+
+
+def test_splitter_optional_source_indexes_preserve_default_geometry_and_order() -> None:
+    segments = [
+        ((0.0, 0.0), (10.0, 0.0)),
+        ((5.0, -5.0), (5.0, 5.0)),
+        ((20.0, 0.0), (30.0, 0.0)),
+    ]
+    baseline = split_segments_at_intersections(segments)
+    split, source_indexes = split_segments_at_intersections(
+        segments,
+        return_source_indexes=True,
+    )
+
+    assert split == baseline
+    assert len(source_indexes) == len(split)
+    assert source_indexes == [0, 0, 1, 1, 2]
