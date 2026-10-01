@@ -327,6 +327,10 @@ def build_audit_scene(
     for entry in drawn + not_drawn:
         label = callout_label(entry["type"], CoverageState(entry["audit"]["coverage_state"]))
         entry["audit"]["callout"] = label
+    coverage_bases = sorted({rec.coverage_basis for rec in records if rec.coverage_basis})
+    family_states = sorted(
+        {rec.expected_family_completeness for rec in records if rec.expected_family_completeness}
+    )
     return {
         "title": title,
         "objects": drawn,
@@ -334,6 +338,10 @@ def build_audit_scene(
         "summary": summarise_records(records),
         "bounds": _bounds(drawn),
         "display_only_height_m": DISPLAY_ONLY_UNRESOLVED_HEIGHT_M,
+        "coverage_semantics": {
+            "coverage_basis": coverage_bases[0] if len(coverage_bases) == 1 else None,
+            "expected_family_completeness": family_states[0] if len(family_states) == 1 else None,
+        },
     }
 
 
@@ -445,8 +453,12 @@ const S = SCENE.summary; const rows = Object.keys(S).map(t => t.padEnd(8,' ') + 
 const legend = MODE==='audit'
   ? ['ACCOUNTED','PARTIAL','UNACCOUNTED','ABSTAINED'].map(k=>'<span class="sw" style="background:'+(COL[k]?('#'+COL[k].toString(16).padStart(6,'0')):'#e2e8f0')+'"></span>'+k).join('<br>')
   : 'Neutral materials. No coverage claims.';
+const CS = SCENE.coverage_semantics || {};
+const semantics = (MODE==='audit' && CS.coverage_basis==='EXPLICIT_DEPENDENCIES_ONLY')
+  ? '<div style="font-size:11px;opacity:.9">ACCOUNTED = explicit dependencies only · expected-family completeness: '+(CS.expected_family_completeness==='UNKNOWN'?'UNKNOWN':'not declared')+' · not complete trade/BOQ scope.</div>'
+  : '';
 document.getElementById('hud').innerHTML = '<b>'+(MODE==='audit'?'AUDIT':'CLEAN')+' 3D VIEW</b> · '+CAMERA.preset+'<br>'+legend+
-  (MODE==='audit' ? '<pre style="margin:6px 0 0;font-size:11px">'+rows.join('\n')+'</pre>' : '')+
+  (MODE==='audit' ? '<pre style="margin:6px 0 0;font-size:11px">'+rows.join('\n')+'</pre>' : '')+semantics+
   '<div style="font-size:11px;opacity:.8">Unresolved heights drawn at '+SCENE.display_only_height_m+' m (display only). Callouts shown: '+shown.length+' of '+callouts.length+'.</div>';
 const nd = SCENE.not_drawn;
 document.getElementById('nd').innerHTML = (MODE==='audit' && nd.length)
