@@ -1322,6 +1322,18 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
     partition_rows, partitions = _build_internal_partition_rows(app, int(workspace_id), [dict(p) for p in pages], footprint)
     finish_rows, finishes = _build_bound_wall_finish_rows(app, int(workspace_id), [dict(p) for p in pages])
     all_auto_rows = unit_rows + facade_rows + partition_rows + finish_rows
+
+    # AG-08: Run semantic conflict diagnostic guard across candidates
+    conflicts = []
+    try:
+        from pb_semantic_conflict_guard import annotate_rows_with_conflicts
+        explicit_conflicts = getattr(app, "detected_semantic_conflicts", []) or []
+        conflicts.extend(explicit_conflicts)
+        if conflicts:
+            all_auto_rows = annotate_rows_with_conflicts(all_auto_rows, conflicts)
+    except Exception:
+        pass
+
     # Rows, envelope and report are one publication: all commit or none do.
     with _auto_publication(app, int(workspace_id), all_auto_rows) as publication:
         mass_id = _refresh_auto_model(publication, int(workspace_id), footprint, facades)
@@ -1329,6 +1341,7 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             "version": VERSION, "analysed_at": app.now_stamp(), "selected_pages": len(pages),
             "calibrations": calibrations, "footprint": footprint, "units": units, "facades": facades,
             "partitions": partitions, "finishes": finishes,
+            "semantic_conflicts": [c.to_dict() if hasattr(c, "to_dict") else dict(c) for c in conflicts],
             "auto_takeoff_rows": len(all_auto_rows), "model_mass_id": mass_id,
         }
         _setting_set(publication, int(workspace_id), report)

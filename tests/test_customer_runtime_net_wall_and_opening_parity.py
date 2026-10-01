@@ -1555,6 +1555,146 @@ class CustomerRuntimeNetWallParityTests(unittest.TestCase):
                 self.assertEqual(calib["method"], "Dimension line")
                 self.assertEqual(calib["px_per_m"], 70.0)
 
+    def test_ag08_check_incompatible_material_identities(self):
+        """AG-08: Incompatible materials claimed for same element face trigger CONFLICT."""
+        from pb_semantic_conflict_guard import (
+            CONFLICT_KIND_INCOMPATIBLE_MATERIALS,
+            check_incompatible_material_identities,
+        )
+
+        conflict = check_incompatible_material_identities(
+            ["brick", "weatherboard"],
+            subject_id="wall-ext-01",
+        )
+        self.assertIsNotNone(conflict)
+        self.assertEqual(conflict.conflict_kind, CONFLICT_KIND_INCOMPATIBLE_MATERIALS)
+        self.assertEqual(conflict.status, EvidenceResolutionStatus.CONFLICT)
+        self.assertIn("Incompatible materials", conflict.description)
+        self.assertEqual(conflict.suggested_action, "abstain_from_arbitrary_selection")
+
+        # Single or compatible materials return None
+        self.assertIsNone(check_incompatible_material_identities(["brick"], subject_id="wall-1"))
+
+    def test_ag08_check_room_label_conflict(self):
+        """AG-08: Mutually exclusive room functional labels or contradictory areas trigger CONFLICT."""
+        from pb_semantic_conflict_guard import (
+            CONFLICT_KIND_ROOM_LABEL_CONFLICT,
+            check_room_label_conflict,
+        )
+
+        # Functional conflict: Bathroom vs Bedroom
+        conflict = check_room_label_conflict(
+            room_id="room-101",
+            labels=["Ensuite Bathroom", "Master Bedroom"],
+        )
+        self.assertIsNotNone(conflict)
+        self.assertEqual(conflict.conflict_kind, CONFLICT_KIND_ROOM_LABEL_CONFLICT)
+        self.assertEqual(conflict.status, EvidenceResolutionStatus.CONFLICT)
+
+        # Area conflict: 20 m2 vs 35 m2 (>5% discrepancy)
+        area_conflict = check_room_label_conflict(
+            room_id="room-102",
+            labels=["Living Room"],
+            areas_m2=[20.0, 35.0],
+        )
+        self.assertIsNotNone(area_conflict)
+        self.assertEqual(area_conflict.conflict_kind, CONFLICT_KIND_ROOM_LABEL_CONFLICT)
+        self.assertIn("Contradictory room area claims", area_conflict.description)
+
+    def test_ag08_check_schedule_vs_drawing_mismatch(self):
+        """AG-08: Discrepancy between schedule and drawing width/family triggers CONFLICT."""
+        from pb_semantic_conflict_guard import (
+            CONFLICT_KIND_SCHEDULE_DRAWING_MISMATCH,
+            check_schedule_vs_drawing_mismatch,
+        )
+
+        # Width mismatch: 820mm vs 1800mm
+        conflict = check_schedule_vs_drawing_mismatch(
+            schedule_spec={"width_mm": 820, "family": "door"},
+            drawing_spec={"width_mm": 1800, "family": "door"},
+            subject_id="door-D10",
+        )
+        self.assertIsNotNone(conflict)
+        self.assertEqual(conflict.conflict_kind, CONFLICT_KIND_SCHEDULE_DRAWING_MISMATCH)
+        self.assertIn("Schedule vs drawing width mismatch", conflict.description)
+
+        # Family mismatch: door vs window
+        family_conflict = check_schedule_vs_drawing_mismatch(
+            schedule_spec={"family": "door"},
+            drawing_spec={"family": "window"},
+            subject_id="op-12",
+        )
+        self.assertIsNotNone(family_conflict)
+        self.assertIn("Schedule family 'door' contradicts drawing family 'window'", family_conflict.description)
+
+    def test_ag08_check_opening_definition_mismatch(self):
+        """AG-08: Opening definition detail vs schedule mismatch triggers CONFLICT."""
+        from pb_semantic_conflict_guard import (
+            CONFLICT_KIND_OPENING_DEFINITION_MISMATCH,
+            check_opening_definition_mismatch,
+        )
+
+        conflict = check_opening_definition_mismatch(
+            detail_spec={"family": "window", "width_mm": 1200},
+            schedule_spec={"family": "door", "width_mm": 1200},
+            opening_id="detail-D01",
+        )
+        self.assertIsNotNone(conflict)
+        self.assertEqual(conflict.conflict_kind, CONFLICT_KIND_OPENING_DEFINITION_MISMATCH)
+        self.assertIn("Opening detail family 'window' contradicts schedule family 'door'", conflict.description)
+
+    def test_ag08_check_incompatible_wall_classifications(self):
+        """AG-08: Wall classified simultaneously as external facade and internal partition triggers CONFLICT."""
+        from pb_semantic_conflict_guard import (
+            CONFLICT_KIND_INCOMPATIBLE_WALL_CLASSIFICATION,
+            check_incompatible_wall_classifications,
+        )
+
+        conflict = check_incompatible_wall_classifications(
+            ["external_facade", "internal_partition"],
+            wall_id="wall-hybrid-01",
+        )
+        self.assertIsNotNone(conflict)
+        self.assertEqual(conflict.conflict_kind, CONFLICT_KIND_INCOMPATIBLE_WALL_CLASSIFICATION)
+        self.assertIn("Contradictory wall classifications", conflict.description)
+        self.assertEqual(conflict.suggested_action, "abstain_from_commercial_row")
+
+    def test_ag08_takeoff_rows_annotated_with_conflict_provenance_without_altering_quantity(self):
+        """AG-08: Conflict provenance is attached to notes without silently altering numerical quantity."""
+        from pb_semantic_conflict_guard import (
+            SemanticConflictRecord,
+            CONFLICT_KIND_INCOMPATIBLE_MATERIALS,
+            annotate_rows_with_conflicts,
+        )
+
+        conflict = SemanticConflictRecord(
+            conflict_id="conf-001",
+            conflict_kind=CONFLICT_KIND_INCOMPATIBLE_MATERIALS,
+            subject_id="North Wall",
+            status=EvidenceResolutionStatus.CONFLICT,
+            description="Brick vs weatherboard conflict",
+            sources=("doc1", "doc2"),
+            suggested_action="review",
+        )
+
+        sample_rows = [
+            (
+                1, 1, "04 Masonry", "North Wall", "Brickwork", "Face brick", 45.0, "m²",
+                "Measured", 1, "North Elevation", "A201", "PB Auto Geometry v1.2.19", "Existing notes",
+                "", "", "", "", "", "", "",
+            ),
+        ]
+
+        annotated = annotate_rows_with_conflicts(sample_rows, [conflict])
+        self.assertEqual(len(annotated), 1)
+        r = annotated[0]
+        # Quantity is strictly preserved (45.0 m2, not modified!)
+        self.assertEqual(r[6], 45.0)
+        # Quantity status escalated to Review
+        self.assertEqual(r[8], "Review")
+        # Notes contain the conflict provenance
+        self.assertIn("[SEMANTIC CONFLICT: Brick vs weatherboard conflict]", r[13])
+
 
 if __name__ == "__main__":
     unittest.main()
