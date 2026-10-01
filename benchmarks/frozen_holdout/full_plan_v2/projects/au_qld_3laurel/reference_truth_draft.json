@@ -28,7 +28,7 @@
     }
   ],
   "unresolved_surface_families": [
-    "internal_wall_faces",
+    "internal_wall_faces_beyond_closed_bathroom_and_gf_ensuite_laundry_gross_faces",
     "external_wall_faces_and_cladding",
     "roof_planes",
     "structural_members_beyond_closed_wall_bracing_and_explicit_140x140_posts_470x470_piers",
@@ -1340,6 +1340,134 @@
         "quantity_basis": "explicit perimeter door width x elevation joinery height 2100 AFL U.N.O."
       },
       "source_location": "architectural:p3:A0.3:GARAGE_perimeter_870; architectural:p4:A0.4:JOINERY_HEIGHTS_2100_AFL_UNO"
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bathroom:long_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bathroom gross internal wall face, 2.750m side 1",
+      "expected_quantity": 7.425,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:Bathroom_Layout:2750_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 2.75,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bathroom:long_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bathroom gross internal wall face, 2.750m side 2",
+      "expected_quantity": 7.425,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:Bathroom_Layout:2750_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 2.75,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bathroom:short_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bathroom gross internal wall face, 1.880m side 1",
+      "expected_quantity": 5.076,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:Bathroom_Layout:1880_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.88,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bathroom:short_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bathroom gross internal wall face, 1.880m side 2",
+      "expected_quantity": 5.076,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:Bathroom_Layout:1880_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.88,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:long_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "GF Ensuite/Laundry gross internal wall face, 3.470m side 1",
+      "expected_quantity": 9.369,
+      "unit": "m2",
+      "source_location": "architectural:p15:A0.15:GF_Ensuite_Laundry:3470_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 3.47,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:long_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "GF Ensuite/Laundry gross internal wall face, 3.470m side 2",
+      "expected_quantity": 9.369,
+      "unit": "m2",
+      "source_location": "architectural:p15:A0.15:GF_Ensuite_Laundry:3470_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 3.47,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:short_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "GF Ensuite/Laundry gross internal wall face, 1.870m side 1",
+      "expected_quantity": 5.049,
+      "unit": "m2",
+      "source_location": "architectural:p15:A0.15:GF_Ensuite_Laundry:1870_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.87,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:short_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "GF Ensuite/Laundry gross internal wall face, 1.870m side 2",
+      "expected_quantity": 5.049,
+      "unit": "m2",
+      "source_location": "architectural:p15:A0.15:GF_Ensuite_Laundry:1870_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.87,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
     }
   ],
   "closure_checks": [
@@ -1551,6 +1679,31 @@
         "architectural:p4-p5:A0.4-A0.5:elevations:entry_door_crosscheck_and_JOINERY_HEIGHTS_2100_AFL_UNO"
       ],
       "note": "Internal door openings remain a separate wall-face deduction universe and are not claimed closed here."
+    },
+    {
+      "check_id": "3laurel:control:partial_internal_wall_gross_faces",
+      "component_object_refs": [
+        "3laurel:surface:internal_wall_gross:bathroom:long_1",
+        "3laurel:surface:internal_wall_gross:bathroom:long_2",
+        "3laurel:surface:internal_wall_gross:bathroom:short_1",
+        "3laurel:surface:internal_wall_gross:bathroom:short_2",
+        "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:long_1",
+        "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:long_2",
+        "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:short_1",
+        "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:short_2"
+      ],
+      "object_count": 8,
+      "gross_area_m2": 53.838,
+      "bathroom_gross_area_m2": 25.002,
+      "gf_ensuite_laundry_gross_area_m2": 28.836,
+      "complete_for_these_two_finished_room_perimeters": true,
+      "complete_for_project_internal_wall_universe": false,
+      "openings_and_finish_deductions_resolved": false,
+      "source_locations": [
+        "architectural:p11:A0.11:Bathroom_Layout:1880x2750_finished_internal_dimensions",
+        "architectural:p15:A0.15:GF_Ensuite_Laundry:1870x3470_finished_internal_dimensions",
+        "architectural:p7:A0.7:FCL_2700"
+      ]
     }
   ]
 }
