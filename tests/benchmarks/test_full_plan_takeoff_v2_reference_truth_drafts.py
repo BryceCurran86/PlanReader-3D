@@ -100,3 +100,27 @@ def test_3laurel_primary_ceiling_planes_close_to_declared_plan_area():
     calculated = sum(float(by_ref[ref]["expected_quantity"]) for ref in check["component_object_refs"])
     assert calculated == pytest.approx(297.50, abs=1e-9)
     assert calculated == pytest.approx(float(check["declared_reference_plan_area_m2"]), abs=1e-9)
+
+
+def test_3laurel_gross_shower_tile_faces_stay_out_of_net_denominator_until_deductions_close():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "wet_area_wall_tile_gross_face"
+    ]
+    assert len(faces) == 8
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(23.085)
+    assert all(
+        row["attributes"]["denominator_readiness"]
+        == "draft_only_until_niche_and_return_adjustments_are_resolved"
+        for row in faces
+    )
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:gross_shower_tile_faces"
+    )
+    assert check["net_denominator_ready"] is False
+    assert "niche/recess returns and deductions remain unresolved" in check["reason"]
+    assert "wet_area_tile_niche_returns_and_recess_deductions" in draft["unresolved_surface_families"]
