@@ -246,6 +246,13 @@ class SemanticOpeningEnumerationProducer:
             tuple[str, str, str, str],
             PhysicalOpeningAuthority,
         ] = {}
+        # Expensive semantic derivation is a property of the immutable source
+        # snapshot + exact page set, not of the caller's decision-scope label.
+        # Scope-specific records are still minted and stored independently.
+        self._derived_scope_results: dict[
+            tuple[str, str, str, str, str, tuple[str, ...]],
+            SemanticOpeningEnumerationResult,
+        ] = {}
 
     @classmethod
     def from_source_visibility_producer(
@@ -395,6 +402,68 @@ class SemanticOpeningEnumerationProducer:
                 ),
             )
 
+        derivation_key = (
+            selector.document_id,
+            selector.revision_id,
+            selector.source_sha256,
+            selector.snapshot_id,
+            decision_scope_kind,
+            scoped_page_ids,
+        )
+        derived_result = self._derived_scope_results.get(derivation_key)
+        if derived_result is not None and derived_result.record is not None:
+            prior_record = derived_result.record
+            payload = {
+                "schema_version": SEMANTIC_OPENING_ENUMERATION_SCHEMA_VERSION,
+                "document_id": selector.document_id,
+                "revision_id": selector.revision_id,
+                "source_sha256": selector.source_sha256,
+                "snapshot_id": selector.snapshot_id,
+                "decision_scope_id": selector.decision_scope_id,
+                "decision_scope_kind": decision_scope_kind,
+                "page_ids": scoped_page_ids,
+                "visible_observation_ids": prior_record.visible_observation_ids,
+                "physical_opening_record_ids": prior_record.physical_opening_record_ids,
+                "representative_observation_ids": prior_record.representative_observation_ids,
+                "opening_support_observation_ids": prior_record.opening_support_observation_ids,
+                "residual_visible_observation_ids": prior_record.residual_visible_observation_ids,
+                "conflict_observation_ids": prior_record.conflict_observation_ids,
+                "structural_enumeration_complete": prior_record.structural_enumeration_complete,
+                "physical_opening_universe_complete": prior_record.physical_opening_universe_complete,
+                "reason_codes": prior_record.reason_codes,
+            }
+            record = SemanticOpeningEnumerationRecord(
+                record_id=stable_contract_id(
+                    "semantic_opening_enumeration",
+                    payload,
+                    digest_chars=32,
+                ),
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                decision_scope_id=selector.decision_scope_id,
+                decision_scope_kind=decision_scope_kind,
+                page_ids=scoped_page_ids,
+                visible_observation_ids=prior_record.visible_observation_ids,
+                physical_opening_record_ids=prior_record.physical_opening_record_ids,
+                representative_observation_ids=prior_record.representative_observation_ids,
+                opening_support_observation_ids=prior_record.opening_support_observation_ids,
+                residual_visible_observation_ids=prior_record.residual_visible_observation_ids,
+                conflict_observation_ids=prior_record.conflict_observation_ids,
+                structural_enumeration_complete=prior_record.structural_enumeration_complete,
+                physical_opening_universe_complete=prior_record.physical_opening_universe_complete,
+                reason_codes=prior_record.reason_codes,
+            )
+            return self._store(
+                selector,
+                SemanticOpeningEnumerationResult(
+                    status=derived_result.status,
+                    reason_codes=derived_result.reason_codes,
+                    record=record,
+                ),
+            )
+
         visibility = self._source_visibility_producer.authority()
         physical_key = (
             published.revision.document_id,
@@ -404,7 +473,7 @@ class SemanticOpeningEnumerationProducer:
         )
         physical = self._physical_opening_authorities.get(physical_key)
         if physical is None:
-            physical = PhysicalOpeningAuthority(visibility)
+            physical = self._source_visibility_producer.physical_opening_authority()
             self._physical_opening_authorities[physical_key] = physical
         allowed_pages = set(scoped_page_ids)
 
@@ -624,14 +693,14 @@ class SemanticOpeningEnumerationProducer:
         )
         if unknown_scope_resolution and not (conflict_ids or lineage_mismatch):
             status = EvidenceResolutionStatus.ABSTAINED
-        return self._store(
-            selector,
-            SemanticOpeningEnumerationResult(
-                status=status,
-                reason_codes=record.reason_codes,
-                record=record,
-            ),
+        result = SemanticOpeningEnumerationResult(
+            status=status,
+            reason_codes=record.reason_codes,
+            record=record,
         )
+        stored = self._store(selector, result)
+        self._derived_scope_results.setdefault(derivation_key, stored)
+        return stored
 
 
 __all__ = [

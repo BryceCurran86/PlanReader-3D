@@ -1323,7 +1323,7 @@ def _producer_opening_relation_overrides(
     opening_authority = (
         physical_opening_authority
         if physical_opening_authority is not None
-        else PhysicalOpeningAuthority(visibility)
+        else source_producer.physical_opening_authority()
     )
     proven_records: dict[str, object] = {}
 
@@ -2468,13 +2468,11 @@ class PhysicalWallCandidateProducer:
                 source_producer=source_visibility_producer,
                 published=published,
             )
-            physical_opening_authority = PhysicalOpeningAuthority(
-                source_visibility_producer.authority()
+            physical_opening_authority = (
+                source_visibility_producer.physical_opening_authority()
             )
             physical_scale_producer = (
-                PhysicalScaleProducer.from_source_visibility_producer(
-                    source_visibility_producer
-                )
+                source_visibility_producer.physical_scale_producer()
             )
 
             for page_id in materialized_page_ids:

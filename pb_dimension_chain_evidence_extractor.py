@@ -26,6 +26,7 @@ The richer all-orientation evidence API lives in ``pb_figured_dimension_evidence
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import replace
 import math
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -222,51 +223,107 @@ class _AxisSegmentSpatialIndex:
         if not candidates:
             return ()
 
-        # The chosen dimension line can be any candidate, or a merge of the
-        # two closest collinear candidates. Include every perpendicular segment
-        # whose axis coordinate falls anywhere across the candidate envelope;
-        # the legacy binder performs the exact intersection/tolerance test.
+        # The binder can only choose the nearest candidate, or merge the two
+        # nearest candidates when they are spatially indistinguishable.  No
+        # third line candidate can affect that decision.  Rank with the exact
+        # binder key and retain only those two before collecting witnesses.
+        ranked_candidates = sorted(
+            candidates,
+            key=lambda segment: (
+                self._axis_distance(center, segment),
+                -segment.length,
+                segment.segment_id,
+            ),
+        )
+        line_candidates = ranked_candidates[:2]
+
         witness_margin = float(calibration.witness_endpoint_distance_pt)
         horizontal_candidates = [
             segment
-            for segment in candidates
+            for segment in line_candidates
             if segment.orientation == DimensionOrientation.HORIZONTAL.value
         ]
         vertical_candidates = [
             segment
-            for segment in candidates
+            for segment in line_candidates
             if segment.orientation == DimensionOrientation.VERTICAL.value
         ]
+
+        def _scope_matches(segment: ObservedGeometrySegment) -> bool:
+            return (
+                segment.source_page == observation.source_page
+                and (
+                    not observation.view_id
+                    or not segment.view_id
+                    or segment.view_id == observation.view_id
+                )
+            )
+
         witnesses: list[ObservedGeometrySegment] = []
         if horizontal_candidates:
             lo = min(min(s.start[0], s.end[0]) for s in horizontal_candidates)
             hi = max(max(s.start[0], s.end[0]) for s in horizontal_candidates)
-            witnesses.extend(
-                self._from_bins(
-                    self._vertical_bins,
-                    lo - witness_margin,
-                    hi + witness_margin,
-                )
-            )
+            horizontal_axes = [
+                (s.start[1] + s.end[1]) / 2.0
+                for s in horizontal_candidates
+            ]
+            # If the top two candidates are text-split fragments, the binder's
+            # merged line lies at their mean axis coordinate. Include it in the
+            # necessary witness-crossing test without deciding whether a merge
+            # will actually be accepted.
+            target_axes = list(horizontal_axes)
+            if len(horizontal_axes) == 2:
+                target_axes.append((horizontal_axes[0] + horizontal_axes[1]) / 2.0)
+            for segment in self._from_bins(
+                self._vertical_bins,
+                lo - witness_margin,
+                hi + witness_margin,
+            ):
+                if not _scope_matches(segment):
+                    continue
+                x = (segment.start[0] + segment.end[0]) / 2.0
+                if not (lo - witness_margin <= x <= hi + witness_margin):
+                    continue
+                y0, y1 = sorted((segment.start[1], segment.end[1]))
+                if not any(
+                    y0 - witness_margin <= axis <= y1 + witness_margin
+                    for axis in target_axes
+                ):
+                    continue
+                witnesses.append(segment)
+
         if vertical_candidates:
             lo = min(min(s.start[1], s.end[1]) for s in vertical_candidates)
             hi = max(max(s.start[1], s.end[1]) for s in vertical_candidates)
-            witnesses.extend(
-                self._from_bins(
-                    self._horizontal_bins,
-                    lo - witness_margin,
-                    hi + witness_margin,
-                )
-            )
+            vertical_axes = [
+                (s.start[0] + s.end[0]) / 2.0
+                for s in vertical_candidates
+            ]
+            target_axes = list(vertical_axes)
+            if len(vertical_axes) == 2:
+                target_axes.append((vertical_axes[0] + vertical_axes[1]) / 2.0)
+            for segment in self._from_bins(
+                self._horizontal_bins,
+                lo - witness_margin,
+                hi + witness_margin,
+            ):
+                if not _scope_matches(segment):
+                    continue
+                y = (segment.start[1] + segment.end[1]) / 2.0
+                if not (lo - witness_margin <= y <= hi + witness_margin):
+                    continue
+                x0, x1 = sorted((segment.start[0], segment.end[0]))
+                if not any(
+                    x0 - witness_margin <= axis <= x1 + witness_margin
+                    for axis in target_axes
+                ):
+                    continue
+                witnesses.append(segment)
 
         selected: dict[str, ObservedGeometrySegment] = {}
-        for segment in candidates:
+        for segment in line_candidates:
             selected[segment.segment_id] = segment
         for segment in witnesses:
-            if segment.source_page != observation.source_page:
-                continue
-            if observation.view_id and segment.view_id and segment.view_id != observation.view_id:
-                continue
             selected[segment.segment_id] = segment
         return tuple(
             sorted(
@@ -284,16 +341,38 @@ def _extract_horizontal_chains_core(
     view_type: str,
     y_tolerance_pt: float,
     viewport_bbox: Optional[Sequence[float]] = None,
+    precomputed_native: Optional[Sequence[DimensionObservation]] = None,
+    precomputed_layout: Optional[DimensionLayoutCalibration] = None,
+    precomputed_segments: Optional[Sequence[ObservedGeometrySegment]] = None,
 ) -> List[DimensionChain]:
-    """F.15-compatible horizontal extraction, optionally bounded to one viewport."""
-    native = extract_native_dimension_observations(
-        page,
-        page_num=page_num,
-        view_id=view_id,
-        view_type=view_type,
+    """F.15-compatible horizontal extraction, optionally bounded to one viewport.
+
+    Production callers may pass page-wide producer-neutral native/vector/layout
+    evidence.  The evidence is retagged to the requested viewport before the
+    existing strict containment filters run, so ownership and chain identities
+    remain identical while dense PDF text/vector extraction happens once/page.
+    """
+    if precomputed_native is None:
+        native = extract_native_dimension_observations(
+            page,
+            page_num=page_num,
+            view_id=view_id,
+            view_type=view_type,
+        )
+    else:
+        native = [
+            replace(observation, view_id=view_id, view_type=view_type)
+            for observation in precomputed_native
+        ]
+    layout = (
+        precomputed_layout
+        if precomputed_layout is not None
+        else calibrate_dimension_layout(page)
     )
-    layout = calibrate_dimension_layout(page)
-    segments = extract_vector_segments(page, page_num=page_num, view_id=view_id)
+    if precomputed_segments is None:
+        segments = extract_vector_segments(page, page_num=page_num, view_id=view_id)
+    else:
+        segments = [replace(segment, view_id=view_id) for segment in precomputed_segments]
 
     if viewport_bbox is not None:
         # Authority-sensitive viewport ownership is strict: a text bbox must be
@@ -462,6 +541,18 @@ def extract_dimension_chains_from_page(
         # to page-wide elevation/section dimensions.
         return []
 
+    # Expensive page-native extraction is invariant across viewport ownership.
+    # Build it once, then retag/filter per authenticated viewport.  The prior
+    # implementation repeated all three operations for every floor-plan frame.
+    page_native = extract_native_dimension_observations(
+        page,
+        page_num=page_num,
+        view_id="",
+        view_type=DrawingViewType.UNKNOWN.value,
+    )
+    page_layout = calibrate_dimension_layout(page)
+    page_segments = extract_vector_segments(page, page_num=page_num, view_id="")
+
     chains: List[DimensionChain] = []
     for viewport in plan_viewports:
         chains.extend(
@@ -472,6 +563,9 @@ def extract_dimension_chains_from_page(
                 view_type=viewport.view_type,
                 y_tolerance_pt=y_tolerance_pt,
                 viewport_bbox=viewport.bounding_box,
+                precomputed_native=page_native,
+                precomputed_layout=page_layout,
+                precomputed_segments=page_segments,
             )
         )
     return chains

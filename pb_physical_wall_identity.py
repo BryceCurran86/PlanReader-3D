@@ -43,7 +43,7 @@ from pb_wall_room_topology_wall_identity_v2 import (
     _chain_source_primitive_ids,
     _path_from_edges,
     canonical_path_fingerprint,
-    canonical_wall_candidate_id_v2,
+    canonical_wall_candidate_id_v2_from_components,
 )
 
 PHYSICAL_WALL_IDENTITY_SCHEMA_VERSION = "1.0.0"
@@ -251,12 +251,10 @@ def resolve_physical_wall_identity(
         path = reconstructed
         comparison_mode = "v2_path"
     path_fingerprint = canonical_path_fingerprint(path)
-    candidate_id = canonical_wall_candidate_id_v2(
+    candidate_id = canonical_wall_candidate_id_v2_from_components(
         wall.viewport_id,
-        resolved_edge_ids,
-        edges_by_id,
-        p1,
-        p2,
+        canonical_path_fingerprint(reconstructed),
+        lineage,
     )
     return PhysicalWallIdentity(
         wall_candidate_id=wall.candidate_id,
@@ -968,7 +966,6 @@ def resolve_physical_wall_equivalence(
         identity.wall_candidate_id: _physical_wall_pair_features(identity)
         for identity in usable
     }
-
     pair_classifications: list[tuple[str, str, str]] = []
     same_links: list[tuple[str, str]] = []
     ambiguous_links: list[tuple[str, str]] = []
@@ -1050,12 +1047,37 @@ def resolve_physical_wall_equivalence(
     angle_buckets: dict[int, list[int]] = {}
     direction_key_by_index: dict[int, tuple[float, float]] = {}
     longitudinal_interval_by_index: dict[int, tuple[float, float]] = {}
+    slow_orientation_buckets_by_index: dict[int, tuple[int, ...]] = {}
+    slow_angle_buckets: dict[int, list[int]] = {}
+    unindexed_slow_indexes: list[int] = []
     if homogeneous_scope and exact_angle_buckets:
         for index, identity in enumerate(usable):
             features = features_by_id[identity.wall_candidate_id]
             unit = features.single_segment_unit
             if len(features.segments) != 1 or unit is None:
                 slow_indexes.append(index)
+                orientation_buckets: set[int] = set()
+                for segment in features.segments:
+                    segment_unit = _unit(segment)
+                    if segment_unit is None:
+                        continue
+                    segment_angle = (
+                        math.degrees(math.atan2(segment_unit[1], segment_unit[0]))
+                        % 180.0
+                    )
+                    orientation_buckets.add(
+                        min(
+                            bucket_count - 1,
+                            int(math.floor(segment_angle / angle_tol)),
+                        )
+                    )
+                if orientation_buckets:
+                    ordered_buckets = tuple(sorted(orientation_buckets))
+                    slow_orientation_buckets_by_index[index] = ordered_buckets
+                    for segment_bucket in ordered_buckets:
+                        slow_angle_buckets.setdefault(segment_bucket, []).append(index)
+                else:
+                    unindexed_slow_indexes.append(index)
                 continue
             angle = math.degrees(math.atan2(unit[1], unit[0])) % 180.0
             bucket = min(bucket_count - 1, int(math.floor(angle / angle_tol)))
@@ -1088,8 +1110,7 @@ def resolve_physical_wall_equivalence(
 
         primitive_indexes: dict[str, list[int]] = {}
         path_indexes: dict[tuple[tuple[float, float], ...], list[int]] = {}
-        for index in fast_single_indexes:
-            identity = usable[index]
+        for index, identity in enumerate(usable):
             features = features_by_id[identity.wall_candidate_id]
             for primitive_id in features.primitive_set:
                 primitive_indexes.setdefault(str(primitive_id), []).append(index)
@@ -1102,16 +1123,99 @@ def resolve_physical_wall_equivalence(
             if len(indexes) > 1:
                 force_group(indexes)
 
+        # Different interior routes can still be competing representations when
+        # both path endpoints coincide within the existing lateral tolerance.
+        # Use an endpoint grid to preserve that exact early-eligibility rule
+        # without restoring an all-pairs scan.
+        endpoint_cell = max(_EQUIVALENCE_LATERAL_TOL_PT, 1e-9)
+        endpoint_bins: dict[tuple[int, int], list[int]] = {}
+        for index, identity in enumerate(usable):
+            path = features_by_id[identity.wall_candidate_id].path
+            if len(path) < 2:
+                continue
+            first = path[0]
+            last = path[-1]
+            first_bin = (
+                math.floor(first[0] / endpoint_cell),
+                math.floor(first[1] / endpoint_cell),
+            )
+            nearby: set[int] = set()
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    nearby.update(
+                        endpoint_bins.get((first_bin[0] + dx, first_bin[1] + dy), ())
+                    )
+            for prior in nearby:
+                prior_path = features_by_id[usable[prior].wall_candidate_id].path
+                if _paths_share_both_endpoints(
+                    prior_path,
+                    path,
+                    _EQUIVALENCE_LATERAL_TOL_PT,
+                ):
+                    forced_by_lower.setdefault(prior, set()).add(index)
+            for endpoint in (first, last):
+                endpoint_bin = (
+                    math.floor(endpoint[0] / endpoint_cell),
+                    math.floor(endpoint[1] / endpoint_cell),
+                )
+                endpoint_bins.setdefault(endpoint_bin, []).append(index)
+
+        slow_set = set(slow_indexes)
         suffix_fast_count = [0] * (len(usable) + 1)
+        suffix_slow_count = [0] * (len(usable) + 1)
         for index in range(len(usable) - 1, -1, -1):
             suffix_fast_count[index] = suffix_fast_count[index + 1] + (
                 1 if index in fast_set else 0
             )
-
-        slow_set = set(slow_indexes)
+            suffix_slow_count[index] = suffix_slow_count[index + 1] + (
+                1 if index in slow_set else 0
+            )
+        unindexed_slow_set = set(unindexed_slow_indexes)
         for left_index in range(len(usable)):
             if left_index in slow_set:
-                for right_index in range(left_index + 1, len(usable)):
+                forced_indexes = forced_by_lower.get(left_index, set())
+                if left_index in unindexed_slow_set:
+                    candidate_indexes = set(range(left_index + 1, len(usable)))
+                else:
+                    candidate_indexes: set[int] = set(forced_indexes)
+                    for segment_bucket in slow_orientation_buckets_by_index.get(
+                        left_index, ()
+                    ):
+                        for neighbor in (
+                            (segment_bucket - 1) % bucket_count,
+                            segment_bucket,
+                            (segment_bucket + 1) % bucket_count,
+                        ):
+                            candidate_indexes.update(
+                                index
+                                for index in angle_buckets.get(neighbor, ())
+                                if index > left_index
+                            )
+                            candidate_indexes.update(
+                                index
+                                for index in slow_angle_buckets.get(neighbor, ())
+                                if index > left_index
+                            )
+                    candidate_indexes.update(
+                        index
+                        for index in unindexed_slow_indexes
+                        if index > left_index
+                    )
+                    candidate_indexes.update(forced_indexes)
+                    skipped_orientation_pairs = (
+                        len(usable) - left_index - 1 - len(candidate_indexes)
+                    )
+                    if skipped_orientation_pairs > 0:
+                        excluded_pairs += skipped_orientation_pairs
+                        exclusion_reason_counts[
+                            PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE
+                        ] = (
+                            exclusion_reason_counts.get(
+                                PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE, 0
+                            )
+                            + skipped_orientation_pairs
+                        )
+                for right_index in sorted(candidate_indexes):
                     evaluate_pair(left_index, right_index)
                 continue
 
@@ -1141,8 +1245,20 @@ def resolve_physical_wall_equivalence(
                             skipped_no_longitudinal += 1
                             continue
                     candidate_indexes.add(index)
+            for neighbor in (
+                (bucket - 1) % bucket_count,
+                bucket,
+                (bucket + 1) % bucket_count,
+            ):
+                candidate_indexes.update(
+                    index
+                    for index in slow_angle_buckets.get(neighbor, ())
+                    if index > left_index
+                )
             candidate_indexes.update(
-                index for index in slow_indexes if index > left_index
+                index
+                for index in unindexed_slow_indexes
+                if index > left_index
             )
             candidate_indexes.update(forced_indexes)
 
@@ -1158,10 +1274,15 @@ def resolve_physical_wall_equivalence(
             evaluated_fast_count = sum(
                 1 for index in candidate_indexes if index in fast_set
             )
+            evaluated_slow_count = sum(
+                1 for index in candidate_indexes if index in slow_set
+            )
             skipped_orientation_pairs = (
                 suffix_fast_count[left_index + 1]
                 - evaluated_fast_count
                 - skipped_no_longitudinal
+                + suffix_slow_count[left_index + 1]
+                - evaluated_slow_count
             )
             if skipped_orientation_pairs > 0:
                 excluded_pairs += skipped_orientation_pairs

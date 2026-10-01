@@ -119,3 +119,60 @@ def test_snapshot_membership_index_rebuilds_if_store_snapshot_is_replaced() -> N
     refreshed = producer._store.snapshot_observation_id_sets[stored.snapshot_id]
     assert refreshed[0] is replacement
     assert observation_id not in refreshed[1]
+
+
+def test_resolve_reuses_verified_record_payload_but_detects_record_replacement(
+    monkeypatch,
+) -> None:
+    import pb_source_observation_authority as source_module
+
+    payload = _single_page_pdf()
+    producer = SourceObservationProducer(
+        producer_method="test-record-resolution-cache",
+        producer_version="1.0.0",
+    )
+    published = producer.ingest_native_pdf_bytes(
+        document_id="doc-record-resolution-cache",
+        source_bytes=payload,
+        source_locator="memory://record-resolution-cache.pdf",
+        page_ids=("1",),
+    )
+    observation_id = published.snapshot.observation_ids[0]
+    selector = ObservationSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        observation_id=observation_id,
+    )
+
+    real_content_sha256 = source_module._content_sha256
+    calls = 0
+
+    def counted(payload):
+        nonlocal calls
+        calls += 1
+        return real_content_sha256(payload)
+
+    monkeypatch.setattr(source_module, "_content_sha256", counted)
+
+    authority = producer.authority()
+    first = authority.resolve(selector)
+    second = authority.resolve(selector)
+    assert first.status is EvidenceResolutionStatus.CORROBORATED
+    assert second == first
+    # Producer commit pre-verifies the exact immutable record object, so the
+    # first consumer reads need no duplicate payload hash.
+    assert calls == 0
+
+    key = (published.snapshot.snapshot_id, observation_id)
+    original = producer._store.observations[key]
+    producer._store.observations[key] = replace(
+        original,
+        raw_text=f"{original.raw_text} tampered",
+    )
+
+    tampered = authority.resolve(selector)
+    assert calls == 1
+    assert tampered.status is EvidenceResolutionStatus.CONFLICT
+    assert tampered.reason_codes == (PRODUCER_INTEGRITY_FAILURE,)

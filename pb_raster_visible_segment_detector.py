@@ -136,12 +136,42 @@ def _snap_intersections(
     list[tuple[float, float, float, float]],
     list[tuple[float, float, float, float]],
 ]:
+    # The historical implementation scanned every HxV pair in three passes.
+    # Preserve its exact endpoint-snap rules and source order, but pre-index
+    # the *necessary, immutable* interval condition for each pass. A segment
+    # that can satisfy the old predicate is guaranteed to be present in the
+    # queried bin; all endpoint mutation logic remains unchanged below.
+    bin_size = max(8.0, float(tolerance_px) * 8.0)
+
+    def _bin(value: float) -> int:
+        return int(math.floor(float(value) / bin_size))
+
+    def _interval_index(
+        rows: list[tuple[float, float, float, float]],
+        *,
+        lo_pos: int,
+        hi_pos: int,
+    ) -> dict[int, list[int]]:
+        bins: dict[int, list[int]] = {}
+        for index, row in enumerate(rows):
+            lo = min(float(row[lo_pos]), float(row[hi_pos])) - tolerance_px
+            hi = max(float(row[lo_pos]), float(row[hi_pos])) + tolerance_px
+            first = _bin(lo)
+            last = _bin(hi)
+            for key in range(first, last + 1):
+                bins.setdefault(key, []).append(index)
+        return bins
+
+    vertical_by_y = _interval_index(vertical, lo_pos=1, hi_pos=3)
     snapped_h: list[tuple[float, float, float, float]] = []
     for x0, y0, x1, _y1 in horizontal:
         left = x0
         right = x1
-        for vx0, vy0, _vx1, vy1 in vertical:
+        for vertical_index in vertical_by_y.get(_bin(y0), ()):
+            vx0, vy0, _vx1, vy1 = vertical[vertical_index]
             vx = vx0
+            # Retain the exact legacy test even though the interval index is a
+            # conservative superset around this coordinate.
             if vy0 - tolerance_px <= y0 <= vy1 + tolerance_px:
                 if abs(left - vx) <= tolerance_px:
                     left = vx
@@ -150,11 +180,13 @@ def _snap_intersections(
         if right - left > 0.0:
             snapped_h.append((left, y0, right, y0))
 
+    horizontal_by_x = _interval_index(snapped_h, lo_pos=0, hi_pos=2)
     snapped_v: list[tuple[float, float, float, float]] = []
     for x0, y0, _x1, y1 in vertical:
         top = y0
         bottom = y1
-        for hx0, hy0, hx1, _hy1 in snapped_h:
+        for horizontal_index in horizontal_by_x.get(_bin(x0), ()):
+            hx0, hy0, hx1, _hy1 = snapped_h[horizontal_index]
             if hx0 - tolerance_px <= x0 <= hx1 + tolerance_px:
                 if abs(top - hy0) <= tolerance_px:
                     top = hy0
@@ -165,11 +197,13 @@ def _snap_intersections(
 
     # A second horizontal pass picks up any y coordinates standardized by the
     # vertical pass without ever bridging a real gap.
+    snapped_vertical_by_y = _interval_index(snapped_v, lo_pos=1, hi_pos=3)
     final_h: list[tuple[float, float, float, float]] = []
     for x0, y0, x1, _y1 in snapped_h:
         left = x0
         right = x1
-        for vx0, vy0, _vx1, vy1 in snapped_v:
+        for vertical_index in snapped_vertical_by_y.get(_bin(y0), ()):
+            vx0, vy0, _vx1, vy1 = snapped_v[vertical_index]
             if vy0 - tolerance_px <= y0 <= vy1 + tolerance_px:
                 if abs(left - vx0) <= tolerance_px:
                     left = vx0

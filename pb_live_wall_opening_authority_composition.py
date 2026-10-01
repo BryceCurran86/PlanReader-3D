@@ -180,8 +180,8 @@ def compose_live_wall_opening_authority(
         ).authority()
     )
 
-    physical_opening_authority = PhysicalOpeningAuthority(
-        source_visibility_producer.authority()
+    physical_opening_authority = (
+        source_visibility_producer.physical_opening_authority()
     )
     semantic_producer = (
         SemanticOpeningEnumerationProducer.from_source_visibility_producer(

@@ -11,6 +11,7 @@ Instances of :class:`PdfTextIntegrityAuthority` are minted by the trusted
 """
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 import math
 import re
@@ -302,12 +303,37 @@ def _valid_tounicode_cmap(stream: bytes | bytearray | memoryview | None) -> bool
     return not (operators - _CMAP_ALLOWED_WORDS)
 
 
-def _font_binding(page: object, span: Mapping[str, object]) -> tuple[Optional[Sequence[object]], tuple[str, ...]]:
+def _page_runtime_cache(page: object) -> dict[str, object]:
+    """Return an ephemeral cache owned by one live PyMuPDF page object."""
+    name = "_planreader_text_integrity_runtime_cache"
     try:
-        fonts = page.get_fonts(full=True) or []  # type: ignore[attr-defined]
+        cached = getattr(page, name, None)
+        if isinstance(cached, dict):
+            return cached
+        cached = {}
+        setattr(page, name, cached)
+        return cached
     except Exception:
-        return None, (TEXT_FONT_BINDING_AMBIGUOUS,)
+        # Cache availability is never authority. Fall back to uncached replay.
+        return {}
+
+
+def _font_binding(page: object, span: Mapping[str, object]) -> tuple[Optional[Sequence[object]], tuple[str, ...]]:
+    cache = _page_runtime_cache(page)
     target = _normalise_font_name(span.get("font"))
+    binding_cache = cache.setdefault("font_binding_by_name", {})
+    if isinstance(binding_cache, dict) and target in binding_cache:
+        return binding_cache[target]  # type: ignore[return-value]
+    try:
+        fonts = cache.get("fonts_full")
+        if fonts is None:
+            fonts = tuple(page.get_fonts(full=True) or ())  # type: ignore[attr-defined]
+            cache["fonts_full"] = fonts
+    except Exception:
+        result = (None, (TEXT_FONT_BINDING_AMBIGUOUS,))
+        if isinstance(binding_cache, dict):
+            binding_cache[target] = result
+        return result
     matches: dict[int, Sequence[object]] = {}
     for font in fonts:
         try:
@@ -318,8 +344,12 @@ def _font_binding(page: object, span: Mapping[str, object]) -> tuple[Optional[Se
         if target and target in aliases:
             matches[xref] = font
     if len(matches) != 1:
-        return None, (TEXT_FONT_BINDING_AMBIGUOUS,)
-    return next(iter(matches.values())), ()
+        result = (None, (TEXT_FONT_BINDING_AMBIGUOUS,))
+    else:
+        result = (next(iter(matches.values())), ())
+    if isinstance(binding_cache, dict):
+        binding_cache[target] = result
+    return result
 
 
 def _font_for_glyph_validation(page: object, font: Sequence[object]):
@@ -336,6 +366,12 @@ def _font_for_glyph_validation(page: object, font: Sequence[object]):
     except (IndexError, TypeError, ValueError):
         return None
 
+    cache = _page_runtime_cache(page)
+    font_view_cache = cache.setdefault("font_view_by_xref", {})
+    if isinstance(font_view_cache, dict) and xref in font_view_cache:
+        return font_view_cache[xref]
+
+    result = None
     try:
         extracted = page.parent.extract_font(xref)  # type: ignore[attr-defined]
         font_buffer = extracted[3] if len(extracted) >= 4 else b""
@@ -343,20 +379,22 @@ def _font_for_glyph_validation(page: object, font: Sequence[object]):
         font_buffer = b""
     if font_buffer:
         try:
-            return fitz.Font(fontbuffer=font_buffer)
+            result = fitz.Font(fontbuffer=font_buffer)
         except Exception:
-            return None
-
-    try:
-        base_font = str(font[3] or "")
-    except (IndexError, TypeError):
-        return None
-    if _normalise_font_name(base_font) not in _BASE14_SIMPLE_FONTS:
-        return None
-    try:
-        return fitz.Font(fontname=base_font)
-    except Exception:
-        return None
+            result = None
+    else:
+        try:
+            base_font = str(font[3] or "")
+        except (IndexError, TypeError):
+            base_font = ""
+        if _normalise_font_name(base_font) in _BASE14_SIMPLE_FONTS:
+            try:
+                result = fitz.Font(fontname=base_font)
+            except Exception:
+                result = None
+    if isinstance(font_view_cache, dict):
+        font_view_cache[xref] = result
+    return result
 
 
 def _glyph_unicode_consistency_reasons(
@@ -425,17 +463,32 @@ def _decode_status(
             subtype,
             base_font,
         )
-    try:
-        kind, value = page.parent.xref_get_key(xref, "ToUnicode")  # type: ignore[attr-defined]
-    except Exception:
-        kind, value = "null", "null"
-    if kind == "xref":
+    cache = _page_runtime_cache(page)
+    tounicode_cache = cache.setdefault("tounicode_status_by_xref", {})
+    cached_tounicode = (
+        tounicode_cache.get(xref)
+        if isinstance(tounicode_cache, dict)
+        else None
+    )
+    if cached_tounicode is None:
         try:
-            cmap_xref = int(str(value).split()[0])
-            cmap = page.parent.xref_stream(cmap_xref)  # type: ignore[attr-defined]
+            kind, value = page.parent.xref_get_key(xref, "ToUnicode")  # type: ignore[attr-defined]
         except Exception:
-            cmap = None
-        if not _valid_tounicode_cmap(cmap):
+            kind, value = "null", "null"
+        cmap_valid = None
+        if kind == "xref":
+            try:
+                cmap_xref = int(str(value).split()[0])
+                cmap = page.parent.xref_stream(cmap_xref)  # type: ignore[attr-defined]
+            except Exception:
+                cmap = None
+            cmap_valid = _valid_tounicode_cmap(cmap)
+        cached_tounicode = (kind, value, cmap_valid)
+        if isinstance(tounicode_cache, dict):
+            tounicode_cache[xref] = cached_tounicode
+    kind, value, cmap_valid = cached_tounicode
+    if kind == "xref":
+        if not cmap_valid:
             return (
                 "malformed_tounicode",
                 (TEXT_TOUNICODE_MALFORMED,),
@@ -1186,22 +1239,36 @@ def _text_clip_reasons(
     except (TypeError, ValueError):
         return (TEXT_CLIP_STATE_UNRESOLVED,)
 
-    before = None
-    after = None
-    for path in model.paths:
-        if path[0] < seqno:
-            before = path
-        elif path[0] > seqno:
-            after = path
-            break
+    # ``model.paths`` and ``model.pushes`` are producer-built in monotonic
+    # sequence / drawing order. Index them once per page instead of rescanning
+    # the complete clip history for every native word.
+    page_cache = _page_cache(page)
+    path_seqnos = page_cache.get("clip_model_path_seqnos")
+    if path_seqnos is None:
+        path_seqnos = tuple(path[0] for path in model.paths)
+        page_cache["clip_model_path_seqnos"] = path_seqnos
+    push_positions = page_cache.get("clip_model_push_positions")
+    if push_positions is None:
+        push_positions = tuple(position for position, _clip_id in model.pushes)
+        page_cache["clip_model_push_positions"] = push_positions
+
+    before_index = bisect_left(path_seqnos, seqno) - 1
+    after_index = bisect_right(path_seqnos, seqno)
+    before = model.paths[before_index] if before_index >= 0 else None
+    after = model.paths[after_index] if after_index < len(model.paths) else None
     lo_position = before[3] if before is not None else -1
     hi_position = after[3] if after is not None else None
     stack_before = set(before[2]) if before is not None else set()
     stack_after = set(after[2]) if after is not None else None
+    push_start = bisect_right(push_positions, lo_position)
+    push_end = (
+        len(model.pushes)
+        if hi_position is None
+        else bisect_left(push_positions, hi_position)
+    )
     between = {
-        clip_id
-        for position, clip_id in model.pushes
-        if position > lo_position and (hi_position is None or position < hi_position)
+        model.pushes[index][1]
+        for index in range(push_start, push_end)
     }
 
     if before is not None and after is not None and not between and before[1] == after[1]:

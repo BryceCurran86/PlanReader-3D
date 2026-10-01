@@ -571,9 +571,7 @@ def compose_live_gross_wall_geometry(
             )[0][1]
     height_authority = height_producer.authority()
 
-    scale_producer = PhysicalScaleProducer.from_source_visibility_producer(
-        source_visibility_producer
-    )
+    scale_producer = source_visibility_producer.physical_scale_producer()
     scale_results = {}
     for page_id in sorted({key[0] for key in wall_targets}, key=int):
         selector = PhysicalScaleSelector(

@@ -182,6 +182,7 @@ def _point_pairs_to_segment_dicts(
     id_prefix: str = "split",
     source_segments: Sequence[Dict[str, Any]] | None = None,
     primary_source_indexes: Sequence[int] | None = None,
+    isolate_lineage: bool = True,
 ) -> List[Dict[str, Any]]:
     """Rebuild historical split dicts, plus additive plural lineage when sources exist.
 
@@ -208,6 +209,7 @@ def _point_pairs_to_segment_dicts(
         source_segments,
         id_prefix=id_prefix,
         primary_source_indexes=primary_source_indexes,
+        isolate_lineage=isolate_lineage,
     )
 
 
@@ -618,12 +620,15 @@ def build_wall_graph_for_viewport(
         split_pairs,
         source_segments=structural_segments,
         primary_source_indexes=primary_source_indexes,
+        # The merge stage below deep-isolates every surviving edge before any
+        # lineage mutation. Collapsed fragments are isolated independently.
+        # Avoid cloning the same lineage once here and once again after snap.
+        isolate_lineage=False,
     )
     snapped_graph = _snap_geometry_indexed(
         split_segment_dicts,
         tolerance_pt=gap_snap_tolerance_pt,
     )
-    isolate_graph_lineage(snapped_graph)
     snap_collapsed_fragments = observe_snap_collapsed_fragments(
         split_segment_dicts, snapped_graph
     )

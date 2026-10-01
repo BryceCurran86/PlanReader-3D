@@ -184,7 +184,29 @@ def _attribute_status_from_records(records: Sequence[Mapping[str, Any]]) -> Tupl
     return status, conflicts
 
 
+def _lineage_from_single_source_segment(segment: Mapping[str, Any]) -> Dict[str, Any]:
+    """Exact one-record lineage without generic dedupe / JSON canonicalization."""
+    record = source_record_from_segment(segment)
+    source_id = record.get("id")
+    status = {
+        field: (
+            _ATTRIBUTE_AGREED
+            if record.get(f"{field}_present")
+            else _ATTRIBUTE_UNKNOWN
+        )
+        for field in _ATTRIBUTE_FIELDS
+    }
+    return {
+        "source_primitive_ids": [str(source_id)] if source_id else [],
+        "source_records": [record],
+        "attribute_status": status,
+        "attribute_conflicts": [],
+    }
+
+
 def lineage_from_source_segments(segments: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    if len(segments) == 1:
+        return _lineage_from_single_source_segment(segments[0])
     records: List[Dict[str, Any]] = []
     seen_keys = set()
     ids: List[str] = []
@@ -219,7 +241,7 @@ def union_lineage(*payloads: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         if not payload:
             continue
         for record in payload.get("source_records") or []:
-            copied = copy.deepcopy(dict(record))
+            copied = _clone_source_record(record)
             key = _record_dedupe_key(copied)
             if key in seen_keys:
                 continue
@@ -380,8 +402,74 @@ def sources_for_fragment(
     return [segment for segment in source_segments if fragment_contained_in_segment(fragment, segment)]
 
 
+_IMMUTABLE_LINEAGE_SCALARS = (str, bytes, int, float, bool, type(None))
+
+
+def _clone_lineage_value(value: Any) -> Any:
+    """Clone mutable lineage containers while sharing proven-immutable leaves."""
+    value_type = type(value)
+    if value_type in _IMMUTABLE_LINEAGE_SCALARS:
+        return value
+    if value_type is tuple:
+        # The production source-record tuples are numeric/color tuples. Share
+        # them when every child is an exact immutable scalar; otherwise recurse
+        # so extension tuples containing mutable children remain isolated.
+        if all(type(item) in _IMMUTABLE_LINEAGE_SCALARS for item in value):
+            return value
+        return tuple(_clone_lineage_value(item) for item in value)
+    if value_type is list:
+        # Lists themselves must never alias, but the overwhelmingly common clip
+        # coordinate lists contain only immutable scalars and can be copied in C.
+        if all(type(item) in _IMMUTABLE_LINEAGE_SCALARS for item in value):
+            return list(value)
+        return [_clone_lineage_value(item) for item in value]
+    if value_type is dict:
+        if all(type(item) in _IMMUTABLE_LINEAGE_SCALARS for item in value.values()):
+            return dict(value)
+        return {key: _clone_lineage_value(item) for key, item in value.items()}
+    if value_type is set:
+        if all(type(item) in _IMMUTABLE_LINEAGE_SCALARS for item in value):
+            return set(value)
+        return {_clone_lineage_value(item) for item in value}
+    # Preserve subclass / extension semantics exactly as the defensive fallback.
+    if isinstance(value, _IMMUTABLE_LINEAGE_SCALARS):
+        return value
+    if isinstance(value, tuple):
+        return tuple(_clone_lineage_value(item) for item in value)
+    if isinstance(value, list):
+        return [_clone_lineage_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _clone_lineage_value(item) for key, item in value.items()}
+    if isinstance(value, set):
+        return {_clone_lineage_value(item) for item in value}
+    return copy.deepcopy(value)
+
+
+def _clone_source_record(record: Mapping[str, Any]) -> Dict[str, Any]:
+    return {
+        key: _clone_lineage_value(value)
+        for key, value in record.items()
+    }
+
+
 def isolated_lineage(payload: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
-    return copy.deepcopy(payload) if payload else empty_lineage()
+    if not payload:
+        return empty_lineage()
+    return {
+        "source_primitive_ids": [
+            _clone_lineage_value(value)
+            for value in (payload.get("source_primitive_ids") or ())
+        ],
+        "source_records": [
+            _clone_source_record(record)
+            for record in (payload.get("source_records") or ())
+        ],
+        "attribute_status": dict(payload.get("attribute_status") or {}),
+        "attribute_conflicts": [
+            _clone_lineage_value(value)
+            for value in (payload.get("attribute_conflicts") or ())
+        ],
+    }
 
 
 def isolate_graph_lineage(graph: Mapping[str, Any]) -> Dict[str, Any]:
@@ -409,6 +497,7 @@ def attach_lineage_to_split_fragments(
     *,
     id_prefix: str = "split",
     primary_source_indexes: Optional[Sequence[int]] = None,
+    isolate_lineage: bool = True,
 ) -> List[Dict[str, Any]]:
     """Rebuild the historical split-dict shape plus additive plural lineage.
 
@@ -421,13 +510,31 @@ def attach_lineage_to_split_fragments(
         raise ValueError("primary_source_indexes must align 1:1 with split_pairs")
 
     buckets: Dict[Tuple[Any, ...], List[Mapping[str, Any]]] = {}
+    source_bounds: Dict[int, Tuple[float, float, float, float]] = {}
     single_source_lineage: Dict[int, Dict[str, Any]] = {}
+    multi_source_lineage: Dict[Tuple[int, ...], Dict[str, Any]] = {}
     for segment in source_segments:
         buckets.setdefault(source_line_bucket(segment), []).append(segment)
+        sx1 = float(segment["x1"])
+        sy1 = float(segment["y1"])
+        sx2 = float(segment["x2"])
+        sy2 = float(segment["y2"])
+        source_bounds[id(segment)] = (
+            min(sx1, sx2),
+            min(sy1, sy2),
+            max(sx1, sx2),
+            max(sy1, sy2),
+        )
 
     out: List[Dict[str, Any]] = []
     for idx, pair in enumerate(split_pairs):
         p1, p2 = pair
+        fragment_bounds = (
+            min(float(p1[0]), float(p2[0])),
+            min(float(p1[1]), float(p2[1])),
+            max(float(p1[0]), float(p2[0])),
+            max(float(p1[1]), float(p2[1])),
+        )
         seen_candidates: set[int] = set()
         candidates: List[Mapping[str, Any]] = []
         if primary_source_indexes is not None:
@@ -444,6 +551,20 @@ def attach_lineage_to_split_fragments(
                 if marker in seen_candidates:
                     continue
                 seen_candidates.add(marker)
+                sx0, sy0, sx1, sy1 = source_bounds[marker]
+                fx0, fy0, fx1, fy1 = fragment_bounds
+                # Necessary condition only: every true segment parent must
+                # contain both fragment endpoints, therefore its AABB must
+                # contain the fragment AABB within the exact containment
+                # tolerance.  The authoritative geometric predicate below is
+                # unchanged and still decides every surviving candidate.
+                if (
+                    sx0 - _CONTAINMENT_TOL_PT > fx0
+                    or sy0 - _CONTAINMENT_TOL_PT > fy0
+                    or sx1 + _CONTAINMENT_TOL_PT < fx1
+                    or sy1 + _CONTAINMENT_TOL_PT < fy1
+                ):
+                    continue
                 candidates.append(candidate)
         parents = sources_for_fragment(pair, candidates)
         if not parents:
@@ -457,9 +578,18 @@ def attach_lineage_to_split_fragments(
             if cached is None:
                 cached = lineage_from_source_segments((parents[0],))
                 single_source_lineage[marker] = cached
-            lineage = isolated_lineage(cached)
+            lineage = isolated_lineage(cached) if isolate_lineage else cached
         else:
-            lineage = isolated_lineage(lineage_from_source_segments(parents))
+            parent_key = tuple(sorted(id(parent) for parent in parents))
+            derived_lineage = multi_source_lineage.get(parent_key)
+            if derived_lineage is None:
+                derived_lineage = lineage_from_source_segments(parents)
+                multi_source_lineage[parent_key] = derived_lineage
+            lineage = (
+                isolated_lineage(derived_lineage)
+                if isolate_lineage
+                else derived_lineage
+            )
         fragment = {
             "id": f"{id_prefix}_{idx}",
             "x1": p1[0],

@@ -35,20 +35,8 @@ def _ingest(document_id: str) -> tuple[SourceVisibilityProducer, str]:
     return source, published.revision.revision_id
 
 
-def test_semantic_producer_reuses_snapshot_bound_physical_authority(
-    monkeypatch,
-) -> None:
+def test_semantic_producer_reuses_snapshot_bound_physical_authority() -> None:
     source, revision_id = _ingest("semantic-reuse")
-    original = semantic.PhysicalOpeningAuthority
-    constructions = 0
-
-    def counted(authority):
-        nonlocal constructions
-        constructions += 1
-        return original(authority)
-
-    monkeypatch.setattr(semantic, "PhysicalOpeningAuthority", counted)
-
     producer = semantic.SemanticOpeningEnumerationProducer.from_source_visibility_producer(
         source
     )
@@ -71,7 +59,10 @@ def test_semantic_producer_reuses_snapshot_bound_physical_authority(
     assert first is not None
     assert page_one is not None
     assert page_two is not None
-    assert constructions == 1
+    assert len(producer._physical_opening_authorities) == 1
+    shared = next(iter(producer._physical_opening_authorities.values()))
+    assert shared is source.physical_opening_authority()
+    assert shared is source._physical_opening_authority_cache
 
 
 def test_semantic_scope_result_is_returned_from_exact_snapshot_cache(
@@ -138,3 +129,75 @@ def test_semantic_result_cache_does_not_hide_scope_equivocation() -> None:
             decision_scope_id="shared-scope-id",
             page_ids=("2",),
         )
+
+
+def test_same_snapshot_pages_reuse_derivation_across_decision_scopes(
+    monkeypatch,
+) -> None:
+    source, revision_id = _ingest("semantic-cross-scope-cache")
+    producer = semantic.SemanticOpeningEnumerationProducer.from_source_visibility_producer(
+        source
+    )
+    first = producer.publish_page_scope(
+        revision_id=revision_id,
+        decision_scope_id="global-wrapper-scope",
+        page_ids=("1", "2"),
+    )
+    assert first.record is not None
+
+    def fail_if_recomputed(*args, **kwargs):
+        raise AssertionError("physical opening derivation was recomputed across scopes")
+
+    monkeypatch.setattr(
+        semantic.PhysicalOpeningAuthority,
+        "classify_disposition",
+        fail_if_recomputed,
+    )
+    monkeypatch.setattr(
+        semantic.PhysicalOpeningAuthority,
+        "assess_visible_candidate_closure",
+        fail_if_recomputed,
+    )
+
+    second = producer.publish_page_scope(
+        revision_id=revision_id,
+        decision_scope_id="page-owned-wall-scope",
+        page_ids=("1", "2"),
+    )
+    assert second.record is not None
+    assert second.status == first.status
+    assert second.reason_codes == first.reason_codes
+    assert second.record.decision_scope_id == "page-owned-wall-scope"
+    assert second.record.record_id != first.record.record_id
+    assert (
+        second.record.visible_observation_ids
+        == first.record.visible_observation_ids
+    )
+    assert (
+        second.record.physical_opening_record_ids
+        == first.record.physical_opening_record_ids
+    )
+    assert (
+        second.record.representative_observation_ids
+        == first.record.representative_observation_ids
+    )
+    assert (
+        second.record.opening_support_observation_ids
+        == first.record.opening_support_observation_ids
+    )
+    assert (
+        second.record.residual_visible_observation_ids
+        == first.record.residual_visible_observation_ids
+    )
+    assert (
+        second.record.conflict_observation_ids
+        == first.record.conflict_observation_ids
+    )
+    assert (
+        second.record.structural_enumeration_complete
+        == first.record.structural_enumeration_complete
+    )
+    assert (
+        second.record.physical_opening_universe_complete
+        == first.record.physical_opening_universe_complete
+    )
