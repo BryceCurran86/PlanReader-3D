@@ -555,6 +555,23 @@
         "A140:figured_dimensions:2935x1620",
         "A110:physical_room_geometry:entry_D09"
       ]
+    },
+    {
+      "object_ref": "maryborough:surface:floor:pwd",
+      "physical_kind": "floor_finish_surface",
+      "room": "PWD",
+      "entry_door_tag": "D13",
+      "finish_mark": "FT2",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 7.854,
+      "figured_dimensions_mm": [
+        3570,
+        2200
+      ],
+      "source_locations": [
+        "A502:PWD_plan:3570x2200:FT2",
+        "A140:floor_finishes:PWD:FT2"
+      ]
     }
   ],
   "wc_shower_floor_surface_universe_complete": true,
@@ -614,6 +631,23 @@
         "A120:RCP:WC_SHOWER_south:2400_WFPB",
         "A140:figured_dimensions:2935x1620",
         "A110:physical_room_geometry:entry_D09"
+      ]
+    },
+    {
+      "object_ref": "maryborough:surface:ceiling:pwd",
+      "physical_kind": "ceiling_finish_surface",
+      "room": "PWD",
+      "finish_mark": "WFPB",
+      "ceiling_height_mm": 2400,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 7.854,
+      "footprint_dimensions_mm": [
+        3570,
+        2200
+      ],
+      "source_locations": [
+        "A120:RCP:PWD:2400_WFPB",
+        "A502:PWD_plan:3570x2200"
       ]
     }
   ],

@@ -16,8 +16,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "e5b10be96ff3a46de3a2cc4d3b0a292d009ba38df2e0a9e06841d131009b3fe5",
-      "size_bytes": 14608,
+      "sha256": "a1ee60cc7876a269a29707060ad72a464d3c7fec106bf41316d33be9bd7a69df",
+      "size_bytes": 16268,
       "page_count": null
     }
   ],
@@ -335,6 +335,48 @@
         "A120:RCP:WC_SHOWER_south:2400_WFPB",
         "A140:figured_dimensions:WC_SHOWER_2935x1620",
         "A110:physical_room_geometry:WC_SHOWER_south:entry_D09"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-pwd-ft2-floor-area",
+      "description": "PWD FT2 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 7.854,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:pwd"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A502:PWD_plan:3570x2200:FT2",
+        "A140:floor_finishes:PWD:FT2_and_matching_room_geometry"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-pwd-wfpb-ceiling-area",
+      "description": "PWD WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 7.854,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:pwd"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:PWD:2400_WFPB",
+        "A502:PWD_plan:3570x2200"
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"

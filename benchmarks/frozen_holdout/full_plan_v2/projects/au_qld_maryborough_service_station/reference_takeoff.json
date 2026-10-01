@@ -328,6 +328,48 @@
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-pwd-ft2-floor-area",
+      "description": "PWD FT2 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 7.854,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:pwd"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A502:PWD_plan:3570x2200:FT2",
+        "A140:floor_finishes:PWD:FT2_and_matching_room_geometry"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-pwd-wfpb-ceiling-area",
+      "description": "PWD WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 7.854,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:pwd"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:PWD:2400_WFPB",
+        "A502:PWD_plan:3570x2200"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "door_universe_reconciliation": {
@@ -476,5 +518,18 @@
       "expected_area_m2": 4.7547,
       "agreement": "PASS"
     }
-  ]
+  ],
+  "pwd_geometry_checks": {
+    "floor_surface_ref": "maryborough:surface:floor:pwd",
+    "ceiling_surface_ref": "maryborough:surface:ceiling:pwd",
+    "a502_figured_mm": [
+      3570,
+      2200
+    ],
+    "area_m2": 7.854,
+    "a140_floor_finish": "FT2",
+    "a120_ceiling_finish": "WFPB",
+    "a120_ceiling_height_mm": 2400,
+    "agreement": "PASS"
+  }
 }
