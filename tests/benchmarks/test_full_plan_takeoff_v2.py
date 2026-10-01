@@ -350,6 +350,75 @@ def test_five_verified_projects_require_run_integrity_before_publish():
     assert published.coverage_accuracy == pytest.approx(1.0)
 
 
+def test_lineage_conflict_blocks_suite_headline():
+    manifests = tuple(_manifest_for(f"p{i}", PROJECT_VERIFIED) for i in range(1, 6))
+    produced_by_project = {
+        f"p{i}": (
+            ProducedTakeoffItemV2(
+                quantity_id=f"q{i}",
+                trade_category="painting",
+                value=10.0,
+                unit="m2",
+                object_refs=(f"p{i}-surface",),
+                lineage_ok=i != 3,
+            ),
+        )
+        for i in range(1, 6)
+    }
+    result = evaluate_suite_v2(
+        manifests,
+        produced_by_project,
+        evaluated_source_sha256s_by_project={
+            f"p{i}": (SHA,) for i in range(1, 6)
+        },
+        reconciliation_complete_by_project={
+            f"p{i}": True for i in range(1, 6)
+        },
+    )
+    assert result.publication_status == "UNPUBLISHED"
+    assert result.coverage_accuracy is None
+    assert "p3:lineage_conflict" in result.reason_codes
+
+
+def test_unexpected_project_output_blocks_suite_headline_and_counts_extra():
+    manifests = tuple(_manifest_for(f"p{i}", PROJECT_VERIFIED) for i in range(1, 6))
+    produced_by_project = {
+        f"p{i}": (
+            ProducedTakeoffItemV2(
+                quantity_id=f"q{i}",
+                trade_category="painting",
+                value=10.0,
+                unit="m2",
+                object_refs=(f"p{i}-surface",),
+            ),
+        )
+        for i in range(1, 6)
+    }
+    produced_by_project["unknown-project"] = (
+        ProducedTakeoffItemV2(
+            quantity_id="q-unknown",
+            trade_category="painting",
+            value=5.0,
+            unit="m2",
+            object_refs=("unknown-surface",),
+        ),
+    )
+    result = evaluate_suite_v2(
+        manifests,
+        produced_by_project,
+        evaluated_source_sha256s_by_project={
+            f"p{i}": (SHA,) for i in range(1, 6)
+        },
+        reconciliation_complete_by_project={
+            f"p{i}": True for i in range(1, 6)
+        },
+    )
+    assert result.publication_status == "UNPUBLISHED"
+    assert result.coverage_accuracy is None
+    assert result.unsupported_extra == 1
+    assert "unknown-project:unexpected_produced_project" in result.reason_codes
+
+
 def test_project_ids_must_be_unique():
     manifests = (
         _manifest_for("p1", PROJECT_INCOMPLETE),
