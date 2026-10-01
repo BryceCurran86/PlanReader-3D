@@ -1259,3 +1259,193 @@ def test_canonical_opening_trade_derivation_and_takeoff_publishing():
     assert trim_win["unit"] == "lm"
 
 
+def test_canonical_opening_enrichment_from_detail_and_schedule_authorities():
+    """Verifies opening detail and schedule provenance enrichment and bridge interoperability."""
+    from pb_opening_schedule_v171 import ScheduleEntry
+    from pb_opening_detail_definition_authority import OpeningDetailDefinitionRecord, _RECORD_SEAL
+    from pb_migration_contracts import EvidenceResolutionStatus
+    from pb_schedule_opening_instance_binding_authority import ScheduleOpeningInstanceBindingRecord
+
+    # 1. Direct construction and head/sill height inference
+    op = CanonicalOpening(
+        id="OP-001",
+        mark="D01",
+        opening_type="DOOR",
+        sill_height_m=0.0,
+        height_m=2.10,
+        width_m=0.82,
+        host_wall_id="W-EAST",
+        deduction_authority=True,
+    )
+    assert op.head_height_m == 2.10
+
+    op2 = CanonicalOpening(
+        id="OP-002",
+        mark="W01",
+        opening_type="WINDOW",
+        head_height_m=2.10,
+        height_m=1.20,
+        width_m=1.80,
+        host_wall_id="W-EAST",
+    )
+    assert op2.sill_height_m == 0.90
+
+    # 2. Enrich with Detail Definition Record
+    detail_rec = OpeningDetailDefinitionRecord(
+        record_id="det_rec_42",
+        semantic_identity_id="sem_w_1800x1200",
+        document_id="doc_1",
+        revision_id="rev_1",
+        source_sha256="abc",
+        snapshot_id="snap_1",
+        page_id="5",
+        source_partition_id="part_1",
+        sequence_start=0,
+        sequence_end=2,
+        source_bbox=(10, 20, 30, 40),
+        family="window",
+        subtype="awning",
+        material="aluminium",
+        width_mm=1800,
+        height_mm=1200,
+        dimension_basis="detail_unspecified",
+        source_observation_ids=("obs_w", "obs_h"),
+        required_observation_ids=(),
+        word_evidence=(),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=(),
+        _seal=_RECORD_SEAL,
+    )
+    op_raw = CanonicalOpening(id="OP-DET", mark="W02", sill_height_m=0.90)
+    op_raw.enrich_with_detail_definition(detail_rec)
+    assert op_raw.width_m == 1.80
+    assert op_raw.height_m == 1.20
+    assert op_raw.head_height_m == 2.10
+    assert op_raw.opening_classification == "awning"
+    assert op_raw.substrate == "aluminium"
+    assert op_raw.detail_record_id == "det_rec_42"
+    assert op_raw.detail_semantic_identity_id == "sem_w_1800x1200"
+    assert op_raw.detail_page_id == "5"
+    assert "obs_w" in op_raw.source_evidence_ids
+
+    # 3. Enrich with Schedule Entry
+    sched_entry = ScheduleEntry(
+        type_mark="D02",
+        width_mm=920,
+        height_mm=2040,
+        description="Solid Core Timber Door",
+        count=1,
+        count_explicit=True,
+        page_no=3,
+        bbox=(0, 0, 10, 10),
+        parse_source="schedule_page_3",
+        dimension_basis="schedule_explicit",
+    )
+    op_sched = CanonicalOpening(id="OP-SCHED", sill_height_m=0.0)
+    op_sched.enrich_with_schedule_entry(sched_entry)
+    assert op_sched.mark == "D02"
+    assert op_sched.width_m == 0.92
+    assert op_sched.height_m == 2.04
+    assert op_sched.head_height_m == 2.04
+    assert op_sched.opening_classification == "Solid Core Timber Door"
+    assert op_sched.schedule_page_id == "3"
+
+    # 4. Enrich with Schedule Binding Record
+    binding_rec = ScheduleOpeningInstanceBindingRecord(
+        record_id="bind_01",
+        document_id="doc_1",
+        revision_id="rev_1",
+        source_sha256="abc",
+        snapshot_id="snap_1",
+        page_id="1",
+        decision_scope_id="scope_1",
+        opening_record_id="op_rec_01",
+        tag_observation_id="tag_obs_01",
+        tag_mark="W03",
+        schedule_page_id="4",
+        schedule_row_observation_ids=("row_obs_01",),
+        schedule_row_type_mark="W03",
+        schedule_row_width_mm=1500,
+        schedule_row_height_mm=1000,
+        schedule_row_count=1,
+        schedule_row_count_explicit=True,
+    )
+    op_bind = CanonicalOpening(id="OP-BIND", sill_height_m=1.0)
+    op_bind.enrich_with_schedule_binding(binding_rec)
+    assert op_bind.mark == "W03"
+    assert op_bind.width_m == 1.50
+    assert op_bind.height_m == 1.00
+    assert op_bind.head_height_m == 2.00
+    assert op_bind.schedule_page_id == "4"
+    assert "tag_obs_01" in op_bind.source_evidence_ids
+    assert "row_obs_01" in op_bind.source_evidence_ids
+
+    # 5. ConsolidatedPhysicalOpening bridge roundtrip
+    c_op = op_raw.to_consolidated()
+    assert c_op.opening_id == "OP-DET"
+    assert c_op.type_mark == "W02"
+    assert c_op.width_m == 1.80
+    assert c_op.height_m == 1.20
+    assert c_op.area_m2 == 2.16
+    assert c_op.detail_record_id == "det_rec_42"
+
+    restored_op = CanonicalOpening.from_consolidated(c_op, level_id="LVL-01", sill_height_m=0.90)
+    assert restored_op.id == "OP-DET"
+    assert restored_op.mark == "W02"
+    assert restored_op.width_m == 1.80
+    assert restored_op.height_m == 1.20
+    assert restored_op.sill_height_m == 0.90
+    assert restored_op.head_height_m == 2.10
+    assert restored_op.detail_record_id == "det_rec_42"
+    assert restored_op.detail_page_id == "5"
+
+    # 6. Serialization / deserialization roundtrip
+    d = op_raw.to_dict()
+    assert d["head_height_m"] == 2.10
+    assert d["detail_record_id"] == "det_rec_42"
+    assert d["detail_page_id"] == "5"
+
+    from_d = CanonicalOpening.from_dict(d)
+    assert from_d.head_height_m == 2.10
+    assert from_d.detail_record_id == "det_rec_42"
+    assert from_d.detail_page_id == "5"
+    assert from_d.width_m == 1.80
+    assert from_d.height_m == 1.20
+
+
+def test_takeoff_rows_preserve_schedule_and_detail_provenance():
+    """Verifies that published takeoff rows preserve exact opening marks, schedule page, and detail links."""
+    wall = CanonicalWall(
+        id="W-TEST",
+        start_point=Vector2D(0, 0),
+        end_point=Vector2D(10, 0),
+        height_m=2.7,
+        is_external=True,
+    )
+    op = CanonicalOpening(
+        id="OP-SCHED-DET",
+        mark="W-05",
+        opening_type="WINDOW",
+        opening_classification="Double Glazed Awning",
+        width_m=2.0,
+        height_m=1.2,
+        sill_height_m=0.9,
+        head_height_m=2.1,
+        schedule_page_id="7",
+        detail_record_id="det_awning_2000",
+        deduction_authority=True,
+    )
+    wall.openings.append(op)
+    proj = CanonicalProject(buildings=[CanonicalBuilding(levels=[CanonicalLevel(walls=[wall])])])
+    rows = proj.generate_takeoff_rows(workspace_id=12)
+
+    op_row = next(r for r in rows if r.get("row_role") == "window")
+    assert op_row["source_page"] == "7"
+    assert "sched_p7" in op_row["source_reference"]
+    assert "det:det_awning_2000" in op_row["source_reference"]
+    assert "Schedule page 7." in op_row["notes"]
+    assert "Detail record det_awning_2000." in op_row["notes"]
+    assert "Sill: 0.90m." in op_row["notes"]
+    assert "Head: 2.10m." in op_row["notes"]
+
+

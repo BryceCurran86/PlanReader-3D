@@ -1857,6 +1857,263 @@ class CustomerRuntimeNetWallParityTests(unittest.TestCase):
             self.assertIn("createOpeningMesh", html_output)
             self.assertIn("createPolygonMesh", html_output)
 
+    def test_ag06_opening_schedule_and_detail_to_canonical_takeoff_3d_viewer_parity(self) -> None:
+        """AG-06 parity test: Opening detail & schedule integration through full customer chain.
+
+        SOURCE EVIDENCE (Plan + Schedule)
+        -> PHYSICAL OPENING (Hosted on Wall)
+        -> CANONICAL OPENING (Enriched with schedule mark, WxH, head height, detail record)
+        -> HOST WALL (Deducted once)
+        -> QUANTITY (Supply 'No.' + Architrave/Reveal 'lm')
+        -> DATABASE (takeoff_rows with exact schedule page and detail reference)
+        -> 3D BIM VIEWER (Payload & sidebar inspection)
+        """
+        import fitz
+        from pb_canonical_building import (
+            CanonicalProject,
+            CanonicalBuilding,
+            CanonicalLevel,
+            CanonicalWall,
+            CanonicalOpening,
+            Vector2D,
+        )
+        from pb_canonical_persistence import (
+            save_workspace_canonical_model,
+            load_workspace_canonical_model,
+        )
+        from pb_bim_viewer import project_to_viewer_payload, generate_bim_viewer_html
+        from pb_opening_schedule_v171 import ScheduleEntry
+        from pb_opening_detail_definition_authority import OpeningDetailDefinitionRecord, _RECORD_SEAL
+        from pb_migration_contracts import EvidenceResolutionStatus
+
+        with _test_workspace() as ws:
+            # 1. Multi-page customer PDF: Page 1 = Floor Plan, Page 2 = Door & Window Schedule
+            doc = fitz.open()
+            # Page 1: Floor Plan
+            p1 = doc.new_page(width=842, height=595)
+            p1.draw_rect(fitz.Rect(100, 100, 500, 400), color=(0, 0, 0), width=2)
+            p1.insert_text(fitz.Point(120, 120), "GROUND FLOOR PLAN SCALE 1:100", fontsize=14)
+            p1.insert_text(fitz.Point(200, 100), "W01", fontsize=10)
+            p1.insert_text(fitz.Point(350, 400), "D01", fontsize=10)
+
+            # Page 2: Schedule
+            p2 = doc.new_page(width=842, height=595)
+            p2.insert_text(fitz.Point(100, 80), "DOOR AND WINDOW SCHEDULE", fontsize=16)
+            p2.insert_text(fitz.Point(100, 120), "MARK  TYPE        WIDTH  HEIGHT  DESCRIPTION", fontsize=11)
+            p2.insert_text(fitz.Point(100, 140), "W01   WINDOW      1800   1200    Aluminium Sliding Window", fontsize=10)
+            p2.insert_text(fitz.Point(100, 160), "D01   DOOR        820    2040    Internal Timber Door", fontsize=10)
+
+            pdf_path = ws.root / "residence_with_schedule.pdf"
+            doc.save(str(pdf_path))
+            doc.close()
+
+            ws.add_document(pdf_path)
+            ws.add_page(1, "floor_plan", "Ground Floor Plan", "GROUND FLOOR PLAN SCALE 1:100 W01 D01")
+            ws.add_page(2, "schedule", "Door and Window Schedule", "DOOR AND WINDOW SCHEDULE W01 1800 1200 D01 820 2040")
+
+            # 2. Schedule definitions from extraction
+            sched_w01 = ScheduleEntry(
+                type_mark="W01",
+                width_mm=1800,
+                height_mm=1200,
+                description="Aluminium Sliding Window",
+                count=1,
+                count_explicit=True,
+                page_no=2,
+                bbox=(100, 140, 400, 155),
+                parse_source="schedule_page_2",
+                dimension_basis="schedule_explicit",
+            )
+            sched_d01 = ScheduleEntry(
+                type_mark="D01",
+                width_mm=820,
+                height_mm=2040,
+                description="Internal Timber Door",
+                count=1,
+                count_explicit=True,
+                page_no=2,
+                bbox=(100, 160, 400, 175),
+                parse_source="schedule_page_2",
+                dimension_basis="schedule_explicit",
+            )
+
+            # Detail definition record for W01
+            detail_rec_w01 = OpeningDetailDefinitionRecord(
+                record_id="det_win_w01_sliding",
+                semantic_identity_id="sem_w01_1800x1200",
+                document_id=str(pdf_path.name),
+                revision_id="rev_1",
+                source_sha256="abc12345",
+                snapshot_id="snap_01",
+                page_id="2",
+                source_partition_id="part_sched",
+                sequence_start=10,
+                sequence_end=25,
+                source_bbox=(100, 140, 400, 155),
+                family="window",
+                subtype="sliding",
+                material="aluminium",
+                width_mm=1800,
+                height_mm=1200,
+                dimension_basis="detail_unspecified",
+                source_observation_ids=("obs_w01_dim",),
+                required_observation_ids=(),
+                word_evidence=(),
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=(),
+                _seal=_RECORD_SEAL,
+            )
+
+            # 3. Build Canonical Project with verified physical openings
+            project = CanonicalProject(id="PRJ-AG06", name="Customer Residence AG-06")
+            building = CanonicalBuilding(id="BLD-01", name="Main House")
+            level = CanonicalLevel(id="LVL-01", name="Ground Floor", level_index=0, elevation_m=0.0, height_m=2.7)
+
+            # External North Wall hosting W01
+            wall_north = CanonicalWall(
+                id="W-NORTH",
+                name="North External Wall",
+                start_point=Vector2D(0.0, 0.0),
+                end_point=Vector2D(10.0, 0.0),
+                height_m=2.7,
+                thickness_m=0.23,
+                is_external=True,
+                substrate="Brick veneer",
+            )
+            op_w01 = CanonicalOpening(
+                id="OP-W01",
+                sill_height_m=0.90,
+                offset_along_wall_m=3.0,
+                host_wall_id="W-NORTH",
+                plan_page_id="1",
+                deduction_authority=True,
+            )
+            op_w01.enrich_with_schedule_entry(sched_w01)
+            op_w01.enrich_with_detail_definition(detail_rec_w01)
+            op_w01.derive_trade_quantities(include_ancillary=True)
+            wall_north.openings.append(op_w01)
+
+            # Internal Wall hosting D01
+            wall_internal = CanonicalWall(
+                id="W-INT",
+                name="Internal Partition Wall",
+                start_point=Vector2D(0.0, 0.0),
+                end_point=Vector2D(0.0, 5.0),
+                height_m=2.7,
+                thickness_m=0.09,
+                is_external=False,
+                substrate="Plasterboard on stud",
+            )
+            op_d01 = CanonicalOpening(
+                id="OP-D01",
+                sill_height_m=0.0,
+                offset_along_wall_m=1.5,
+                host_wall_id="W-INT",
+                plan_page_id="1",
+                deduction_authority=True,
+            )
+            op_d01.enrich_with_schedule_entry(sched_d01)
+            op_d01.derive_trade_quantities(include_ancillary=True)
+            wall_internal.openings.append(op_d01)
+
+            level.walls.extend([wall_north, wall_internal])
+            building.levels.append(level)
+            project.buildings.append(building)
+
+            # 4. Topology and constructability check
+            project.recompute_relationships()
+            issues = project.check_constructability()
+            errors = [i for i in issues if i.severity == "ERROR"]
+            self.assertEqual(len(errors), 0)
+
+            # Verify opening properties before persistence
+            self.assertEqual(op_w01.mark, "W01")
+            self.assertEqual(op_w01.width_m, 1.80)
+            self.assertEqual(op_w01.height_m, 1.20)
+            self.assertEqual(op_w01.sill_height_m, 0.90)
+            self.assertEqual(op_w01.head_height_m, 2.10)
+            self.assertEqual(op_w01.schedule_page_id, "2")
+            self.assertEqual(op_w01.detail_record_id, "det_win_w01_sliding")
+            self.assertIn("obs_w01_dim", op_w01.source_evidence_ids)
+
+            self.assertEqual(op_d01.mark, "D01")
+            self.assertEqual(op_d01.width_m, 0.82)
+            self.assertEqual(op_d01.height_m, 2.04)
+            self.assertEqual(op_d01.head_height_m, 2.04)
+            self.assertEqual(op_d01.schedule_page_id, "2")
+
+            # 5. Save to database and load back
+            save_workspace_canonical_model(
+                ws.app,
+                1,
+                project,
+                snapshot={"source_pdf": str(pdf_path), "registered_walls": []},
+            )
+            ok, loaded_project, _, _ = load_workspace_canonical_model(ws.app, 1)
+            self.assertTrue(ok)
+            self.assertIsNotNone(loaded_project)
+
+            loaded_w01 = next(o for o in loaded_project.all_openings() if o.mark == "W01")
+            self.assertEqual(loaded_w01.head_height_m, 2.10)
+            self.assertEqual(loaded_w01.schedule_page_id, "2")
+            self.assertEqual(loaded_w01.detail_record_id, "det_win_w01_sliding")
+            self.assertIn("obs_w01_dim", loaded_w01.source_evidence_ids)
+
+            # 6. Publish takeoff rows to database
+            from pb_canonical_building import publish_canonical_model_to_takeoff
+            published = publish_canonical_model_to_takeoff(ws.app, 1, loaded_project)
+            self.assertGreater(published, 0)
+
+            db_rows = [dict(r) for r in ws.app.lquery("SELECT * FROM takeoff_rows WHERE workspace_id=1")]
+            
+            # Check window primary row
+            win_row = next(r for r in db_rows if r.get("row_role") == "window")
+            self.assertEqual(win_row["quantity"], 1.0)
+            self.assertEqual(win_row["unit"], "No.")
+            self.assertEqual(win_row["source_page"], "2")
+            self.assertIn("sched_p2", win_row["source_reference"])
+            self.assertIn("det:det_win_w01_sliding", win_row["source_reference"])
+            self.assertIn("Head: 2.10m.", win_row["notes"])
+            self.assertIn("Schedule page 2.", win_row["notes"])
+
+            # Check window reveal trim row
+            win_trim_row = next(r for r in db_rows if r.get("row_role") == "opening_trim" and "W01" in str(r.get("notes") or ""))
+            self.assertEqual(win_trim_row["unit"], "lm")
+            self.assertAlmostEqual(win_trim_row["quantity"], 6.0, places=2)  # 2 * (1.8 + 1.2)
+            self.assertEqual(win_trim_row["source_page"], "2")
+
+            # Check door primary row
+            door_row = next(r for r in db_rows if r.get("row_role") == "door")
+            self.assertEqual(door_row["quantity"], 1.0)
+            self.assertEqual(door_row["unit"], "No.")
+            self.assertEqual(door_row["source_page"], "2")
+            self.assertIn("sched_p2", door_row["source_reference"])
+
+            # Check door architrave trim row
+            door_trim_row = next(r for r in db_rows if r.get("row_role") == "opening_trim" and "D01" in str(r.get("notes") or ""))
+            self.assertEqual(door_trim_row["unit"], "lm")
+            self.assertAlmostEqual(door_trim_row["quantity"], 4.90, places=2)  # 2 * 2.04 + 0.82
+
+            # Check wall deduction: North wall gross 10 * 2.7 = 27.0 m2, opening 1.8 * 1.2 = 2.16 m2 -> net 24.84 m2
+            wall_row = next(r for r in db_rows if r.get("row_role") == "external_wall")
+            self.assertAlmostEqual(wall_row["quantity"], 24.84, places=2)
+
+            # 7. Check 3D Viewer Payload
+            viewer_payload = project_to_viewer_payload(loaded_project)
+            v_openings = [o for o in viewer_payload["objects"] if o["type"] in ("DOOR", "WINDOW")]
+            self.assertEqual(len(v_openings), 2)
+            v_w01 = next(o for o in v_openings if o["mark"] == "W01")
+            self.assertEqual(v_w01["head_height_m"], 2.10)
+            self.assertEqual(v_w01["schedule_page_id"], "2")
+            self.assertEqual(v_w01["detail_record_id"], "det_win_w01_sliding")
+            self.assertIn("obs_w01_dim", v_w01["source_evidence_ids"])
+            self.assertEqual(len(v_w01["derived_quantities"]), 3)
+
+            html = generate_bim_viewer_html(viewer_payload)
+            self.assertIn("Host Offset", html)
+            self.assertIn("Head Height", html)
+            self.assertIn("Schedule Page", html)
+
 
 if __name__ == "__main__":
     unittest.main()

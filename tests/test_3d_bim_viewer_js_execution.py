@@ -43,6 +43,8 @@ def test_phase5m_js_code_structure():
     assert "if (!op || op.is_host_attached === false || !op.wall_id) return null;" in html
     for state in ("wrong_host", "wrong_level", "invalid_geometry", "conflict_overlap", "evidence_only"):
         assert state in html
+    for opening_field in ("Mark / Tag", "Classification", "Sill Height", "Head Height", "Host Offset", "Schedule Page", "Detail Record"):
+        assert opening_field in html
 
 
 def test_phase5m_js_runtime_executes_polygon_and_opening_functions(tmp_path):

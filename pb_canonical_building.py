@@ -476,6 +476,14 @@ class CanonicalOpening(CanonicalElement):
     mark: Optional[str] = None
     host_wall_id: Optional[str] = None
     opening_classification: Optional[str] = None
+    head_height_m: Optional[float] = None
+    schedule_page_id: Optional[str] = None
+    detail_page_id: Optional[str] = None
+    detail_record_id: Optional[str] = None
+    detail_semantic_identity_id: Optional[str] = None
+    plan_page_id: Optional[str] = None
+    elevation_page_id: Optional[str] = None
+    source_evidence_ids: List[str] = field(default_factory=list)
     derived_quantities: List[QuantityFormulaBinding] = field(default_factory=list)
     is_user_edited: bool = False
     revision_id: Optional[str] = None
@@ -492,6 +500,12 @@ class CanonicalOpening(CanonicalElement):
             self.object_type = ObjectType.WINDOW
         else:
             self.object_type = ObjectType.OPENING
+
+        # Infer head height from sill height + height if unrecorded, or vice versa
+        if self.head_height_m is None and self.sill_height_m is not None and self.height_m is not None:
+            self.head_height_m = round(self.sill_height_m + self.height_m, 4)
+        elif self.sill_height_m is None and self.head_height_m is not None and self.height_m is not None:
+            self.sill_height_m = max(0.0, round(self.head_height_m - self.height_m, 4))
 
     def derive_trade_quantities(self, include_ancillary: bool = False) -> List[QuantityFormulaBinding]:
         """Derives primary unit and optional ancillary trade quantities from this physical opening."""
@@ -551,6 +565,175 @@ class CanonicalOpening(CanonicalElement):
         self.derived_quantities = bindings
         return bindings
 
+    def enrich_with_detail_definition(self, record: Any) -> None:
+        """Enriches this canonical opening from an OpeningDetailDefinitionRecord (AG-06)."""
+        if getattr(record, "width_mm", None) is not None:
+            self.width_m = round(float(record.width_mm) / 1000.0, 4)
+        if getattr(record, "height_mm", None) is not None:
+            self.height_m = round(float(record.height_mm) / 1000.0, 4)
+        if getattr(record, "family", None):
+            fam = str(record.family).lower()
+            if fam == "door":
+                self.object_type = ObjectType.DOOR
+                self.opening_type = "DOOR"
+            elif fam == "window":
+                self.object_type = ObjectType.WINDOW
+                self.opening_type = "WINDOW"
+        if getattr(record, "subtype", None):
+            self.opening_classification = str(record.subtype)
+        if getattr(record, "material", None):
+            self.substrate = str(record.material)
+        if getattr(record, "record_id", None):
+            self.detail_record_id = str(record.record_id)
+        if getattr(record, "semantic_identity_id", None):
+            self.detail_semantic_identity_id = str(record.semantic_identity_id)
+        if getattr(record, "page_id", None):
+            self.detail_page_id = str(record.page_id)
+        if getattr(record, "source_observation_ids", None):
+            for oid in record.source_observation_ids:
+                if str(oid) not in self.source_evidence_ids:
+                    self.source_evidence_ids.append(str(oid))
+        if self.sill_height_m is not None and self.height_m is not None and self.head_height_m is None:
+            self.head_height_m = round(self.sill_height_m + self.height_m, 4)
+
+    def enrich_with_schedule_entry(self, entry: Any) -> None:
+        """Enriches this canonical opening from a ScheduleEntry (AG-06)."""
+        if getattr(entry, "width_mm", None) is not None and self.width_m is None:
+            self.width_m = round(float(entry.width_mm) / 1000.0, 4)
+        if getattr(entry, "height_mm", None) is not None and self.height_m is None:
+            self.height_m = round(float(entry.height_mm) / 1000.0, 4)
+        if getattr(entry, "type_mark", None) and not self.mark:
+            self.mark = str(entry.type_mark).strip()
+        if getattr(entry, "description", None) and not self.opening_classification:
+            self.opening_classification = str(entry.description).strip()
+        if getattr(entry, "page_no", None) is not None:
+            self.schedule_page_id = str(entry.page_no)
+
+        # If opening type is generic, infer door or window from mark and description
+        if self.object_type == ObjectType.OPENING or self.opening_type == "GENERIC":
+            desc_upper = (getattr(entry, "description", "") or "").upper()
+            mark_upper = (getattr(entry, "type_mark", "") or "").upper()
+            if "DOOR" in desc_upper or mark_upper.startswith("D"):
+                self.object_type = ObjectType.DOOR
+                self.opening_type = "DOOR"
+            elif "WINDOW" in desc_upper or mark_upper.startswith("W"):
+                self.object_type = ObjectType.WINDOW
+                self.opening_type = "WINDOW"
+
+        if self.sill_height_m is not None and self.height_m is not None and self.head_height_m is None:
+            self.head_height_m = round(self.sill_height_m + self.height_m, 4)
+
+    def enrich_with_schedule_binding(self, record: Any) -> None:
+        """Enriches this canonical opening from a ScheduleOpeningInstanceBindingRecord (AG-06)."""
+        if getattr(record, "tag_mark", None) and not self.mark:
+            self.mark = str(record.tag_mark).strip()
+        if getattr(record, "schedule_row_type_mark", None) and not self.mark:
+            self.mark = str(record.schedule_row_type_mark).strip()
+        if getattr(record, "schedule_row_width_mm", None) is not None and self.width_m is None:
+            self.width_m = round(float(record.schedule_row_width_mm) / 1000.0, 4)
+        if getattr(record, "schedule_row_height_mm", None) is not None and self.height_m is None:
+            self.height_m = round(float(record.schedule_row_height_mm) / 1000.0, 4)
+        if getattr(record, "schedule_page_id", None):
+            self.schedule_page_id = str(record.schedule_page_id)
+
+        # If opening type is generic, infer door or window from mark
+        if self.object_type == ObjectType.OPENING or self.opening_type == "GENERIC":
+            mark_upper = (self.mark or "").upper()
+            if mark_upper.startswith("D"):
+                self.object_type = ObjectType.DOOR
+                self.opening_type = "DOOR"
+            elif mark_upper.startswith("W"):
+                self.object_type = ObjectType.WINDOW
+                self.opening_type = "WINDOW"
+        if getattr(record, "tag_observation_id", None):
+            if str(record.tag_observation_id) not in self.source_evidence_ids:
+                self.source_evidence_ids.append(str(record.tag_observation_id))
+        if getattr(record, "schedule_row_observation_ids", None):
+            for oid in record.schedule_row_observation_ids:
+                if str(oid) not in self.source_evidence_ids:
+                    self.source_evidence_ids.append(str(oid))
+        if self.sill_height_m is not None and self.height_m is not None and self.head_height_m is None:
+            self.head_height_m = round(self.sill_height_m + self.height_m, 4)
+
+    def to_consolidated(self) -> Any:
+        """Converts this canonical opening to a ConsolidatedPhysicalOpening for bridge interoperability."""
+        from pb_opening_detail_definition_bridge import ConsolidatedPhysicalOpening
+        w_m = float(self.width_m) if self.width_m is not None else 0.0
+        h_m = float(self.height_m) if self.height_m is not None else 0.0
+        area = round(w_m * h_m, 4) if (w_m > 0 and h_m > 0) else 0.0
+        fam = "door" if self.object_type == ObjectType.DOOR else "window" if self.object_type == ObjectType.WINDOW else "opening"
+        return ConsolidatedPhysicalOpening(
+            opening_id=self.id,
+            type_mark=self.mark or "",
+            host_wall_id=self.host_wall_id or self.wall_id or "",
+            width_m=w_m,
+            height_m=h_m,
+            area_m2=area,
+            family=fam,
+            subtype=self.opening_classification or "",
+            material=self.substrate or "",
+            deducts=parse_strict_bool(self.deduction_authority),
+            detail_record_id=self.detail_record_id,
+            detail_semantic_identity_id=self.detail_semantic_identity_id,
+            plan_page_id=self.plan_page_id,
+            elevation_page_id=self.elevation_page_id,
+            schedule_page_id=self.schedule_page_id,
+            detail_page_id=self.detail_page_id,
+            source_evidence_ids=list(self.source_evidence_ids),
+        )
+
+    @classmethod
+    def from_consolidated(
+        cls,
+        c_op: Any,
+        level_id: Optional[str] = None,
+        sill_height_m: Optional[float] = None,
+        offset_along_wall_m: Optional[float] = None,
+    ) -> "CanonicalOpening":
+        """Instantiates a CanonicalOpening from a ConsolidatedPhysicalOpening."""
+        fam = getattr(c_op, "family", "opening").lower()
+        if fam == "door":
+            op_type = "DOOR"
+            obj_type = ObjectType.DOOR
+        elif fam == "window":
+            op_type = "WINDOW"
+            obj_type = ObjectType.WINDOW
+        else:
+            op_type = "GENERIC"
+            obj_type = ObjectType.OPENING
+
+        w_m = float(getattr(c_op, "width_m", 0.0))
+        h_m = float(getattr(c_op, "height_m", 0.0))
+        eff_w = w_m if w_m > 0.0 else None
+        eff_h = h_m if h_m > 0.0 else None
+
+        op = cls(
+            id=str(getattr(c_op, "opening_id", f"op_{uuid.uuid4().hex[:8]}")),
+            name=f"{fam.capitalize()} {getattr(c_op, 'type_mark', '')}".strip(),
+            object_type=obj_type,
+            level_id=level_id,
+            wall_id=getattr(c_op, "host_wall_id", None),
+            host_wall_id=getattr(c_op, "host_wall_id", None),
+            opening_type=op_type,
+            offset_along_wall_m=offset_along_wall_m,
+            sill_height_m=sill_height_m,
+            width_m=eff_w,
+            height_m=eff_h,
+            mark=getattr(c_op, "type_mark", None),
+            opening_classification=getattr(c_op, "subtype", None) or getattr(c_op, "family", None),
+            substrate=getattr(c_op, "material", None),
+            deduction_authority=bool(getattr(c_op, "deducts", True)),
+            takeoff_eligible=bool(getattr(c_op, "deducts", True)),
+            detail_record_id=getattr(c_op, "detail_record_id", None),
+            detail_semantic_identity_id=getattr(c_op, "detail_semantic_identity_id", None),
+            plan_page_id=getattr(c_op, "plan_page_id", None),
+            elevation_page_id=getattr(c_op, "elevation_page_id", None),
+            schedule_page_id=getattr(c_op, "schedule_page_id", None),
+            detail_page_id=getattr(c_op, "detail_page_id", None),
+            source_evidence_ids=list(getattr(c_op, "source_evidence_ids", []) or []),
+        )
+        return op
+
     def to_dict(self) -> Dict[str, Any]:
         res = self.base_to_dict()
         res.update({
@@ -563,6 +746,14 @@ class CanonicalOpening(CanonicalElement):
             "mark": self.mark,
             "host_wall_id": self.host_wall_id or self.wall_id,
             "opening_classification": self.opening_classification,
+            "head_height_m": self.head_height_m,
+            "schedule_page_id": self.schedule_page_id,
+            "detail_page_id": self.detail_page_id,
+            "detail_record_id": self.detail_record_id,
+            "detail_semantic_identity_id": self.detail_semantic_identity_id,
+            "plan_page_id": self.plan_page_id,
+            "elevation_page_id": self.elevation_page_id,
+            "source_evidence_ids": list(self.source_evidence_ids),
             "derived_quantities": [q.to_dict() for q in self.derived_quantities],
             "is_user_edited": parse_strict_bool(self.is_user_edited),
             "revision_id": self.revision_id,
@@ -585,6 +776,14 @@ class CanonicalOpening(CanonicalElement):
             mark=data.get("mark"),
             host_wall_id=data.get("host_wall_id") or data.get("wall_id"),
             opening_classification=data.get("opening_classification"),
+            head_height_m=parse_optional_float(data.get("head_height_m")),
+            schedule_page_id=data.get("schedule_page_id"),
+            detail_page_id=data.get("detail_page_id"),
+            detail_record_id=data.get("detail_record_id"),
+            detail_semantic_identity_id=data.get("detail_semantic_identity_id"),
+            plan_page_id=data.get("plan_page_id"),
+            elevation_page_id=data.get("elevation_page_id"),
+            source_evidence_ids=[str(x) for x in (data.get("source_evidence_ids") or []) if x],
             derived_quantities=d_quants,
             is_user_edited=parse_strict_bool(data.get("is_user_edited")),
             revision_id=data.get("revision_id"),
@@ -1881,6 +2080,24 @@ class CanonicalProject(CanonicalElement):
                     if not op.derived_quantities:
                         op.derive_trade_quantities()
                     elem_name = op.opening_classification or ("Door" if op.object_type == ObjectType.DOOR else "Window")
+                    src_page = op.schedule_page_id or op.plan_page_id or getattr(op.provenance, "source_page", "1") or "1"
+                    src_ref = f"PB Canonical BIM · opening:{op.id}"
+                    if op.schedule_page_id:
+                        src_ref += f" · sched_p{op.schedule_page_id}"
+                    if op.detail_record_id:
+                        src_ref += f" · det:{op.detail_record_id}"
+
+                    notes_parts = [f"{elem_name} {op.mark} ({op.width_m or 0.0:.2f}m W × {op.height_m or 0.0:.2f}m H)."]
+                    if op.sill_height_m is not None:
+                        notes_parts.append(f"Sill: {op.sill_height_m:.2f}m.")
+                    if op.head_height_m is not None:
+                        notes_parts.append(f"Head: {op.head_height_m:.2f}m.")
+                    if op.schedule_page_id:
+                        notes_parts.append(f"Schedule page {op.schedule_page_id}.")
+                    if op.detail_record_id:
+                        notes_parts.append(f"Detail record {op.detail_record_id}.")
+                    op_notes = " ".join(notes_parts)
+
                     rows.append({
                         "workspace_id": int(workspace_id),
                         "section": "Internal" if op.object_type == ObjectType.DOOR else "External",
@@ -1891,15 +2108,15 @@ class CanonicalProject(CanonicalElement):
                         "quantity": 1.0,
                         "unit": "No.",
                         "quantity_status": "Measured",
-                        "source_page": getattr(op.provenance, "source_page", "1") or "1",
-                        "source_reference": f"PB Canonical BIM · opening:{op.id}",
+                        "source_page": str(src_page),
+                        "source_reference": src_ref,
                         "inclusion_status": "PROVISIONAL",
                         "coats": 1,
                         "coverage_m2_per_litre": 0.0,
                         "productivity_m2_per_hour": 0.0,
                         "rate_per_unit": 0.0,
                         "confidence": "Documented",
-                        "notes": f"{elem_name} {op.mark} ({op.width_m or 0.0:.2f}m W × {op.height_m or 0.0:.2f}m H).",
+                        "notes": op_notes,
                         "row_role": "door" if op.object_type == ObjectType.DOOR else "window" if op.object_type == ObjectType.WINDOW else "opening",
                         "created_at": stamp,
                         "updated_at": stamp,
@@ -1908,6 +2125,9 @@ class CanonicalProject(CanonicalElement):
                     # Secondary opening trade quantities (architraves, reveals)
                     for dq in op.derived_quantities:
                         if dq.item_code in ("DOOR_ARCHITRAVE", "WINDOW_REVEAL_LINER"):
+                            trim_ref = f"PB Canonical BIM · opening_trim:{op.id}"
+                            if op.schedule_page_id:
+                                trim_ref += f" · sched_p{op.schedule_page_id}"
                             rows.append({
                                 "workspace_id": int(workspace_id),
                                 "section": "Internal" if op.object_type == ObjectType.DOOR else "External",
@@ -1918,8 +2138,8 @@ class CanonicalProject(CanonicalElement):
                                 "quantity": round(dq.quantity, 2),
                                 "unit": "lm",
                                 "quantity_status": "Measured",
-                                "source_page": getattr(op.provenance, "source_page", "1") or "1",
-                                "source_reference": f"PB Canonical BIM · opening_trim:{op.id}",
+                                "source_page": str(src_page),
+                                "source_reference": trim_ref,
                                 "inclusion_status": "PROVISIONAL",
                                 "coats": 1,
                                 "coverage_m2_per_litre": 0.0,

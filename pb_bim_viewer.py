@@ -95,9 +95,19 @@ def project_to_viewer_payload(project: CanonicalProject) -> Dict[str, Any]:
                         "is_host_attached": is_host_attached,
                         "offset_along_wall_m": op.offset_along_wall_m,
                         "sill_height_m": op.sill_height_m,
+                        "head_height_m": op.head_height_m,
                         "width_m": op.width_m,
                         "height_m": op.height_m,
                         "mark": op.mark,
+                        "opening_classification": op.opening_classification,
+                        "schedule_page_id": op.schedule_page_id,
+                        "detail_page_id": op.detail_page_id,
+                        "detail_record_id": op.detail_record_id,
+                        "detail_semantic_identity_id": op.detail_semantic_identity_id,
+                        "plan_page_id": op.plan_page_id,
+                        "elevation_page_id": op.elevation_page_id,
+                        "source_evidence_ids": list(op.source_evidence_ids),
+                        "derived_quantities": [q.to_dict() for q in op.derived_quantities],
                         "gross_area_m2": op_gross,
                         "substrate": op.substrate,
                         "finish": op.finish,
@@ -1122,6 +1132,35 @@ def generate_bim_viewer_html(payload: Dict[str, Any], height_px: int = 750) -> s
                     }}
                 }}
 
+                if (obj.type === 'DOOR' || obj.type === 'WINDOW' || obj.type === 'OPENING') {{
+                    if (obj.mark) addInfoRow(container, 'Mark / Tag', String(obj.mark));
+                    if (obj.opening_classification) addInfoRow(container, 'Classification', String(obj.opening_classification));
+                    if (obj.width_m !== undefined && obj.width_m !== null && !isNaN(obj.width_m)) {{
+                        addInfoRow(container, 'Width', obj.width_m.toFixed(2) + ' m');
+                    }}
+                    if (obj.height_m !== undefined && obj.height_m !== null && !isNaN(obj.height_m)) {{
+                        addInfoRow(container, 'Height', obj.height_m.toFixed(2) + ' m');
+                    }}
+                    if (obj.sill_height_m !== undefined && obj.sill_height_m !== null && !isNaN(obj.sill_height_m)) {{
+                        addInfoRow(container, 'Sill Height', obj.sill_height_m.toFixed(2) + ' m');
+                    }}
+                    if (obj.head_height_m !== undefined && obj.head_height_m !== null && !isNaN(obj.head_height_m)) {{
+                        addInfoRow(container, 'Head Height', obj.head_height_m.toFixed(2) + ' m');
+                    }}
+                    if (obj.offset_along_wall_m !== undefined && obj.offset_along_wall_m !== null && !isNaN(obj.offset_along_wall_m)) {{
+                        addInfoRow(container, 'Host Offset', obj.offset_along_wall_m.toFixed(2) + ' m');
+                    }}
+                    if (obj.wall_id) addInfoRow(container, 'Host Wall', String(obj.wall_id));
+                    if (obj.schedule_page_id) addInfoRow(container, 'Schedule Page', String(obj.schedule_page_id));
+                    if (obj.detail_record_id) addInfoRow(container, 'Detail Record', String(obj.detail_record_id));
+                    if (obj.derived_quantities && obj.derived_quantities.length > 0) {{
+                        addSectionTitle(container, 'Derived Trade Quantities');
+                        obj.derived_quantities.forEach(q => {{
+                            addInfoRow(container, (q.trade_category || '') + ': ' + (q.item_code || ''), (q.quantity || 0) + ' ' + (q.unit || ''));
+                        }});
+                    }}
+                }}
+
             }} else if (activeTab === 'advanced') {{
                 addInfoRow(container, 'Object ID', obj.id);
                 addInfoRow(container, 'Parent ID', obj.parent_id || 'None');
@@ -1149,6 +1188,19 @@ def generate_bim_viewer_html(payload: Dict[str, Any], height_px: int = 750) -> s
                 addInfoRow(container, 'Page Number', (p.page_number !== undefined && p.page_number !== null) ? String(p.page_number) : 'N/A');
                 addInfoRow(container, 'Drawing Sheet ID', p.drawing_id || 'N/A');
                 addInfoRow(container, 'Scale Source', p.scale_source || 'N/A');
+
+                if (obj.schedule_page_id) addInfoRow(container, 'Schedule Page', String(obj.schedule_page_id));
+                if (obj.detail_page_id) addInfoRow(container, 'Detail Page', String(obj.detail_page_id));
+                if (obj.plan_page_id) addInfoRow(container, 'Plan Page', String(obj.plan_page_id));
+                if (obj.elevation_page_id) addInfoRow(container, 'Elevation Page', String(obj.elevation_page_id));
+                if (obj.detail_record_id) addInfoRow(container, 'Detail Record ID', String(obj.detail_record_id));
+                if (obj.detail_semantic_identity_id) addInfoRow(container, 'Detail Semantic ID', String(obj.detail_semantic_identity_id));
+                if (obj.source_evidence_ids && obj.source_evidence_ids.length > 0) {{
+                    addSectionTitle(container, 'Source Observation IDs');
+                    obj.source_evidence_ids.forEach(sid => {{
+                        addInfoRow(container, '•', String(sid));
+                    }});
+                }}
 
                 addSectionTitle(container, 'Evidence Traces');
                 if (p.contributing_evidence && p.contributing_evidence.length > 0) {{
