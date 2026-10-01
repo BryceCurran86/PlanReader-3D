@@ -3128,11 +3128,13 @@ class GenericPlanReaderExtractor:
         # floor-plan viewport labels can mint a level scope; no default
         # "Ground" level is introduced for unlabeled geometry.
         _live_level_records = ()
+        _live_viewport_records = ()
         try:
             from pb_live_floor_plan_level_identity import (
                 LIVE_FLOOR_PLAN_LEVEL_RESOLVED,
                 LIVE_FLOOR_PLAN_LEVEL_UNAVAILABLE,
                 collect_source_owned_floor_plan_levels,
+                collect_source_owned_floor_plan_viewports,
             )
 
             _level_source_sha = hashlib.sha256(p_path.read_bytes()).hexdigest()
@@ -3147,10 +3149,18 @@ class GenericPlanReaderExtractor:
                     )
                 )
             ]
+            _live_viewport_records = (
+                collect_source_owned_floor_plan_viewports(
+                    doc,
+                    page_indices=_level_pages,
+                    source_sha256=_level_source_sha,
+                )
+            )
             _live_level_records = collect_source_owned_floor_plan_levels(
                 doc,
                 page_indices=_level_pages,
                 source_sha256=_level_source_sha,
+                viewport_records=_live_viewport_records,
             )
             self.canonical_levels_live = {
                 "status": (
@@ -3174,6 +3184,7 @@ class GenericPlanReaderExtractor:
             )
         except Exception as _level_exc:  # noqa: BLE001
             _live_level_records = ()
+            _live_viewport_records = ()
             self.canonical_levels_live = {
                 "status": "abstained",
                 "reason_codes": [
@@ -3218,6 +3229,8 @@ class GenericPlanReaderExtractor:
                     for wall in physical_wall_result.canonical_walls
                 ]
                 from pb_live_floor_plan_level_identity import (
+                    enrich_live_floor_viewport_ownership,
+                    enrich_live_room_viewport_ownership,
                     enrich_live_wall_level_ownership,
                 )
 
@@ -3284,6 +3297,18 @@ class GenericPlanReaderExtractor:
                         (),
                     )
                 ]
+                canonical_room_objects = list(
+                    enrich_live_room_viewport_ownership(
+                        canonical_room_objects,
+                        viewports=_live_viewport_records,
+                    )
+                )
+                canonical_floor_objects = list(
+                    enrich_live_floor_viewport_ownership(
+                        canonical_floor_objects,
+                        rooms=canonical_room_objects,
+                    )
+                )
                 self.canonical_openings_live = {
                     "status": (
                         "corroborated"

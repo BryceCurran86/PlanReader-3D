@@ -5,6 +5,9 @@ from types import SimpleNamespace
 import pb_live_floor_plan_level_identity as level_identity
 from pb_live_floor_plan_level_identity import (
     collect_source_owned_floor_plan_levels,
+    collect_source_owned_floor_plan_viewports,
+    enrich_live_floor_viewport_ownership,
+    enrich_live_room_viewport_ownership,
     enrich_live_wall_level_ownership,
 )
 
@@ -230,6 +233,161 @@ def test_unknown_or_mixed_viewport_wall_stays_unassigned(
 
     assert enriched[0]["level_ids"] == []
     assert "level_ownership" not in enriched[0]
+
+
+def test_room_and_floor_bind_to_one_authoritative_floor_plan_viewport(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        level_identity,
+        "authoritative_floor_plan_viewports",
+        lambda page, *, page_number: [
+            _viewport(
+                view_id="floor-view-1",
+                label="PROPOSED FLOOR PLAN",
+                page_number=page_number,
+                bbox=(0.0, 0.0, 200.0, 150.0),
+            )
+        ],
+    )
+    viewports = collect_source_owned_floor_plan_viewports(
+        _FakeDoc(page_count=1),
+        page_indices=(0,),
+        source_sha256=SHA,
+    )
+    assert len(viewports) == 1
+    assert viewports[0].is_source_owned is True
+
+    room = {
+        "canonical_room_id": "room-1",
+        "page_id": "1",
+        "viewport_id": None,
+        "polygon_pdf_pts": [
+            [20.0, 20.0],
+            [100.0, 20.0],
+            [100.0, 80.0],
+            [20.0, 80.0],
+        ],
+    }
+    floor = {
+        "canonical_floor_id": "floor-1",
+        "room_entity_id": "room-1",
+        "viewport_id": None,
+    }
+
+    rooms = enrich_live_room_viewport_ownership(
+        (room,),
+        viewports=viewports,
+    )
+    floors = enrich_live_floor_viewport_ownership(
+        (floor,),
+        rooms=rooms,
+    )
+
+    assert rooms[0]["viewport_id"] == "floor-view-1"
+    assert rooms[0]["viewport_relationship_complete"] is True
+    assert rooms[0]["viewport_ownership"]["authority"] == (
+        "source_owned_floor_plan_viewport"
+    )
+    assert floors[0]["viewport_id"] == "floor-view-1"
+    assert floors[0]["viewport_relationship_complete"] is True
+    assert floors[0]["viewport_ownership"]["source_viewport_id"] == (
+        "floor-view-1"
+    )
+
+
+def test_room_inside_two_authoritative_viewports_stays_ambiguous(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        level_identity,
+        "authoritative_floor_plan_viewports",
+        lambda page, *, page_number: [
+            _viewport(
+                view_id="view-a",
+                label="PLAN A",
+                page_number=page_number,
+                bbox=(0.0, 0.0, 200.0, 150.0),
+            ),
+            _viewport(
+                view_id="view-b",
+                label="PLAN B",
+                page_number=page_number,
+                bbox=(0.0, 0.0, 220.0, 170.0),
+            ),
+        ],
+    )
+    viewports = collect_source_owned_floor_plan_viewports(
+        _FakeDoc(page_count=1),
+        page_indices=(0,),
+        source_sha256=SHA,
+    )
+    room = {
+        "canonical_room_id": "room-1",
+        "page_id": "1",
+        "viewport_id": None,
+        "polygon_pdf_pts": [
+            [20.0, 20.0],
+            [100.0, 20.0],
+            [100.0, 80.0],
+            [20.0, 80.0],
+        ],
+    }
+
+    rooms = enrich_live_room_viewport_ownership(
+        (room,),
+        viewports=viewports,
+    )
+
+    assert rooms[0]["viewport_id"] is None
+    assert rooms[0]["viewport_relationship_complete"] is False
+    assert rooms[0]["viewport_relationship_reason"] == (
+        "room_viewport_ambiguous"
+    )
+
+
+def test_room_outside_authoritative_viewport_stays_unassigned(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        level_identity,
+        "authoritative_floor_plan_viewports",
+        lambda page, *, page_number: [
+            _viewport(
+                view_id="view-a",
+                label="PLAN A",
+                page_number=page_number,
+                bbox=(0.0, 0.0, 50.0, 50.0),
+            )
+        ],
+    )
+    viewports = collect_source_owned_floor_plan_viewports(
+        _FakeDoc(page_count=1),
+        page_indices=(0,),
+        source_sha256=SHA,
+    )
+    room = {
+        "canonical_room_id": "room-1",
+        "page_id": "1",
+        "viewport_id": None,
+        "polygon_pdf_pts": [
+            [60.0, 60.0],
+            [100.0, 60.0],
+            [100.0, 90.0],
+            [60.0, 90.0],
+        ],
+    }
+
+    rooms = enrich_live_room_viewport_ownership(
+        (room,),
+        viewports=viewports,
+    )
+
+    assert rooms[0]["viewport_id"] is None
+    assert rooms[0]["viewport_relationship_complete"] is False
+    assert rooms[0]["viewport_relationship_reason"] == (
+        "room_viewport_unavailable"
+    )
 
 
 def test_invalid_source_sha_fails_closed(

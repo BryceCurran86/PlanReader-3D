@@ -120,6 +120,8 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
         "coordinate_unit": "pdf_pt",
         "geometry_complete": True,
         "metric_geometry_complete": False,
+        "viewport_relationship_complete": False,
+        "viewport_relationship_reason": "room_viewport_unavailable",
     }
     canonical_room = SimpleNamespace(to_dict=lambda: canonical_room_payload)
     canonical_floor_payload = {
@@ -132,6 +134,8 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
         "metric_area_m2": None,
         "finish_descriptor": None,
         "commercial_quantity_authority": False,
+        "viewport_relationship_complete": False,
+        "viewport_relationship_reason": "floor_room_viewport_unresolved",
     }
     canonical_floor = SimpleNamespace(to_dict=lambda: canonical_floor_payload)
 
@@ -242,6 +246,8 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
         "coordinate_unit": "pdf_pt",
         "geometry_complete": True,
         "metric_geometry_complete": False,
+        "viewport_relationship_complete": False,
+        "viewport_relationship_reason": "room_viewport_unavailable",
     }
     canonical_room = SimpleNamespace(to_dict=lambda: canonical_room_payload)
     canonical_floor_payload = {
@@ -254,6 +260,8 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
         "metric_area_m2": None,
         "finish_descriptor": None,
         "commercial_quantity_authority": False,
+        "viewport_relationship_complete": False,
+        "viewport_relationship_reason": "floor_room_viewport_unresolved",
     }
     canonical_floor = SimpleNamespace(to_dict=lambda: canonical_floor_payload)
     canonical_wall_payload = {

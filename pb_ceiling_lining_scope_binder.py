@@ -238,24 +238,17 @@ def build_owned_topology_room_index(
 
 
 
-def _source_room_polygon_owned_by_viewport(
+def source_room_polygon_owned_by_bbox(
     polygon: Sequence[tuple[float, float]],
-    viewport: ViewportEvidence,
+    bbox: Sequence[float],
     *,
     tolerance: float = 1e-6,
 ) -> bool:
-    """Return whether every source-room vertex belongs to the owned viewport.
-
-    SourceRoomFaceAuthority is page-scoped.  A page may contain multiple
-    independently scaled drawing viewports, so page membership alone cannot
-    authorize applying one viewport's scale to every room face on the page.
-    Filtering here does not delete source authority; it creates the exact
-    viewport-owned index consumed by downstream quantity binding.
-    """
+    """Return whether every source-room vertex belongs to one owned bbox."""
     if len(polygon) < 3:
         return False
     try:
-        x0, y0, x1, y1 = (float(value) for value in viewport.bbox)
+        x0, y0, x1, y1 = (float(value) for value in bbox)
     except (TypeError, ValueError):
         return False
     if not all(math.isfinite(value) for value in (x0, y0, x1, y1)):
@@ -278,6 +271,25 @@ def _source_room_polygon_owned_by_viewport(
         ):
             return False
     return True
+
+
+def source_room_polygon_owned_by_viewport(
+    polygon: Sequence[tuple[float, float]],
+    viewport: ViewportEvidence,
+    *,
+    tolerance: float = 1e-6,
+) -> bool:
+    """Return whether every source-room vertex belongs to the owned viewport.
+
+    SourceRoomFaceAuthority is page-scoped. A page may contain multiple
+    independently scaled drawing viewports, so page membership alone cannot
+    authorize applying one viewport's scale to every room face on the page.
+    """
+    return source_room_polygon_owned_by_bbox(
+        polygon,
+        viewport.bbox,
+        tolerance=tolerance,
+    )
 
 
 def build_owned_source_room_face_index(
@@ -354,7 +366,7 @@ def build_owned_source_room_face_index(
         # Source room-face authority is page-scoped, while metric authority
         # is viewport-scoped.  Never let a room outside this exact viewport
         # inherit the viewport's scale or finish scope.
-        if not _source_room_polygon_owned_by_viewport(
+        if not source_room_polygon_owned_by_viewport(
             record.polygon_pdf_pts,
             viewport,
         ):
