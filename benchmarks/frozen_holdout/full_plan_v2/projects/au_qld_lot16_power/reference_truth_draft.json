@@ -940,6 +940,27 @@
         "architectural:p4-p5:elevations:FSL_to_JL_2100_and_opening_crosscheck",
         "architectural:p4:elevation_1:CUSTOM_WINDOWS_TO_FRONT_MEASURE_ON_SITE"
       ]
+    },
+    {
+      "check_id": "lot16:control:roof_sheathing_geometry",
+      "component_object_refs": [
+        "lot16:surface:roof:lower_left_5deg",
+        "lot16:surface:roof:lower_right_5deg",
+        "lot16:surface:roof:upper_left_12deg",
+        "lot16:surface:roof:upper_right_12deg"
+      ],
+      "roof_plane_count": 4,
+      "total_projected_plan_area_m2": 252.04696,
+      "total_sloped_sheathing_area_m2": 255.250323,
+      "pitch_groups_degrees": [
+        5,
+        12
+      ],
+      "figured_dimension_source": "architectural:p6:roof_plan:6540x6490;15160x5846;16150x5660;9240x3200",
+      "pitch_crosscheck_source": "architectural:p4-p5:elevations:5deg_and_12deg",
+      "complete_for_architectural_guide_geometry": true,
+      "final_engineering_crosscheck_complete": false,
+      "blocker": "architectural roof plan explicitly states GUIDE ONLY and requires engineer stormwater drainage plan; that independent engineering roof/stormwater document is not present in the supplied Lot16 source package"
     }
   ]
 }
