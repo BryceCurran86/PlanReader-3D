@@ -625,3 +625,24 @@ def test_3laurel_labelled_internal_joinery_openings_are_closed_but_unlabelled_br
         in draft["unresolved_surface_families"]
     )
 
+
+
+def test_3laurel_bathroom_wc_room_access_deductions_are_mapped_but_not_full_net_walls():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:bathroom_wc_room_access_deductions"
+    )
+    assert check["mapped_room_access_opening_count"] == 2
+    assert check["mapped_room_access_opening_area_m2"] == pytest.approx(3.024)
+    by_room = {row["room"]: row for row in check["room_controls"]}
+    assert by_room["main_bathroom"]["gross_wall_area_m2"] == pytest.approx(25.002)
+    assert by_room["main_bathroom"]["access_opening_area_m2"] == pytest.approx(1.512)
+    assert by_room["main_bathroom"]["gross_less_room_access_opening_m2"] == pytest.approx(23.49)
+    assert by_room["main_wc"]["gross_wall_area_m2"] == pytest.approx(14.418)
+    assert by_room["main_wc"]["access_opening_area_m2"] == pytest.approx(1.512)
+    assert by_room["main_wc"]["gross_less_room_access_opening_m2"] == pytest.approx(12.906)
+    assert check["complete_for_these_room_access_openings"] is True
+    assert check["complete_for_all_wall_openings"] is False
+    assert check["finish_scope_resolved"] is False
