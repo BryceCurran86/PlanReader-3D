@@ -33,7 +33,7 @@
     "roof_planes",
     "structural_members_beyond_closed_wall_bracing_and_explicit_140x140_posts_470x470_piers",
     "secondary_fc_soffit_and_beam_faces_beyond_primary_ceiling_planes",
-    "wet_area_tile_bathroom_niche_face_and_all_niche_return_depths",
+    "wet_area_tile_bathroom_niche_width_and_all_niche_return_depths",
     "wet_area_non_shower_tile_skirtings_bath_surrounds_and_splashbacks",
     "unlabelled_internal_wall_breaks_beyond_two_closed_dimensioned_open_archways_for_wall_face_deductions"
   ],
@@ -2350,6 +2350,42 @@
         "openings_deducted": false,
         "denominator_readiness": "draft_only_until_window_room_access_and_other_wall_opening_deductions_are_applied"
       }
+    },
+    {
+      "object_ref": "3laurel:surface:floor:bed2",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Bed 2 vinyl floor surface",
+      "expected_quantity": 12.6,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED_2:3000x4200_figured_dimensions:VINYL",
+      "attributes": {
+        "width_m": 3,
+        "length_m": 4.2,
+        "calculation": "3.000m * 4.200m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:floor:bed3",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Bed 3 vinyl floor surface",
+      "expected_quantity": 12.6,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED_3:3000x4200_figured_dimensions:VINYL",
+      "attributes": {
+        "width_m": 3,
+        "length_m": 4.2,
+        "calculation": "3.000m * 4.200m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      }
     }
   ],
   "closure_checks": [
@@ -2834,6 +2870,42 @@
       "source_closed_gross_geometry": true,
       "openings_deducted": false,
       "overlap_note": "Atomic media floor is a component of main_living_composite_region and must not be double-counted with that aggregate."
+    },
+    {
+      "check_id": "3laurel:closure:bed2_bed3_floor_surfaces",
+      "component_object_refs": [
+        "3laurel:surface:floor:bed2",
+        "3laurel:surface:floor:bed3"
+      ],
+      "room_count": 2,
+      "floor_area_each_m2": 12.6,
+      "component_sum_m2": 25.2,
+      "figured_room_dimensions_m": [
+        3,
+        4.2
+      ],
+      "finish": "vinyl",
+      "source_location": "architectural:p3:A0.3:floor_plan:3000_B2_3000_B3_and_4200_B2&B3_with_VINYL_labels",
+      "source_closed": true,
+      "overlap_note": "Atomic bedroom floors are components of main_living_composite_region and must not be double-counted with that aggregate."
+    },
+    {
+      "check_id": "3laurel:blocker:bathroom_niche_width_and_niche_return_depths",
+      "status": "UNRESOLVED_SOURCE_LIMITATION",
+      "source_location": "architectural:p11:A0.11:Bathroom_D_and_Bathroom_plan",
+      "explicit_dimensions_available": {
+        "sill_height_mm": 1100,
+        "niche_height_mm": 400
+      },
+      "missing_dimensions": [
+        "bathroom_niche_width",
+        "bathroom_niche_return_depth",
+        "main_ensuite_niche_return_depth",
+        "gf_ensuite_niche_return_depth"
+      ],
+      "drawing_instruction": "Dimensions shall not be obtained by scaling.",
+      "scaling_substitute_allowed": false,
+      "conclusion": "Bathroom niche face area and all niche return areas remain unresolved until independent dimensions are supplied."
     }
   ]
 }
