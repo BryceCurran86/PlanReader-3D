@@ -64,6 +64,11 @@
       "evidence": "A140 gives 4025 x 3297 mm Food Prep FT3 geometry; A110 independently shows the same room footprint; A120 assigns a 3000 FPB ceiling."
     },
     {
+      "proof": "Office floor and ceiling independently closed",
+      "status": "PASS",
+      "evidence": "A140 gives 3570 x 2536 mm OFFICE FT3 geometry; A110 independently shows the same room; A120 assigns a 2400 GRID ceiling."
+    },
+    {
       "proof": "PlanReader output not used as benchmark truth",
       "status": "PASS",
       "evidence": "Truth derived from source drawings and independent cross-check only"
@@ -76,7 +81,7 @@
     {
       "proof": "full project surface universe complete",
       "status": "FAIL",
-      "evidence": "WC/shower, PWD, airlock, laundry and Food Prep floor/ceiling surfaces plus door/window identity universes are closed; remaining surfaces stay unresolved."
+      "evidence": "WC/shower, PWD, airlock, laundry, Food Prep and Office floor/ceiling surfaces plus door/window identity universes are closed; remaining surfaces stay unresolved."
     }
   ]
 }
