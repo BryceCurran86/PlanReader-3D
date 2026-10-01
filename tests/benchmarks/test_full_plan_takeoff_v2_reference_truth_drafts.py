@@ -1286,3 +1286,42 @@ def test_3laurel_bathroom_C_shower_tile_face_is_net_closed():
     assert check["tile_area_m2"] == pytest.approx(1.89)
     assert check["complete_for_this_explicit_face"] is True
     assert check["complete_for_project_wet_area_tile_universe"] is False
+
+
+def test_3laurel_niche_free_ensuite_shower_returns_are_net_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    refs = [
+        "3laurel:surface:wall_tile:ensuite_B_shower_return_net",
+        "3laurel:surface:wall_tile:ensuite_D_shower_return_net",
+        "3laurel:surface:wall_tile:gf_ensuite_B_shower_return_net",
+        "3laurel:surface:wall_tile:gf_ensuite_D_shower_return_net",
+    ]
+    rows = [by_ref[ref] for ref in refs]
+    assert len(rows) == 4
+    assert all(row["expected_quantity"] == pytest.approx(2.43) for row in rows)
+    assert all(
+        row["attributes"]["finished_face_width_m"] == pytest.approx(0.9)
+        for row in rows
+    )
+    assert all(
+        row["attributes"]["tile_height_m"] == pytest.approx(2.7)
+        for row in rows
+    )
+    assert all(row["attributes"]["niche_in_host_face"] is False for row in rows)
+    assert all(
+        row["attributes"]["net_finish_area_ready"] is True for row in rows
+    )
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:niche_free_ensuite_shower_returns"
+    )
+    assert check["object_count"] == 4
+    assert check["tile_area_each_m2"] == pytest.approx(2.43)
+    assert check["component_sum_m2"] == pytest.approx(9.72)
+    assert check["complete_for_these_four_faces"] is True
+    assert check["complete_for_project_wet_area_tile_universe"] is False
