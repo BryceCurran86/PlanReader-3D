@@ -1555,6 +1555,36 @@ def planreader_to_canonical_model(
             c_sof.derive_trade_quantities()
         s_target_lvl.soffits.append(c_sof)
 
+    # Process finish surfaces
+    raw_surfaces = payload.get("surfaces") or []
+    for surf_idx, surf_raw in enumerate(raw_surfaces):
+        if not isinstance(surf_raw, dict):
+            continue
+        surf_id = str(surf_raw.get("id") or f"surf_{surf_idx+1}")
+        surf_lvl_val = surf_raw.get("level_id") or surf_raw.get("level")
+        surf_target_lvl, _ = resolve_canonical_level(surf_lvl_val, levels_map)
+        area_m2 = _safe_float(surf_raw.get("surface_area_m2"))
+        c_surf = CanonicalFinishSurface(
+            id=surf_id,
+            name=str(surf_raw.get("name") or f"Surface {surf_idx+1}"),
+            level_id=surf_target_lvl.id,
+            parent_element_id=surf_raw.get("parent_element_id"),
+            surface_area_m2=area_m2,
+            orientation=str(surf_raw.get("orientation", "UNKNOWN")),
+            substrate=surf_raw.get("substrate"),
+            finish=surf_raw.get("finish"),
+            review_state=ReviewState.CONFIRMED,
+            takeoff_eligible=bool(is_validated_internal_workspace),
+            provenance=_parse_provenance(surf_raw.get("provenance")),
+        )
+        if surf_raw.get("derived_quantities") and isinstance(surf_raw["derived_quantities"], list):
+            for qb_raw in surf_raw["derived_quantities"]:
+                if isinstance(qb_raw, dict):
+                    c_surf.derived_quantities.append(QuantityFormulaBinding.from_dict(qb_raw))
+        if not c_surf.derived_quantities and c_surf.surface_area_m2 and c_surf.surface_area_m2 > 0:
+            c_surf.derive_trade_quantities()
+        surf_target_lvl.surfaces.append(c_surf)
+
     if not levels_map:
         resolve_canonical_level(None, levels_map)
 

@@ -1073,7 +1073,7 @@ class CanonicalSpace(CanonicalElement):
 
         bindings: List[QuantityFormulaBinding] = []
 
-        if floor_finish in ("timber", "laminate", "hybrid"):
+        if any(k in floor_finish for k in ("timber", "laminate", "hybrid", "vinyl", "wood")):
             bindings.append(QuantityFormulaBinding(
                 trade_category="flooring",
                 item_code="FLOOR_TIMBER",
@@ -1097,7 +1097,7 @@ class CanonicalSpace(CanonicalElement):
                     quantity=round(max(0.0, perimeter - 0.90), 2),
                 ))
 
-        elif floor_finish == "carpet":
+        elif any(k in floor_finish for k in ("carpet", "broadloom")):
             bindings.append(QuantityFormulaBinding(
                 trade_category="flooring",
                 item_code="FLOOR_CARPET",
@@ -1121,7 +1121,7 @@ class CanonicalSpace(CanonicalElement):
                     quantity=round(max(0.0, perimeter - 0.90), 2),
                 ))
 
-        elif floor_finish in ("tiles", "tiling"):
+        elif any(k in floor_finish for k in ("tile", "tiling", "ceramic", "porcelain")):
             bindings.append(QuantityFormulaBinding(
                 trade_category="tiling",
                 item_code="FLOOR_TILES",
@@ -1790,10 +1790,27 @@ class CanonicalFinishSurface(CanonicalElement):
     parent_element_id: Optional[str] = None
     surface_area_m2: Optional[float] = None
     orientation: str = "UNKNOWN"
+    derived_quantities: List[QuantityFormulaBinding] = field(default_factory=list)
+    is_user_edited: bool = False
+    revision_id: Optional[str] = None
 
     def __post_init__(self):
         super().__post_init__()
         self.object_type = ObjectType.SURFACE
+        self.is_user_edited = parse_strict_bool(self.is_user_edited)
+
+    def derive_trade_quantities(self) -> List[QuantityFormulaBinding]:
+        if self.surface_area_m2 and self.surface_area_m2 > 0:
+            self.derived_quantities = [
+                QuantityFormulaBinding(
+                    trade_category="finishes",
+                    item_code="FINISH_SURFACE",
+                    formula_expression=f"{self.surface_area_m2:.2f}",
+                    unit="m²",
+                    quantity=round(self.surface_area_m2, 2),
+                )
+            ]
+        return self.derived_quantities
 
     def to_dict(self) -> Dict[str, Any]:
         res = self.base_to_dict()
@@ -1801,18 +1818,27 @@ class CanonicalFinishSurface(CanonicalElement):
             "parent_element_id": self.parent_element_id,
             "surface_area_m2": self.surface_area_m2,
             "orientation": self.orientation,
+            "derived_quantities": [q.to_dict() for q in self.derived_quantities],
+            "is_user_edited": parse_strict_bool(self.is_user_edited),
+            "revision_id": self.revision_id,
         })
         return res
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CanonicalFinishSurface":
         base_args = cls.base_from_dict_args(data)
+        d_quants_raw = data.get("derived_quantities", []) or []
+        d_quants = [QuantityFormulaBinding.from_dict(q) for q in d_quants_raw if isinstance(q, dict)]
         return cls(
             **base_args,
             parent_element_id=data.get("parent_element_id"),
             surface_area_m2=parse_optional_float(data.get("surface_area_m2")),
             orientation=str(data.get("orientation", "UNKNOWN")),
+            derived_quantities=d_quants,
+            is_user_edited=parse_strict_bool(data.get("is_user_edited")),
+            revision_id=data.get("revision_id"),
         )
+
 
 
 @dataclass
@@ -2103,6 +2129,13 @@ class CanonicalProject(CanonicalElement):
                 screens.extend(lvl.screens)
         return screens
 
+    def all_surfaces(self) -> List[CanonicalFinishSurface]:
+        surfaces = []
+        for b in self.buildings:
+            for lvl in b.levels:
+                surfaces.extend(lvl.surfaces)
+        return surfaces
+
     def find_element(self, element_id: str) -> Optional[CanonicalElement]:
         """Finds any element in the canonical building hierarchy by id."""
         if not element_id:
@@ -2151,6 +2184,9 @@ class CanonicalProject(CanonicalElement):
                 for scr in lvl.screens:
                     if scr.id == element_id:
                         return scr
+                for s in lvl.surfaces:
+                    if s.id == element_id:
+                        return s
         return None
 
     def recompute_relationships(self) -> None:
@@ -2225,6 +2261,10 @@ class CanonicalProject(CanonicalElement):
                 for scr in lvl.screens:
                     scr.level_id = lvl_id
                     scr.parent_id = lvl_id
+                for s in lvl.surfaces:
+                    s.level_id = lvl_id
+                    if not s.parent_id:
+                        s.parent_id = s.parent_element_id or lvl_id
 
     def recompute_quantities(self, rates_map: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
         """Recomputes costs across all quantity bindings using current rates map:
@@ -2273,6 +2313,9 @@ class CanonicalProject(CanonicalElement):
                 process_binding(qb)
         for col in self.all_columns():
             for qb in col.derived_quantities:
+                process_binding(qb)
+        for s in self.all_surfaces():
+            for qb in s.derived_quantities:
                 process_binding(qb)
 
         return summary
@@ -3103,6 +3146,39 @@ class CanonicalProject(CanonicalElement):
                     "confidence": "Documented",
                     "notes": f"Soffit lining {b.quantity:.2f} m².",
                     "row_role": "",
+                    "created_at": stamp,
+                    "updated_at": stamp,
+                })
+
+        # 8. Finish Surfaces
+        for s in self.all_surfaces():
+            if not s.derived_quantities:
+                s.derive_trade_quantities()
+            for b in s.derived_quantities:
+                elem_name = (
+                    "Applied wall / surface finish" if b.item_code == "FINISH_SURFACE"
+                    else b.item_code.replace("_", " ").title()
+                )
+                rows.append({
+                    "workspace_id": int(workspace_id),
+                    "section": "Internal" if "INT" in (s.orientation or "").upper() else "External",
+                    "element": elem_name,
+                    "location": f"Surface · {s.id}",
+                    "substrate": s.substrate or "Wall / ceiling substrate",
+                    "finish_system": s.finish or "Specified surface finish",
+                    "quantity": round(b.quantity, 2),
+                    "unit": b.unit,
+                    "quantity_status": "Measured",
+                    "source_page": getattr(s.provenance, "source_page", "1") or "1",
+                    "source_reference": f"PB Canonical BIM · surface:{s.id}:{b.item_code}",
+                    "inclusion_status": "INCLUSION",
+                    "coats": 1,
+                    "coverage_m2_per_litre": 0.0,
+                    "productivity_m2_per_hour": 0.0,
+                    "rate_per_unit": 0.0,
+                    "confidence": "Documented",
+                    "notes": f"Surface {s.id} ({s.orientation}): {b.quantity:.2f} {b.unit}.",
+                    "row_role": "finish_surface",
                     "created_at": stamp,
                     "updated_at": stamp,
                 })

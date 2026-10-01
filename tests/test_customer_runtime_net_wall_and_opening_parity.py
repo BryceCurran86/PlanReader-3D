@@ -2114,9 +2114,469 @@ class CustomerRuntimeNetWallParityTests(unittest.TestCase):
             self.assertIn("Head Height", html)
             self.assertIn("Schedule Page", html)
 
+    def test_ag10_every_mature_canonical_family_parity_harness(self):
+        """AG-10 Parity Harness: Extends parity coverage to every mature canonical family:
+        
+        1. Wall (gross and net after opening deductions, cavity ties, DPC, sarking, partition plates, lintels)
+        2. Opening (generic void deduction authority)
+        3. Door / Window (mark, opening classification, supply, architrave / reveal liner, lockset / screen)
+        4. Room (space geometry, floor finish trade quantities, skirting, wet area waterproofing)
+        5. Floor / Slab (concrete slab area, concrete supply volume, DPM vapor barrier, edge formwork)
+        6. Ceiling (plasterboard lining, insulation batts, cornice trim)
+        7. Roof (3D pitched roof surface, sheet metal / tiles, reflective foil sarking, gutters & fascia)
+        8. Finish Surface (wall face finishes A/B and applied feature finish surfaces)
+        9. Structural Member (column 4-sided formwork, column concrete supply & pump volume)
+
+        Proves customer runtime consumes the same authoritative object, geometry, quantity,
+        persists to database, and surfaces in 3D BIM viewer.
+        """
+        import math
+        from pb_canonical_building import (
+            CanonicalProject,
+            CanonicalBuilding,
+            CanonicalLevel,
+            CanonicalWall,
+            CanonicalOpening,
+            CanonicalSpace,
+            CanonicalFloor,
+            CanonicalCeiling,
+            CanonicalRoof,
+            CanonicalFinishSurface,
+            CanonicalColumn,
+            WallFace,
+            Vector2D,
+            ObjectType,
+            ReviewState,
+            publish_canonical_model_to_takeoff,
+        )
+        from pb_canonical_persistence import (
+            save_workspace_canonical_model,
+            load_workspace_canonical_model,
+        )
+        from pb_bim_viewer import project_to_viewer_payload, generate_bim_viewer_html
+        import pb_takeoff_row_contract as takeoff_contract
+
+        with _test_workspace() as ws:
+            # 1. Customer PDF with multi-trade drawings
+            doc = fitz.open()
+            p1 = doc.new_page(width=842, height=595)
+            p1.insert_text(fitz.Point(100, 100), "MULTI-TRADE ARCHITECTURAL SET", fontsize=14)
+            pdf_path = ws.root / "multi_family_customer_project.pdf"
+            doc.save(str(pdf_path))
+            doc.close()
+
+            ws.add_document(pdf_path)
+            ws.add_page(1, "floor_plan", "Ground Plan", "GROUND FLOOR PLAN MULTI-FAMILY")
+            ws.add_page(2, "schedule", "Opening Schedule", "SCHEDULE W01 D01")
+
+            # 2. Construct Canonical Model covering all 9 mature families
+            project = CanonicalProject(id="PRJ-AG10", name="Full Multi-Family Parity Project")
+            building = CanonicalBuilding(id="BLD-01", name="Main Residence")
+            level = CanonicalLevel(id="LVL-01", name="Ground Floor", level_index=0, elevation_m=0.0, height_m=2.7)
+
+            # FAMILY 1: Wall (External with faces & Internal partition)
+            wall_ext = CanonicalWall(
+                id="W-EXT-NORTH",
+                name="North External Wall",
+                start_point=Vector2D(0.0, 0.0),
+                end_point=Vector2D(10.0, 0.0),
+                height_m=2.7,
+                thickness_m=0.23,
+                is_external=True,
+                substrate="Brick veneer",
+            )
+            # FAMILY 8 (Part A): Finish Surface on Wall Faces
+            face_a = WallFace(
+                face_id="A",
+                finish="Face brickwork",
+                finish_code="BRK-01",
+                substrate="Clay face brick",
+                area_net_m2=24.84,  # Net after 2.16m2 window
+            )
+            face_b = WallFace(
+                face_id="B",
+                finish="Interior low-sheen acrylic paint",
+                finish_code="PNT-INT-01",
+                substrate="10mm Plasterboard",
+                area_net_m2=24.84,
+            )
+            wall_ext.face_a = face_a
+            wall_ext.face_b = face_b
+
+            wall_int = CanonicalWall(
+                id="W-INT-01",
+                name="Internal Corridor Partition Wall",
+                start_point=Vector2D(0.0, 0.0),
+                end_point=Vector2D(0.0, 5.0),
+                height_m=2.7,
+                thickness_m=0.09,
+                is_external=False,
+                substrate="Timber stud framing",
+            )
+
+            # FAMILY 2 & 3: Opening & Door / Window
+            # Window (Family 3)
+            op_win = CanonicalOpening(
+                id="OP-W01",
+                mark="W01",
+                opening_type="WINDOW",
+                width_m=1.80,
+                height_m=1.20,
+                sill_height_m=0.90,
+                head_height_m=2.10,
+                offset_along_wall_m=3.0,
+                host_wall_id="W-EXT-NORTH",
+                plan_page_id="1",
+                schedule_page_id="2",
+                detail_record_id="det_win_w01",
+                opening_classification="Aluminium sliding window",
+                deduction_authority=True,
+            )
+            op_win.derive_trade_quantities(include_ancillary=True)
+            wall_ext.openings.append(op_win)
+
+            # Door (Family 3)
+            op_door = CanonicalOpening(
+                id="OP-D01",
+                mark="D01",
+                opening_type="DOOR",
+                width_m=0.82,
+                height_m=2.04,
+                sill_height_m=0.0,
+                head_height_m=2.04,
+                offset_along_wall_m=1.2,
+                host_wall_id="W-INT-01",
+                plan_page_id="1",
+                schedule_page_id="2",
+                opening_classification="Internal timber hollow core door",
+                deduction_authority=True,
+            )
+            op_door.derive_trade_quantities(include_ancillary=True)
+            wall_int.openings.append(op_door)
+
+            # Generic Opening Void (Family 2)
+            op_void = CanonicalOpening(
+                id="OP-VOID-01",
+                mark="OPENING-01",
+                opening_type="GENERIC",
+                width_m=1.00,
+                height_m=2.10,
+                sill_height_m=0.0,
+                head_height_m=2.10,
+                offset_along_wall_m=3.0,
+                host_wall_id="W-INT-01",
+                plan_page_id="1",
+                opening_classification="Square set wall opening",
+                deduction_authority=True,
+            )
+            op_void.derive_trade_quantities()
+            wall_int.openings.append(op_void)
+
+            # FAMILY 4: Room (Space with dry and wet finishes)
+            sp_living = CanonicalSpace(
+                id="SP-LIVING",
+                name="Living Room",
+                room_number="101",
+                boundary_polygon=[Vector2D(0.0, 0.0), Vector2D(6.0, 0.0), Vector2D(6.0, 5.0), Vector2D(0.0, 5.0)],
+                height_m=2.7,
+                finish_assignments={"floor": "Selected Timber Flooring"},
+            )
+            sp_living.derive_trade_quantities()
+
+            sp_bath = CanonicalSpace(
+                id="SP-BATH",
+                name="Ensuite Bathroom",
+                room_number="102",
+                boundary_polygon=[Vector2D(6.0, 0.0), Vector2D(10.0, 0.0), Vector2D(10.0, 3.0), Vector2D(6.0, 3.0)],
+                height_m=2.7,
+                finish_assignments={"floor": "Ceramic Floor Tiles"},
+            )
+            sp_bath.derive_trade_quantities()
+
+            # FAMILY 5: Floor / Slab
+            floor_slab = CanonicalFloor(
+                id="FL-SLAB-01",
+                name="Ground Concrete Slab",
+                polygon=[Vector2D(0.0, 0.0), Vector2D(10.0, 0.0), Vector2D(10.0, 5.0), Vector2D(0.0, 5.0)],
+                thickness_m=0.100,
+                substrate="25 MPa Reinforced Concrete",
+            )
+            floor_slab.derive_trade_quantities()
+
+            # FAMILY 6: Ceiling
+            ceiling_living = CanonicalCeiling(
+                id="CL-LIVING-01",
+                name="Living Room Plasterboard Ceiling",
+                polygon=[Vector2D(0.0, 0.0), Vector2D(6.0, 0.0), Vector2D(6.0, 5.0), Vector2D(0.0, 5.0)],
+                substrate="10mm Plasterboard on steel ceiling battens",
+            )
+            ceiling_living.derive_trade_quantities()
+
+            # FAMILY 7: Roof (Pitched with 3D trigonometry)
+            roof_main = CanonicalRoof(
+                id="RF-MAIN-01",
+                name="Main Pitched Gable Roof",
+                polygon=[Vector2D(0.0, 0.0), Vector2D(10.0, 0.0), Vector2D(10.0, 6.0), Vector2D(0.0, 6.0)],
+                pitch_deg=22.5,
+                substrate="Colorbond Custom Orb Corrugated Sheet Metal",
+            )
+            roof_main.derive_trade_quantities()
+
+            # FAMILY 8 (Part B): Applied Finish Surface
+            surf_feature = CanonicalFinishSurface(
+                id="SURF-FEAT-01",
+                name="Living Room Feature Timber Slatting",
+                parent_element_id="W-INT-01",
+                surface_area_m2=13.50,
+                orientation="INT_NORTH",
+                substrate="10mm Plasterboard",
+                finish="Timber acoustic slat paneling",
+            )
+            surf_feature.derive_trade_quantities()
+
+            # FAMILY 9: Structural Member (Column)
+            col_portico = CanonicalColumn(
+                id="COL-PORT-01",
+                name="Portico Structural Column",
+                center=Vector2D(10.0, 0.0),
+                width_m=0.35,
+                depth_m=0.35,
+                height_m=2.7,
+                substrate="40 MPa Reinforced Concrete",
+            )
+            col_portico.derive_trade_quantities()
+
+            # Assemble hierarchy
+            level.walls.extend([wall_ext, wall_int])
+            level.spaces.extend([sp_living, sp_bath])
+            level.floors.append(floor_slab)
+            level.ceilings.append(ceiling_living)
+            level.roofs.append(roof_main)
+            level.surfaces.append(surf_feature)
+            level.columns.append(col_portico)
+            building.levels.append(level)
+            project.buildings.append(building)
+
+            # 3. Topology and constructability check
+            project.recompute_relationships()
+            issues = project.check_constructability()
+            errors = [i for i in issues if i.severity == "ERROR"]
+            self.assertEqual(len(errors), 0, f"Unexpected constructability errors: {errors}")
+
+            # Verify relationship linkages
+            self.assertEqual(wall_ext.level_id, "LVL-01")
+            self.assertEqual(op_win.host_wall_id, "W-EXT-NORTH")
+            self.assertEqual(op_win.level_id, "LVL-01")
+            self.assertEqual(sp_living.level_id, "LVL-01")
+            self.assertEqual(floor_slab.level_id, "LVL-01")
+            self.assertEqual(ceiling_living.level_id, "LVL-01")
+            self.assertEqual(roof_main.level_id, "LVL-01")
+            self.assertEqual(surf_feature.level_id, "LVL-01")
+            self.assertEqual(col_portico.level_id, "LVL-01")
+
+            # 4. Save to database and load back roundtrip
+            save_workspace_canonical_model(
+                ws.app,
+                1,
+                project,
+                snapshot={"source_pdf": str(pdf_path), "status": "multi_family_verified"},
+            )
+            ok, loaded_project, _, _ = load_workspace_canonical_model(ws.app, 1)
+            self.assertTrue(ok)
+            self.assertIsNotNone(loaded_project)
+
+            # Assert all 9 families exist in loaded project
+            self.assertEqual(len(loaded_project.all_walls()), 2)
+            self.assertEqual(len(loaded_project.all_openings()), 3)
+            self.assertEqual(len(loaded_project.all_spaces()), 2)
+            self.assertEqual(len(loaded_project.all_floors()), 1)
+            self.assertEqual(len(loaded_project.all_ceilings()), 1)
+            self.assertEqual(len(loaded_project.all_roofs()), 1)
+            self.assertEqual(len(loaded_project.all_surfaces()), 1)
+            self.assertEqual(len(loaded_project.all_columns()), 1)
+
+            # 5. Publish to SQLite customer takeoff table
+            published_count = publish_canonical_model_to_takeoff(ws.app, 1, loaded_project)
+            self.assertGreater(published_count, 15)
+
+            db_rows = [dict(r) for r in ws.app.lquery("SELECT * FROM takeoff_rows WHERE workspace_id=1")]
+            self.assertEqual(len(db_rows), published_count)
+
+            # Strict 21-field contract compliance for EVERY row
+            for r in db_rows:
+                for f in takeoff_contract.CORE_FIELDS:
+                    self.assertIn(f, r, f"Field {f} missing from takeoff row {r}")
+                self.assertIn(r["unit"], takeoff_contract.TAKEOFF_UNITS)
+                self.assertGreaterEqual(r["quantity"], 0.0)
+
+            # VERIFY PARITY FOR EVERY MATURE CANONICAL FAMILY IN DATABASE:
+
+            # Family 1: Wall (Net after opening deduction: 27.0 - 2.16 = 24.84 m2)
+            ext_wall_row = next(r for r in db_rows if r.get("row_role") == "external_wall")
+            self.assertAlmostEqual(ext_wall_row["quantity"], 24.84, places=2)
+            self.assertEqual(ext_wall_row["unit"], "m²")
+
+            int_wall_row = next(r for r in db_rows if r.get("row_role") == "internal_partition")
+            self.assertAlmostEqual(int_wall_row["quantity"], 5.00, places=2)
+            self.assertEqual(int_wall_row["unit"], "lm")
+
+            # Family 2: Opening (Void deduction)
+            # Void on W-INT-01 has deduction_authority=True and mark="OPENING-01"
+            void_op = loaded_project.find_element("OP-VOID-01")
+            self.assertIsNotNone(void_op)
+            self.assertTrue(void_op.deduction_authority)
+
+            # Family 3: Door / Window
+            win_row = next(r for r in db_rows if r.get("row_role") == "window")
+            self.assertEqual(win_row["quantity"], 1.0)
+            self.assertEqual(win_row["unit"], "No.")
+            self.assertIn("W01", win_row["notes"])
+
+            win_trim = next(r for r in db_rows if r.get("row_role") == "opening_trim" and "W01" in str(r.get("notes") or ""))
+            self.assertAlmostEqual(win_trim["quantity"], 6.00, places=2)  # 2 * (1.8 + 1.2)
+            self.assertEqual(win_trim["unit"], "lm")
+
+            door_row = next(r for r in db_rows if r.get("row_role") == "door")
+            self.assertEqual(door_row["quantity"], 1.0)
+            self.assertEqual(door_row["unit"], "No.")
+
+            door_trim = next(r for r in db_rows if r.get("row_role") == "opening_trim" and "D01" in str(r.get("notes") or ""))
+            self.assertAlmostEqual(door_trim["quantity"], 4.90, places=2)  # 2 * 2.04 + 0.82
+            self.assertEqual(door_trim["unit"], "lm")
+
+            # Family 4: Room (Flooring & Tiling & Waterproofing & Skirting)
+            timber_row = next(r for r in db_rows if r.get("element") == "Floor Timber")
+            self.assertAlmostEqual(timber_row["quantity"], 30.00, places=2)
+            self.assertEqual(timber_row["unit"], "m²")
+
+            living_skirt = next(r for r in db_rows if "Floor Timber Perimeter Quad" in r.get("element", "") and "Living Room" in r.get("location", ""))
+            self.assertAlmostEqual(living_skirt["quantity"], 21.10, places=2)
+            self.assertEqual(living_skirt["unit"], "lm")
+
+            tile_row = next(r for r in db_rows if r.get("element") == "Floor Tiles" and "Bathroom" in r.get("location", ""))
+            self.assertAlmostEqual(tile_row["quantity"], 12.00, places=2)
+            self.assertEqual(tile_row["unit"], "m²")
+
+            wp_row = next(r for r in db_rows if "Waterproofing" in r.get("element", "") and "Bathroom" in r.get("location", ""))
+            self.assertAlmostEqual(wp_row["quantity"], 14.10, places=2)
+            self.assertEqual(wp_row["unit"], "m²")
+
+            # Family 5: Floor / Slab (Area, Volume, DPM, Formwork)
+            slab_area = next(r for r in db_rows if "Concrete slab on ground" in r.get("element", ""))
+            self.assertAlmostEqual(slab_area["quantity"], 50.00, places=2)
+            self.assertEqual(slab_area["unit"], "m²")
+
+            slab_vol = next(r for r in db_rows if "Concrete supply & pump" in r.get("element", ""))
+            self.assertAlmostEqual(slab_vol["quantity"], 5.00, places=2)
+
+            dpm_row = next(r for r in db_rows if "Damp-proof membrane" in r.get("element", ""))
+            self.assertAlmostEqual(dpm_row["quantity"], 55.00, places=2)  # 50 * 1.10
+            self.assertEqual(dpm_row["unit"], "m²")
+
+            edge_form = next(r for r in db_rows if "Slab edge formwork" in r.get("element", ""))
+            self.assertAlmostEqual(edge_form["quantity"], 30.00, places=2)
+            self.assertEqual(edge_form["unit"], "lm")
+
+            # Family 6: Ceiling (Plasterboard, Insulation, Cornice)
+            plaster_ceil = next(r for r in db_rows if "Ceiling plasterboard lining" in r.get("element", ""))
+            self.assertAlmostEqual(plaster_ceil["quantity"], 30.00, places=2)
+            self.assertEqual(plaster_ceil["unit"], "m²")
+
+            insul_ceil = next(r for r in db_rows if "Ceiling thermal insulation batts" in r.get("element", ""))
+            self.assertAlmostEqual(insul_ceil["quantity"], 30.00, places=2)
+            self.assertEqual(insul_ceil["unit"], "m²")
+
+            cornice_row = next(r for r in db_rows if "Ceiling cornice / perimeter trim" in r.get("element", ""))
+            self.assertAlmostEqual(cornice_row["quantity"], 22.00, places=2)
+            self.assertEqual(cornice_row["unit"], "lm")
+
+            # Family 7: Roof (Pitched 3D area, Sarking, Gutters)
+            expected_pitched_area = round(60.0 / math.cos(math.radians(22.5)), 2)
+            roof_sheet = next(r for r in db_rows if r.get("row_role") == "roof_area")
+            self.assertAlmostEqual(roof_sheet["quantity"], expected_pitched_area, places=2)
+            self.assertEqual(roof_sheet["unit"], "m²")
+
+            roof_sark = next(r for r in db_rows if "Roof insulation & reflective foil sarking" in r.get("element", ""))
+            self.assertAlmostEqual(roof_sark["quantity"], round(expected_pitched_area * 1.05, 2), places=2)
+            self.assertEqual(roof_sark["unit"], "m²")
+
+            gutters = next(r for r in db_rows if "Eaves gutter and fascia" in r.get("element", ""))
+            self.assertAlmostEqual(gutters["quantity"], 32.00, places=2)
+            self.assertEqual(gutters["unit"], "lm")
+
+            # Family 8: Finish Surface
+            face_a_row = next(r for r in db_rows if "BRK-01" in r.get("element", ""))
+            self.assertAlmostEqual(face_a_row["quantity"], 24.84, places=2)
+            self.assertEqual(face_a_row["unit"], "m²")
+
+            face_b_row = next(r for r in db_rows if "PNT-INT-01" in r.get("element", ""))
+            self.assertAlmostEqual(face_b_row["quantity"], 24.84, places=2)
+            self.assertEqual(face_b_row["unit"], "m²")
+
+            feat_surf_row = next(r for r in db_rows if r.get("row_role") == "finish_surface")
+            self.assertAlmostEqual(feat_surf_row["quantity"], 13.50, places=2)
+            self.assertEqual(feat_surf_row["unit"], "m²")
+            self.assertIn("SURF-FEAT-01", feat_surf_row["location"])
+
+            # Family 9: Structural Member (Column formwork & concrete volume)
+            col_form = next(r for r in db_rows if "Structural column formwork" in r.get("element", ""))
+            self.assertAlmostEqual(col_form["quantity"], 3.78, places=2)  # 4 * 0.35 * 2.7
+            self.assertEqual(col_form["unit"], "m²")
+
+            col_conc = next(r for r in db_rows if "Structural column concrete supply" in r.get("element", ""))
+            self.assertAlmostEqual(col_conc["quantity"], 0.33, places=2)  # 0.35 * 0.35 * 2.7 = 0.33075
+
+            # 6. Check 3D BIM Viewer Payload for all families
+            viewer_payload = project_to_viewer_payload(loaded_project)
+            objects_by_type = {}
+            for obj in viewer_payload.get("objects", []):
+                objects_by_type.setdefault(obj["type"], []).append(obj)
+
+            # Verify objects exist for all families in 3D viewer
+            self.assertIn("WALL", objects_by_type)
+            self.assertIn("DOOR", objects_by_type)
+            self.assertIn("WINDOW", objects_by_type)
+            self.assertIn("SPACE", objects_by_type)
+            self.assertIn("FLOOR", objects_by_type)
+            self.assertIn("CEILING", objects_by_type)
+            self.assertIn("ROOF", objects_by_type)
+            self.assertIn("COLUMN", objects_by_type)
+            self.assertIn("SURFACE", objects_by_type)
+
+            # Verify derived trade quantities are surfaced on 3D viewer objects
+            v_col = objects_by_type["COLUMN"][0]
+            self.assertEqual(len(v_col["derived_quantities"]), 2)
+
+            v_roof = objects_by_type["ROOF"][0]
+            self.assertEqual(len(v_roof["derived_quantities"]), 3)
+
+            v_surf = objects_by_type["SURFACE"][0]
+            self.assertEqual(len(v_surf["derived_quantities"]), 1)
+
+            # Generate HTML viewer markup
+            html = generate_bim_viewer_html(viewer_payload)
+            self.assertIn("PlanReader Commercial 3D BIM Viewer", html)
+            self.assertIn("Derived Trade Quantities", html)
+            self.assertIn("Host Offset", html)
+            self.assertIn("Head Height", html)
+
+            # Verify base64-embedded payload in HTML carries all element IDs
+            import base64
+            import re
+            m = re.search(r'const b64Data\s*=\s*"([^"]+)";', html)
+            self.assertIsNotNone(m)
+            decoded_json = json.loads(base64.b64decode(m.group(1)).decode("utf-8"))
+            self.assertEqual(decoded_json["project_id"], "PRJ-AG10")
+            decoded_ids = [o["id"] for o in decoded_json["objects"]]
+            self.assertIn("W-EXT-NORTH", decoded_ids)
+            self.assertIn("SP-LIVING", decoded_ids)
+            self.assertIn("COL-PORT-01", decoded_ids)
+            self.assertIn("SURF-FEAT-01", decoded_ids)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

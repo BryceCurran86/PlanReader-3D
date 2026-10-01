@@ -317,6 +317,7 @@ def project_to_viewer_payload(project: CanonicalProject) -> Dict[str, Any]:
                     "confidence": s.confidence,
                     "review_state": s_rev,
                     "provenance": s.provenance.to_dict() if s.provenance else {},
+                    "derived_quantities": [q.to_dict() for q in getattr(s, "derived_quantities", [])],
                 }
                 objects_payload.append(s_data)
 
