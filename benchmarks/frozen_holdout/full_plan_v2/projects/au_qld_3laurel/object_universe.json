@@ -625,5 +625,100 @@
       ]
     }
   ],
-  "primary_ceiling_plane_universe_complete": true
+  "primary_ceiling_plane_universe_complete": true,
+  "wet_area_floor_surfaces": [
+    {
+      "object_ref": "3laurel:surface:floor:bathroom",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Main bathroom tiled floor surface",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 5.17,
+      "attributes": {
+        "width_m": 1.88,
+        "length_m": 2.75,
+        "calculation": "1.880m * 2.750m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from bathroom layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      },
+      "source_locations": [
+        "architectural:p11:A0.11:Bathroom_Layout:1880x2750_finished_dimensions",
+        "architectural:p3:A0.3:BATH:TILES"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:floor:main_wc",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Main WC tiled floor surface",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 1.7316,
+      "attributes": {
+        "width_m": 1.56,
+        "length_m": 1.11,
+        "calculation": "1.560m * 1.110m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from WC layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      },
+      "source_locations": [
+        "architectural:p11:A0.11:WC_plan:1560x1110_finished_dimensions",
+        "architectural:p3:A0.3:WC:TILES"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:floor:laundry",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Main laundry tiled floor surface",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 5.1744,
+      "attributes": {
+        "width_m": 3.08,
+        "length_m": 1.68,
+        "calculation": "3.080m * 1.680m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from laundry layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      },
+      "source_locations": [
+        "architectural:p13:A0.13:Laundry_Layout:3080x1680_finished_dimensions",
+        "architectural:p3:A0.3:LDY:TILES"
+      ]
+    },
+    {
+      "object_ref": "3laurel:surface:floor:gf_ensuite_laundry",
+      "physical_kind": "floor_finish_surface",
+      "object_family": "floor",
+      "description": "Granny-flat ensuite/laundry tiled floor surface",
+      "finish": "tiles",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "expected_area_m2": 6.4889,
+      "attributes": {
+        "width_m": 1.87,
+        "length_m": 3.47,
+        "calculation": "1.870m * 3.470m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from GF ensuite/laundry layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:gf_living_composite_region"
+      },
+      "source_locations": [
+        "architectural:p15:A0.15:GF_Ensuite_Laundry:1870x3470_finished_dimensions",
+        "architectural:p3:A0.3:GF_wet_area:TILES"
+      ]
+    }
+  ],
+  "wet_area_floor_surface_universe_complete": true
 }
