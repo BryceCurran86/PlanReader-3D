@@ -1,13 +1,30 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from pb_live_canonical_floor_surface import (
+    LIVE_CANONICAL_FLOOR_METRIC_AREA_CONFLICT,
+    LIVE_CANONICAL_FLOOR_METRIC_AREA_RESOLVED,
+    LIVE_CANONICAL_FLOOR_METRIC_AREA_UNAVAILABLE,
     LIVE_CANONICAL_FLOOR_SURFACE_RESOLVED,
     LIVE_CANONICAL_FLOOR_SURFACE_UNAVAILABLE,
+    LiveCanonicalFloorSurfaceComposition,
+    LiveCanonicalFloorSurfaceObject,
     compose_live_canonical_floor_surfaces,
+    enrich_live_canonical_floor_metric_areas,
 )
 from pb_live_canonical_room_composition import compose_live_canonical_rooms
 from pb_migration_contracts import EvidenceResolutionStatus
 from tests.test_live_canonical_room_composition import _source
+from tests.test_source_room_area_bridge_v1 import (
+    _authority,
+    _context,
+    _document,
+    _firm_scale,
+    _viewport,
+    _write_plan,
+)
+from pb_source_room_area_bridge import build_source_room_area_bridge
 
 
 def test_two_authenticated_rooms_create_two_floor_surface_objects() -> None:
@@ -76,3 +93,168 @@ def test_floor_projection_is_deterministic_for_same_room_identity() -> None:
     assert [floor.to_dict() for floor in first.floors] == [
         floor.to_dict() for floor in second.floors
     ]
+
+
+
+def _floor_composition_from_bridge(published, bridge):
+    assert bridge.room_index is not None
+    floors = []
+    for room in bridge.room_index.rooms():
+        evidence_ids = tuple(room.evidence)
+        floors.append(
+            LiveCanonicalFloorSurfaceObject(
+                canonical_floor_id=f"floor:{room.room_ref}",
+                room_entity_id=room.room_ref,
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                page_id="1",
+                viewport_id=None,
+                polygon_pdf_pts=tuple(room.polygon_pdf_pts),
+                area_page_pts2=float(room.area_page_pts2),
+                bounding_wall_ids=(),
+                canonical_bounding_wall_ids=(),
+                source_room_face_record_id=evidence_ids[0],
+                evidence_ids=evidence_ids,
+                geometry_complete=True,
+                metric_geometry_complete=False,
+                metric_area_m2=None,
+                metric_area_quantity_id=None,
+                metric_area_authority=None,
+                finish_descriptor=None,
+                structural_slab_id=None,
+                physical_floor_surface_identity_resolved=False,
+                commercial_quantity_authority=False,
+            )
+        )
+    return LiveCanonicalFloorSurfaceComposition(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=(LIVE_CANONICAL_FLOOR_SURFACE_RESOLVED,),
+        floors=tuple(floors),
+        source_pages=(1,),
+    )
+
+
+def test_firm_source_room_area_enriches_same_floor_identity(tmp_path) -> None:
+    path = tmp_path / "metric-floor-area.pdf"
+    _write_plan(path)
+    published, room_faces, selector = _authority(path)
+    bridge = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+        scale_calibration=_firm_scale(published),
+    )
+    floors = _floor_composition_from_bridge(published, bridge)
+    before_ids = [floor.canonical_floor_id for floor in floors.floors]
+
+    enriched = enrich_live_canonical_floor_metric_areas(floors, bridge)
+
+    assert enriched.status is EvidenceResolutionStatus.CORROBORATED
+    assert LIVE_CANONICAL_FLOOR_METRIC_AREA_RESOLVED in enriched.reason_codes
+    assert [floor.canonical_floor_id for floor in enriched.floors] == before_ids
+    assert len(enriched.floors) == 2
+    quantities = {
+        quantity.input_entity_ids[0]: quantity
+        for quantity in bridge.quantities
+        if not quantity.abstained
+    }
+    for floor in enriched.floors:
+        quantity = quantities[floor.room_entity_id]
+        assert floor.metric_area_m2 == quantity.value
+        assert floor.metric_area_quantity_id == quantity.quantity_id
+        assert floor.metric_area_authority == quantity.authority
+        assert floor.metric_geometry_complete is False
+        assert floor.commercial_quantity_authority is False
+        assert floor.finish_descriptor is None
+        assert floor.structural_slab_id is None
+
+
+def test_missing_scale_keeps_floor_identity_but_metric_area_unresolved(
+    tmp_path,
+) -> None:
+    path = tmp_path / "metric-floor-no-scale.pdf"
+    _write_plan(path)
+    published, room_faces, selector = _authority(path)
+    bridge = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+        scale_calibration=None,
+    )
+    floors = _floor_composition_from_bridge(published, bridge)
+
+    enriched = enrich_live_canonical_floor_metric_areas(floors, bridge)
+
+    assert enriched.status is EvidenceResolutionStatus.CORROBORATED
+    assert LIVE_CANONICAL_FLOOR_METRIC_AREA_UNAVAILABLE in enriched.reason_codes
+    assert all(floor.metric_area_m2 is None for floor in enriched.floors)
+    assert all(
+        floor.canonical_floor_id == original.canonical_floor_id
+        for floor, original in zip(enriched.floors, floors.floors)
+    )
+
+
+def test_metric_area_lineage_mismatch_does_not_attach(tmp_path) -> None:
+    path = tmp_path / "metric-floor-lineage.pdf"
+    _write_plan(path)
+    published, room_faces, selector = _authority(path)
+    bridge = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+        scale_calibration=_firm_scale(published),
+    )
+    floors = _floor_composition_from_bridge(published, bridge)
+    wrong = replace(
+        floors,
+        floors=tuple(
+            replace(floor, revision_id="different-revision")
+            for floor in floors.floors
+        ),
+    )
+
+    enriched = enrich_live_canonical_floor_metric_areas(wrong, bridge)
+
+    assert LIVE_CANONICAL_FLOOR_METRIC_AREA_UNAVAILABLE in enriched.reason_codes
+    assert all(floor.metric_area_m2 is None for floor in enriched.floors)
+
+
+def test_duplicate_valid_room_area_authority_conflicts(tmp_path) -> None:
+    path = tmp_path / "metric-floor-duplicate.pdf"
+    _write_plan(path)
+    published, room_faces, selector = _authority(path)
+    bridge = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+        scale_calibration=_firm_scale(published),
+    )
+    floors = _floor_composition_from_bridge(published, bridge)
+    duplicated = replace(
+        bridge,
+        quantities=(
+            bridge.quantities[0],
+            bridge.quantities[0],
+            *bridge.quantities[1:],
+        ),
+    )
+
+    enriched = enrich_live_canonical_floor_metric_areas(floors, duplicated)
+
+    assert enriched.status is EvidenceResolutionStatus.CONFLICT
+    assert enriched.reason_codes == (LIVE_CANONICAL_FLOOR_METRIC_AREA_CONFLICT,)
+    assert any(floor.metric_area_m2 is None for floor in enriched.floors)
