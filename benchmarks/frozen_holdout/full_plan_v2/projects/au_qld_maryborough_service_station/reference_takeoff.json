@@ -370,6 +370,90 @@
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-airlock-ft2-floor-area",
+      "description": "Airlock FT2 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 7.66688,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:airlock"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A501:airlock_plan:1520x5044:FT2",
+        "A140:floor_finishes:AIRLOCK:FT2_and_matching_geometry"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-airlock-wfpb-ceiling-area",
+      "description": "Airlock WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 7.66688,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:airlock"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:AIRLOCK:2400_WFPB",
+        "A501:airlock_plan:1520x5044"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-laundry-ft2-floor-area",
+      "description": "Laundry FT2 tiled floor surface",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 8.34782,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:floor:laundry"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A501:laundry_plan:1655x5044:FT2",
+        "A140:floor_finishes:LAUNDRY:FT2_and_matching_geometry"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "maryborough-laundry-wfpb-ceiling-area",
+      "description": "Laundry WFPB ceiling surface",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 8.34782,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "maryborough:surface:ceiling:laundry"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "A120:RCP:LAUNDRY:2400_WFPB",
+        "A501:laundry_plan:1655x5044"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "door_universe_reconciliation": {
@@ -531,5 +615,35 @@
     "a120_ceiling_finish": "WFPB",
     "a120_ceiling_height_mm": 2400,
     "agreement": "PASS"
-  }
+  },
+  "airlock_laundry_geometry_checks": [
+    {
+      "room": "AIRLOCK",
+      "floor_ref": "maryborough:surface:floor:airlock",
+      "ceiling_ref": "maryborough:surface:ceiling:airlock",
+      "a501_figured_mm": [
+        1520,
+        5044
+      ],
+      "area_m2": 7.66688,
+      "a501_floor_finish": "FT2",
+      "a120_ceiling_finish": "WFPB",
+      "a120_ceiling_height_mm": 2400,
+      "agreement": "PASS"
+    },
+    {
+      "room": "LAUNDRY",
+      "floor_ref": "maryborough:surface:floor:laundry",
+      "ceiling_ref": "maryborough:surface:ceiling:laundry",
+      "a501_figured_mm": [
+        1655,
+        5044
+      ],
+      "area_m2": 8.34782,
+      "a501_floor_finish": "FT2",
+      "a120_ceiling_finish": "WFPB",
+      "a120_ceiling_height_mm": 2400,
+      "agreement": "PASS"
+    }
+  ]
 }
