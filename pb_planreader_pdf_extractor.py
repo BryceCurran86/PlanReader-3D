@@ -474,6 +474,15 @@ class GenericPlanReaderExtractor:
             "unassigned": {},
             "object_counts": {},
             "level_assignment_complete": False,
+            "relationship_status": "abstained",
+            "relationship_reason_codes": ["not_collected"],
+            "relationship_issues": [],
+            "relationship_counts": {
+                "resolved": 0,
+                "unresolved": 0,
+                "conflict": 0,
+            },
+            "relationship_complete": False,
         }
         # Live extraction visibility: distinguish absence from failure/conflict.
         self.extraction_status: Dict[str, str] = {}
@@ -1063,6 +1072,15 @@ class GenericPlanReaderExtractor:
             "unassigned": {},
             "object_counts": {},
             "level_assignment_complete": False,
+            "relationship_status": "abstained",
+            "relationship_reason_codes": ["not_collected"],
+            "relationship_issues": [],
+            "relationship_counts": {
+                "resolved": 0,
+                "unresolved": 0,
+                "conflict": 0,
+            },
+            "relationship_complete": False,
         }
 
         self.physical_net_wall_live = {
@@ -3963,6 +3981,17 @@ class GenericPlanReaderExtractor:
                 "unassigned": {},
                 "object_counts": {},
                 "level_assignment_complete": False,
+                "relationship_status": "abstained",
+                "relationship_reason_codes": [
+                    f"live_canonical_building_exception:{type(_building_exc).__name__}"
+                ],
+                "relationship_issues": [],
+                "relationship_counts": {
+                    "resolved": 0,
+                    "unresolved": 0,
+                    "conflict": 0,
+                },
+                "relationship_complete": False,
             }
             self.extraction_status["canonical_building_live"] = (
                 "extraction_failed"

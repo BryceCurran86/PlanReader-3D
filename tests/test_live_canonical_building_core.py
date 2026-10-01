@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from pb_live_canonical_building_core import (
+    LIVE_CANONICAL_BUILDING_RELATIONSHIPS_CONFLICT,
+    LIVE_CANONICAL_BUILDING_RELATIONSHIPS_PARTIAL,
+    LIVE_CANONICAL_BUILDING_RELATIONSHIPS_RESOLVED,
     LIVE_CANONICAL_BUILDING_CORE_ASSEMBLED,
     LIVE_CANONICAL_BUILDING_CORE_LEVEL_PARTIAL,
     LIVE_CANONICAL_BUILDING_CORE_LEVEL_UNAVAILABLE,
@@ -32,10 +35,14 @@ def _opening(*, kind="door"):
     }
 
 
-def _room():
+def _room(*, relationships_complete=False):
     return {
         "canonical_room_id": "room-1",
         "bounding_wall_ids": ["wall-candidate-1"],
+        "canonical_bounding_wall_ids": (
+            ["wall-1"] if relationships_complete else []
+        ),
+        "wall_relationships_complete": relationships_complete,
         "polygon_pdf_pts": [[0, 0], [10, 0], [10, 8], [0, 8]],
     }
 
@@ -184,6 +191,112 @@ def test_source_owned_level_metadata_survives_into_building_bucket() -> None:
     payload = result.to_dict()
     assert payload["levels"][0]["level_label"] == "GROUND FLOOR PLAN"
     assert payload["object_counts"]["levels"] == 1
+
+
+def test_relationship_integrity_reports_fully_resolved_graph() -> None:
+    result = assemble_live_canonical_building_core(
+        source_sha256=SHA,
+        walls=(_wall(),),
+        openings=(_opening(),),
+        rooms=(_room(relationships_complete=True),),
+        floors=(_floor(),),
+        ceilings=(_ceiling(),),
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.relationship_status is EvidenceResolutionStatus.CORROBORATED
+    assert result.relationship_reason_codes == (
+        LIVE_CANONICAL_BUILDING_RELATIONSHIPS_RESOLVED,
+    )
+    assert result.relationship_complete is True
+    assert result.relationship_issues == ()
+    assert result.relationship_counts["resolved"] == 4
+    assert result.relationship_counts["unresolved"] == 0
+    assert result.relationship_counts["conflict"] == 0
+
+
+def test_unresolved_relationships_do_not_delete_canonical_objects() -> None:
+    opening = dict(_opening())
+    opening["host_wall_id"] = None
+    result = assemble_live_canonical_building_core(
+        source_sha256=SHA,
+        walls=(_wall(),),
+        openings=(opening,),
+        rooms=(_room(relationships_complete=False),),
+        floors=(_floor(),),
+        ceilings=(_ceiling(),),
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.relationship_status is EvidenceResolutionStatus.CANDIDATE
+    assert result.relationship_reason_codes == (
+        LIVE_CANONICAL_BUILDING_RELATIONSHIPS_PARTIAL,
+    )
+    assert result.relationship_complete is False
+    assert result.relationship_counts["unresolved"] == 2
+    assert result.relationship_counts["conflict"] == 0
+    assert {
+        issue.reason_code for issue in result.relationship_issues
+    } == {
+        "opening_host_wall_unresolved",
+        "room_bounding_wall_relationship_partial",
+    }
+    assert result.object_counts["walls"] == 1
+    assert result.object_counts["openings"] == 1
+    assert result.object_counts["rooms"] == 1
+    assert result.object_counts["floors"] == 1
+    assert result.object_counts["ceilings"] == 1
+
+
+def test_claimed_relationship_to_missing_parent_is_graph_conflict_only() -> None:
+    opening = dict(_opening())
+    opening["host_wall_id"] = "wall-not-in-building"
+    floor = dict(_floor())
+    floor["room_entity_id"] = "room-not-in-building"
+
+    result = assemble_live_canonical_building_core(
+        source_sha256=SHA,
+        walls=(_wall(),),
+        openings=(opening,),
+        floors=(floor,),
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.building_id
+    assert result.relationship_status is EvidenceResolutionStatus.CONFLICT
+    assert result.relationship_reason_codes == (
+        LIVE_CANONICAL_BUILDING_RELATIONSHIPS_CONFLICT,
+    )
+    assert result.relationship_complete is False
+    assert result.relationship_counts["conflict"] == 2
+    assert {
+        issue.reason_code for issue in result.relationship_issues
+    } == {
+        "opening_host_wall_missing_from_building",
+        "floor_room_parent_missing_from_building",
+    }
+    assert result.object_counts["walls"] == 1
+    assert result.object_counts["openings"] == 1
+    assert result.object_counts["floors"] == 1
+
+
+def test_room_claiming_complete_relationship_without_canonical_walls_conflicts() -> None:
+    room = dict(_room())
+    room["wall_relationships_complete"] = True
+    room["canonical_bounding_wall_ids"] = []
+
+    result = assemble_live_canonical_building_core(
+        source_sha256=SHA,
+        walls=(_wall(),),
+        rooms=(room,),
+    )
+
+    assert result.relationship_status is EvidenceResolutionStatus.CONFLICT
+    assert result.relationship_counts["conflict"] == 1
+    assert result.relationship_issues[0].reason_code == (
+        "room_claims_complete_wall_relationship_without_walls"
+    )
+    assert result.object_counts["rooms"] == 1
 
 
 def test_duplicate_canonical_identity_fails_closed() -> None:

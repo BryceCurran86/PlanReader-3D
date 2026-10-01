@@ -28,6 +28,15 @@ LIVE_CANONICAL_BUILDING_CORE_LEVEL_UNAVAILABLE = (
 LIVE_CANONICAL_BUILDING_CORE_UNAVAILABLE = (
     "live_canonical_building_core_unavailable"
 )
+LIVE_CANONICAL_BUILDING_RELATIONSHIPS_RESOLVED = (
+    "live_canonical_building_relationships_resolved"
+)
+LIVE_CANONICAL_BUILDING_RELATIONSHIPS_PARTIAL = (
+    "live_canonical_building_relationships_partial"
+)
+LIVE_CANONICAL_BUILDING_RELATIONSHIPS_CONFLICT = (
+    "live_canonical_building_relationships_conflict"
+)
 
 _FAMILY_ID_FIELD = MappingProxyType({
     "walls": "canonical_wall_id",
@@ -50,6 +59,28 @@ def _dict_items(values: Sequence[Mapping[str, object]] | None) -> tuple[dict, ..
 
 def _object_id(family: str, payload: Mapping[str, object]) -> str:
     return _clean(payload.get(_FAMILY_ID_FIELD[family]))
+
+
+@dataclass(frozen=True)
+class LiveCanonicalRelationshipIssue:
+    relationship: str
+    child_family: str
+    child_id: str
+    parent_family: str
+    parent_id: str | None
+    severity: str
+    reason_code: str
+
+    def to_dict(self) -> dict:
+        return {
+            "relationship": self.relationship,
+            "child_family": self.child_family,
+            "child_id": self.child_id,
+            "parent_family": self.parent_family,
+            "parent_id": self.parent_id,
+            "severity": self.severity,
+            "reason_code": self.reason_code,
+        }
 
 
 def _one_level_id(values: object) -> str | None:
@@ -124,6 +155,11 @@ class LiveCanonicalBuildingCore:
     unassigned: Mapping[str, tuple[Mapping[str, object], ...]]
     object_counts: Mapping[str, int]
     level_assignment_complete: bool
+    relationship_status: EvidenceResolutionStatus
+    relationship_reason_codes: tuple[str, ...]
+    relationship_issues: tuple[LiveCanonicalRelationshipIssue, ...]
+    relationship_counts: Mapping[str, int]
+    relationship_complete: bool
     schema_version: str = LIVE_CANONICAL_BUILDING_CORE_SCHEMA_VERSION
 
     def to_dict(self) -> dict:
@@ -140,6 +176,13 @@ class LiveCanonicalBuildingCore:
             },
             "object_counts": dict(self.object_counts),
             "level_assignment_complete": self.level_assignment_complete,
+            "relationship_status": self.relationship_status.value,
+            "relationship_reason_codes": list(self.relationship_reason_codes),
+            "relationship_issues": [
+                issue.to_dict() for issue in self.relationship_issues
+            ],
+            "relationship_counts": dict(self.relationship_counts),
+            "relationship_complete": self.relationship_complete,
             "schema_version": self.schema_version,
         }
 
@@ -155,7 +198,205 @@ def _empty() -> LiveCanonicalBuildingCore:
         unassigned=MappingProxyType({family: () for family in _FAMILY_ID_FIELD}),
         object_counts=MappingProxyType({family: 0 for family in _FAMILY_ID_FIELD}),
         level_assignment_complete=False,
+        relationship_status=EvidenceResolutionStatus.ABSTAINED,
+        relationship_reason_codes=(
+            LIVE_CANONICAL_BUILDING_CORE_UNAVAILABLE,
+        ),
+        relationship_issues=(),
+        relationship_counts=MappingProxyType(
+            {"resolved": 0, "unresolved": 0, "conflict": 0}
+        ),
+        relationship_complete=False,
     )
+
+def _relationship_integrity(
+    families: Mapping[str, tuple[dict, ...]],
+) -> tuple[
+    EvidenceResolutionStatus,
+    tuple[str, ...],
+    tuple[LiveCanonicalRelationshipIssue, ...],
+    Mapping[str, int],
+    bool,
+]:
+    wall_ids = {
+        _object_id("walls", wall)
+        for wall in families["walls"]
+        if _object_id("walls", wall)
+    }
+    room_ids = {
+        _object_id("rooms", room)
+        for room in families["rooms"]
+        if _object_id("rooms", room)
+    }
+
+    issues: list[LiveCanonicalRelationshipIssue] = []
+    resolved = 0
+
+    for opening in families["openings"]:
+        opening_id = _object_id("openings", opening)
+        host_wall_id = _clean(opening.get("host_wall_id"))
+        if not host_wall_id:
+            issues.append(
+                LiveCanonicalRelationshipIssue(
+                    relationship="opening_host_wall",
+                    child_family="openings",
+                    child_id=opening_id,
+                    parent_family="walls",
+                    parent_id=None,
+                    severity="unresolved",
+                    reason_code="opening_host_wall_unresolved",
+                )
+            )
+        elif host_wall_id not in wall_ids:
+            issues.append(
+                LiveCanonicalRelationshipIssue(
+                    relationship="opening_host_wall",
+                    child_family="openings",
+                    child_id=opening_id,
+                    parent_family="walls",
+                    parent_id=host_wall_id,
+                    severity="conflict",
+                    reason_code="opening_host_wall_missing_from_building",
+                )
+            )
+        else:
+            resolved += 1
+
+    for room in families["rooms"]:
+        room_id = _object_id("rooms", room)
+        canonical_wall_ids = tuple(
+            dict.fromkeys(
+                _clean(value)
+                for value in (
+                    room.get("canonical_bounding_wall_ids") or ()
+                )
+                if _clean(value)
+            )
+        )
+        relationship_complete = (
+            room.get("wall_relationships_complete") is True
+        )
+        if relationship_complete and not canonical_wall_ids:
+            issues.append(
+                LiveCanonicalRelationshipIssue(
+                    relationship="room_bounding_walls",
+                    child_family="rooms",
+                    child_id=room_id,
+                    parent_family="walls",
+                    parent_id=None,
+                    severity="conflict",
+                    reason_code="room_claims_complete_wall_relationship_without_walls",
+                )
+            )
+            continue
+        missing = tuple(
+            wall_id
+            for wall_id in canonical_wall_ids
+            if wall_id not in wall_ids
+        )
+        if missing:
+            for wall_id in missing:
+                issues.append(
+                    LiveCanonicalRelationshipIssue(
+                        relationship="room_bounding_walls",
+                        child_family="rooms",
+                        child_id=room_id,
+                        parent_family="walls",
+                        parent_id=wall_id,
+                        severity="conflict",
+                        reason_code="room_bounding_wall_missing_from_building",
+                    )
+                )
+            continue
+        if relationship_complete:
+            resolved += max(1, len(canonical_wall_ids))
+        else:
+            issues.append(
+                LiveCanonicalRelationshipIssue(
+                    relationship="room_bounding_walls",
+                    child_family="rooms",
+                    child_id=room_id,
+                    parent_family="walls",
+                    parent_id=None,
+                    severity="unresolved",
+                    reason_code="room_bounding_wall_relationship_partial",
+                )
+            )
+
+    for family, relationship in (
+        ("floors", "floor_room"),
+        ("ceilings", "ceiling_room"),
+    ):
+        for item in families[family]:
+            child_id = _object_id(family, item)
+            room_id = _clean(item.get("room_entity_id"))
+            if not room_id:
+                issues.append(
+                    LiveCanonicalRelationshipIssue(
+                        relationship=relationship,
+                        child_family=family,
+                        child_id=child_id,
+                        parent_family="rooms",
+                        parent_id=None,
+                        severity="conflict",
+                        reason_code=f"{relationship}_identity_missing",
+                    )
+                )
+            elif room_id not in room_ids:
+                issues.append(
+                    LiveCanonicalRelationshipIssue(
+                        relationship=relationship,
+                        child_family=family,
+                        child_id=child_id,
+                        parent_family="rooms",
+                        parent_id=room_id,
+                        severity="conflict",
+                        reason_code=f"{relationship}_parent_missing_from_building",
+                    )
+                )
+            else:
+                resolved += 1
+
+    issues.sort(
+        key=lambda issue: (
+            issue.severity,
+            issue.relationship,
+            issue.child_family,
+            issue.child_id,
+            issue.parent_id or "",
+        )
+    )
+    conflict_count = sum(
+        1 for issue in issues if issue.severity == "conflict"
+    )
+    unresolved_count = sum(
+        1 for issue in issues if issue.severity == "unresolved"
+    )
+    counts = MappingProxyType(
+        {
+            "resolved": int(resolved),
+            "unresolved": int(unresolved_count),
+            "conflict": int(conflict_count),
+        }
+    )
+    if conflict_count:
+        status = EvidenceResolutionStatus.CONFLICT
+        reasons = (LIVE_CANONICAL_BUILDING_RELATIONSHIPS_CONFLICT,)
+    elif unresolved_count:
+        status = EvidenceResolutionStatus.CANDIDATE
+        reasons = (LIVE_CANONICAL_BUILDING_RELATIONSHIPS_PARTIAL,)
+    else:
+        status = EvidenceResolutionStatus.CORROBORATED
+        reasons = (LIVE_CANONICAL_BUILDING_RELATIONSHIPS_RESOLVED,)
+
+    return (
+        status,
+        reasons,
+        tuple(issues),
+        counts,
+        not issues,
+    )
+
 
 def assemble_live_canonical_building_core(
     *,
@@ -389,6 +630,15 @@ def assemble_live_canonical_building_core(
     )
     unassigned_count = sum(len(items) for items in unassigned.values())
     level_assignment_complete = unassigned_count == 0
+
+    (
+        relationship_status,
+        relationship_reason_codes,
+        relationship_issues,
+        relationship_counts,
+        relationship_complete,
+    ) = _relationship_integrity(families)
+
     if level_assignment_complete:
         reasons = (LIVE_CANONICAL_BUILDING_CORE_ASSEMBLED,)
     elif levels:
@@ -412,10 +662,18 @@ def assemble_live_canonical_building_core(
         unassigned=unassigned_frozen,
         object_counts=counts,
         level_assignment_complete=level_assignment_complete,
+        relationship_status=relationship_status,
+        relationship_reason_codes=relationship_reason_codes,
+        relationship_issues=relationship_issues,
+        relationship_counts=relationship_counts,
+        relationship_complete=relationship_complete,
     )
 
 
 __all__ = [
+    "LIVE_CANONICAL_BUILDING_RELATIONSHIPS_CONFLICT",
+    "LIVE_CANONICAL_BUILDING_RELATIONSHIPS_PARTIAL",
+    "LIVE_CANONICAL_BUILDING_RELATIONSHIPS_RESOLVED",
     "LIVE_CANONICAL_BUILDING_CORE_ASSEMBLED",
     "LIVE_CANONICAL_BUILDING_CORE_LEVEL_PARTIAL",
     "LIVE_CANONICAL_BUILDING_CORE_LEVEL_UNAVAILABLE",
@@ -423,5 +681,6 @@ __all__ = [
     "LIVE_CANONICAL_BUILDING_CORE_UNAVAILABLE",
     "LiveCanonicalBuildingCore",
     "LiveCanonicalLevelBucket",
+    "LiveCanonicalRelationshipIssue",
     "assemble_live_canonical_building_core",
 ]
