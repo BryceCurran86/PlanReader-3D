@@ -39,6 +39,11 @@
       "evidence": "A110 has exactly W01-W06 once each; A610 provides elevations for W01-W06"
     },
     {
+      "proof": "WC shower FT2 floor surfaces independently closed",
+      "status": "PASS",
+      "evidence": "A140 gives FT2 and 2935 x 1620 figured dimensions for each of three rooms; A110 independently reproduces the same physical room geometry within drawing tolerance."
+    },
+    {
       "proof": "PlanReader output not used as benchmark truth",
       "status": "PASS",
       "evidence": "Truth derived from source drawings and independent cross-check only"
@@ -51,7 +56,7 @@
     {
       "proof": "full project surface universe complete",
       "status": "FAIL",
-      "evidence": "Room/wall/ceiling/tile/external/window-area surfaces remain unresolved; door and window identity universes are reconciled."
+      "evidence": "Three FT2 WC/shower floors plus door/window identity universes are closed; remaining room floors, wall, ceiling, tile-wall, external and window-area surfaces remain unresolved."
     }
   ]
 }
