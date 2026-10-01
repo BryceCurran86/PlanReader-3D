@@ -128,16 +128,17 @@ def test_3laurel_gross_shower_tile_faces_stay_out_of_net_denominator_until_deduc
 
 def test_3laurel_typed_external_opening_census_is_source_closed():
     draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
-    openings = [
-        row
-        for row in draft["verified_physical_candidates"]
-        if row["object_family"] == "external_opening"
-    ]
     check = next(
         row
         for row in draft["closure_checks"]
         if row["check_id"] == "3laurel:control:typed_external_opening_census"
     )
+    typed_refs = set(check["component_object_refs"])
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in typed_refs
+    ]
     assert len(openings) == 20
     assert check["typed_opening_count"] == 20
     assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(58.59)
@@ -168,16 +169,17 @@ def test_wall_bracing_schedule_closure(project_id: str, check_id: str, expected_
 
 def test_lot16_typed_external_opening_census_closes_without_guessing_custom_front_glazing():
     draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
-    openings = [
-        row
-        for row in draft["verified_physical_candidates"]
-        if row["object_family"] == "external_opening"
-    ]
     check = next(
         row
         for row in draft["closure_checks"]
         if row["check_id"] == "lot16:control:typed_external_opening_census"
     )
+    typed_refs = set(check["component_object_refs"])
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in typed_refs
+    ]
     assert len(openings) == check["typed_opening_count"] == 10
     assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(31.41)
     assert check["typed_opening_area_m2"] == pytest.approx(31.41)
@@ -324,13 +326,10 @@ def test_3laurel_external_opening_universe_is_source_closed():
     assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(64.764)
     assert check["external_opening_area_m2"] == pytest.approx(64.764)
     assert check["complete_for_all_external_openings"] is True
-    assert (
-        "internal_door_opening_universe_for_wall_face_deductions"
-        in draft["unresolved_surface_families"]
-    )
-    assert (
-        "untyped_or_ambiguous_door_openings_and_internal_external_classification"
-        not in draft["unresolved_surface_families"]
+    assert "external_wall_faces_and_cladding" in draft["unresolved_surface_families"]
+    assert all(
+        "external_opening" not in item
+        for item in draft["unresolved_surface_families"]
     )
 
 
@@ -354,7 +353,10 @@ def test_lot16_roof_sheathing_geometry_is_closed_but_engineering_crosscheck_bloc
     assert check["pitch_groups_degrees"] == [5, 12]
     assert check["complete_for_architectural_guide_geometry"] is True
     assert check["final_engineering_crosscheck_complete"] is False
-    assert "roof_planes_final_crosscheck_against_engineering_stormwater_note" in draft["unresolved_surface_families"]
+    assert (
+        "roof_planes_final_crosscheck_blocked_by_missing_engineering_stormwater_drainage_plan"
+        in draft["unresolved_surface_families"]
+    )
 
 def test_3laurel_partial_internal_wall_gross_faces_are_dimension_closed_but_not_net_ready():
     draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
@@ -382,7 +384,7 @@ def test_3laurel_partial_internal_wall_gross_faces_are_dimension_closed_but_not_
         for row in faces
     )
     assert (
-        "internal_wall_faces_beyond_closed_bathroom_and_gf_ensuite_laundry_gross_faces"
+        "internal_wall_faces_beyond_closed_bathroom_main_ensuite_main_wc_main_laundry_gf_ensuite_laundry_and_bed2_bed3_gross_faces"
         in draft["unresolved_surface_families"]
     )
 
@@ -439,7 +441,7 @@ def test_3laurel_main_laundry_gross_wall_faces_are_dimension_closed_but_not_net_
         for row in faces
     )
     assert (
-        "internal_wall_faces_beyond_closed_bathroom_main_laundry_and_gf_ensuite_laundry_gross_faces"
+        "internal_wall_faces_beyond_closed_bathroom_main_ensuite_main_wc_main_laundry_gf_ensuite_laundry_and_bed2_bed3_gross_faces"
         in draft["unresolved_surface_families"]
     )
 
@@ -565,7 +567,7 @@ def test_lot16_bed2_bed3_gross_wall_faces_are_dimension_closed_but_not_net_ready
         for row in faces
     )
     assert (
-        "internal_wall_faces_beyond_closed_bed2_bed3_top_plate_gross_faces"
+        "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces_with_room_access_deductions_pending_joinery_and_open_archways"
         in draft["unresolved_surface_families"]
     )
 
@@ -595,7 +597,7 @@ def test_3laurel_internal_room_access_door_census_is_source_closed_but_joinery_s
         for row in openings
     )
     assert (
-        "internal_wall_openings_beyond_closed_room_access_doors_including_robe_linen_joinery"
+        "unlabelled_internal_wall_breaks_beyond_two_closed_dimensioned_open_archways_for_wall_face_deductions"
         in draft["unresolved_surface_families"]
     )
 
@@ -621,7 +623,7 @@ def test_3laurel_labelled_internal_joinery_openings_are_closed_but_unlabelled_br
         "unlabelled_internal_wall_breaks_or_open_archways"
     ]
     assert (
-        "unlabelled_internal_wall_breaks_or_open_archways_for_wall_face_deductions"
+        "unlabelled_internal_wall_breaks_beyond_two_closed_dimensioned_open_archways_for_wall_face_deductions"
         in draft["unresolved_surface_families"]
     )
 
@@ -711,7 +713,7 @@ def test_lot16_bed1_gross_wall_faces_are_dimension_closed_but_raked_extension_st
     assert check["openings_and_raked_ceiling_intersection_resolved"] is False
     assert all(row["attributes"]["raked_ceiling_extension_included"] is False for row in faces)
     assert (
-        "internal_wall_faces_beyond_closed_bed1_bed2_bed3_top_plate_gross_faces"
+        "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces_with_room_access_deductions_pending_joinery_and_open_archways"
         in draft["unresolved_surface_families"]
     )
 
@@ -788,7 +790,7 @@ def test_lot16_explicit_bath_shower_tile_face_is_net_closed_but_wet_area_univers
     assert check["complete_for_this_explicit_face"] is True
     assert check["complete_for_project_wet_area_tile_universe"] is False
     assert (
-        "wet_area_wall_tiling_beyond_explicit_bath_shower_full_height_face"
+        "wet_area_wall_tiling_beyond_three_closed_bath_gross_faces_including_remaining_bath_face_and_raked_ensuite"
         in draft["unresolved_surface_families"]
     )
 
@@ -843,7 +845,7 @@ def test_lot16_partial_wet_area_tile_faces_and_known_niches_are_source_closed():
     assert check["complete_for_project_wet_area_tile_universe"] is False
     assert check["niche_return_depths_resolved"] is False
     assert (
-        "wet_area_wall_tiling_beyond_five_closed_gross_faces_and_known_niche_face_deductions"
+        "wet_area_wall_tiling_beyond_three_closed_bath_gross_faces_including_remaining_bath_face_and_raked_ensuite"
         in draft["unresolved_surface_families"]
     )
 
@@ -872,7 +874,7 @@ def test_lot16_garage_floor_and_flat_ceiling_close_to_same_figured_rectangle():
     assert check["floor_surface_closed"] is True
     assert check["ceiling_surface_closed"] is True
     assert (
-        "ceilings_beyond_closed_garage_flat_ceiling_including_raked_ceiling"
+        "ceilings_beyond_closed_bed1_ensuite_wir_raked_and_garage_flat_planes_including_entry_porch_and_other_flat_regions"
         in draft["unresolved_surface_families"]
     )
 
