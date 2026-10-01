@@ -332,3 +332,26 @@ def test_3laurel_external_opening_universe_is_source_closed():
         "untyped_or_ambiguous_door_openings_and_internal_external_classification"
         not in draft["unresolved_surface_families"]
     )
+
+
+def test_lot16_roof_sheathing_geometry_is_closed_but_engineering_crosscheck_blocks_finality():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    roof = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "roof_sheathing"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:roof_sheathing_geometry"
+    )
+    assert len(roof) == check["roof_plane_count"] == 4
+    assert sum(float(row["attributes"]["projected_area_m2"]) for row in roof) == pytest.approx(252.04696)
+    assert sum(float(row["expected_quantity"]) for row in roof) == pytest.approx(255.250323)
+    assert check["total_projected_plan_area_m2"] == pytest.approx(252.04696)
+    assert check["total_sloped_sheathing_area_m2"] == pytest.approx(255.250323)
+    assert check["pitch_groups_degrees"] == [5, 12]
+    assert check["complete_for_architectural_guide_geometry"] is True
+    assert check["final_engineering_crosscheck_complete"] is False
+    assert "roof_planes_final_crosscheck_against_engineering_stormwater_note" in draft["unresolved_surface_families"]
