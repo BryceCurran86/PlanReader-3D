@@ -25,6 +25,8 @@ The richer all-orientation evidence API lives in ``pb_figured_dimension_evidence
 """
 from __future__ import annotations
 
+from collections import defaultdict
+import math
 from typing import Any, Dict, List, Optional, Sequence
 
 from pb_dimension_graph_constraint_engine import (
@@ -37,6 +39,9 @@ from pb_dimension_graph_constraint_engine import (
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_figured_dimension_evidence import (
     BindingStatus,
+    CoordinateSpace,
+    DimensionLayoutCalibration,
+    ObservedGeometrySegment,
     apply_anchor_binding,
     bind_observation_to_vector_geometry,
     calibrate_dimension_layout,
@@ -90,6 +95,187 @@ def _point_inside(point: Sequence[float], bbox: Sequence[float], *, tolerance: f
     )
 
 
+
+class _AxisSegmentSpatialIndex:
+    """Lossless spatial prefilter for dense axis-aligned vector linework.
+
+    The legacy binder remains the authority: this index only reduces the
+    segment sequence handed to it. The subset is deliberately a superset of
+    every segment that can satisfy either the binder's dimension-line candidate
+    test or its perpendicular witness-intersection test.
+    """
+
+    def __init__(
+        self,
+        segments: Sequence[ObservedGeometrySegment],
+        calibration: DimensionLayoutCalibration,
+    ) -> None:
+        self._segments = tuple(
+            segment
+            for segment in segments
+            if segment.coordinate_space == CoordinateSpace.PDF_POINTS.value
+            and segment.orientation
+            in {
+                DimensionOrientation.HORIZONTAL.value,
+                DimensionOrientation.VERTICAL.value,
+            }
+        )
+        self._position = {
+            segment.segment_id: index
+            for index, segment in enumerate(self._segments)
+        }
+        self._bin_size = max(
+            1.0,
+            float(calibration.line_search_distance_pt),
+            float(calibration.witness_endpoint_distance_pt),
+        )
+        self._horizontal_bins: dict[int, list[ObservedGeometrySegment]] = defaultdict(list)
+        self._vertical_bins: dict[int, list[ObservedGeometrySegment]] = defaultdict(list)
+        for segment in self._segments:
+            if segment.orientation == DimensionOrientation.HORIZONTAL.value:
+                axis = (segment.start[1] + segment.end[1]) / 2.0
+                self._horizontal_bins[self._bin(axis)].append(segment)
+            elif segment.orientation == DimensionOrientation.VERTICAL.value:
+                axis = (segment.start[0] + segment.end[0]) / 2.0
+                self._vertical_bins[self._bin(axis)].append(segment)
+
+    def _bin(self, value: float) -> int:
+        return int(math.floor(float(value) / self._bin_size))
+
+    def _from_bins(
+        self,
+        bins: dict[int, list[ObservedGeometrySegment]],
+        lo: float,
+        hi: float,
+    ) -> list[ObservedGeometrySegment]:
+        first = self._bin(lo)
+        last = self._bin(hi)
+        result: list[ObservedGeometrySegment] = []
+        for key in range(first, last + 1):
+            result.extend(bins.get(key, ()))
+        return result
+
+    @staticmethod
+    def _axis_distance(
+        point: tuple[float, float],
+        segment: ObservedGeometrySegment,
+    ) -> float:
+        if segment.orientation == DimensionOrientation.HORIZONTAL.value:
+            return abs(point[1] - (segment.start[1] + segment.end[1]) / 2.0)
+        if segment.orientation == DimensionOrientation.VERTICAL.value:
+            return abs(point[0] - (segment.start[0] + segment.end[0]) / 2.0)
+        return float("inf")
+
+    @staticmethod
+    def _projection_contains(
+        point: tuple[float, float],
+        segment: ObservedGeometrySegment,
+        margin: float,
+    ) -> bool:
+        if segment.orientation == DimensionOrientation.HORIZONTAL.value:
+            lo, hi = sorted((segment.start[0], segment.end[0]))
+            return lo - margin <= point[0] <= hi + margin
+        if segment.orientation == DimensionOrientation.VERTICAL.value:
+            lo, hi = sorted((segment.start[1], segment.end[1]))
+            return lo - margin <= point[1] <= hi + margin
+        return False
+
+    def binding_subset(
+        self,
+        observation: DimensionObservation,
+        calibration: DimensionLayoutCalibration,
+    ) -> Sequence[ObservedGeometrySegment]:
+        if observation.bbox is None:
+            return ()
+        center = (
+            (float(observation.bbox[0]) + float(observation.bbox[2])) / 2.0,
+            (float(observation.bbox[1]) + float(observation.bbox[3])) / 2.0,
+        )
+        search = float(calibration.line_search_distance_pt)
+        candidates: list[ObservedGeometrySegment] = []
+        candidates.extend(
+            self._from_bins(
+                self._horizontal_bins,
+                center[1] - search,
+                center[1] + search,
+            )
+        )
+        candidates.extend(
+            self._from_bins(
+                self._vertical_bins,
+                center[0] - search,
+                center[0] + search,
+            )
+        )
+        candidates = [
+            segment
+            for segment in candidates
+            if segment.source_page == observation.source_page
+            and (
+                not observation.view_id
+                or not segment.view_id
+                or segment.view_id == observation.view_id
+            )
+            and self._axis_distance(center, segment) <= search
+            and self._projection_contains(center, segment, search)
+        ]
+        if not candidates:
+            return ()
+
+        # The chosen dimension line can be any candidate, or a merge of the
+        # two closest collinear candidates. Include every perpendicular segment
+        # whose axis coordinate falls anywhere across the candidate envelope;
+        # the legacy binder performs the exact intersection/tolerance test.
+        witness_margin = float(calibration.witness_endpoint_distance_pt)
+        horizontal_candidates = [
+            segment
+            for segment in candidates
+            if segment.orientation == DimensionOrientation.HORIZONTAL.value
+        ]
+        vertical_candidates = [
+            segment
+            for segment in candidates
+            if segment.orientation == DimensionOrientation.VERTICAL.value
+        ]
+        witnesses: list[ObservedGeometrySegment] = []
+        if horizontal_candidates:
+            lo = min(min(s.start[0], s.end[0]) for s in horizontal_candidates)
+            hi = max(max(s.start[0], s.end[0]) for s in horizontal_candidates)
+            witnesses.extend(
+                self._from_bins(
+                    self._vertical_bins,
+                    lo - witness_margin,
+                    hi + witness_margin,
+                )
+            )
+        if vertical_candidates:
+            lo = min(min(s.start[1], s.end[1]) for s in vertical_candidates)
+            hi = max(max(s.start[1], s.end[1]) for s in vertical_candidates)
+            witnesses.extend(
+                self._from_bins(
+                    self._horizontal_bins,
+                    lo - witness_margin,
+                    hi + witness_margin,
+                )
+            )
+
+        selected: dict[str, ObservedGeometrySegment] = {}
+        for segment in candidates:
+            selected[segment.segment_id] = segment
+        for segment in witnesses:
+            if segment.source_page != observation.source_page:
+                continue
+            if observation.view_id and segment.view_id and segment.view_id != observation.view_id:
+                continue
+            selected[segment.segment_id] = segment
+        return tuple(
+            sorted(
+                selected.values(),
+                key=lambda segment: self._position.get(segment.segment_id, 10**12),
+            )
+        )
+
+
 def _extract_horizontal_chains_core(
     page: Any,
     *,
@@ -127,6 +313,8 @@ def _extract_horizontal_chains_core(
             and _point_inside(segment.end, viewport_bbox)
         ]
 
+    segment_index = _AxisSegmentSpatialIndex(segments, layout)
+
     usable: List[DimensionObservation] = []
     for observation in native:
         value_mm = observation.value_m * 1000.0
@@ -134,7 +322,11 @@ def _extract_horizontal_chains_core(
         if not (lo <= value_mm <= hi):
             continue
 
-        binding = bind_observation_to_vector_geometry(observation, segments, layout)
+        binding = bind_observation_to_vector_geometry(
+            observation,
+            segment_index.binding_subset(observation, layout),
+            layout,
+        )
 
         if binding.status == BindingStatus.WITNESS_BOUND.value:
             # A complete two-witness association is strong enough to establish

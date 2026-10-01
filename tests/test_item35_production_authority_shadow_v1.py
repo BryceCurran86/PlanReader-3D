@@ -61,7 +61,7 @@ def test_live_extractor_populates_item35_shadow_without_publishing_opening_count
     _write_minimal_drawing(pdf_path)
 
     extractor = GenericPlanReaderExtractor()
-    predictions = extractor.extract_from_pdf(pdf_path)
+    predictions = extractor.extract_from_pdf(pdf_path, collect_item35_shadow=True)
 
     # No schedule/dimension/quantity evidence exists in this fixture. Executing
     # Item 35 must not manufacture a commercial opening prediction.
@@ -85,7 +85,7 @@ def test_scoped_live_extraction_runs_item35_only_on_requested_pages(tmp_path) ->
     _write_minimal_drawing(pdf_path)
 
     extractor = GenericPlanReaderExtractor()
-    predictions = extractor.extract_from_pdf(pdf_path, pages=[0])
+    predictions = extractor.extract_from_pdf(pdf_path, pages=[0], collect_item35_shadow=True)
 
     assert not [
         prediction

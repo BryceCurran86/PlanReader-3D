@@ -524,6 +524,65 @@ def _texttrace_spans(page: object) -> Optional[list]:
     return cache["texttrace"]
 
 
+
+_TEXTTRACE_SPATIAL_BIN_PT = 32.0
+
+
+def _texttrace_spans_near_bbox(
+    page: object,
+    bbox: Sequence[object],
+) -> Optional[tuple[Mapping[str, object], ...]]:
+    """Return a lossless spatial superset of trace spans touching the bbox.
+
+    The exact overlap/text tests remain in _matching_trace_spans. This cache
+    only avoids rescanning every text-trace span for every native word.
+    """
+    spans = _texttrace_spans(page)
+    if spans is None:
+        return None
+    try:
+        x0, y0, x1, y1 = _rect_tuple(bbox)
+    except (TypeError, ValueError):
+        return tuple(span for span in spans if isinstance(span, Mapping))
+
+    cache = _page_cache(page)
+    key = "texttrace_spatial_index_v1"
+    indexed = cache.get(key)
+    if indexed is None:
+        grid: dict[tuple[int, int], list[tuple[int, Mapping[str, object]]]] = {}
+        unindexed: list[tuple[int, Mapping[str, object]]] = []
+        for position, span in enumerate(spans):
+            if not isinstance(span, Mapping):
+                continue
+            try:
+                sx0, sy0, sx1, sy1 = _rect_tuple(span.get("bbox") or ())
+            except (TypeError, ValueError):
+                unindexed.append((position, span))
+                continue
+            ix0 = int(math.floor(sx0 / _TEXTTRACE_SPATIAL_BIN_PT))
+            ix1 = int(math.floor(sx1 / _TEXTTRACE_SPATIAL_BIN_PT))
+            iy0 = int(math.floor(sy0 / _TEXTTRACE_SPATIAL_BIN_PT))
+            iy1 = int(math.floor(sy1 / _TEXTTRACE_SPATIAL_BIN_PT))
+            for ix in range(ix0, ix1 + 1):
+                for iy in range(iy0, iy1 + 1):
+                    grid.setdefault((ix, iy), []).append((position, span))
+        indexed = (grid, tuple(unindexed))
+        cache[key] = indexed
+
+    grid, unindexed = indexed
+    qx0 = int(math.floor(x0 / _TEXTTRACE_SPATIAL_BIN_PT))
+    qx1 = int(math.floor(x1 / _TEXTTRACE_SPATIAL_BIN_PT))
+    qy0 = int(math.floor(y0 / _TEXTTRACE_SPATIAL_BIN_PT))
+    qy1 = int(math.floor(y1 / _TEXTTRACE_SPATIAL_BIN_PT))
+    found: dict[int, Mapping[str, object]] = {
+        position: span for position, span in unindexed
+    }
+    for ix in range(qx0, qx1 + 1):
+        for iy in range(qy0, qy1 + 1):
+            for position, span in grid.get((ix, iy), ()):
+                found[position] = span
+    return tuple(found[position] for position in sorted(found))
+
 def _span_seqno(span: Mapping[str, object]) -> Optional[int]:
     try:
         return int(span.get("seqno"))  # type: ignore[arg-type]
@@ -790,7 +849,7 @@ def _matching_trace_spans(
 ) -> tuple[tuple[Mapping[str, object], ...], str, tuple[str, ...]]:
     raw_text = str(word.get("text") or "")
     bbox = word.get("bbox") or ()
-    spans = _texttrace_spans(page)
+    spans = _texttrace_spans_near_bbox(page, bbox)
     if spans is None:
         return (), "", (TEXT_TRACE_UNAVAILABLE,)
     candidates: list[tuple[Mapping[str, object], str]] = []
@@ -1018,11 +1077,17 @@ def _clip_model(page: object) -> Optional[_ClipModel]:
 
 
 def _page_content_has_clip_operator(page: object) -> Optional[bool]:
-    try:
-        content = bytes(page.read_contents() or b"")  # type: ignore[attr-defined]
-    except Exception:
-        return None
-    return re.search(rb"(?<!\S)W\*?(?!\S)", content) is not None
+    cache = _page_cache(page)
+    if "content_has_clip_operator" not in cache:
+        try:
+            content = bytes(page.read_contents() or b"")  # type: ignore[attr-defined]
+        except Exception:
+            cache["content_has_clip_operator"] = None
+        else:
+            cache["content_has_clip_operator"] = (
+                re.search(rb"(?<!\S)W\*?(?!\S)", content) is not None
+            )
+    return cache["content_has_clip_operator"]
 
 
 def _rect_contains(
@@ -1072,24 +1137,26 @@ def _native_word_is_present(
         return False
 
     cache = _page_cache(page)
-    if "native_words" not in cache:
+    if "native_word_bboxes_by_text" not in cache:
         try:
-            cache["native_words"] = list(
-                page.get_text("words") or []
-            )
+            words = list(page.get_text("words") or [])
         except Exception:
-            cache["native_words"] = None
-    words = cache.get("native_words")
-    if words is None:
+            cache["native_word_bboxes_by_text"] = None
+        else:
+            indexed: dict[str, list[tuple[float, float, float, float]]] = {}
+            for row in words:
+                try:
+                    text = str(row[4])
+                    row_bbox = _rect_tuple(row[:4])
+                except (IndexError, TypeError, ValueError):
+                    continue
+                indexed.setdefault(text, []).append(row_bbox)
+            cache["native_word_bboxes_by_text"] = indexed
+    indexed = cache.get("native_word_bboxes_by_text")
+    if indexed is None:
         return False
 
-    for row in words:
-        try:
-            if str(row[4]) != raw_text:
-                continue
-            row_bbox = _rect_tuple(row[:4])
-        except (IndexError, TypeError, ValueError):
-            continue
+    for row_bbox in indexed.get(raw_text, ()):
         if all(abs(left - right) <= 1e-6 for left, right in zip(row_bbox, bbox)):
             return True
     return False

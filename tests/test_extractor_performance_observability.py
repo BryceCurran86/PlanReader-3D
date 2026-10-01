@@ -138,3 +138,41 @@ def test_drawing_page_classification_is_cached_per_page(tmp_path, monkeypatch):
     extractor.extract_from_pdf(path, collect_item35_shadow=False)
 
     assert calls["count"] == 2
+
+
+def _pdf_with_raster(tmp_path, name, display_rect):
+    path = tmp_path / name
+    doc = fitz.open()
+    page = doc.new_page(width=1000, height=1000)
+    pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 500, 500), False)
+    pix.clear_with(255)
+    page.insert_image(fitz.Rect(*display_rect), stream=pix.tobytes("png"))
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def test_large_raster_gate_ignores_high_resolution_tiny_logo(tmp_path):
+    path = _pdf_with_raster(
+        tmp_path,
+        "tiny-logo.pdf",
+        (10, 10, 60, 60),
+    )
+    doc = fitz.open(path)
+    try:
+        assert not GenericPlanReaderExtractor._page_has_large_raster(doc[0])
+    finally:
+        doc.close()
+
+
+def test_large_raster_gate_accepts_page_significant_raster(tmp_path):
+    path = _pdf_with_raster(
+        tmp_path,
+        "raster-plan.pdf",
+        (100, 100, 900, 900),
+    )
+    doc = fitz.open(path)
+    try:
+        assert GenericPlanReaderExtractor._page_has_large_raster(doc[0])
+    finally:
+        doc.close()
