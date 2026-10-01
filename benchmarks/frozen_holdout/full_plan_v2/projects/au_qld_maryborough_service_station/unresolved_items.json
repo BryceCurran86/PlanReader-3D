@@ -4,8 +4,8 @@
   "status": "INCOMPLETE",
   "unresolved_families": [
     {
-      "family": "room_floor_areas",
-      "reason": "Room geometry route not independently closed."
+      "family": "remaining_room_floor_areas",
+      "reason": "The three FT2 WC & SHOWER floors are independently closed; all other room floor surfaces remain unresolved."
     },
     {
       "family": "internal_wall_ipf2_areas",
