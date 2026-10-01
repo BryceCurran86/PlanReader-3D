@@ -1414,6 +1414,147 @@ class CustomerRuntimeNetWallParityTests(unittest.TestCase):
             self.assertEqual(row_dict["quantity"], 47.6)
             self.assertIn("opening deductions", row_dict["notes"])
 
+    def test_ag07_precedence_tier_1_explicit_dimension_beats_measured_geometry(self):
+        """AG-07: Explicit figured dimension beats measured vector and raster geometry."""
+        from pb_geometry_takeoff_model import AuthorityStatus
+        from pb_raster_plan_dimension_bridge import (
+            DimensionPrecedenceTier,
+            resolve_dimension_with_precedence,
+        )
+
+        # Explicit: 10.0m, Vector: 10.1m (within 5%), Raster: 10.2m
+        result = resolve_dimension_with_precedence(
+            explicit_dim_m=10.0,
+            vector_geom_m=10.1,
+            raster_geom_m=10.2,
+        )
+        self.assertEqual(result.tier, DimensionPrecedenceTier.EXPLICIT)
+        self.assertEqual(result.resolved_m, 10.0)
+        self.assertEqual(result.status, AuthorityStatus.FIRM.value)
+        self.assertEqual(result.evidence_status, EvidenceResolutionStatus.CORROBORATED)
+        self.assertAlmostEqual(result.discrepancy_delta_m, 0.1, places=2)
+
+    def test_ag07_disagreement_between_explicit_and_measured_escalates_to_review(self):
+        """AG-07: When explicit dimension and measured geometry disagree beyond 5%, escalate to review."""
+        from pb_geometry_takeoff_model import AuthorityStatus
+        from pb_raster_plan_dimension_bridge import (
+            DimensionPrecedenceTier,
+            resolve_dimension_with_precedence,
+        )
+
+        # Explicit: 10.0m, Measured: 12.0m (20% discrepancy > 5% tolerance)
+        result = resolve_dimension_with_precedence(
+            explicit_dim_m=10.0,
+            vector_geom_m=12.0,
+            max_delta_ratio=0.05,
+        )
+        # Explicit dimension still prevails in quantity, but flags review required and conflict
+        self.assertEqual(result.tier, DimensionPrecedenceTier.EXPLICIT)
+        self.assertEqual(result.resolved_m, 10.0)
+        self.assertEqual(result.status, AuthorityStatus.REVIEW_REQUIRED.value)
+        self.assertEqual(result.evidence_status, EvidenceResolutionStatus.CONFLICT)
+        self.assertIn("Warning: Large discrepancy", result.notes)
+        self.assertAlmostEqual(result.discrepancy_delta_m, 2.0, places=2)
+        self.assertAlmostEqual(result.discrepancy_ratio, 0.2, places=2)
+
+    def test_ag07_vector_geometry_prevails_over_raster_measurement(self):
+        """AG-07: Without explicit dimension, authenticated vector geometry prevails over raster measurement."""
+        from pb_geometry_takeoff_model import AuthorityStatus
+        from pb_raster_plan_dimension_bridge import (
+            DimensionPrecedenceTier,
+            resolve_dimension_with_precedence,
+        )
+
+        # Vector: 15.0m, Raster: 14.0m
+        result = resolve_dimension_with_precedence(
+            explicit_dim_m=None,
+            vector_geom_m=15.0,
+            raster_geom_m=14.0,
+        )
+        self.assertEqual(result.tier, DimensionPrecedenceTier.VECTOR)
+        self.assertEqual(result.resolved_m, 15.0)
+        self.assertIn("Vector geometry 15.0m prevails over raster measurement 14.0m", result.notes)
+
+    def test_ag07_raster_plan_dimension_calibration_promoted_when_vector_missing(self):
+        """AG-07: When vector dimension lines are absent, calibrated raster dimension chain is promoted."""
+        from pb_raster_plan_dimension_authority import (
+            RasterPlanDimensionResult,
+            RasterOverallDimension,
+            _RECORD_SEAL,
+        )
+
+        with _test_workspace() as ws:
+            page = {"id": 10, "page_no": 1, "scale_text": "Auto provisional", "px_per_m": 0.0}
+
+            # Vector dimension line detector finds nothing
+            auto.detect_dimension_calibration = lambda app, p: None
+            # Printed scale detector finds generic 1:100 (28.35 px/m)
+            ws.app.auto_detect_scale = lambda p: {"px_per_m": 28.35, "source": "title_block"}
+
+            # Raster authority has a calibrated overall dimension (56.7 px/m)
+            raster_res = RasterPlanDimensionResult(
+                status=EvidenceResolutionStatus.CANDIDATE,
+                reason_codes=("raster_dimension_chain_resolved",),
+                document_id="doc10",
+                revision_id="rev10",
+                source_sha256="0" * 64,
+                snapshot_id="snap10",
+                page_id="10",
+                horizontal=RasterOverallDimension(
+                    overall_dimension_id="dim1",
+                    orientation="horizontal",
+                    value_mm=10000,
+                    span_pt=200.0,
+                    endpoints_pt=((0.0, 0.0), (200.0, 0.0)),
+                    child_dimension_ids=("txt1", "txt2"),
+                    child_values_mm=(5000, 5000),
+                    _seal=_RECORD_SEAL,
+                ),
+                scale_status="provisional",
+                scale_px_per_m=56.7,
+                length_m=10.0,
+                width_m=5.0,
+            )
+            ws.app.raster_plan_dimension_results = {"10": raster_res}
+
+            calib = auto._auto_calibrate_page(ws.app, page)
+            self.assertIsNotNone(calib)
+            # Promoted raster dimension (56.7), NOT printed scale fallback (28.35)
+            self.assertEqual(calib["method"], "Raster dimension")
+            self.assertEqual(calib["px_per_m"], 56.7)
+
+    def test_ag07_vector_dimension_line_never_overridden_by_raster(self):
+        """AG-07: When vector dimension lines exist, vector geometry is chosen over raster."""
+        from pb_raster_plan_dimension_authority import (
+            RasterPlanDimensionResult,
+            RasterOverallDimension,
+        )
+
+        with _test_workspace() as ws:
+            page = {"id": 11, "page_no": 1, "scale_text": "Auto provisional", "px_per_m": 0.0}
+
+            # Vector dimension line detector finds 70.0 px/m
+            with patch("pb_auto_geometry_v1219.detect_dimension_calibration", return_value={"px_per_m": 70.0, "dimension_text": "5000", "confidence": "High"}):
+                # Raster authority claims 50.0 px/m
+                raster_res = RasterPlanDimensionResult(
+                    status=EvidenceResolutionStatus.CANDIDATE,
+                    reason_codes=("raster_dimension_chain_resolved",),
+                    document_id="doc11",
+                    revision_id="rev11",
+                    source_sha256="1" * 64,
+                    snapshot_id="snap11",
+                    page_id="11",
+                    scale_status="provisional",
+                    scale_px_per_m=50.0,
+                )
+                ws.app.raster_plan_dimension_results = {"11": raster_res}
+
+                calib = auto._auto_calibrate_page(ws.app, page)
+                self.assertIsNotNone(calib)
+                # Vector dimension wins: 70.0 px/m, method Dimension line
+                self.assertEqual(calib["method"], "Dimension line")
+                self.assertEqual(calib["px_per_m"], 70.0)
+
 
 if __name__ == "__main__":
     unittest.main()

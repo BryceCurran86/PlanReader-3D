@@ -554,6 +554,15 @@ def _auto_calibrate_page(app: Any, page: Dict[str, Any]) -> Optional[Dict[str, A
         app.lexecute("UPDATE pages SET px_per_m=?,scale_text=? WHERE id=?", (_num(detected["px_per_m"]), label, int(page["id"])))
         return {"page_id": int(page["id"]), "method": "Dimension line", "px_per_m": _num(detected["px_per_m"]), "confidence": detected.get("confidence", "Medium")}
     try:
+        from pb_raster_plan_dimension_bridge import detect_raster_plan_dimension_calibration
+        raster_detected = detect_raster_plan_dimension_calibration(app, page)
+    except Exception:
+        raster_detected = None
+    if raster_detected:
+        label = f"Auto raster dimension {raster_detected.get('dimension_text')} · {raster_detected.get('confidence')} confidence"
+        app.lexecute("UPDATE pages SET px_per_m=?,scale_text=? WHERE id=?", (_num(raster_detected["px_per_m"]), label, int(page["id"])))
+        return {"page_id": int(page["id"]), "method": "Raster dimension", "px_per_m": _num(raster_detected["px_per_m"]), "confidence": raster_detected.get("confidence", "Medium")}
+    try:
         scale = app.auto_detect_scale(page)
     except Exception:
         scale = None
