@@ -31,7 +31,7 @@
     "internal_wall_faces",
     "external_wall_faces_and_cladding",
     "ceilings_including_raked_ceiling",
-    "doors_and_windows",
+    "custom_front_glazing_and_untyped_external_door_elements",
     "wet_area_wall_tiling",
     "structural_members_other_than_scheduled_wall_bracing",
     "roof_planes_final_crosscheck_against_engineering_stormwater_note"
@@ -764,6 +764,34 @@
       ],
       "object_count": 24,
       "total_length_m": 27.9
+    },
+    {
+      "check_id": "lot16:control:typed_external_opening_census",
+      "component_object_refs": [
+        "lot16:opening:p3:0615_sgw:01",
+        "lot16:opening:p3:0621_sgw:01",
+        "lot16:opening:p3:0630_fg:01",
+        "lot16:opening:p3:0906_sgw_obs:01",
+        "lot16:opening:p3:1215_sgw_obs:01",
+        "lot16:opening:p3:1218_sgw:01",
+        "lot16:opening:p3:1218_sgw:02",
+        "lot16:opening:p3:2124_corner_stack:01",
+        "lot16:opening:p3:2127_stacker:01",
+        "lot16:opening:p3:2148_panel_lift:01"
+      ],
+      "typed_opening_count": 10,
+      "typed_opening_area_m2": 31.41,
+      "complete_for_typed_dimensioned_labels": true,
+      "complete_for_all_openings": false,
+      "residual_unresolved": [
+        "custom_front_windows_measure_on_site",
+        "untyped_front_entry_or_glazed_elements"
+      ],
+      "source_locations": [
+        "architectural:p3:floor_plan:typed_external_opening_labels",
+        "architectural:p4-p5:elevations:typed_opening_crosscheck",
+        "architectural:p4:elevation_1:CUSTOM_WINDOWS_TO_FRONT_MEASURE_ON_SITE"
+      ]
     }
   ]
 }
