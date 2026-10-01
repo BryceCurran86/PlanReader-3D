@@ -52,6 +52,11 @@
       "evidence": "Bathroom, main WC, main laundry and granny-flat ensuite/laundry floor surfaces are independently dimension-closed and explicitly tiled; combined area 18.5649 m2."
     },
     {
+      "proof": "source-dimensioned vinyl floor surfaces source-closed",
+      "status": "PASS",
+      "evidence": "Media, Bed 2 and Bed 3 vinyl floors are independently figured and finish-labelled; combined atomic area 38.346 m2. The overlapping main living composite region remains non-denominator."
+    },
+    {
       "proof": "full project surface universe complete",
       "status": "FAIL",
       "evidence": "External openings are source-closed, but multiple other in-scope families remain unresolved."
@@ -86,5 +91,15 @@
     "verified_area_m2": 18.5649,
     "source_closed": true,
     "overlapping_living_aggregate_regions_denominator_eligible": false
+  },
+  "vinyl_floor_closure_summary": {
+    "closure_check_ids": [
+      "3laurel:closure:media_floor_and_gross_wall_faces",
+      "3laurel:closure:bed2_bed3_floor_surfaces"
+    ],
+    "verified_floor_count": 3,
+    "verified_area_m2": 38.346,
+    "source_closed": true,
+    "overlapping_main_living_aggregate_denominator_eligible": false
   }
 }
