@@ -39,6 +39,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import pb_takeoff_row_contract as takeoff_contract
+from pb_cross_trade_geometry_reuse import DerivedTradeQuantity
+from pb_migration_contracts import stable_contract_id
 
 BUILDER_EDITION_VERSION = "2.0.0"
 DEFAULT_BUILDER_MARGIN_PCT = 15.0
@@ -164,6 +166,228 @@ class ProjectHealthReport:
     readiness_score_pct: float
     warnings: List[str] = field(default_factory=list)
     healthy: bool = True
+
+
+@dataclass(frozen=True)
+class CanonicalCompanyRate:
+    """One company-owned unit-rate definition, independent of geometry."""
+
+    rate_key: str
+    unit: str
+    currency: str = "AUD"
+    material_cost_per_unit: float = 0.0
+    labour_cost_per_unit: float = 0.0
+    subcontract_cost_per_unit: float = 0.0
+    plant_cost_per_unit: float = 0.0
+    material_waste_pct: float = 0.0
+    overhead_pct: float = 0.0
+    gross_margin_pct: float = 0.0
+    evidence_ids: Tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        key = str(self.rate_key or "").strip()
+        unit = str(self.unit or "").strip()
+        currency = str(self.currency or "").strip().upper()
+        evidence = tuple(
+            dict.fromkeys(
+                str(value or "").strip()
+                for value in self.evidence_ids
+                if str(value or "").strip()
+            )
+        )
+        if not key:
+            raise ValueError("rate_key must be non-empty")
+        if not unit:
+            raise ValueError("unit must be non-empty")
+        if not currency:
+            raise ValueError("currency must be non-empty")
+        if not evidence:
+            raise ValueError("company rate requires config/source provenance")
+        for field_name in (
+            "material_cost_per_unit",
+            "labour_cost_per_unit",
+            "subcontract_cost_per_unit",
+            "plant_cost_per_unit",
+            "material_waste_pct",
+            "overhead_pct",
+            "gross_margin_pct",
+        ):
+            value = float(getattr(self, field_name))
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{field_name} must be finite and non-negative")
+        if float(self.gross_margin_pct) >= 100.0:
+            raise ValueError("gross_margin_pct must be less than 100")
+        object.__setattr__(self, "rate_key", key)
+        object.__setattr__(self, "unit", unit)
+        object.__setattr__(self, "currency", currency)
+        object.__setattr__(self, "evidence_ids", evidence)
+
+
+@dataclass(frozen=True)
+class CanonicalCostLine:
+    canonical_quantity_id: str
+    rate_key: str
+    host_object_id: str
+    host_object_type: str
+    trade_scope: str
+    element: str
+    quantity: float
+    unit: str
+    currency: str
+    material_base_cost: float
+    material_waste_cost: float
+    labour_cost: float
+    subcontract_cost: float
+    plant_cost: float
+    direct_cost: float
+    overhead_cost: float
+    cost_before_margin: float
+    gross_margin_pct: float
+    margin_amount: float
+    sell_price: float
+    quantity_evidence_ids: Tuple[str, ...]
+    spec_evidence_ids: Tuple[str, ...]
+    rate_binding_evidence_ids: Tuple[str, ...]
+    rate_evidence_ids: Tuple[str, ...]
+    derivation_formula: str
+
+
+@dataclass(frozen=True)
+class CanonicalCostingResult:
+    lines: Tuple[CanonicalCostLine, ...]
+    unrated_quantity_ids: Tuple[str, ...]
+    currency: Optional[str]
+    direct_cost_total: float
+    overhead_total: float
+    margin_total: float
+    sell_price_total: float
+    complete: bool
+
+
+def canonical_quantity_id(quantity: DerivedTradeQuantity) -> str:
+    if type(quantity) is not DerivedTradeQuantity:
+        raise TypeError("quantity must be DerivedTradeQuantity")
+    return stable_contract_id(
+        "canonical_trade_quantity",
+        {
+            "host_object_id": quantity.host_object_id,
+            "host_object_type": quantity.host_object_type,
+            "trade_scope": quantity.trade_scope,
+            "element": quantity.element,
+            "location": quantity.location,
+            "substrate": quantity.substrate,
+            "quantity": quantity.quantity,
+            "unit": quantity.unit,
+            "derivation_formula": quantity.derivation_formula,
+            "host_evidence_ids": quantity.host_evidence_ids,
+            "spec_evidence_ids": quantity.spec_evidence_ids,
+        },
+        digest_chars=32,
+    )
+
+
+def price_canonical_quantities(
+    quantities: Sequence[DerivedTradeQuantity],
+    rates: Sequence[CanonicalCompanyRate],
+) -> CanonicalCostingResult:
+    """Apply company rate inputs without mutating source geometry or quantities."""
+
+    rate_by_key: Dict[str, CanonicalCompanyRate] = {}
+    for rate in rates:
+        if type(rate) is not CanonicalCompanyRate:
+            raise TypeError("rates must contain CanonicalCompanyRate values")
+        if rate.rate_key in rate_by_key:
+            raise ValueError(f"duplicate company rate_key {rate.rate_key!r}")
+        rate_by_key[rate.rate_key] = rate
+
+    lines: List[CanonicalCostLine] = []
+    unrated: List[str] = []
+    currencies: set[str] = set()
+
+    for quantity in quantities:
+        if type(quantity) is not DerivedTradeQuantity:
+            raise TypeError("quantities must contain DerivedTradeQuantity values")
+        quantity_id = canonical_quantity_id(quantity)
+        rate_key = str(quantity.rate_key or "").strip()
+        if (
+            not rate_key
+            or not quantity.rate_binding_evidence_ids
+            or rate_key not in rate_by_key
+        ):
+            unrated.append(quantity_id)
+            continue
+
+        rate = rate_by_key[rate_key]
+        if rate.unit != quantity.unit:
+            raise ValueError(
+                f"rate unit {rate.unit!r} does not match quantity unit "
+                f"{quantity.unit!r} for {quantity_id}"
+            )
+        currencies.add(rate.currency)
+        if len(currencies) > 1:
+            raise ValueError("one canonical costing result cannot mix currencies")
+
+        q = float(quantity.quantity)
+        material_base = q * float(rate.material_cost_per_unit)
+        material_waste = material_base * (
+            float(rate.material_waste_pct) / 100.0
+        )
+        labour = q * float(rate.labour_cost_per_unit)
+        subcontract = q * float(rate.subcontract_cost_per_unit)
+        plant = q * float(rate.plant_cost_per_unit)
+        direct = material_base + material_waste + labour + subcontract + plant
+        overhead = direct * (float(rate.overhead_pct) / 100.0)
+        before_margin = direct + overhead
+        margin_ratio = float(rate.gross_margin_pct) / 100.0
+        sell = (
+            before_margin / (1.0 - margin_ratio)
+            if margin_ratio > 0.0
+            else before_margin
+        )
+        margin = sell - before_margin
+
+        lines.append(
+            CanonicalCostLine(
+                canonical_quantity_id=quantity_id,
+                rate_key=rate_key,
+                host_object_id=quantity.host_object_id,
+                host_object_type=quantity.host_object_type,
+                trade_scope=quantity.trade_scope,
+                element=quantity.element,
+                quantity=quantity.quantity,
+                unit=quantity.unit,
+                currency=rate.currency,
+                material_base_cost=round(material_base, 2),
+                material_waste_cost=round(material_waste, 2),
+                labour_cost=round(labour, 2),
+                subcontract_cost=round(subcontract, 2),
+                plant_cost=round(plant, 2),
+                direct_cost=round(direct, 2),
+                overhead_cost=round(overhead, 2),
+                cost_before_margin=round(before_margin, 2),
+                gross_margin_pct=float(rate.gross_margin_pct),
+                margin_amount=round(margin, 2),
+                sell_price=round(sell, 2),
+                quantity_evidence_ids=tuple(quantity.host_evidence_ids),
+                spec_evidence_ids=tuple(quantity.spec_evidence_ids),
+                rate_binding_evidence_ids=tuple(
+                    quantity.rate_binding_evidence_ids
+                ),
+                rate_evidence_ids=tuple(rate.evidence_ids),
+                derivation_formula=quantity.derivation_formula,
+            )
+        )
+
+    return CanonicalCostingResult(
+        lines=tuple(lines),
+        unrated_quantity_ids=tuple(unrated),
+        currency=(next(iter(currencies)) if currencies else None),
+        direct_cost_total=round(sum(line.direct_cost for line in lines), 2),
+        overhead_total=round(sum(line.overhead_cost for line in lines), 2),
+        margin_total=round(sum(line.margin_amount for line in lines), 2),
+        sell_price_total=round(sum(line.sell_price for line in lines), 2),
+        complete=(len(lines) == len(quantities) and not unrated),
+    )
 
 
 class BuilderEditionEngine:

@@ -17,7 +17,7 @@ finish-face ownership.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
 from pb_auto_geometry_v1219 import SOURCE_PREFIX
@@ -142,6 +142,8 @@ class DerivedTradeQuantity:
     derivation_formula: str
     host_evidence_ids: tuple[str, ...] = ()
     spec_evidence_ids: tuple[str, ...] = ()
+    rate_key: Optional[str] = None
+    rate_binding_evidence_ids: tuple[str, ...] = ()
     confidence: str = "Source-derived"
     notes: str = ""
     status: str = "Measured"
@@ -173,6 +175,39 @@ class DerivedTradeQuantity:
             self.unit = unit
         self.host_evidence_ids = tuple(dict.fromkeys(self.host_evidence_ids))
         self.spec_evidence_ids = tuple(dict.fromkeys(self.spec_evidence_ids))
+        self.rate_key = _clean(self.rate_key) or None
+        self.rate_binding_evidence_ids = tuple(
+            dict.fromkeys(
+                _clean(value)
+                for value in self.rate_binding_evidence_ids
+                if _clean(value)
+            )
+        )
+
+
+def bind_derived_quantity_rate_key(
+    quantity: DerivedTradeQuantity,
+    *,
+    rate_key: str,
+    evidence_ids: Sequence[str],
+) -> DerivedTradeQuantity:
+    """Attach a company-rate lookup key without changing geometry or quantity."""
+
+    if type(quantity) is not DerivedTradeQuantity:
+        raise TypeError("quantity must be DerivedTradeQuantity")
+    clean_key = _clean(rate_key)
+    clean_evidence = tuple(
+        dict.fromkeys(_clean(value) for value in evidence_ids if _clean(value))
+    )
+    if not clean_key:
+        raise ValueError("rate_key must be non-empty")
+    if not clean_evidence:
+        raise ValueError("rate binding requires evidence/config provenance")
+    return replace(
+        quantity,
+        rate_key=clean_key,
+        rate_binding_evidence_ids=clean_evidence,
+    )
 
 
 def _quantity(
@@ -949,6 +984,7 @@ def to_takeoff_rows(
 
 __all__ = [
     "DerivedTradeQuantity",
+    "bind_derived_quantity_rate_key",
     "derive_ceiling_trade_quantities",
     "derive_floor_surface_trade_quantities",
     "derive_roof_trade_quantities",
