@@ -21,7 +21,9 @@ Functions/contracts traced:
 - pb_takeoff_output_authority.TakeoffOutputRow
 - existing extractor/evaluator firewall documented for pb_benchmark_accuracy_engine
 
-Authority boundaries crossed: none. This work is read-only evaluation downstream of existing physical-object and QuantityEvidence authorities.Files that remain untouched in the implementation PR:
+Authority boundaries crossed: none. This work is read-only evaluation downstream of existing physical-object and QuantityEvidence authorities.
+
+Files that remain untouched in the implementation PR:
 - pb_planreader_pdf_extractor.py
 - pb_planreader_jobhub_publish_contract.py
 - live wall/opening/structural authority modules
@@ -41,7 +43,9 @@ Authority boundaries crossed: none. This work is read-only evaluation downstream
 
 ## New source suite
 
-The replacement headline suite uses the newly supplied Australian project sets, not the historical Kenyan canonical five.Currently identified new projects:
+The replacement headline suite uses the newly supplied Australian project sets, not the historical Kenyan canonical five.
+
+Currently identified new projects:
 1. Lot 16 Power — architectural construction plans plus structural engineering set.
 2. 3LAUREL — complete construction plan set Rev3.
 3. Maryborough Service Station — combined architectural set.
@@ -57,7 +61,9 @@ The user-facing question is not “did a selected benchmark row pass?” It is:
 
 Coverage v1 supplies the production-side lineage needed for this, but V2 requires a separate expected takeoff universe because expected-family completeness is deliberately unknown in coverage v1.
 
-That expected universe is evaluation truth only. It must never be imported by extraction, object admission, quantity production, or commercial publication.## Proposed V2 contracts
+That expected universe is evaluation truth only. It must never be imported by extraction, object admission, quantity production, or commercial publication.
+
+## Proposed V2 contracts
 
 ### VerifiedTakeoffItemV2
 
@@ -86,7 +92,9 @@ expected_object_refs identify the verified physical surface/object universe behi
 - status = VERIFIED | INCOMPLETE | NOT_CONFIGURED
 - reason_codes
 
-Only VERIFIED projects contribute to the headline denominator.### Reconciliation states
+Only VERIFIED projects contribute to the headline denominator.
+
+### Reconciliation states
 
 For each verified takeoff item:
 - MATCHED_WITHIN_TOLERANCE
@@ -119,7 +127,9 @@ Supporting:
 - unresolved count
 - unsupported-extra / hallucination count
 - gross mismatch count
-- runtime and completion statusThe headline must fail closed to UNPUBLISHED when:
+- runtime and completion status
+
+The headline must fail closed to UNPUBLISHED when:
 - any required project is NOT_CONFIGURED or INCOMPLETE;
 - a required source/takeoff hash is missing or mismatched;
 - extraction did not complete;
@@ -154,7 +164,9 @@ Expected cases include:
 - no mutation of coverage summary or takeoff rows;
 - extractor results identical with expected V2 universe present or absent;
 - four-of-five suite emits provisional only;
-- fifth missing slot cannot be silently substituted by an old benchmark project.## Benchmark observations that must not influence implementation
+- fifth missing slot cannot be silently substituted by an old benchmark project.
+
+## Benchmark observations that must not influence implementation
 
 - Historical 60-row canonical accuracy values.
 - Any known miss list from KSTVET/Murera/Ghazi/Lamu/Umma.
