@@ -6,8 +6,7 @@ schedule-count extraction (Cursor); dataset/adversarial evaluation (Gemini). Thi
 wall and room **candidates** and an opening-**host interface**; it does not compute schedule
 counts, does not run deductions, and does not become authoritative for anything without passing
 through shadow mode first.
-**Baseline at time of writing:** development 24/61 = 39.34% (`ACCURACY_GAP_LEDGER.md`); unseen
-holdout `NOT_RUN`. This workstream is not expected or intended to move that number — see §19.
+**Active validation baseline:** Full Plan V2 multi-metric source-closed truth. This workstream is evaluated by physical-object/canonicalization/geometry/provenance coverage and must not be optimized against a retired percentage — see §19.
 **Predecessor document:** `docs/planreader_v2_architecture_design.md` (the full 14-part
 architecture audit). This document assumes that audit's findings and goes deep on exactly one
 piece of it (§4.2, §7, §13 there). Do not re-derive the migration contracts

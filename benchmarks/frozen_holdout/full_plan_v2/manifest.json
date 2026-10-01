@@ -1,14 +1,27 @@
 {
   "schema_version": "2.0",
   "benchmark_id": "full_plan_takeoff_reconciliation_v2",
+  "primary_milestone": "V2_CANONICAL_BUILDING_CORE",
   "required_project_count": 4,
-  "headline_metric": "verified_takeoff_coverage_accuracy",
   "projects": [
     "au_qld_lot16_power",
     "au_qld_3laurel",
     "au_qld_maryborough_service_station",
     "au_qld_q5446_armstrong32_harlequin"
   ],
-  "publication_rule": "all_four_projects_verified",
-  "historical_canonical_five_headline": false
+  "scoreboard_metrics": [
+    "source_closed_truth_coverage",
+    "physical_object_detection_coverage",
+    "canonicalization_coverage",
+    "geometry_correctness",
+    "quantity_correctness",
+    "strict_exact_matches",
+    "correct_abstention",
+    "provenance_completeness",
+    "customer_runtime_publication_coverage",
+    "hallucinations",
+    "gross_mismatches",
+    "duplicate_double_counting_errors"
+  ],
+  "publication_rule": "publish_only_source_closed_v2_metrics"
 }

@@ -1,91 +1,38 @@
-# Frozen Holdout Suite
+# Active PlanReader Validation: Full Plan V2
 
-This directory holds genuinely unseen Plan+BOQ projects used only for the
-**final, verified 99% accuracy measurement** — never for development,
-diagnosis, or tuning.
+The only active PlanReader benchmark / validation framework in this repository is:
 
-## The rule
+`benchmarks/frozen_holdout/full_plan_v2/`
 
-While implementing or tuning any extraction logic (`pb_*.py`), **never
-open `expected_boq_summary.json` for any project under this directory.**
-That file is the ground-truth answer key; reading it while writing
-extraction code — even "just to understand the failure" — is exactly the
-backward-solving this suite exists to prevent. If a failure needs to be
-understood, use a **development** project instead
-(`benchmarks/public_tenders/`), which exists for precisely that purpose.
+The previous legacy percentage/public-tender/golden-plan benchmark systems are retired and must not be used for scoring, product headlines, regression gates, roadmap decisions, investor progress, or production truth. Their history remains available in Git.
 
-`KSTVET` (`tenders_ke_kstvet_cbc_classroom`) and `Murera`
-(`tenders_ke_murera_science_lab`) are development/diagnostic projects,
-not holdout evidence — their expected quantities have already been
-inspected in this codebase's history and must never be presented as
-unseen holdout results.
+## Active truth chain
 
-## Directory schema
+`SOURCE DOCUMENT → SOURCE EVIDENCE → PHYSICAL OBJECT → CANONICAL OBJECT → VERIFIED GEOMETRY → VERIFIED QUANTITY → CUSTOMER OUTPUT`
 
-Each registered project is a subdirectory named by its `benchmark_id`,
-containing the same four files as a development project under
-`benchmarks/public_tenders/`:
+V2 truth must remain source-closed and provenance-preserving. Do not invent geometry, identity, relationships, dimensions, materials, or quantities that the source does not prove.
 
-- `source_manifest.json` — where the PDF/BOQ came from, retrieval date,
-  verification notes.
-- `benchmark_rules.json` — tolerances, item-tag mappings, comparison
-  rules.
-- `expected_project.json` — non-secret project identity facts (name,
-  location, building dimensions) used for identity matching.
-- `expected_boq_summary.json` — the ground-truth answer key. **Never
-  read this while developing.**
+## Active scoreboard
 
-All four JSON files are benchmark-defining inputs. Registration freezes
-all four by SHA-256. Changing expected quantities, tolerances, mappings,
-project metadata, or source identity after registration invalidates the
-holdout and must fail verification before scoring.
+V2 progress is evaluated across multiple metrics rather than one headline percentage:
 
-Source PDFs themselves are not committed to the repository; they are
-referenced by filename in `source_manifest.json` and kept alongside the
-benchmark tooling's existing local file conventions.
+- source-closed truth coverage
+- physical-object detection coverage
+- canonicalization coverage
+- geometry correctness
+- quantity correctness
+- strict-exact matches where appropriate
+- correct abstention
+- provenance completeness
+- customer-runtime publication coverage
+- hallucinations
+- gross mismatches
+- duplicate / double-counting errors
 
-## Registering a project
+The primary milestone is `V2_CANONICAL_BUILDING_CORE`.
 
-Use `pb_holdout_suite_registry.register_holdout_project()`:
+## CI
 
-```python
-from pathlib import Path
-from pb_holdout_suite_registry import register_holdout_project
-
-record = register_holdout_project(
-    Path("benchmarks/frozen_holdout/some_new_project"),
-    development_project_dirs=[
-        Path("benchmarks/public_tenders/tenders_ke_kstvet_cbc_classroom"),
-        Path("benchmarks/public_tenders/tenders_ke_murera_science_lab"),
-    ],
-)
-```
-
-This validates the four required files are present and parse as JSON,
-rejects the project if its identity (`project_name` / `project_number` /
-`client`) collides with a known development project, and writes a
-`.holdout_lock.json` recording SHA-256 checksums of every benchmark-defining
-JSON file. Registration is a one-time administrative step — it may require
-reading the real BOQ to populate `expected_boq_summary.json` in the first
-place, which is legitimate; the discipline is about not reading it *during
-extraction development*, not about it never being created.
-
-## Verifying nothing was edited after registration
-
-```python
-from pb_holdout_suite_registry import verify_holdout_untouched
-
-result = verify_holdout_untouched(Path("benchmarks/frozen_holdout/some_new_project"))
-assert result.is_untouched, result.mismatches
-```
-
-This recomputes all four checksums and compares them to what was recorded
-at registration. A missing checksum in an older/incomplete lock fails
-closed; the project must not be scored until it is registered under the
-current integrity contract.
-
-## Status
-
-No projects are registered yet. This suite currently has **zero**
-holdout projects; the final 99% claim cannot be validated until real,
-verified Plan+BOQ projects are supplied and registered here.
+- `scripts/check_v2_truth_separation.py` prevents V2 truth and production code from changing in the same PR.
+- `scripts/check_full_plan_v2_integrity.py` validates configured V2 projects, reference-takeoff byte pins, and verified object references.
+- V2 JSON is forced to LF by `.gitattributes` so byte pins are cross-platform stable.

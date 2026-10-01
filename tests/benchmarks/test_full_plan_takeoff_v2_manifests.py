@@ -12,17 +12,32 @@ def _json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_suite_is_exactly_four_new_australian_projects():
+def test_suite_defines_active_v2_projects_and_multi_metric_scoreboard():
     suite = _json(ROOT / "manifest.json")
+    assert suite["primary_milestone"] == "V2_CANONICAL_BUILDING_CORE"
     assert suite["required_project_count"] == 4
     assert len(suite["projects"]) == 4
-    assert suite["historical_canonical_five_headline"] is False
     assert suite["projects"] == [
         "au_qld_lot16_power",
         "au_qld_3laurel",
         "au_qld_maryborough_service_station",
         "au_qld_q5446_armstrong32_harlequin",
     ]
+    assert suite["scoreboard_metrics"] == [
+        "source_closed_truth_coverage",
+        "physical_object_detection_coverage",
+        "canonicalization_coverage",
+        "geometry_correctness",
+        "quantity_correctness",
+        "strict_exact_matches",
+        "correct_abstention",
+        "provenance_completeness",
+        "customer_runtime_publication_coverage",
+        "hallucinations",
+        "gross_mismatches",
+        "duplicate_double_counting_errors",
+    ]
+    assert "headline_metric" not in suite
 
 
 def test_all_four_configured_projects_are_source_complete_but_not_falsely_verified():

@@ -59,6 +59,16 @@
       "evidence": "A501 gives AIRLOCK 1520 x 5044 FT2 and LAUNDRY 1655 x 5044 FT2; A140 independently shows matching room/finish geometry; A120 assigns 2400 WFPB ceilings to both rooms."
     },
     {
+      "proof": "Food Prep floor and ceiling independently closed",
+      "status": "PASS",
+      "evidence": "A140 gives 4025 x 3297 mm Food Prep FT3 geometry; A110 independently shows the same room footprint; A120 assigns a 3000 FPB ceiling."
+    },
+    {
+      "proof": "Office floor and ceiling independently closed",
+      "status": "PASS",
+      "evidence": "A140 gives 3570 x 2536 mm OFFICE FT3 geometry; A110 independently shows the same room; A120 assigns a 2400 GRID ceiling."
+    },
+    {
       "proof": "PlanReader output not used as benchmark truth",
       "status": "PASS",
       "evidence": "Truth derived from source drawings and independent cross-check only"
@@ -71,7 +81,22 @@
     {
       "proof": "full project surface universe complete",
       "status": "FAIL",
-      "evidence": "WC/shower floor/ceilings, PWD floor/ceiling, airlock floor/ceiling, laundry floor/ceiling, and door/window identity universes are closed; remaining surfaces stay unresolved."
+      "evidence": "WC/shower, PWD, airlock, laundry, Food Prep and Office floor/ceiling surfaces plus door/window identity universes are closed; remaining surfaces stay unresolved."
     }
-  ]
+  ],
+  "food_prep_office_surface_closure_summary": {
+    "object_refs": [
+      "maryborough:surface:floor:food_prep",
+      "maryborough:surface:ceiling:food_prep",
+      "maryborough:surface:floor:office",
+      "maryborough:surface:ceiling:office"
+    ],
+    "source_closed_object_count": 4,
+    "object_identity_available": true,
+    "geometry_verified": true,
+    "geometry_scope": "2D rectangular plan extents / ceiling footprints only",
+    "quantity_verified": true,
+    "provenance_chain_complete": true,
+    "project_surface_universe_complete": false
+  }
 }
