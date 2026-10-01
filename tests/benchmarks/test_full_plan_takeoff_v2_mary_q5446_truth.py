@@ -41,11 +41,11 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     manifest = load_project_manifest(project / "source_manifest.json")
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
-    assert len(manifest.verified_items) == 6
+    assert len(manifest.verified_items) == 7
 
     eligible = [item for item in manifest.verified_items if item.denominator_eligible]
     excluded = [item for item in manifest.verified_items if not item.denominator_eligible]
-    assert len(eligible) == 3
+    assert len(eligible) == 4
     assert len(excluded) == 3
 
     by_id = {item.item_id: item for item in manifest.verified_items}
@@ -80,6 +80,9 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
         "painted_ipf3": 11,
     }
     assert sum(class_counts.values()) == 28
+    assert universe["window_identity_universe_complete"] is True
+    assert universe["window_area_universe_complete"] is False
+    assert {row["source_tag"] for row in universe["windows"]} == {"W01", "W02", "W03", "W04", "W05", "W06"}
     _assert_reference_hash("au_qld_maryborough_service_station")
 
 
@@ -88,13 +91,18 @@ def test_q5446_only_independently_closed_alfresco_enters_verified_core():
     manifest = load_project_manifest(project / "source_manifest.json")
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
-    assert len(manifest.verified_items) == 1
+    assert len(manifest.verified_items) == 4
 
     item = manifest.verified_items[0]
     assert item.item_id == "q5446-alfresco-floor-area"
     assert item.expected_quantity == 12.0
     assert item.unit == "m2"
     assert item.expected_object_refs == ("q5446:surface:floor:alfresco",)
+
+    by_id = {row.item_id: row for row in manifest.verified_items}
+    assert by_id["q5446-ground-ensuite-floor-tiling-area"].expected_quantity == 4.2224
+    assert by_id["q5446-first-ensuite-floor-tiling-area"].expected_quantity == 5.9572
+    assert by_id["q5446-first-bath-floor-tiling-area"].expected_quantity == 5.8446
 
     ref = _json(project / "reference_takeoff.json")
     controls = {
@@ -109,6 +117,7 @@ def test_q5446_only_independently_closed_alfresco_enters_verified_core():
     }
     assert controls["garage"]["quantity_m2"] == 36.40
     assert controls["total"]["quantity_m2"] == 298.19
+    assert len(ref["independent_geometry_checks"]) == 3
     _assert_reference_hash("au_qld_q5446_armstrong32_harlequin")
 
 

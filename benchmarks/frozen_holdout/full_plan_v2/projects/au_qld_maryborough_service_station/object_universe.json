@@ -425,60 +425,80 @@
     }
   ],
   "door_universe_complete": true,
-  "windows_unverified_candidates": [
+  "windows": [
     {
       "object_ref": "maryborough:window:W01",
-      "classification": "UNVERIFIED_CANDIDATE",
-      "reason": "Tag identity is corroborated by A110/A610 but dimensional surface truth is not independently closed.",
+      "physical_kind": "window_or_tagged_glazing_object",
+      "source_tag": "W01",
+      "classification": "VERIFIED_CORE_OBJECT_IDENTITY_ONLY",
+      "denominator_core": true,
       "source_locations": [
         "A110:floor_plan:W01",
         "A610:window_elevations:W01"
-      ]
+      ],
+      "area_status": "UNRESOLVED"
     },
     {
       "object_ref": "maryborough:window:W02",
-      "classification": "UNVERIFIED_CANDIDATE",
-      "reason": "Tag identity is corroborated by A110/A610 but dimensional surface truth is not independently closed.",
+      "physical_kind": "window_or_tagged_glazing_object",
+      "source_tag": "W02",
+      "classification": "VERIFIED_CORE_OBJECT_IDENTITY_ONLY",
+      "denominator_core": true,
       "source_locations": [
         "A110:floor_plan:W02",
         "A610:window_elevations:W02"
-      ]
+      ],
+      "area_status": "UNRESOLVED"
     },
     {
       "object_ref": "maryborough:window:W03",
-      "classification": "UNVERIFIED_CANDIDATE",
-      "reason": "Tag identity is corroborated by A110/A610 but dimensional surface truth is not independently closed.",
+      "physical_kind": "window_or_tagged_glazing_object",
+      "source_tag": "W03",
+      "classification": "VERIFIED_CORE_OBJECT_IDENTITY_ONLY",
+      "denominator_core": true,
       "source_locations": [
         "A110:floor_plan:W03",
         "A610:window_elevations:W03"
-      ]
+      ],
+      "area_status": "UNRESOLVED"
     },
     {
       "object_ref": "maryborough:window:W04",
-      "classification": "UNVERIFIED_CANDIDATE",
-      "reason": "Tag identity is corroborated by A110/A610 but dimensional surface truth is not independently closed.",
+      "physical_kind": "window_or_tagged_glazing_object",
+      "source_tag": "W04",
+      "classification": "VERIFIED_CORE_OBJECT_IDENTITY_ONLY",
+      "denominator_core": true,
       "source_locations": [
         "A110:floor_plan:W04",
         "A610:window_elevations:W04"
-      ]
+      ],
+      "area_status": "UNRESOLVED"
     },
     {
       "object_ref": "maryborough:window:W05",
-      "classification": "UNVERIFIED_CANDIDATE",
-      "reason": "Tag identity is corroborated by A110/A610 but dimensional surface truth is not independently closed.",
+      "physical_kind": "window_or_tagged_glazing_object",
+      "source_tag": "W05",
+      "classification": "VERIFIED_CORE_OBJECT_IDENTITY_ONLY",
+      "denominator_core": true,
       "source_locations": [
         "A110:floor_plan:W05",
         "A610:window_elevations:W05"
-      ]
+      ],
+      "area_status": "UNRESOLVED"
     },
     {
       "object_ref": "maryborough:window:W06",
-      "classification": "UNVERIFIED_CANDIDATE",
-      "reason": "Tag identity is corroborated by A110/A610 but dimensional surface truth is not independently closed.",
+      "physical_kind": "window_or_tagged_glazing_object",
+      "source_tag": "W06",
+      "classification": "VERIFIED_CORE_OBJECT_IDENTITY_ONLY",
+      "denominator_core": true,
       "source_locations": [
         "A110:floor_plan:W06",
         "A610:window_elevations:W06"
-      ]
+      ],
+      "area_status": "UNRESOLVED"
     }
-  ]
+  ],
+  "window_identity_universe_complete": true,
+  "window_area_universe_complete": false
 }

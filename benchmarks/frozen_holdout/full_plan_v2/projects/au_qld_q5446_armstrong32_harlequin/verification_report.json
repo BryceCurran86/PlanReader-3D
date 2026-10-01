@@ -64,6 +64,11 @@
       "evidence": "12.00 m2 table plus 3000x4000 figured dimensions"
     },
     {
+      "proof": "wet-area floor tiling surfaces independently closed",
+      "status": "PASS",
+      "evidence": "GF ensuite 2320x1820, FF ensuite 2810x2120, FF bath 1910x3060; all cross-checked against 1:100 vector inner faces and wet-area tiling scope documents"
+    },
+    {
       "proof": "every denominator item has exact physical object refs",
       "status": "PASS",
       "evidence": "q5446:surface:floor:alfresco"
@@ -84,7 +89,7 @@
     {
       "proof": "full project surface universe complete",
       "status": "FAIL",
-      "evidence": "Only the alfresco surface is independently closed"
+      "evidence": "Alfresco and three wet-area floor surfaces are closed; remaining floor, opening, wall, ceiling, roof and wall-tile universes remain incomplete."
     }
   ]
 }

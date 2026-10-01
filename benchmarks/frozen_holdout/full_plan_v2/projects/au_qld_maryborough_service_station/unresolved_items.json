@@ -24,8 +24,8 @@
       "reason": "External surface universe not independently closed."
     },
     {
-      "family": "windows",
-      "reason": "W01-W06 identity is corroborated but exact size/surface truth is not yet independently verified."
+      "family": "window_areas",
+      "reason": "W01-W06 identities/count are independently reconciled, but exact glazing/opening area semantics are not yet frozen."
     }
   ]
 }
