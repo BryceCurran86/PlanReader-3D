@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import asdict, dataclass, field
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -453,6 +454,15 @@ class GenericPlanReaderExtractor:
             "reason_codes": ["not_collected"],
             "source_pages": [],
             "slabs": [],
+        }
+        self.canonical_building_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "building_id": None,
+            "levels": [],
+            "unassigned": {},
+            "object_counts": {},
+            "level_assignment_complete": False,
         }
         # Live extraction visibility: distinguish absence from failure/conflict.
         self.extraction_status: Dict[str, str] = {}
@@ -1033,6 +1043,15 @@ class GenericPlanReaderExtractor:
             "reason_codes": ["not_collected"],
             "member_kind": None,
             "members": [],
+        }
+        self.canonical_building_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "building_id": None,
+            "levels": [],
+            "unassigned": {},
+            "object_counts": {},
+            "level_assignment_complete": False,
         }
 
         self.physical_net_wall_live = {
@@ -3765,6 +3784,48 @@ class GenericPlanReaderExtractor:
                 "roof_covering_area_m2": None,
             }
             self.extraction_status["roof_covering_shadow"] = "failed"
+
+        # Assemble the source-revision canonical Building -> Level graph only
+        # after every live object family has completed. Storey ownership is
+        # propagated solely through proven level IDs / physical relationships;
+        # missing ownership remains explicitly unassigned.
+        try:
+            from pb_live_canonical_building_core import (
+                assemble_live_canonical_building_core,
+            )
+
+            _building_core = assemble_live_canonical_building_core(
+                source_sha256=hashlib.sha256(p_path.read_bytes()).hexdigest(),
+                walls=self.canonical_walls_live.get("walls", ()),
+                openings=self.canonical_openings_live.get("openings", ()),
+                rooms=self.canonical_rooms_live.get("rooms", ()),
+                slabs=self.canonical_slabs_live.get("slabs", ()),
+                ceilings=self.canonical_ceilings_live.get("ceilings", ()),
+                roofs=self.canonical_roofs_live.get("roofs", ()),
+                structural_members=self.canonical_structural_members_live.get(
+                    "members",
+                    (),
+                ),
+            )
+            self.canonical_building_live = _building_core.to_dict()
+            self.extraction_status["canonical_building_live"] = (
+                _building_core.status.value
+            )
+        except Exception as _building_exc:  # noqa: BLE001
+            self.canonical_building_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_building_exception:{type(_building_exc).__name__}"
+                ],
+                "building_id": None,
+                "levels": [],
+                "unassigned": {},
+                "object_counts": {},
+                "level_assignment_complete": False,
+            }
+            self.extraction_status["canonical_building_live"] = (
+                "extraction_failed"
+            )
 
         doc.close()
         return list(pred_dict.values())

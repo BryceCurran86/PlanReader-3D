@@ -76,4 +76,5 @@ def test_reused_extractor_clears_all_live_canonical_object_state(
     assert extractor.canonical_slabs_live["status"] == "abstained"
     assert extractor.canonical_ceilings_live["status"] == "abstained"
     assert extractor.canonical_roofs_live["status"] == "abstained"
+    assert extractor.canonical_building_live["status"] == "abstained"
     assert extractor.canonical_structural_members_live["status"] == "abstained"
