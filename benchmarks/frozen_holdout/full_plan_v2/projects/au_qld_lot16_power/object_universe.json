@@ -620,6 +620,20 @@
         "quantity_basis": "figured finished room dimensions",
         "closure_group": "lot16_declared_floor_area"
       },
+      "verification": {
+        "object_exists": true,
+        "object_identified": true,
+        "geometry_verified": true,
+        "geometry_scope": "2D rectangular plan extents only",
+        "quantity_verified": true,
+        "fully_source_closed": true,
+        "source_closure_scope": "floor finish-surface identity, finish, 2D plan dimensions and area"
+      },
+      "provenance": {
+        "document_ref": "1. Construction Plans - Lot 16 Power (REV E).pdf",
+        "sheet_page_ref": "architectural:p3",
+        "source_evidence_ref": "floor_plan:ENS:TILES:2890x1900_figured_dimensions"
+      },
       "source_locations": [
         "architectural:p3:floor_plan:ENS:TILES:2890x1900_figured_dimensions"
       ]
@@ -640,6 +654,20 @@
         "finish": "vinyl",
         "quantity_basis": "figured finished room dimensions",
         "closure_group": "lot16_declared_floor_area"
+      },
+      "verification": {
+        "object_exists": true,
+        "object_identified": true,
+        "geometry_verified": true,
+        "geometry_scope": "2D rectangular plan extents only",
+        "quantity_verified": true,
+        "fully_source_closed": true,
+        "source_closure_scope": "floor finish-surface identity, finish, 2D plan dimensions and area"
+      },
+      "provenance": {
+        "document_ref": "1. Construction Plans - Lot 16 Power (REV E).pdf",
+        "sheet_page_ref": "architectural:p3",
+        "source_evidence_ref": "floor_plan:WIR:VINYL:2890x1620_figured_dimensions"
       },
       "source_locations": [
         "architectural:p3:floor_plan:WIR:VINYL:2890x1620_figured_dimensions"

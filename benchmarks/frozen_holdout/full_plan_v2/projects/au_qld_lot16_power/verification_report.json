@@ -94,6 +94,11 @@
     "closure_check_id": "lot16:closure:ensuite_wir_floor_surfaces",
     "verified_floor_count": 2,
     "verified_area_m2": 10.1728,
+    "object_identity_available": true,
+    "geometry_verified": true,
+    "geometry_scope": "2D rectangular plan extents only",
+    "quantity_verified": true,
+    "provenance_chain_complete": true,
     "source_closed": true,
     "overlapping_residence_composite_denominator_eligible": false,
     "project_floor_universe_complete": false
