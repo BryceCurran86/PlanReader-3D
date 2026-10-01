@@ -2503,6 +2503,36 @@
         "architectural:p3:A0.3:floor_plan:four_explicit_vsd_labels",
         "architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_TO_BE_2100_AFL_UNO"
       ]
+    },
+    {
+      "check_id": "3laurel:control:bathroom_wc_room_access_deductions",
+      "room_controls": [
+        {
+          "room": "main_bathroom",
+          "gross_wall_area_m2": 25.002,
+          "access_opening_ref": "3laurel:opening:p3:internal_access:0720_swing:01",
+          "access_opening_area_m2": 1.512,
+          "gross_less_room_access_opening_m2": 23.49
+        },
+        {
+          "room": "main_wc",
+          "gross_wall_area_m2": 14.418,
+          "access_opening_ref": "3laurel:opening:p3:internal_access:0720_cs:03",
+          "access_opening_area_m2": 1.512,
+          "gross_less_room_access_opening_m2": 12.906
+        }
+      ],
+      "mapped_room_access_opening_count": 2,
+      "mapped_room_access_opening_area_m2": 3.024,
+      "complete_for_these_room_access_openings": true,
+      "complete_for_all_wall_openings": false,
+      "finish_scope_resolved": false,
+      "reason": "room-access door deductions are source-mapped, but any exterior windows, niches, joinery interfaces and finish partitioning remain separate truth layers",
+      "source_locations": [
+        "architectural:p11:A0.11:Bathroom_and_WC_finished_room_dimensions",
+        "architectural:p3:A0.3:main_bathroom_720_hinged_and_main_WC_720_cs",
+        "architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
     }
   ]
 }
