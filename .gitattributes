@@ -1,0 +1,3 @@
+# Frozen reference-takeoff files are checksum-pinned byte artifacts.
+# Do not translate line endings on checkout; hashes must be cross-platform stable.
+benchmarks/frozen_holdout/full_plan_v2/projects/**/reference_takeoff.json -text
