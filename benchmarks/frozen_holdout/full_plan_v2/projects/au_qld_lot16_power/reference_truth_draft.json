@@ -1631,6 +1631,43 @@
         "raked_extension_above_top_plate_included": false,
         "top_plate_flat_portion_ready": true
       }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile:bath_elev1_net",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Bath elevation 1 full-height tile finish",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_Elevation_1:1200_finished_width_full_tile_grid_to_TP",
+      "attributes": {
+        "host_gross_surface_ref": "lot16:surface:wall_tile_gross:bath:elev1",
+        "finished_face_width_m": 1.2,
+        "tile_height_m": 2.59,
+        "calculation": "1.200m * 2.590m",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile:ensuite_elev1_topplate_net",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Ensuite elevation 1 tile finish to top-plate datum",
+      "expected_quantity": 4.7138,
+      "unit": "m2",
+      "source_location": "architectural:p11:Ensuite_Elevation_1:1820_finished_width_full_tile_grid_to_TP",
+      "attributes": {
+        "host_gross_surface_ref": "lot16:surface:wall_tile_gross:ensuite:elev1",
+        "finished_face_width_m": 1.82,
+        "tile_height_to_top_plate_m": 2.59,
+        "calculation": "1.820m * 2.590m",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "raked_extension_above_top_plate_included": false,
+        "top_plate_flat_portion_ready": true
+      }
     }
   ],
   "closure_checks": [
@@ -2135,6 +2172,19 @@
       "ensuite_top_plate_portion_complete_excluding_niche_returns": true,
       "ensuite_raked_extension_resolved": false,
       "niche_returns_resolved": false,
+      "complete_for_project_wet_area_tile_universe": false
+    },
+    {
+      "check_id": "lot16:closure:niche_free_explicit_tile_faces",
+      "component_object_refs": [
+        "lot16:surface:wall_tile:bath_elev1_net",
+        "lot16:surface:wall_tile:ensuite_elev1_topplate_net"
+      ],
+      "object_count": 2,
+      "component_sum_m2": 7.8218,
+      "bath_face_complete": true,
+      "ensuite_top_plate_portion_complete": true,
+      "ensuite_raked_extension_resolved": false,
       "complete_for_project_wet_area_tile_universe": false
     }
   ]
