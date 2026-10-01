@@ -186,6 +186,13 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
     assert extractor.canonical_rooms_live["status"] == "corroborated"
     assert extractor.canonical_rooms_live["source_pages"] == [1]
     assert extractor.canonical_rooms_live["rooms"] == [canonical_room_payload]
+    assert extractor.canonical_building_live["status"] == "corroborated"
+    assert extractor.canonical_building_live["building_id"]
+    assert extractor.canonical_building_live["levels"] == []
+    assert extractor.canonical_building_live["level_assignment_complete"] is False
+    assert extractor.canonical_building_live["object_counts"]["walls"] == 1
+    assert extractor.canonical_building_live["object_counts"]["openings"] == 1
+    assert extractor.canonical_building_live["object_counts"]["rooms"] == 1
     assert wall.metadata["canonical_opening_ids"] == ["opening-1"]
     assert wall.metadata["canonical_opening_objects"] == [
         canonical_opening_payload
@@ -279,6 +286,9 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
     ]
     assert extractor.canonical_rooms_live["status"] == "corroborated"
     assert extractor.canonical_rooms_live["rooms"] == [canonical_room_payload]
+    assert extractor.canonical_building_live["status"] == "corroborated"
+    assert extractor.canonical_building_live["building_id"]
+    assert extractor.canonical_building_live["levels"] == []
     physical_promotions = [
         pred
         for pred in predictions
