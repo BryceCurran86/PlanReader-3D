@@ -1194,3 +1194,39 @@ def test_3laurel_wet_area_atomic_floors_are_source_closed_without_double_countin
     assert check["component_sum_m2"] == pytest.approx(18.5649)
     assert check["source_closed"] is True
     assert "must not be double-counted" in check["aggregate_overlap"]["rule"]
+
+
+def test_lot16_retaining_wall_profile_is_measured_but_final_extent_stays_open():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    blocker = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:blocker:retaining_wall_final_extent"
+    )
+    assert blocker["status"] == "UNRESOLVED_SOURCE_LIMITATION"
+    assert blocker["profile_segment_lengths_m"] == [
+        6.1,
+        1.4,
+        3.0,
+        1.8,
+        2.8,
+        2.5,
+        2.8,
+        5.9,
+        2.7,
+        1.8,
+        1.9,
+        3.689,
+    ]
+    assert sum(blocker["profile_segment_lengths_m"]) == pytest.approx(36.389)
+    assert blocker["profile_chain_length_m"] == pytest.approx(36.389)
+    assert blocker["plan_label_approx_length_m"] == pytest.approx(36.5)
+    assert blocker["profile_vs_plan_approx_difference_m"] == pytest.approx(-0.111)
+    assert blocker["source_closed_profile_chain"] is True
+    assert blocker["final_installed_length_resolved"] is False
+    assert blocker["denominator_ready"] is False
+    assert blocker["scaling_substitute_allowed"] is False
+    assert "TO BE EXTENDED AS NEEDED" in blocker["plan_note"]
+    assert "site_retaining_wall_final_extent_and_profile" in draft[
+        "unresolved_surface_families"
+    ]
