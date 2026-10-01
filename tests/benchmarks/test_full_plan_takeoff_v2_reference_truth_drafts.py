@@ -358,16 +358,17 @@ def test_lot16_roof_sheathing_geometry_is_closed_but_engineering_crosscheck_bloc
 
 def test_3laurel_partial_internal_wall_gross_faces_are_dimension_closed_but_not_net_ready():
     draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
-    faces = [
-        row
-        for row in draft["verified_physical_candidates"]
-        if row["object_family"] == "internal_wall_gross_face"
-    ]
     check = next(
         row
         for row in draft["closure_checks"]
         if row["check_id"] == "3laurel:control:partial_internal_wall_gross_faces"
     )
+    refs = set(check["component_object_refs"])
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
     assert len(faces) == check["object_count"] == 8
     assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(53.838)
     assert check["bathroom_gross_area_m2"] == pytest.approx(25.002)
@@ -411,3 +412,33 @@ def test_source_limitations_block_unverifiable_geometry_from_truth():
     assert roof_blocker["scaling_substitute_allowed"] is False
     assert roof_blocker["pitch_evidence_degrees"] == [25]
     assert "roof_planes" in laurel["unresolved_surface_families"]
+
+
+def test_3laurel_main_laundry_gross_wall_faces_are_dimension_closed_but_not_net_ready():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:main_laundry_internal_wall_gross_faces"
+    )
+    refs = set(check["component_object_refs"])
+    faces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in refs
+    ]
+    assert len(faces) == check["object_count"] == 4
+    assert sum(float(row["expected_quantity"]) for row in faces) == pytest.approx(25.704)
+    assert check["room_finished_dimensions_m"] == [3.08, 1.68]
+    assert check["finished_ceiling_height_m"] == pytest.approx(2.7)
+    assert check["complete_for_main_laundry_finished_room_perimeter"] is True
+    assert check["openings_and_finish_deductions_resolved"] is False
+    assert all(
+        row["attributes"]["denominator_readiness"]
+        == "draft_only_until_openings_and_finish_scope_are_resolved"
+        for row in faces
+    )
+    assert (
+        "internal_wall_faces_beyond_closed_bathroom_main_laundry_and_gf_ensuite_laundry_gross_faces"
+        in draft["unresolved_surface_families"]
+    )
