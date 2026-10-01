@@ -1,0 +1,634 @@
+{
+  "schema_version": "draft-reference-truth-v1",
+  "project_id": "au_qld_lot16_power",
+  "status": "DRAFT_INCOMPLETE",
+  "truth_source_policy": "source-declared-quantity-or-independent-dimension-measurement-only; never PlanReader output",
+  "source_documents": [
+    {
+      "name": "1. Construction Plans - Lot 16 Power (REV E).pdf",
+      "sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+    }
+  ],
+  "aggregate_controls_not_denominator": [
+    {
+      "control_id": "lot16:control:residence_area",
+      "description": "Residence aggregate area",
+      "expected_quantity": 193.24,
+      "unit": "m2",
+      "source_location": "architectural:p3:area_calculations:RESIDENCE_193.24_m2",
+      "reason": "aggregate overlaps atomic room/floor surfaces; retain as closure control until atomic residence surface universe is complete"
+    },
+    {
+      "control_id": "lot16:control:total_floor_area",
+      "description": "Residence + alfresco + porch aggregate",
+      "expected_quantity": 224.36,
+      "unit": "m2",
+      "source_location": "architectural:p3:area_calculations:TOTAL_224.36_m2",
+      "reason": "aggregate overlaps component surfaces"
+    }
+  ],
+  "unresolved_surface_families": [
+    "remaining_internal_floor_surfaces",
+    "garage_floor_partition",
+    "internal_wall_faces",
+    "external_wall_faces_and_cladding",
+    "ceilings_including_raked_ceiling",
+    "roof_planes",
+    "doors_and_windows",
+    "wet_area_wall_tiling",
+    "structural_members_other_than_scheduled_wall_bracing"
+  ],
+  "completion_rule": "Do not mark project VERIFIED until every in-scope family is independently closed and aggregate controls reconcile without double counting.",
+  "verified_physical_candidates": [
+    {
+      "object_ref": "lot16:opening:p3:0615_sgw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "0615 SGW",
+      "expected_quantity": 0.9,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 0.6,
+        "width_m": 1.5,
+        "source_bbox_pdf_pt": [
+          445.3,
+          534.1,
+          473.1,
+          541.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:0615_SGW"
+    },
+    {
+      "object_ref": "lot16:opening:p3:0621_sgw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "0621 SGW",
+      "expected_quantity": 1.26,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 0.6,
+        "width_m": 2.1,
+        "source_bbox_pdf_pt": [
+          364.6,
+          196.1,
+          392.4,
+          203.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:0621_SGW"
+    },
+    {
+      "object_ref": "lot16:opening:p3:0630_fg:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "0630 fixed glass",
+      "expected_quantity": 1.8,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "fixed_glass",
+        "height_m": 0.6,
+        "width_m": 3.0,
+        "source_bbox_pdf_pt": [
+          814.0,
+          180.1,
+          836.3,
+          187.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:0630_fixed_glass"
+    },
+    {
+      "object_ref": "lot16:opening:p3:0906_sgw_obs:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "0906 SGW obs",
+      "expected_quantity": 0.54,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 0.9,
+        "width_m": 0.6,
+        "source_bbox_pdf_pt": [
+          485.3,
+          180.1,
+          523.8,
+          187.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:0906_SGW_obs"
+    },
+    {
+      "object_ref": "lot16:opening:p3:1215_sgw_obs:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1215 SGW obs",
+      "expected_quantity": 1.8,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 1.2,
+        "width_m": 1.5,
+        "source_bbox_pdf_pt": [
+          622.4,
+          430.7,
+          661.0,
+          438.5
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:1215_SGW_obs"
+    },
+    {
+      "object_ref": "lot16:opening:p3:1218_sgw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1218 SGW #1",
+      "expected_quantity": 2.16,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 1.2,
+        "width_m": 1.8,
+        "source_bbox_pdf_pt": [
+          545.5,
+          180.1,
+          573.3,
+          187.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:1218_SGW_#1"
+    },
+    {
+      "object_ref": "lot16:opening:p3:1218_sgw:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1218 SGW #2",
+      "expected_quantity": 2.16,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 1.2,
+        "width_m": 1.8,
+        "source_bbox_pdf_pt": [
+          655.1,
+          180.1,
+          682.9,
+          187.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:1218_SGW_#2"
+    },
+    {
+      "object_ref": "lot16:opening:p3:2124_corner_stack:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2124 corner stack opening",
+      "expected_quantity": 5.04,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "corner_stacker_door",
+        "height_m": 2.1,
+        "width_m": 2.4,
+        "source_bbox_pdf_pt": [
+          896.5,
+          271.6,
+          933.8,
+          277.3
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:2124_corner_stack_opening"
+    },
+    {
+      "object_ref": "lot16:opening:p3:2127_stacker:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2127 stacker door",
+      "expected_quantity": 5.67,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "stacker_door",
+        "height_m": 2.1,
+        "width_m": 2.7,
+        "source_bbox_pdf_pt": [
+          783.6,
+          435.2,
+          813.6,
+          440.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:2127_stacker_door"
+    },
+    {
+      "object_ref": "lot16:opening:p3:2148_panel_lift:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2148 panel lift door",
+      "expected_quantity": 10.08,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "panel_lift_door",
+        "height_m": 2.1,
+        "width_m": 4.8,
+        "source_bbox_pdf_pt": [
+          414.9,
+          421.4,
+          420.6,
+          454.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:2148_panel_lift_door"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A1:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A1 PLY-1 bracing instance 1 of 1",
+      "expected_quantity": 0.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A1",
+        "brace_type": "PLY-1",
+        "schedule_instance_count": 1
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A2:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A2 PLY-2 bracing instance 1 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A2:02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A2 PLY-2 bracing instance 2 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A2:03",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A2 PLY-2 bracing instance 3 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A2:04",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A2 PLY-2 bracing instance 4 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A2:05",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A2 PLY-2 bracing instance 5 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A2:06",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A2 PLY-2 bracing instance 6 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A2:07",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A2 PLY-2 bracing instance 7 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A3:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A3 PLY-2 bracing instance 1 of 1",
+      "expected_quantity": 1.7,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A3",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 1
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A3"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A4:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A4 PLY-2 bracing instance 1 of 2",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A4",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 2
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A4"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A4:02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A4 PLY-2 bracing instance 2 of 2",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A4",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 2
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A4"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A5:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A5 PLY-2 bracing instance 1 of 2",
+      "expected_quantity": 2.4,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A5",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 2
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A5"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A5:02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A5 PLY-2 bracing instance 2 of 2",
+      "expected_quantity": 2.4,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A5",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 2
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A5"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A6:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A6 PTC bracing instance 1 of 2",
+      "expected_quantity": 0.4,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A6",
+        "brace_type": "PTC",
+        "schedule_instance_count": 2
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A6"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A6:02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A6 PTC bracing instance 2 of 2",
+      "expected_quantity": 0.4,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A6",
+        "brace_type": "PTC",
+        "schedule_instance_count": 2
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A6"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B1:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B1 PLY-2 bracing instance 1 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B1",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B1:02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B1 PLY-2 bracing instance 2 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B1",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B1:03",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B1 PLY-2 bracing instance 3 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B1",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B1:04",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B1 PLY-2 bracing instance 4 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B1",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B1:05",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B1 PLY-2 bracing instance 5 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B1",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B1:06",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B1 PLY-2 bracing instance 6 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B1",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B1:07",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B1 PLY-2 bracing instance 7 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B1",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B2:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B2 PLY-2 bracing instance 1 of 1",
+      "expected_quantity": 1.2,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 1
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B3:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B3 PLY-2 bracing instance 1 of 1",
+      "expected_quantity": 2.4,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B3",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 1
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B3"
+    },
+    {
+      "object_ref": "lot16:surface:floor:alfresco",
+      "description": "Alfresco tiled floor surface",
+      "expected_quantity": 28.1,
+      "unit": "m2",
+      "source_location": "architectural:p3:area_calculations:ALFRESCO_28.10_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "lot16:surface:floor:bed_1",
+      "description": "Bed 1 vinyl floor surface",
+      "expected_quantity": 12.64,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_1:declared_12.64_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "lot16:surface:floor:bed_2",
+      "description": "Bed 2 vinyl floor surface",
+      "expected_quantity": 11.88,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_2:declared_11.88_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "lot16:surface:floor:bed_3",
+      "description": "Bed 3 vinyl floor surface",
+      "expected_quantity": 11.7,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_3:declared_11.70_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "lot16:surface:floor:porch",
+      "description": "Porch tiled floor surface",
+      "expected_quantity": 3.02,
+      "unit": "m2",
+      "source_location": "architectural:p3:area_calculations:PORCH_3.02_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "lot16:surface:site:driveway_concrete",
+      "description": "Driveway concrete surface",
+      "expected_quantity": 10.7,
+      "unit": "m2",
+      "source_location": "architectural:p2:site_plan:DRIVEWAY_CONCRETE_10.7_m2",
+      "physical_kind": "surface",
+      "object_family": "site_concrete"
+    }
+  ]
+}

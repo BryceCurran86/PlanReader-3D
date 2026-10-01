@@ -1,0 +1,903 @@
+{
+  "schema_version": "draft-reference-truth-v1",
+  "project_id": "au_qld_3laurel",
+  "status": "DRAFT_INCOMPLETE",
+  "truth_source_policy": "source-declared-quantity-or-independent-dimension-measurement-only; never PlanReader output",
+  "source_documents": [
+    {
+      "name": "3LAUREL - Construction Plan Set Rev3 08.05.26.pdf",
+      "sha256": "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+    }
+  ],
+  "aggregate_controls_not_denominator": [
+    {
+      "control_id": "3laurel:control:main_living_area",
+      "description": "Main-house living aggregate area",
+      "expected_quantity": 168.1,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:area_table:MAIN_LIVING_168.10_m2",
+      "reason": "aggregate spans multiple atomic room surfaces; retain as closure control"
+    },
+    {
+      "control_id": "3laurel:control:gf_living_area",
+      "description": "Granny-flat living aggregate area",
+      "expected_quantity": 60.0,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:area_table:GF_LIVING_60.00_m2",
+      "reason": "aggregate spans multiple atomic room surfaces; retain as closure control"
+    },
+    {
+      "control_id": "3laurel:control:total_floor_area",
+      "description": "Total declared floor area",
+      "expected_quantity": 297.5,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:area_table:TOTAL_FLOOR_AREA_297.50_m2",
+      "reason": "aggregate overlaps all component floor surfaces"
+    },
+    {
+      "control_id": "3laurel:control:building_site_coverage",
+      "description": "Building site coverage",
+      "expected_quantity": 297.6,
+      "unit": "m2",
+      "source_location": "architectural:p2:site_plan:BUILDING_SITE_COVERAGE_297.6_m2",
+      "reason": "site coverage is a separate aggregate control and differs by 0.1 m2 from floor-area schedule"
+    }
+  ],
+  "unresolved_surface_families": [
+    "main_and_granny_flat_atomic_living_floor_surfaces",
+    "internal_wall_faces",
+    "external_wall_faces_and_cladding",
+    "ceilings_and_fc_soffits",
+    "roof_planes",
+    "doors_and_windows",
+    "wet_area_wall_tiling",
+    "structural_members_other_than_scheduled_wall_bracing"
+  ],
+  "completion_rule": "Do not mark project VERIFIED until every in-scope family is independently closed and aggregate controls reconcile without double counting.",
+  "verified_physical_candidates": [
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 x 1810 ASW #1",
+      "expected_quantity": 2.172,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          663.3,
+          463.1,
+          718.8,
+          470.9
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 x 1810 ASW #2",
+      "expected_quantity": 2.172,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          576.3,
+          463.1,
+          631.7,
+          470.9
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:02"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:03",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 x 1810 ASW #3",
+      "expected_quantity": 2.172,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          383.3,
+          463.1,
+          438.7,
+          470.9
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:03"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:04",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 x 1810 ASW #4",
+      "expected_quantity": 2.172,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          168.3,
+          259.3,
+          223.7,
+          267.1
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:04"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #1",
+      "expected_quantity": 4.338,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          275.6,
+          180.5,
+          331.0,
+          188.3
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #2",
+      "expected_quantity": 4.338,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          391.8,
+          270.1,
+          447.2,
+          277.9
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:02"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:03",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #3",
+      "expected_quantity": 4.338,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          522.3,
+          180.5,
+          577.7,
+          188.3
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:03"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:04",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #4",
+      "expected_quantity": 4.338,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          624.6,
+          180.5,
+          680.1,
+          188.3
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:04"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x900_adh:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 900 ADH #1",
+      "expected_quantity": 1.62,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_double_hung_window",
+        "height_m": 1.8,
+        "width_m": 0.9,
+        "source_bbox_pdf_pt": [
+          994.8,
+          200.7,
+          1002.6,
+          236.0
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x900_adh:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 900 ADH #2",
+      "expected_quantity": 1.62,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_double_hung_window",
+        "height_m": 1.8,
+        "width_m": 0.9,
+        "source_bbox_pdf_pt": [
+          994.8,
+          252.3,
+          1002.6,
+          287.6
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:02"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:2100x1500_asd:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 1500 ASD",
+      "expected_quantity": 3.15,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_door",
+        "height_m": 2.1,
+        "width_m": 1.5,
+        "source_bbox_pdf_pt": [
+          740.0,
+          460.5,
+          779.2,
+          468.3
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:2100x2100_asd:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 2100 ASD",
+      "expected_quantity": 4.41,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_door",
+        "height_m": 2.1,
+        "width_m": 2.1,
+        "source_bbox_pdf_pt": [
+          236.7,
+          211.5,
+          244.5,
+          250.7
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:2100x4800_panel_lift:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 4800 panel lift door",
+      "expected_quantity": 10.08,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "panel_lift_door",
+        "height_m": 2.1,
+        "width_m": 4.8,
+        "source_bbox_pdf_pt": [
+          957.9,
+          381.9,
+          965.8,
+          471.2
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1510_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1510 ASW #1",
+      "expected_quantity": 0.906,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 0.6,
+        "width_m": 1.51,
+        "source_bbox_pdf_pt": [
+          132.5,
+          374.8,
+          140.3,
+          424.4
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1510_asw:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1510 ASW #2",
+      "expected_quantity": 0.906,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 0.6,
+        "width_m": 1.51,
+        "source_bbox_pdf_pt": [
+          132.5,
+          288.9,
+          140.3,
+          338.5
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:02"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-01 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-01",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-01"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-02 750 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.75,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-02",
+        "brace_type": "750 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-02"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-03",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-03 1500 Ply - Meth B bracing panel/member",
+      "expected_quantity": 1.5,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-03",
+        "brace_type": "1500 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-03"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-04",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-04 1200 Ply - Meth B bracing panel/member",
+      "expected_quantity": 1.2,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-04",
+        "brace_type": "1200 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-04"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-05",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-05 1800 Ply - Meth B bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-05",
+        "brace_type": "1800 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-05"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-06",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-06 2700 Ply - Meth B bracing panel/member",
+      "expected_quantity": 2.7,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-06",
+        "brace_type": "2700 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-06"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-07",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-07 2700 Ply - Meth B bracing panel/member",
+      "expected_quantity": 2.7,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-07",
+        "brace_type": "2700 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-07"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-08",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-08 900 Ply - Meth B bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-08",
+        "brace_type": "900 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-08"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-09",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-09 1800 Ply - Meth B bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-09",
+        "brace_type": "1800 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-09"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-10",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-10 1800 Ply - Meth B bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-10",
+        "brace_type": "1800 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-10"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-11",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-11 900 Ply - Meth B bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-11",
+        "brace_type": "900 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-11"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-12",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-12 700 Ply - Meth B bracing panel/member",
+      "expected_quantity": 0.7,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-12",
+        "brace_type": "700 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-12"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-13",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-13 1800 Galv. Angle bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-13",
+        "brace_type": "1800 Galv. Angle"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-13"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-14",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-14 1800 Galv. Angle bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-14",
+        "brace_type": "1800 Galv. Angle"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-14"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-U2-01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-U2-01 1200 Ply - Meth A bracing panel/member",
+      "expected_quantity": 1.2,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-U2-01",
+        "brace_type": "1200 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-U2-01"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-U2-02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-U2-02 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-U2-02",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-U2-02"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-U2-03",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-U2-03 900 Ply - Meth B bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-U2-03",
+        "brace_type": "900 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-U2-03"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-U2-04",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-U2-04 1100 Ply - Meth A bracing panel/member",
+      "expected_quantity": 1.1,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-U2-04",
+        "brace_type": "1100 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-U2-04"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-U2-05",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-U2-05 1800 Galv. Angle bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-U2-05",
+        "brace_type": "1800 Galv. Angle"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-U2-05"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-U2-06",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-U2-06 1800 Galv. Angle bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-U2-06",
+        "brace_type": "1800 Galv. Angle"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-U2-06"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-U2-07",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-U2-07 1800 Galv. Angle bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-U2-07",
+        "brace_type": "1800 Galv. Angle"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-U2-07"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-01 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-01",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-01"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-02 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-02",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-02"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-03",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-03 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-03",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-03"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-04",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-04 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-04",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-04"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-05",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-05 1800 Ply - Meth B bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-05",
+        "brace_type": "1800 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-05"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-06",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-06 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-06",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-06"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-07",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-07 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-07",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-07"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-08",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-08 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-08",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-08"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-09",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-09 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-09",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-09"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-U2-01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-U2-01 750 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.75,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-U2-01",
+        "brace_type": "750 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-U2-01"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-U2-02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-U2-02 750 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.75,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-U2-02",
+        "brace_type": "750 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-U2-02"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-U2-03",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-U2-03 1800 Ply - Meth A bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-U2-03",
+        "brace_type": "1800 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-U2-03"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-U2-04",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-U2-04 600 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.6,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-U2-04",
+        "brace_type": "600 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-U2-04"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-U2-05",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-U2-05 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-U2-05",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-U2-05"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-U2-06",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-U2-06 600 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.6,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-U2-06",
+        "brace_type": "600 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-U2-06"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-U2-07",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-U2-07 600 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.6,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-U2-07",
+        "brace_type": "600 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-U2-07"
+    },
+    {
+      "object_ref": "3laurel:surface:floor:garage",
+      "description": "Garage concrete floor surface",
+      "expected_quantity": 36.4,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:area_table:GARAGE_36.40_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "3laurel:surface:floor:gf_alfresco",
+      "description": "Granny-flat alfresco tiled floor surface",
+      "expected_quantity": 10.5,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:area_table:GF_ALFRESCO_10.50_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "3laurel:surface:floor:gf_porch",
+      "description": "Granny-flat porch tiled floor surface",
+      "expected_quantity": 1.4,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:area_table:GF_PORCH_1.40_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "3laurel:surface:floor:main_alfresco",
+      "description": "Main-house alfresco tiled floor surface",
+      "expected_quantity": 13.6,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:area_table:ALFRESCO_13.60_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "3laurel:surface:floor:main_porch",
+      "description": "Main-house porch tiled floor surface",
+      "expected_quantity": 7.5,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:area_table:PORCH_7.50_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "3laurel:surface:site:driveway_entry",
+      "description": "Exposed-aggregate driveway and entry path surface",
+      "expected_quantity": 71.2,
+      "unit": "m2",
+      "source_location": "architectural:p2:site_plan:DRIVEWAY_ENTRY_PATH_TOTAL_71.2_m2",
+      "physical_kind": "surface",
+      "object_family": "site_concrete"
+    },
+    {
+      "object_ref": "3laurel:surface:site:path",
+      "description": "Exposed-aggregate path surface",
+      "expected_quantity": 26.7,
+      "unit": "m2",
+      "source_location": "architectural:p2:site_plan:PATH_TOTAL_26.7_m2",
+      "physical_kind": "surface",
+      "object_family": "site_concrete"
+    }
+  ]
+}
