@@ -28,7 +28,7 @@
     }
   ],
   "unresolved_surface_families": [
-    "internal_wall_faces_beyond_closed_bathroom_main_ensuite_main_wc_main_laundry_gf_ensuite_laundry_bed2_bed3_and_media_gross_faces",
+    "internal_wall_faces_beyond_closed_bathroom_main_ensuite_main_wc_main_laundry_gf_ensuite_laundry_bed2_bed3_net_geometry_and_media_gross_faces",
     "external_wall_faces_and_cladding",
     "roof_planes",
     "structural_members_beyond_closed_wall_bracing_and_explicit_140x140_posts_470x470_piers",
@@ -43,7 +43,7 @@
       "object_ref": "3laurel:opening:p3:1200x1810_asw:01",
       "physical_kind": "opening_surface",
       "object_family": "external_opening",
-      "description": "1200 x 1810 ASW #1",
+      "description": "Bed 2 1200 x 1810 ASW",
       "expected_quantity": 2.172,
       "unit": "m2",
       "attributes": {
@@ -57,13 +57,13 @@
           470.9
         ]
       },
-      "source_location": "architectural:p3:A0.3:floor_plan:01"
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed_2_external_1200x1810_ASW:bbox_663.3_463.1_718.8_470.9"
     },
     {
       "object_ref": "3laurel:opening:p3:1200x1810_asw:02",
       "physical_kind": "opening_surface",
       "object_family": "external_opening",
-      "description": "1200 x 1810 ASW #2",
+      "description": "Bed 3 1200 x 1810 ASW",
       "expected_quantity": 2.172,
       "unit": "m2",
       "attributes": {
@@ -77,7 +77,7 @@
           470.9
         ]
       },
-      "source_location": "architectural:p3:A0.3:floor_plan:02"
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed_3_external_1200x1810_ASW:bbox_576.3_463.1_631.7_470.9"
     },
     {
       "object_ref": "3laurel:opening:p3:1200x1810_asw:03",
@@ -1837,10 +1837,10 @@
       "object_ref": "3laurel:opening:p3:internal_access:0870_swing:02",
       "object_family": "internal_room_access_opening",
       "physical_kind": "opening_surface",
-      "description": "Internal room-access 870 mm hinged opening",
+      "description": "Internal room-access 870 mm hinged opening: Bed 3",
       "expected_quantity": 1.827,
       "unit": "m2",
-      "source_location": "architectural:p3:A0.3:floor_plan:main bedroom/hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed_3_hall_870:bbox_559.4_347.5_567.2_359.1; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
       "attributes": {
         "opening_type": "hinged_swing",
         "width_m": 0.87,
@@ -1859,10 +1859,10 @@
       "object_ref": "3laurel:opening:p3:internal_access:0870_swing:03",
       "object_family": "internal_room_access_opening",
       "physical_kind": "opening_surface",
-      "description": "Internal room-access 870 mm hinged opening",
+      "description": "Internal room-access 870 mm hinged opening: Bed 2",
       "expected_quantity": 1.827,
       "unit": "m2",
-      "source_location": "architectural:p3:A0.3:floor_plan:Bed 2/hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed_2_hall_870:bbox_722.8_347.5_730.6_359.1; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
       "attributes": {
         "opening_type": "hinged_swing",
         "width_m": 0.87,
@@ -3215,6 +3215,51 @@
       "niche_returns_resolved": false,
       "complete_for_two_flat_host_faces": true,
       "complete_for_full_niche_tile_assemblies": false
+    },
+    {
+      "check_id": "3laurel:closure:bed2_bed3_net_wall_geometry",
+      "source_location": "architectural:p3:A0.3:Bed_2_and_Bed_3_opening_and_room_dimension_census",
+      "rooms": [
+        {
+          "room": "bed2",
+          "gross_surface_refs": [
+            "3laurel:surface:internal_wall_gross:bed2:3000_side_1",
+            "3laurel:surface:internal_wall_gross:bed2:3000_side_2",
+            "3laurel:surface:internal_wall_gross:bed2:4200_side_1",
+            "3laurel:surface:internal_wall_gross:bed2:4200_side_2"
+          ],
+          "deduction_opening_refs": [
+            "3laurel:opening:p3:1200x1810_asw:01",
+            "3laurel:opening:p3:internal_access:0870_swing:03",
+            "3laurel:opening:p3:internal_joinery:1800_vsd_bed2_robe:01"
+          ],
+          "gross_wall_area_m2": 38.88,
+          "opening_deduction_area_m2": 7.779,
+          "net_wall_geometry_m2": 31.101
+        },
+        {
+          "room": "bed3",
+          "gross_surface_refs": [
+            "3laurel:surface:internal_wall_gross:bed3:3000_side_1",
+            "3laurel:surface:internal_wall_gross:bed3:3000_side_2",
+            "3laurel:surface:internal_wall_gross:bed3:4200_side_1",
+            "3laurel:surface:internal_wall_gross:bed3:4200_side_2"
+          ],
+          "deduction_opening_refs": [
+            "3laurel:opening:p3:1200x1810_asw:02",
+            "3laurel:opening:p3:internal_access:0870_swing:02",
+            "3laurel:opening:p3:internal_joinery:1800_vsd_bed3_robe:01"
+          ],
+          "gross_wall_area_m2": 38.88,
+          "opening_deduction_area_m2": 7.779,
+          "net_wall_geometry_m2": 31.101
+        }
+      ],
+      "combined_gross_wall_area_m2": 77.76,
+      "combined_opening_deduction_area_m2": 15.558,
+      "combined_net_wall_geometry_m2": 62.202,
+      "complete_for_bed2_bed3_known_opening_geometry": true,
+      "finish_scope_resolved": false
     }
   ]
 }
