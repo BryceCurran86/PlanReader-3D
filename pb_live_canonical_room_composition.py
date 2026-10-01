@@ -7,7 +7,7 @@ geometry, names, levels, finishes, quantities, or commercial authority.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Collection, Mapping, Optional
 
 from pb_live_wall_opening_authority_composition import (
     LiveWallOpeningAuthorityComposition,
@@ -40,6 +40,8 @@ class LiveCanonicalRoomObject:
     decision_scope_id: str
     polygon_pdf_pts: tuple[tuple[float, float], ...]
     bounding_wall_ids: tuple[str, ...]
+    canonical_bounding_wall_ids: tuple[str, ...]
+    wall_relationships_complete: bool
     area_page_pts2: float
     source_room_face_record_id: str
     evidence_ids: tuple[str, ...]
@@ -61,6 +63,8 @@ class LiveCanonicalRoomObject:
             "decision_scope_id": self.decision_scope_id,
             "polygon_pdf_pts": [list(point) for point in self.polygon_pdf_pts],
             "bounding_wall_ids": list(self.bounding_wall_ids),
+            "canonical_bounding_wall_ids": list(self.canonical_bounding_wall_ids),
+            "wall_relationships_complete": self.wall_relationships_complete,
             "area_page_pts2": self.area_page_pts2,
             "source_room_face_record_id": self.source_room_face_record_id,
             "evidence_ids": list(self.evidence_ids),
@@ -87,6 +91,8 @@ def compose_live_canonical_rooms(
     *,
     source_visibility_producer: SourceVisibilityProducer,
     wall_opening_composition: LiveWallOpeningAuthorityComposition,
+    canonical_wall_ids_by_candidate: Optional[Mapping[str, str]] = None,
+    unresolved_wall_candidate_ids: Optional[Collection[str]] = None,
 ) -> LiveCanonicalRoomComposition:
     """Project sealed room-face authority into persistent canonical room objects."""
 
@@ -131,6 +137,24 @@ def compose_live_canonical_rooms(
             if str(page_id).isdigit():
                 resolved_pages.add(int(page_id))
             for record in result.records:
+                canonical_boundary_ids: tuple[str, ...] = ()
+                wall_relationships_complete = False
+                if canonical_wall_ids_by_candidate is not None:
+                    mapped = [
+                        str(canonical_wall_ids_by_candidate.get(wall_id) or "")
+                        for wall_id in record.bounding_wall_ids
+                    ]
+                    if mapped and all(mapped):
+                        canonical_boundary_ids = tuple(dict.fromkeys(mapped))
+                        unresolved_ids = {
+                            str(value)
+                            for value in (unresolved_wall_candidate_ids or ())
+                            if str(value)
+                        }
+                        wall_relationships_complete = not any(
+                            wall_id in unresolved_ids
+                            for wall_id in record.bounding_wall_ids
+                        )
                 rooms.append(
                     LiveCanonicalRoomObject(
                         canonical_room_id=record.face_id,
@@ -144,6 +168,8 @@ def compose_live_canonical_rooms(
                         decision_scope_id=record.decision_scope_id,
                         polygon_pdf_pts=record.polygon_pdf_pts,
                         bounding_wall_ids=record.bounding_wall_ids,
+                        canonical_bounding_wall_ids=canonical_boundary_ids,
+                        wall_relationships_complete=wall_relationships_complete,
                         area_page_pts2=float(record.area_page_pts2),
                         source_room_face_record_id=record.record_id,
                         evidence_ids=(record.record_id,),

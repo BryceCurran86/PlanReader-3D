@@ -8,6 +8,7 @@ from pb_live_canonical_room_composition import (
     LIVE_CANONICAL_ROOM_UNAVAILABLE,
     compose_live_canonical_rooms,
 )
+from pb_live_canonical_wall_composition import compose_live_canonical_walls
 from pb_live_wall_opening_authority_composition import (
     compose_live_wall_opening_authority,
 )
@@ -62,9 +63,19 @@ def _source(*, page_partitions: tuple[bool, ...]):
 def test_two_room_source_publishes_stable_canonical_room_objects() -> None:
     source, wall_opening = _source(page_partitions=(True,))
 
+    wall_core = compose_live_canonical_walls(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
     result = compose_live_canonical_rooms(
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
+        canonical_wall_ids_by_candidate=(
+            wall_core.candidate_to_canonical_wall_id
+        ),
+        unresolved_wall_candidate_ids=(
+            wall_core.unresolved_wall_candidate_ids
+        ),
     )
 
     assert result.status is EvidenceResolutionStatus.CORROBORATED
@@ -82,12 +93,16 @@ def test_two_room_source_publishes_stable_canonical_room_objects() -> None:
         assert room.metric_geometry_complete is False
         assert len(room.polygon_pdf_pts) >= 4
         assert room.bounding_wall_ids
+        assert room.canonical_bounding_wall_ids
+        assert room.wall_relationships_complete is False
         assert room.area_page_pts2 > 0.0
         assert room.evidence_ids == (room.source_room_face_record_id,)
         payload = room.to_dict()
         assert payload["canonical_room_id"] == room.canonical_room_id
         assert payload["polygon_pdf_pts"]
         assert payload["bounding_wall_ids"]
+        assert payload["canonical_bounding_wall_ids"]
+        assert payload["wall_relationships_complete"] is False
 
 
 def test_single_box_fails_closed_without_minting_room_object() -> None:
