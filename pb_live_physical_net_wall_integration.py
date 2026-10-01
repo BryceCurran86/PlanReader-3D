@@ -35,7 +35,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION = "1.1.0"
+LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION = "1.2.0"
 LIVE_PHYSICAL_NET_WALL_INTEGRATION_RESOLVED = (
     "live_physical_net_wall_integration_resolved"
 )
