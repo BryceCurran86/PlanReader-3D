@@ -811,3 +811,38 @@ def test_lot16_bed1_raked_ceiling_closes_from_area_and_section_pitch():
     )
     assert check["component_sum_m2"] == pytest.approx(12.922385)
     assert check["net_denominator_ready"] is False
+
+
+def test_lot16_partial_wet_area_tile_faces_and_known_niches_are_source_closed():
+    draft = _load(ROOT / "au_qld_lot16_power" / "reference_truth_draft.json")
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "lot16:control:partial_wet_area_tile_faces"
+    )
+    tile_refs = set(check["component_object_refs"])
+    niche_refs = set(check["niche_deduction_object_refs"])
+    tiles = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in tile_refs
+    ]
+    niches = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_ref"] in niche_refs
+    ]
+    assert len(tiles) == check["gross_tile_face_count"] == 5
+    assert sum(float(row["expected_quantity"]) for row in tiles) == pytest.approx(18.4149)
+    assert check["gross_tile_area_m2"] == pytest.approx(18.4149)
+    assert len(niches) == check["source_dimensioned_niche_count"] == 2
+    assert sum(float(row["expected_quantity"]) for row in niches) == pytest.approx(0.9)
+    assert check["flat_niche_face_deduction_area_m2"] == pytest.approx(0.9)
+    assert check["flat_tile_area_after_known_niche_face_deductions_m2"] == pytest.approx(17.5149)
+    assert check["complete_for_these_five_source_tiled_elevations"] is True
+    assert check["complete_for_project_wet_area_tile_universe"] is False
+    assert check["niche_return_depths_resolved"] is False
+    assert (
+        "wet_area_wall_tiling_beyond_five_closed_gross_faces_and_known_niche_face_deductions"
+        in draft["unresolved_surface_families"]
+    )
