@@ -123,7 +123,10 @@ def test_3laurel_gross_shower_tile_faces_stay_out_of_net_denominator_until_deduc
     )
     assert check["net_denominator_ready"] is False
     assert "niche/recess returns and deductions remain unresolved" in check["reason"]
-    assert "wet_area_tile_bathroom_niche_face_and_all_niche_return_depths" in draft["unresolved_surface_families"]
+    assert any(
+        item.startswith("wet_area_tile_bathroom_niche_")
+        for item in draft["unresolved_surface_families"]
+    )
 
 
 def test_3laurel_typed_external_opening_census_is_source_closed():
@@ -1105,3 +1108,58 @@ def test_3laurel_media_floor_and_gross_walls_are_source_closed():
     assert check["source_closed_gross_geometry"] is True
     assert check["openings_deducted"] is False
     assert "must not be double-counted" in check["overlap_note"]
+
+
+def test_3laurel_bed2_bed3_floor_surfaces_are_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    by_ref = {
+        row["object_ref"]: row for row in draft["verified_physical_candidates"]
+    }
+    bed2 = by_ref["3laurel:surface:floor:bed2"]
+    bed3 = by_ref["3laurel:surface:floor:bed3"]
+
+    for floor in (bed2, bed3):
+        assert floor["expected_quantity"] == pytest.approx(12.6)
+        assert floor["attributes"]["width_m"] == pytest.approx(3.0)
+        assert floor["attributes"]["length_m"] == pytest.approx(4.2)
+        assert floor["attributes"]["finish"] == "vinyl"
+        assert (
+            floor["attributes"]["overlaps_aggregate_ref"]
+            == "3laurel:surface:floor:main_living_composite_region"
+        )
+
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:closure:bed2_bed3_floor_surfaces"
+    )
+    assert check["room_count"] == 2
+    assert check["floor_area_each_m2"] == pytest.approx(12.6)
+    assert check["component_sum_m2"] == pytest.approx(25.2)
+    assert check["source_closed"] is True
+    assert "must not be double-counted" in check["overlap_note"]
+
+
+def test_3laurel_bathroom_niche_dimensions_fail_closed_without_width_or_returns():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    blocker = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"]
+        == "3laurel:blocker:bathroom_niche_width_and_niche_return_depths"
+    )
+    assert blocker["status"] == "UNRESOLVED_SOURCE_LIMITATION"
+    assert blocker["explicit_dimensions_available"] == {
+        "sill_height_mm": 1100,
+        "niche_height_mm": 400,
+    }
+    assert "bathroom_niche_width" in blocker["missing_dimensions"]
+    assert "bathroom_niche_return_depth" in blocker["missing_dimensions"]
+    assert "main_ensuite_niche_return_depth" in blocker["missing_dimensions"]
+    assert "gf_ensuite_niche_return_depth" in blocker["missing_dimensions"]
+    assert blocker["scaling_substitute_allowed"] is False
+    assert "remain unresolved" in blocker["conclusion"]
+    assert (
+        "wet_area_tile_bathroom_niche_width_and_all_niche_return_depths"
+        in draft["unresolved_surface_families"]
+    )
