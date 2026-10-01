@@ -124,3 +124,44 @@ def test_3laurel_gross_shower_tile_faces_stay_out_of_net_denominator_until_deduc
     assert check["net_denominator_ready"] is False
     assert "niche/recess returns and deductions remain unresolved" in check["reason"]
     assert "wet_area_tile_niche_returns_and_recess_deductions" in draft["unresolved_surface_families"]
+
+
+def test_3laurel_typed_external_opening_census_is_source_closed():
+    draft = _load(ROOT / "au_qld_3laurel" / "reference_truth_draft.json")
+    openings = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "external_opening"
+    ]
+    check = next(
+        row
+        for row in draft["closure_checks"]
+        if row["check_id"] == "3laurel:control:typed_external_opening_census"
+    )
+    assert len(openings) == 20
+    assert check["typed_opening_count"] == 20
+    assert sum(float(row["expected_quantity"]) for row in openings) == pytest.approx(58.59)
+    assert check["typed_opening_area_m2"] == pytest.approx(58.59)
+    assert check["complete_for_typed_labels"] is True
+    assert check["complete_for_all_openings"] is False
+    assert "untyped_or_ambiguous_door_openings_and_internal_external_classification" in draft["unresolved_surface_families"]
+
+
+@pytest.mark.parametrize(
+    ("project_id", "check_id", "expected_count", "expected_length"),
+    (
+        ("au_qld_lot16_power", "lot16:closure:wall_bracing_schedule", 24, 27.9),
+        ("au_qld_3laurel", "3laurel:closure:wall_bracing_schedule", 37, 45.75),
+    ),
+)
+def test_wall_bracing_schedule_closure(project_id: str, check_id: str, expected_count: int, expected_length: float):
+    draft = _load(ROOT / project_id / "reference_truth_draft.json")
+    braces = [
+        row
+        for row in draft["verified_physical_candidates"]
+        if row["object_family"] == "wall_bracing"
+    ]
+    check = next(row for row in draft["closure_checks"] if row["check_id"] == check_id)
+    assert len(braces) == expected_count == check["object_count"]
+    assert sum(float(row["expected_quantity"]) for row in braces) == pytest.approx(expected_length)
+    assert check["total_length_m"] == pytest.approx(expected_length)
