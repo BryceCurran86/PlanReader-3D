@@ -31,11 +31,11 @@
     "internal_wall_faces",
     "external_wall_faces_and_cladding",
     "roof_planes",
-    "doors_and_windows",
     "structural_members_other_than_scheduled_wall_bracing",
     "secondary_fc_soffit_and_beam_faces_beyond_primary_ceiling_planes",
     "wet_area_tile_niche_returns_and_recess_deductions",
-    "wet_area_non_shower_tile_skirtings_bath_surrounds_and_splashbacks"
+    "wet_area_non_shower_tile_skirtings_bath_surrounds_and_splashbacks",
+    "untyped_or_ambiguous_door_openings_and_internal_external_classification"
   ],
   "completion_rule": "Do not mark project VERIFIED until every in-scope family is independently closed and aggregate controls reconcile without double counting.",
   "verified_physical_candidates": [
@@ -200,6 +200,21 @@
       "source_location": "architectural:p3:A0.3:floor_plan:04"
     },
     {
+      "object_ref": "3laurel:opening:p3:1800x610_asw_obs:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 610 ASW obs",
+      "expected_quantity": 1.098,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window_obscure",
+        "height_m": 1.8,
+        "width_m": 0.61,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:1800_610_asw_obs"
+    },
+    {
       "object_ref": "3laurel:opening:p3:1800x900_adh:01",
       "physical_kind": "opening_surface",
       "object_family": "external_opening",
@@ -238,6 +253,21 @@
         ]
       },
       "source_location": "architectural:p3:A0.3:floor_plan:02"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x910_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 910 ASW",
+      "expected_quantity": 1.638,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 0.91,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:1800_910_asw"
     },
     {
       "object_ref": "3laurel:opening:p3:2100x1500_asd:01",
@@ -280,6 +310,21 @@
       "source_location": "architectural:p3:A0.3:floor_plan:01"
     },
     {
+      "object_ref": "3laurel:opening:p3:2100x2700_assd:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 2700 ASSD",
+      "expected_quantity": 5.67,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_stack_door",
+        "height_m": 2.1,
+        "width_m": 2.7,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:21_27_assd"
+    },
+    {
       "object_ref": "3laurel:opening:p3:2100x4800_panel_lift:01",
       "physical_kind": "opening_surface",
       "object_family": "external_opening",
@@ -298,6 +343,36 @@
         ]
       },
       "source_location": "architectural:p3:A0.3:floor_plan:01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1210_asw_obs:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1210 ASW obs #1",
+      "expected_quantity": 0.726,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window_obscure",
+        "height_m": 0.6,
+        "width_m": 1.21,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:600_1210_asw_obs_01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1210_asw_obs:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1210 ASW obs #2",
+      "expected_quantity": 0.726,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window_obscure",
+        "height_m": 0.6,
+        "width_m": 1.21,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:600_1210_asw_obs_02"
     },
     {
       "object_ref": "3laurel:opening:p3:600x1510_asw:01",
@@ -1187,6 +1262,37 @@
       "net_denominator_ready": false,
       "source_location": "architectural:p11:A0.11; architectural:p12:A0.12; architectural:p15:A0.15",
       "reason": "gross designated shower tile faces only; niche/recess returns and deductions remain unresolved"
+    },
+    {
+      "check_id": "3laurel:control:typed_external_opening_census",
+      "component_object_refs": [
+        "3laurel:opening:p3:1200x1810_asw:01",
+        "3laurel:opening:p3:1200x1810_asw:02",
+        "3laurel:opening:p3:1200x1810_asw:03",
+        "3laurel:opening:p3:1200x1810_asw:04",
+        "3laurel:opening:p3:1800x2410_asw:01",
+        "3laurel:opening:p3:1800x2410_asw:02",
+        "3laurel:opening:p3:1800x2410_asw:03",
+        "3laurel:opening:p3:1800x2410_asw:04",
+        "3laurel:opening:p3:1800x610_asw_obs:01",
+        "3laurel:opening:p3:1800x900_adh:01",
+        "3laurel:opening:p3:1800x900_adh:02",
+        "3laurel:opening:p3:1800x910_asw:01",
+        "3laurel:opening:p3:2100x1500_asd:01",
+        "3laurel:opening:p3:2100x2100_asd:01",
+        "3laurel:opening:p3:2100x2700_assd:01",
+        "3laurel:opening:p3:2100x4800_panel_lift:01",
+        "3laurel:opening:p3:600x1210_asw_obs:01",
+        "3laurel:opening:p3:600x1210_asw_obs:02",
+        "3laurel:opening:p3:600x1510_asw:01",
+        "3laurel:opening:p3:600x1510_asw:02"
+      ],
+      "typed_opening_count": 20,
+      "typed_opening_area_m2": 58.59,
+      "complete_for_typed_labels": true,
+      "complete_for_all_openings": false,
+      "source_location": "architectural:p3:A0.3:floor_plan",
+      "reason": "all explicitly typed ASW/ASD/ASSD/ADH/panel-lift labels admitted; generic door labels remain unresolved"
     }
   ]
 }
