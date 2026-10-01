@@ -48,6 +48,55 @@ LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED = (
     "live_ceiling_lining_multi_viewport_identity_unresolved"
 )
 LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT = "live_ceiling_lining_tag_family_conflict"
+LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT = (
+    "live_ceiling_canonical_identity_conflict"
+)
+
+
+@dataclass(frozen=True)
+class LiveCanonicalCeilingSurfaceObject:
+    canonical_ceiling_id: str
+    room_entity_id: str
+    source_page: int
+    viewport_id: str
+    source_sha256: str
+    revision_id: str
+    polygon_pdf_pts: tuple[tuple[float, float], ...]
+    area_m2: float
+    finish_descriptor: str
+    room_area_quantity_id: str
+    ceiling_quantity_id: str
+    source_room_index_id: str
+    evidence_ids: tuple[str, ...]
+    physical_scale_record_id: str
+    geometry_complete: bool = True
+    metric_area_complete: bool = True
+    metric_geometry_complete: bool = False
+    coordinate_space: str = "source_page_points"
+    schema_version: str = LIVE_CEILING_LINING_SCHEMA_VERSION
+
+    def to_dict(self) -> dict:
+        return {
+            "canonical_ceiling_id": self.canonical_ceiling_id,
+            "room_entity_id": self.room_entity_id,
+            "source_page": self.source_page,
+            "viewport_id": self.viewport_id,
+            "source_sha256": self.source_sha256,
+            "revision_id": self.revision_id,
+            "polygon_pdf_pts": [list(point) for point in self.polygon_pdf_pts],
+            "area_m2": self.area_m2,
+            "finish_descriptor": self.finish_descriptor,
+            "room_area_quantity_id": self.room_area_quantity_id,
+            "ceiling_quantity_id": self.ceiling_quantity_id,
+            "source_room_index_id": self.source_room_index_id,
+            "evidence_ids": list(self.evidence_ids),
+            "physical_scale_record_id": self.physical_scale_record_id,
+            "geometry_complete": self.geometry_complete,
+            "metric_area_complete": self.metric_area_complete,
+            "metric_geometry_complete": self.metric_geometry_complete,
+            "coordinate_space": self.coordinate_space,
+            "schema_version": self.schema_version,
+        }
 
 
 @dataclass(frozen=True)
@@ -74,6 +123,7 @@ class LiveCeilingLiningResult:
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
     claims: tuple[LiveCeilingLiningClaim, ...]
+    canonical_ceilings: tuple[LiveCanonicalCeilingSurfaceObject, ...] = ()
     schema_version: str = LIVE_CEILING_LINING_SCHEMA_VERSION
 
 
@@ -239,6 +289,10 @@ def collect_live_ceiling_lining_claims(
                 ]
             ],
         ] = {}
+        canonical_ceilings_by_id: dict[
+            str, LiveCanonicalCeilingSurfaceObject
+        ] = {}
+        canonical_conflicts: set[str] = set()
 
         for page_index in selected:
             page_no = page_index + 1
@@ -324,6 +378,63 @@ def collect_live_ceiling_lining_claims(
                         )
                     )
 
+                    room_index = result.pipeline.room_area_bridge.room_index
+                    if room_index is not None and len(room_ids) == 1:
+                        room_id = room_ids[0]
+                        room = room_index.room(room_id)
+                        quantity_meta = (
+                            quantity.metadata
+                            if isinstance(quantity.metadata, dict)
+                            else {}
+                        )
+                        upstream_area_id = _clean(
+                            quantity_meta.get("upstream_area_quantity_id")
+                        )
+                        if (
+                            room is not None
+                            and upstream_area_id
+                            and len(room.polygon_pdf_pts) >= 3
+                        ):
+                            canonical_id = stable_contract_id(
+                                "live_canonical_ceiling_surface",
+                                {
+                                    "source_sha256": current.revision.source_sha256,
+                                    "revision_id": current.revision.revision_id,
+                                    "page_no": page_no,
+                                    "viewport_id": viewport_id,
+                                    "room_entity_id": room_id,
+                                },
+                            )
+                            ceiling_object = LiveCanonicalCeilingSurfaceObject(
+                                canonical_ceiling_id=canonical_id,
+                                room_entity_id=room_id,
+                                source_page=page_no,
+                                viewport_id=viewport_id,
+                                source_sha256=current.revision.source_sha256,
+                                revision_id=current.revision.revision_id,
+                                polygon_pdf_pts=tuple(
+                                    (float(point[0]), float(point[1]))
+                                    for point in room.polygon_pdf_pts
+                                ),
+                                area_m2=float(value),
+                                finish_descriptor=descriptor,
+                                room_area_quantity_id=upstream_area_id,
+                                ceiling_quantity_id=quantity.quantity_id,
+                                source_room_index_id=room_index.index_id,
+                                evidence_ids=tuple(evidence_ids),
+                                physical_scale_record_id=scale_record_id,
+                            )
+                            prior = canonical_ceilings_by_id.get(canonical_id)
+                            if prior is not None and prior != ceiling_object:
+                                canonical_conflicts.add(canonical_id)
+                            else:
+                                canonical_ceilings_by_id[canonical_id] = (
+                                    ceiling_object
+                                )
+
+        for canonical_id in canonical_conflicts:
+            canonical_ceilings_by_id.pop(canonical_id, None)
+
         claims: list[LiveCeilingLiningClaim] = []
         multi_viewport_blocked = False
         for descriptor in sorted(by_descriptor):
@@ -401,16 +512,26 @@ def collect_live_ceiling_lining_claims(
         if conflicted_tags:
             claims = [claim for claim in claims if claim.tag not in conflicted_tags]
 
+        canonical_ceilings = tuple(
+            sorted(
+                canonical_ceilings_by_id.values(),
+                key=lambda item: item.canonical_ceiling_id,
+            )
+        )
+
         if claims:
             reasons = [LIVE_CEILING_LINING_RESOLVED]
             if multi_viewport_blocked:
                 reasons.append(LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED)
             if tag_conflict_blocked:
                 reasons.append(LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT)
+            if canonical_conflicts:
+                reasons.append(LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT)
             return LiveCeilingLiningResult(
                 status=EvidenceResolutionStatus.CORROBORATED,
                 reason_codes=tuple(reasons),
                 claims=tuple(sorted(claims, key=lambda item: item.claim_id)),
+                canonical_ceilings=canonical_ceilings,
             )
 
         reasons = [LIVE_CEILING_LINING_UNAVAILABLE]
@@ -418,21 +539,26 @@ def collect_live_ceiling_lining_claims(
             reasons.append(LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED)
         if tag_conflict_blocked:
             reasons.append(LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT)
+        if canonical_conflicts:
+            reasons.append(LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT)
         return LiveCeilingLiningResult(
             status=EvidenceResolutionStatus.ABSTAINED,
             reason_codes=tuple(reasons),
             claims=(),
+            canonical_ceilings=canonical_ceilings,
         )
     finally:
         doc.close()
 
 
 __all__ = [
+    "LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT",
     "LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED",
     "LIVE_CEILING_LINING_RESOLVED",
     "LIVE_CEILING_LINING_SCHEMA_VERSION",
     "LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT",
     "LIVE_CEILING_LINING_UNAVAILABLE",
+    "LiveCanonicalCeilingSurfaceObject",
     "LiveCeilingLiningClaim",
     "LiveCeilingLiningResult",
     "collect_live_ceiling_lining_claims",

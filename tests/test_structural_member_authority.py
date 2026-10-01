@@ -5,6 +5,7 @@ from pb_structural_member_authority import (
     STRUCTURAL_MEMBER_COUNT_CONFLICT,
     STRUCTURAL_MEMBER_DEFINITION_ONLY,
     STRUCTURAL_MEMBER_DEFINITION_CONFLICT,
+    STRUCTURAL_MEMBER_GEOMETRY_CONFLICT,
     STRUCTURAL_MEMBER_REGISTRATION_INCOMPLETE,
     STRUCTURAL_MEMBER_RELATION_AMBIGUOUS,
     STRUCTURAL_MEMBER_RELATION_CONFLICT,
@@ -41,7 +42,18 @@ def definition(*, kind="column"):
     )
 
 
-def obs(oid, view, *, kind="column", page="1", definition_id=None, primitive=None):
+def obs(
+    oid,
+    view,
+    *,
+    kind="column",
+    page="1",
+    definition_id=None,
+    primitive=None,
+    bbox=None,
+    bbox_primitive=None,
+):
+    primitive_id = primitive or f"prim:{oid}"
     return StructuralMemberObservation(
         observation_id=oid,
         member_kind=kind,
@@ -49,7 +61,17 @@ def obs(oid, view, *, kind="column", page="1", definition_id=None, primitive=Non
         view_id=view,
         view_type=view,
         source_evidence_ids=(f"src:{oid}",),
-        source_primitive_ids=((primitive or f"prim:{oid}"),),
+        source_primitive_ids=(primitive_id,),
+        source_primitive_bboxes=(
+            (
+                (
+                    bbox_primitive or primitive_id,
+                    tuple(float(value) for value in bbox),
+                ),
+            )
+            if bbox is not None
+            else ()
+        ),
         definition_id=definition_id,
     )
 
@@ -151,6 +173,42 @@ def test_repeated_identical_chs_pillars_remain_distinct_instances():
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.quantity == 4
     assert len({m.physical_member_id for m in result.members}) == 4
+
+
+def test_owned_primitive_bbox_is_preserved_on_physical_member():
+    observation = obs(
+        "p0",
+        "plan",
+        bbox=(10.0, 20.0, 14.0, 24.0),
+    )
+    result = resolve(
+        observations=(observation,),
+        scopes=(scope("plan"),),
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.quantity == 1
+    assert result.members[0].source_primitive_bboxes == (
+        ("prim:p0", (10.0, 20.0, 14.0, 24.0)),
+    )
+
+
+def test_primitive_bbox_for_unowned_primitive_fails_closed():
+    observation = obs(
+        "p0",
+        "plan",
+        primitive="prim:p0",
+        bbox=(10.0, 20.0, 14.0, 24.0),
+        bbox_primitive="prim:other",
+    )
+    result = resolve(
+        observations=(observation,),
+        scopes=(scope("plan"),),
+    )
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.quantity is None
+    assert STRUCTURAL_MEMBER_GEOMETRY_CONFLICT in result.reason_codes
 
 
 def test_cropped_plan_abstains_on_completeness():

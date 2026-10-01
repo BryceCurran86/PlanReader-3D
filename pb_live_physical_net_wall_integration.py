@@ -17,6 +17,15 @@ from typing import Optional, Sequence
 
 import fitz
 
+from pb_live_canonical_floor_surface import (
+    LiveCanonicalFloorSurfaceObject,
+    compose_live_canonical_floor_surfaces,
+)
+from pb_live_canonical_room_composition import (
+    LiveCanonicalRoomObject,
+    compose_live_canonical_rooms,
+)
+from pb_live_canonical_wall_composition import compose_live_canonical_walls
 from pb_live_external_physical_net_wall_publication import (
     LiveCanonicalWallObject,
     LiveExternalPhysicalNetWallPublication,
@@ -51,7 +60,19 @@ class LivePhysicalNetWallClaim:
     quantity_m2: Optional[float]
     source_pages: tuple[int, ...]
     canonical_walls: tuple[LiveCanonicalWallObject, ...]
+    canonical_wall_status: EvidenceResolutionStatus
+    canonical_wall_reason_codes: tuple[str, ...]
+    canonical_wall_source_pages: tuple[int, ...]
+    unresolved_wall_candidate_ids: tuple[str, ...]
     canonical_openings: tuple[LiveCanonicalOpeningObject, ...]
+    canonical_rooms: tuple[LiveCanonicalRoomObject, ...]
+    canonical_floors: tuple[LiveCanonicalFloorSurfaceObject, ...]
+    canonical_floor_status: EvidenceResolutionStatus
+    canonical_floor_reason_codes: tuple[str, ...]
+    canonical_floor_source_pages: tuple[int, ...]
+    canonical_room_status: EvidenceResolutionStatus
+    canonical_room_reason_codes: tuple[str, ...]
+    canonical_room_source_pages: tuple[int, ...]
     external_wall_ids: tuple[str, ...]
     evidence_ids: tuple[str, ...]
     quantity_id: Optional[str]
@@ -115,6 +136,23 @@ def collect_live_physical_net_wall_claim(
         revision_id=published.revision.revision_id,
         page_ids=page_ids,
     )
+    canonical_wall_core = compose_live_canonical_walls(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+    canonical_rooms = compose_live_canonical_rooms(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+        canonical_wall_ids_by_candidate=(
+            canonical_wall_core.candidate_to_canonical_wall_id
+        ),
+        unresolved_wall_candidate_ids=(
+            canonical_wall_core.unresolved_wall_candidate_ids
+        ),
+    )
+    canonical_floors = compose_live_canonical_floor_surfaces(
+        canonical_rooms
+    )
     physical_void = compose_live_physical_opening_voids(
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
@@ -132,6 +170,16 @@ def collect_live_physical_net_wall_claim(
         physical_void_composition=physical_void,
         gross_wall_composition=gross,
         whole_wall_role_composition=roles,
+    )
+
+    canonical_walls_by_id = {
+        wall.canonical_wall_id: wall for wall in canonical_wall_core.walls
+    }
+    for wall in publication.canonical_walls:
+        canonical_walls_by_id[wall.canonical_wall_id] = wall
+    canonical_walls = tuple(
+        canonical_walls_by_id[wall_id]
+        for wall_id in sorted(canonical_walls_by_id)
     )
 
     evidence = publication.quantity_evidence
@@ -160,8 +208,22 @@ def collect_live_physical_net_wall_claim(
             ),
             quantity_m2=float(evidence.value),
             source_pages=source_pages,
-            canonical_walls=publication.canonical_walls,
+            canonical_walls=canonical_walls,
+            canonical_wall_status=canonical_wall_core.status,
+            canonical_wall_reason_codes=canonical_wall_core.reason_codes,
+            canonical_wall_source_pages=canonical_wall_core.source_pages,
+            unresolved_wall_candidate_ids=(
+                canonical_wall_core.unresolved_wall_candidate_ids
+            ),
             canonical_openings=physical_void.canonical_openings,
+            canonical_rooms=canonical_rooms.rooms,
+            canonical_floors=canonical_floors.floors,
+            canonical_floor_status=canonical_floors.status,
+            canonical_floor_reason_codes=canonical_floors.reason_codes,
+            canonical_floor_source_pages=canonical_floors.source_pages,
+            canonical_room_status=canonical_rooms.status,
+            canonical_room_reason_codes=canonical_rooms.reason_codes,
+            canonical_room_source_pages=canonical_rooms.source_pages,
             external_wall_ids=publication.external_wall_ids,
             evidence_ids=tuple(evidence.evidence_ids),
             quantity_id=evidence.quantity_id,
@@ -177,8 +239,22 @@ def collect_live_physical_net_wall_claim(
         ),
         quantity_m2=None,
         source_pages=(),
-        canonical_walls=(),
+        canonical_walls=canonical_walls,
+        canonical_wall_status=canonical_wall_core.status,
+        canonical_wall_reason_codes=canonical_wall_core.reason_codes,
+        canonical_wall_source_pages=canonical_wall_core.source_pages,
+        unresolved_wall_candidate_ids=(
+            canonical_wall_core.unresolved_wall_candidate_ids
+        ),
         canonical_openings=physical_void.canonical_openings,
+        canonical_rooms=canonical_rooms.rooms,
+        canonical_floors=canonical_floors.floors,
+        canonical_floor_status=canonical_floors.status,
+        canonical_floor_reason_codes=canonical_floors.reason_codes,
+        canonical_floor_source_pages=canonical_floors.source_pages,
+        canonical_room_status=canonical_rooms.status,
+        canonical_room_reason_codes=canonical_rooms.reason_codes,
+        canonical_room_source_pages=canonical_rooms.source_pages,
         external_wall_ids=(),
         evidence_ids=(),
         quantity_id=None,

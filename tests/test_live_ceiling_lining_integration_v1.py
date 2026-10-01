@@ -96,6 +96,15 @@ def test_resolved_floor_plan_emits_live_chipboard_ceiling_claim(tmp_path) -> Non
     assert claim.room_entity_ids
     assert claim.evidence_ids
     assert claim.physical_scale_record_id
+    assert len(result.canonical_ceilings) == 1
+    ceiling = result.canonical_ceilings[0]
+    assert ceiling.room_entity_id in claim.room_entity_ids
+    assert ceiling.area_m2 == claim.quantity_m2
+    assert ceiling.finish_descriptor == claim.finish_descriptor
+    assert ceiling.polygon_pdf_pts
+    assert ceiling.geometry_complete is True
+    assert ceiling.metric_area_complete is True
+    assert ceiling.metric_geometry_complete is False
 
 
 def test_generic_extractor_publishes_only_separate_live_provisional_prediction(tmp_path) -> None:
@@ -118,7 +127,11 @@ def test_generic_extractor_publishes_only_separate_live_provisional_prediction(t
     assert prediction.metadata["live_authority_status"] == "provisional"
     assert prediction.metadata["commercial_projection_allowed"] is False
     assert prediction.metadata["physical_scale_record_id"]
+    assert prediction.metadata["canonical_ceiling_ids"]
+    assert prediction.metadata["canonical_ceiling_objects"]
     assert extractor.ceiling_lining_live["status"] == "corroborated"
+    assert extractor.canonical_ceilings_live["status"] == "corroborated"
+    assert len(extractor.canonical_ceilings_live["ceilings"]) == 1
 
 
 def test_unframed_plan_does_not_fall_back_to_page_wide_ceiling_authority(tmp_path) -> None:
@@ -133,6 +146,7 @@ def test_unframed_plan_does_not_fall_back_to_page_wide_ceiling_authority(tmp_pat
 
     assert not any(item.tag.startswith("ceiling_") for item in predictions)
     assert extractor.ceiling_lining_live["claims"] == []
+    assert extractor.canonical_ceilings_live["ceilings"] == []
 
 
 def _pdf_with_two_board_descriptors() -> bytes:
@@ -196,3 +210,10 @@ def test_distinct_finish_descriptors_that_share_one_family_tag_abstain(tmp_path)
 
     assert result.claims == ()
     assert LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT in result.reason_codes
+    assert len(result.canonical_ceilings) == 2
+    assert len(
+        {ceiling.canonical_ceiling_id for ceiling in result.canonical_ceilings}
+    ) == 2
+    assert {
+        ceiling.finish_descriptor for ceiling in result.canonical_ceilings
+    } == {"board type a", "board type b"}
