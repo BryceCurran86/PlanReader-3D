@@ -6,6 +6,8 @@ import unittest
 import pb_takeoff_row_contract as takeoff_contract
 from pb_auto_geometry_v1219 import _validate_auto_rows
 from pb_cross_trade_geometry_reuse import (
+    derive_ceiling_trade_quantities,
+    derive_floor_surface_trade_quantities,
     derive_roof_trade_quantities,
     derive_slab_trade_quantities,
     derive_space_trade_quantities,
@@ -68,6 +70,29 @@ def _space():
         "canonical_room_id": "room_101",
         "perimeter_m": 20.0,
         "evidence_ids": ["room-face-1"],
+    }
+
+
+def _floor_surface():
+    return {
+        "canonical_floor_id": "floor_101",
+        "geometry_complete": True,
+        "metric_area_m2": 24.0,
+        "metric_area_quantity_id": "qty-floor-101",
+        "metric_area_authority": "pdf_scaled",
+        "evidence_ids": ["room-face-1"],
+    }
+
+
+def _ceiling_surface():
+    return {
+        "canonical_ceiling_id": "ceiling_101",
+        "geometry_complete": True,
+        "metric_area_complete": True,
+        "area_m2": 24.0,
+        "ceiling_quantity_id": "qty-ceiling-101",
+        "physical_scale_record_id": "scale-record-1",
+        "evidence_ids": ["ceiling-evidence-1"],
     }
 
 
@@ -240,6 +265,118 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
         }
         self.assertEqual(
             derive_roof_trade_quantities(legacy_proxy, specs),
+            [],
+        )
+
+    def test_floor_surface_reuses_one_metric_area_across_explicit_trades(self):
+        specs = {
+            "flooring": {
+                "material": "Timber flooring",
+                "section": "Internal",
+                "evidence_ids": ["spec-flooring"],
+            },
+            "tiling": {
+                "material": "Porcelain floor tile",
+                "section": "Internal",
+                "evidence_ids": ["spec-tile"],
+            },
+            "coating": {
+                "material": "Epoxy coating",
+                "section": "Internal",
+                "evidence_ids": ["spec-coating"],
+            },
+        }
+
+        quantities = derive_floor_surface_trade_quantities(
+            _floor_surface(),
+            specs,
+        )
+
+        self.assertEqual(len(quantities), 3)
+        by_trade = {item.trade_scope: item for item in quantities}
+        self.assertEqual(by_trade["flooring"].quantity, 24.0)
+        self.assertEqual(by_trade["tiling"].quantity, 24.0)
+        self.assertEqual(by_trade["painting"].quantity, 24.0)
+        for item in quantities:
+            self.assertEqual(item.host_object_id, "floor_101")
+            self.assertEqual(item.host_object_type, "FLOOR")
+            self.assertEqual(item.unit, "m²")
+            self.assertIn("qty-floor-101", item.host_evidence_ids)
+            self.assertIn("no waste factor applied", item.notes)
+
+    def test_floor_surface_without_metric_authority_fails_closed(self):
+        floor = _floor_surface()
+        floor["metric_area_quantity_id"] = None
+        specs = {
+            "flooring": {
+                "material": "Timber flooring",
+                "section": "Internal",
+                "evidence_ids": ["spec-flooring"],
+            }
+        }
+
+        self.assertEqual(
+            derive_floor_surface_trade_quantities(floor, specs),
+            [],
+        )
+
+    def test_ceiling_surface_reuses_metric_area_without_room_proxy(self):
+        specs = {
+            "lining": {
+                "material": "13mm plasterboard",
+                "section": "Internal",
+                "evidence_ids": ["spec-lining"],
+            },
+            "painting": {
+                "material": "Ceiling acrylic",
+                "section": "Internal",
+                "evidence_ids": ["spec-paint"],
+            },
+            "insulation": {
+                "material": "R3.5 ceiling batts",
+                "section": "Internal",
+                "evidence_ids": ["spec-insulation"],
+            },
+        }
+
+        quantities = derive_ceiling_trade_quantities(
+            _ceiling_surface(),
+            specs,
+        )
+
+        self.assertEqual(len(quantities), 3)
+        by_trade = {item.trade_scope: item for item in quantities}
+        self.assertEqual(by_trade["linings"].quantity, 24.0)
+        self.assertEqual(by_trade["painting"].quantity, 24.0)
+        self.assertEqual(by_trade["insulation"].quantity, 24.0)
+        for item in quantities:
+            self.assertEqual(item.host_object_id, "ceiling_101")
+            self.assertEqual(item.host_object_type, "CEILING")
+            self.assertIn("qty-ceiling-101", item.host_evidence_ids)
+
+    def test_ceiling_incomplete_metric_area_fails_closed(self):
+        ceiling = _ceiling_surface()
+        ceiling["metric_area_complete"] = False
+        specs = {
+            "lining": {
+                "material": "13mm plasterboard",
+                "section": "Internal",
+                "evidence_ids": ["spec-lining"],
+            }
+        }
+
+        self.assertEqual(
+            derive_ceiling_trade_quantities(ceiling, specs),
+            [],
+        )
+
+    def test_floor_and_ceiling_need_explicit_trade_specs(self):
+        self.assertEqual(
+            derive_floor_surface_trade_quantities(_floor_surface()),
+            [],
+        )
+        self.assertEqual(
+            derive_ceiling_trade_quantities(_ceiling_surface()),
             [],
         )
 
