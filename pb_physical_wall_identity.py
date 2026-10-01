@@ -28,6 +28,7 @@ No confidence, nearest, first, or epsilon merge.
 """
 from __future__ import annotations
 
+import heapq
 import math
 from dataclasses import dataclass, field
 from enum import Enum
@@ -623,6 +624,44 @@ def _parallel_overlap_separation(
     return overlap, separation
 
 
+
+
+def _parallel_longitudinal_overlap(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+    *,
+    angle_tolerance_deg: float,
+) -> Optional[float]:
+    """Return longitudinal overlap for an orientation-compatible segment pair.
+
+    This is the no-scale subset of ``_parallel_overlap_separation``.  When no
+    authoritative physical scale exists, candidacy only needs orientation and
+    longitudinal overlap; perpendicular separation cannot prove distinctness.
+    """
+    lu, ru = _unit(left), _unit(right)
+    if lu is None or ru is None:
+        return None
+    dot = max(-1.0, min(1.0, abs(lu[0] * ru[0] + lu[1] * ru[1])))
+    if math.degrees(math.acos(dot)) > angle_tolerance_deg:
+        return None
+    axis = lu
+    left_first = left[0] * axis[0] + left[1] * axis[1]
+    left_second = left[2] * axis[0] + left[3] * axis[1]
+    right_first = right[0] * axis[0] + right[1] * axis[1]
+    right_second = right[2] * axis[0] + right[3] * axis[1]
+    left_min, left_max = (
+        (left_first, left_second)
+        if left_first <= left_second
+        else (left_second, left_first)
+    )
+    right_min, right_max = (
+        (right_first, right_second)
+        if right_first <= right_second
+        else (right_second, right_first)
+    )
+    return min(left_max, right_max) - max(left_min, right_min)
+
+
 def _single_segment_pair_identity_candidacy(
     left_features: _PhysicalWallPairFeatures,
     right_features: _PhysicalWallPairFeatures,
@@ -648,22 +687,6 @@ def _single_segment_pair_identity_candidacy(
     if math.degrees(math.acos(dot)) > _EQUIVALENCE_ANGLE_TOL_DEG:
         return False, PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE
 
-    left_bbox = left_features.single_segment_bbox
-    right_bbox = right_features.single_segment_bbox
-    can_meet = True
-    if left_bbox is not None and right_bbox is not None:
-        tol = _EQUIVALENCE_LATERAL_TOL_PT
-        can_meet = not (
-            left_bbox[2] + tol < right_bbox[0]
-            or right_bbox[2] + tol < left_bbox[0]
-            or left_bbox[3] + tol < right_bbox[1]
-            or right_bbox[3] + tol < left_bbox[1]
-        )
-    if can_meet and _segments_meet_within(
-        left, right, _EQUIVALENCE_LATERAL_TOL_PT
-    ):
-        return True, None
-
     axis = lu
     left_values = sorted(
         (
@@ -680,12 +703,40 @@ def _single_segment_pair_identity_candidacy(
     overlap = min(left_values[1], right_values[1]) - max(
         left_values[0], right_values[0]
     )
-    if overlap <= _EQUIVALENCE_LATERAL_TOL_PT:
-        return False, PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP
+
+    left_bbox = left_features.single_segment_bbox
+    right_bbox = right_features.single_segment_bbox
+    can_meet = True
+    if left_bbox is not None and right_bbox is not None:
+        tol = _EQUIVALENCE_LATERAL_TOL_PT
+        can_meet = not (
+            left_bbox[2] + tol < right_bbox[0]
+            or right_bbox[2] + tol < left_bbox[0]
+            or left_bbox[3] + tol < right_bbox[1]
+            or right_bbox[3] + tol < left_bbox[1]
+        )
 
     band = max_plausible_wall_body_separation_pt(points_per_mm)
     if band is None:
+        # Without physical scale, any positive longitudinal overlap already
+        # keeps the pair in contest regardless of lateral separation.  Avoid
+        # the much more expensive segment-distance calculation unless overlap
+        # itself cannot admit the pair and near-contact is the only remaining
+        # route to candidacy.
+        if overlap > _EQUIVALENCE_LATERAL_TOL_PT:
+            return True, None
+        if can_meet and _segments_meet_within(
+            left, right, _EQUIVALENCE_LATERAL_TOL_PT
+        ):
+            return True, None
+        return False, PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP
+
+    if can_meet and _segments_meet_within(
+        left, right, _EQUIVALENCE_LATERAL_TOL_PT
+    ):
         return True, None
+    if overlap <= _EQUIVALENCE_LATERAL_TOL_PT:
+        return False, PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP
 
     normal = (-axis[1], axis[0])
     mid = (
@@ -784,6 +835,30 @@ def _physical_wall_pair_identity_candidacy_with_features(
     # pass. This changes no candidate decision or exclusion reason.
     band = max_plausible_wall_body_separation_pt(points_per_mm)
     saw_parallel = False
+
+    if band is None:
+        # No physical scale means perpendicular separation has no authority to
+        # exclude a pair.  Longitudinal overlap can therefore decide candidacy
+        # before any point-to-segment distance work.  Near-contact remains the
+        # exact fallback for parallel segments whose intervals do not overlap.
+        for a in left_features.segments:
+            for b in right_features.segments:
+                overlap = _parallel_longitudinal_overlap(
+                    a, b, angle_tolerance_deg=_EQUIVALENCE_ANGLE_TOL_DEG
+                )
+                if overlap is None:
+                    continue
+                saw_parallel = True
+                if overlap > _EQUIVALENCE_LATERAL_TOL_PT:
+                    return True, None
+                if _segments_meet_within(
+                    a, b, _EQUIVALENCE_LATERAL_TOL_PT
+                ):
+                    return True, None
+        if not saw_parallel:
+            return False, PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE
+        return False, PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP
+
     saw_overlap = False
     for a in left_features.segments:
         for b in right_features.segments:
@@ -799,15 +874,13 @@ def _physical_wall_pair_identity_candidacy_with_features(
             if overlap <= _EQUIVALENCE_LATERAL_TOL_PT:
                 continue
             saw_overlap = True
-            if band is None or separation <= band:
+            if separation <= band:
                 return True, None
 
     if not saw_parallel:
         return False, PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE
     if not saw_overlap:
         return False, PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP
-    if band is None:
-        return True, None
     return False, PAIR_EXCLUDED_SEPARATION_BEYOND_BAND
 
 
@@ -1099,6 +1172,51 @@ def resolve_physical_wall_equivalence(
         fast_set = set(fast_single_indexes)
         forced_by_lower: dict[int, set[int]] = {}
 
+        # Exact-direction single-segment groups can be very large on CAD plans.
+        # The historical loop visited every later member only to reject most of
+        # them for disjoint longitudinal intervals.  Precompute the exact
+        # interval-overlap relation with a sweep so only pairs with gap <= the
+        # existing tolerance are enumerated during candidacy.  Audit counts for
+        # skipped disjoint pairs are retained separately below.
+        same_direction_candidates_by_lower: dict[int, set[int]] = {}
+        same_direction_future_count: dict[int, int] = {}
+        direction_groups: dict[tuple[float, float], list[int]] = {}
+        for index in fast_single_indexes:
+            direction_groups.setdefault(direction_key_by_index[index], []).append(index)
+        for group in direction_groups.values():
+            ordered_by_index = sorted(group)
+            group_size = len(ordered_by_index)
+            for position, index in enumerate(ordered_by_index):
+                same_direction_future_count[index] = group_size - position - 1
+
+            ordered_by_start = sorted(
+                group,
+                key=lambda index: (
+                    longitudinal_interval_by_index[index][0],
+                    longitudinal_interval_by_index[index][1],
+                    index,
+                ),
+            )
+            active: set[int] = set()
+            expiry_heap: list[tuple[float, int]] = []
+            for index in ordered_by_start:
+                start, end = longitudinal_interval_by_index[index]
+                while (
+                    expiry_heap
+                    and expiry_heap[0][0] + _EQUIVALENCE_LATERAL_TOL_PT < start
+                ):
+                    _expired_end, expired_index = heapq.heappop(expiry_heap)
+                    active.discard(expired_index)
+                for prior in active:
+                    left_index, right_index = (
+                        (prior, index) if prior < index else (index, prior)
+                    )
+                    same_direction_candidates_by_lower.setdefault(
+                        left_index, set()
+                    ).add(right_index)
+                active.add(index)
+                heapq.heappush(expiry_heap, (end, index))
+
         def force_group(indexes: Sequence[int]) -> None:
             ordered = sorted(set(indexes))
             for pos, left_index in enumerate(ordered):
@@ -1222,9 +1340,27 @@ def resolve_physical_wall_equivalence(
             candidate_indexes: set[int] = set()
             bucket = angle_bucket_by_index[left_index]
             forced_indexes = forced_by_lower.get(left_index, set())
-            skipped_no_longitudinal = 0
             left_direction = direction_key_by_index[left_index]
-            left_interval = longitudinal_interval_by_index[left_index]
+
+            same_direction_candidates = same_direction_candidates_by_lower.get(
+                left_index, set()
+            )
+            candidate_indexes.update(same_direction_candidates)
+            forced_disjoint_same_direction = sum(
+                1
+                for index in forced_indexes
+                if index > left_index
+                and index in fast_set
+                and direction_key_by_index.get(index) == left_direction
+                and index not in same_direction_candidates
+            )
+            skipped_no_longitudinal = max(
+                0,
+                same_direction_future_count.get(left_index, 0)
+                - len(same_direction_candidates)
+                - forced_disjoint_same_direction,
+            )
+
             for neighbor in (
                 (bucket - 1) % bucket_count,
                 bucket,
@@ -1233,17 +1369,10 @@ def resolve_physical_wall_equivalence(
                 for index in angle_buckets.get(neighbor, ()):
                     if index <= left_index:
                         continue
-                    if (
-                        index not in forced_indexes
-                        and direction_key_by_index[index] == left_direction
-                    ):
-                        right_interval = longitudinal_interval_by_index[index]
-                        gap = max(left_interval[0], right_interval[0]) - min(
-                            left_interval[1], right_interval[1]
-                        )
-                        if gap > _EQUIVALENCE_LATERAL_TOL_PT:
-                            skipped_no_longitudinal += 1
-                            continue
+                    if direction_key_by_index[index] == left_direction:
+                        # Exact-direction pairs were handled by the interval
+                        # sweep above (plus forced-pair restoration below).
+                        continue
                     candidate_indexes.add(index)
             for neighbor in (
                 (bucket - 1) % bucket_count,
@@ -1261,6 +1390,39 @@ def resolve_physical_wall_equivalence(
                 if index > left_index
             )
             candidate_indexes.update(forced_indexes)
+
+            # Angle buckets are deliberately a conservative broad phase.  A
+            # neighbouring bucket can still differ by more than the exact W3
+            # angle tolerance, and historically those pairs reached the full
+            # candidacy predicate only to be rejected immediately.  For two
+            # cached single-segment identities the exact orientation decision
+            # depends only on their already-cached unit vectors, so reject those
+            # impossible non-forced pairs here before any overlap / distance
+            # calculations.  Forced lineage/path/endpoint pairs must still run
+            # through the legacy predicate because those gates precede angle.
+            if candidate_indexes:
+                exact_angle_candidates: set[int] = set()
+                for index in candidate_indexes:
+                    if index in forced_indexes or index in slow_set:
+                        exact_angle_candidates.add(index)
+                        continue
+                    right_direction = direction_key_by_index.get(index)
+                    if right_direction is None:
+                        exact_angle_candidates.add(index)
+                        continue
+                    dot = max(
+                        -1.0,
+                        min(
+                            1.0,
+                            abs(
+                                left_direction[0] * right_direction[0]
+                                + left_direction[1] * right_direction[1]
+                            ),
+                        ),
+                    )
+                    if math.degrees(math.acos(dot)) <= angle_tol:
+                        exact_angle_candidates.add(index)
+                candidate_indexes = exact_angle_candidates
 
             if skipped_no_longitudinal > 0:
                 excluded_pairs += skipped_no_longitudinal

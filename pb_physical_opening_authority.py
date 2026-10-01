@@ -631,7 +631,17 @@ class PhysicalOpeningAuthority:
             return cached
         records: list[SourceObservationRecord] = []
         failures: list[SourceObservationAuthorityResult] = []
+        visible_observation_ids = visibility.visible_observation_ids_for_snapshot(
+            seed.snapshot.snapshot_id
+        )
         for observation_id in seed.snapshot.observation_ids:
+            # Non-visible source observations historically resolve to
+            # VISIBILITY_RECEIPT_UNAVAILABLE and are intentionally ignored.
+            # Skip that no-op authority round trip using the producer-owned
+            # receipt index, while preserving exact snapshot ordering for every
+            # visible record that still undergoes full resolve_visible checks.
+            if observation_id not in visible_observation_ids:
+                continue
             result = self._resolve_visible_cached(
                 ObservationSelector(
                     document_id=seed.snapshot.document_id,

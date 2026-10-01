@@ -1399,6 +1399,25 @@ class SourceVisibilityAuthority:
             reason_codes=(reason,),
         )
 
+    def visible_observation_ids_for_snapshot(self, snapshot_id: str) -> frozenset[str]:
+        """Return producer-receipted visible ids for one immutable snapshot.
+
+        This is an addressing index only.  Consumers must still call
+        ``resolve_visible`` for every returned id before using its observation.
+        """
+        snapshot_id = str(snapshot_id)
+        ids = {
+            observation_id
+            for (receipt_snapshot_id, observation_id) in self._visibility_receipts
+            if receipt_snapshot_id == snapshot_id
+        }
+        ids.update(
+            observation_id
+            for (receipt_snapshot_id, observation_id) in self._raster_visibility_receipts
+            if receipt_snapshot_id == snapshot_id
+        )
+        return frozenset(ids)
+
     def resolve_visible(self, selector: ObservationSelector) -> SourceObservationAuthorityResult:
         expected_parent = self._visibility_receipts.get(
             (selector.snapshot_id, selector.observation_id)

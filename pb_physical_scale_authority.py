@@ -699,6 +699,10 @@ class PhysicalScaleProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
         self._source = source_visibility_producer
         self._results: dict[_Key, PhysicalScaleResult] = {}
+        # Replay cache for deterministic blocked/conflict outcomes as well as
+        # published successes.  Only corroborated evidence enters _results, so
+        # authority publication semantics remain unchanged.
+        self._attempt_cache: dict[_Key, PhysicalScaleResult] = {}
         self._scope_bbox_cache: dict[_Key, tuple[object, object]] = {}
         self._bar_candidates_cache: dict[_Key, tuple[object, ...]] = {}
         self._trusted_words_by_snapshot: dict[
@@ -886,13 +890,17 @@ class PhysicalScaleProducer:
         # Published scale evidence is immutable for one exact source/page/viewport
         # selector. Return producer-owned prior evidence before reopening the PDF,
         # re-segmenting viewports, and rescanning scale-bar geometry.
-        existing = self._results.get(selector.key)
-        if existing is not None:
-            return existing
+        existing_attempt = self._attempt_cache.get(selector.key)
+        if existing_attempt is not None:
+            return existing_attempt
         inputs = self._revision_inputs(selector)
         if inputs is None:
             return _blocked(EvidenceResolutionStatus.ABSTAINED, PHYSICAL_SCALE_SCOPE_UNAVAILABLE)
         published, source_bytes = inputs
+
+        def cache_attempt(result: PhysicalScaleResult) -> PhysicalScaleResult:
+            self._attempt_cache[selector.key] = result
+            return result
         cached_scope = self._scope_bbox_cache.get(selector.key)
         if cached_scope is None:
             scope_bbox, scope_error = self._scope_bbox(selector, source_bytes)
@@ -900,7 +908,7 @@ class PhysicalScaleProducer:
         else:
             scope_bbox, scope_error = cached_scope
         if scope_bbox is None:
-            return _blocked(EvidenceResolutionStatus.ABSTAINED, scope_error or PHYSICAL_SCALE_SCOPE_UNAVAILABLE)
+            return cache_attempt(_blocked(EvidenceResolutionStatus.ABSTAINED, scope_error or PHYSICAL_SCALE_SCOPE_UNAVAILABLE))
 
         words = _scope_words(self._trusted_words(selector, published), scope_bbox)
         segments = _scope_segments(self._visible_segments(selector, published), scope_bbox)
@@ -911,24 +919,24 @@ class PhysicalScaleProducer:
         else:
             bars = cached_bars
         if not bars:
-            return _blocked(EvidenceResolutionStatus.ABSTAINED, PHYSICAL_SCALE_BAR_UNAVAILABLE)
+            return cache_attempt(_blocked(EvidenceResolutionStatus.ABSTAINED, PHYSICAL_SCALE_BAR_UNAVAILABLE))
 
         mappings = {round(bar.points_per_mm, 9) for bar in bars}
         if len(mappings) != 1:
-            return _blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT)
+            return cache_attempt(_blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT))
         representative = sorted(bars, key=lambda bar: (bar.segment_ids, bar.text_ids))[0]
         span_pt = float(representative.span_pt)
         points_per_mm = float(representative.points_per_mm)
 
         ratios = _ratios(words)
         if len(ratios) > 1:
-            return _blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT)
+            return cache_attempt(_blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT))
         if len(ratios) == 1:
             denominator = ratios[0]
             expected_points_per_mm = POINTS_PER_METRE_AT_1_1 / denominator / 1000.0
             tolerance = max(1e-9, expected_points_per_mm * 1e-5)
             if abs(points_per_mm - expected_points_per_mm) > tolerance:
-                return _blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT)
+                return cache_attempt(_blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT))
             # Ratio text may corroborate the source-native bar measurement,
             # but it is not measurement authority and must not rewrite the
             # bar's observed geometry or geometry-derived mapping.
@@ -939,7 +947,7 @@ class PhysicalScaleProducer:
             or not math.isfinite(span_pt)
             or span_pt <= 0
         ):
-            return _blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT)
+            return cache_attempt(_blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT))
         mm_per_point = 1.0 / points_per_mm
 
         payload = {
@@ -972,6 +980,7 @@ class PhysicalScaleProducer:
         if existing is not None and existing != result:
             raise RuntimeError("physical scale producer equivocation")
         self._results[selector.key] = result
+        self._attempt_cache[selector.key] = result
         return result
 
     def authority(self) -> PhysicalScaleAuthority:
