@@ -28,7 +28,7 @@
     }
   ],
   "unresolved_surface_families": [
-    "internal_wall_faces_beyond_closed_bathroom_main_ensuite_main_laundry_and_gf_ensuite_laundry_gross_faces",
+    "internal_wall_faces_beyond_closed_bathroom_main_ensuite_main_wc_main_laundry_gf_ensuite_laundry_and_bed2_bed3_gross_faces",
     "external_wall_faces_and_cladding",
     "roof_planes",
     "structural_members_beyond_closed_wall_bracing_and_explicit_140x140_posts_470x470_piers",
@@ -2140,6 +2140,134 @@
         "wall_deduction_scope": "dimensioned_open_archway",
         "source_closed_opening": true
       }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed2:3000_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED2 gross room-side wall face, 3.000m side 1",
+      "expected_quantity": 8.1,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED2:3000_finished_room_width; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 3,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_external_window_or_robe_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed2:3000_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED2 gross room-side wall face, 3.000m side 2",
+      "expected_quantity": 8.1,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED2:3000_finished_room_width; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 3,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_external_window_or_robe_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed2:4200_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED2 gross room-side wall face, 4.200m side 1",
+      "expected_quantity": 11.34,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED2:4200_room_depth; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 4.2,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_room_access_and_robe_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed2:4200_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED2 gross room-side wall face, 4.200m side 2",
+      "expected_quantity": 11.34,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED2:4200_room_depth; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 4.2,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_room_access_and_robe_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed3:3000_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED3 gross room-side wall face, 3.000m side 1",
+      "expected_quantity": 8.1,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED3:3000_finished_room_width; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 3,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_external_window_or_robe_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed3:3000_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED3 gross room-side wall face, 3.000m side 2",
+      "expected_quantity": 8.1,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED3:3000_finished_room_width; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 3,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_external_window_or_robe_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed3:4200_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED3 gross room-side wall face, 4.200m side 1",
+      "expected_quantity": 11.34,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED3:4200_room_depth; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 4.2,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_room_access_and_robe_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed3:4200_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED3 gross room-side wall face, 4.200m side 2",
+      "expected_quantity": 11.34,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED3:4200_room_depth; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 4.2,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_room_access_and_robe_opening_deductions_are_applied"
+      }
     }
   ],
   "closure_checks": [
@@ -2578,6 +2706,30 @@
       "total_opening_area_m2": 4.263,
       "source_location": "architectural:p3:A0.3:floor_plan:2100x1030_and_2100x1000_wall_breaks",
       "source_closed": true
+    },
+    {
+      "check_id": "3laurel:closure:bed2_bed3_gross_wall_faces",
+      "component_object_refs": [
+        "3laurel:surface:internal_wall_gross:bed2:3000_side_1",
+        "3laurel:surface:internal_wall_gross:bed2:3000_side_2",
+        "3laurel:surface:internal_wall_gross:bed2:4200_side_1",
+        "3laurel:surface:internal_wall_gross:bed2:4200_side_2",
+        "3laurel:surface:internal_wall_gross:bed3:3000_side_1",
+        "3laurel:surface:internal_wall_gross:bed3:3000_side_2",
+        "3laurel:surface:internal_wall_gross:bed3:4200_side_1",
+        "3laurel:surface:internal_wall_gross:bed3:4200_side_2"
+      ],
+      "room_count": 2,
+      "object_count": 8,
+      "gross_wall_area_m2": 77.76,
+      "figured_room_dimensions_m": [
+        3,
+        4.2
+      ],
+      "wall_height_m": 2.7,
+      "source_location": "architectural:p3:A0.3:floor_plan:3000_B2_3000_B3_and_4200_B2&B3; architectural:p7:A0.7:FCL_2700",
+      "openings_deducted": false,
+      "source_closed_gross_geometry": true
     }
   ]
 }
