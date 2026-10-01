@@ -557,5 +557,65 @@
       ]
     }
   ],
-  "wc_shower_floor_surface_universe_complete": true
+  "wc_shower_floor_surface_universe_complete": true,
+  "verified_ceiling_surfaces": [
+    {
+      "object_ref": "maryborough:surface:ceiling:wc_shower_north",
+      "physical_kind": "ceiling_finish_surface",
+      "room": "WC & SHOWER north",
+      "entry_door_tag": "D07",
+      "finish_mark": "WFPB",
+      "ceiling_height_mm": 2400,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 4.7547,
+      "footprint_dimensions_mm": [
+        2935,
+        1620
+      ],
+      "source_locations": [
+        "A120:RCP:WC_SHOWER_north:2400_WFPB",
+        "A140:figured_dimensions:2935x1620",
+        "A110:physical_room_geometry:entry_D07"
+      ]
+    },
+    {
+      "object_ref": "maryborough:surface:ceiling:wc_shower_middle",
+      "physical_kind": "ceiling_finish_surface",
+      "room": "WC & SHOWER middle",
+      "entry_door_tag": "D08",
+      "finish_mark": "WFPB",
+      "ceiling_height_mm": 2400,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 4.7547,
+      "footprint_dimensions_mm": [
+        2935,
+        1620
+      ],
+      "source_locations": [
+        "A120:RCP:WC_SHOWER_middle:2400_WFPB",
+        "A140:figured_dimensions:2935x1620",
+        "A110:physical_room_geometry:entry_D08"
+      ]
+    },
+    {
+      "object_ref": "maryborough:surface:ceiling:wc_shower_south",
+      "physical_kind": "ceiling_finish_surface",
+      "room": "WC & SHOWER south",
+      "entry_door_tag": "D09",
+      "finish_mark": "WFPB",
+      "ceiling_height_mm": 2400,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "expected_area_m2": 4.7547,
+      "footprint_dimensions_mm": [
+        2935,
+        1620
+      ],
+      "source_locations": [
+        "A120:RCP:WC_SHOWER_south:2400_WFPB",
+        "A140:figured_dimensions:2935x1620",
+        "A110:physical_room_geometry:entry_D09"
+      ]
+    }
+  ],
+  "wc_shower_ceiling_surface_universe_complete": true
 }
