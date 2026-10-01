@@ -36,8 +36,8 @@
       "reason": "Sales advice selects Colorbond roof but measured roof-plane universe is not built."
     },
     {
-      "family": "floor_finishes",
-      "reason": "Sales advice/inclusions define finishes but the room surface universe is not fully measured."
+      "family": "remaining_floor_finishes",
+      "reason": "Ground and first ensuite plus first bathroom tiled floors are independently closed; remaining tiled/carpet/other floor surfaces are not fully measured."
     },
     {
       "family": "wall_tiling",
