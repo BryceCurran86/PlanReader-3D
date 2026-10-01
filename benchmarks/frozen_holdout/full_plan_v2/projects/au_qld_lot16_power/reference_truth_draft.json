@@ -30,7 +30,7 @@
   "unresolved_surface_families": [
     "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces_with_room_access_deductions_pending_joinery_and_open_archways",
     "external_wall_faces_and_cladding",
-    "ceilings_beyond_closed_bed1_raked_and_garage_flat_planes_including_entry_porch_ensuite_wir_and_other_flat_regions",
+    "ceilings_beyond_closed_bed1_ensuite_wir_raked_and_garage_flat_planes_including_entry_porch_and_other_flat_regions",
     "custom_front_glazing_measure_on_site_only",
     "wet_area_wall_tiling_beyond_three_closed_bath_gross_faces_including_remaining_bath_face_and_raked_ensuite",
     "structural_members_beyond_closed_wall_bracing_and_explicit_architectural_supports",
@@ -1521,6 +1521,44 @@
         ],
         "wall_deduction_scope": "internal_room_access_opening_only"
       }
+    },
+    {
+      "object_ref": "lot16:surface:ceiling:ensuite_raked_12deg",
+      "object_family": "ceiling_plane",
+      "physical_kind": "surface",
+      "description": "Ensuite raked ceiling plane following 12 degree roof pitch",
+      "expected_quantity": 5.613672,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:ENS_[RAKED_CEILING]:2890x1900_figured_dimensions; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof",
+      "attributes": {
+        "plan_width_m": 2.89,
+        "plan_length_m": 1.9,
+        "plan_projection_area_m2": 5.491,
+        "pitch_degrees": 12,
+        "calculation": "2.890m * 1.900m / cos(12deg)",
+        "ceiling_geometry": "raked",
+        "source_closed_plane": true,
+        "denominator_readiness": "source_closed_plane_candidate"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:ceiling:wir_raked_12deg",
+      "object_family": "ceiling_plane",
+      "physical_kind": "surface",
+      "description": "WIR raked ceiling plane following 12 degree roof pitch",
+      "expected_quantity": 4.786394,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:WIR_[RAKED_CEILING]:2890x1620_figured_dimensions; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof",
+      "attributes": {
+        "plan_width_m": 2.89,
+        "plan_length_m": 1.62,
+        "plan_projection_area_m2": 4.6818,
+        "pitch_degrees": 12,
+        "calculation": "2.890m * 1.620m / cos(12deg)",
+        "ceiling_geometry": "raked",
+        "source_closed_plane": true,
+        "denominator_readiness": "source_closed_plane_candidate"
+      }
     }
   ],
   "closure_checks": [
@@ -1945,6 +1983,18 @@
         "architectural:p3:floor_plan:nine_internal_870_labels_with_native_text_bboxes",
         "architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
       ]
+    },
+    {
+      "check_id": "lot16:closure:ensuite_wir_raked_ceiling_planes",
+      "component_object_refs": [
+        "lot16:surface:ceiling:ensuite_raked_12deg",
+        "lot16:surface:ceiling:wir_raked_12deg"
+      ],
+      "plan_projection_sum_m2": 10.1728,
+      "raked_surface_sum_m2": 10.400066,
+      "pitch_degrees": 12,
+      "source_location": "architectural:p3:floor_plan:ENS_WIR_[RAKED_CEILING]_figured_dimensions; architectural:p7:Section_1:12deg_raked_ceiling",
+      "source_closed": true
     }
   ]
 }
