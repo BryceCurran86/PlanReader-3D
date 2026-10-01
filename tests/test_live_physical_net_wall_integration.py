@@ -28,6 +28,7 @@ def test_live_physical_net_wall_runs_real_source_chain_and_fails_closed_without_
     }
     assert result.quantity_m2 is None
     assert result.quantity_id is None
+    assert result.canonical_walls == ()
     assert result.external_wall_ids == ()
 
 

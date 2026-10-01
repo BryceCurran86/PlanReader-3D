@@ -52,6 +52,38 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
     path = tmp_path / "drawing-plus-boq.pdf"
     path.write_bytes(_drawing_and_boq_pdf())
     seen: dict[str, object] = {}
+    canonical_wall_payload = {
+        "canonical_wall_id": "whole-wall-1",
+        "physical_wall_id": "whole-wall-1",
+        "page_id": "1",
+        "wall_local_frame_id": "whole-wall-1",
+        "length_m": 15.0,
+        "height_m": 3.0,
+        "gross_area_m2": 45.0,
+        "net_area_m2": 42.5,
+        "member_wall_candidate_ids": ["wall-candidate-1"],
+        "plan_members": [
+            {
+                "wall_candidate_id": "wall-candidate-1",
+                "centerline_pts": [[10.0, 20.0], [160.0, 20.0]],
+                "level_id": "ground",
+            }
+        ],
+        "opening_identity_ids": ["opening-1"],
+        "opening_voids": [
+            {
+                "opening_identity_id": "opening-1",
+                "u0": 4.0,
+                "u1": 5.0,
+                "z0": 0.0,
+                "z1": 2.5,
+            }
+        ],
+        "gross_geometry_record_id": "gross-1",
+        "whole_wall_role_record_id": "role-1",
+        "evidence_ids": ["gross-1", "void-1", "role-1"],
+    }
+    canonical_wall = SimpleNamespace(to_dict=lambda: canonical_wall_payload)
 
     def fake_physical_wall_claim(pdf_path, *, pages=None):
         seen["pdf_path"] = pdf_path
@@ -61,6 +93,7 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
             reason_codes=("test_physical_net_wall_resolved",),
             quantity_m2=42.5,
             source_pages=(1,),
+            canonical_walls=(canonical_wall,),
             external_wall_ids=("whole-wall-1",),
             evidence_ids=("gross-1", "void-1", "role-1"),
             quantity_id="physical-net-wall-q1",
@@ -89,7 +122,12 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
     assert wall.metadata["derivation"] == "source_owned_physical_external_net_wall"
     assert wall.metadata["commercial_projection_allowed"] is True
     assert wall.metadata["raw_evidence_ref"] == "physical-net-wall-q1"
+    assert wall.metadata["canonical_wall_ids"] == ["whole-wall-1"]
+    assert wall.metadata["canonical_wall_objects"] == [canonical_wall_payload]
     assert extractor.physical_net_wall_live["status"] == "corroborated"
+    assert extractor.physical_net_wall_live["canonical_walls"] == [
+        canonical_wall_payload
+    ]
     assert extractor.extraction_status["physical_net_wall_live"] == "corroborated"
 
 
@@ -112,6 +150,7 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
             reason_codes=("test_physical_net_wall_unavailable",),
             quantity_m2=None,
             source_pages=(),
+            canonical_walls=(),
             external_wall_ids=(),
             evidence_ids=(),
             quantity_id=None,
