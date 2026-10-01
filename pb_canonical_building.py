@@ -1259,6 +1259,15 @@ class CanonicalProject(CanonicalElement):
                         if isinstance(target_wall, CanonicalWall):
                             if sp.id not in target_wall.bounded_space_ids:
                                 target_wall.bounded_space_ids.append(sp.id)
+                            # Link bounded_space_id to wall faces
+                            if target_wall.is_external:
+                                if target_wall.face_b and not target_wall.face_b.bounded_space_id:
+                                    target_wall.face_b.bounded_space_id = sp.id
+                            else:
+                                if target_wall.face_a and not target_wall.face_a.bounded_space_id:
+                                    target_wall.face_a.bounded_space_id = sp.id
+                                elif target_wall.face_b and not target_wall.face_b.bounded_space_id and target_wall.face_a and target_wall.face_a.bounded_space_id != sp.id:
+                                    target_wall.face_b.bounded_space_id = sp.id
 
                 # Link floors
                 for fl in lvl.floors:

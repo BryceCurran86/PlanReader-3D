@@ -650,3 +650,165 @@ def test_end_to_end_customer_upload_parity_with_canonical_model():
             assert "authenticated opening deductions 2.16 m²" in wall_row["notes"]
 
 
+def test_internal_partition_derived_quantities_and_faces():
+    """Internal partition walls automatically compute carpentry lm, link bounding room faces, and apply opening deductions to both faces."""
+    from pb_production_3d_adapter import planreader_to_canonical_model
+
+    payload = {
+        "workspace_id": 105,
+        "registered_walls": [
+            {
+                "wall_ref": "PART_BED1_HALL",
+                "a": {"x": 0.0, "y": 0.0},
+                "b": {"x": 5.0, "y": 0.0},
+                "height_m": 2.7,
+                "thickness_m": 0.09,
+                "is_external": False,
+                "substrate": "Timber stud",
+                "takeoff_eligible": True,
+                "face_a": {"face_id": "A", "finish": "Acrylic paint low sheen", "substrate": "Plasterboard"},
+                "face_b": {"face_id": "B", "finish": "Acrylic paint low sheen", "substrate": "Villaboard"},
+                "level": {"id": "lvl_gnd", "name": "Ground Floor", "level_index": 0},
+                "openings": [
+                    {
+                        "opening_instance_id": "op_D02_bed1",
+                        "type_mark": "D02",
+                        "opening_type": "DOOR",
+                        "width_m": 0.82,
+                        "height_m": 2.04,
+                        "offset_along_wall_m": 1.5,
+                        "wall_ref": "PART_BED1_HALL",
+                    }
+                ],
+            }
+        ],
+        "spaces": [
+            {
+                "id": "SP_BED1",
+                "name": "Bed 1",
+                "area_m2": 15.0,
+                "bounding_wall_ids": ["wall_PART_BED1_HALL"],
+            },
+            {
+                "id": "SP_HALL",
+                "name": "Hallway",
+                "area_m2": 8.0,
+                "bounding_wall_ids": ["wall_PART_BED1_HALL"],
+            }
+        ],
+    }
+
+    project, skipped = planreader_to_canonical_model(payload, is_validated_internal_workspace=True)
+    project.recompute_relationships()
+
+    walls = project.all_walls()
+    assert len(walls) == 1
+    w = walls[0]
+
+    assert w.is_external is False
+    assert w.length_m() == 5.0
+    assert w.height_m == 2.7
+    assert w.gross_area_m2() == 13.5
+    # Door area = 0.82 * 2.04 = 1.6728 m2. Net = 13.5 - 1.6728 = 11.8272 m2
+    assert round(w.net_area_m2(), 4) == 11.8272
+
+    # Carpentry partition quantity in lm
+    assert len(w.derived_quantities) >= 1
+    carpentry = next(q for q in w.derived_quantities if q.trade_category == "carpentry")
+    assert carpentry.unit == "lm"
+    assert carpentry.quantity == 5.0
+    assert "PARTITION" in carpentry.item_code
+
+    # Verify Face A and Face B area and space linkage
+    assert w.face_a is not None
+    assert w.face_b is not None
+    assert w.face_a.area_gross_m2 == 13.5
+    assert w.face_b.area_gross_m2 == 13.5
+    assert round(w.face_a.opening_deductions_m2, 4) == 1.6728
+    assert round(w.face_b.opening_deductions_m2, 4) == 1.6728
+    assert round(w.face_a.area_net_m2, 4) == 11.8272
+    assert round(w.face_b.area_net_m2, 4) == 11.8272
+
+    # Verify bounded room assignments
+    assert w.face_a.bounded_space_id == "SP_BED1"
+    assert w.face_b.bounded_space_id == "SP_HALL"
+
+    # Dynamic costing
+    cost_summary = project.recompute_quantities({
+        carpentry.item_code: 48.0,  # $48/lm framing
+        "OPENING_D02": 320.0,       # $320 door unit
+    })
+    assert cost_summary["items_costed"] == 2
+    assert cost_summary["by_trade"]["carpentry"] == 240.0  # 5.0 lm * $48
+    assert cost_summary["by_trade"]["doors"] == 320.0      # 1 door * $320
+    assert cost_summary["total_cost"] == 560.0
+
+
+def test_bound_wall_finish_schedule_authority_on_wall_faces():
+    """Wall faces maintain independent finish codes and area bounds without duplicate geometry."""
+    from pb_production_3d_adapter import planreader_to_canonical_model
+
+    payload = {
+        "workspace_id": 106,
+        "registered_walls": [
+            {
+                "wall_ref": "W_EXT_FACADE",
+                "a": {"x": 0.0, "y": 0.0},
+                "b": {"x": 8.0, "y": 0.0},
+                "height_m": 3.0,
+                "thickness_m": 0.25,
+                "is_external": True,
+                "substrate": "Clay brick",
+                "takeoff_eligible": True,
+                "face_a": {
+                    "face_id": "EXTERNAL",
+                    "finish": "Face brickwork natural mortar",
+                    "substrate": "Clay brick",
+                    "finish_code": "BRK-01",
+                },
+                "face_b": {
+                    "face_id": "INTERNAL",
+                    "finish": "Acrylic wash & wear low sheen",
+                    "substrate": "Plasterboard",
+                    "finish_code": "PNT-02",
+                },
+                "level": {"id": "lvl_gnd", "name": "Ground Floor", "level_index": 0},
+                "openings": [
+                    {
+                        "opening_instance_id": "op_W02_ext",
+                        "type_mark": "W02",
+                        "opening_type": "WINDOW",
+                        "width_m": 2.0,
+                        "height_m": 1.5,
+                        "sill_height_m": 0.8,
+                        "wall_ref": "W_EXT_FACADE",
+                    }
+                ],
+            }
+        ],
+    }
+
+    project, skipped = planreader_to_canonical_model(payload, is_validated_internal_workspace=True)
+    project.recompute_relationships()
+
+    walls = project.all_walls()
+    assert len(walls) == 1
+    w = walls[0]
+
+    # Gross area: 8m * 3m = 24.0 m2. Window area: 2.0m * 1.5m = 3.0 m2. Net = 21.0 m2.
+    assert w.gross_area_m2() == 24.0
+    assert w.net_area_m2() == 21.0
+
+    # Face A (External) and Face B (Internal)
+    assert w.face_a.finish_code == "BRK-01"
+    assert w.face_a.area_gross_m2 == 24.0
+    assert w.face_a.opening_deductions_m2 == 3.0
+    assert w.face_a.area_net_m2 == 21.0
+
+    assert w.face_b.finish_code == "PNT-02"
+    assert w.face_b.area_gross_m2 == 24.0
+    assert w.face_b.opening_deductions_m2 == 3.0
+    assert w.face_b.area_net_m2 == 21.0
+
+
+

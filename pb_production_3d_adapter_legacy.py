@@ -1041,6 +1041,56 @@ def planreader_to_canonical_model(
             and parse_strict_bool(op.deduction_authority)
             for op in c_wall.openings
         )
+
+        # Populate / initialize derived trade quantities for walls
+        if w_input.get("derived_quantities") and isinstance(w_input["derived_quantities"], list):
+            for qb_raw in w_input["derived_quantities"]:
+                if isinstance(qb_raw, dict):
+                    c_wall.derived_quantities.append(QuantityFormulaBinding.from_dict(qb_raw))
+        if not c_wall.derived_quantities and c_wall.takeoff_eligible and c_wall.length_m() > 0.0:
+            wall_sub = str(w_input.get("substrate") or "")
+            if c_wall.is_external:
+                sub_code = (wall_sub or "EXTERNAL_WALL").upper().replace(" ", "_")
+                c_wall.derived_quantities.append(
+                    QuantityFormulaBinding(
+                        trade_category="bricklaying" if "brick" in wall_sub.lower() else "masonry",
+                        item_code=f"WALL_{sub_code}",
+                        formula_expression="net_area_m2",
+                        unit="m2",
+                        quantity=round(c_wall.net_area_m2(), 2),
+                    )
+                )
+            else:
+                sub_code = (wall_sub or "INTERNAL_PARTITION").upper().replace(" ", "_")
+                c_wall.derived_quantities.append(
+                    QuantityFormulaBinding(
+                        trade_category="carpentry",
+                        item_code=f"PARTITION_{sub_code}",
+                        formula_expression="length_m",
+                        unit="lm",
+                        quantity=round(c_wall.length_m(), 2),
+                    )
+                )
+
+        # Update / initialize WallFace areas and opening deductions
+        w_gross = c_wall.gross_area_m2()
+        w_open_ded = c_wall.total_opening_deductions_m2()
+        if c_wall.face_a:
+            if c_wall.face_a.area_gross_m2 is None and w_gross is not None:
+                c_wall.face_a.area_gross_m2 = w_gross
+            if c_wall.face_a.opening_deductions_m2 is None:
+                c_wall.face_a.opening_deductions_m2 = w_open_ded
+            if c_wall.face_a.area_gross_m2 is not None and c_wall.face_a.area_net_m2 is None:
+                c_wall.face_a.area_net_m2 = max(0.0, round(c_wall.face_a.area_gross_m2 - (c_wall.face_a.opening_deductions_m2 or 0.0), 4))
+
+        if c_wall.face_b:
+            if c_wall.face_b.area_gross_m2 is None and w_gross is not None:
+                c_wall.face_b.area_gross_m2 = w_gross
+            if c_wall.face_b.opening_deductions_m2 is None:
+                c_wall.face_b.opening_deductions_m2 = w_open_ded
+            if c_wall.face_b.area_gross_m2 is not None and c_wall.face_b.area_net_m2 is None:
+                c_wall.face_b.area_net_m2 = max(0.0, round(c_wall.face_b.area_gross_m2 - (c_wall.face_b.opening_deductions_m2 or 0.0), 4))
+
         target_lvl.walls.append(c_wall)
 
     # Process floors (Sections 6, 7, 8, 9)
