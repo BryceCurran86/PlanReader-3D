@@ -408,7 +408,6 @@ def compose_live_physical_opening_voids(
         for trace in wall_opening_composition.host_frames
         if trace.opening_identity_id
     }
-    visibility_authority = source_visibility_producer.authority()
     for opening_id, opening_selector in opening_selectors.items():
         page_id = opening_pages[opening_id]
         binding_selector = wall_opening_composition.binding_selectors.get(opening_id)
@@ -466,26 +465,23 @@ def compose_live_physical_opening_voids(
         frame_trace = frame_by_opening.get(opening_id)
 
         source_geometries: list[tuple[float, ...]] = []
-        if existence_record is not None:
-            for source_observation_id in existence_record.source_observation_ids:
-                visible = visibility_authority.resolve_visible(
-                    ObservationSelector(
-                        document_id=existence_record.document_id,
-                        revision_id=existence_record.revision_id,
-                        source_sha256=existence_record.source_sha256,
-                        snapshot_id=existence_record.snapshot_id,
-                        observation_id=source_observation_id,
-                    )
+        existence_result = existence_by_opening[opening_id]
+        source_result = getattr(existence_result, "source_observation", None)
+        representative_observation = (
+            getattr(source_result, "observation", None)
+            if source_result is not None
+            else None
+        )
+        if (
+            representative_observation is not None
+            and getattr(representative_observation, "geometry", None)
+        ):
+            source_geometries.append(
+                tuple(
+                    float(value)
+                    for value in representative_observation.geometry
                 )
-                observation = getattr(visible, "observation", None)
-                if (
-                    visible.status is EvidenceResolutionStatus.CORROBORATED
-                    and observation is not None
-                    and getattr(observation, "geometry", None)
-                ):
-                    source_geometries.append(
-                        tuple(float(value) for value in observation.geometry)
-                    )
+            )
 
         host_wall_id = None
         host_binding_record_id = None
