@@ -643,6 +643,28 @@ class CanonicalSpace(CanonicalElement):
         self.object_type = ObjectType.SPACE
         self.is_user_edited = parse_strict_bool(self.is_user_edited)
 
+    def measured_area_m2(self) -> float:
+        """Computes boundary polygon 2D area using shoelace formula."""
+        if not self.boundary_polygon or len(self.boundary_polygon) < 3:
+            return 0.0
+        pts = [(p.x, p.y) for p in self.boundary_polygon if p.x is not None and p.y is not None]
+        if len(pts) < 3:
+            return 0.0
+        n = len(pts)
+        area = 0.0
+        for i in range(n):
+            j = (i + 1) % n
+            area += pts[i][0] * pts[j][1]
+            area -= pts[j][0] * pts[i][1]
+        return round(abs(area) / 2.0, 4)
+
+    def effective_floor_area_m2(self) -> Optional[float]:
+        """Returns specified_floor_area_m2 if present, else measured_area_m2() if > 0."""
+        if self.specified_floor_area_m2 is not None and self.specified_floor_area_m2 > 0.0:
+            return self.specified_floor_area_m2
+        meas = self.measured_area_m2()
+        return meas if meas > 0.0 else None
+
     def to_dict(self) -> Dict[str, Any]:
         res = self.base_to_dict()
         res.update({
@@ -700,6 +722,28 @@ class PolygonElement(CanonicalElement):
     def __post_init__(self):
         super().__post_init__()
         self.is_user_edited = parse_strict_bool(self.is_user_edited)
+
+    def measured_area_m2(self) -> float:
+        """Computes polygon 2D area using shoelace formula."""
+        if not self.polygon or len(self.polygon) < 3:
+            return 0.0
+        pts = [(p.x, p.y) for p in self.polygon if p.x is not None and p.y is not None]
+        if len(pts) < 3:
+            return 0.0
+        n = len(pts)
+        area = 0.0
+        for i in range(n):
+            j = (i + 1) % n
+            area += pts[i][0] * pts[j][1]
+            area -= pts[j][0] * pts[i][1]
+        return round(abs(area) / 2.0, 4)
+
+    def effective_area_m2(self) -> Optional[float]:
+        """Returns specified_floor_area_m2 if present, else measured_area_m2() if > 0."""
+        if self.specified_floor_area_m2 is not None and self.specified_floor_area_m2 > 0.0:
+            return self.specified_floor_area_m2
+        meas = self.measured_area_m2()
+        return meas if meas > 0.0 else None
 
     def to_dict(self) -> Dict[str, Any]:
         res = self.base_to_dict()
@@ -760,6 +804,16 @@ class CanonicalRoof(PolygonElement):
     def __post_init__(self):
         super().__post_init__()
         self.object_type = ObjectType.ROOF
+
+    def surface_area_m2(self) -> Optional[float]:
+        """Calculates 3D pitched roof surface area from plan area and pitch."""
+        plan_area = self.effective_area_m2()
+        if plan_area is None or plan_area <= 0.0:
+            return None
+        if self.pitch_deg is not None and 0.0 < float(self.pitch_deg) < 89.0:
+            rad = math.radians(float(self.pitch_deg))
+            return round(plan_area / math.cos(rad), 4)
+        return plan_area
 
     def to_dict(self) -> Dict[str, Any]:
         res = super().to_dict()

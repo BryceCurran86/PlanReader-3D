@@ -21,6 +21,7 @@ from pb_canonical_building import (
     CanonicalLevel,
     CanonicalOpening,
     CanonicalProject,
+    CanonicalRoof,
     CanonicalSpace,
     CanonicalWall,
     ObjectType,
@@ -811,4 +812,85 @@ def test_bound_wall_finish_schedule_authority_on_wall_faces():
     assert w.face_b.area_net_m2 == 21.0
 
 
+def test_canonical_space_and_polygon_shoelace_area():
+    """CanonicalSpace and PolygonElement compute exact 2D planar areas via shoelace algorithm."""
+    # 6.0m x 4.0m rectangle
+    poly = [
+        Vector2D(x=0.0, y=0.0),
+        Vector2D(x=6.0, y=0.0),
+        Vector2D(x=6.0, y=4.0),
+        Vector2D(x=0.0, y=4.0),
+    ]
+    space = CanonicalSpace(
+        id="sp_bed1",
+        name="Bedroom 1",
+        boundary_polygon=poly,
+    )
+    assert space.measured_area_m2() == 24.0
+    # effective_floor_area_m2 returns measured if specified is None
+    assert space.effective_floor_area_m2() == 24.0
 
+    # Overridden by specified area if provided
+    space.specified_floor_area_m2 = 25.5
+    assert space.effective_floor_area_m2() == 25.5
+    assert space.measured_area_m2() == 24.0  # Measured remains uncorrupted
+
+    # Degenerate polygon fails closed to 0.0 / None
+    degenerate_space = CanonicalSpace(
+        id="sp_degen",
+        boundary_polygon=[Vector2D(x=0.0, y=0.0), Vector2D(x=1.0, y=1.0)],
+    )
+    assert degenerate_space.measured_area_m2() == 0.0
+    assert degenerate_space.effective_floor_area_m2() is None
+
+
+def test_canonical_floor_and_roof_areas():
+    """CanonicalFloor and CanonicalRoof compute planar area and 3D pitched surface area."""
+    floor_poly = [
+        Vector2D(x=0.0, y=0.0),
+        Vector2D(x=10.0, y=0.0),
+        Vector2D(x=10.0, y=8.0),
+        Vector2D(x=0.0, y=8.0),
+    ]
+    floor = CanonicalFloor(
+        id="flr_01",
+        name="Ground Floor Slab",
+        polygon=floor_poly,
+        thickness_m=0.1,
+    )
+    assert floor.measured_area_m2() == 80.0
+    assert floor.effective_area_m2() == 80.0
+
+    # 10m x 10m roof = 100m2 plan area
+    roof_poly = [
+        Vector2D(x=0.0, y=0.0),
+        Vector2D(x=10.0, y=0.0),
+        Vector2D(x=10.0, y=10.0),
+        Vector2D(x=0.0, y=10.0),
+    ]
+    roof_pitched = CanonicalRoof(
+        id="roof_01",
+        name="Main Hip Roof",
+        polygon=roof_poly,
+        pitch_deg=30.0,
+    )
+    assert roof_pitched.measured_area_m2() == 100.0
+    assert roof_pitched.effective_area_m2() == 100.0
+    # 100 / cos(30 deg) = 100 / 0.8660254 = 115.4701
+    assert roof_pitched.surface_area_m2() == 115.4701
+
+    # Flat roof (0 deg pitch)
+    roof_flat = CanonicalRoof(
+        id="roof_flat",
+        polygon=roof_poly,
+        pitch_deg=0.0,
+    )
+    assert roof_flat.surface_area_m2() == 100.0
+
+    # No pitch recorded fails closed to plan area
+    roof_no_pitch = CanonicalRoof(
+        id="roof_no_pitch",
+        polygon=roof_poly,
+        pitch_deg=None,
+    )
+    assert roof_no_pitch.surface_area_m2() == 100.0
