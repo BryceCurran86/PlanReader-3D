@@ -335,6 +335,101 @@ class CustomerRuntimeNetWallParityTests(unittest.TestCase):
             auto.analyse_workspace(ws.app, 1)
             self.assertEqual(analysed_pages, [1], "Second run must be idempotent and skip already analysed page")
 
+    def test_internal_partition_positive_evidence_publishes_linear_partition_row(self):
+        """Positive test: genuine solid-fill partition geometry publishes canonical takeoff rows in lm."""
+        from pb_wall_fill_internal_partition_evidence import InternalPartitionEvidence
+
+        with _test_workspace() as ws:
+            pdf_path = ws.root / "floor_plan.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4 mock floor plan")
+            ws.add_document(pdf_path)
+            ws.add_page(1, "Floor Plan", "Ground Floor", "GROUND FLOOR PLAN", px_per_m=28.35)
+
+            fake_evidence = InternalPartitionEvidence(
+                status="found",
+                reason="Found 1 internal partition wall",
+                total_length_m=6.1,
+                wall_thickness_m=0.20,
+                scale_pt_per_m=28.35,
+                segment_lengths_m=(6.1,),
+            )
+
+            with patch(
+                "pb_wall_fill_internal_partition_evidence.resolve_internal_partition_length_m",
+                return_value=fake_evidence,
+            ), patch.object(ws.app.fitz, "open"):
+                rows, partitions = auto._build_internal_partition_rows(
+                    ws.app, 1, ws.pages(), {"width_m": 16.0, "depth_m": 8.2}
+                )
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(len(partitions), 1)
+            row_dict = dict(zip(auto.TAKEOFF_ROW_FIELDS, rows[0]))
+            self.assertEqual(row_dict["quantity"], 6.1)
+            self.assertEqual(row_dict["unit"], "lm")
+            self.assertEqual(row_dict["section"], "Internal")
+            self.assertEqual(row_dict["element"], "Internal partitions / walls")
+            self.assertEqual(row_dict["quantity_status"], "Measured")
+            self.assertEqual(row_dict["row_role"], "internal_partition")
+            self.assertIn("Thickness: 0.200 m", row_dict["notes"])
+            self.assertEqual(partitions[0]["total_length_m"], 6.1)
+
+    def test_internal_partition_negative_stroke_only_furniture_and_grids_ignored(self):
+        """Negative test: stroke-only shapes (furniture, desk outlines, grid bubbles) are rejected as walls."""
+        from pb_wall_fill_internal_partition_evidence import InternalPartitionEvidence
+
+        with _test_workspace() as ws:
+            pdf_path = ws.root / "floor_plan.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4 mock floor plan")
+            ws.add_document(pdf_path)
+            ws.add_page(1, "Floor Plan", "Ground Floor", "GROUND FLOOR PLAN", px_per_m=28.35)
+
+            # Authority abstains because only furniture / stroke shapes exist
+            abstained_evidence = InternalPartitionEvidence(
+                status="abstained",
+                reason="No consistent internal partition wall fill found",
+                total_length_m=0.0,
+            )
+
+            with patch(
+                "pb_wall_fill_internal_partition_evidence.resolve_internal_partition_length_m",
+                return_value=abstained_evidence,
+            ), patch.object(ws.app.fitz, "open"):
+                rows, partitions = auto._build_internal_partition_rows(
+                    ws.app, 1, ws.pages(), {"width_m": 16.0, "depth_m": 8.2}
+                )
+
+            # No false-positive partition rows created
+            self.assertEqual(len(rows), 0)
+            self.assertEqual(len(partitions), 0)
+
+    def test_internal_partition_negative_implausible_thickness_abstained(self):
+        """Negative test: fills with implausible thickness (e.g. wide shading boxes) abstain cleanly."""
+        from pb_wall_fill_internal_partition_evidence import InternalPartitionEvidence
+
+        with _test_workspace() as ws:
+            pdf_path = ws.root / "floor_plan.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4 mock floor plan")
+            ws.add_document(pdf_path)
+            ws.add_page(1, "Floor Plan", "Ground Floor", "GROUND FLOOR PLAN", px_per_m=28.35)
+
+            abstained_evidence = InternalPartitionEvidence(
+                status="abstained",
+                reason="Implausible wall thickness (0.85 m)",
+                total_length_m=0.0,
+            )
+
+            with patch(
+                "pb_wall_fill_internal_partition_evidence.resolve_internal_partition_length_m",
+                return_value=abstained_evidence,
+            ), patch.object(ws.app.fitz, "open"):
+                rows, partitions = auto._build_internal_partition_rows(
+                    ws.app, 1, ws.pages(), {"width_m": 16.0, "depth_m": 8.2}
+                )
+
+            self.assertEqual(len(rows), 0)
+            self.assertEqual(len(partitions), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

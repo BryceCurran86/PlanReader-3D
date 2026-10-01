@@ -663,7 +663,7 @@ def _is_finite_number(value: Any) -> bool:
 
 # What an automatic row may carry: the roles _takeoff_row() assigns, text in
 # every text column (required ones non-empty), and finite non-negative numbers.
-AUTO_ROW_ROLES = ("", "floor_area", "external_wall")
+AUTO_ROW_ROLES = ("", "floor_area", "external_wall", "internal_partition")
 _AUTO_REQUIRED_TEXT = ("section", "element", "location", "substrate", "unit", "quantity_status",
                        "source_reference", "inclusion_status", "confidence")
 _AUTO_OPTIONAL_TEXT = ("finish_system", "source_page", "notes", "row_role")
@@ -1019,6 +1019,119 @@ def _build_facade_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, An
     return rows, facades
 
 
+def _build_internal_partition_rows(
+    app: Any,
+    workspace_id: int,
+    pages: Sequence[Dict[str, Any]],
+    footprint: Optional[Dict[str, Any]],
+) -> Tuple[List[Tuple[Any, ...]], List[Dict[str, Any]]]:
+    """Extract evidenced internal partition walls from vector drawing geometry.
+
+    Leverages `pb_wall_fill_internal_partition_evidence` to detect solid-fill wall bands
+    and distinguish genuine internal partitions from furniture/desk symbols, title-block borders,
+    or perimeter walls. Emits canonical takeoff rows in linear meters (`lm`).
+    """
+    rows: List[Tuple[Any, ...]] = []
+    partitions: List[Dict[str, Any]] = []
+
+    doc_paths: Dict[int, Path] = {}
+    if hasattr(app, "lquery"):
+        try:
+            doc_rows = app.lquery(
+                "SELECT id, path FROM documents WHERE workspace_id=? ORDER BY id",
+                (int(workspace_id),),
+            )
+            for d in doc_rows:
+                p = Path(str(d.get("path") or ""))
+                if p.is_file() and p.suffix.lower() == ".pdf":
+                    doc_paths[int(d["id"])] = p
+        except Exception:
+            pass
+
+    length_m = 0.0
+    width_m = 0.0
+    if footprint:
+        w_f = _num(footprint.get("width_m"))
+        d_f = _num(footprint.get("depth_m"))
+        if w_f > 0 and d_f > 0:
+            length_m = max(w_f, d_f)
+            width_m = min(w_f, d_f)
+
+    for page in pages:
+        ptype = str(page.get("page_type") or "").lower()
+        if "floor" not in ptype and "plan" not in ptype:
+            continue
+        doc_id = int(page.get("document_id") or 0)
+        doc_path = doc_paths.get(doc_id)
+        if not doc_path:
+            continue
+
+        page_no = int(page.get("page_no") or 1)
+        px_per_m = _num(page.get("px_per_m"))
+
+        p_len_m = length_m
+        p_wid_m = width_m
+        if p_len_m <= 0 or p_wid_m <= 0:
+            if px_per_m > 0:
+                p_len_m = _num(page.get("width_px"), 1000.0) / px_per_m
+                p_wid_m = _num(page.get("height_px"), 700.0) / px_per_m
+
+        if p_len_m <= 0 or p_wid_m <= 0:
+            continue
+
+        try:
+            from pb_wall_fill_internal_partition_evidence import resolve_internal_partition_length_m
+            fitz_mod = getattr(app, "fitz", None) or fitz
+            doc = fitz_mod.open(doc_path)
+            try:
+                pdf_page = doc[page_no - 1]
+                drawings = pdf_page.get_drawings()
+                evidence = resolve_internal_partition_length_m(
+                    drawings,
+                    length_m=p_len_m,
+                    width_m=p_wid_m,
+                    page=pdf_page,
+                )
+            finally:
+                doc.close()
+
+            if evidence.status == "found" and evidence.total_length_m > 0:
+                qty_lm = round(max(0.0, float(evidence.total_length_m)), 2)
+                page_label = str(page.get("page_label") or f"p{page_no}")
+                note = f"Internal partition length derived from vector geometry: {evidence.reason}."
+                if evidence.wall_thickness_m:
+                    note += f" Thickness: {evidence.wall_thickness_m:.3f} m."
+
+                row = _takeoff_row(
+                    workspace_id=workspace_id,
+                    section="Internal",
+                    element="Internal partitions / walls",
+                    location=f"Internal partitions · {page_label}",
+                    substrate="Plasterboard / partition",
+                    quantity=qty_lm,
+                    status="Measured",
+                    source_page=page_label,
+                    source_reference=f"{SOURCE_PREFIX} · internal_partition:{int(page['id'])}",
+                    confidence="Documented",
+                    notes=note,
+                    row_role="internal_partition",
+                    unit="lm",
+                )
+                rows.append(row)
+                partitions.append({
+                    "page_id": int(page["id"]),
+                    "page_label": page_label,
+                    "total_length_m": qty_lm,
+                    "wall_thickness_m": evidence.wall_thickness_m,
+                    "segment_lengths_m": list(evidence.segment_lengths_m),
+                    "reason": evidence.reason,
+                })
+        except Exception:
+            pass
+
+    return rows, partitions
+
+
 def _surface_code_for(substrates: Sequence[Dict[str, str]]) -> str:
     if len(substrates) != 1:
         return "OTHER"
@@ -1152,13 +1265,16 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
         )
     unit_rows, units = _build_unit_rows(app, int(workspace_id), [dict(p) for p in pages])
     facade_rows, facades = _build_facade_rows(app, int(workspace_id), [dict(p) for p in pages])
+    partition_rows, partitions = _build_internal_partition_rows(app, int(workspace_id), [dict(p) for p in pages], footprint)
+    all_auto_rows = unit_rows + facade_rows + partition_rows
     # Rows, envelope and report are one publication: all commit or none do.
-    with _auto_publication(app, int(workspace_id), unit_rows + facade_rows) as publication:
+    with _auto_publication(app, int(workspace_id), all_auto_rows) as publication:
         mass_id = _refresh_auto_model(publication, int(workspace_id), footprint, facades)
         report = {
             "version": VERSION, "analysed_at": app.now_stamp(), "selected_pages": len(pages),
             "calibrations": calibrations, "footprint": footprint, "units": units, "facades": facades,
-            "auto_takeoff_rows": len(unit_rows) + len(facade_rows), "model_mass_id": mass_id,
+            "partitions": partitions,
+            "auto_takeoff_rows": len(all_auto_rows), "model_mass_id": mass_id,
         }
         _setting_set(publication, int(workspace_id), report)
     return report
