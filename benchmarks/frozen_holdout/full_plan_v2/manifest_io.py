@@ -37,6 +37,7 @@ def _verified_item(raw: dict[str, Any], project_id: str) -> VerifiedTakeoffItemV
         item_id=raw["item_id"],
         project_id=project_id,
         description=raw["description"],
+        trade_category=raw["trade_category"],
         unit=raw["unit"],
         expected_quantity=float(raw["expected_quantity"]),
         tolerance_fraction=float(raw["tolerance_fraction"]),
@@ -52,6 +53,7 @@ def load_project_manifest(path: Path) -> ProjectBenchmarkManifestV2:
     return ProjectBenchmarkManifestV2(
         project_id=project_id,
         status=str(raw["status"]),
+        source_package_complete=bool(raw.get("source_package_complete", False)),
         source_documents=tuple(_source_doc(value) for value in raw.get("source_documents", ())),
         reference_takeoff_documents=tuple(
             _source_doc(value) for value in raw.get("reference_takeoff_documents", ())
@@ -90,6 +92,7 @@ def load_produced_items(path: Path) -> tuple[ProducedTakeoffItemV2, ...]:
     return tuple(
         ProducedTakeoffItemV2(
             quantity_id=value["quantity_id"],
+            trade_category=value["trade_category"],
             value=None if value.get("value") is None else float(value["value"]),
             unit=value["unit"],
             object_refs=tuple(value.get("object_refs") or ()),
