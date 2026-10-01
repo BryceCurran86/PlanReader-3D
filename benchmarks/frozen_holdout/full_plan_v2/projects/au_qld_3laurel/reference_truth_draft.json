@@ -2582,6 +2582,42 @@
         "niche_in_host_face": false,
         "net_finish_area_ready": true
       }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:ensuite_rear_flat_after_niche",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Main ensuite rear shower wall flat tile face after niche opening deduction",
+      "expected_quantity": 4.296,
+      "unit": "m2",
+      "source_location": "architectural:p12:A0.12:Ensuite_A:1680x2700_gross_less_600x400_niche_face",
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_rear",
+        "niche_deduction_ref": "3laurel:opening:p12:main_ensuite_niche:01",
+        "gross_area_m2": 4.536,
+        "niche_face_deduction_m2": 0.24,
+        "calculation": "4.536 - 0.240",
+        "niche_returns_included": false,
+        "net_flat_face_area_ready": true
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:gf_ensuite_rear_flat_after_niche",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "GF ensuite rear shower wall flat tile face after niche opening deduction",
+      "expected_quantity": 4.809,
+      "unit": "m2",
+      "source_location": "architectural:p15:A0.15:GF_Ens_Ldry_C:1870x2700_gross_less_600x400_niche_face",
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_rear",
+        "niche_deduction_ref": "3laurel:opening:p15:gf_ensuite_niche:01",
+        "gross_area_m2": 5.049,
+        "niche_face_deduction_m2": 0.24,
+        "calculation": "5.049 - 0.240",
+        "niche_returns_included": false,
+        "net_flat_face_area_ready": true
+      }
     }
   ],
   "closure_checks": [
@@ -3166,6 +3202,19 @@
       ],
       "complete_for_these_four_faces": true,
       "complete_for_project_wet_area_tile_universe": false
+    },
+    {
+      "check_id": "3laurel:closure:ensuite_rear_flat_faces_after_niche_deductions",
+      "component_object_refs": [
+        "3laurel:surface:wall_tile:ensuite_rear_flat_after_niche",
+        "3laurel:surface:wall_tile:gf_ensuite_rear_flat_after_niche"
+      ],
+      "object_count": 2,
+      "component_sum_m2": 9.105,
+      "flat_face_niche_deduction_sum_m2": 0.48,
+      "niche_returns_resolved": false,
+      "complete_for_two_flat_host_faces": true,
+      "complete_for_full_niche_tile_assemblies": false
     }
   ]
 }
