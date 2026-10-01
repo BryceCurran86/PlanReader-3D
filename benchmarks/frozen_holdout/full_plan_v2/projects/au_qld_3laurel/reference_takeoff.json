@@ -475,7 +475,27 @@
   "external_opening_reconciliation": {
     "verified_external_opening_count": 23,
     "verified_external_opening_area_m2": 64.764,
+    "typed_opening_subset": {
+      "count": 20,
+      "area_m2": 58.59,
+      "complete_for_typed_labels": true,
+      "complete_for_all_external_openings": false
+    },
+    "separately_closed_perimeter_hinged_doors": {
+      "count": 3,
+      "area_m2": 6.174,
+      "object_refs": [
+        "3laurel:opening:p3:1200_main_entry_hinged:01",
+        "3laurel:opening:p3:0870_gf_entry_hinged:01",
+        "3laurel:opening:p3:0870_garage_personnel_hinged:01"
+      ]
+    },
     "external_opening_universe_status": "SOURCE_CLOSED",
-    "external_opening_universe_complete": true
+    "external_opening_universe_complete": true,
+    "source_locations": [
+      "architectural:p3:A0.3:floor_plan:all_perimeter_typed_openings_plus_main_entry_GF_entry_and_garage_personnel_door",
+      "architectural:p4-p5:A0.4-A0.5:elevations:entry_door_crosscheck_and_JOINERY_HEIGHTS_2100_AFL_UNO"
+    ],
+    "note": "Internal door openings remain a separate wall-face deduction universe and are not claimed closed here."
   }
 }
