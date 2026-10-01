@@ -1,0 +1,484 @@
+{
+  "schema_version": "v2-object-universe-1.0",
+  "project_id": "au_qld_maryborough_service_station",
+  "scope": "verified-only core",
+  "doors": [
+    {
+      "object_ref": "maryborough:door:D01",
+      "physical_kind": "door",
+      "source_tag": "D01",
+      "room": "SALES",
+      "door_class": "aluminium_glazed",
+      "width_mm": null,
+      "height_mm": null,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D01",
+        "A110:floor_plan:D01"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D02",
+      "physical_kind": "door",
+      "source_tag": "D02",
+      "room": "TRUCK DRIVER LOUNGE",
+      "door_class": "aluminium_glazed",
+      "width_mm": 900,
+      "height_mm": 2050,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D02",
+        "A110:floor_plan:D02"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D03",
+      "physical_kind": "door",
+      "source_tag": "D03",
+      "room": "AIRLOCK",
+      "door_class": "painted_ipf3",
+      "width_mm": 920,
+      "height_mm": 2040,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D03",
+        "A110:floor_plan:D03"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D04",
+      "physical_kind": "door",
+      "source_tag": "D04",
+      "room": "WC & SHOWER",
+      "door_class": "laminex_partition",
+      "width_mm": 600,
+      "height_mm": 1700,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D04",
+        "A110:floor_plan:D04"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D05",
+      "physical_kind": "door",
+      "source_tag": "D05",
+      "room": "WC & SHOWER",
+      "door_class": "laminex_partition",
+      "width_mm": 600,
+      "height_mm": 1700,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D05",
+        "A110:floor_plan:D05"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D06",
+      "physical_kind": "door",
+      "source_tag": "D06",
+      "room": "WC & SHOWER",
+      "door_class": "laminex_partition",
+      "width_mm": 600,
+      "height_mm": 1700,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D06",
+        "A110:floor_plan:D06"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D07",
+      "physical_kind": "door",
+      "source_tag": "D07",
+      "room": "WC & SHOWER",
+      "door_class": "painted_ipf3",
+      "width_mm": 920,
+      "height_mm": 2040,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D07",
+        "A110:floor_plan:D07"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D08",
+      "physical_kind": "door",
+      "source_tag": "D08",
+      "room": "WC & SHOWER",
+      "door_class": "painted_ipf3",
+      "width_mm": 920,
+      "height_mm": 2040,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D08",
+        "A110:floor_plan:D08"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D09",
+      "physical_kind": "door",
+      "source_tag": "D09",
+      "room": "WC & SHOWER",
+      "door_class": "painted_ipf3",
+      "width_mm": 920,
+      "height_mm": 2040,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D09",
+        "A110:floor_plan:D09"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D10",
+      "physical_kind": "door",
+      "source_tag": "D10",
+      "room": "LAUNDRY",
+      "door_class": "painted_ipf3",
+      "width_mm": 920,
+      "height_mm": 2040,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D10",
+        "A110:floor_plan:D10"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D11",
+      "physical_kind": "door",
+      "source_tag": "D11",
+      "room": "F-AMB",
+      "door_class": "painted_ipf3",
+      "width_mm": 820,
+      "height_mm": 2040,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D11",
+        "A110:floor_plan:D11"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D12",
+      "physical_kind": "door",
+      "source_tag": "D12",
+      "room": "M-AMB",
+      "door_class": "painted_ipf3",
+      "width_mm": 820,
+      "height_mm": 2040,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D12",
+        "A110:floor_plan:D12"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D13",
+      "physical_kind": "door",
+      "source_tag": "D13",
+      "room": "PWD",
+      "door_class": "painted_ipf3",
+      "width_mm": 920,
+      "height_mm": 2040,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D13",
+        "A110:floor_plan:D13"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D14",
+      "physical_kind": "door",
+      "source_tag": "D14",
+      "room": "DRY STORE",
+      "door_class": "painted_ipf3",
+      "width_mm": 920,
+      "height_mm": 2040,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D14",
+        "A110:floor_plan:D14"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D15",
+      "physical_kind": "door",
+      "source_tag": "D15",
+      "room": "OFFICE",
+      "door_class": "painted_ipf3",
+      "width_mm": 920,
+      "height_mm": 2040,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D15",
+        "A110:floor_plan:D15"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D16",
+      "physical_kind": "door",
+      "source_tag": "D16",
+      "room": "COLD ROOM",
+      "door_class": "by_others_coolroom",
+      "width_mm": 800,
+      "height_mm": 2000,
+      "classification": "VERIFIED_EXCLUDED_BY_INDEPENDENT_SCOPE",
+      "denominator_core": false,
+      "source_locations": [
+        "A600:door_schedule:D16",
+        "A110:floor_plan:D16"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D17",
+      "physical_kind": "door",
+      "source_tag": "D17",
+      "room": "FREEZER",
+      "door_class": "by_others_coolroom",
+      "width_mm": 800,
+      "height_mm": 2000,
+      "classification": "VERIFIED_EXCLUDED_BY_INDEPENDENT_SCOPE",
+      "denominator_core": false,
+      "source_locations": [
+        "A600:door_schedule:D17",
+        "A110:floor_plan:D17"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D18",
+      "physical_kind": "door",
+      "source_tag": "D18",
+      "room": "FREEZER",
+      "door_class": "by_others_lessee_shelving",
+      "width_mm": null,
+      "height_mm": null,
+      "classification": "VERIFIED_EXCLUDED_BY_INDEPENDENT_SCOPE",
+      "denominator_core": false,
+      "source_locations": [
+        "A600:door_schedule:D18",
+        "A110:floor_plan:D18"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D19",
+      "physical_kind": "door",
+      "source_tag": "D19",
+      "room": "FREEZER",
+      "door_class": "by_others_lessee_shelving",
+      "width_mm": null,
+      "height_mm": null,
+      "classification": "VERIFIED_EXCLUDED_BY_INDEPENDENT_SCOPE",
+      "denominator_core": false,
+      "source_locations": [
+        "A600:door_schedule:D19",
+        "A110:floor_plan:D19"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D20",
+      "physical_kind": "door",
+      "source_tag": "D20",
+      "room": "COLD ROOM",
+      "door_class": "by_others_lessee_shelving",
+      "width_mm": null,
+      "height_mm": null,
+      "classification": "VERIFIED_EXCLUDED_BY_INDEPENDENT_SCOPE",
+      "denominator_core": false,
+      "source_locations": [
+        "A600:door_schedule:D20",
+        "A110:floor_plan:D20"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D21",
+      "physical_kind": "door",
+      "source_tag": "D21",
+      "room": "COLD ROOM",
+      "door_class": "by_others_lessee_shelving",
+      "width_mm": null,
+      "height_mm": null,
+      "classification": "VERIFIED_EXCLUDED_BY_INDEPENDENT_SCOPE",
+      "denominator_core": false,
+      "source_locations": [
+        "A600:door_schedule:D21",
+        "A110:floor_plan:D21"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D22",
+      "physical_kind": "door",
+      "source_tag": "D22",
+      "room": "COLD ROOM",
+      "door_class": "by_others_lessee_shelving",
+      "width_mm": null,
+      "height_mm": null,
+      "classification": "VERIFIED_EXCLUDED_BY_INDEPENDENT_SCOPE",
+      "denominator_core": false,
+      "source_locations": [
+        "A600:door_schedule:D22",
+        "A110:floor_plan:D22"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D23",
+      "physical_kind": "door",
+      "source_tag": "D23",
+      "room": "COLD ROOM",
+      "door_class": "by_others_lessee_shelving",
+      "width_mm": null,
+      "height_mm": null,
+      "classification": "VERIFIED_EXCLUDED_BY_INDEPENDENT_SCOPE",
+      "denominator_core": false,
+      "source_locations": [
+        "A600:door_schedule:D23",
+        "A110:floor_plan:D23"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D24",
+      "physical_kind": "door",
+      "source_tag": "D24",
+      "room": "COLD ROOM",
+      "door_class": "by_others_lessee_shelving",
+      "width_mm": null,
+      "height_mm": null,
+      "classification": "VERIFIED_EXCLUDED_BY_INDEPENDENT_SCOPE",
+      "denominator_core": false,
+      "source_locations": [
+        "A600:door_schedule:D24",
+        "A110:floor_plan:D24"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D25",
+      "physical_kind": "door",
+      "source_tag": "D25",
+      "room": "COLD ROOM",
+      "door_class": "by_others_lessee_shelving",
+      "width_mm": null,
+      "height_mm": null,
+      "classification": "VERIFIED_EXCLUDED_BY_INDEPENDENT_SCOPE",
+      "denominator_core": false,
+      "source_locations": [
+        "A600:door_schedule:D25",
+        "A110:floor_plan:D25"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D26",
+      "physical_kind": "door",
+      "source_tag": "D26",
+      "room": "COLD ROOM",
+      "door_class": "by_others_lessee_shelving",
+      "width_mm": null,
+      "height_mm": null,
+      "classification": "VERIFIED_EXCLUDED_BY_INDEPENDENT_SCOPE",
+      "denominator_core": false,
+      "source_locations": [
+        "A600:door_schedule:D26",
+        "A110:floor_plan:D26"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D27",
+      "physical_kind": "door",
+      "source_tag": "D27",
+      "room": "COLD ROOM",
+      "door_class": "by_others_lessee_shelving",
+      "width_mm": null,
+      "height_mm": null,
+      "classification": "VERIFIED_EXCLUDED_BY_INDEPENDENT_SCOPE",
+      "denominator_core": false,
+      "source_locations": [
+        "A600:door_schedule:D27",
+        "A110:floor_plan:D27"
+      ]
+    },
+    {
+      "object_ref": "maryborough:door:D28",
+      "physical_kind": "door",
+      "source_tag": "D28",
+      "room": "FOOD PREP",
+      "door_class": "painted_ipf3",
+      "width_mm": 920,
+      "height_mm": 2040,
+      "classification": "VERIFIED_CORE_OBJECT",
+      "denominator_core": true,
+      "source_locations": [
+        "A600:door_schedule:D28",
+        "A110:floor_plan:D28"
+      ]
+    }
+  ],
+  "door_universe_complete": true,
+  "windows_unverified_candidates": [
+    {
+      "object_ref": "maryborough:window:W01",
+      "classification": "UNVERIFIED_CANDIDATE",
+      "reason": "Tag identity is corroborated by A110/A610 but dimensional surface truth is not independently closed.",
+      "source_locations": [
+        "A110:floor_plan:W01",
+        "A610:window_elevations:W01"
+      ]
+    },
+    {
+      "object_ref": "maryborough:window:W02",
+      "classification": "UNVERIFIED_CANDIDATE",
+      "reason": "Tag identity is corroborated by A110/A610 but dimensional surface truth is not independently closed.",
+      "source_locations": [
+        "A110:floor_plan:W02",
+        "A610:window_elevations:W02"
+      ]
+    },
+    {
+      "object_ref": "maryborough:window:W03",
+      "classification": "UNVERIFIED_CANDIDATE",
+      "reason": "Tag identity is corroborated by A110/A610 but dimensional surface truth is not independently closed.",
+      "source_locations": [
+        "A110:floor_plan:W03",
+        "A610:window_elevations:W03"
+      ]
+    },
+    {
+      "object_ref": "maryborough:window:W04",
+      "classification": "UNVERIFIED_CANDIDATE",
+      "reason": "Tag identity is corroborated by A110/A610 but dimensional surface truth is not independently closed.",
+      "source_locations": [
+        "A110:floor_plan:W04",
+        "A610:window_elevations:W04"
+      ]
+    },
+    {
+      "object_ref": "maryborough:window:W05",
+      "classification": "UNVERIFIED_CANDIDATE",
+      "reason": "Tag identity is corroborated by A110/A610 but dimensional surface truth is not independently closed.",
+      "source_locations": [
+        "A110:floor_plan:W05",
+        "A610:window_elevations:W05"
+      ]
+    },
+    {
+      "object_ref": "maryborough:window:W06",
+      "classification": "UNVERIFIED_CANDIDATE",
+      "reason": "Tag identity is corroborated by A110/A610 but dimensional surface truth is not independently closed.",
+      "source_locations": [
+        "A110:floor_plan:W06",
+        "A610:window_elevations:W06"
+      ]
+    }
+  ]
+}

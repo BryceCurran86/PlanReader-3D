@@ -1,0 +1,52 @@
+{
+  "schema_version": "v2-verification-report-1.0",
+  "project_id": "au_qld_maryborough_service_station",
+  "project_status": "INCOMPLETE",
+  "source_hash_verification": {
+    "status": "PASS",
+    "documents": [
+      {
+        "name": "Arch_Combined_Maryborough_Service_Station.pdf",
+        "expected_sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
+        "observed_sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+      }
+    ]
+  },
+  "proofs": [
+    {
+      "proof": "independent reference quantity exists for every admitted core item",
+      "status": "PASS",
+      "evidence": "A600 schedule plus A110 tag census"
+    },
+    {
+      "proof": "every denominator item has exact physical object refs",
+      "status": "PASS",
+      "evidence": "Exact D-tag object sets"
+    },
+    {
+      "proof": "source lineage complete for admitted core",
+      "status": "PASS",
+      "evidence": "A600 and A110 locations retained per item"
+    },
+    {
+      "proof": "door object universe reconciled",
+      "status": "PASS",
+      "evidence": "28 schedule rows = 28 distinct A110 door tags; 11+3+2+2+10=28"
+    },
+    {
+      "proof": "PlanReader output not used as benchmark truth",
+      "status": "PASS",
+      "evidence": "Truth derived from source drawings and independent cross-check only"
+    },
+    {
+      "proof": "unsupported surfaces are not silently excluded",
+      "status": "PASS",
+      "evidence": "All unresolved families are explicit; by-others doors are explicit non-denominator items"
+    },
+    {
+      "proof": "full project surface universe complete",
+      "status": "FAIL",
+      "evidence": "Room/wall/ceiling/tile/external/window surfaces remain unresolved"
+    }
+  ]
+}
