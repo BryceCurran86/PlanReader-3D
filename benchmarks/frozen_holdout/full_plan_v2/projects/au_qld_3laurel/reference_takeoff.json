@@ -470,6 +470,153 @@
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-ceiling-garage-area",
+      "description": "Garage ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 36.4,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:ceiling:garage"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_area_region:garage",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-ceiling-gf-alfresco-area",
+      "description": "Granny-flat alfresco ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 10.5,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:ceiling:gf_alfresco"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_area_region:gf_alfresco",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-ceiling-gf-living-area",
+      "description": "Granny-flat internal ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 60,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:ceiling:gf_living"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_area_region:gf_living",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-ceiling-gf-porch-area",
+      "description": "Granny-flat porch ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 1.4,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:ceiling:gf_porch"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_area_region:gf_porch",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-ceiling-main-alfresco-area",
+      "description": "Main-house alfresco ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 13.6,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:ceiling:main_alfresco"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_area_region:main_alfresco",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-ceiling-main-living-area",
+      "description": "Main-house internal ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 168.1,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:ceiling:main_living"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_area_region:main_living",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-ceiling-main-porch-area",
+      "description": "Main-house porch ceiling plane area",
+      "trade_category": "ceilings",
+      "unit": "m2",
+      "expected_quantity": 7.5,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:ceiling:main_porch"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_area_region:main_porch",
+        "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "external_opening_reconciliation": {
@@ -497,5 +644,26 @@
       "architectural:p4-p5:A0.4-A0.5:elevations:entry_door_crosscheck_and_JOINERY_HEIGHTS_2100_AFL_UNO"
     ],
     "note": "Internal door openings remain a separate wall-face deduction universe and are not claimed closed here."
+  },
+  "primary_ceiling_reconciliation": {
+    "closure_check_id": "3laurel:closure:primary_ceiling_planes",
+    "component_object_refs": [
+      "3laurel:surface:ceiling:garage",
+      "3laurel:surface:ceiling:gf_alfresco",
+      "3laurel:surface:ceiling:gf_living",
+      "3laurel:surface:ceiling:gf_porch",
+      "3laurel:surface:ceiling:main_alfresco",
+      "3laurel:surface:ceiling:main_living",
+      "3laurel:surface:ceiling:main_porch"
+    ],
+    "component_sum_m2": 297.5,
+    "declared_reference_plan_area_m2": 297.5,
+    "difference_m2": 0,
+    "source_locations": [
+      "architectural:p3:A0.3:area_table",
+      "architectural:p7:A0.7:ceilings_to_truss_bottom_chord"
+    ],
+    "primary_ceiling_universe_complete": true,
+    "note": "Primary horizontal ceiling planes only; secondary FC soffit and beam faces remain a separate unresolved family."
   }
 }
