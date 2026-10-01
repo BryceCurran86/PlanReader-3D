@@ -41,11 +41,11 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
     manifest = load_project_manifest(project / "source_manifest.json")
     assert manifest.status == "INCOMPLETE"
     assert len(manifest.reference_takeoff_documents) == 1
-    assert len(manifest.verified_items) == 6
+    assert len(manifest.verified_items) == 7
 
     eligible = [item for item in manifest.verified_items if item.denominator_eligible]
     excluded = [item for item in manifest.verified_items if not item.denominator_eligible]
-    assert len(eligible) == 3
+    assert len(eligible) == 4
     assert len(excluded) == 3
 
     by_id = {item.item_id: item for item in manifest.verified_items}
@@ -80,6 +80,9 @@ def test_maryborough_verified_door_core_is_exact_and_project_stays_incomplete():
         "painted_ipf3": 11,
     }
     assert sum(class_counts.values()) == 28
+    assert universe["window_identity_universe_complete"] is True
+    assert universe["window_area_universe_complete"] is False
+    assert {row["source_tag"] for row in universe["windows"]} == {"W01", "W02", "W03", "W04", "W05", "W06"}
     _assert_reference_hash("au_qld_maryborough_service_station")
 
 
