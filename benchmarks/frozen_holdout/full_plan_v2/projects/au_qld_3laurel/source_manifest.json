@@ -16,8 +16,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "3a33d5dca809904697e143194b80603f0c71f94a0ae96c9803830fe8d6206052",
-      "size_bytes": 21850,
+      "sha256": "bc40d0917aea52e2076fd1555203a101137bfbbe8f459700343e724c2b2432d0",
+      "size_bytes": 25516,
       "page_count": null
     }
   ],
@@ -628,6 +628,90 @@
       "source_location_refs": [
         "architectural:p3:A0.3:floor_area_region:main_porch",
         "architectural:p7:A0.7:ceiling_bottom_chord_note"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wet-floor-bathroom-area",
+      "description": "Main bathroom tiled floor surface area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 5.17,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:bathroom"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p11:A0.11:Bathroom_Layout:1880x2750_finished_dimensions",
+        "architectural:p3:A0.3:BATH:TILES"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wet-floor-main-wc-area",
+      "description": "Main WC tiled floor surface area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 1.7316,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:main_wc"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p11:A0.11:WC_plan:1560x1110_finished_dimensions",
+        "architectural:p3:A0.3:WC:TILES"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wet-floor-laundry-area",
+      "description": "Main laundry tiled floor surface area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 5.1744,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:laundry"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p13:A0.13:Laundry_Layout:3080x1680_finished_dimensions",
+        "architectural:p3:A0.3:LDY:TILES"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-wet-floor-gf-ensuite-laundry-area",
+      "description": "Granny-flat ensuite/laundry tiled floor surface area",
+      "trade_category": "tiling",
+      "unit": "m2",
+      "expected_quantity": 6.4889,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:surface:floor:gf_ensuite_laundry"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p15:A0.15:GF_Ensuite_Laundry:1870x3470_finished_dimensions",
+        "architectural:p3:A0.3:GF_wet_area:TILES"
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
