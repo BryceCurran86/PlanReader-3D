@@ -103,3 +103,18 @@ parity between a successful collector and a forced collector failure.
 Review is performed autonomously under Bryce's instruction to review this work
 and continue without stopping. This approval covers diagnostic consumption only;
 commercial TakeoffOutputRow/JobHub promotion is still a separate boundary.
+
+
+## AG09 secondary-area coverage trace hardening
+
+Coverage collection is intentionally broader than commercial publication. Explicit
+secondary-area labels `ALFRESCO`, `PORCH`, and `PATIO` may now activate the same
+producer-owned structural resolution and coverage trace when the existing
+geometry/evidence gates pass. This does not create a new customer quantity tag.
+
+`verandah_pillars` remains publishable only for canonical `verandah` evidence.
+For other admitted secondary-area names the extractor may populate the shadow
+object universe, structural QuantityEvidence, and coverage registry summary,
+while leaving `pred_dict` unchanged. This closes the diagnostic blind spot
+identified during real-source review without promoting a synonym into commercial
+authority.
