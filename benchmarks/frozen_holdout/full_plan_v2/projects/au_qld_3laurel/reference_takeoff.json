@@ -921,6 +921,286 @@
       ],
       "denominator_eligible": true,
       "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0720-cs-01-area",
+      "description": "Internal room-access 720 mm cavity-slider opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.512,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0720_cs:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:WIP-side 720 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-cs-01-area",
+      "description": "Internal room-access 870 mm cavity-slider opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_cs:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:ENS/WIR-side 870 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-swing-01-area",
+      "description": "Internal room-access 870 mm hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_swing:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:master/WIR-entry zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-1200-cs-01-area",
+      "description": "Internal room-access 1200 mm cavity-slider opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 2.52,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:1200_cs:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:media-side 1200 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-cs-02-area",
+      "description": "Internal room-access 870 mm cavity-slider opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_cs:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:granny-flat wet-area zone 870 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-swing-02-area",
+      "description": "Internal room-access 870 mm hinged opening: Bed 3 area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_swing:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed_3_hall_870:bbox_559.4_347.5_567.2_359.1; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-swing-03-area",
+      "description": "Internal room-access 870 mm hinged opening: Bed 2 area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_swing:03"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed_2_hall_870:bbox_722.8_347.5_730.6_359.1; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-swing-04-area",
+      "description": "Internal room-access 870 mm hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_swing:04"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:laundry/hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0720-cs-02-area",
+      "description": "Internal room-access 720 mm cavity-slider opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.512,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0720_cs:02"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:granny-flat bathroom-side 720 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-swing-05-area",
+      "description": "Internal room-access 870 mm hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_swing:05"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed 5/WIR zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-swing-06-area",
+      "description": "Internal room-access 870 mm hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_swing:06"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:laundry/bedroom hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0720-cs-03-area",
+      "description": "Internal room-access 720 mm cavity-slider opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.512,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0720_cs:03"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:main WC-side 720 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0870-swing-07-area",
+      "description": "Internal room-access 870 mm hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.827,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0870_swing:07"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:Bed 3/4 hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
+    },
+    {
+      "item_id": "3laurel-internal-access-0720-swing-01-area",
+      "description": "Internal room-access 720 mm hinged opening area",
+      "trade_category": "doors",
+      "unit": "m2",
+      "expected_quantity": 1.512,
+      "tolerance_policy_id": "relative-tolerance-v1",
+      "tolerance_fraction": 0.05,
+      "expected_object_refs": [
+        "3laurel:opening:p3:internal_access:0720_swing:01"
+      ],
+      "source_document_refs": [
+        "reference_takeoff.json"
+      ],
+      "source_location_refs": [
+        "architectural:p3:A0.3:floor_plan:main bathroom 720 hinged opening; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "denominator_eligible": true,
+      "verification_status": "VERIFIED"
     }
   ],
   "external_opening_reconciliation": {
@@ -1035,5 +1315,40 @@
     "complete_for_project_wet_area_tile_universe": false,
     "niche_return_depths_resolved": false,
     "note": "The two rear flat host faces deduct the source-dimensioned 600 x 400 mm niche openings only. Niche returns/depths remain unresolved and are not included in these denominator items."
+  },
+  "internal_room_access_reconciliation": {
+    "closure_check_id": "3laurel:closure:internal_room_access_door_census",
+    "component_object_refs": [
+      "3laurel:opening:p3:internal_access:0720_cs:01",
+      "3laurel:opening:p3:internal_access:0870_cs:01",
+      "3laurel:opening:p3:internal_access:0870_swing:01",
+      "3laurel:opening:p3:internal_access:1200_cs:01",
+      "3laurel:opening:p3:internal_access:0870_cs:02",
+      "3laurel:opening:p3:internal_access:0870_swing:02",
+      "3laurel:opening:p3:internal_access:0870_swing:03",
+      "3laurel:opening:p3:internal_access:0870_swing:04",
+      "3laurel:opening:p3:internal_access:0720_cs:02",
+      "3laurel:opening:p3:internal_access:0870_swing:05",
+      "3laurel:opening:p3:internal_access:0870_swing:06",
+      "3laurel:opening:p3:internal_access:0720_cs:03",
+      "3laurel:opening:p3:internal_access:0870_swing:07",
+      "3laurel:opening:p3:internal_access:0720_swing:01"
+    ],
+    "room_access_opening_count": 14,
+    "room_access_opening_area_m2": 25.011,
+    "hinged_count": 8,
+    "cavity_slider_count": 6,
+    "width_distribution_m": {
+      "0.72": 4,
+      "0.87": 9,
+      "1.20": 1
+    },
+    "joinery_height_m": 2.1,
+    "complete_for_labelled_room_access_doors": true,
+    "complete_for_all_internal_wall_openings": false,
+    "residual_unresolved": [
+      "robe_and_linen_sliding_joinery_openings",
+      "unlabelled_internal_wall_openings"
+    ]
   }
 }
