@@ -16,8 +16,8 @@
     {
       "name": "reference_takeoff.json",
       "role": "independent_verified_reference_takeoff",
-      "sha256": "8791e47eea9333006d83c5fc5689550f5e6f77992f8d314aba73d9487f861e68",
-      "size_bytes": 19753,
+      "sha256": "e680699bd66fb5c4010c6667e3917dc971e0405526d58b84f0fc3326e756f617",
+      "size_bytes": 20402,
       "page_count": null
     }
   ],
