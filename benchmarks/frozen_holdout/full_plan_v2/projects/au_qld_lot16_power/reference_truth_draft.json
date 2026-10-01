@@ -31,7 +31,7 @@
     "internal_wall_faces",
     "external_wall_faces_and_cladding",
     "ceilings_including_raked_ceiling",
-    "custom_front_glazing_and_untyped_external_door_elements",
+    "custom_front_glazing_measure_on_site_only",
     "wet_area_wall_tiling",
     "structural_members_beyond_closed_wall_bracing_and_explicit_architectural_supports",
     "roof_planes_final_crosscheck_against_engineering_stormwater_note"
@@ -754,6 +754,51 @@
         "material": "hardwood",
         "engineering_instance_crosscheck": "not_project_tagged_in_structural_set"
       }
+    },
+    {
+      "object_ref": "lot16:opening:p3:1200_entry_hinged:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 front entry hinged opening",
+      "expected_quantity": 2.52,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "hinged_external_entry_door",
+        "height_m": 2.1,
+        "width_m": 1.2,
+        "quantity_basis": "explicit floor-plan opening width x elevation FSL-to-joinery-line height"
+      },
+      "source_location": "architectural:p3:floor_plan:ENTRY_PORCH_1200_opening; architectural:p4-p5:elevations:FSL_to_JL_2100"
+    },
+    {
+      "object_ref": "lot16:opening:p3:0870_laundry_external:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "870 laundry external hinged opening",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "hinged_external_door",
+        "height_m": 2.1,
+        "width_m": 0.87,
+        "quantity_basis": "explicit floor-plan perimeter door width x elevation FSL-to-joinery-line height"
+      },
+      "source_location": "architectural:p3:floor_plan:LDRY_external_870; architectural:p5:elevation_4:door_between_1215_SGW_obs_and_2127_STACKER; architectural:p4-p5:elevations:FSL_to_JL_2100"
+    },
+    {
+      "object_ref": "lot16:opening:p3:0870_garage_personnel:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "870 garage personnel external hinged opening",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "hinged_external_personnel_door",
+        "height_m": 2.1,
+        "width_m": 0.87,
+        "quantity_basis": "explicit floor-plan perimeter door width x elevation FSL-to-joinery-line height"
+      },
+      "source_location": "architectural:p3:floor_plan:GARAGE_external_870; architectural:p4-p5:elevations:FSL_to_JL_2100"
     }
   ],
   "closure_checks": [
@@ -825,14 +870,14 @@
       "complete_for_typed_dimensioned_labels": true,
       "complete_for_all_openings": false,
       "residual_unresolved": [
-        "custom_front_windows_measure_on_site",
-        "untyped_front_entry_or_glazed_elements"
+        "custom_front_windows_measure_on_site"
       ],
       "source_locations": [
         "architectural:p3:floor_plan:typed_external_opening_labels",
         "architectural:p4-p5:elevations:typed_opening_crosscheck",
         "architectural:p4:elevation_1:CUSTOM_WINDOWS_TO_FRONT_MEASURE_ON_SITE"
-      ]
+      ],
+      "untyped_external_hinged_doors_closed_by_separate_control": true
     },
     {
       "check_id": "lot16:control:wall_bracing_resistance",
@@ -864,6 +909,36 @@
       "source_locations": [
         "architectural:p3:floor_plan:two_TELESCOPIC_PIER_labels",
         "architectural:p4:elevation_1:90x90_HWD_Timber_Post"
+      ]
+    },
+    {
+      "check_id": "lot16:control:known_external_opening_census",
+      "component_object_refs": [
+        "lot16:opening:p3:0615_sgw:01",
+        "lot16:opening:p3:0621_sgw:01",
+        "lot16:opening:p3:0630_fg:01",
+        "lot16:opening:p3:0906_sgw_obs:01",
+        "lot16:opening:p3:1215_sgw_obs:01",
+        "lot16:opening:p3:1218_sgw:01",
+        "lot16:opening:p3:1218_sgw:02",
+        "lot16:opening:p3:2124_corner_stack:01",
+        "lot16:opening:p3:2127_stacker:01",
+        "lot16:opening:p3:2148_panel_lift:01",
+        "lot16:opening:p3:1200_entry_hinged:01",
+        "lot16:opening:p3:0870_laundry_external:01",
+        "lot16:opening:p3:0870_garage_personnel:01"
+      ],
+      "known_opening_count": 13,
+      "known_opening_area_m2": 37.584,
+      "complete_for_all_dimensioned_and_plan_width_openings": true,
+      "complete_for_all_external_openings": false,
+      "residual_unresolved": [
+        "custom_front_windows_measure_on_site"
+      ],
+      "source_locations": [
+        "architectural:p3:floor_plan:typed_openings_and_three_perimeter_hinged_door_widths",
+        "architectural:p4-p5:elevations:FSL_to_JL_2100_and_opening_crosscheck",
+        "architectural:p4:elevation_1:CUSTOM_WINDOWS_TO_FRONT_MEASURE_ON_SITE"
       ]
     }
   ]
