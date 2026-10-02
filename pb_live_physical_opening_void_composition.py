@@ -23,6 +23,9 @@ from pb_opening_kind_authority import (
     OPENING_KIND_CONFLICT,
     resolve_opening_kind,
 )
+from pb_opening_label_dimension_authority import (
+    OpeningLabelDimensionProducer,
+)
 from pb_opening_tag_normalization import normalize_opening_tag
 from pb_opening_vertical_placement_authority import (
     OpeningVerticalPlacementProducer,
@@ -88,6 +91,8 @@ class LiveCanonicalOpeningObject:
     width_m: Optional[float]
     height_m: Optional[float]
     area_m2: Optional[float]
+    area_basis: Optional[str]
+    figured_area_record_id: Optional[str]
     opening_void_record_id: Optional[str]
     opening_universe_record_id: Optional[str]
     width_record_id: Optional[str]
@@ -137,6 +142,8 @@ class LiveCanonicalOpeningObject:
             "width_m": self.width_m,
             "height_m": self.height_m,
             "area_m2": self.area_m2,
+            "area_basis": self.area_basis,
+            "figured_area_record_id": self.figured_area_record_id,
             "opening_void_record_id": self.opening_void_record_id,
             "opening_universe_record_id": self.opening_universe_record_id,
             "width_record_id": self.width_record_id,
@@ -392,6 +399,15 @@ def compose_live_physical_opening_voids(
         )
 
     dimension_authority = source_visibility_producer.opening_dimension_authority()
+    label_dimension_producer = (
+        OpeningLabelDimensionProducer.from_source_visibility_producer(
+            source_visibility_producer
+        )
+    )
+    label_dimension_results = {
+        opening_id: label_dimension_producer.publish_scope(opening_selector)
+        for opening_id, opening_selector in opening_selectors.items()
+    }
     height_authority = height_producer.authority()
     vertical_authority = vertical_producer.authority()
     scale_authority = scale_producer.authority()
@@ -440,6 +456,8 @@ def compose_live_physical_opening_voids(
             continue
 
         width = dimension_authority.resolve_width(opening_selector)
+        figured_label = label_dimension_results.get(opening_id)
+        figured_label_evidence = getattr(figured_label, "evidence", None)
         schedule = schedule_results.get(opening_id)
         height = height_results.get(opening_id)
         vertical = vertical_results.get(opening_id)
@@ -595,6 +613,21 @@ def compose_live_physical_opening_voids(
             if width_m is not None and height_m is not None
             else None
         )
+        area_basis = "resolved_opening_geometry" if area_m2 is not None else None
+        figured_area_record_id = None
+        if figured_label_evidence is not None:
+            figured_area_record_id = str(figured_label_evidence.evidence_id)
+            # A two-axis figured label can prove AREA without proving which
+            # printed token is width versus height. Preserve existing complete
+            # opening geometry when it exists; otherwise publish the
+            # order-invariant figured product only.
+            if (
+                area_m2 is None
+                and figured_label_evidence.area_m2 is not None
+                and figured_label_evidence.axis_order_resolved is False
+            ):
+                area_m2 = float(figured_label_evidence.area_m2)
+                area_basis = str(figured_label_evidence.basis)
 
         if existence_record is not None:
             evidence_ids = tuple(
@@ -621,6 +654,12 @@ def compose_live_physical_opening_voids(
                         ),
                         tag_observation_id,
                         *schedule_row_observation_ids,
+                        figured_area_record_id,
+                        *(
+                            figured_label_evidence.source_text_observation_ids
+                            if figured_label_evidence is not None
+                            else ()
+                        ),
                         (
                             void_record.record_id
                             if void_record is not None
@@ -675,6 +714,8 @@ def compose_live_physical_opening_voids(
                     width_m=width_m,
                     height_m=height_m,
                     area_m2=area_m2,
+                    area_basis=area_basis,
+                    figured_area_record_id=figured_area_record_id,
                     opening_void_record_id=(
                         str(void_record.record_id)
                         if void_record is not None
