@@ -88,7 +88,7 @@ def _rebuild_dictionary_item(code: str, sources: Sequence[Dict[str, Any]]) -> Op
     conflicts = [item for item in sources[1:] if not material._compatible_descriptions(representative.get("description"), item.get("description"))]
     substrates = {str(item.get("substrate") or "") for item in sources if item.get("substrate")}
     finishes = {str(item.get("finish") or "") for item in sources if item.get("finish")}
-    return {
+    entry = {
         "code": code,
         "description": str(representative.get("description") or ""),
         "substrate": next(iter(substrates)) if len(substrates) == 1 else "",
@@ -96,6 +96,12 @@ def _rebuild_dictionary_item(code: str, sources: Sequence[Dict[str, Any]]) -> Op
         "status": "Conflict" if conflicts or len(substrates) > 1 or len(finishes) > 1 else "Confirmed",
         "sources": sources,
     }
+    # Selected-sheet filtering rebuilds the material dictionary, so preserve
+    # the same upstream semantic authority contract as the base schedule
+    # resolver. Raw codes (for example IP) never supply semantics by
+    # themselves; the resolved description/substrate/finish must prove them.
+    entry["semantic_finish"] = material.semantic_finish_from_schedule_entry(entry)
+    return entry
 
 
 def selected_material_base_builder(app: Any, workspace_id: int) -> Dict[str, Any]:
