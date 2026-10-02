@@ -219,6 +219,68 @@ def test_producer_binds_one_figured_pair_by_gap_projection_not_nearest_choice() 
     assert result.evidence.source_text_observation_ids
 
 
+def test_producer_stitches_one_source_callout_split_over_adjacent_native_lines() -> None:
+    source, published = _ingest(
+        _pdf(
+            labels=(
+                (108.0, 120.0, "1,800 -"),
+                (108.0, 128.0, "910 asw"),
+            )
+        ),
+        "split-callout",
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.evidence is not None
+    assert result.evidence.dimension_values_mm == (1800.0, 910.0)
+    assert result.evidence.semantic_kind == "window"
+    assert result.evidence.area_m2 == pytest.approx(1.638)
+    assert len(result.evidence.source_text_observation_ids) >= 2
+
+
+def test_remote_lines_with_complementary_syntax_do_not_stitch() -> None:
+    source, published = _ingest(
+        _pdf(
+            labels=(
+                (108.0, 120.0, "1,800 -"),
+                (108.0, 180.0, "910 asw"),
+            )
+        ),
+        "split-remote",
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.evidence is None
+    assert OPENING_LABEL_DIMENSION_TEXT_UNAVAILABLE in result.reason_codes
+
+
+def test_split_niche_annotation_does_not_become_opening_dimension() -> None:
+    source, published = _ingest(
+        _pdf(
+            labels=(
+                (108.0, 120.0, "04 - 06"),
+                (108.0, 128.0, "Niche"),
+            )
+        ),
+        "split-niche",
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.evidence is None
+
+
 def test_two_distinct_eligible_callouts_conflict_instead_of_picking_closest() -> None:
     source, published = _ingest(
         _pdf(
