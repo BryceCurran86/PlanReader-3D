@@ -1,0 +1,178 @@
+"""Source-closed opening-area quantity publication.
+
+Consumes only typed LiveCanonicalOpeningObject instances. It never discovers an
+opening, reads benchmark truth, or repairs missing measurement evidence. A
+quantity is published only when the canonical physical identity is present,
+door/window semantic kind is resolved, a positive area exists, and the exact
+measurement evidence backing that area is retained on the object.
+"""
+from __future__ import annotations
+
+import math
+
+from pb_live_physical_opening_void_composition import (
+    LiveCanonicalOpeningObject,
+    LivePhysicalOpeningVoidComposition,
+)
+from pb_migration_contracts import QuantityEvidence, stable_contract_id
+
+
+LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION = "1.0.0"
+LIVE_OPENING_AREA_QUANTITY_RESOLVED = "live_opening_area_quantity_resolved"
+LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY = (
+    "pb_opening_label_dimension_authority.figured_opening_label_area"
+)
+LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY = (
+    "pb_live_physical_opening_void_composition.resolved_opening_geometry_area"
+)
+
+
+def _opening_quantity(
+    opening: LiveCanonicalOpeningObject,
+) -> QuantityEvidence | None:
+    if type(opening) is not LiveCanonicalOpeningObject:
+        raise TypeError("opening must be LiveCanonicalOpeningObject")
+
+    canonical_id = str(opening.canonical_opening_id or "").strip()
+    physical_id = str(opening.physical_opening_id or "").strip()
+    viewport_id = str(opening.viewport_id or "").strip()
+    opening_kind = str(opening.opening_kind or "").strip().lower()
+    basis = str(opening.area_basis or "").strip()
+    if (
+        not canonical_id
+        or canonical_id != physical_id
+        or not viewport_id
+        or opening_kind not in {"door", "window"}
+        or not basis
+        or opening.area_m2 is None
+    ):
+        return None
+
+    try:
+        value = float(opening.area_m2)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(value) or value <= 0.0:
+        return None
+
+    evidence_ids = tuple(
+        dict.fromkeys(
+            str(value).strip()
+            for value in opening.evidence_ids
+            if str(value).strip()
+        )
+    )
+    if not evidence_ids:
+        return None
+
+    measurement_record_id = None
+    quantity_authority = None
+    if basis == "figured_opening_label":
+        measurement_record_id = str(opening.figured_area_record_id or "").strip()
+        if not measurement_record_id or measurement_record_id not in evidence_ids:
+            return None
+        quantity_authority = LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY
+    elif basis == "resolved_opening_geometry":
+        measurement_record_id = str(opening.opening_void_record_id or "").strip()
+        if not measurement_record_id or measurement_record_id not in evidence_ids:
+            return None
+        quantity_authority = LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY
+    else:
+        # Unknown area bases cannot silently become commercial quantities.
+        return None
+
+    payload = {
+        "schema_version": LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION,
+        "canonical_opening_id": canonical_id,
+        "opening_kind": opening_kind,
+        "area_m2": value,
+        "area_basis": basis,
+        "measurement_record_id": measurement_record_id,
+        "source_sha256": opening.source_sha256,
+        "revision_id": opening.revision_id,
+    }
+    quantity_id = stable_contract_id(
+        "opening_area",
+        payload,
+        digest_chars=32,
+    )
+    return QuantityEvidence(
+        quantity_id=quantity_id,
+        family="opening_area",
+        semantic_key=f"{opening_kind}_area:{canonical_id}",
+        value=value,
+        unit="m2",
+        input_entity_ids=(canonical_id,),
+        formula=(
+            "authenticated figured opening-label dimension product"
+            if basis == "figured_opening_label"
+            else "authenticated physical opening width * height"
+        ),
+        formula_version=LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION,
+        evidence_ids=evidence_ids,
+        authority=quantity_authority,
+        status="corroborated",
+        confidence=1.0,
+        abstained=False,
+        blocking_reasons=(),
+        reason_codes=(LIVE_OPENING_AREA_QUANTITY_RESOLVED,),
+        metadata={
+            "document_id": opening.document_id,
+            "revision_id": opening.revision_id,
+            "source_sha256": opening.source_sha256,
+            "page_no": opening.page_id,
+            "viewport_id": viewport_id,
+            "canonical_opening_id": canonical_id,
+            "physical_opening_id": physical_id,
+            "opening_kind": opening_kind,
+            "area_basis": basis,
+            "measurement_record_id": measurement_record_id,
+            "commercial_projection_allowed": True,
+            "section": "Openings",
+            "element": f"{opening_kind.title()} area",
+            "row_role": opening_kind,
+        },
+    )
+
+
+def publish_live_opening_area_quantities(
+    composition: LivePhysicalOpeningVoidComposition,
+) -> tuple[QuantityEvidence, ...]:
+    """Publish one deterministic area quantity per source-proven opening."""
+    if type(composition) is not LivePhysicalOpeningVoidComposition:
+        raise TypeError(
+            "composition must be LivePhysicalOpeningVoidComposition"
+        )
+
+    quantities: list[QuantityEvidence] = []
+    seen_entity_ids: set[str] = set()
+    seen_quantity_ids: set[str] = set()
+    for opening in sorted(
+        composition.canonical_openings,
+        key=lambda item: item.canonical_opening_id,
+    ):
+        quantity = _opening_quantity(opening)
+        if quantity is None:
+            continue
+        entity_id = quantity.input_entity_ids[0]
+        if entity_id in seen_entity_ids:
+            raise ValueError(
+                f"duplicate canonical opening identity in quantity publication: {entity_id}"
+            )
+        if quantity.quantity_id in seen_quantity_ids:
+            raise ValueError(
+                f"duplicate opening quantity id: {quantity.quantity_id}"
+            )
+        seen_entity_ids.add(entity_id)
+        seen_quantity_ids.add(quantity.quantity_id)
+        quantities.append(quantity)
+    return tuple(quantities)
+
+
+__all__ = [
+    "LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY",
+    "LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY",
+    "LIVE_OPENING_AREA_QUANTITY_RESOLVED",
+    "LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION",
+    "publish_live_opening_area_quantities",
+]
