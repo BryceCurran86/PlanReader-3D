@@ -903,7 +903,6 @@ class SourceVisibilityProducer:
         return OpeningDimensionAuthority(
             self.authority(),
             self.text_integrity_authority(),
-            physical_opening_authority=self.physical_opening_authority(),
             _seal=_OPENING_DIMENSION_AUTHORITY_SEAL,
         )
 
