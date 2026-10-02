@@ -1380,6 +1380,15 @@ class PhysicalOpeningAuthority:
             self._visible_viewport_scope_cache[key] = result
             return result
 
+        # Absence of authenticated viewport structure is not negative evidence.
+        # Preserve the existing page-scoped G17 proposition in that case. The
+        # viewport gate becomes authoritative only when the source itself
+        # supplies at least one authenticated view boundary/type.
+        if not tuple(scope_result.authenticated_viewports):
+            result = (candidates, decisions, tuple(scope_result.reason_codes))
+            self._visible_viewport_scope_cache[key] = result
+            return result
+
         promoted: list[CandidateSemanticOpening] = []
         for candidate in candidates:
             decision = decisions.get(candidate.candidate_id)
