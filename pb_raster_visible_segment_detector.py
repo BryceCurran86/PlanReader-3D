@@ -127,6 +127,43 @@ def _dedupe(
     return result
 
 
+def _span_bucket_index(
+    segments: list[tuple[float, float, float, float]],
+    *,
+    start_index: int,
+    end_index: int,
+    tolerance_px: float,
+) -> tuple[float, dict[int, tuple[int, ...]]]:
+    """Index segment spans without changing snapping semantics.
+
+    Buckets are only a conservative candidate accelerator. Exact span tests and
+    original segment iteration order remain authoritative in the snapping
+    routine.
+    """
+
+    bucket_size = max(32.0, 8.0 * float(tolerance_px))
+    buckets: dict[int, list[int]] = {}
+    for index, segment in enumerate(segments):
+        low = min(float(segment[start_index]), float(segment[end_index]))
+        high = max(float(segment[start_index]), float(segment[end_index]))
+        first = math.floor((low - tolerance_px) / bucket_size)
+        last = math.floor((high + tolerance_px) / bucket_size)
+        for bucket in range(first, last + 1):
+            buckets.setdefault(bucket, []).append(index)
+    return bucket_size, {
+        bucket: tuple(indices) for bucket, indices in buckets.items()
+    }
+
+
+def _bucket_candidates(
+    *,
+    point: float,
+    bucket_size: float,
+    buckets: dict[int, tuple[int, ...]],
+) -> tuple[int, ...]:
+    return buckets.get(math.floor(float(point) / bucket_size), ())
+
+
 def _snap_intersections(
     horizontal: list[tuple[float, float, float, float]],
     vertical: list[tuple[float, float, float, float]],
@@ -136,11 +173,27 @@ def _snap_intersections(
     list[tuple[float, float, float, float]],
     list[tuple[float, float, float, float]],
 ]:
+    # The historical implementation scanned every H x V pair in three passes.
+    # Dense plan sheets can contain thousands of each, producing tens of
+    # millions of Python comparisons. Spatial buckets narrow only the candidate
+    # set; exact conditions and source order below are unchanged.
+    vertical_y_bucket_size, vertical_by_y = _span_bucket_index(
+        vertical,
+        start_index=1,
+        end_index=3,
+        tolerance_px=tolerance_px,
+    )
+
     snapped_h: list[tuple[float, float, float, float]] = []
     for x0, y0, x1, _y1 in horizontal:
         left = x0
         right = x1
-        for vx0, vy0, _vx1, vy1 in vertical:
+        for index in _bucket_candidates(
+            point=y0,
+            bucket_size=vertical_y_bucket_size,
+            buckets=vertical_by_y,
+        ):
+            vx0, vy0, _vx1, vy1 = vertical[index]
             vx = vx0
             if vy0 - tolerance_px <= y0 <= vy1 + tolerance_px:
                 if abs(left - vx) <= tolerance_px:
@@ -150,11 +203,23 @@ def _snap_intersections(
         if right - left > 0.0:
             snapped_h.append((left, y0, right, y0))
 
+    horizontal_x_bucket_size, horizontal_by_x = _span_bucket_index(
+        snapped_h,
+        start_index=0,
+        end_index=2,
+        tolerance_px=tolerance_px,
+    )
+
     snapped_v: list[tuple[float, float, float, float]] = []
     for x0, y0, _x1, y1 in vertical:
         top = y0
         bottom = y1
-        for hx0, hy0, hx1, _hy1 in snapped_h:
+        for index in _bucket_candidates(
+            point=x0,
+            bucket_size=horizontal_x_bucket_size,
+            buckets=horizontal_by_x,
+        ):
+            hx0, hy0, hx1, _hy1 = snapped_h[index]
             if hx0 - tolerance_px <= x0 <= hx1 + tolerance_px:
                 if abs(top - hy0) <= tolerance_px:
                     top = hy0
@@ -165,11 +230,22 @@ def _snap_intersections(
 
     # A second horizontal pass picks up any y coordinates standardized by the
     # vertical pass without ever bridging a real gap.
+    snapped_vertical_y_bucket_size, snapped_vertical_by_y = _span_bucket_index(
+        snapped_v,
+        start_index=1,
+        end_index=3,
+        tolerance_px=tolerance_px,
+    )
     final_h: list[tuple[float, float, float, float]] = []
     for x0, y0, x1, _y1 in snapped_h:
         left = x0
         right = x1
-        for vx0, vy0, _vx1, vy1 in snapped_v:
+        for index in _bucket_candidates(
+            point=y0,
+            bucket_size=snapped_vertical_y_bucket_size,
+            buckets=snapped_vertical_by_y,
+        ):
+            vx0, vy0, _vx1, vy1 = snapped_v[index]
             if vy0 - tolerance_px <= y0 <= vy1 + tolerance_px:
                 if abs(left - vx0) <= tolerance_px:
                     left = vx0
@@ -178,7 +254,6 @@ def _snap_intersections(
         final_h.append((left, y0, right, y0))
 
     return _dedupe(final_h), _dedupe(snapped_v)
-
 
 def detect_axis_aligned_raster_segments(
     png_bytes: bytes,
