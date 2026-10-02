@@ -561,8 +561,8 @@ class SourceVisibilityProducer:
         if self._physical_opening_authority_cache is None:
             from pb_physical_opening_authority import PhysicalOpeningAuthority
 
-            self._physical_opening_authority_cache = PhysicalOpeningAuthority(
-                self.authority()
+            self._physical_opening_authority_cache = (
+                PhysicalOpeningAuthority.from_source_visibility_producer(self)
             )
         return self._physical_opening_authority_cache
 
