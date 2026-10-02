@@ -348,6 +348,89 @@ def _bbox_union(values: Sequence[Sequence[float]]) -> Optional[tuple[float, floa
     )
 
 
+def _parseable_opening_label_fragments(
+    rows: Sequence[tuple[int, str, str, tuple[float, ...]]],
+) -> tuple[_TrustedTextLine, ...]:
+    """Split one native PDF text line into non-overlapping opening callouts.
+
+    PyMuPDF can place several architectural opening callouts in one native text
+    line. Treating the whole line as one label loses those individual source
+    claims. We therefore enumerate only short contiguous word spans that are
+    independently accepted by the existing fail-closed label grammar.
+
+    Overlapping parses are resolved by evidence richness: two-axis dimensions
+    outrank single dimensions, explicit opening semantics outrank untyped text,
+    and then the longer source span wins. This suppresses sub-parses of a
+    semantic callout without merging adjacent callouts on the same PDF line.
+    """
+
+    ordered = sorted(rows, key=lambda item: (item[0], item[1]))
+    if not ordered:
+        return ()
+
+    candidates: list[
+        tuple[
+            tuple[int, int, int],
+            int,
+            int,
+            _TrustedTextLine,
+        ]
+    ] = []
+    max_words = 7
+    for start in range(len(ordered)):
+        for end in range(start + 1, min(len(ordered), start + max_words) + 1):
+            subset = ordered[start:end]
+            text_value = " ".join(row[2] for row in subset)
+            parsed = parse_opening_label_dimensions(text_value)
+            if parsed is None:
+                continue
+            bbox = _bbox_union([row[3] for row in subset])
+            if bbox is None:
+                continue
+            rank = (
+                len(parsed.dimension_values_mm),
+                1 if parsed.semantic_kind is not None else 0,
+                end - start,
+            )
+            candidates.append(
+                (
+                    rank,
+                    start,
+                    end,
+                    _TrustedTextLine(
+                        observation_ids=tuple(row[1] for row in subset),
+                        text=text_value,
+                        bbox=bbox,
+                    ),
+                )
+            )
+
+    selected: list[tuple[int, int, _TrustedTextLine]] = []
+    occupied: set[int] = set()
+    for _rank, start, end, fragment in sorted(
+        candidates,
+        key=lambda item: (
+            -item[0][0],
+            -item[0][1],
+            -item[0][2],
+            item[1],
+            item[2],
+        ),
+    ):
+        token_indexes = set(range(start, end))
+        if token_indexes & occupied:
+            continue
+        selected.append((start, end, fragment))
+        occupied.update(token_indexes)
+
+    return tuple(
+        fragment
+        for _start, _end, fragment in sorted(
+            selected,
+            key=lambda item: (item[0], item[1], item[2].observation_ids),
+        )
+    )
+
 def _trusted_text_lines(
     source: SourceVisibilityProducer,
     opening: PhysicalOpeningExistenceRecord,
@@ -393,20 +476,21 @@ def _trusted_text_lines(
             )
         )
 
-    lines: list[_TrustedTextLine] = []
+    fragments: list[_TrustedTextLine] = []
     for rows in grouped.values():
-        rows.sort(key=lambda item: (item[0], item[1]))
-        bbox = _bbox_union([row[3] for row in rows])
-        if bbox is None:
-            continue
-        lines.append(
-            _TrustedTextLine(
-                observation_ids=tuple(row[1] for row in rows),
-                text=" ".join(row[2] for row in rows),
-                bbox=bbox,
-            )
+        fragments.extend(_parseable_opening_label_fragments(rows))
+    return tuple(
+        sorted(
+            fragments,
+            key=lambda item: (
+                item.bbox[1],
+                item.bbox[0],
+                item.bbox[3],
+                item.bbox[2],
+                item.observation_ids,
+            ),
         )
-    return tuple(lines)
+    )
 
 
 def _label_matches_gap(label: _TrustedTextLine, gap: _GapSpan) -> bool:
