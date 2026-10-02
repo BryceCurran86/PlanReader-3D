@@ -412,6 +412,70 @@ def resolve_internal_elevation_wall_surface(
     )
 
 
+class AuthenticatedWallFaceTileExtentAuthority:
+    """Read-only registry of corroborated elevation wall-face tile extents.
+
+    The quantity layer can resolve an extent only by the exact elevation
+    viewport + physical wall-face identity.  Raw caller numbers, room geometry,
+    and net-wall area are not accepted by this seam.
+    """
+
+    def __init__(
+        self,
+        surfaces: Mapping[tuple[str, str], CanonicalWallSurface],
+    ) -> None:
+        self._surfaces = dict(surfaces)
+
+    @classmethod
+    def from_resolutions(
+        cls,
+        resolutions: Sequence[WallSurfaceResolution],
+    ) -> "AuthenticatedWallFaceTileExtentAuthority":
+        surfaces: dict[tuple[str, str], CanonicalWallSurface] = {}
+        for resolution in resolutions:
+            if (
+                not isinstance(resolution, WallSurfaceResolution)
+                or resolution.status is not EvidenceResolutionStatus.CORROBORATED
+                or resolution.canonical_wall_surface is None
+                or _positive(resolution.quantity_m2) is None
+            ):
+                continue
+            surface = resolution.canonical_wall_surface
+            if str(surface.authority_status).strip().lower() != "corroborated":
+                continue
+            key = (
+                str(surface.viewport_id).strip(),
+                str(surface.physical_wall_face_id).strip(),
+            )
+            if not all(key):
+                continue
+            prior = surfaces.get(key)
+            if (
+                prior is not None
+                and prior.canonical_wall_surface_id
+                != surface.canonical_wall_surface_id
+            ):
+                raise ValueError(
+                    "conflicting authenticated tile extents for one physical wall face"
+                )
+            surfaces[key] = surface
+        return cls(surfaces)
+
+    def resolve(
+        self,
+        *,
+        viewport_id: str,
+        physical_wall_face_id: str,
+    ) -> Optional[CanonicalWallSurface]:
+        key = (
+            str(viewport_id or "").strip(),
+            str(physical_wall_face_id or "").strip(),
+        )
+        if not all(key):
+            return None
+        return self._surfaces.get(key)
+
+
 def authenticated_tile_surface_rows(
     spec: Mapping[str, Any],
     *,
@@ -453,6 +517,7 @@ def authenticated_tile_surface_rows(
 
 
 __all__ = [
+    "AuthenticatedWallFaceTileExtentAuthority",
     "CanonicalWallSurface",
     "InternalElevationViewport",
     "OpeningMeasurementResult",
