@@ -399,11 +399,17 @@ class OpeningHostBindingProducer:
             or identity.status is not EvidenceResolutionStatus.CORROBORATED
             or identity.proven_same is not True
             or PHYSICAL_OPENING_IDENTITY_RESOLVED not in identity.reason_codes
-            or left.existence_record.record_id != right.existence_record.record_id
+            or not identity.physical_opening_identity
         ):
             return _blocked_binding("authenticated_physical_opening_identity_required")
 
         opening = left.existence_record
+        opening_identity_id = identity.physical_opening_identity
+        if (
+            opening.physical_identity_fingerprint
+            and opening.physical_identity_fingerprint != opening_identity_id
+        ):
+            return _blocked_binding("physical_opening_identity_fingerprint_mismatch")
         if not _selector_matches_opening(host_universe_selector, opening):
             return _blocked_binding("opening_host_scope_mismatch")
 
@@ -459,7 +465,7 @@ class OpeningHostBindingProducer:
                 "source_sha256": opening.source_sha256,
                 "snapshot_id": opening.snapshot_id,
                 "page_id": opening.page_id,
-                "opening_identity_id": opening.record_id,
+                "opening_identity_id": opening_identity_id,
                 "member_wall_candidate_ids": band.member_ids,
                 "member_candidate_identity_ids": band.member_candidate_identity_ids,
                 "member_equivalence_groups": band.member_equivalence_groups,
@@ -473,7 +479,7 @@ class OpeningHostBindingProducer:
             "snapshot_id": opening.snapshot_id,
             "page_id": opening.page_id,
             "decision_scope_id": host_universe_selector.decision_scope_id,
-            "opening_identity_id": opening.record_id,
+            "opening_identity_id": opening_identity_id,
             "host_wall_id": host_wall_id,
             "member_wall_candidate_ids": band.member_ids,
             "member_candidate_identity_ids": band.member_candidate_identity_ids,
@@ -488,7 +494,7 @@ class OpeningHostBindingProducer:
             snapshot_id=opening.snapshot_id,
             page_id=opening.page_id,
             decision_scope_id=host_universe_selector.decision_scope_id,
-            opening_identity_id=opening.record_id,
+            opening_identity_id=opening_identity_id,
             host_wall_id=host_wall_id,
             member_wall_candidate_ids=band.member_ids,
             member_candidate_identity_ids=band.member_candidate_identity_ids,
@@ -507,7 +513,7 @@ class OpeningHostBindingProducer:
             opening.snapshot_id,
             opening.page_id,
             host_universe_selector.decision_scope_id,
-            opening.record_id,
+            opening_identity_id,
         )
         existing = self._results.get(key)
         if existing is not None and existing != result:
