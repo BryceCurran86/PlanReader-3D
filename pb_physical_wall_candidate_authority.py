@@ -509,6 +509,28 @@ def _filter_repeated_non_physical_drafting_primitives(
     return tuple(kept)
 
 
+def filtered_wall_topology_source_segment_count(
+    segments: Sequence[dict],
+    *,
+    page_width: float,
+    page_height: float,
+) -> int:
+    """Return the runtime-safety census after generic drafting filtering.
+
+    This is a census only, not positive wall authority. It deliberately uses
+    the exact same producer-owned drafting-motif/annotation-mask filter as the
+    physical wall authority before the topology safety gate. Final authority
+    still rechecks the complete native+raster scope.
+    """
+    return len(
+        _filter_repeated_non_physical_drafting_primitives(
+            segments,
+            page_width=page_width,
+            page_height=page_height,
+        )
+    )
+
+
 def _segment_geometry(segment: Mapping[str, object]) -> Line:
     return (
         float(segment["x1"]),
