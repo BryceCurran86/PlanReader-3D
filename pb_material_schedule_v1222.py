@@ -21,7 +21,7 @@ import pb_memory_stability_v1220 as memory
 VERSION = "1.2.22"
 SETTING_KEY = "material_schedule_v1222"
 CODE_RE = re.compile(
-    r"\b(?:EC\d+|FC\d+|RBL\d*|SOF\d*|CL\d+|PT\d+|PF\d+|WF\d+|BA\d+|SCR\d*|SHD\d*|DP\d*|GD\d*|RS\d*|BC\d*)\b",
+    r"\b(?:EC\d+|FC\d+|RBL\d*|SOF\d*|CL\d+|PT\d+|PF\d+|WF\d+|BA\d+|SCR\d*|SHD\d*|DP\d*|GD\d*|RS\d*|BC\d*|IP)\b",
     re.IGNORECASE,
 )
 SCHEDULE_WORDS = (
@@ -42,6 +42,8 @@ _MATERIAL_HINTS: Sequence[Tuple[Tuple[str, ...], str]] = (
     (("downpipe",), "Downpipes"),
     (("garage door",), "Garage Doors"),
     (("roof sheet", "roofing"), "Roof Sheet"),
+    (("insulated panel", "insulation panel"), "Insulated Panel"),
+    (("sandwich panel",), "Sandwich Panel"),
     (("gutter", "capping", "parapet cap"), "Cappings & Gutters"),
 )
 _FINISH_HINTS = (
@@ -84,6 +86,32 @@ def _infer_finish(description: Any, code: str = "") -> str:
         return re.sub(r"\s+", " ", str(description or "")).strip()
     return ""
 
+
+def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
+    """Return a normalized finish semantic from confirmed schedule authority.
+
+    Raw abbreviations such as IP are never semantic authority by themselves.
+    The entry must already be confirmed by the schedule resolver, and its
+    resolved meaning must explicitly identify the finish/material family.
+    """
+
+    if str(entry.get("status") or "").strip().lower() != "confirmed":
+        return ""
+    text = _normalise(
+        " ".join(
+            str(entry.get(key) or "")
+            for key in ("description", "substrate", "finish")
+        )
+    )
+    if "sandwich panel" in text:
+        return "sandwich_panel"
+    if "insulated panel" in text or "insulation panel" in text:
+        return "insulated_panel"
+    if "epoxy" in text:
+        return "epoxy"
+    if "vinyl" in text:
+        return "vinyl"
+    return ""
 
 def _compatible_descriptions(a: Any, b: Any) -> bool:
     left, right = _normalise(a), _normalise(b)
@@ -158,6 +186,9 @@ def build_material_dictionary(app: Any, workspace_id: int) -> Dict[str, Any]:
             "status": status,
             "sources": items,
         }
+        dictionary[code]["semantic_finish"] = semantic_finish_from_schedule_entry(
+            dictionary[code]
+        )
         if conflicting or len(substrate_names) > 1 or len(finish_names) > 1:
             issues.append({
                 "category": "Schedule conflict", "severity": "High", "code": code,
