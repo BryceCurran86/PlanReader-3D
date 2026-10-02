@@ -53,9 +53,15 @@ from typing import Optional
 
 import pytest
 
+import pb_hosted_opening_geometry as hosted_geometry
+
 fitz = pytest.importorskip("fitz")
 
-from pb_hosted_opening_geometry import resolve_hosted_opening_spans
+from pb_hosted_opening_geometry import (
+    _VerticalJambSpatialIndex,
+    _candidate_face_row_pairs,
+    resolve_hosted_opening_spans,
+)
 
 _BAGHAU_PDF = (
     Path(__file__).resolve().parent.parent
@@ -295,6 +301,69 @@ def test_exporter_is_deterministic(spec_name):
     first = _serialise(export_page_snapshot(**kwargs))
     second = _serialise(export_page_snapshot(**kwargs))
     assert first == second, "exporter output was not byte-identical across two runs"
+
+
+
+def test_door_swing_source_geometry_is_scanned_once_for_multiple_openings(monkeypatch):
+    y0, y1 = 100.0, 106.0
+    drawings = [
+        _fill_rect(0.0, y0, 30.0, y1),
+        _fill_rect(60.0, y0, 90.0, y1),
+        _fill_rect(120.0, y0, 220.0, y1),
+    ]
+    calls = {"count": 0}
+
+    def _fake_iter(_page, *, page_num=0):
+        calls["count"] += 1
+        return []
+
+    monkeypatch.setattr(hosted_geometry, "iter_quarter_circle_cubics", _fake_iter)
+    ev = hosted_geometry.resolve_hosted_opening_spans(
+        _FakePage(drawings),
+        viewport_bbox=(-10.0, 90.0, 230.0, 116.0),
+        scale_authority=25.0,
+    )
+
+    assert ev.status == "found"
+    assert len(ev.openings) == 2
+    assert calls["count"] == 1
+
+
+def test_face_row_pairing_is_windowed_by_existing_wall_thickness_bounds():
+    # 1,000 source face rows would imply 499,500 all-pairs comparisons.
+    # The production resolver must consider only rows within the existing
+    # physical wall-thickness band while preserving historical pair order.
+    face_rows = [(float(y), []) for y in range(1000)]
+    first = list(_candidate_face_row_pairs(face_rows))
+    first_y = [(a[0], b[0]) for a, b in first]
+
+    assert len(first_y) < 45_000
+    assert all(1.5 <= abs(b - a) <= 40.0 for a, b in first_y)
+
+    # Candidate membership is independent of row ordering, but emission order
+    # must still match the original nested (i, j) traversal because downstream
+    # near-duplicate collapse is intentionally first-wins.
+    shuffled = [(10.0, []), (0.0, []), (20.0, []), (100.0, [])]
+    emitted = [(a[0], b[0]) for a, b in _candidate_face_row_pairs(shuffled)]
+    assert emitted == [(10.0, 0.0), (10.0, 20.0), (0.0, 20.0)]
+
+
+def test_vertical_jamb_spatial_index_excludes_far_source_lines_from_band_query():
+    # Thousands of unrelated verticals elsewhere on the sheet must not be
+    # rescanned for a 10pt wall band.
+    far = [
+        (float(index), 500.0, float(index), 800.0)
+        for index in range(5000)
+    ]
+    local = [
+        (10.0, 99.0, 10.0, 111.0),
+        (40.0, 99.0, 40.0, 111.0),
+    ]
+    index = _VerticalJambSpatialIndex(tuple(far + local))
+
+    candidates = index.query_lines(100.0, 110.0)
+    assert len(candidates) == 2
+    assert sorted(index.jamb_positions(100.0, 110.0)) == [10.0, 40.0]
 
 
 # ---------------------------------------------------------------------------

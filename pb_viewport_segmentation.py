@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import hashlib
 import json
+import math
 import re
 import statistics
 from typing import Any, Iterable, Optional, Sequence
@@ -105,6 +106,11 @@ _SCALE_RE = re.compile(r"\b(?:SCALE\s*)?(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)\b"
 _TITLE_BLOCK_LABEL_RE = re.compile(
     r"\b(?:drawing\s+(?:title|no\.?|number)|rev(?:ision)?|checked by|drawn by|approved|"
     r"consultant|client|date)\b",
+    re.I,
+)
+_SHEET_METADATA_LABEL_RE = re.compile(
+    r"\b(?:drawing\s+(?:name|title|no\.?|number)|project\s+title|"
+    r"rev(?:ision)?|client|scale|drawn|checked|approved|date)\b",
     re.I,
 )
 _MAX_FRAME_PAGE_FRACTION = 0.95
@@ -549,6 +555,92 @@ def _title_field_owned_regions(page: Any) -> list[tuple[float, float, float, flo
     return regions
 
 
+def _proven_title_block_region(
+    page: Any,
+) -> Optional[tuple[float, float, float, float]]:
+    """Return only a page-title-authority-proven native title-block region."""
+    try:
+        rect = page.rect
+        width = float(rect.width)
+        height = float(rect.height)
+        analysis = _title_authority.analyse_cells(
+            _title_authority.page_cells(page), width, height, 0, "native"
+        )
+    except Exception:
+        return None
+    block = analysis.title_block
+    if block is None or width <= 0.0 or height <= 0.0:
+        return None
+    bbox = tuple(float(value) for value in block)
+    if (
+        len(bbox) != 4
+        or bbox[2] <= bbox[0]
+        or bbox[3] <= bbox[1]
+        or bbox[0] < -1e-6
+        or bbox[1] < -1e-6
+        or bbox[2] > width + 1e-6
+        or bbox[3] > height + 1e-6
+    ):
+        return None
+    return bbox
+
+
+def _drawing_vector_primitive_count(
+    page: Any,
+    bbox: Sequence[float],
+    calibration: ViewportLayoutCalibration,
+) -> int:
+    """Count nontrivial native drawing primitives spatially owned by the bbox.
+
+    This is a presence gate only. It never classifies walls/openings and never
+    performs pairwise geometry work, so it stays linear in source primitives.
+    """
+    minimum_span = max(calibration.median_word_height_pt * 2.0, 4.0)
+    count = 0
+    try:
+        drawings = page.get_drawings() or []
+    except Exception:
+        drawings = []
+    for drawing in drawings:
+        for item in drawing.get("items", []) or []:
+            if not item:
+                continue
+            primitive_bbox: Optional[tuple[float, float, float, float]] = None
+            if item[0] == "l" and len(item) >= 3:
+                start, end = item[1], item[2]
+                primitive_bbox = _normalized_bbox(
+                    float(start.x), float(start.y), float(end.x), float(end.y)
+                )
+                if math.hypot(
+                    float(end.x) - float(start.x),
+                    float(end.y) - float(start.y),
+                ) < minimum_span:
+                    continue
+            elif item[0] == "re" and len(item) >= 2:
+                rect = item[1]
+                primitive_bbox = _normalized_bbox(
+                    float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)
+                )
+                if max(
+                    primitive_bbox[2] - primitive_bbox[0],
+                    primitive_bbox[3] - primitive_bbox[1],
+                ) < minimum_span:
+                    continue
+            elif item[0] == "qu" and len(item) >= 2:
+                primitive_bbox = _axis_aligned_quad_bbox(
+                    item[1],
+                    tol=max(calibration.median_word_height_pt * 0.15, 0.75),
+                )
+                if primitive_bbox is None:
+                    continue
+            if (
+                primitive_bbox is not None
+                and _point_in_bbox(_bbox_center(primitive_bbox), bbox)
+            ):
+                count += 1
+    return count
+
+
 @dataclass(frozen=True)
 class _NativeLine:
     bbox: tuple[float, float, float, float]
@@ -838,24 +930,36 @@ def _frame_resolved_viewports(
 
 
 _AUTHORITATIVE_DERIVED_PARTITION_MODE = "columnar_title_grid"
+_SINGLE_FLOOR_PLAN_PARTITION_MODE = "single_floor_plan_printable_area"
+_SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE = "single_floor_plan_sheet_frame"
 
 
 def is_authoritative_derived_viewport(viewport: Any) -> bool:
-    """Return True only for the strictly validated multi-column title grid.
-
-    Ordinary TITLE_PARTITION viewports remain diagnostic DERIVED evidence.
-    This stronger subtype is producer-owned: it requires a non-overlapping
-    columnar grid with independently separated title rows in every column.
-    """
+    """Return True only for producer-proven strict derived ownership modes."""
     provenance = getattr(viewport, "provenance", {}) or {}
-    return bool(
+    if not (
         getattr(viewport, "status", None) == ViewportSegmentationStatus.DERIVED.value
         and getattr(viewport, "boundary_source", None)
         == ViewportBoundarySource.TITLE_PARTITION.value
         and getattr(viewport, "bounding_box", None) is not None
-        and provenance.get("partition_mode") == _AUTHORITATIVE_DERIVED_PARTITION_MODE
-        and provenance.get("grid_validated") is True
-    )
+    ):
+        return False
+    mode = provenance.get("partition_mode")
+    if mode == _AUTHORITATIVE_DERIVED_PARTITION_MODE:
+        return provenance.get("grid_validated") is True
+    if mode == _SINGLE_FLOOR_PLAN_PARTITION_MODE:
+        return bool(
+            provenance.get("single_view_validated") is True
+            and provenance.get("title_block_bbox")
+            and int(provenance.get("drawing_vector_primitive_count", 0) or 0) >= 2
+        )
+    if mode == _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE:
+        return bool(
+            provenance.get("single_view_validated") is True
+            and int(provenance.get("metadata_label_count", 0) or 0) >= 2
+            and int(provenance.get("drawing_vector_primitive_count", 0) or 0) >= 2
+        )
+    return False
 
 
 def _title_identity(anchor: _TitleAnchor) -> tuple[str, str]:
@@ -1098,6 +1202,280 @@ def _columnar_title_grid_partitions(
     return out
 
 
+def _axis_aligned_long_source_lines(
+    page: Any,
+    calibration: ViewportLayoutCalibration,
+) -> tuple[
+    tuple[tuple[float, float, float], ...],
+    tuple[tuple[float, float, float], ...],
+]:
+    """Collect only long native horizontal/vertical line primitives in O(N)."""
+    tolerance = max(calibration.median_word_height_pt * 0.15, 0.75)
+    min_horizontal = calibration.page_width_pt * 0.55
+    min_vertical = calibration.page_height_pt * 0.55
+    horizontal: list[tuple[float, float, float]] = []
+    vertical: list[tuple[float, float, float]] = []
+    try:
+        drawings = page.get_drawings() or []
+    except Exception:
+        drawings = []
+    for drawing in drawings:
+        for item in drawing.get("items", []) or []:
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = item[1], item[2]
+            x0, y0 = float(start.x), float(start.y)
+            x1, y1 = float(end.x), float(end.y)
+            if abs(y1 - y0) <= tolerance and abs(x1 - x0) >= min_horizontal:
+                horizontal.append((min(x0, x1), max(x0, x1), (y0 + y1) / 2.0))
+            elif abs(x1 - x0) <= tolerance and abs(y1 - y0) >= min_vertical:
+                vertical.append(((x0 + x1) / 2.0, min(y0, y1), max(y0, y1)))
+    return tuple(horizontal), tuple(vertical)
+
+
+def _sheet_metadata_label_count_outside(
+    page: Any,
+    bbox: Sequence[float],
+) -> int:
+    labels: set[str] = set()
+    for text_bbox, text in _text_fragments(page):
+        if _point_in_bbox(_bbox_center(text_bbox), bbox):
+            continue
+        match = _SHEET_METADATA_LABEL_RE.search(text)
+        if match:
+            labels.add(_normalise_text(match.group(0)).upper())
+    return len(labels)
+
+
+def _single_view_sheet_drawing_frames(
+    page: Any,
+    anchor: _TitleAnchor,
+    calibration: ViewportLayoutCalibration,
+) -> list[tuple[tuple[float, float, float, float], int, int]]:
+    """Find closed large sheet drawing frames without full-source pair scans.
+
+    Long source lines are bucketed by their endpoint spans. Adjacent horizontal
+    boundaries are checked only against the matching vertical-span bucket, so
+    work remains linear/log-linear in source primitive count.
+    """
+    horizontal, vertical = _axis_aligned_long_source_lines(page, calibration)
+    if len(horizontal) < 2 or len(vertical) < 2:
+        return []
+
+    tolerance = max(calibration.median_word_height_pt * 0.2, 0.75)
+
+    def bucket(value: float) -> int:
+        return int(round(float(value) / tolerance))
+
+    horizontal_by_span: dict[tuple[int, int], list[tuple[float, float, float]]] = {}
+    for line in horizontal:
+        horizontal_by_span.setdefault(
+            (bucket(line[0]), bucket(line[1])),
+            [],
+        ).append(line)
+
+    vertical_by_span: dict[tuple[int, int], list[tuple[float, float, float]]] = {}
+    for line in vertical:
+        vertical_by_span.setdefault(
+            (bucket(line[1]), bucket(line[2])),
+            [],
+        ).append(line)
+
+    candidates: list[tuple[tuple[float, float, float, float], int, int]] = []
+    for rows in horizontal_by_span.values():
+        ordered = sorted(rows, key=lambda line: line[2])
+        for top, bottom in zip(ordered, ordered[1:]):
+            x0 = (top[0] + bottom[0]) / 2.0
+            x1 = (top[1] + bottom[1]) / 2.0
+            y0, y1 = top[2], bottom[2]
+            bbox = (x0, y0, x1, y1)
+            width = x1 - x0
+            height = y1 - y0
+            if (
+                width < calibration.page_width_pt * 0.60
+                or height < calibration.page_height_pt * 0.55
+                or _bbox_area(bbox)
+                < calibration.page_width_pt * calibration.page_height_pt * 0.45
+                or _is_page_or_crop_border(bbox, calibration)
+                or not _bbox_contains(
+                    bbox,
+                    anchor.bbox,
+                    margin=calibration.median_word_height_pt * 0.25,
+                )
+            ):
+                continue
+
+            span_key = (bucket(y0), bucket(y1))
+            columns: list[tuple[float, float, float]] = []
+            for dy0 in (-1, 0, 1):
+                for dy1 in (-1, 0, 1):
+                    columns.extend(
+                        vertical_by_span.get(
+                            (span_key[0] + dy0, span_key[1] + dy1),
+                            (),
+                        )
+                    )
+            if not columns:
+                continue
+            has_left = any(abs(column[0] - x0) <= tolerance for column in columns)
+            has_right = any(abs(column[0] - x1) <= tolerance for column in columns)
+            if not (has_left and has_right):
+                continue
+
+            metadata_count = _sheet_metadata_label_count_outside(page, bbox)
+            if metadata_count < 2:
+                continue
+
+            margin = max(calibration.median_word_height_pt * 2.0, 2.0)
+            interior = (
+                bbox[0] + margin,
+                bbox[1] + margin,
+                bbox[2] - margin,
+                bbox[3] - margin,
+            )
+            primitive_count = _drawing_vector_primitive_count(
+                page,
+                interior,
+                calibration,
+            )
+            if primitive_count < 2:
+                continue
+            candidates.append((bbox, metadata_count, primitive_count))
+    return candidates
+
+
+def _single_floor_plan_sheet_frame_partition(
+    page: Any,
+    anchor: _TitleAnchor,
+    calibration: ViewportLayoutCalibration,
+    *,
+    page_number: int,
+) -> Optional[SegmentedViewport]:
+    if anchor.view_type != DrawingViewType.FLOOR_PLAN.value:
+        return None
+    candidates = _single_view_sheet_drawing_frames(page, anchor, calibration)
+    if len(candidates) != 1:
+        return None
+    bbox, metadata_count, primitive_count = candidates[0]
+    raw, denominator, scale_conflict, scale_notes = _extract_scales_for_bbox(
+        page, bbox
+    )
+    return SegmentedViewport(
+        view_id=f"view_p{page_number}_1",
+        page_number=page_number,
+        view_type=anchor.view_type,
+        label=anchor.text,
+        title_bbox=anchor.bbox,
+        bounding_box=bbox,
+        status=ViewportSegmentationStatus.DERIVED.value,
+        boundary_source=ViewportBoundarySource.TITLE_PARTITION.value,
+        confidence=0.95,
+        scale_raw=raw,
+        scale_denominator=denominator,
+        scale_conflict=scale_conflict,
+        notes=[
+            "single floor plan owns closed native sheet drawing frame with separate metadata band",
+            *scale_notes,
+        ],
+        provenance={
+            "partition_mode": _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE,
+            "single_view_validated": True,
+            "metadata_label_count": metadata_count,
+            "drawing_vector_primitive_count": primitive_count,
+            "title_bbox": anchor.bbox,
+            "sheet_frame_bbox": bbox,
+        },
+    )
+
+
+def _single_floor_plan_printable_partition(
+    page: Any,
+    anchor: _TitleAnchor,
+    calibration: ViewportLayoutCalibration,
+    *,
+    page_number: int,
+) -> Optional[SegmentedViewport]:
+    """Resolve one unframed floor plan from page ownership, fail-closed."""
+    if anchor.view_type != DrawingViewType.FLOOR_PLAN.value:
+        return None
+    title_block = _proven_title_block_region(page)
+    if title_block is None:
+        return None
+
+    width = calibration.page_width_pt
+    height = calibration.page_height_pt
+    # Title blocks are often inset from the crop edge by a normal drawing
+    # margin. Require ownership of an outer page band rather than literal edge
+    # contact, while rejecting central tables/panels.
+    occupies_outer_band = (
+        title_block[0] <= width * 0.25
+        or title_block[2] >= width * 0.75
+        or title_block[1] <= height * 0.25
+        or title_block[3] >= height * 0.75
+    )
+    if not occupies_outer_band:
+        return None
+
+    gap = max(calibration.median_word_height_pt * 0.5, 1.0)
+    candidates: list[tuple[float, float, float, float]] = []
+    if title_block[0] - gap >= calibration.minimum_frame_span_pt:
+        candidates.append((0.0, 0.0, title_block[0] - gap, height))
+    if width - (title_block[2] + gap) >= calibration.minimum_frame_span_pt:
+        candidates.append((title_block[2] + gap, 0.0, width, height))
+    if title_block[1] - gap >= calibration.minimum_frame_span_pt:
+        candidates.append((0.0, 0.0, width, title_block[1] - gap))
+    if height - (title_block[3] + gap) >= calibration.minimum_frame_span_pt:
+        candidates.append((0.0, title_block[3] + gap, width, height))
+
+    valid: list[tuple[tuple[float, float, float, float], int]] = []
+    for bbox in candidates:
+        if not _bbox_contains(
+            bbox,
+            anchor.bbox,
+            margin=calibration.median_word_height_pt * 0.25,
+        ):
+            continue
+        primitive_count = _drawing_vector_primitive_count(page, bbox, calibration)
+        if primitive_count < 2:
+            continue
+        valid.append((bbox, primitive_count))
+    if not valid:
+        return None
+
+    bbox, primitive_count = max(
+        valid,
+        key=lambda item: (_bbox_area(item[0]), item[1]),
+    )
+    raw, denominator, scale_conflict, scale_notes = _extract_scales_for_bbox(
+        page, bbox
+    )
+    return SegmentedViewport(
+        view_id=f"view_p{page_number}_1",
+        page_number=page_number,
+        view_type=anchor.view_type,
+        label=anchor.text,
+        title_bbox=anchor.bbox,
+        bounding_box=bbox,
+        status=ViewportSegmentationStatus.DERIVED.value,
+        boundary_source=ViewportBoundarySource.TITLE_PARTITION.value,
+        confidence=0.9,
+        scale_raw=raw,
+        scale_denominator=denominator,
+        scale_conflict=scale_conflict,
+        notes=[
+            "single floor plan owns proven printable area outside native title block",
+            *scale_notes,
+        ],
+        provenance={
+            "partition_mode": _SINGLE_FLOOR_PLAN_PARTITION_MODE,
+            "single_view_validated": True,
+            "title_block_bbox": title_block,
+            "drawing_vector_primitive_count": primitive_count,
+            "title_bbox": anchor.bbox,
+        },
+    )
+
+
 def _derived_partitions(
     page: Any,
     anchors: Sequence[_TitleAnchor],
@@ -1107,6 +1485,23 @@ def _derived_partitions(
     page_number: int,
 ) -> list[SegmentedViewport]:
     if len(unresolved_indices) < 2:
+        if len(unresolved_indices) == 1 and len(anchors) == 1:
+            index = unresolved_indices[0]
+            single = _single_floor_plan_sheet_frame_partition(
+                page,
+                anchors[index],
+                calibration,
+                page_number=page_number,
+            )
+            if single is None:
+                single = _single_floor_plan_printable_partition(
+                    page,
+                    anchors[index],
+                    calibration,
+                    page_number=page_number,
+                )
+            if single is not None:
+                return [single]
         return [SegmentedViewport(
             view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
             view_type=anchors[index].view_type, label=anchors[index].text,

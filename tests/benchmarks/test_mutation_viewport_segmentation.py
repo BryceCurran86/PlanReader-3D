@@ -159,6 +159,155 @@ def test_single_unframed_title_is_unsupported_not_whole_page_guessed():
     doc.close()
 
 
+
+def _single_plan_with_proven_title_block(*, include_plan_vectors: bool = True) -> fitz.Document:
+    doc = fitz.open()
+    page = doc.new_page(width=1200, height=842)
+
+    # One real drawing-view title in the printable drawing area.
+    page.insert_text((220, 760), "GROUND FLOOR PLAN", fontsize=11)
+
+    if include_plan_vectors:
+        # Positive drawing geometry outside the title block.  A title alone
+        # is insufficient to mint a page-owned viewport.
+        page.draw_line((80, 100), (780, 100))
+        page.draw_line((780, 100), (780, 620))
+        page.draw_line((780, 620), (80, 620))
+        page.draw_line((80, 620), (80, 100))
+        page.draw_line((300, 100), (300, 620))
+
+    # Explicit native title-block fields on the page edge.  This is source
+    # evidence for the non-drawing region; no project-specific coordinates or
+    # labels participate in production code.
+    x = 1000
+    page.insert_text((x, 520), "PROJECT TITLE", fontsize=6)
+    page.insert_text((x, 532), "SYNTHETIC RESIDENCE", fontsize=9)
+    page.insert_text((x, 556), "CLIENT", fontsize=6)
+    page.insert_text((x, 568), "EXAMPLE CLIENT", fontsize=9)
+    page.insert_text((x, 596), "DRAWING TITLE", fontsize=6)
+    page.insert_text((x, 612), "GENERAL ARRANGEMENT", fontsize=11)
+    page.insert_text((x, 650), "DRAWN", fontsize=6)
+    page.insert_text((x + 60, 650), "CHECKED", fontsize=6)
+    page.insert_text((x + 120, 650), "SCALE", fontsize=6)
+    page.insert_text((x, 662), "AB", fontsize=8)
+    page.insert_text((x + 60, 662), "CD", fontsize=8)
+    page.insert_text((x + 120, 662), "1:100", fontsize=8)
+    page.insert_text((x, 690), "DRAWING NO", fontsize=6)
+    page.insert_text((x + 120, 690), "REVISION", fontsize=6)
+    page.insert_text((x, 704), "A-201", fontsize=10)
+    page.insert_text((x + 120, 704), "C", fontsize=10)
+    return _reopen(doc)
+
+
+def test_single_floor_plan_with_proven_title_block_owns_printable_area():
+    doc = _single_plan_with_proven_title_block()
+    viewports = segment_page_viewports(doc[0], page_number=1)
+    assert len(viewports) == 1
+    plan = viewports[0]
+    assert plan.view_type == DrawingViewType.FLOOR_PLAN.value
+    assert plan.status == ViewportSegmentationStatus.DERIVED.value
+    assert plan.boundary_source == ViewportBoundarySource.TITLE_PARTITION.value
+    assert plan.bounding_box is not None
+    assert plan.provenance["partition_mode"] == "single_floor_plan_printable_area"
+    assert plan.provenance["single_view_validated"] is True
+    assert plan.provenance["title_block_bbox"]
+    assert plan.provenance["drawing_vector_primitive_count"] >= 2
+    assert is_authoritative_derived_viewport(plan)
+
+    authoritative = authoritative_floor_plan_viewports(doc[0], page_number=1)
+    assert len(authoritative) == 1
+    assert authoritative[0].bounding_box == pytest.approx(plan.bounding_box)
+    doc.close()
+
+
+def test_single_floor_plan_with_title_block_but_no_drawing_geometry_stays_unsupported():
+    doc = _single_plan_with_proven_title_block(include_plan_vectors=False)
+    viewport = segment_page_viewports(doc[0], page_number=1)[0]
+    assert viewport.status == ViewportSegmentationStatus.UNSUPPORTED.value
+    assert viewport.bounding_box is None
+    assert not is_authoritative_derived_viewport(viewport)
+    assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
+    doc.close()
+
+
+
+def _single_plan_with_sheet_drawing_frame(
+    *,
+    include_footer_metadata: bool = True,
+    omit_right_frame_edge: bool = False,
+) -> fitz.Document:
+    doc = fitz.open()
+    page = doc.new_page(width=1200, height=842)
+
+    # Deliberately draw the large sheet drawing frame as four independent
+    # source lines, not one rectangle path.  This exercises the source-owned
+    # sheet-frame resolver rather than the ordinary native-frame path.
+    left, top, right, bottom = 24.0, 24.0, 1170.0, 770.0
+    page.draw_line((left, top), (right, top))
+    page.draw_line((left, bottom), (right, bottom))
+    page.draw_line((left, top), (left, bottom))
+    if not omit_right_frame_edge:
+        page.draw_line((right, top), (right, bottom))
+
+    # Real drawing content, distinct from the sheet boundary itself.
+    page.draw_line((90, 120), (760, 120))
+    page.draw_line((760, 120), (760, 600))
+    page.draw_line((760, 600), (90, 600))
+    page.draw_line((90, 600), (90, 120))
+    page.insert_text((180, 690), "GROUND FLOOR PLAN", fontsize=11)
+
+    # Separate source-owned footer/metadata band outside the drawing frame.
+    page.draw_line((left, 774), (right, 774))
+    page.draw_line((left, 820), (right, 820))
+    page.draw_line((left, 774), (left, 820))
+    page.draw_line((right, 774), (right, 820))
+    if include_footer_metadata:
+        page.insert_text((700, 788), "Drawing name:", fontsize=6)
+        page.insert_text((700, 802), "Floor Plan", fontsize=9)
+        page.insert_text((900, 788), "Client", fontsize=6)
+        page.insert_text((900, 802), "Example Client", fontsize=9)
+        page.insert_text((1040, 788), "REVISION", fontsize=6)
+        page.insert_text((1120, 788), "Scale:", fontsize=6)
+        page.insert_text((1120, 802), "1:100", fontsize=8)
+
+    return _reopen(doc)
+
+
+def test_single_floor_plan_sheet_frame_with_separate_metadata_band_is_authoritative():
+    doc = _single_plan_with_sheet_drawing_frame()
+    viewports = segment_page_viewports(doc[0], page_number=1)
+    assert len(viewports) == 1
+    plan = viewports[0]
+    assert plan.view_type == DrawingViewType.FLOOR_PLAN.value
+    assert plan.status == ViewportSegmentationStatus.DERIVED.value
+    assert plan.bounding_box == pytest.approx((24.0, 24.0, 1170.0, 770.0))
+    assert plan.provenance["partition_mode"] == "single_floor_plan_sheet_frame"
+    assert plan.provenance["single_view_validated"] is True
+    assert plan.provenance["metadata_label_count"] >= 2
+    assert plan.provenance["drawing_vector_primitive_count"] >= 2
+    assert is_authoritative_derived_viewport(plan)
+    assert len(authoritative_floor_plan_viewports(doc[0], page_number=1)) == 1
+    doc.close()
+
+
+def test_single_floor_plan_sheet_frame_without_metadata_band_evidence_stays_unsupported():
+    doc = _single_plan_with_sheet_drawing_frame(include_footer_metadata=False)
+    viewport = segment_page_viewports(doc[0], page_number=1)[0]
+    assert viewport.status == ViewportSegmentationStatus.UNSUPPORTED.value
+    assert viewport.bounding_box is None
+    assert not is_authoritative_derived_viewport(viewport)
+    doc.close()
+
+
+def test_single_floor_plan_incomplete_sheet_frame_stays_unsupported():
+    doc = _single_plan_with_sheet_drawing_frame(omit_right_frame_edge=True)
+    viewport = segment_page_viewports(doc[0], page_number=1)[0]
+    assert viewport.status == ViewportSegmentationStatus.UNSUPPORTED.value
+    assert viewport.bounding_box is None
+    assert not is_authoritative_derived_viewport(viewport)
+    doc.close()
+
+
 def test_two_unframed_separated_titles_create_non_overlapping_derived_partition():
     doc = fitz.open()
     page = doc.new_page(width=600, height=360)
