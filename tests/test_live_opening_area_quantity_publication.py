@@ -6,7 +6,8 @@ from types import MappingProxyType
 import pytest
 
 from pb_live_opening_area_quantity_publication import (
-    LIVE_OPENING_AREA_QUANTITY_AUTHORITY,
+    LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY,
+    LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY,
     _opening_quantity,
     publish_live_opening_area_quantities,
 )
@@ -117,7 +118,7 @@ def test_figured_opening_area_becomes_identity_bound_quantity_evidence() -> None
     assert quantity.value == pytest.approx(2.172)
     assert quantity.unit == "m2"
     assert quantity.input_entity_ids == ("opening-1",)
-    assert quantity.authority == LIVE_OPENING_AREA_QUANTITY_AUTHORITY
+    assert quantity.authority == LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY
     assert quantity.status == "corroborated"
     assert quantity.abstained is False
     assert "figured-1" in quantity.evidence_ids
@@ -147,6 +148,7 @@ def test_resolved_geometry_area_requires_physical_void_evidence() -> None:
     quantity = _opening_quantity(opening)
     assert quantity is not None
     assert quantity.value == pytest.approx(1.827)
+    assert quantity.authority == LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY
     assert quantity.metadata["measurement_record_id"] == "void-1"
 
     assert _opening_quantity(
