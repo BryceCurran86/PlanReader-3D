@@ -19,9 +19,11 @@ from pb_migration_contracts import QuantityEvidence, stable_contract_id
 
 LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION = "1.0.0"
 LIVE_OPENING_AREA_QUANTITY_RESOLVED = "live_opening_area_quantity_resolved"
-LIVE_OPENING_AREA_QUANTITY_AUTHORITY = (
-    "pb_live_opening_area_quantity_publication."
-    "publish_live_opening_area_quantities"
+LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY = (
+    "pb_opening_label_dimension_authority.figured_opening_label_area"
+)
+LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY = (
+    "pb_live_physical_opening_void_composition.resolved_opening_geometry_area"
 )
 
 
@@ -62,14 +64,17 @@ def _opening_quantity(
         return None
 
     measurement_record_id = None
+    quantity_authority = None
     if basis == "figured_opening_label":
         measurement_record_id = str(opening.figured_area_record_id or "").strip()
         if not measurement_record_id or measurement_record_id not in evidence_ids:
             return None
+        quantity_authority = LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY
     elif basis == "resolved_opening_geometry":
         measurement_record_id = str(opening.opening_void_record_id or "").strip()
         if not measurement_record_id or measurement_record_id not in evidence_ids:
             return None
+        quantity_authority = LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY
     else:
         # Unknown area bases cannot silently become commercial quantities.
         return None
@@ -103,7 +108,7 @@ def _opening_quantity(
         ),
         formula_version=LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION,
         evidence_ids=evidence_ids,
-        authority=LIVE_OPENING_AREA_QUANTITY_AUTHORITY,
+        authority=quantity_authority,
         status="corroborated",
         confidence=1.0,
         abstained=False,
@@ -163,7 +168,8 @@ def publish_live_opening_area_quantities(
 
 
 __all__ = [
-    "LIVE_OPENING_AREA_QUANTITY_AUTHORITY",
+    "LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY",
+    "LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY",
     "LIVE_OPENING_AREA_QUANTITY_RESOLVED",
     "LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION",
     "publish_live_opening_area_quantities",
