@@ -327,3 +327,28 @@ def test_source_closed_trace_rejects_canonical_evidence_dropout() -> None:
     # The publication gate itself rejects this quantity before sealing rather
     # than allowing an incomplete source trace to be constructed.
     assert publish_live_opening_area_quantities(composition) == ()
+
+
+def test_live_opening_source_closed_run_is_deterministic() -> None:
+    composition = _composition(
+        _opening(canonical_id="opening-a"),
+        _opening(
+            canonical_id="opening-b",
+            kind="door",
+            area_m2=3.15,
+            figured_area_record_id="figured-b",
+        ),
+    )
+    first = seal_live_opening_area_run(
+        composition,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    second = seal_live_opening_area_run(
+        composition,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    assert first.run_id == second.run_id
+    assert first.fingerprint == second.fingerprint
+    assert first.to_json() == second.to_json()
