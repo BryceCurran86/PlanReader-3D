@@ -5,8 +5,9 @@
 The isolated integration starts from current main `b4c71c22`, whose tree
 equals tested #1140 head `463458b3`. #1140 final CI passed 7,299 tests on
 Python 3.13 and 3.14, with 55 skipped and 13 expected failures on each.
-The exact private-source runtime is still being independently completed;
-the merge into main does not establish that source gate.
+The independent 18-page 3LAUREL runtime later terminated with exit 139 before
+producing a completed result. The merge into main does not establish that
+private-source gate; the separate dense-CAD guard in #1201 is not included here.
 
 Performance PR #1197 is inspected at `62485426`. Its CI stopped at Ruff:
 `Sequence` is used without an import in `pb_physical_opening_authority.py`.
@@ -24,19 +25,20 @@ current-revision and byte-hash checks. The caches must not bypass these seams.
 
 No benchmark/golden, scorer or V2 truth changes occur in the reviewed 32-file
 performance diff. Source-neutral decoding, immutable contract hashing,
-geometry broad phases and lineage copying are being checked against the
-existing synthetic invariance and fail-closed tests, rather than room targets.
+geometry broad phases and lineage copying were checked against the
+existing synthetic invariance and fail-closed tests. Room targets were never
+prediction inputs.
 The inherited #1195 viewport fix and #1196 customer-source scope must survive.
 
 ## Inference and proposed narrow fixes
 
 Reusing an authority after another revision is ingested can make a cached
 positive outlive its source. Focused stale-revision and source-replacement
-regressions will establish whether this occurs. The small integration fixes
-are to import `Sequence`, retain the normal shadow default and its existing
-behavior tests, and perform the original source guards before reusing cached
-opening/scale outcomes. Candidate discovery and geometry caches remain scoped
-to their exact snapshot. No room architecture is redesigned.
+regressions reproduced this defect. The small integration fixes import
+`Sequence`, retain the normal shadow default and its existing behavior tests,
+and perform the original source guards before reusing cached opening/scale
+outcomes. Candidate discovery and geometry caches remain scoped to their exact
+snapshot. No room architecture is redesigned.
 
 ## Source review and validation boundaries
 
@@ -151,3 +153,57 @@ The deployed v1.5.1 customer run also reaches the same repeated polygon-list
 construction in multiple one-minute stack snapshots. It is interrupted before
 publication and repeated after the exact-value allocation fix. This probe is
 not a substitute for the repository performance gates or real-source parity.
+
+## Completed customer and regression gates
+
+The repeated deployed v1.5.1 normal upload completes automatic processing in
+658.991 seconds and returns `[3, "Processed"]`. It uploads the unchanged,
+31-page pinned source and selects ordinary customer pages 7, 9 and 11. No
+geometry, scale or expected room quantity is supplied to the producer. Local
+non-AI reading uses the supported production setting and available Tesseract;
+optional ONNX/RapidOCR packages are absent. This is a three-selected-page
+customer gate, not a completed all-pages extraction claim.
+
+The completed automatic report contains distinct `COLDROOM` and `FREEZER`
+entries, each with `area_m2=1.765`, `quantity_status="Measured"` and legacy
+`PB RoomFace v2` provenance. The database export contains their corresponding
+1.76 m² floor rows, IDs 53 and 50, with empty commercial-authority fields.
+Food Prep has no named published row. Dry Store has no named row either; that
+absence does not establish a room-specific, source-owned abstention decision.
+The database export follows an interrupted extra manual refresh; the completed
+automatic checkpoint independently records both incorrect room quantities.
+Page-calibration values changed during that extra refresh and must not be
+presented as immutable metadata of the first automatic run.
+
+The source-only review establishes Cold Room's 6425 x 3950 mm interior envelope
+(25.37875 m²) and Freezer's separate 1700 x 3875 mm interior envelope
+(6.5875 m²) using native evidence and independent Poppler inspection, with
+cross-sheet corroboration. Food Prep's requested 4025 x 3297 mm control remains
+13.270425 m²; its partition-span scope is not silently enlarged into a new
+whole-room claim. The completed runtime fails these source/customer gates.
+
+The normal upload's AG-09 registry records 267 opening objects at CANONICALIZED,
+with zero QUANTIFIED or PUBLISHED and `explicit_quantity_link_unavailable`.
+These are openings, not rooms. The 56 exported legacy takeoff rows do not
+establish canonical publication of those 267 objects. Coverage is not changed
+to conceal either dropout or the weaker legacy room quantity path.
+
+Published code head `b9ad1aaa924b5b5a91708c0091cb2d72d9fab426` has the same
+tree as local tested head `a9cca38a5c43bb3e5908e54938e974873ed5aced`:
+`1992bec04e8ee20b1b3f2f3c80ed2bc23aa3245b`. Full CI passes on both Python
+3.13 and 3.14: 7,332 passed, 55 skipped and 13 expected failures each, plus
+the CI smoke test. Performance Fastpath, Docker Runtime Smoke and Wall
+Equivalence Grid Shadow also pass. Final focused integration checks pass
+193 tests. These regression results do not override the real-source failures.
+
+The normal customer process reaches an observed 3,174,252 kB high-water RSS
+(about 3,100 MiB); the separate A140 extractor reaches about 3,827 MiB. The
+isolated allocation and paint-log regressions improve, but the measured
+customer duration and memory do not establish that production freezes are
+resolved. No stable release or canonical-five accuracy claim is made.
+
+PR #1202 remains draft and unmerged. The major room scope, metric authority and
+customer parity failure is returned for owner review, as required by the
+integration brief. See `maryborough_customer_parity_handoff.md` for the source
+identities, observed seams, commit order and next gate. No missing canonical
+identity or metric geometry is invented to complete this integration.
