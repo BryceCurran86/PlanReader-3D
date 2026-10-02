@@ -21,7 +21,11 @@ from pb_hardened_authority_contract import (
     WallViewIdentity,
     resolve_internal_elevation_wall_surface,
 )
-from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_migration_contracts import (
+    EvidenceResolutionStatus,
+    QuantityEvidence,
+    stable_contract_id,
+)
 
 SCHEMA_VERSION = "1.0.0"
 SCALE_OR_FIGURED_HEIGHT_REQUIRED = "scale_or_figured_height_required"
@@ -930,10 +934,84 @@ def extract_internal_elevation_tile_surfaces(
     )
 
 
+def tile_surface_resolution_to_quantity_evidence(
+    resolution: WallSurfaceResolution,
+    *,
+    document_id: str,
+    source_sha256: str,
+    page_id: str,
+) -> QuantityEvidence:
+    """Project one corroborated canonical wall surface into typed quantity evidence.
+
+    The projector has no geometry-discovery authority of its own.  It accepts
+    only the canonical surface emitted by the hardened elevation wall-face gate.
+    """
+    if (
+        not isinstance(resolution, WallSurfaceResolution)
+        or resolution.status is not EvidenceResolutionStatus.CORROBORATED
+        or resolution.canonical_wall_surface is None
+        or resolution.quantity_m2 is None
+    ):
+        raise ValueError("resolution must contain a corroborated canonical wall surface")
+
+    surface = resolution.canonical_wall_surface
+    if str(surface.authority_status).strip().lower() != "corroborated":
+        raise ValueError("canonical wall surface must be corroborated")
+    value = float(resolution.quantity_m2)
+    if not math.isfinite(value) or value <= 0.0:
+        raise ValueError("tile surface quantity must be finite and positive")
+
+    quantity_id = stable_contract_id(
+        "internal_elevation_wall_tile_quantity",
+        {
+            "document_id": str(document_id),
+            "source_sha256": str(source_sha256),
+            "page_id": str(page_id),
+            "canonical_wall_surface_id": surface.canonical_wall_surface_id,
+            "tile_extent_id": surface.tile_extent_id,
+            "quantity_m2": round(value, 9),
+        },
+        digest_chars=32,
+    )
+    return QuantityEvidence(
+        quantity_id=quantity_id,
+        family="wall_tile_finish_area",
+        semantic_key=(
+            "wall_tile_finish:"
+            + surface.canonical_wall_surface_id
+            + ":area"
+        ),
+        value=value,
+        unit="m2",
+        input_entity_ids=(surface.canonical_wall_surface_id,),
+        formula="authenticated_internal_elevation_tile_extent",
+        formula_version=SCHEMA_VERSION,
+        evidence_ids=surface.evidence_ids,
+        authority="authenticated_internal_elevation_wall_face_extent",
+        status="firm",
+        confidence=1.0,
+        abstained=False,
+        blocking_reasons=(),
+        reason_codes=resolution.reason_codes,
+        metadata={
+            "document_id": str(document_id),
+            "source_sha256": str(source_sha256),
+            "page_id": str(page_id),
+            "viewport_id": surface.viewport_id,
+            "canonical_wall_id": surface.canonical_wall_id,
+            "physical_wall_face_id": surface.physical_wall_face_id,
+            "wall_view_id": surface.wall_view_id,
+            "tile_extent_id": surface.tile_extent_id,
+            "canonical_wall_surface_id": surface.canonical_wall_surface_id,
+        },
+    )
+
+
 __all__ = [
     "InternalElevationTileSurfaceExtraction",
     "SCALE_OR_FIGURED_HEIGHT_REQUIRED",
     "TILE_SCOPE_REQUIRED",
     "VIEW_TITLE_AUTHORITY_REQUIRED",
     "extract_internal_elevation_tile_surfaces",
+    "tile_surface_resolution_to_quantity_evidence",
 ]
