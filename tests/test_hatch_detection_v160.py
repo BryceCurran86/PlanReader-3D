@@ -1646,5 +1646,37 @@ class TestHatchErrorStatus(unittest.TestCase):
         self.assertEqual(status, "no_fills")
 
 
+class TestHatchResourceGuard(unittest.TestCase):
+    """Dense CAD pages fail closed before heavyweight drawing expansion."""
+
+    def test_dense_compact_drawing_count_skips_full_drawing_materialization(self):
+        from pb_hatch_detection_v160 import _MAX_CLUSTER_INPUT_STROKES
+
+        class Rect:
+            width = 841.0
+            height = 594.0
+
+        class DensePage:
+            rect = Rect()
+
+            def get_cdrawings(self):
+                return [None] * (_MAX_CLUSTER_INPUT_STROKES + 1)
+
+            def get_drawings(self):
+                raise AssertionError(
+                    "resource guard must run before get_drawings()"
+                )
+
+        evidence, clusters, diag = detect_hatch_patterns(DensePage())
+        self.assertEqual(evidence, [])
+        self.assertEqual(clusters, [])
+        self.assertTrue(diag["resource_guard_triggered"])
+        self.assertEqual(
+            diag["compact_drawings_count"],
+            _MAX_CLUSTER_INPUT_STROKES + 1,
+        )
+        self.assertIn("resource_guard", diag["extraction_error"])
+
+
 if __name__ == "__main__":
     unittest.main()
