@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - chatgpt/page7-wall-discrimination
-      - review/surface-accuracy-hardening-1208
 
 permissions:
   contents: read
