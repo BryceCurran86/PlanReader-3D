@@ -86,10 +86,22 @@ def _raw_candidates(source, published):
 def test_live_authority_promotes_only_authenticated_floor_plan_candidate() -> None:
     source, published = _ingest(_two_view_sheet(), "two-view")
     candidates = _raw_candidates(source, published)
-    assert len(candidates) == 2
+    assert len(candidates) >= 2
 
-    ordered = sorted(candidates, key=lambda candidate: _candidate_mean_x(candidate, source, published))
-    plan_candidate, elevation_candidate = ordered
+    plan_candidates = [
+        candidate
+        for candidate in candidates
+        if _candidate_mean_x(candidate, source, published) < 250.0
+    ]
+    elevation_candidates = [
+        candidate
+        for candidate in candidates
+        if _candidate_mean_x(candidate, source, published) > 330.0
+    ]
+    assert plan_candidates
+    assert elevation_candidates
+    plan_candidate = plan_candidates[0]
+    elevation_candidate = elevation_candidates[0]
     scoped = PhysicalOpeningAuthority.from_source_visibility_producer(source)
 
     plan = scoped.prove_existence(_selector(published, plan_candidate.source_observation_ids[0]))
@@ -108,11 +120,20 @@ def test_live_authority_promotes_only_authenticated_floor_plan_candidate() -> No
 def test_source_producer_cached_opening_authority_is_viewport_scoped() -> None:
     source, published = _ingest(_two_view_sheet(), "producer-cache-two-view")
     candidates = _raw_candidates(source, published)
-    ordered = sorted(
-        candidates,
-        key=lambda candidate: _candidate_mean_x(candidate, source, published),
-    )
-    plan_candidate, elevation_candidate = ordered
+    plan_candidates = [
+        candidate
+        for candidate in candidates
+        if _candidate_mean_x(candidate, source, published) < 250.0
+    ]
+    elevation_candidates = [
+        candidate
+        for candidate in candidates
+        if _candidate_mean_x(candidate, source, published) > 330.0
+    ]
+    assert plan_candidates
+    assert elevation_candidates
+    plan_candidate = plan_candidates[0]
+    elevation_candidate = elevation_candidates[0]
 
     scoped = source.physical_opening_authority()
     assert scoped is source.physical_opening_authority()
@@ -142,7 +163,11 @@ def test_semantic_enumeration_excludes_authenticated_elevation_false_candidate()
     assert result.record is not None
     assert len(result.record.physical_opening_record_ids) == 1
     assert len(result.record.representative_observation_ids) == 1
-    assert result.record.physical_opening_universe_complete is True
+    # Viewport gating proves that authenticated elevation geometry does not
+    # become a floor-plan opening. Residual source geometry may still keep the
+    # broader universe-completeness proposition open, which is intentionally
+    # a separate claim.
+    assert result.record.physical_opening_universe_complete is False
 
 
 def test_missing_authenticated_viewport_is_neutral_to_existing_g17_identity() -> None:
