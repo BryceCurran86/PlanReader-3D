@@ -515,7 +515,7 @@ def wall_topology_source_segment_count(
     page_width: float,
     page_height: float,
 ) -> int:
-    \"\"\"Return the source segment count eligible for exact wall topology.
+    """Return the source segment count eligible for exact wall topology.
 
     Runtime preflights must measure the same generic source universe as the
     physical-wall authority itself. Raw native-PDF segment count is not a
@@ -526,7 +526,7 @@ def wall_topology_source_segment_count(
     This helper does not publish walls or bypass the authority's final
     complexity check. Raster augmentation and all other source-owned evidence
     are still re-evaluated by the physical wall producer.
-    \"\"\"
+    """
 
     return len(
         _filter_repeated_non_physical_drafting_primitives(
