@@ -176,5 +176,4 @@ def test_complexity_census_preserves_unproven_filled_physical_geometry() -> None
             page_height=1000.0,
         )
         == len(fill_edges)
-    )
-\n
+    )\n
