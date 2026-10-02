@@ -457,6 +457,11 @@ class GenericPlanReaderExtractor:
             "evidence_ids": [],
             "quantity_id": None,
         }
+        self.source_opening_callouts_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "openings": [],
+        }
         # Declared source area claims are reconciliation-only diagnostics. They
         # remain observable even when no physical geometry can be established.
         self.declared_floor_area_claims: List[Dict[str, Any]] = []
@@ -1219,6 +1224,11 @@ class GenericPlanReaderExtractor:
             "external_wall_ids": [],
             "evidence_ids": [],
             "quantity_id": None,
+        }
+        self.source_opening_callouts_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "openings": [],
         }
         self.canonical_openings_live = {
             "status": "abstained",
@@ -3072,6 +3082,60 @@ class GenericPlanReaderExtractor:
         except Exception:
             self.extraction_status["ocr_reconcile"] = "extraction_failed"
         self._mark_performance("drawing_ocr_reconciliation_complete")
+
+        # ------------------------------------------------------------------
+        # Source-owned compact floor-plan opening callouts
+        # ------------------------------------------------------------------
+        self._mark_performance("source_plan_opening_callouts_start")
+        try:
+            from pb_source_plan_opening_callout import (
+                extract_source_plan_opening_callouts,
+            )
+
+            source_sha256 = hashlib.sha256(p_path.read_bytes()).hexdigest()
+            source_callouts = []
+            for page_index in target_pages:
+                if 0 <= page_index < len(doc):
+                    source_callouts.extend(
+                        extract_source_plan_opening_callouts(
+                            doc[page_index],
+                            source_sha256=source_sha256,
+                            source_page=page_index + 1,
+                        )
+                    )
+            if source_callouts:
+                self.source_opening_callouts_live = {
+                    "status": "corroborated",
+                    "reason_codes": ["source_plan_opening_callouts_resolved"],
+                    "openings": [item.to_dict() for item in source_callouts],
+                }
+                _coverage_quantities.extend(
+                    item.quantity_evidence for item in source_callouts
+                )
+                self.extraction_status["source_plan_opening_callouts"] = (
+                    "corroborated"
+                )
+            else:
+                self.source_opening_callouts_live = {
+                    "status": "abstained",
+                    "reason_codes": ["source_plan_opening_callouts_unavailable"],
+                    "openings": [],
+                }
+                self.extraction_status["source_plan_opening_callouts"] = (
+                    "abstained"
+                )
+        except Exception as exc:
+            self.source_opening_callouts_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"source_plan_opening_callouts_exception:{type(exc).__name__}"
+                ],
+                "openings": [],
+            }
+            self.extraction_status["source_plan_opening_callouts"] = (
+                "extraction_failed"
+            )
+        self._mark_performance("source_plan_opening_callouts_complete")
 
         # ------------------------------------------------------------------
         # Unique door WxH callout → already identified dimensionless D#
