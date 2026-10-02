@@ -19,6 +19,10 @@ from pb_opening_height_authority import (
     OpeningHeightProducer,
     OpeningHeightSelector,
 )
+from pb_opening_kind_authority import (
+    OPENING_KIND_CONFLICT,
+    resolve_opening_kind,
+)
 from pb_opening_tag_normalization import normalize_opening_tag
 from pb_opening_vertical_placement_authority import (
     OpeningVerticalPlacementProducer,
@@ -416,6 +420,7 @@ def compose_live_physical_opening_voids(
 
     traces: list[LivePhysicalOpeningVoidTrace] = []
     canonical_openings: list[LiveCanonicalOpeningObject] = []
+    kind_conflict_opening_ids: set[str] = set()
     void_selectors: dict[str, PhysicalOpeningVoidSelector] = {}
     binding_by_opening = {
         str(trace.opening_identity_id): trace
@@ -462,6 +467,7 @@ def compose_live_physical_opening_voids(
             if schedule_record is not None
             else None
         )
+        schedule_trade_type = None
         opening_kind = None
         type_mark = None
         schedule_page_id = None
@@ -472,13 +478,7 @@ def compose_live_physical_opening_voids(
         schedule_row_observation_ids: tuple[str, ...] = ()
         tag_observation_id = None
         if schedule_record is not None and normalized_schedule_tag is not None:
-            opening_kind = (
-                "door"
-                if normalized_schedule_tag.trade_type == "doors"
-                else "window"
-                if normalized_schedule_tag.trade_type == "windows"
-                else None
-            )
+            schedule_trade_type = normalized_schedule_tag.trade_type
             type_mark = normalized_schedule_tag.tag
             schedule_page_id = str(schedule_record.schedule_page_id)
             schedule_declared_width_mm = schedule_record.schedule_row_width_mm
@@ -513,6 +513,17 @@ def compose_live_physical_opening_voids(
             else None
         )
         existence_record = existence_by_opening[opening_id].existence_record
+        kind_resolution = resolve_opening_kind(
+            structural_pattern=(
+                existence_record.structural_pattern
+                if existence_record is not None
+                else None
+            ),
+            schedule_trade_type=schedule_trade_type,
+        )
+        opening_kind = kind_resolution.opening_kind
+        if OPENING_KIND_CONFLICT in kind_resolution.reason_codes:
+            kind_conflict_opening_ids.add(opening_id)
         void_record = void.record
         binding_trace = binding_by_opening.get(opening_id)
         frame_trace = frame_by_opening.get(opening_id)
@@ -770,7 +781,7 @@ def compose_live_physical_opening_voids(
         and set(opening_selectors) == expected_opening_id_set
         and traced_opening_ids == expected_opening_id_set
     )
-    has_conflict = any(
+    has_conflict = bool(kind_conflict_opening_ids) or any(
         trace.void_status is EvidenceResolutionStatus.CONFLICT for trace in traces
     )
     all_resolved = upstream_complete and all(
@@ -785,6 +796,11 @@ def compose_live_physical_opening_voids(
         status = EvidenceResolutionStatus.CONFLICT
         reasons = (
             LIVE_PHYSICAL_OPENING_VOID_PARTIAL,
+            *(
+                (OPENING_KIND_CONFLICT,)
+                if kind_conflict_opening_ids
+                else ()
+            ),
             *(reason for trace in traces for reason in trace.void_reason_codes),
         )
     else:
