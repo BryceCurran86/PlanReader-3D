@@ -7,6 +7,34 @@ on:
     branches: [main]
 
 jobs:
+  handoff:
+    if: github.event_name == 'pull_request' && github.head_ref == 'ops/surface-review-handoff'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build repository handoff archive
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+          root = Path(".")
+          output = Path("/tmp/planreader-surface-review-handoff.zip")
+          excluded = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
+          with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+              for path in root.rglob("*"):
+                  if not path.is_file():
+                      continue
+                  if any(part in excluded for part in path.parts):
+                      continue
+                  archive.write(path, path.as_posix())
+          print(output, output.stat().st_size)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-surface-review-handoff
+          path: /tmp/planreader-surface-review-handoff.zip
+          retention-days: 1
+
   test:
     runs-on: ubuntu-latest
     strategy:
