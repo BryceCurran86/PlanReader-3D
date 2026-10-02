@@ -74,6 +74,13 @@ from pb_wall_room_topology_wall_assembly import assemble_wall_topology
 PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION = "1.2.0"
 PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED = "physical_wall_candidate_scope_resolved"
 PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE = "physical_wall_candidate_scope_unavailable"
+PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED = (
+    "physical_wall_candidate_scope_complexity_exceeded"
+)
+# Exact topology remains fail-closed on pathologically dense CAD scopes. The
+# limit is a runtime-safety boundary only: exceeding it never publishes a wall
+# or quantity and never changes evidence into a positive claim.
+MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS = 20_000
 PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE = (
     "physical_wall_candidate_source_integrity_failure"
 )
@@ -1959,6 +1966,11 @@ def _assemble_scope_result(
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = selector.decision_scope_id
+    if len(segments) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
+        return _blocked(
+            selector,
+            PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED,
+        )
     proven_wall_strips = _proven_filled_wall_strips(tuple(segments))
     graph_segments = _filter_proven_wall_strip_geometry(
         tuple(segments),
@@ -2147,6 +2159,11 @@ def _build_scope_result(
         decision_scope_id=scope_id,
         resolved_visible_observations=resolved_visible_observations,
     )
+    if len(segments) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
+        return _blocked(
+            selector,
+            PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED,
+        )
     scale_producer = (
         physical_scale_producer
         if physical_scale_producer is not None
