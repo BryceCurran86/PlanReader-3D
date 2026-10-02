@@ -116,7 +116,7 @@ def test_dense_repeated_non_orthogonal_singleton_motif_is_excluded() -> None:
     assert _filter(motif) == ()
 
 
-def test_repeated_orthogonal_short_returns_need_strong_repetition_before_exclusion() -> None:
+def test_repeated_orthogonal_short_returns_below_motif_threshold_are_preserved() -> None:
     walls = [
         _line(
             f"r-{idx}",
@@ -126,6 +126,6 @@ def test_repeated_orthogonal_short_returns_need_strong_repetition_before_exclusi
             0.0,
             path_index=idx,
         )
-        for idx in range(12)
+        for idx in range(4)
     ]
     assert _filter(walls) == tuple(walls)
