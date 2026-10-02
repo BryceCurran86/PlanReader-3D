@@ -11,14 +11,33 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import importlib.util
 import json
+from pathlib import Path
+import sys
 from typing import Any, Mapping, Sequence
 
-from .evaluator import (
-    ProducedTakeoffItemV2,
-    ProjectBenchmarkManifestV2,
-    VerifiedTakeoffItemV2,
-)
+if __package__:
+    from .evaluator import (
+        ProducedTakeoffItemV2,
+        ProjectBenchmarkManifestV2,
+        VerifiedTakeoffItemV2,
+    )
+else:
+    _evaluator_path = Path(__file__).with_name("evaluator.py")
+    _evaluator_spec = importlib.util.spec_from_file_location(
+        "full_plan_takeoff_v2_evaluator",
+        _evaluator_path,
+    )
+    assert _evaluator_spec is not None and _evaluator_spec.loader is not None
+    _evaluator_module = sys.modules.get(_evaluator_spec.name)
+    if _evaluator_module is None:
+        _evaluator_module = importlib.util.module_from_spec(_evaluator_spec)
+        sys.modules[_evaluator_spec.name] = _evaluator_module
+        _evaluator_spec.loader.exec_module(_evaluator_module)
+    ProducedTakeoffItemV2 = _evaluator_module.ProducedTakeoffItemV2
+    ProjectBenchmarkManifestV2 = _evaluator_module.ProjectBenchmarkManifestV2
+    VerifiedTakeoffItemV2 = _evaluator_module.VerifiedTakeoffItemV2
 
 
 SEALED_SOURCE_RUN_SCHEMA_VERSION = "1.0.0"
@@ -166,7 +185,10 @@ def _validate_sealed_run(
 ) -> tuple[Mapping[str, Any], ...]:
     if str(sealed_run.get("schema_version")) != SEALED_SOURCE_RUN_SCHEMA_VERSION:
         raise ValueError("unsupported sealed source-run schema_version")
-    if _required(sealed_run.get("project_id"), "sealed_run.project_id") != manifest.project_id:
+    if (
+        _required(sealed_run.get("project_id"), "sealed_run.project_id")
+        != manifest.project_id
+    ):
         raise ValueError("sealed-run project_id does not match manifest")
     _verify_fingerprint(sealed_run, "sealed_run")
     expected_hashes = {doc.sha256 for doc in manifest.source_documents}
@@ -250,14 +272,16 @@ def reconcile_sealed_run_v2(
 
         raw_refs = tuple(row.get("object_identity_refs") or ())
         unmapped_refs = tuple(
-            f"production-unmapped:{value}"
-            for value in raw_refs
-            if str(value).strip()
+            f"production-unmapped:{identity_ref}"
+            for identity_ref in raw_refs
+            if str(identity_ref).strip()
         ) or (f"production-unmapped:{row['quantity_id']}",)
         produced.append(
             ProducedTakeoffItemV2(
                 quantity_id=_required(row.get("quantity_id"), "quantity_id"),
-                trade_category=f"production-unmapped:{_required(row.get('family'), 'family')}",
+                trade_category=(
+                    f"production-unmapped:{_required(row.get('family'), 'family')}"
+                ),
                 value=value,
                 unit=unit,
                 object_refs=unmapped_refs,
