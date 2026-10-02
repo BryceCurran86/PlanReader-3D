@@ -538,6 +538,10 @@ class PhysicalOpeningAuthority:
             tuple[str, str, str, str, str],
             dict[str, tuple[CandidateSemanticOpening, ...]],
         ] = {}
+        self._visible_viewport_candidate_membership_cache: dict[
+            tuple[str, str, str, str, str],
+            dict[str, tuple[CandidateSemanticOpening, ...]],
+        ] = {}
         self._visible_existence_cache: dict[
             tuple[str, str, str, str, str],
             PhysicalOpeningExistenceResult,
@@ -1303,6 +1307,31 @@ class PhysicalOpeningAuthority:
         by_id = {item.candidate_id: item for item in (*strong, *retained)}
         return tuple(by_id[key] for key in sorted(by_id))
 
+    @staticmethod
+    def _visible_page_candidate_key(
+        seed: SourceObservationRecord,
+    ) -> tuple[str, str, str, str, str]:
+        return (
+            seed.document_id,
+            seed.revision_id,
+            seed.source_sha256,
+            seed.snapshot_id,
+            seed.page_id,
+        )
+
+    @staticmethod
+    def _candidate_membership_index(
+        candidates: tuple[CandidateSemanticOpening, ...],
+    ) -> dict[str, tuple[CandidateSemanticOpening, ...]]:
+        membership: dict[str, list[CandidateSemanticOpening]] = {}
+        for candidate in candidates:
+            for observation_id in candidate.source_observation_ids:
+                membership.setdefault(str(observation_id), []).append(candidate)
+        return {
+            observation_id: tuple(rows)
+            for observation_id, rows in membership.items()
+        }
+
     def _visible_candidates_for(
         self,
         seed: SourceObservationRecord,
@@ -1310,26 +1339,15 @@ class PhysicalOpeningAuthority:
     ) -> tuple[CandidateSemanticOpening, ...]:
         """Memoize deterministic multi-path candidate discovery per source page."""
 
-        key = (
-            seed.document_id,
-            seed.revision_id,
-            seed.source_sha256,
-            seed.snapshot_id,
-            seed.page_id,
-        )
+        key = self._visible_page_candidate_key(seed)
         cached = self._visible_candidate_cache.get(key)
         if cached is not None:
             return cached
         candidates = self._visible_all_structural_candidates(seed, records)
         self._visible_candidate_cache[key] = candidates
-        membership: dict[str, list[CandidateSemanticOpening]] = {}
-        for candidate in candidates:
-            for observation_id in candidate.source_observation_ids:
-                membership.setdefault(str(observation_id), []).append(candidate)
-        self._visible_candidate_membership_cache[key] = {
-            observation_id: tuple(rows)
-            for observation_id, rows in membership.items()
-        }
+        self._visible_candidate_membership_cache[key] = (
+            self._candidate_membership_index(candidates)
+        )
         return candidates
 
     def _viewport_scoped_visible_candidates_for(
@@ -1348,16 +1366,13 @@ class PhysicalOpeningAuthority:
         producer-owned SourceVisibilityProducer.
         """
         candidates = self._visible_candidates_for(seed, records)
+        key = self._visible_page_candidate_key(seed)
         if self._source_visibility_producer is None:
+            self._visible_viewport_candidate_membership_cache[key] = (
+                self._visible_candidate_membership_cache.get(key, {})
+            )
             return candidates, {}, ()
 
-        key = (
-            seed.document_id,
-            seed.revision_id,
-            seed.source_sha256,
-            seed.snapshot_id,
-            seed.page_id,
-        )
         cached = self._visible_viewport_scope_cache.get(key)
         if cached is not None:
             return cached
@@ -1378,15 +1393,15 @@ class PhysicalOpeningAuthority:
         if scope_result.status is not EvidenceResolutionStatus.CORROBORATED:
             result = ((), decisions, tuple(scope_result.reason_codes))
             self._visible_viewport_scope_cache[key] = result
+            self._visible_viewport_candidate_membership_cache[key] = {}
             return result
 
-        # Absence of authenticated viewport structure is not negative evidence.
-        # Preserve the existing page-scoped G17 proposition in that case. The
-        # viewport gate becomes authoritative only when the source itself
-        # supplies at least one authenticated view boundary/type.
         if not tuple(scope_result.authenticated_viewports):
             result = (candidates, decisions, tuple(scope_result.reason_codes))
             self._visible_viewport_scope_cache[key] = result
+            self._visible_viewport_candidate_membership_cache[key] = (
+                self._visible_candidate_membership_cache.get(key, {})
+            )
             return result
 
         promoted: list[CandidateSemanticOpening] = []
@@ -1401,12 +1416,16 @@ class PhysicalOpeningAuthority:
                 continue
             promoted.append(replace(candidate, viewport_id=viewport_id))
 
+        promoted_tuple = tuple(promoted)
         result = (
-            tuple(promoted),
+            promoted_tuple,
             decisions,
             tuple(scope_result.reason_codes),
         )
         self._visible_viewport_scope_cache[key] = result
+        self._visible_viewport_candidate_membership_cache[key] = (
+            self._candidate_membership_index(promoted_tuple)
+        )
         return result
 
     @staticmethod
@@ -1799,16 +1818,13 @@ class PhysicalOpeningAuthority:
         candidates, viewport_decisions, viewport_reasons = (
             self._viewport_scoped_visible_candidates_for(observation, records)
         )
-        raw_containing = tuple(
-            candidate
-            for candidate in raw_candidates
-            if observation.observation_id in candidate.source_observation_ids
-        )
-        containing = tuple(
-            candidate
-            for candidate in candidates
-            if observation.observation_id in candidate.source_observation_ids
-        )
+        candidate_key = self._visible_page_candidate_key(observation)
+        raw_containing = self._visible_candidate_membership_cache.get(
+            candidate_key, {}
+        ).get(observation.observation_id, ())
+        containing = self._visible_viewport_candidate_membership_cache.get(
+            candidate_key, {}
+        ).get(observation.observation_id, ())
 
         if self._source_visibility_producer is not None and raw_containing and not containing:
             raw_scopes = {
@@ -1968,14 +1984,13 @@ class PhysicalOpeningAuthority:
         candidates, viewport_decisions, viewport_reasons = (
             self._viewport_scoped_visible_candidates_for(observation, records)
         )
-        raw_containing = tuple(
-            candidate for candidate in raw_candidates
-            if observation.observation_id in candidate.source_observation_ids
-        )
-        containing = tuple(
-            candidate for candidate in candidates
-            if observation.observation_id in candidate.source_observation_ids
-        )
+        candidate_key = self._visible_page_candidate_key(observation)
+        raw_containing = self._visible_candidate_membership_cache.get(
+            candidate_key, {}
+        ).get(observation.observation_id, ())
+        containing = self._visible_viewport_candidate_membership_cache.get(
+            candidate_key, {}
+        ).get(observation.observation_id, ())
         if self._source_visibility_producer is not None and raw_containing and not containing:
             return cache_visible(PhysicalOpeningExistenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
