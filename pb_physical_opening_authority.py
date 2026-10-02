@@ -1886,7 +1886,7 @@ class PhysicalOpeningAuthority:
             source_sha256=candidate.source_sha256,
             snapshot_id=candidate.snapshot_id,
             page_id=candidate.page_id,
-            viewport_id=None,
+            viewport_id=candidate.viewport_id,
             semantic_class="opening",
             status=EvidenceResolutionStatus.CORROBORATED,
             proposition=PHYSICAL_OPENING_EXISTS,
@@ -1934,13 +1934,17 @@ class PhysicalOpeningAuthority:
         return tuple(point for segment in segments for point in segment)
 
     @staticmethod
-    def _identity_scope(record: PhysicalOpeningExistenceRecord) -> tuple[str, str, str, str, str]:
+    def _identity_scope(
+        record: PhysicalOpeningExistenceRecord,
+    ) -> tuple[str, str, str, Optional[str]]:
+        # Physical identity scope follows immutable source bytes + physical
+        # viewport, not producer revision/snapshot metadata. Detector/module
+        # upgrades may change evidence fingerprints without changing the object.
         return (
             record.document_id,
-            record.revision_id,
             record.source_sha256,
-            record.snapshot_id,
             record.page_id,
+            record.viewport_id,
         )
 
     def compare_identity(
