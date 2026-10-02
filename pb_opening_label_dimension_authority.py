@@ -46,14 +46,14 @@ _MAX_OPENING_DIMENSION_MM = 6000.0
 _COORD_TOL = 1e-6
 
 _PAIR_RE = re.compile(
-    r"^\s*(?P<a>\d{1,2}|\d{3,4}|\d{1,2}[,.]\d{3})\s*"
+    r"^\s*(?P<a>\d{1,2}[,.]\d{3}|\d{3,4}|\d{1,2})\s*"
     r"(?:[-–—xX×])\s*"
-    r"(?P<b>\d{1,2}|\d{3,4}|\d{1,2}[,.]\d{3})"
+    r"(?P<b>\d{1,2}[,.]\d{3}|\d{3,4}|\d{1,2})"
     r"(?P<tail>.*)$",
     re.IGNORECASE,
 )
 _SINGLE_RE = re.compile(
-    r"^\s*(?P<a>\d{3,4}|\d{1,2}[,.]\d{3})(?P<tail>.*)$",
+    r"^\s*(?P<a>\d{1,2}[,.]\d{3}|\d{3,4})(?P<tail>.*)$",
     re.IGNORECASE,
 )
 _WINDOW_TOKEN_RE = re.compile(
