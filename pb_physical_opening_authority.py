@@ -417,19 +417,20 @@ def _candidate_collinear_record_pairs(
 
     return tuple(sorted(pairs))
 
-def _face_break(
+def _face_break_from_proven_collinear_lines(
     first: SourceObservationRecord,
     second: SourceObservationRecord,
     *,
-    first_line: Optional[tuple[float, float, float, float]] = None,
-    second_line: Optional[tuple[float, float, float, float]] = None,
+    first_line: tuple[float, float, float, float],
+    second_line: tuple[float, float, float, float],
 ) -> Optional[_FaceBreak]:
-    if first_line is None:
-        first_line = _line_geometry(first)
-    if second_line is None:
-        second_line = _line_geometry(second)
-    if first_line is None or second_line is None or not _collinear(first_line, second_line):
-        return None
+    \"\"\"Build one face break after exact collinearity has already been proved.
+
+    The production caller consumes pairs emitted by
+    _candidate_collinear_record_pairs(), which already applies the exact
+    _parallel and _collinear predicates to these same cached line geometries.
+    Avoiding the duplicate proof changes no candidate membership or tolerance.
+    \"\"\"
     direction = _canonical_direction(first_line)
     first_values = sorted(
         (_projection((first_line[0], first_line[1]), direction),
@@ -463,6 +464,26 @@ def _face_break(
         direction=direction,
     )
 
+
+def _face_break(
+    first: SourceObservationRecord,
+    second: SourceObservationRecord,
+    *,
+    first_line: Optional[tuple[float, float, float, float]] = None,
+    second_line: Optional[tuple[float, float, float, float]] = None,
+) -> Optional[_FaceBreak]:
+    if first_line is None:
+        first_line = _line_geometry(first)
+    if second_line is None:
+        second_line = _line_geometry(second)
+    if first_line is None or second_line is None or not _collinear(first_line, second_line):
+        return None
+    return _face_break_from_proven_collinear_lines(
+        first,
+        second,
+        first_line=first_line,
+        second_line=second_line,
+    )
 
 def _same_gap(left: _FaceBreak, right: _FaceBreak) -> bool:
     if abs(left.gap_start - right.gap_start) > _COORD_EQ_ABS_TOL:
@@ -832,7 +853,7 @@ class PhysicalOpeningAuthority:
         for first_index, second_index in _candidate_collinear_record_pairs(
             scoped, line_geometries=cached_lines
         ):
-            found = _face_break(
+            found = _face_break_from_proven_collinear_lines(
                 scoped[first_index],
                 scoped[second_index],
                 first_line=cached_lines[first_index],
