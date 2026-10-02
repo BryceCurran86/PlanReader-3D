@@ -7,6 +7,39 @@ on:
     branches: [main]
 
 jobs:
+  handoff:
+    if: github.event_name == 'pull_request' && github.head_ref == 'ops/mary1205-handoff'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build repository handoff archive
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+
+          root = Path(".")
+          output = Path("/tmp/planreader-mary1205-handoff.zip")
+          excluded = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
+          with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+              for path in root.rglob("*"):
+                  if not path.is_file():
+                      continue
+                  if any(part in excluded for part in path.parts):
+                      continue
+                  archive.write(path, path.as_posix())
+          print(f"created {output} ({output.stat().st_size} bytes)")
+          PY
+
+      - name: Upload repository handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: planreader-mary1205-handoff
+          path: /tmp/planreader-mary1205-handoff.zip
+          if-no-files-found: error
+          retention-days: 1
+
   test:
     runs-on: ubuntu-latest
     strategy:
