@@ -7,6 +7,35 @@ on:
     branches: [main]
 
 jobs:
+  handoff:
+    if: github.event_name == 'pull_request' && github.head_ref == 'ops/maryborough-1220-exact-handoff-v2'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 6ac04b1225dcaf93b234f0192230a2a72f5c0865
+      - name: Build exact #1220 handoff
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+          out = Path('/tmp/planreader-maryborough-1220-exact.zip')
+          excluded = {'.git', '.venv', '__pycache__', '.pytest_cache', '.ruff_cache'}
+          with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as zf:
+              for p in Path('.').rglob('*'):
+                  if not p.is_file():
+                      continue
+                  if any(part in excluded for part in p.parts):
+                      continue
+                  zf.write(p, p.as_posix())
+          print(out, out.stat().st_size)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-maryborough-1220-exact
+          path: /tmp/planreader-maryborough-1220-exact.zip
+          retention-days: 1
+
   test:
     runs-on: ubuntu-latest
     strategy:
