@@ -162,8 +162,14 @@ def test_dense_unrelated_segments_do_not_restore_gap_times_all_segment_scans(
     )
     noise = tuple(
         (
-            (20.0 + float(index % 120) * 5.0, 220.0 + float(index // 120) * 3.0),
-            (22.0 + float(index % 120) * 5.0, 222.0 + float(index // 120) * 3.0),
+            (
+                20.0 + float(index % 100) * 6.0,
+                180.0 + float(index) * 0.1,
+            ),
+            (
+                22.0 + float(index % 100) * 6.0,
+                180.0 + float(index) * 0.1,
+            ),
         )
         for index in range(720)
     )
