@@ -6,6 +6,7 @@ import fitz
 import pytest
 
 from pb_source_plan_opening_callout import (
+    SOURCE_PLAN_OPENING_CALLOUT_BINDING_REQUIRED,
     extract_source_plan_opening_callouts,
 )
 
@@ -60,9 +61,19 @@ def test_explicit_compact_window_and_door_callouts_publish_source_area() -> None
     assert window.width_mm == 1800.0
     assert window.height_mm == 1200.0
     assert window.area_m2 == pytest.approx(2.16)
-    assert window.quantity_evidence.value == pytest.approx(2.16)
+    assert window.quantity_evidence.value is None
     assert window.quantity_evidence.unit == "m2"
-    assert window.quantity_evidence.input_entity_ids == (window.opening_id,)
+    assert window.quantity_evidence.input_entity_ids == ()
+    assert window.quantity_evidence.status == "abstained"
+    assert window.quantity_evidence.abstained is True
+    assert window.quantity_evidence.blocking_reasons == (
+        SOURCE_PLAN_OPENING_CALLOUT_BINDING_REQUIRED,
+    )
+    assert window.quantity_evidence.metadata["observed_area_m2"] == pytest.approx(2.16)
+    assert window.quantity_evidence.metadata["source_callout_id"] == window.opening_id
+    assert window.quantity_evidence.metadata["physical_opening_identity_bound"] is False
+    assert window.quantity_evidence.metadata["shadow_only"] is True
+    assert window.quantity_evidence.metadata["commercial_projection_allowed"] is False
 
     door = by_callout["2127 STACKER"]
     assert door.opening_kind == "door"
@@ -129,3 +140,22 @@ def test_physically_impossible_compact_code_fails_closed() -> None:
         )
     )
     assert result == ()
+
+
+def test_source_callout_measurement_never_mints_commercial_physical_identity() -> None:
+    result = _extract(
+        _pdf_bytes(
+            lines=(
+                "1218 SGW",
+                "2127 STACKER",
+            )
+        )
+    )
+    assert len(result) == 2
+    for callout in result:
+        quantity = callout.quantity_evidence
+        assert quantity.abstained is True
+        assert quantity.value is None
+        assert quantity.input_entity_ids == ()
+        assert SOURCE_PLAN_OPENING_CALLOUT_BINDING_REQUIRED in quantity.reason_codes
+        assert quantity.metadata["source_callout_id"] == callout.opening_id
