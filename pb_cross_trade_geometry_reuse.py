@@ -17,7 +17,7 @@ finish-face ownership.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
 from pb_auto_geometry_v1219 import SOURCE_PREFIX
@@ -29,6 +29,34 @@ _ALLOWED_HOST_TYPES = {"WALL", "SLAB", "ROOF", "SPACE", "FLOOR", "CEILING"}
 
 def _clean(value: object) -> str:
     return str(value or "").strip()
+
+
+def normalise_trade_unit(unit: object) -> str:
+    """Map spelling aliases of one unit onto its canonical spelling.
+
+    Aliases of the SAME unit only (m2 -> m², ea -> No., ...). Distinct units
+    are never merged, so quantity and company-rate units can be compared
+    exactly after normalising both sides with this one function.
+    """
+
+    cleaned = _clean(unit)
+    if cleaned in {"m2", "sqm", "m^2"}:
+        return "m²"
+    if cleaned in {"m3", "cum", "m^3"}:
+        return "m³"
+    if cleaned.lower() in {"ea", "count", "nr", "no"}:
+        return "No."
+    if cleaned in {"m", "lin.m", "linear_m"}:
+        return "lm"
+    return cleaned
+
+
+def require_evidence_ids(value: object, name: str) -> tuple[str, ...]:
+    """Clean an evidence-id sequence; a bare string is a caller bug, not a list."""
+
+    if isinstance(value, (str, bytes)) or not hasattr(value, "__iter__"):
+        raise TypeError(f"{name} must be a sequence of evidence ids, not a bare string")
+    return tuple(dict.fromkeys(_clean(item) for item in value if _clean(item)))
 
 
 def _positive(value: object) -> Optional[float]:
@@ -142,6 +170,8 @@ class DerivedTradeQuantity:
     derivation_formula: str
     host_evidence_ids: tuple[str, ...] = ()
     spec_evidence_ids: tuple[str, ...] = ()
+    rate_key: Optional[str] = None
+    rate_binding_evidence_ids: tuple[str, ...] = ()
     confidence: str = "Source-derived"
     notes: str = ""
     status: str = "Measured"
@@ -160,19 +190,36 @@ class DerivedTradeQuantity:
             )
         if not _clean(self.derivation_formula):
             raise ValueError("derivation_formula must be explicit")
-        unit = _clean(self.unit)
-        if unit in {"m2", "sqm", "m^2"}:
-            self.unit = "m²"
-        elif unit in {"m3", "cum", "m^3"}:
-            self.unit = "m³"
-        elif unit.lower() in {"ea", "count", "nr", "no"}:
-            self.unit = "No."
-        elif unit in {"m", "lin.m", "linear_m"}:
-            self.unit = "lm"
-        else:
-            self.unit = unit
+        self.unit = normalise_trade_unit(self.unit)
         self.host_evidence_ids = tuple(dict.fromkeys(self.host_evidence_ids))
         self.spec_evidence_ids = tuple(dict.fromkeys(self.spec_evidence_ids))
+        self.rate_key = _clean(self.rate_key) or None
+        self.rate_binding_evidence_ids = require_evidence_ids(
+            self.rate_binding_evidence_ids, "rate_binding_evidence_ids"
+        )
+
+
+def bind_derived_quantity_rate_key(
+    quantity: DerivedTradeQuantity,
+    *,
+    rate_key: str,
+    evidence_ids: Sequence[str],
+) -> DerivedTradeQuantity:
+    """Attach a company-rate lookup key without changing geometry or quantity."""
+
+    if type(quantity) is not DerivedTradeQuantity:
+        raise TypeError("quantity must be DerivedTradeQuantity")
+    clean_key = _clean(rate_key)
+    clean_evidence = require_evidence_ids(evidence_ids, "evidence_ids")
+    if not clean_key:
+        raise ValueError("rate_key must be non-empty")
+    if not clean_evidence:
+        raise ValueError("rate binding requires evidence/config provenance")
+    return replace(
+        quantity,
+        rate_key=clean_key,
+        rate_binding_evidence_ids=clean_evidence,
+    )
 
 
 def _quantity(
@@ -739,6 +786,37 @@ def derive_floor_surface_trade_quantities(
     )
 
 
+_PANEL_FINISH_SEMANTICS = frozenset({"insulated_panel", "sandwich_panel"})
+
+
+def _ceiling_insulation_spec_allowed(spec: Optional[Mapping[str, Any]]) -> bool:
+    if spec is None:
+        return True
+    material = _clean(
+        spec.get("material")
+        or spec.get("system")
+        or spec.get("profile")
+        or spec.get("substrate")
+    )
+    normalized_material = material.lower().replace("-", "_").replace(" ", "_")
+    semantic_finish = _clean(spec.get("semantic_finish")).lower()
+
+    # Panel-like insulation must already have an authenticated normalized
+    # semantic from the upstream schedule/finish authority. Raw abbreviations
+    # and raw descriptive wording are not interpreted here.
+    panel_like = (
+        material.upper() == "IP"
+        or normalized_material in {
+            "insulated_panel",
+            "insulation_panel",
+            "sandwich_panel",
+        }
+    )
+    if panel_like:
+        return semantic_finish in _PANEL_FINISH_SEMANTICS
+    return True
+
+
 def derive_ceiling_trade_quantities(
     ceiling: Mapping[str, Any],
     specs: Optional[Mapping[str, Any]] = None,
@@ -750,9 +828,17 @@ def derive_ceiling_trade_quantities(
         or ceiling.get("metric_area_complete") is not True
     ):
         return []
+    effective_specs = specs
+    insulation_spec = _trade_spec(specs, "insulation")
+    if insulation_spec is not None and not _ceiling_insulation_spec_allowed(
+        insulation_spec
+    ):
+        effective_specs = dict(specs or {})
+        effective_specs.pop("insulation", None)
+
     return _derive_area_surface_trade_quantities(
         surface=ceiling,
-        specs=specs,
+        specs=effective_specs,
         host_id_field="canonical_ceiling_id",
         host_type="CEILING",
         area_field="area_m2",
@@ -949,11 +1035,14 @@ def to_takeoff_rows(
 
 __all__ = [
     "DerivedTradeQuantity",
+    "bind_derived_quantity_rate_key",
     "derive_ceiling_trade_quantities",
     "derive_floor_surface_trade_quantities",
     "derive_roof_trade_quantities",
     "derive_slab_trade_quantities",
     "derive_space_trade_quantities",
     "derive_wall_trade_quantities",
+    "normalise_trade_unit",
+    "require_evidence_ids",
     "to_takeoff_rows",
 ]
