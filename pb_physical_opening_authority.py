@@ -1332,6 +1332,49 @@ class PhysicalOpeningAuthority:
             for observation_id, rows in membership.items()
         }
 
+    def _candidate_memberships_for_returned_candidates(
+        self,
+        seed: SourceObservationRecord,
+        raw_candidates: tuple[CandidateSemanticOpening, ...],
+        scoped_candidates: tuple[CandidateSemanticOpening, ...],
+    ) -> tuple[
+        dict[str, tuple[CandidateSemanticOpening, ...]],
+        dict[str, tuple[CandidateSemanticOpening, ...]],
+    ]:
+        """Use cached indexes only when they match the returned candidate tuples.
+
+        Normal producer execution returns the exact memoized tuples, so this is
+        an O(1) lookup. Tests and future provider overrides may replace
+        candidate discovery after a page cache already exists; in that case the
+        returned tuple is authoritative and its membership index is rebuilt
+        without changing candidate semantics.
+        """
+
+        key = self._visible_page_candidate_key(seed)
+        cached_raw = self._visible_candidate_cache.get(key)
+        if raw_candidates is cached_raw:
+            raw_membership = self._visible_candidate_membership_cache.get(key, {})
+        else:
+            raw_membership = self._candidate_membership_index(raw_candidates)
+
+        if scoped_candidates is raw_candidates or (
+            self._source_visibility_producer is None
+            and scoped_candidates == raw_candidates
+        ):
+            scoped_membership = raw_membership
+        else:
+            cached_scope = self._visible_viewport_scope_cache.get(key)
+            cached_scoped = cached_scope[0] if cached_scope is not None else None
+            if scoped_candidates is cached_scoped:
+                scoped_membership = (
+                    self._visible_viewport_candidate_membership_cache.get(key, {})
+                )
+            else:
+                scoped_membership = self._candidate_membership_index(
+                    scoped_candidates
+                )
+        return raw_membership, scoped_membership
+
     def _visible_candidates_for(
         self,
         seed: SourceObservationRecord,
@@ -1818,13 +1861,15 @@ class PhysicalOpeningAuthority:
         candidates, viewport_decisions, viewport_reasons = (
             self._viewport_scoped_visible_candidates_for(observation, records)
         )
-        candidate_key = self._visible_page_candidate_key(observation)
-        raw_containing = self._visible_candidate_membership_cache.get(
-            candidate_key, {}
-        ).get(observation.observation_id, ())
-        containing = self._visible_viewport_candidate_membership_cache.get(
-            candidate_key, {}
-        ).get(observation.observation_id, ())
+        raw_membership, scoped_membership = (
+            self._candidate_memberships_for_returned_candidates(
+                observation,
+                raw_candidates,
+                candidates,
+            )
+        )
+        raw_containing = raw_membership.get(observation.observation_id, ())
+        containing = scoped_membership.get(observation.observation_id, ())
 
         if self._source_visibility_producer is not None and raw_containing and not containing:
             raw_scopes = {
@@ -1984,13 +2029,15 @@ class PhysicalOpeningAuthority:
         candidates, viewport_decisions, viewport_reasons = (
             self._viewport_scoped_visible_candidates_for(observation, records)
         )
-        candidate_key = self._visible_page_candidate_key(observation)
-        raw_containing = self._visible_candidate_membership_cache.get(
-            candidate_key, {}
-        ).get(observation.observation_id, ())
-        containing = self._visible_viewport_candidate_membership_cache.get(
-            candidate_key, {}
-        ).get(observation.observation_id, ())
+        raw_membership, scoped_membership = (
+            self._candidate_memberships_for_returned_candidates(
+                observation,
+                raw_candidates,
+                candidates,
+            )
+        )
+        raw_containing = raw_membership.get(observation.observation_id, ())
+        containing = scoped_membership.get(observation.observation_id, ())
         if self._source_visibility_producer is not None and raw_containing and not containing:
             return cache_visible(PhysicalOpeningExistenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
