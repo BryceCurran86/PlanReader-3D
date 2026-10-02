@@ -145,14 +145,18 @@ def test_semantic_enumeration_excludes_authenticated_elevation_false_candidate()
     assert result.record.physical_opening_universe_complete is True
 
 
-def test_missing_authenticated_viewport_fails_closed_in_live_authority() -> None:
+def test_missing_authenticated_viewport_is_neutral_to_existing_g17_identity() -> None:
     source, published = _ingest(_untitled_sheet(), "untitled")
     candidates = _raw_candidates(source, published)
     assert candidates
 
     scoped = PhysicalOpeningAuthority.from_source_visibility_producer(source)
-    result = scoped.prove_existence(_selector(published, candidates[0].source_observation_ids[0]))
+    result = scoped.prove_existence(
+        _selector(published, candidates[0].source_observation_ids[0])
+    )
 
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert result.existence_record is None
-    assert "no_authenticated_viewport" in result.reason_codes
+    # No authenticated viewport structure is absence of scoping evidence, not
+    # proof against the already-covered page-scoped G17 opening proposition.
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.existence_record is not None
+    assert result.existence_record.viewport_id is None
