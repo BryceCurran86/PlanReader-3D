@@ -588,6 +588,98 @@ class TestSemanticLabelFiltering(unittest.TestCase):
         self.assertEqual(labels, ["MASTER BEDROOM"],
             f"Expected exactly ['MASTER BEDROOM'], got: {labels}")
 
+    def test_food_prep_horizontal_phrase_first(self):
+        """Known phrase survives even when neither token is a standalone anchor."""
+        words = [
+            {"text": "FOOD", "bbox": [10.0, 10.0, 40.0, 25.0]},
+            {"text": "PREP", "bbox": [45.0, 10.0, 75.0, 25.0]},
+        ]
+        candidates = filter_room_label_candidates(words)
+        self.assertEqual([c["label"] for c in candidates], ["FOOD PREP"])
+        self.assertEqual(candidates[0]["confidence"], 0.95)
+
+    def test_food_prep_vertical_preserves_native_word_order(self):
+        """Maryborough-style vertical FOOD PREP uses native word_no ordering."""
+        words = [
+            {
+                "text": "FOOD",
+                "bbox": [443.4, 668.4, 461.4, 698.6],
+                "block_no": 106,
+                "line_no": 0,
+                "word_no": 0,
+            },
+            {
+                "text": "PREP",
+                "bbox": [443.4, 632.2, 461.4, 662.4],
+                "block_no": 106,
+                "line_no": 0,
+                "word_no": 1,
+            },
+        ]
+        candidates = filter_room_label_candidates(words)
+        self.assertEqual([c["label"] for c in candidates], ["FOOD PREP"])
+        self.assertEqual(candidates[0]["confidence"], 0.95)
+
+    def test_leading_non_anchor_known_phrase(self):
+        """CONFERENCE ROOM reconstructs before ROOM falls back as a single token."""
+        words = [
+            {"text": "CONFERENCE", "bbox": [10.0, 10.0, 70.0, 25.0]},
+            {"text": "ROOM", "bbox": [75.0, 10.0, 110.0, 25.0]},
+        ]
+        candidates = filter_room_label_candidates(words)
+        self.assertEqual([c["label"] for c in candidates], ["CONFERENCE ROOM"])
+        self.assertEqual(candidates[0]["confidence"], 0.95)
+
+    def test_unrelated_sentence_does_not_become_room_phrase(self):
+        """Specification prose containing meeting remains non-room text."""
+        words = [
+            {"text": "subject", "bbox": [10.0, 10.0, 40.0, 25.0]},
+            {"text": "to", "bbox": [45.0, 10.0, 55.0, 25.0]},
+            {"text": "meeting", "bbox": [60.0, 10.0, 95.0, 25.0]},
+            {"text": "this", "bbox": [100.0, 10.0, 115.0, 25.0]},
+            {"text": "criterion", "bbox": [120.0, 10.0, 160.0, 25.0]},
+        ]
+        self.assertEqual(filter_room_label_candidates(words), [])
+
+    def test_vertical_without_word_no_checks_reverse_reading_order(self):
+        """Vertical fallback may reverse tokens, but only for exact known phrases."""
+        words = [
+            {"text": "PREP", "bbox": [10.0, 100.0, 25.0, 130.0]},
+            {"text": "FOOD", "bbox": [10.0, 135.0, 25.0, 165.0]},
+        ]
+        candidates = filter_room_label_candidates(words)
+        self.assertEqual([c["label"] for c in candidates], ["FOOD PREP"])
+
+    def test_unregistered_food_service_fails_closed(self):
+        """Nearby FOOD SERVICE text is not promoted because the phrase is unregistered."""
+        words = [
+            {"text": "FOOD", "bbox": [10.0, 10.0, 40.0, 25.0]},
+            {"text": "SERVICE", "bbox": [45.0, 10.0, 85.0, 25.0]},
+        ]
+        self.assertEqual(filter_room_label_candidates(words), [])
+
+    def test_stacked_known_phrase_within_compact_native_block(self):
+        """Adjacent short native lines may reconstruct one registered room label."""
+        words = [
+            {
+                "text": "MASTER",
+                "bbox": [10.0, 10.0, 70.0, 25.0],
+                "block_no": 7,
+                "line_no": 0,
+                "word_no": 0,
+            },
+            {
+                "text": "BEDROOM",
+                "bbox": [10.0, 30.0, 80.0, 45.0],
+                "block_no": 7,
+                "line_no": 1,
+                "word_no": 0,
+            },
+        ]
+        candidates = filter_room_label_candidates(words)
+        self.assertEqual([c["label"] for c in candidates], ["MASTER BEDROOM"])
+        self.assertEqual(candidates[0]["confidence"], 0.95)
+
     def test_labelled_small_wc_survives(self):
         """BLOCKER 2 + BLOCKER 1: labelled 1.4 m² WC survives."""
         result = filter_face(WC_PDF, SCALE_1_100, 595, 842, label="WC")
