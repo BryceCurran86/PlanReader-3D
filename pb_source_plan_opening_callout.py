@@ -28,6 +28,9 @@ from pb_migration_contracts import QuantityEvidence, stable_contract_id
 SOURCE_PLAN_OPENING_CALLOUT_SCHEMA_VERSION = "1.0.0"
 SOURCE_PLAN_OPENING_CALLOUT_RESOLVED = "source_plan_opening_callout_resolved"
 SOURCE_PLAN_OPENING_CALLOUT_UNAVAILABLE = "source_plan_opening_callout_unavailable"
+SOURCE_PLAN_OPENING_CALLOUT_BINDING_REQUIRED = (
+    "source_plan_opening_callout_physical_binding_required"
+)
 
 _FLOOR_PLAN_RE = re.compile(r"\bfloor\s+plan\b|\bplan\s*:\s*floor\b", re.I)
 _CODE_RE = re.compile(r"^\d{4}$")
@@ -255,19 +258,27 @@ def extract_source_plan_opening_callouts(
             },
             digest_chars=32,
         )
+        # The callout is authenticated source measurement evidence, not a
+        # physical opening identity. Keep the numerical observation on the
+        # SourcePlanOpeningCallout record, while the QuantityEvidence remains
+        # explicitly non-publishable until another authority binds it to one
+        # independently proven physical opening.
         quantity = QuantityEvidence(
             quantity_id=quantity_id,
             family="opening_area",
-            semantic_key=f"opening:{opening_id}:area",
-            value=area_m2,
+            semantic_key=f"source_callout:{opening_id}:area",
+            value=None,
             unit="m2",
-            input_entity_ids=(opening_id,),
+            input_entity_ids=(),
             formula="width_mm * height_mm / 1000000",
             formula_version="source_plan_compact_opening_callout_v1",
             evidence_ids=(evidence_id,),
             authority="source_plan_compact_opening_callout",
-            status="firm",
+            status="abstained",
             confidence=1.0,
+            abstained=True,
+            blocking_reasons=(SOURCE_PLAN_OPENING_CALLOUT_BINDING_REQUIRED,),
+            reason_codes=(SOURCE_PLAN_OPENING_CALLOUT_BINDING_REQUIRED,),
             metadata={
                 "source_sha256": source_sha256,
                 "source_page": int(source_page),
@@ -279,6 +290,11 @@ def extract_source_plan_opening_callouts(
                 "trade_category": trade_category,
                 "width_mm": width_mm,
                 "height_mm": height_mm,
+                "observed_area_m2": area_m2,
+                "source_callout_id": opening_id,
+                "physical_opening_identity_bound": False,
+                "shadow_only": True,
+                "commercial_projection_allowed": False,
             },
         )
         found.append(
@@ -315,6 +331,7 @@ def extract_source_plan_opening_callouts(
 
 
 __all__ = [
+    "SOURCE_PLAN_OPENING_CALLOUT_BINDING_REQUIRED",
     "SOURCE_PLAN_OPENING_CALLOUT_RESOLVED",
     "SOURCE_PLAN_OPENING_CALLOUT_SCHEMA_VERSION",
     "SOURCE_PLAN_OPENING_CALLOUT_UNAVAILABLE",
