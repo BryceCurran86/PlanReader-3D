@@ -36,12 +36,17 @@ def _opening_quantity(
     canonical_id = str(opening.canonical_opening_id or "").strip()
     physical_id = str(opening.physical_opening_id or "").strip()
     viewport_id = str(opening.viewport_id or "").strip()
+    host_wall_id = str(opening.host_wall_id or "").strip()
+    host_binding_record_id = str(opening.host_binding_record_id or "").strip()
+    host_frame_record_id = str(opening.host_frame_record_id or "").strip()
     opening_kind = str(opening.opening_kind or "").strip().lower()
     basis = str(opening.area_basis or "").strip()
     if (
         not canonical_id
         or canonical_id != physical_id
         or not viewport_id
+        or not host_wall_id
+        or not (host_binding_record_id or host_frame_record_id)
         or opening_kind not in {"door", "window"}
         or not basis
         or opening.area_m2 is None
@@ -124,6 +129,9 @@ def _opening_quantity(
             "viewport_id": viewport_id,
             "canonical_opening_id": canonical_id,
             "physical_opening_id": physical_id,
+            "host_wall_id": host_wall_id,
+            "host_binding_record_id": host_binding_record_id or None,
+            "host_frame_record_id": host_frame_record_id or None,
             "opening_kind": opening_kind,
             "area_basis": basis,
             "measurement_record_id": measurement_record_id,

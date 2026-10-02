@@ -124,10 +124,34 @@ def test_figured_opening_area_becomes_identity_bound_quantity_evidence() -> None
     assert "figured-1" in quantity.evidence_ids
     assert quantity.metadata["area_basis"] == "figured_opening_label"
     assert quantity.metadata["measurement_record_id"] == "figured-1"
+    assert quantity.metadata["host_wall_id"] == "wall-1"
+    assert quantity.metadata["host_binding_record_id"] == "host-binding-1"
 
 
 def test_untyped_opening_never_publishes_trade_area() -> None:
     assert _opening_quantity(_opening(kind=None)) is None
+
+
+def test_opening_without_authenticated_host_never_publishes_area_quantity() -> None:
+    assert _opening_quantity(
+        replace(
+            _opening(),
+            host_wall_id=None,
+            host_binding_record_id=None,
+            host_frame_record_id=None,
+        )
+    ) is None
+
+
+def test_host_identity_requires_source_binding_or_frame_record() -> None:
+    assert _opening_quantity(
+        replace(
+            _opening(),
+            host_wall_id="wall-1",
+            host_binding_record_id=None,
+            host_frame_record_id=None,
+        )
+    ) is None
 
 
 def test_opening_without_owned_viewport_never_publishes_area_quantity() -> None:
