@@ -126,6 +126,12 @@ def test_non_opening_text_fragments_are_not_created_from_native_line() -> None:
     assert _parseable_opening_label_fragments(rows) == ()
 
 
+def test_parser_rejects_dangling_single_dimension_separator_fragments() -> None:
+    assert parse_opening_label_dimensions("1,800 -") is None
+    assert parse_opening_label_dimensions("2,100 x") is None
+    assert parse_opening_label_dimensions("2,100 ×") is None
+
+
 def test_parser_keeps_single_dimension_separate_and_rejects_clear_zone_text() -> None:
     sliding = parse_opening_label_dimensions("1,200 vsd")
     assert sliding is not None
