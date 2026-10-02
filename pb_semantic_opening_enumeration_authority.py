@@ -404,7 +404,9 @@ class SemanticOpeningEnumerationProducer:
         )
         physical = self._physical_opening_authorities.get(physical_key)
         if physical is None:
-            physical = PhysicalOpeningAuthority(visibility)
+            physical = PhysicalOpeningAuthority.from_source_visibility_producer(
+                self._source_visibility_producer
+            )
             self._physical_opening_authorities[physical_key] = physical
         allowed_pages = set(scoped_page_ids)
 
