@@ -28,6 +28,8 @@ from typing import Mapping, Optional, Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_opening_authority import (
+    GAP_CORROBORATED_DOOR_JAMB_LEAF,
+    GAP_CORROBORATED_WINDOW_JAMB_PAIR,
     PHYSICAL_OPENING_EXISTS,
     PHYSICAL_OPENING_IDENTITY_RESOLVED,
     PhysicalOpeningAuthority,
@@ -424,15 +426,23 @@ class OpeningHostBindingProducer:
                 status=status,
             )
 
-        geometry = _opening_geometry(self._opening, opening)
-        if geometry is None:
-            return _blocked_binding("authenticated_opening_geometry_unavailable")
-
-        band_resolution = _resolve_host_bands(
+        lineage_resolution = _resolve_generic_gap_lineage_host(
+            self._opening,
+            opening,
             universe.records,
-            geometry,
             universe.equivalence,
         )
+        if lineage_resolution is not None:
+            band_resolution = lineage_resolution
+        else:
+            geometry = _opening_geometry(self._opening, opening)
+            if geometry is None:
+                return _blocked_binding("authenticated_opening_geometry_unavailable")
+            band_resolution = _resolve_host_bands(
+                universe.records,
+                geometry,
+                universe.equivalence,
+            )
         if band_resolution.status is not EvidenceResolutionStatus.CORROBORATED:
             return _blocked_binding(
                 *band_resolution.reason_codes,
@@ -645,6 +655,367 @@ def _point_at_scalar(line: Sequence[float], axis: Point, target: float) -> Optio
     return None
 
 
+def _point_close(left: Point, right: Point, *, tolerance: float = _COORD_TOL) -> bool:
+    return (
+        abs(float(left[0]) - float(right[0])) <= tolerance
+        and abs(float(left[1]) - float(right[1])) <= tolerance
+    )
+
+
+def _window_jamb_pair_geometry(
+    records: Sequence[SourceObservationRecord],
+) -> Optional[_OpeningGeometry]:
+    """Recover two-face opening geometry from an authenticated gap + two jambs.
+
+    The GAP_CORROBORATED_WINDOW_JAMB_PAIR producer path contributes exactly
+    two collinear wall-continuation segments and two source-drawn jamb
+    segments. This helper accepts only the topology already proven by that
+    pattern: one unique positive gap, one jamb attached to each gap endpoint,
+    parallel jambs, and matching opposite endpoints. It never infers geometry
+    from proximity, labels, dimensions, or expected widths.
+    """
+
+    if len(records) != 4:
+        return None
+    lines = tuple(_line(record) for record in records)
+    if any(line is None for line in lines):
+        return None
+    concrete = tuple(line for line in lines if line is not None)
+
+    gap_candidates: list[
+        tuple[int, int, Point, Point, Point]
+    ] = []
+    for first_index, first in enumerate(concrete):
+        for second_index in range(first_index + 1, len(concrete)):
+            second = concrete[second_index]
+            if not _collinear(first, second):
+                continue
+            axis = _canonical_unit(first)
+            if axis is None:
+                continue
+            first_iv = _scalar_interval(first, axis)
+            second_iv = _scalar_interval(second, axis)
+            if first_iv[0] <= second_iv[0]:
+                left, left_iv, right, right_iv = first, first_iv, second, second_iv
+            else:
+                left, left_iv, right, right_iv = second, second_iv, first, first_iv
+            if right_iv[0] - left_iv[1] <= _COORD_TOL:
+                continue
+            start = _point_at_scalar(left, axis, left_iv[1])
+            end = _point_at_scalar(right, axis, right_iv[0])
+            if start is None or end is None:
+                continue
+            gap_candidates.append(
+                (first_index, second_index, axis, start, end)
+            )
+
+    if len(gap_candidates) != 1:
+        return None
+    first_index, second_index, axis, start, end = gap_candidates[0]
+    jamb_indexes = tuple(
+        index
+        for index in range(len(concrete))
+        if index not in {first_index, second_index}
+    )
+    if len(jamb_indexes) != 2:
+        return None
+
+    gap_length = math.hypot(end[0] - start[0], end[1] - start[1])
+    if gap_length <= _COORD_TOL:
+        return None
+    normal = (-axis[1], axis[0])
+
+    attached: dict[str, tuple[Point, Point]] = {}
+    for index in jamb_indexes:
+        jamb = concrete[index]
+        jamb_axis = _canonical_unit(jamb)
+        if jamb_axis is None or abs(jamb_axis[0] * axis[0] + jamb_axis[1] * axis[1]) > _PARALLEL_TOL:
+            return None
+        jamb_points = _endpoints(jamb)
+        matches: list[tuple[str, Point, Point]] = []
+        for name, gap_point in (("start", start), ("end", end)):
+            for endpoint_index, endpoint in enumerate(jamb_points):
+                if _point_close(endpoint, gap_point):
+                    matches.append(
+                        (name, gap_point, jamb_points[1 - endpoint_index])
+                    )
+        if len(matches) != 1:
+            return None
+        name, gap_point, opposite = matches[0]
+        if name in attached:
+            return None
+        attached[name] = (gap_point, opposite)
+
+    if set(attached) != {"start", "end"}:
+        return None
+    start_face, start_opposite = attached["start"]
+    end_face, end_opposite = attached["end"]
+
+    start_offset = (
+        (start_opposite[0] - start_face[0]) * normal[0]
+        + (start_opposite[1] - start_face[1]) * normal[1]
+    )
+    end_offset = (
+        (end_opposite[0] - end_face[0]) * normal[0]
+        + (end_opposite[1] - end_face[1]) * normal[1]
+    )
+    if (
+        abs(start_offset) <= _COORD_TOL
+        or abs(end_offset) <= _COORD_TOL
+        or start_offset * end_offset <= 0.0
+    ):
+        return None
+    thickness = (abs(start_offset) + abs(end_offset)) / 2.0
+    thickness_tol = max(_COORD_TOL, thickness * 0.05)
+    if abs(abs(start_offset) - abs(end_offset)) > thickness_tol:
+        return None
+
+    opposite_axis = (
+        end_opposite[0] - start_opposite[0],
+        end_opposite[1] - start_opposite[1],
+    )
+    opposite_length = math.hypot(*opposite_axis)
+    if opposite_length <= _COORD_TOL:
+        return None
+    opposite_unit = (
+        opposite_axis[0] / opposite_length,
+        opposite_axis[1] / opposite_length,
+    )
+    if abs(_cross(axis, opposite_unit)) > _PARALLEL_TOL:
+        return None
+    if abs(opposite_length - gap_length) > max(_COORD_TOL, gap_length * 0.02):
+        return None
+
+    origin = (
+        (start_face[0] + start_opposite[0]) / 2.0,
+        (start_face[1] + start_opposite[1]) / 2.0,
+    )
+    end_mid = (
+        (end_face[0] + end_opposite[0]) / 2.0,
+        (end_face[1] + end_opposite[1]) / 2.0,
+    )
+    direction = (end_mid[0] - origin[0], end_mid[1] - origin[1])
+    length = math.hypot(*direction)
+    if length <= _COORD_TOL:
+        return None
+    resolved_axis = (direction[0] / length, direction[1] / length)
+    resolved_normal = (-resolved_axis[1], resolved_axis[0])
+    return _OpeningGeometry(
+        origin=origin,
+        axis=resolved_axis,
+        normal=resolved_normal,
+        length=length,
+        thickness=thickness,
+    )
+
+
+
+GENERIC_GAP_HOST_PATTERNS = frozenset(
+    {
+        GAP_CORROBORATED_DOOR_JAMB_LEAF,
+        GAP_CORROBORATED_WINDOW_JAMB_PAIR,
+    }
+)
+HOST_GAP_LINEAGE_UNAVAILABLE = "opening_gap_wall_lineage_unavailable"
+HOST_GAP_LINEAGE_UNMAPPED = "opening_gap_wall_lineage_unmapped"
+HOST_GAP_LINEAGE_AMBIGUOUS = "opening_gap_wall_lineage_ambiguous"
+
+
+def _raw_source_primitive_id(record: SourceObservationRecord) -> Optional[str]:
+    """Return the exact producer source primitive referenced by a visible line."""
+    ref = str(getattr(record, "source_primitive_ref", "") or "")
+    prefix = "visible:"
+    if not ref.startswith(prefix):
+        return None
+    raw_id = ref[len(prefix):].strip()
+    return raw_id or None
+
+
+def _unique_gap_source_records(
+    records: Sequence[SourceObservationRecord],
+) -> Optional[tuple[SourceObservationRecord, SourceObservationRecord]]:
+    """Find exactly one positive collinear interruption among source records."""
+    candidates: list[tuple[SourceObservationRecord, SourceObservationRecord]] = []
+    for index, first_record in enumerate(records):
+        first = _line(first_record)
+        if first is None:
+            return None
+        for second_record in records[index + 1:]:
+            second = _line(second_record)
+            if second is None or not _collinear(first, second):
+                continue
+            axis = _canonical_unit(first)
+            if axis is None:
+                continue
+            first_iv = _scalar_interval(first, axis)
+            second_iv = _scalar_interval(second, axis)
+            if first_iv[0] <= second_iv[0]:
+                left_iv, right_iv = first_iv, second_iv
+            else:
+                left_iv, right_iv = second_iv, first_iv
+            if right_iv[0] - left_iv[1] > _COORD_TOL:
+                candidates.append((first_record, second_record))
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
+def _resolve_gap_lineage_host_from_records(
+    opening_records: Sequence[SourceObservationRecord],
+    wall_records: Sequence[PhysicalWallCandidateRecord],
+    equivalence: PhysicalWallEquivalenceResolution,
+) -> _HostBandResolution:
+    """Bind a generic gap opening to wall candidates by immutable source lineage.
+
+    The G17 generic door/window patterns have already proved that two visible
+    source wall primitives form the interrupted wall run.  This resolver does
+    not use nearest-wall geometry.  It maps those exact primitives through W4
+    lineage, requires one unambiguous upstream equivalence group per side, and
+    retains both structural roles in the opening-scoped host group.
+    """
+
+    gap_pair = _unique_gap_source_records(opening_records)
+    if gap_pair is None:
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_GAP_LINEAGE_UNAVAILABLE,),
+        )
+    raw_ids = tuple(_raw_source_primitive_id(record) for record in gap_pair)
+    if any(raw_id is None for raw_id in raw_ids):
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_GAP_LINEAGE_UNAVAILABLE,),
+        )
+    left_raw, right_raw = raw_ids  # type: ignore[misc]
+    if left_raw == right_raw:
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_GAP_LINEAGE_UNAVAILABLE,),
+        )
+
+    ambiguous_ids = set(equivalence.ambiguous_wall_ids)
+    role_members: list[_RoleCandidate] = []
+    for raw_id in (left_raw, right_raw):
+        owners = tuple(
+            record
+            for record in wall_records
+            if record.physical_identity.usable
+            and raw_id in set(record.physical_identity.source_primitive_ids)
+        )
+        if not owners:
+            return _HostBandResolution(
+                EvidenceResolutionStatus.ABSTAINED,
+                (),
+                (HOST_GAP_LINEAGE_UNMAPPED,),
+            )
+        if any(record.wall_candidate_id in ambiguous_ids for record in owners):
+            return _HostBandResolution(
+                EvidenceResolutionStatus.CONFLICT,
+                (),
+                (HOST_GAP_LINEAGE_AMBIGUOUS, HOST_EQUIVALENCE_AMBIGUOUS),
+            )
+
+        by_group: dict[tuple[str, ...], list[PhysicalWallCandidateRecord]] = {}
+        for record in owners:
+            group = _equivalence_group_for(equivalence, record.wall_candidate_id)
+            by_group.setdefault(group, []).append(record)
+        if len(by_group) != 1:
+            return _HostBandResolution(
+                EvidenceResolutionStatus.CONFLICT,
+                (),
+                (HOST_GAP_LINEAGE_AMBIGUOUS,),
+            )
+        group, members = next(iter(by_group.items()))
+        chosen = sorted(members, key=lambda record: record.wall_candidate_id)[0]
+        role_members.append(
+            _RoleCandidate(
+                offset=0.0,
+                record=chosen,
+                candidate_group=group,
+            )
+        )
+
+    member_ids = tuple(
+        sorted({member.record.wall_candidate_id for member in role_members})
+    )
+    identity_ids = tuple(
+        sorted(
+            {
+                str(member.record.physical_identity.candidate_identity_id)
+                for member in role_members
+                if member.record.physical_identity.candidate_identity_id
+            }
+        )
+    )
+    if not member_ids or not identity_ids:
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_GAP_LINEAGE_UNMAPPED,),
+        )
+    groups = tuple(
+        sorted({tuple(sorted(member.candidate_group)) for member in role_members})
+    )
+    return _HostBandResolution(
+        EvidenceResolutionStatus.CORROBORATED,
+        (
+            _HostBand(
+                member_ids=member_ids,
+                member_candidate_identity_ids=identity_ids,
+                member_equivalence_groups=groups,
+                center_offset=0.0,
+            ),
+        ),
+        (),
+    )
+
+
+def _resolve_generic_gap_lineage_host(
+    authority: PhysicalOpeningAuthority,
+    opening: PhysicalOpeningExistenceRecord,
+    wall_records: Sequence[PhysicalWallCandidateRecord],
+    equivalence: PhysicalWallEquivalenceResolution,
+) -> Optional[_HostBandResolution]:
+    if opening.structural_pattern not in GENERIC_GAP_HOST_PATTERNS:
+        return None
+    visibility = authority.source_visibility_authority()
+    if type(visibility) is not SourceVisibilityAuthority:
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_GAP_LINEAGE_UNAVAILABLE,),
+        )
+    observations: list[SourceObservationRecord] = []
+    for observation_id in opening.source_observation_ids:
+        result = visibility.resolve_visible(
+            ObservationSelector(
+                document_id=opening.document_id,
+                revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,
+                snapshot_id=opening.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        if (
+            result.status is not EvidenceResolutionStatus.CORROBORATED
+            or result.observation is None
+        ):
+            return _HostBandResolution(
+                EvidenceResolutionStatus.ABSTAINED,
+                (),
+                (HOST_GAP_LINEAGE_UNAVAILABLE,),
+            )
+        observations.append(result.observation)
+    return _resolve_gap_lineage_host_from_records(
+        observations,
+        wall_records,
+        equivalence,
+    )
+
+
 def _opening_geometry(
     authority: PhysicalOpeningAuthority,
     opening: PhysicalOpeningExistenceRecord,
@@ -669,6 +1040,8 @@ def _opening_geometry(
         ):
             return None
         records.append(result.observation)
+    if opening.structural_pattern == GAP_CORROBORATED_WINDOW_JAMB_PAIR:
+        return _window_jamb_pair_geometry(records)
     if len(records) != 6:
         return None
 
