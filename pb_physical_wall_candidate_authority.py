@@ -71,6 +71,8 @@ from pb_wall_room_topology_stage_a import (
 from pb_wall_room_topology_wall_assembly import assemble_wall_topology
 
 
+_PRECOMPUTED_PAGE_VIEWPORTS_UNSET = object()
+
 PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION = "1.2.0"
 PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED = "physical_wall_candidate_scope_resolved"
 PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE = "physical_wall_candidate_scope_unavailable"
@@ -1323,7 +1325,7 @@ def _producer_opening_relation_overrides(
     opening_authority = (
         physical_opening_authority
         if physical_opening_authority is not None
-        else PhysicalOpeningAuthority(visibility)
+        else source_producer.physical_opening_authority()
     )
     proven_records: dict[str, object] = {}
 
@@ -1957,6 +1959,7 @@ def _assemble_scope_result(
     points_per_mm: Optional[float] = None,
     resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
+    precomputed_page_viewports=_PRECOMPUTED_PAGE_VIEWPORTS_UNSET,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = selector.decision_scope_id
     proven_wall_strips = _proven_filled_wall_strips(tuple(segments))
@@ -2036,33 +2039,38 @@ def _assemble_scope_result(
     )
 
     boundary_reasons: list[str] = list(pre_boundary_reasons)
-    boundary_pdf = fitz.open(stream=source_bytes, filetype="pdf")
-    try:
-        boundary_page = boundary_pdf.load_page(int(page_id) - 1)
-        page_viewports = (
-            _all_viewports(boundary_page, page_number=int(page_id))
-            if viewport is None
-            else None
-        )
-        for wall in ordered_walls:
-            if viewport is None:
-                reason = _scope_boundary_reason_from_viewports(
-                    wall,
-                    all_viewports=page_viewports,
-                    page_width=page_width,
-                    page_height=page_height,
+    if viewport is None:
+        if precomputed_page_viewports is _PRECOMPUTED_PAGE_VIEWPORTS_UNSET:
+            boundary_pdf = fitz.open(stream=source_bytes, filetype="pdf")
+            try:
+                boundary_page = boundary_pdf.load_page(int(page_id) - 1)
+                page_viewports = _all_viewports(
+                    boundary_page, page_number=int(page_id)
                 )
-            else:
-                reason = _viewport_scope_boundary_reason(
-                    wall,
-                    bbox=viewport.bounding_box,
-                    page_width=page_width,
-                    page_height=page_height,
-                )
-            if reason is not None:
-                boundary_reasons.append(reason)
-    finally:
-        boundary_pdf.close()
+            finally:
+                boundary_pdf.close()
+        else:
+            page_viewports = precomputed_page_viewports
+    else:
+        page_viewports = None
+
+    for wall in ordered_walls:
+        if viewport is None:
+            reason = _scope_boundary_reason_from_viewports(
+                wall,
+                all_viewports=page_viewports,
+                page_width=page_width,
+                page_height=page_height,
+            )
+        else:
+            reason = _viewport_scope_boundary_reason(
+                wall,
+                bbox=viewport.bounding_box,
+                page_width=page_width,
+                page_height=page_height,
+            )
+        if reason is not None:
+            boundary_reasons.append(reason)
 
     cropped = bool(boundary_reasons)
     reason_codes = (
@@ -2147,15 +2155,40 @@ def _build_scope_result(
         decision_scope_id=scope_id,
         resolved_visible_observations=resolved_visible_observations,
     )
+    boundary_pdf = fitz.open(stream=source_bytes, filetype="pdf")
+    try:
+        boundary_page = boundary_pdf.load_page(page_number - 1)
+        page_viewports = _all_viewports(boundary_page, page_number=page_number)
+    finally:
+        boundary_pdf.close()
+
+    usable_page_viewports = (
+        ()
+        if page_viewports is None
+        else tuple(
+            viewport
+            for viewport in page_viewports
+            if viewport.bounding_box is not None
+            and viewport.status
+            in {
+                ViewportSegmentationStatus.RESOLVED.value,
+                ViewportSegmentationStatus.DERIVED.value,
+            }
+        )
+    )
     scale_producer = (
         physical_scale_producer
         if physical_scale_producer is not None
         else PhysicalScaleProducer.from_source_visibility_producer(source_producer)
     )
-    points_per_mm = _producer_owned_points_per_mm(
-        scale_producer=scale_producer,
-        published=published,
-        page_id=page_id,
+    points_per_mm = (
+        None
+        if usable_page_viewports
+        else _producer_owned_points_per_mm(
+            scale_producer=scale_producer,
+            published=published,
+            page_id=page_id,
+        )
     )
     return _assemble_scope_result(
         source_producer=source_producer,
@@ -2170,6 +2203,7 @@ def _build_scope_result(
         points_per_mm=points_per_mm,
         resolved_visible_observations=resolved_visible_observations,
         physical_opening_authority=physical_opening_authority,
+        precomputed_page_viewports=page_viewports,
     )
 
 
@@ -2468,13 +2502,11 @@ class PhysicalWallCandidateProducer:
                 source_producer=source_visibility_producer,
                 published=published,
             )
-            physical_opening_authority = PhysicalOpeningAuthority(
-                source_visibility_producer.authority()
+            physical_opening_authority = (
+                source_visibility_producer.physical_opening_authority()
             )
             physical_scale_producer = (
-                PhysicalScaleProducer.from_source_visibility_producer(
-                    source_visibility_producer
-                )
+                source_visibility_producer.physical_scale_producer()
             )
 
             for page_id in materialized_page_ids:

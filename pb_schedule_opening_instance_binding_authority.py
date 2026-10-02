@@ -697,7 +697,7 @@ class ScheduleOpeningInstanceBindingProducer:
 
         visibility = self._source_visibility_producer.authority()
         text_integrity = self._source_visibility_producer.text_integrity_authority()
-        physical = PhysicalOpeningAuthority(visibility)
+        physical = self._source_visibility_producer.physical_opening_authority()
 
         existence = physical.prove_existence(opening_selector)
         opening = existence.existence_record

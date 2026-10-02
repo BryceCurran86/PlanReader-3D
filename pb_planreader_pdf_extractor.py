@@ -794,13 +794,33 @@ class GenericPlanReaderExtractor:
 
     @staticmethod
     def _page_has_large_raster(page: fitz.Page) -> bool:
-        """True when the page embeds a drawing-sized raster (plan often lives there)."""
+        """True when a genuinely page-significant raster is displayed.
+
+        Intrinsic image pixel dimensions alone are not enough: drawing exports
+        often embed a high-resolution logo/stamp that is only a tiny fraction
+        of the physical sheet. Treating that as a raster plan forces expensive
+        full-page OCR even when the drawing itself has rich native PDF text.
+
+        A raster must therefore be both reasonably detailed and occupy at
+        least 15% of the rendered page area. If display geometry cannot be
+        resolved, fail closed to ``False`` here; sparse native-text pages are
+        still independently eligible for OCR via the caller's sparse-text gate.
+        """
         try:
-            for image in page.get_images():
+            page_area = float(page.rect.get_area())
+            if not math.isfinite(page_area) or page_area <= 0.0:
+                return False
+            for image in page.get_images(full=True):
                 width = int(image[2] or 0)
                 height = int(image[3] or 0)
-                if width * height >= 400 * 400:
-                    return True
+                if width * height < 400 * 400:
+                    continue
+                xref = int(image[0])
+                rects = page.get_image_rects(xref)
+                for rect in rects:
+                    displayed_area = float(rect.get_area())
+                    if displayed_area / page_area >= 0.15:
+                        return True
         except Exception:
             return False
         return False
@@ -1286,7 +1306,17 @@ class GenericPlanReaderExtractor:
                 continue
             native_sparse = len((pg_txt or "").strip()) < 150
             if native_sparse or self._page_has_large_raster(page_obj):
+                self._mark_performance(
+                    "prescan_ocr_start",
+                    page=p_idx + 1,
+                    total_pages=len(target_pages),
+                )
                 ocr_txt = self._ocr_text_for_page(page_obj, p_idx)
+                self._mark_performance(
+                    "prescan_ocr_complete",
+                    page=p_idx + 1,
+                    total_pages=len(target_pages),
+                )
                 if ocr_txt.strip():
                     pg_txt = f"{pg_txt}\n{ocr_txt}"
             norm_pg = re.sub(r"\s+", " ", pg_txt.lower())
@@ -1329,8 +1359,18 @@ class GenericPlanReaderExtractor:
                     resolve_secondary_footprint_width_m,
                 )
 
+                self._mark_performance(
+                    "secondary_footprint_width_start",
+                    page=p_idx + 1,
+                    total_pages=len(target_pages),
+                )
                 spatial_evidence = resolve_secondary_footprint_width_m(
                     doc[p_idx], page_num=p_idx + 1
+                )
+                self._mark_performance(
+                    "secondary_footprint_width_complete",
+                    page=p_idx + 1,
+                    total_pages=len(target_pages),
                 )
                 if spatial_evidence is not None:
                     global_verandah_width = spatial_evidence.width_m
@@ -1399,8 +1439,18 @@ class GenericPlanReaderExtractor:
             # dimension strings carry a genuine wall-span-wall bracket --
             # see pb_dimension_chain_evidence_extractor.
             from pb_dimension_chain_evidence_extractor import extract_dimension_chains_from_page
+            self._mark_performance(
+                "dimension_chain_extraction_start",
+                page=p_idx + 1,
+                total_pages=len(target_pages),
+            )
             page_dimension_chains = extract_dimension_chains_from_page(
                 doc[p_idx], page_num=p_idx + 1, view_id=f"page_{p_idx + 1}"
+            )
+            self._mark_performance(
+                "dimension_chain_extraction_complete",
+                page=p_idx + 1,
+                total_pages=len(target_pages),
             )
             global_dimension_chains.extend(page_dimension_chains)
 
@@ -1410,10 +1460,20 @@ class GenericPlanReaderExtractor:
             from pb_secondary_area_support_evidence import (
                 extract_secondary_area_support_evidence_from_page,
             )
+            self._mark_performance(
+                "secondary_support_evidence_start",
+                page=p_idx + 1,
+                total_pages=len(target_pages),
+            )
             secondary_support_evidence = extract_secondary_area_support_evidence_from_page(
                 doc[p_idx],
                 source_page=p_idx + 1,
                 dimension_chains=page_dimension_chains,
+            )
+            self._mark_performance(
+                "secondary_support_evidence_complete",
+                page=p_idx + 1,
+                total_pages=len(target_pages),
             )
             if secondary_support_evidence is not None:
                 global_secondary_area_support_evidence.append(secondary_support_evidence)

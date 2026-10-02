@@ -379,3 +379,70 @@ def test_full_resolver_matches_pre_cache_pair_logic(monkeypatch):
         )
 
         assert actual == expected
+
+
+def test_orientation_bucket_resolver_matches_exhaustive_pair_surface() -> None:
+    import math
+
+    rng = random.Random(20261002)
+    angles = (0.0, 1.0, 2.4, 2.6, 44.0, 45.0, 46.0, 89.0, 90.0, 91.0, 134.0, 135.0, 136.0, 177.4, 178.5, 179.5)
+    identities = []
+    for index in range(240):
+        angle = math.radians(rng.choice(angles))
+        length = rng.uniform(15.0, 220.0)
+        x = rng.uniform(-500.0, 500.0)
+        y = rng.uniform(-500.0, 500.0)
+        path = (
+            (x, y),
+            (x + math.cos(angle) * length, y + math.sin(angle) * length),
+        )
+        identities.append(
+            _identity(
+                f"bucket-{index}",
+                path=path,
+                primitives=(f"source-{index}",),
+                viewport="same-page",
+                level=None,
+            )
+        )
+
+    # Force two orientation-incompatible pairs through the exact resolver gates:
+    # shared source ancestry and exact same-path identity must never be bulk
+    # excluded merely because the orientation buckets differ.
+    identities[0] = _identity(
+        "bucket-0",
+        path=((0.0, 0.0), (100.0, 0.0)),
+        primitives=("forced-shared",),
+        viewport="same-page",
+    )
+    identities[1] = _identity(
+        "bucket-1",
+        path=((50.0, -50.0), (50.0, 50.0)),
+        primitives=("forced-shared",),
+        viewport="same-page",
+    )
+
+    expected_pairs = []
+    expected_excluded = 0
+    expected_reasons = {}
+    for i, left in enumerate(identities):
+        for right in identities[i + 1 :]:
+            eligible, reason = physical_wall_pair_identity_candidacy(left, right)
+            if not eligible:
+                expected_excluded += 1
+                if reason:
+                    expected_reasons[reason] = expected_reasons.get(reason, 0) + 1
+                continue
+            classification = classify_physical_wall_pair(left, right)
+            a, b = sorted((left.wall_candidate_id, right.wall_candidate_id))
+            expected_pairs.append((a, b, classification.value))
+
+    resolved = resolve_physical_wall_equivalence(identities)
+    audit = resolved.candidate_pair_audit
+    total = len(identities) * (len(identities) - 1) // 2
+
+    assert audit.total_pairs == total
+    assert audit.excluded_pairs == expected_excluded
+    assert audit.considered_pairs == total - expected_excluded
+    assert audit.exclusion_reason_counts == dict(sorted(expected_reasons.items()))
+    assert resolved.pair_classifications == tuple(sorted(expected_pairs))

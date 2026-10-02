@@ -359,10 +359,9 @@ def compose_live_physical_opening_voids(
         height_results[opening_id] = height_producer.publish_scope(height_selector)
         vertical_results[opening_id] = vertical_producer.publish_scope(vertical_selector)
 
-    scale_producer = PhysicalScaleProducer.from_source_visibility_producer(
-        source_visibility_producer
-    )
+    scale_producer = source_visibility_producer.physical_scale_producer()
     scale_results = {}
+    scale_results_by_scope = {}
     for opening_id, existence in existence_by_opening.items():
         page_id = opening_pages[opening_id]
         source_result = existence.source_observation
@@ -376,16 +375,22 @@ def compose_live_physical_opening_voids(
             getattr(source_observation, "viewport_id", None)
             or getattr(record, "viewport_id", None)
         )
-        scale_results[opening_id] = scale_producer.publish_scope(
-            PhysicalScaleSelector(
-                document_id=published.revision.document_id,
-                revision_id=published.revision.revision_id,
-                source_sha256=published.revision.source_sha256,
-                snapshot_id=published.snapshot.snapshot_id,
-                page_id=page_id,
-                viewport_id=viewport_id,
-            )
+        scale_selector = PhysicalScaleSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            page_id=page_id,
+            viewport_id=viewport_id,
         )
+        # Scale is source/page/viewport scoped, not opening scoped. Reuse the
+        # complete deterministic result here, including fail-closed abstentions,
+        # so many openings do not rescan the same PDF scope.
+        scale_result = scale_results_by_scope.get(scale_selector.key)
+        if scale_result is None:
+            scale_result = scale_producer.publish_scope(scale_selector)
+            scale_results_by_scope[scale_selector.key] = scale_result
+        scale_results[opening_id] = scale_result
 
     dimension_authority = source_visibility_producer.opening_dimension_authority()
     height_authority = height_producer.authority()

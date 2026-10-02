@@ -181,6 +181,8 @@ def _point_pairs_to_segment_dicts(
     *,
     id_prefix: str = "split",
     source_segments: Sequence[Dict[str, Any]] | None = None,
+    primary_source_indexes: Sequence[int] | None = None,
+    isolate_lineage: bool = True,
 ) -> List[Dict[str, Any]]:
     """Rebuild historical split dicts, plus additive plural lineage when sources exist.
 
@@ -202,7 +204,13 @@ def _point_pairs_to_segment_dicts(
             }
             for idx, (p1, p2) in enumerate(pairs)
         ]
-    return attach_lineage_to_split_fragments(pairs, source_segments, id_prefix=id_prefix)
+    return attach_lineage_to_split_fragments(
+        pairs,
+        source_segments,
+        id_prefix=id_prefix,
+        primary_source_indexes=primary_source_indexes,
+        isolate_lineage=isolate_lineage,
+    )
 
 
 def _snap_geometry_indexed(
@@ -604,15 +612,23 @@ def build_wall_graph_for_viewport(
     """
     structural_segments, excluded_segments = filter_structural_segments(segments)
     point_pairs = _segments_to_point_pairs(structural_segments)
-    split_pairs = split_segments_at_intersections(point_pairs)
+    split_pairs, primary_source_indexes = split_segments_at_intersections(
+        point_pairs,
+        return_source_indexes=True,
+    )
     split_segment_dicts = _point_pairs_to_segment_dicts(
-        split_pairs, source_segments=structural_segments
+        split_pairs,
+        source_segments=structural_segments,
+        primary_source_indexes=primary_source_indexes,
+        # The merge stage below deep-isolates every surviving edge before any
+        # lineage mutation. Collapsed fragments are isolated independently.
+        # Avoid cloning the same lineage once here and once again after snap.
+        isolate_lineage=False,
     )
     snapped_graph = _snap_geometry_indexed(
         split_segment_dicts,
         tolerance_pt=gap_snap_tolerance_pt,
     )
-    isolate_graph_lineage(snapped_graph)
     snap_collapsed_fragments = observe_snap_collapsed_fragments(
         split_segment_dicts, snapped_graph
     )

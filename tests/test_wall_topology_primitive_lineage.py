@@ -538,3 +538,75 @@ class TestLiveAndCommercialStability:
         assert results["publishability"][0] is False
         assert results["pricing"][0] is False
         assert results["jobhub"][0] is False
+
+
+def test_primary_source_index_fast_path_preserves_exact_lineage_payload() -> None:
+    segments = [
+        _seg("h1", -6, 0, 6, 0, width=1.0, layer="A"),
+        _seg("h2", -6, 0, 6, 0, width=2.0, layer="B"),
+        _seg("v", 0, -6, 0, 6),
+    ]
+    pairs = [
+        ((-6.0, 0.0), (0.0, 0.0)),
+        ((0.0, 0.0), (6.0, 0.0)),
+        ((0.0, -6.0), (0.0, 0.0)),
+        ((0.0, 0.0), (0.0, 6.0)),
+    ]
+    source_indexes = [0, 0, 2, 2]
+
+    baseline = attach_lineage_to_split_fragments(pairs, segments)
+    fast = attach_lineage_to_split_fragments(
+        pairs,
+        segments,
+        primary_source_indexes=source_indexes,
+    )
+
+    assert fast == baseline
+
+
+def test_primary_source_index_fast_path_rejects_misaligned_index_vector() -> None:
+    segments = [_seg("a", 0, 0, 10, 0)]
+    with pytest.raises(ValueError, match="align 1:1"):
+        attach_lineage_to_split_fragments(
+            [((0.0, 0.0), (10.0, 0.0))],
+            segments,
+            primary_source_indexes=[],
+        )
+
+
+
+class TestSplitterOwnerIndexFastPath:
+    def test_splitter_owner_indexes_preserve_default_geometry(self) -> None:
+        pairs = [
+            ((-5.0, 0.0), (5.0, 0.0)),
+            ((0.0, -5.0), (0.0, 5.0)),
+        ]
+        baseline = split_segments_at_intersections(pairs)
+        hinted, source_indexes = split_segments_at_intersections(
+            pairs,
+            return_source_indexes=True,
+        )
+        assert hinted == baseline
+        assert source_indexes == [0, 0, 1, 1]
+
+    def test_owner_hints_preserve_plural_lineage_exactly(self) -> None:
+        segments = [
+            _seg("h1", -6, 0, 6, 0, width=1.0, layer="A"),
+            _seg("h2", -6, 0, 6, 0, width=2.0, layer="B"),
+            _seg("v", 0, -6, 0, 6),
+        ]
+        pairs = [
+            ((float(seg["x1"]), float(seg["y1"])), (float(seg["x2"]), float(seg["y2"])))
+            for seg in segments
+        ]
+        split_pairs, source_indexes = split_segments_at_intersections(
+            pairs,
+            return_source_indexes=True,
+        )
+        baseline = attach_lineage_to_split_fragments(split_pairs, segments)
+        hinted = attach_lineage_to_split_fragments(
+            split_pairs,
+            segments,
+            primary_source_indexes=source_indexes,
+        )
+        assert hinted == baseline

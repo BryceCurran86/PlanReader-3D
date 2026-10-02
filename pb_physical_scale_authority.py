@@ -217,6 +217,30 @@ class _TickEndpointIndex:
 
     def __init__(self, segments: Sequence[_VisibleSegment]) -> None:
         self._segments = tuple(segments)
+        self._index_by_identity = {
+            id(segment): index for index, segment in enumerate(self._segments)
+        }
+        lengths: list[float] = []
+        units: list[Optional[_Point]] = []
+        vectors: list[_Point] = []
+        denoms: list[float] = []
+        observation_id_sets: list[frozenset[str]] = []
+        for segment in self._segments:
+            dx = segment.end[0] - segment.start[0]
+            dy = segment.end[1] - segment.start[1]
+            length = math.hypot(dx, dy)
+            lengths.append(length)
+            vectors.append((dx, dy))
+            denoms.append(dx * dx + dy * dy)
+            units.append(
+                None if length <= 1e-9 else (dx / length, dy / length)
+            )
+            observation_id_sets.append(frozenset(segment.observation_ids))
+        self._lengths = tuple(lengths)
+        self._units = tuple(units)
+        self._vectors = tuple(vectors)
+        self._denoms = tuple(denoms)
+        self._observation_id_sets = tuple(observation_id_sets)
         self._angle_width = _TICK_INDEX_ANGLE_BUCKET_DEG
         self._angle_bucket_count = max(
             1, int(math.ceil(180.0 / self._angle_width))
@@ -224,7 +248,7 @@ class _TickEndpointIndex:
         by_angle: dict[int, list[tuple[float, float, int]]] = {}
         unindexed: list[int] = []
         for index, segment in enumerate(self._segments):
-            unit = _unit(segment)
+            unit = self._units[index]
             if unit is None:
                 continue
             angle = math.degrees(math.atan2(unit[1], unit[0])) % 180.0
@@ -232,7 +256,7 @@ class _TickEndpointIndex:
             midpoint_y = (segment.start[1] + segment.end[1]) / 2.0
             if not all(
                 math.isfinite(value)
-                for value in (angle, midpoint_x, midpoint_y, segment.length)
+                for value in (angle, midpoint_x, midpoint_y, self._lengths[index])
             ):
                 # Preserve legacy behavior for malformed source geometry by
                 # keeping it in every exact candidate universe instead of
@@ -264,13 +288,19 @@ class _TickEndpointIndex:
         baseline: _VisibleSegment,
         endpoint: _Point,
     ) -> tuple[_VisibleSegment, ...]:
-        baseline_unit = _unit(baseline)
+        baseline_index = self._index_by_identity.get(id(baseline))
+        if baseline_index is None:
+            baseline_unit = _unit(baseline)
+            baseline_length = baseline.length
+        else:
+            baseline_unit = self._units[baseline_index]
+            baseline_length = self._lengths[baseline_index]
         if baseline_unit is None:
             return ()
         if not all(
             math.isfinite(value)
             for value in (
-                baseline.length,
+                baseline_length,
                 baseline.start[0],
                 baseline.start[1],
                 baseline.end[0],
@@ -295,7 +325,7 @@ class _TickEndpointIndex:
                 abs(_TICK_PARAMETER_MAX - 0.5),
             )
             * _TICK_MAX_LENGTH_RATIO
-            * baseline.length
+            * baseline_length
         )
         radius = math.hypot(max_along_midpoint, _TICK_MAX_DISTANCE_PT) + 1e-9
         min_x = endpoint[0] - radius
@@ -320,6 +350,74 @@ class _TickEndpointIndex:
                     found.add(index)
 
         return tuple(self._segments[index] for index in sorted(found))
+
+    def exact_ticks_for_endpoint(
+        self,
+        baseline: _VisibleSegment,
+        endpoint: _Point,
+    ) -> tuple[_VisibleSegment, ...]:
+        """Return exact legacy tick matches using one cached metric set per segment."""
+        baseline_index = self._index_by_identity.get(id(baseline))
+        if baseline_index is None:
+            return _tick_for_endpoint(
+                baseline, endpoint, self.candidates(baseline, endpoint)
+            )
+        baseline_unit = self._units[baseline_index]
+        baseline_length = self._lengths[baseline_index]
+        if baseline_unit is None:
+            return ()
+        baseline_ids = self._observation_id_sets[baseline_index]
+        perpendicular_dot_max = math.sin(
+            math.radians(_TICK_PERPENDICULAR_TOLERANCE_DEG)
+        )
+        matches: list[_VisibleSegment] = []
+        for tick in self.candidates(baseline, endpoint):
+            tick_index = self._index_by_identity.get(id(tick))
+            if tick_index is None:
+                # Defensive compatibility; this cannot occur for index-owned rows.
+                if _tick_for_endpoint(baseline, endpoint, (tick,)):
+                    matches.append(tick)
+                continue
+            if self._observation_id_sets[tick_index] & baseline_ids:
+                continue
+            tick_length = self._lengths[tick_index]
+            if (
+                tick_length <= 1e-9
+                or tick_length > baseline_length * _TICK_MAX_LENGTH_RATIO
+            ):
+                continue
+            tick_unit = self._units[tick_index]
+            if (
+                tick_unit is None
+                or abs(_dot(baseline_unit, tick_unit)) > perpendicular_dot_max
+            ):
+                continue
+            vx, vy = self._vectors[tick_index]
+            denom = self._denoms[tick_index]
+            if denom <= 1e-12:
+                distance = _distance(endpoint, tick.start)
+                parameter = 0.0
+            else:
+                parameter = (
+                    (endpoint[0] - tick.start[0]) * vx
+                    + (endpoint[1] - tick.start[1]) * vy
+                ) / denom
+                clamped = min(1.0, max(0.0, parameter))
+                projection = (
+                    tick.start[0] + clamped * vx,
+                    tick.start[1] + clamped * vy,
+                )
+                distance = _distance(endpoint, projection)
+            tolerance = max(
+                1e-4,
+                min(_TICK_MAX_DISTANCE_PT, tick_length * 0.01),
+            )
+            if distance > tolerance:
+                continue
+            if not (_TICK_PARAMETER_MIN <= parameter <= _TICK_PARAMETER_MAX):
+                continue
+            matches.append(tick)
+        return tuple(sorted(matches, key=lambda item: item.observation_id))
 
 
 def _primitive_position(segment: _VisibleSegment) -> Optional[tuple[int, int]]:
@@ -512,15 +610,11 @@ def _bar_candidates(
     for baseline in segments:
         if baseline.length <= 1e-6:
             continue
-        left_ticks = _tick_for_endpoint(
-            baseline,
-            baseline.start,
-            tick_index.candidates(baseline, baseline.start),
+        left_ticks = tick_index.exact_ticks_for_endpoint(
+            baseline, baseline.start
         )
-        right_ticks = _tick_for_endpoint(
-            baseline,
-            baseline.end,
-            tick_index.candidates(baseline, baseline.end),
+        right_ticks = tick_index.exact_ticks_for_endpoint(
+            baseline, baseline.end
         )
         if len(left_ticks) != 1 or len(right_ticks) != 1:
             continue
@@ -605,6 +699,12 @@ class PhysicalScaleProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
         self._source = source_visibility_producer
         self._results: dict[_Key, PhysicalScaleResult] = {}
+        # Replay cache for deterministic blocked/conflict outcomes as well as
+        # published successes.  Only corroborated evidence enters _results, so
+        # authority publication semantics remain unchanged.
+        self._attempt_cache: dict[_Key, PhysicalScaleResult] = {}
+        self._scope_bbox_cache: dict[_Key, tuple[object, object]] = {}
+        self._bar_candidates_cache: dict[_Key, tuple[object, ...]] = {}
         self._trusted_words_by_snapshot: dict[
             tuple[str, str, str, str], dict[str, tuple[_TrustedWord, ...]]
         ] = {}
@@ -791,32 +891,52 @@ class PhysicalScaleProducer:
         if inputs is None:
             return _blocked(EvidenceResolutionStatus.ABSTAINED, PHYSICAL_SCALE_SCOPE_UNAVAILABLE)
         published, source_bytes = inputs
-        scope_bbox, scope_error = self._scope_bbox(selector, source_bytes)
+        # Published scale evidence is immutable for one exact source/page/viewport
+        # selector. Reuse it only after the source revision and bytes pass the
+        # original authority guard, before re-segmenting or rescanning geometry.
+        existing_attempt = self._attempt_cache.get(selector.key)
+        if existing_attempt is not None:
+            return existing_attempt
+
+        def cache_attempt(result: PhysicalScaleResult) -> PhysicalScaleResult:
+            self._attempt_cache[selector.key] = result
+            return result
+        cached_scope = self._scope_bbox_cache.get(selector.key)
+        if cached_scope is None:
+            scope_bbox, scope_error = self._scope_bbox(selector, source_bytes)
+            self._scope_bbox_cache[selector.key] = (scope_bbox, scope_error)
+        else:
+            scope_bbox, scope_error = cached_scope
         if scope_bbox is None:
-            return _blocked(EvidenceResolutionStatus.ABSTAINED, scope_error or PHYSICAL_SCALE_SCOPE_UNAVAILABLE)
+            return cache_attempt(_blocked(EvidenceResolutionStatus.ABSTAINED, scope_error or PHYSICAL_SCALE_SCOPE_UNAVAILABLE))
 
         words = _scope_words(self._trusted_words(selector, published), scope_bbox)
         segments = _scope_segments(self._visible_segments(selector, published), scope_bbox)
-        bars = _bar_candidates(segments, words)
+        cached_bars = self._bar_candidates_cache.get(selector.key)
+        if cached_bars is None:
+            bars = tuple(_bar_candidates(segments, words))
+            self._bar_candidates_cache[selector.key] = bars
+        else:
+            bars = cached_bars
         if not bars:
-            return _blocked(EvidenceResolutionStatus.ABSTAINED, PHYSICAL_SCALE_BAR_UNAVAILABLE)
+            return cache_attempt(_blocked(EvidenceResolutionStatus.ABSTAINED, PHYSICAL_SCALE_BAR_UNAVAILABLE))
 
         mappings = {round(bar.points_per_mm, 9) for bar in bars}
         if len(mappings) != 1:
-            return _blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT)
+            return cache_attempt(_blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT))
         representative = sorted(bars, key=lambda bar: (bar.segment_ids, bar.text_ids))[0]
         span_pt = float(representative.span_pt)
         points_per_mm = float(representative.points_per_mm)
 
         ratios = _ratios(words)
         if len(ratios) > 1:
-            return _blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT)
+            return cache_attempt(_blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT))
         if len(ratios) == 1:
             denominator = ratios[0]
             expected_points_per_mm = POINTS_PER_METRE_AT_1_1 / denominator / 1000.0
             tolerance = max(1e-9, expected_points_per_mm * 1e-5)
             if abs(points_per_mm - expected_points_per_mm) > tolerance:
-                return _blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT)
+                return cache_attempt(_blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT))
             # Ratio text may corroborate the source-native bar measurement,
             # but it is not measurement authority and must not rewrite the
             # bar's observed geometry or geometry-derived mapping.
@@ -827,7 +947,7 @@ class PhysicalScaleProducer:
             or not math.isfinite(span_pt)
             or span_pt <= 0
         ):
-            return _blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT)
+            return cache_attempt(_blocked(EvidenceResolutionStatus.CONFLICT, PHYSICAL_SCALE_CONFLICT))
         mm_per_point = 1.0 / points_per_mm
 
         payload = {
@@ -860,6 +980,7 @@ class PhysicalScaleProducer:
         if existing is not None and existing != result:
             raise RuntimeError("physical scale producer equivocation")
         self._results[selector.key] = result
+        self._attempt_cache[selector.key] = result
         return result
 
     def authority(self) -> PhysicalScaleAuthority:

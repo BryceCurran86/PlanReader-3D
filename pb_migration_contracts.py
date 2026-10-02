@@ -10,13 +10,14 @@ provenance boundaries explicit so those stages can evolve independently.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import fields, is_dataclass, dataclass, field
 from enum import Enum
 import hashlib
 import json
 import math
 import re
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Optional, Sequence
 
 
 MIGRATION_CONTRACT_SCHEMA_VERSION = "1.0.0"
@@ -92,19 +93,39 @@ def _require_bbox(
 
 def _plain(value: Any) -> Any:
     """Convert contract values into deterministic JSON-compatible primitives."""
+    # Contract payloads are overwhelmingly built from exact JSON primitives,
+    # dicts and list/tuple containers. Handle those before generic Enum,
+    # dataclass and ABC checks; exact-type guards preserve subclass semantics.
+    value_type = type(value)
+    if value is None or value_type is str or value_type is int or value_type is bool:
+        return value
+    if value_type is float:
+        if not math.isfinite(value):
+            raise ValueError("contract payload contains a non-finite float")
+        return value
+    if value_type is dict:
+        return {
+            str(k): _plain(v)
+            for k, v in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if value_type is list or value_type is tuple:
+        return [_plain(v) for v in value]
     if isinstance(value, Enum):
         return value.value
     if is_dataclass(value):
         return {f.name: _plain(getattr(value, f.name)) for f in fields(value)}
     if isinstance(value, Mapping):
-        return {str(k): _plain(v) for k, v in sorted(value.items(), key=lambda item: str(item[0]))}
+        return {
+            str(k): _plain(v)
+            for k, v in sorted(value.items(), key=lambda item: str(item[0]))
+        }
     if isinstance(value, (list, tuple)):
         return [_plain(v) for v in value]
     if isinstance(value, float):
         if not math.isfinite(value):
             raise ValueError("contract payload contains a non-finite float")
         return value
-    if value is None or isinstance(value, (str, int, bool)):
+    if isinstance(value, (str, int, bool)):
         return value
     return str(value)
 

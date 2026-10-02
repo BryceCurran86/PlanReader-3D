@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 from math import hypot, atan2, pi
-from typing import Any, Dict, Iterable, List, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Literal, Sequence, Tuple, overload
 import re
 
 VERSION = "1.4.5"
@@ -44,13 +44,31 @@ def _segment_intersection(a: Segment, b: Segment, tol: float = 1e-9) -> Point | 
     return None
 
 
-def split_segments_at_intersections(segments: Sequence[Segment]) -> List[Segment]:
+@overload
+def split_segments_at_intersections(
+    segments: Sequence[Segment], *, return_source_indexes: Literal[False] = False
+) -> List[Segment]: ...
+
+
+@overload
+def split_segments_at_intersections(
+    segments: Sequence[Segment], *, return_source_indexes: Literal[True]
+) -> tuple[List[Segment], List[int]]: ...
+
+
+def split_segments_at_intersections(
+    segments: Sequence[Segment], *, return_source_indexes: bool = False
+) -> List[Segment] | tuple[List[Segment], List[int]]:
     """Split vector linework at every true crossing before graph traversal.
 
     The exact intersection predicate and split ordering are unchanged. A
     deterministic x-axis sweep only removes segment pairs whose axis-aligned
     bounding boxes cannot intersect, avoiding the historical all-pairs scan on
     dense CAD pages.
+
+    ``return_source_indexes`` is an additive provenance fast-path for Stage A:
+    each emitted fragment is paired with the original input segment index that
+    emitted it.  Geometry, ordering, and the default return shape are unchanged.
     """
     pts: List[List[Point]] = [[tuple(map(float,s[0])), tuple(map(float,s[1]))] for s in segments]
 
@@ -82,7 +100,8 @@ def split_segments_at_intersections(segments: Sequence[Segment]) -> List[Segment
                 pts[i].append(p); pts[j].append(p)
 
     out: List[Segment]=[]
-    for original, candidates in zip(segments,pts):
+    source_indexes: List[int] = []
+    for source_index, (original, candidates) in enumerate(zip(segments,pts)):
         a,b=original; dx=b[0]-a[0]; dy=b[1]-a[1]
         denom=dx*dx+dy*dy or 1.0
         unique=[]
@@ -90,7 +109,11 @@ def split_segments_at_intersections(segments: Sequence[Segment]) -> List[Segment
             if not any(_same(p,q) for q in unique): unique.append(p)
         unique.sort(key=lambda p: ((p[0]-a[0])*dx+(p[1]-a[1])*dy)/denom)
         for p,q in zip(unique,unique[1:]):
-            if segment_length((p,q))>1e-7: out.append((p,q))
+            if segment_length((p,q))>1e-7:
+                out.append((p,q))
+                source_indexes.append(source_index)
+    if return_source_indexes:
+        return out, source_indexes
     return out
 
 

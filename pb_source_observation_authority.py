@@ -9,9 +9,11 @@ equal-privilege Python code.
 """
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, replace
 import hashlib
 import math
+from threading import RLock
 from typing import Any, Mapping, Optional, Sequence
 
 import fitz
@@ -35,6 +37,162 @@ SNAPSHOT_MISMATCH = "snapshot_mismatch"
 INVALID_RENDER_CLIP = "invalid_render_clip"
 LINEAGE_UNAVAILABLE = "lineage_unavailable"
 PRODUCER_INTEGRITY_FAILURE = "producer_integrity_failure"
+
+
+# Process-local, producer-neutral native PDF decode cache.  The cache stores
+# only immutable page primitives derived from exact source bytes.  Producer
+# method/version, generation, snapshot ids, authority records, and provenance
+# are minted later by each SourceObservationProducer exactly as before.
+#
+# A small bounded page cache is intentional: it captures the repeated live
+# wall/opening/ceiling passes over the same recent sheets without retaining a
+# large portfolio of plan sets in memory.
+_NATIVE_PAGE_DECODE_CACHE_MAX_PAGES = 24
+_NATIVE_PAGE_COUNT_CACHE_MAX_DOCUMENTS = 16
+_NATIVE_PAGE_DECODE_CACHE_LOCK = RLock()
+_NATIVE_PAGE_COUNT_CACHE: "OrderedDict[str, int]" = OrderedDict()
+_NATIVE_PAGE_DECODE_CACHE: "OrderedDict[tuple[str, int], _NativePageDecodeCacheEntry]" = OrderedDict()
+
+
+@dataclass(frozen=True)
+class _NativePageDecodeCacheEntry:
+    failed: bool
+    pending_items: tuple[
+        tuple[str, str, str, str, str, tuple[float, ...]], ...
+    ]
+    # Producer-neutral output from extract_native_page().  Visibility and
+    # other source-owned consumers may reuse this immutable in-process decode
+    # instead of asking PyMuPDF to rebuild the same words/drawings again.
+    native_page: Optional[Mapping[str, Any]] = None
+
+
+def _cached_page_count(source_sha256: str) -> Optional[int]:
+    with _NATIVE_PAGE_DECODE_CACHE_LOCK:
+        value = _NATIVE_PAGE_COUNT_CACHE.get(source_sha256)
+        if value is not None:
+            _NATIVE_PAGE_COUNT_CACHE.move_to_end(source_sha256)
+        return value
+
+
+def _remember_page_count(source_sha256: str, page_count: int) -> None:
+    with _NATIVE_PAGE_DECODE_CACHE_LOCK:
+        _NATIVE_PAGE_COUNT_CACHE[source_sha256] = int(page_count)
+        _NATIVE_PAGE_COUNT_CACHE.move_to_end(source_sha256)
+        while len(_NATIVE_PAGE_COUNT_CACHE) > _NATIVE_PAGE_COUNT_CACHE_MAX_DOCUMENTS:
+            _NATIVE_PAGE_COUNT_CACHE.popitem(last=False)
+
+
+def _cached_native_page(
+    source_sha256: str, page_number: int
+) -> Optional[_NativePageDecodeCacheEntry]:
+    key = (source_sha256, int(page_number))
+    with _NATIVE_PAGE_DECODE_CACHE_LOCK:
+        value = _NATIVE_PAGE_DECODE_CACHE.get(key)
+        if value is not None:
+            _NATIVE_PAGE_DECODE_CACHE.move_to_end(key)
+        return value
+
+
+def _remember_native_page(
+    source_sha256: str,
+    page_number: int,
+    entry: _NativePageDecodeCacheEntry,
+) -> None:
+    key = (source_sha256, int(page_number))
+    with _NATIVE_PAGE_DECODE_CACHE_LOCK:
+        _NATIVE_PAGE_DECODE_CACHE[key] = entry
+        _NATIVE_PAGE_DECODE_CACHE.move_to_end(key)
+        while len(_NATIVE_PAGE_DECODE_CACHE) > _NATIVE_PAGE_DECODE_CACHE_MAX_PAGES:
+            _NATIVE_PAGE_DECODE_CACHE.popitem(last=False)
+
+
+def _decode_native_page_for_cache(
+    pdf: fitz.Document, page_number: int
+) -> _NativePageDecodeCacheEntry:
+    page_index = int(page_number) - 1
+    page_id = str(page_number)
+    partition_id = f"page:{page_number}"
+    items: list[tuple[str, str, str, str, str, tuple[float, ...]]] = []
+    try:
+        page = pdf.load_page(page_index)
+        native = extract_native_page(page)
+        items.append(
+            (
+                page_id,
+                partition_id,
+                "native_pdf_page",
+                f"page:{page_number}",
+                "",
+                (float(native["width"]), float(native["height"])),
+            )
+        )
+        for segment in native.get("segments") or []:
+            items.append(
+                (
+                    page_id,
+                    partition_id,
+                    "native_pdf_segment",
+                    f"segment:{segment.get('id')}",
+                    "",
+                    (
+                        float(segment["x1"]),
+                        float(segment["y1"]),
+                        float(segment["x2"]),
+                        float(segment["y2"]),
+                    ),
+                )
+            )
+        for word in native.get("words") or []:
+            items.append(
+                (
+                    page_id,
+                    partition_id,
+                    "native_pdf_word",
+                    native_word_primitive_ref(word),
+                    str(word.get("text") or ""),
+                    _finite_tuple(word.get("bbox") or ()),
+                )
+            )
+        for rect_index, rect in enumerate(native.get("rects") or []):
+            items.append(
+                (
+                    page_id,
+                    partition_id,
+                    "native_pdf_rect",
+                    f"rect:{rect_index}",
+                    "",
+                    _finite_tuple(rect.get("bbox") or ()),
+                )
+            )
+        return _NativePageDecodeCacheEntry(False, tuple(items), native)
+    except Exception:
+        # Preserve the historical fail-closed page decode outcome.  Any items
+        # prepared before the failure remain visible exactly as in the old
+        # append-as-you-go path, while coverage marks the page failed.
+        return _NativePageDecodeCacheEntry(True, tuple(items), None)
+
+
+def _pending_dicts_from_cached_page(
+    entry: _NativePageDecodeCacheEntry,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "page_id": page_id,
+            "partition_id": partition_id,
+            "kind": kind,
+            "primitive_ref": primitive_ref,
+            "raw_text": raw_text,
+            "geometry": geometry,
+        }
+        for (
+            page_id,
+            partition_id,
+            kind,
+            primitive_ref,
+            raw_text,
+            geometry,
+        ) in entry.pending_items
+    ]
 
 
 class ProducerIntegrityError(RuntimeError):
@@ -177,6 +335,19 @@ class _SourceObservationStore:
         self.source_snapshot_by_revision: dict[str, str] = {}
         self.observations: dict[tuple[str, str], SourceObservationRecord] = {}
         self.record_fingerprints: dict[tuple[str, str], str] = {}
+        # Verified read cache bound to exact immutable store object identities.
+        # Replacing a revision, snapshot, record, or fingerprint invalidates the
+        # entry automatically; parent lineage presence is still checked on use.
+        self.verified_resolution_cache: dict[
+            tuple[str, str],
+            tuple[
+                SourceRevisionRecord,
+                ProducerSnapshotRecord,
+                SourceObservationRecord,
+                str,
+                SourceObservationAuthorityResult,
+            ],
+        ] = {}
 
     def source_bytes_match_revision(
         self,
@@ -566,16 +737,20 @@ class SourceObservationProducer:
             digest_chars=32,
         )
 
-        try:
-            pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
-        except Exception as exc:
-            raise ValueError(f"{SOURCE_UNAVAILABLE}: PDF decode failed") from exc
-
         pending: list[dict[str, Any]] = []
         decoded_pages: list[int] = []
         failed_pages: list[int] = []
+        pdf: Optional[fitz.Document] = None
         try:
-            total_pages = int(pdf.page_count)
+            total_pages = _cached_page_count(digest)
+            if total_pages is None:
+                try:
+                    pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
+                except Exception as exc:
+                    raise ValueError(f"{SOURCE_UNAVAILABLE}: PDF decode failed") from exc
+                total_pages = int(pdf.page_count)
+                _remember_page_count(digest, total_pages)
+
             all_pages = tuple(range(1, total_pages + 1))
             if page_ids is None:
                 requested_pages = all_pages
@@ -625,67 +800,25 @@ class SourceObservationProducer:
 
             partition_ids = tuple(f"page:{i + 1}" for i in range(total_pages))
             for page_number in requested_pages:
-                page_index = page_number - 1
-                partition_id = f"page:{page_number}"
-                try:
-                    page = pdf.load_page(page_index)
-                    native = extract_native_page(page)
-                    decoded_pages.append(page_number)
-                    pending.append(
-                        {
-                            "page_id": str(page_number),
-                            "partition_id": partition_id,
-                            "kind": "native_pdf_page",
-                            "primitive_ref": f"page:{page_number}",
-                            "raw_text": "",
-                            "geometry": (
-                                float(native["width"]),
-                                float(native["height"]),
-                            ),
-                        }
-                    )
-                    for segment in native.get("segments") or []:
-                        pending.append(
-                            {
-                                "page_id": str(page_number),
-                                "partition_id": partition_id,
-                                "kind": "native_pdf_segment",
-                                "primitive_ref": f"segment:{segment.get('id')}",
-                                "raw_text": "",
-                                "geometry": (
-                                    float(segment["x1"]),
-                                    float(segment["y1"]),
-                                    float(segment["x2"]),
-                                    float(segment["y2"]),
-                                ),
-                            }
-                        )
-                    for word in native.get("words") or []:
-                        pending.append(
-                            {
-                                "page_id": str(page_number),
-                                "partition_id": partition_id,
-                                "kind": "native_pdf_word",
-                                "primitive_ref": native_word_primitive_ref(word),
-                                "raw_text": str(word.get("text") or ""),
-                                "geometry": _finite_tuple(word.get("bbox") or ()),
-                            }
-                        )
-                    for rect_index, rect in enumerate(native.get("rects") or []):
-                        pending.append(
-                            {
-                                "page_id": str(page_number),
-                                "partition_id": partition_id,
-                                "kind": "native_pdf_rect",
-                                "primitive_ref": f"rect:{rect_index}",
-                                "raw_text": "",
-                                "geometry": _finite_tuple(rect.get("bbox") or ()),
-                            }
-                        )
-                except Exception:
+                cached_page = _cached_native_page(digest, page_number)
+                if cached_page is None:
+                    if pdf is None:
+                        try:
+                            pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
+                        except Exception as exc:
+                            raise ValueError(
+                                f"{SOURCE_UNAVAILABLE}: PDF decode failed"
+                            ) from exc
+                    cached_page = _decode_native_page_for_cache(pdf, page_number)
+                    _remember_native_page(digest, page_number, cached_page)
+                pending.extend(_pending_dicts_from_cached_page(cached_page))
+                if cached_page.failed:
                     failed_pages.append(page_number)
+                else:
+                    decoded_pages.append(page_number)
         finally:
-            pdf.close()
+            if pdf is not None:
+                pdf.close()
 
         previous_revision = self._store.current_revision_by_document.get(document_id)
         generation = self._store.next_generation()
@@ -1168,6 +1301,38 @@ class SourceObservationProducer:
         for key, record in staged.items():
             self._store.observations[key] = record
             self._store.record_fingerprints[key] = record.observation_payload_sha256
+
+        # The producer just created these immutable records and computed their
+        # payload fingerprints before this atomic commit. Seed the identity-bound
+        # verified read cache from that exact committed object instead of making
+        # the first downstream consumer immediately JSON-serialize and hash the
+        # same payload again. Any later record/revision/snapshot replacement
+        # changes object identity, misses this cache, and triggers the normal
+        # full integrity revalidation path in SourceObservationAuthority.resolve.
+        # Revision and snapshot values are frozen and identical for every
+        # record in this atomic commit. Clone each once instead of repeating
+        # the same dataclass copy for every observation in large CAD pages.
+        cached_revision = replace(revision)
+        cached_snapshot = replace(snapshot)
+        for key, record in staged.items():
+            result = SourceObservationAuthorityResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                proposition=SOURCE_OBSERVATION_EXISTS,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=("producer_owned_source_observation_resolved",),
+                source_revision=cached_revision,
+                snapshot=cached_snapshot,
+                observation=replace(record),
+                semantic_enumeration_complete=None,
+                decision_scope_complete=None,
+            )
+            self._store.verified_resolution_cache[key] = (
+                revision,
+                snapshot,
+                record,
+                record.observation_payload_sha256,
+                result,
+            )
         if mark_source_snapshot:
             self._store.source_snapshot_by_revision[revision.revision_id] = snapshot.snapshot_id
 
@@ -1230,14 +1395,40 @@ class SourceObservationAuthority:
             selector.observation_id,
         ):
             return self._integrity_failure()
-        expected = self._store.record_fingerprints.get((selector.snapshot_id, selector.observation_id))
+        key = (selector.snapshot_id, selector.observation_id)
+        expected = self._store.record_fingerprints.get(key)
+        cached = self._store.verified_resolution_cache.get(key)
+        if (
+            expected is not None
+            and cached is not None
+            and cached[0] is revision
+            and cached[1] is snapshot
+            and cached[2] is record
+            and cached[3] == expected
+            and all(
+                (selector.snapshot_id, parent_id) in self._store.observations
+                for parent_id in record.derivation_parent_ids
+            )
+        ):
+            # The cached object is internal validation state. Return fresh
+            # defensive copies so even object.__setattr__ on a frozen value
+            # cannot poison subsequent authority reads.
+            return replace(
+                cached[4],
+                source_revision=replace(revision),
+                snapshot=replace(snapshot),
+                observation=replace(record),
+            )
+
         actual = _content_sha256(_record_payload(record))
         if expected is None or expected != actual or record.observation_payload_sha256 != actual:
+            self._store.verified_resolution_cache.pop(key, None)
             return self._integrity_failure()
         for parent_id in record.derivation_parent_ids:
             if (selector.snapshot_id, parent_id) not in self._store.observations:
+                self._store.verified_resolution_cache.pop(key, None)
                 return self._blocked(LINEAGE_UNAVAILABLE)
-        return SourceObservationAuthorityResult(
+        result = SourceObservationAuthorityResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             proposition=SOURCE_OBSERVATION_EXISTS,
             physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
@@ -1247,6 +1438,19 @@ class SourceObservationAuthority:
             observation=replace(record),
             semantic_enumeration_complete=None,
             decision_scope_complete=None,
+        )
+        self._store.verified_resolution_cache[key] = (
+            revision,
+            snapshot,
+            record,
+            expected,
+            result,
+        )
+        return replace(
+            result,
+            source_revision=replace(revision),
+            snapshot=replace(snapshot),
+            observation=replace(record),
         )
 
     def coverage(

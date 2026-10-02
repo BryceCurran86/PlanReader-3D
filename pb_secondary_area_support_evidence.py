@@ -341,6 +341,7 @@ def _physical_support_evidence(
     zone_type: str,
     bay: _BayChain,
     source_chain: Any,
+    physical_glyphs: Optional[Sequence[_PhysicalSupportGlyph]] = None,
 ) -> Optional[SecondaryAreaSupportEvidence]:
     """Bind a complete row of physical support glyphs to one repeated bay chain.
 
@@ -390,9 +391,14 @@ def _physical_support_evidence(
     ) / len(observations)
 
     page_height = float(page.rect.height)
+    page_glyphs = (
+        tuple(physical_glyphs)
+        if physical_glyphs is not None
+        else tuple(_physical_support_glyphs(page, source_page=source_page))
+    )
     glyphs = [
         glyph
-        for glyph in _physical_support_glyphs(page, source_page=source_page)
+        for glyph in page_glyphs
         if expected_left - horizontal_margin
         <= glyph.center_x
         <= expected_right + horizontal_margin
@@ -553,6 +559,13 @@ def extract_secondary_area_support_evidence_from_page(
     # when the drawing itself independently contains the complete N+1 row of
     # matching support glyphs at that named secondary zone.
     source_by_id = {str(chain.chain_id): chain for chain in chains}
+    # Producer-visible support glyph geometry is invariant across bay/zone
+    # candidate checks.  Extract dense page drawings once rather than once per
+    # candidate pair; the authoritative row/midpoint/spacing checks below are
+    # unchanged.
+    page_physical_glyphs = tuple(
+        _physical_support_glyphs(page, source_page=source_page)
+    )
     for bay in bays:
         source_chain = source_by_id.get(bay.chain_id)
         if source_chain is None:
@@ -565,6 +578,7 @@ def extract_secondary_area_support_evidence_from_page(
                 zone_type=zt,
                 bay=bay,
                 source_chain=source_chain,
+                physical_glyphs=page_physical_glyphs,
             )
             if evidence is not None:
                 candidates.append(evidence)

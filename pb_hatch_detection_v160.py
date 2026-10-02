@@ -352,58 +352,94 @@ def _cluster_strokes(
     n = len(strokes)
     uf = _UnionFind(n)
 
-    # Pre-compute average stroke length for gap threshold
-    avg_len = sum(s.length for s in strokes) / max(n, 1)
+    # Cache immutable stroke geometry once.  This hot loop can see millions
+    # of candidate pairs on dense CAD sheets; repeatedly recomputing atan2 /
+    # hypot / midpoints for the same stroke dominated page runtime.
+    lengths: List[float] = []
+    angles: List[float] = []
+    centers: List[Tuple[float, float]] = []
+    for stroke in strokes:
+        dx = stroke.x2 - stroke.x1
+        dy = stroke.y2 - stroke.y1
+        lengths.append(math.hypot(dx, dy))
+        angles.append(math.degrees(math.atan2(dy, dx)) % 180.0)
+        centers.append(((stroke.x1 + stroke.x2) * 0.5, (stroke.y1 + stroke.y2) * 0.5))
 
-    # Angle-bucket acceleration: group strokes into angle buckets
+    avg_len = sum(lengths) / max(n, 1)
+    gap_limit = avg_len * 1.5
+
+    # Necessary-condition broad phase for the unchanged exact pair rules.
+    # Any pair that passes the current perpendicular-distance and projected-gap
+    # tests must have midpoint separation inside this bound.  Using the full
+    # angle tolerance makes the filter conservative, so borderline pairs still
+    # reach the exact historical calculations below.
+    half_angle_rad = math.radians(max(0.0, min(float(angle_tol), 179.0)) * 0.5)
+    cos_half_angle = math.cos(half_angle_rad)
+    midpoint_perp_bound = (
+        float("inf")
+        if cos_half_angle <= 1e-9
+        else float(max_dist) / cos_half_angle
+    )
+
     bucket_size = angle_tol * 2
     angle_buckets: Dict[int, List[int]] = {}
-    for i, s in enumerate(strokes):
-        bucket = int(s.angle_deg / bucket_size)
+    for i, angle in enumerate(angles):
+        bucket = int(angle / bucket_size)
         if bucket not in angle_buckets:
             angle_buckets[bucket] = []
         angle_buckets[bucket].append(i)
 
-    # Within each bucket (and neighbours), check proximity
+    # ``j <= i`` already guarantees every unordered candidate pair is visited
+    # at most once across the symmetric neighbour-bucket traversal, so the
+    # historical multi-million-entry ``checked`` set was redundant.
     merge_count = 0
-    checked: set = set()
     for bucket, indices in angle_buckets.items():
-        # Check this bucket and the next (for angles near bucket boundary)
         neighbor_indices = list(indices)
         if (bucket + 1) in angle_buckets:
             neighbor_indices.extend(angle_buckets[bucket + 1])
         if (bucket - 1) in angle_buckets:
             neighbor_indices.extend(angle_buckets[bucket - 1])
 
-        for ii, i in enumerate(indices):
+        for i in indices:
+            ci_x, ci_y = centers[i]
             for j in neighbor_indices:
                 if j <= i:
                     continue
-                pair_key = (i, j)
-                if pair_key in checked:
+
+                angle_i = angles[i]
+                angle_j = angles[j]
+                if _angle_delta(angle_i, angle_j) > angle_tol:
                     continue
-                checked.add(pair_key)
+
+                cj_x, cj_y = centers[j]
+                center_dx = ci_x - cj_x
+                center_dy = ci_y - cj_y
+                longitudinal_bound = (
+                    (lengths[i] + lengths[j]) * 0.5 + gap_limit
+                )
+                max_midpoint_distance_sq = (
+                    longitudinal_bound * longitudinal_bound
+                    + midpoint_perp_bound * midpoint_perp_bound
+                )
+                if (
+                    center_dx * center_dx + center_dy * center_dy
+                    > max_midpoint_distance_sq
+                ):
+                    continue
 
                 si, sj = strokes[i], strokes[j]
-                if _angle_delta(si.angle_deg, sj.angle_deg) > angle_tol:
-                    continue
                 dist = _strokes_midpoint_distance(si, sj)
                 if dist > max_dist:
                     continue
 
-                # BLOCKER 1 fix: along-axis proximity check.
-                # Project both strokes onto their SHARED DIRECTION axis
-                # derived from the stroke angles themselves (circular mean),
-                # NOT the midpoint-to-midpoint vector which may be largely
-                # perpendicular to the lines for parallel strokes offset
-                # in the perpendicular direction.
+                # Preserve the exact legacy shared-direction projection and
+                # gap rule for every broad-phase survivor.
                 mean_angle_rad = math.radians(
-                    _circular_mean([si.angle_deg, sj.angle_deg])
+                    _circular_mean([angle_i, angle_j])
                 )
                 dir_x = math.cos(mean_angle_rad)
                 dir_y = math.sin(mean_angle_rad)
 
-                # Project stroke endpoints onto direction axis
                 a_start = si.x1 * dir_x + si.y1 * dir_y
                 a_end = si.x2 * dir_x + si.y2 * dir_y
                 if a_start > a_end:
@@ -414,18 +450,15 @@ def _cluster_strokes(
                 if b_start > b_end:
                     b_start, b_end = b_end, b_start
 
-                # Check overlap
                 overlap_start = max(a_start, b_start)
                 overlap_end = min(a_end, b_end)
 
                 if overlap_start <= overlap_end:
-                    # Intervals overlap — merge
                     uf.union(i, j)
                     merge_count += 1
                 else:
-                    # No overlap — check gap
                     gap = b_start - a_end if b_start > a_end else a_start - b_end
-                    if gap <= avg_len * 1.5:
+                    if gap <= gap_limit:
                         uf.union(i, j)
                         merge_count += 1
 
