@@ -9,6 +9,7 @@ from pb_opening_label_dimension_authority import (
     OPENING_LABEL_DIMENSION_RESOLVED,
     OPENING_LABEL_DIMENSION_TEXT_UNAVAILABLE,
     OpeningLabelDimensionProducer,
+    _parseable_opening_label_fragments,
     parse_opening_label_dimensions,
 )
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
@@ -45,6 +46,65 @@ def test_parser_accepts_typed_compact_hundred_mm_notation_only() -> None:
 
     # Untyped two-digit arithmetic/text cannot silently become dimensions.
     assert parse_opening_label_dimensions("21 - 15") is None
+
+
+def _word_row(order: int, text: str, x0: float):
+    width = max(4.0, len(text) * 4.0)
+    return (order, f"obs-{order}", text, (x0, 10.0, x0 + width, 18.0))
+
+
+def test_native_line_with_two_adjacent_opening_callouts_is_split_without_merging() -> None:
+    rows = (
+        _word_row(0, "1,800", 0.0),
+        _word_row(1, "-", 28.0),
+        _word_row(2, "610", 34.0),
+        _word_row(3, "1,200", 70.0),
+        _word_row(4, "-", 98.0),
+        _word_row(5, "1,810", 104.0),
+        _word_row(6, "asw", 134.0),
+    )
+    fragments = _parseable_opening_label_fragments(rows)
+    assert [fragment.text for fragment in fragments] == [
+        "1,800 - 610",
+        "1,200 - 1,810 asw",
+    ]
+
+
+def test_semantic_callout_outranks_its_untyped_subparse() -> None:
+    rows = (
+        _word_row(0, "1,200", 0.0),
+        _word_row(1, "-", 28.0),
+        _word_row(2, "1,810", 34.0),
+        _word_row(3, "asw", 64.0),
+    )
+    fragments = _parseable_opening_label_fragments(rows)
+    assert len(fragments) == 1
+    assert fragments[0].text == "1,200 - 1,810 asw"
+
+
+def test_pair_callout_outranks_single_dimension_subparses() -> None:
+    rows = (
+        _word_row(0, "2,100", 0.0),
+        _word_row(1, "x", 28.0),
+        _word_row(2, "1,030", 34.0),
+    )
+    fragments = _parseable_opening_label_fragments(rows)
+    assert len(fragments) == 1
+    assert fragments[0].text == "2,100 x 1,030"
+
+
+def test_non_opening_text_fragments_are_not_created_from_native_line() -> None:
+    rows = (
+        _word_row(0, "900x1200", 0.0),
+        _word_row(1, "CLEAR", 40.0),
+        _word_row(2, "04", 75.0),
+        _word_row(3, "-", 87.0),
+        _word_row(4, "06", 93.0),
+        _word_row(5, "Niche", 108.0),
+        _word_row(6, "Scale", 145.0),
+        _word_row(7, "1:100", 170.0),
+    )
+    assert _parseable_opening_label_fragments(rows) == ()
 
 
 def test_parser_keeps_single_dimension_separate_and_rejects_clear_zone_text() -> None:
