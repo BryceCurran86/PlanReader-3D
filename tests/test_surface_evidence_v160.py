@@ -42,6 +42,7 @@ from pb_surface_evidence_v160 import (
     associate_with_measured_surfaces,
     build_surface_evidence,
     process_page_surface_evidence,
+    _get_measured_surfaces_for_page,
     get_surface_evidence_diagnostics_v160,
     _items_are_closed_lines,
     _closed_line_vertices,
@@ -50,6 +51,78 @@ from pb_surface_evidence_v160 import (
     PDF_PT_TO_MM,
     MM_PER_PT,
 )
+
+
+class TestMeasuredRoomAuthorityPrecedence(unittest.TestCase):
+    def test_authenticated_source_room_outranks_legacy_room_geometry(self):
+        app = MagicMock()
+        app.canonical_rooms_live = {
+            "status": "corroborated",
+            "rooms": [
+                {
+                    "canonical_room_id": "canonical-room-1",
+                    "page_id": "7",
+                    "polygon_pdf_pts": [[0, 0], [10, 0], [10, 8], [0, 8]],
+                    "geometry_complete": True,
+                    "metric_area_m2": 4.75,
+                    "source_room_face_record_id": "source-face-1",
+                    "evidence_ids": ["source-face-1"],
+                }
+            ],
+        }
+        app.registered_wall_records_v135.return_value = []
+        diag = SurfaceProcessingDiagnostics()
+        page = {"page_no": 7}
+
+        with patch(
+            "pb_room_face_takeoff.extract_room_faces_from_page",
+            side_effect=AssertionError("legacy extractor must not run"),
+        ):
+            surfaces = _get_measured_surfaces_for_page(app, 7, 1, page, diag)
+
+        rooms = [surface for surface in surfaces if surface["type"] == "room"]
+        self.assertEqual(len(rooms), 1)
+        self.assertEqual(rooms[0]["ref"], "canonical-room-1")
+        self.assertEqual(rooms[0]["authority"], "authenticated_source_room")
+        self.assertEqual(rooms[0]["area_m2"], 4.75)
+        self.assertEqual(diag.measured_room_targets_count, 1)
+
+    def test_legacy_room_remains_fallback_when_source_room_abstains(self):
+        from pb_room_face_takeoff import RoomFace
+
+        app = MagicMock()
+        app.canonical_rooms_live = {
+            "status": "abstained",
+            "reason_codes": ["source_room_face_scope_unavailable"],
+            "rooms": [],
+        }
+        app.registered_wall_records_v135.return_value = []
+        legacy = RoomFace(
+            room_ref="legacy-r1",
+            label="ROOM",
+            polygon_pdf_pts=[(0, 0), (5, 0), (5, 5), (0, 5)],
+            polygon_m=None,
+            floor_area_m2=25.0,
+            area_page_pts2=25.0,
+            perimeter_m=None,
+            geometry_confidence=0.5,
+            evidence=[],
+        )
+        diag = SurfaceProcessingDiagnostics()
+
+        with patch(
+            "pb_room_face_takeoff.extract_room_faces_from_page",
+            return_value=[legacy],
+        ):
+            surfaces = _get_measured_surfaces_for_page(
+                app, 7, 1, {"page_no": 7}, diag
+            )
+
+        rooms = [surface for surface in surfaces if surface["type"] == "room"]
+        self.assertEqual(len(rooms), 1)
+        self.assertEqual(rooms[0]["ref"], "legacy-r1")
+        self.assertEqual(rooms[0]["authority"], "legacy_room_face")
+
 
 
 # ---------------------------------------------------------------------------
