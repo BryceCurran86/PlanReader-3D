@@ -11,6 +11,7 @@ Instances of :class:`PdfTextIntegrityAuthority` are minted by the trusted
 """
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 import math
 import re
@@ -302,12 +303,37 @@ def _valid_tounicode_cmap(stream: bytes | bytearray | memoryview | None) -> bool
     return not (operators - _CMAP_ALLOWED_WORDS)
 
 
-def _font_binding(page: object, span: Mapping[str, object]) -> tuple[Optional[Sequence[object]], tuple[str, ...]]:
+def _page_runtime_cache(page: object) -> dict[str, object]:
+    """Return an ephemeral cache owned by one live PyMuPDF page object."""
+    name = "_planreader_text_integrity_runtime_cache"
     try:
-        fonts = page.get_fonts(full=True) or []  # type: ignore[attr-defined]
+        cached = getattr(page, name, None)
+        if isinstance(cached, dict):
+            return cached
+        cached = {}
+        setattr(page, name, cached)
+        return cached
     except Exception:
-        return None, (TEXT_FONT_BINDING_AMBIGUOUS,)
+        # Cache availability is never authority. Fall back to uncached replay.
+        return {}
+
+
+def _font_binding(page: object, span: Mapping[str, object]) -> tuple[Optional[Sequence[object]], tuple[str, ...]]:
+    cache = _page_runtime_cache(page)
     target = _normalise_font_name(span.get("font"))
+    binding_cache = cache.setdefault("font_binding_by_name", {})
+    if isinstance(binding_cache, dict) and target in binding_cache:
+        return binding_cache[target]  # type: ignore[return-value]
+    try:
+        fonts = cache.get("fonts_full")
+        if fonts is None:
+            fonts = tuple(page.get_fonts(full=True) or ())  # type: ignore[attr-defined]
+            cache["fonts_full"] = fonts
+    except Exception:
+        result = (None, (TEXT_FONT_BINDING_AMBIGUOUS,))
+        if isinstance(binding_cache, dict):
+            binding_cache[target] = result
+        return result
     matches: dict[int, Sequence[object]] = {}
     for font in fonts:
         try:
@@ -318,8 +344,12 @@ def _font_binding(page: object, span: Mapping[str, object]) -> tuple[Optional[Se
         if target and target in aliases:
             matches[xref] = font
     if len(matches) != 1:
-        return None, (TEXT_FONT_BINDING_AMBIGUOUS,)
-    return next(iter(matches.values())), ()
+        result = (None, (TEXT_FONT_BINDING_AMBIGUOUS,))
+    else:
+        result = (next(iter(matches.values())), ())
+    if isinstance(binding_cache, dict):
+        binding_cache[target] = result
+    return result
 
 
 def _font_for_glyph_validation(page: object, font: Sequence[object]):
@@ -336,6 +366,12 @@ def _font_for_glyph_validation(page: object, font: Sequence[object]):
     except (IndexError, TypeError, ValueError):
         return None
 
+    cache = _page_runtime_cache(page)
+    font_view_cache = cache.setdefault("font_view_by_xref", {})
+    if isinstance(font_view_cache, dict) and xref in font_view_cache:
+        return font_view_cache[xref]
+
+    result = None
     try:
         extracted = page.parent.extract_font(xref)  # type: ignore[attr-defined]
         font_buffer = extracted[3] if len(extracted) >= 4 else b""
@@ -343,20 +379,22 @@ def _font_for_glyph_validation(page: object, font: Sequence[object]):
         font_buffer = b""
     if font_buffer:
         try:
-            return fitz.Font(fontbuffer=font_buffer)
+            result = fitz.Font(fontbuffer=font_buffer)
         except Exception:
-            return None
-
-    try:
-        base_font = str(font[3] or "")
-    except (IndexError, TypeError):
-        return None
-    if _normalise_font_name(base_font) not in _BASE14_SIMPLE_FONTS:
-        return None
-    try:
-        return fitz.Font(fontname=base_font)
-    except Exception:
-        return None
+            result = None
+    else:
+        try:
+            base_font = str(font[3] or "")
+        except (IndexError, TypeError):
+            base_font = ""
+        if _normalise_font_name(base_font) in _BASE14_SIMPLE_FONTS:
+            try:
+                result = fitz.Font(fontname=base_font)
+            except Exception:
+                result = None
+    if isinstance(font_view_cache, dict):
+        font_view_cache[xref] = result
+    return result
 
 
 def _glyph_unicode_consistency_reasons(
@@ -425,17 +463,32 @@ def _decode_status(
             subtype,
             base_font,
         )
-    try:
-        kind, value = page.parent.xref_get_key(xref, "ToUnicode")  # type: ignore[attr-defined]
-    except Exception:
-        kind, value = "null", "null"
-    if kind == "xref":
+    cache = _page_runtime_cache(page)
+    tounicode_cache = cache.setdefault("tounicode_status_by_xref", {})
+    cached_tounicode = (
+        tounicode_cache.get(xref)
+        if isinstance(tounicode_cache, dict)
+        else None
+    )
+    if cached_tounicode is None:
         try:
-            cmap_xref = int(str(value).split()[0])
-            cmap = page.parent.xref_stream(cmap_xref)  # type: ignore[attr-defined]
+            kind, value = page.parent.xref_get_key(xref, "ToUnicode")  # type: ignore[attr-defined]
         except Exception:
-            cmap = None
-        if not _valid_tounicode_cmap(cmap):
+            kind, value = "null", "null"
+        cmap_valid = None
+        if kind == "xref":
+            try:
+                cmap_xref = int(str(value).split()[0])
+                cmap = page.parent.xref_stream(cmap_xref)  # type: ignore[attr-defined]
+            except Exception:
+                cmap = None
+            cmap_valid = _valid_tounicode_cmap(cmap)
+        cached_tounicode = (kind, value, cmap_valid)
+        if isinstance(tounicode_cache, dict):
+            tounicode_cache[xref] = cached_tounicode
+    kind, value, cmap_valid = cached_tounicode
+    if kind == "xref":
+        if not cmap_valid:
             return (
                 "malformed_tounicode",
                 (TEXT_TOUNICODE_MALFORMED,),
@@ -523,6 +576,65 @@ def _texttrace_spans(page: object) -> Optional[list]:
             cache["texttrace"] = None
     return cache["texttrace"]
 
+
+
+_TEXTTRACE_SPATIAL_BIN_PT = 32.0
+
+
+def _texttrace_spans_near_bbox(
+    page: object,
+    bbox: Sequence[object],
+) -> Optional[tuple[Mapping[str, object], ...]]:
+    """Return a lossless spatial superset of trace spans touching the bbox.
+
+    The exact overlap/text tests remain in _matching_trace_spans. This cache
+    only avoids rescanning every text-trace span for every native word.
+    """
+    spans = _texttrace_spans(page)
+    if spans is None:
+        return None
+    try:
+        x0, y0, x1, y1 = _rect_tuple(bbox)
+    except (TypeError, ValueError):
+        return tuple(span for span in spans if isinstance(span, Mapping))
+
+    cache = _page_cache(page)
+    key = "texttrace_spatial_index_v1"
+    indexed = cache.get(key)
+    if indexed is None:
+        grid: dict[tuple[int, int], list[tuple[int, Mapping[str, object]]]] = {}
+        unindexed: list[tuple[int, Mapping[str, object]]] = []
+        for position, span in enumerate(spans):
+            if not isinstance(span, Mapping):
+                continue
+            try:
+                sx0, sy0, sx1, sy1 = _rect_tuple(span.get("bbox") or ())
+            except (TypeError, ValueError):
+                unindexed.append((position, span))
+                continue
+            ix0 = int(math.floor(sx0 / _TEXTTRACE_SPATIAL_BIN_PT))
+            ix1 = int(math.floor(sx1 / _TEXTTRACE_SPATIAL_BIN_PT))
+            iy0 = int(math.floor(sy0 / _TEXTTRACE_SPATIAL_BIN_PT))
+            iy1 = int(math.floor(sy1 / _TEXTTRACE_SPATIAL_BIN_PT))
+            for ix in range(ix0, ix1 + 1):
+                for iy in range(iy0, iy1 + 1):
+                    grid.setdefault((ix, iy), []).append((position, span))
+        indexed = (grid, tuple(unindexed))
+        cache[key] = indexed
+
+    grid, unindexed = indexed
+    qx0 = int(math.floor(x0 / _TEXTTRACE_SPATIAL_BIN_PT))
+    qx1 = int(math.floor(x1 / _TEXTTRACE_SPATIAL_BIN_PT))
+    qy0 = int(math.floor(y0 / _TEXTTRACE_SPATIAL_BIN_PT))
+    qy1 = int(math.floor(y1 / _TEXTTRACE_SPATIAL_BIN_PT))
+    found: dict[int, Mapping[str, object]] = {
+        position: span for position, span in unindexed
+    }
+    for ix in range(qx0, qx1 + 1):
+        for iy in range(qy0, qy1 + 1):
+            for position, span in grid.get((ix, iy), ()):
+                found[position] = span
+    return tuple(found[position] for position in sorted(found))
 
 def _span_seqno(span: Mapping[str, object]) -> Optional[int]:
     try:
@@ -763,7 +875,7 @@ def _exact_fill_stroke_overprint_pair(
         return None
 
     try:
-        bboxlog = list(page.get_bboxlog() or ())  # type: ignore[attr-defined]
+        bboxlog = _cached_bboxlog(page)
     except Exception:
         return None
     sequence_numbers = (ordered[0][0], ordered[1][0])
@@ -790,7 +902,7 @@ def _matching_trace_spans(
 ) -> tuple[tuple[Mapping[str, object], ...], str, tuple[str, ...]]:
     raw_text = str(word.get("text") or "")
     bbox = word.get("bbox") or ()
-    spans = _texttrace_spans(page)
+    spans = _texttrace_spans_near_bbox(page, bbox)
     if spans is None:
         return (), "", (TEXT_TRACE_UNAVAILABLE,)
     candidates: list[tuple[Mapping[str, object], str]] = []
@@ -1018,11 +1130,17 @@ def _clip_model(page: object) -> Optional[_ClipModel]:
 
 
 def _page_content_has_clip_operator(page: object) -> Optional[bool]:
-    try:
-        content = bytes(page.read_contents() or b"")  # type: ignore[attr-defined]
-    except Exception:
-        return None
-    return re.search(rb"(?<!\S)W\*?(?!\S)", content) is not None
+    cache = _page_cache(page)
+    if "content_has_clip_operator" not in cache:
+        try:
+            content = bytes(page.read_contents() or b"")  # type: ignore[attr-defined]
+        except Exception:
+            cache["content_has_clip_operator"] = None
+        else:
+            cache["content_has_clip_operator"] = (
+                re.search(rb"(?<!\S)W\*?(?!\S)", content) is not None
+            )
+    return cache["content_has_clip_operator"]
 
 
 def _rect_contains(
@@ -1072,24 +1190,26 @@ def _native_word_is_present(
         return False
 
     cache = _page_cache(page)
-    if "native_words" not in cache:
+    if "native_word_bboxes_by_text" not in cache:
         try:
-            cache["native_words"] = list(
-                page.get_text("words") or []
-            )
+            words = list(page.get_text("words") or [])
         except Exception:
-            cache["native_words"] = None
-    words = cache.get("native_words")
-    if words is None:
+            cache["native_word_bboxes_by_text"] = None
+        else:
+            indexed: dict[str, list[tuple[float, float, float, float]]] = {}
+            for row in words:
+                try:
+                    text = str(row[4])
+                    row_bbox = _rect_tuple(row[:4])
+                except (IndexError, TypeError, ValueError):
+                    continue
+                indexed.setdefault(text, []).append(row_bbox)
+            cache["native_word_bboxes_by_text"] = indexed
+    indexed = cache.get("native_word_bboxes_by_text")
+    if indexed is None:
         return False
 
-    for row in words:
-        try:
-            if str(row[4]) != raw_text:
-                continue
-            row_bbox = _rect_tuple(row[:4])
-        except (IndexError, TypeError, ValueError):
-            continue
+    for row_bbox in indexed.get(raw_text, ()):
         if all(abs(left - right) <= 1e-6 for left, right in zip(row_bbox, bbox)):
             return True
     return False
@@ -1119,22 +1239,36 @@ def _text_clip_reasons(
     except (TypeError, ValueError):
         return (TEXT_CLIP_STATE_UNRESOLVED,)
 
-    before = None
-    after = None
-    for path in model.paths:
-        if path[0] < seqno:
-            before = path
-        elif path[0] > seqno:
-            after = path
-            break
+    # ``model.paths`` and ``model.pushes`` are producer-built in monotonic
+    # sequence / drawing order. Index them once per page instead of rescanning
+    # the complete clip history for every native word.
+    page_cache = _page_cache(page)
+    path_seqnos = page_cache.get("clip_model_path_seqnos")
+    if path_seqnos is None:
+        path_seqnos = tuple(path[0] for path in model.paths)
+        page_cache["clip_model_path_seqnos"] = path_seqnos
+    push_positions = page_cache.get("clip_model_push_positions")
+    if push_positions is None:
+        push_positions = tuple(position for position, _clip_id in model.pushes)
+        page_cache["clip_model_push_positions"] = push_positions
+
+    before_index = bisect_left(path_seqnos, seqno) - 1
+    after_index = bisect_right(path_seqnos, seqno)
+    before = model.paths[before_index] if before_index >= 0 else None
+    after = model.paths[after_index] if after_index < len(model.paths) else None
     lo_position = before[3] if before is not None else -1
     hi_position = after[3] if after is not None else None
     stack_before = set(before[2]) if before is not None else set()
     stack_after = set(after[2]) if after is not None else None
+    push_start = bisect_right(push_positions, lo_position)
+    push_end = (
+        len(model.pushes)
+        if hi_position is None
+        else bisect_left(push_positions, hi_position)
+    )
     between = {
-        clip_id
-        for position, clip_id in model.pushes
-        if position > lo_position and (hi_position is None or position < hi_position)
+        model.pushes[index][1]
+        for index in range(push_start, push_end)
     }
 
     if before is not None and after is not None and not between and before[1] == after[1]:
@@ -1491,6 +1625,98 @@ def _exact_fill_path_coverage(
     return float(result.coverage_ratio)
 
 
+_LATER_PAINT_KINDS = frozenset({
+    "fill-path",
+    "fill-image",
+    "fill-shade",
+    "fill-text",
+})
+_LATER_PAINT_SPATIAL_BIN_PT = 64.0
+_LATER_PAINT_SPATIAL_MAX_CELLS = 4096
+
+
+def _later_paint_spatial_candidates(
+    page: object,
+    subject_bbox: Sequence[object],
+    text_sequence_number: int,
+    bboxlog: Sequence[object],
+) -> Optional[tuple[int, ...]]:
+    """Lossless broad phase for later-paint occlusion checks.
+
+    The authority predicate remains `_intersection_ratio` plus the exact fill
+    coverage gate below. This index only removes later paint records whose
+    axis-aligned bounding boxes cannot intersect the text subject at all.
+    Candidate sequence numbers are returned in original paint order so the
+    historical first-qualifying-occluder behavior is unchanged.
+    """
+    try:
+        sx0, sy0, sx1, sy1 = _rect_tuple(subject_bbox)
+    except (TypeError, ValueError):
+        return None
+    if sx1 <= sx0 or sy1 <= sy0:
+        return None
+
+    cache = _page_cache(page)
+    cache_key = "later_paint_spatial_index_v1"
+    indexed = cache.get(cache_key)
+    if indexed is None or indexed[0] is not bboxlog:
+        grid: dict[tuple[int, int], list[int]] = {}
+        broad: list[int] = []
+        bin_size = _LATER_PAINT_SPATIAL_BIN_PT
+        for paint_seqno, item in enumerate(bboxlog):
+            try:
+                paint_kind, paint_bbox = str(item[0]), item[1]  # type: ignore[index]
+            except (IndexError, TypeError):
+                continue
+            if paint_kind not in _LATER_PAINT_KINDS:
+                continue
+            try:
+                x0, y0, x1, y1 = _rect_tuple(paint_bbox)
+            except (TypeError, ValueError):
+                # The legacy exact predicate returns zero overlap for malformed
+                # boxes, so they cannot become positive occlusion authority.
+                continue
+            if x1 <= x0 or y1 <= y0:
+                continue
+            ix0 = int(math.floor(x0 / bin_size))
+            ix1 = int(math.floor(x1 / bin_size))
+            iy0 = int(math.floor(y0 / bin_size))
+            iy1 = int(math.floor(y1 / bin_size))
+            cell_count = (ix1 - ix0 + 1) * (iy1 - iy0 + 1)
+            if cell_count > _LATER_PAINT_SPATIAL_MAX_CELLS:
+                broad.append(paint_seqno)
+                continue
+            for ix in range(ix0, ix1 + 1):
+                for iy in range(iy0, iy1 + 1):
+                    grid.setdefault((ix, iy), []).append(paint_seqno)
+        indexed = (bboxlog, grid, tuple(broad))
+        cache[cache_key] = indexed
+
+    _same_bboxlog, grid, broad = indexed
+    bin_size = _LATER_PAINT_SPATIAL_BIN_PT
+    ix0 = int(math.floor(sx0 / bin_size))
+    ix1 = int(math.floor(sx1 / bin_size))
+    iy0 = int(math.floor(sy0 / bin_size))
+    iy1 = int(math.floor(sy1 / bin_size))
+    query_cell_count = (ix1 - ix0 + 1) * (iy1 - iy0 + 1)
+    if query_cell_count > _LATER_PAINT_SPATIAL_MAX_CELLS:
+        return None
+
+    candidates = {
+        seqno
+        for seqno in broad
+        if seqno > text_sequence_number
+    }
+    for ix in range(ix0, ix1 + 1):
+        for iy in range(iy0, iy1 + 1):
+            candidates.update(
+                seqno
+                for seqno in grid.get((ix, iy), ())
+                if seqno > text_sequence_number
+            )
+    return tuple(sorted(candidates))
+
+
 def _later_paint_occlusion_reasons(
     page: object,
     subject_bbox: Sequence[object],
@@ -1499,20 +1725,22 @@ def _later_paint_occlusion_reasons(
     *,
     threshold: float = 0.65,
 ) -> tuple[str, ...]:
-    for paint_seqno, item in enumerate(
-        bboxlog[text_sequence_number + 1 :],
-        start=text_sequence_number + 1,
-    ):
+    candidate_seqnos = _later_paint_spatial_candidates(
+        page,
+        subject_bbox,
+        text_sequence_number,
+        bboxlog,
+    )
+    if candidate_seqnos is None:
+        candidate_seqnos = tuple(range(text_sequence_number + 1, len(bboxlog)))
+
+    for paint_seqno in candidate_seqnos:
         try:
+            item = bboxlog[paint_seqno]
             paint_kind, paint_bbox = str(item[0]), item[1]  # type: ignore[index]
         except (IndexError, TypeError):
             continue
-        if paint_kind not in {
-            "fill-path",
-            "fill-image",
-            "fill-shade",
-            "fill-text",
-        }:
+        if paint_kind not in _LATER_PAINT_KINDS:
             continue
         if _intersection_ratio(subject_bbox, paint_bbox) < threshold:
             continue
