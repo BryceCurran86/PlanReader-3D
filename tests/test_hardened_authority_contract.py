@@ -20,6 +20,7 @@ from pb_hardened_authority_contract import (
 )
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_cross_trade_geometry_reuse import derive_wall_trade_quantities
+from pb_surface_evidence_v160 import SurfaceEvidence, associate_with_measured_surfaces
 
 
 def _opening_geometry():
@@ -152,6 +153,35 @@ def test_fixture_5_internal_elevation_text_cannot_tile_a_plan_room_by_spatial_co
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.canonical_wall_surface is None
     assert result.quantity_m2 is None
+
+    legacy_surface = SurfaceEvidence(
+        polygon_pdf_pts=((10.0, 10.0), (90.0, 10.0), (90.0, 90.0), (10.0, 90.0)),
+        geometry_method="native_rectangle",
+        viewport_id="elev-vp",
+        viewport_kind="internal_elevation",
+        workspace_id=1,
+        page_id=7,
+    )
+    associated = associate_with_measured_surfaces(
+        [legacy_surface],
+        [
+            {
+                "polygon": [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)],
+                "ref": "room-01",
+                "type": "room",
+                "viewport_id": plan_viewport,
+            }
+        ],
+        code_occurrences=[
+            {
+                "code": "WT",
+                "bbox": (20.0, 20.0, 30.0, 30.0),
+                "viewport_id": "elev-vp",
+            }
+        ],
+    )[0]
+    assert associated.association_target_type == ""
+    assert associated.association_target_ref == ""
 
 
 def test_fixture_6_tile_quantity_requires_authenticated_internal_elevation_wall_face_extent():
