@@ -248,6 +248,28 @@ def test_producer_stitches_one_source_callout_split_over_adjacent_native_lines()
     assert len(result.evidence.source_text_observation_ids) >= 2
 
 
+def test_producer_stitches_semantic_modifier_from_adjacent_native_line() -> None:
+    source, published = _ingest(
+        _pdf(
+            labels=(
+                (108.0, 120.0, "1,800 - 610"),
+                (108.0, 128.0, "asw obs"),
+            )
+        ),
+        "split-semantic-modifier",
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.evidence is not None
+    assert result.evidence.dimension_values_mm == (1800.0, 610.0)
+    assert result.evidence.semantic_kind == "window"
+    assert result.evidence.area_m2 == pytest.approx(1.098)
+
+
 def test_remote_lines_with_complementary_syntax_do_not_stitch() -> None:
     source, published = _ingest(
         _pdf(
