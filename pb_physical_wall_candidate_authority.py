@@ -2528,13 +2528,24 @@ def _build_authenticated_viewport_scope_results(
 class PhysicalWallCandidateProducer:
     """Trusted writer derived only from an already-ingested visibility producer."""
 
-    def __init__(self, scopes: Mapping[_ScopeKey, PhysicalWallCandidateScopeResult], *, _seal=None) -> None:
+    def __init__(
+        self,
+        scopes: Mapping[_ScopeKey, PhysicalWallCandidateScopeResult],
+        *,
+        physical_opening_authorities_by_revision: Optional[
+            Mapping[str, PhysicalOpeningAuthority]
+        ] = None,
+        _seal=None,
+    ) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError(
                 "PhysicalWallCandidateProducer must be obtained from "
                 "from_source_visibility_producer()"
             )
         self._scopes = MappingProxyType(dict(scopes))
+        self._physical_opening_authorities_by_revision = MappingProxyType(
+            dict(physical_opening_authorities_by_revision or {})
+        )
 
     @classmethod
     def from_authenticated_viewports(
@@ -2643,6 +2654,9 @@ class PhysicalWallCandidateProducer:
         published_by_revision = dict(source_visibility_producer._published_by_revision)
         store = source_visibility_producer._producer._store
         scopes: dict[_ScopeKey, PhysicalWallCandidateScopeResult] = {}
+        physical_opening_authorities_by_revision: dict[
+            str, PhysicalOpeningAuthority
+        ] = {}
 
         for revision_id, published in sorted(published_by_revision.items()):
             if source_visibility_producer._producer.current_revision_id(
@@ -2680,6 +2694,9 @@ class PhysicalWallCandidateProducer:
                 from_producer(source_visibility_producer)
                 if callable(from_producer)
                 else PhysicalOpeningAuthority(source_visibility_producer.authority())
+            )
+            physical_opening_authorities_by_revision[revision_id] = (
+                physical_opening_authority
             )
             physical_scale_producer = (
                 PhysicalScaleProducer.from_source_visibility_producer(
@@ -2729,7 +2746,29 @@ class PhysicalWallCandidateProducer:
                         )
                         scopes[viewport_key] = viewport_result
 
-        return cls(scopes, _seal=_PRODUCER_SEAL)
+        return cls(
+            scopes,
+            physical_opening_authorities_by_revision=(
+                physical_opening_authorities_by_revision
+            ),
+            _seal=_PRODUCER_SEAL,
+        )
+
+    def physical_opening_authority_for_revision(
+        self,
+        revision_id: str,
+    ) -> Optional[PhysicalOpeningAuthority]:
+        """Return the exact producer-owned opening authority for one revision.
+
+        The wall producer creates this authority from the same immutable source
+        root used to materialize wall scopes. Reusing it preserves its
+        deterministic per-page candidate caches without allowing callers to
+        inject geometry, candidates, completeness, or evidence-shaped inputs.
+        """
+
+        return self._physical_opening_authorities_by_revision.get(
+            str(revision_id)
+        )
 
     def authority(self):
         return PhysicalWallCandidateAuthority(self._scopes, _seal=_AUTHORITY_SEAL)
