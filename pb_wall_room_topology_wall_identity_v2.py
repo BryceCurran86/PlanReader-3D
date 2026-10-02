@@ -161,6 +161,20 @@ def _path_from_edges(
     return tuple(path)
 
 
+def canonical_wall_candidate_id_v2_from_components(
+    viewport_id: str,
+    path_fingerprint: Sequence[Tuple[float, float]],
+    source_primitive_ids: Sequence[str],
+) -> str:
+    """Hash already-derived v2 geometry + provenance components."""
+    payload = {
+        "viewport_id": viewport_id,
+        "path_fingerprint": tuple(path_fingerprint),
+        "source_primitive_ids": tuple(source_primitive_ids),
+    }
+    return stable_contract_id("wall2", payload)
+
+
 def canonical_wall_candidate_id_v2(
     viewport_id: str,
     edge_ids: Sequence[str],
@@ -176,9 +190,8 @@ def canonical_wall_candidate_id_v2(
     source_primitive_ids = _chain_source_primitive_ids(edge_ids, edges_by_id)
     path = _path_from_edges(edge_ids, edges_by_id, p1, p2)
     path_fingerprint = canonical_path_fingerprint(path)
-    payload = {
-        "viewport_id": viewport_id,
-        "path_fingerprint": path_fingerprint,
-        "source_primitive_ids": source_primitive_ids,
-    }
-    return stable_contract_id("wall2", payload)
+    return canonical_wall_candidate_id_v2_from_components(
+        viewport_id,
+        path_fingerprint,
+        source_primitive_ids,
+    )

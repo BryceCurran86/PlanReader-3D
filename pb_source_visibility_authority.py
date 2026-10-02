@@ -20,10 +20,12 @@ Raw native observations remain preserved by ``SourceObservationProducer``.
 """
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, replace
 import hashlib
 import math
-from typing import Mapping, Optional, Sequence
+from threading import RLock
+from typing import Any, Mapping, Optional, Sequence
 
 import fitz
 
@@ -51,6 +53,7 @@ from pb_source_observation_authority import (
     SourceObservationAuthorityResult,
     SourceObservationProducer,
     SourceRevisionRecord,
+    _cached_native_page,
 )
 from pb_vector_geometry_v130 import extract_native_page, native_word_primitive_ref
 
@@ -81,6 +84,108 @@ VISIBILITY_RECTANGULAR_CLIP_EXCLUDES_SEGMENT = (
 )
 VISIBILITY_RECEIPT_UNAVAILABLE = "visibility_receipt_unavailable"
 VISIBILITY_PARENT_MISMATCH = "visibility_parent_mismatch"
+
+
+# Producer-neutral visibility derivation cache.  The cached content contains
+# only immutable decisions derived from exact source bytes; producer-specific
+# observation ids, snapshot ids, receipts, and authority records are minted
+# fresh by each SourceVisibilityProducer.
+_VISIBILITY_PAGE_CACHE_MAX_PAGES = 24
+_VISIBILITY_PAGE_CACHE_LOCK = RLock()
+
+
+@dataclass(frozen=True)
+class _CachedVisibilityWord:
+    raw_text: str
+    geometry: tuple[float, ...]
+    primitive_ref: str
+    decision: Any
+    block_no: Any
+    line_no: Any
+    word_no: Any
+
+
+@dataclass(frozen=True)
+class _CachedVisibleSegment:
+    raw_segment_id: str
+    geometry: tuple[float, float, float, float]
+    reason_codes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _CachedVisibilityPage:
+    words: tuple[_CachedVisibilityWord, ...]
+    visible_segments: tuple[_CachedVisibleSegment, ...]
+
+
+_VISIBILITY_PAGE_CACHE: "OrderedDict[tuple[str, int], _CachedVisibilityPage]" = OrderedDict()
+
+
+def _cached_visibility_page(
+    source_sha256: str, page_number: int
+) -> Optional[_CachedVisibilityPage]:
+    key = (str(source_sha256), int(page_number))
+    with _VISIBILITY_PAGE_CACHE_LOCK:
+        value = _VISIBILITY_PAGE_CACHE.get(key)
+        if value is not None:
+            _VISIBILITY_PAGE_CACHE.move_to_end(key)
+        return value
+
+
+def _remember_visibility_page(
+    source_sha256: str,
+    page_number: int,
+    value: _CachedVisibilityPage,
+) -> None:
+    key = (str(source_sha256), int(page_number))
+    with _VISIBILITY_PAGE_CACHE_LOCK:
+        _VISIBILITY_PAGE_CACHE[key] = value
+        _VISIBILITY_PAGE_CACHE.move_to_end(key)
+        while len(_VISIBILITY_PAGE_CACHE) > _VISIBILITY_PAGE_CACHE_MAX_PAGES:
+            _VISIBILITY_PAGE_CACHE.popitem(last=False)
+
+
+def _derive_visibility_page(
+    page: fitz.Page,
+    *,
+    native_page: Optional[Mapping[str, Any]] = None,
+) -> _CachedVisibilityPage:
+    native = native_page if native_page is not None else extract_native_page(page)
+    words: list[_CachedVisibilityWord] = []
+    visible_segments: list[_CachedVisibleSegment] = []
+    for word in native.get("words") or ():
+        raw_text = str(word.get("text") or "")
+        geometry = tuple(float(value) for value in (word.get("bbox") or ()))
+        words.append(
+            _CachedVisibilityWord(
+                raw_text=raw_text,
+                geometry=geometry,
+                primitive_ref=native_word_primitive_ref(word),
+                decision=classify_native_word_integrity(page, word),
+                block_no=word.get("block_no"),
+                line_no=word.get("line_no"),
+                word_no=word.get("word_no"),
+            )
+        )
+    for segment in native.get("segments") or ():
+        decision = classify_native_segment_visibility(segment)
+        if not decision.visible:
+            continue
+        raw_segment_id = str(segment.get("id") or "").strip()
+        if not raw_segment_id:
+            continue
+        visible_segments.append(
+            _CachedVisibleSegment(
+                raw_segment_id=raw_segment_id,
+                geometry=tuple(float(value) for value in decision.geometry),
+                reason_codes=tuple(decision.reason_codes),
+            )
+        )
+    return _CachedVisibilityPage(
+        words=tuple(words),
+        visible_segments=tuple(visible_segments),
+    )
+
 
 # Structural in-process construction seal. This is not a security boundary
 # against equal-privilege Python code; it prevents ordinary caller-provided
@@ -417,6 +522,15 @@ class SourceVisibilityProducer:
         self._raster_visibility_receipts: dict[
             tuple[str, str], RasterSegmentVisibilityReceipt
         ] = {}
+        # One source-bound physical-opening authority per producer.  The
+        # visibility authority it wraps is a live read-only view over this
+        # producer's store/receipt maps, so later producer-owned augmentation is
+        # visible without rebuilding opening candidate caches.
+        self._physical_opening_authority_cache = None
+        # Physical scale is likewise source-owned and selector-keyed. Reuse one
+        # producer so wall, opening-void, and gross-wall compositions share the
+        # same immutable page/viewport analysis instead of rescanning it.
+        self._physical_scale_producer_cache = None
         # Raster extraction is deterministic for immutable source bytes, the
         # fixed render DPI, and the detector version. Cache successful render
         # attempts per revision/page so repeated downstream compositions do not
@@ -434,6 +548,33 @@ class SourceVisibilityProducer:
             self._raster_visibility_receipts,
             _seal=_VISIBILITY_AUTHORITY_SEAL,
         )
+
+    def physical_opening_authority(self):
+        """Return one cached opening authority bound to this producer.
+
+        The returned authority remains source-owned: callers cannot inject
+        observations or candidate sets, and its underlying visibility reader
+        sees only this producer's immutable lineage and producer-owned receipt
+        maps.  Reuse prevents repeated page candidate/existence reconstruction
+        across wall, semantic-opening, host-binding, and downstream live stages.
+        """
+        if self._physical_opening_authority_cache is None:
+            from pb_physical_opening_authority import PhysicalOpeningAuthority
+
+            self._physical_opening_authority_cache = PhysicalOpeningAuthority(
+                self.authority()
+            )
+        return self._physical_opening_authority_cache
+
+    def physical_scale_producer(self):
+        """Return one cached physical-scale producer bound to this source root."""
+        if self._physical_scale_producer_cache is None:
+            from pb_physical_scale_authority import PhysicalScaleProducer
+
+            self._physical_scale_producer_cache = (
+                PhysicalScaleProducer.from_source_visibility_producer(self)
+            )
+        return self._physical_scale_producer_cache
 
     def text_integrity_authority(self) -> PdfTextIntegrityAuthority:
         return PdfTextIntegrityAuthority(
@@ -788,28 +929,44 @@ class SourceVisibilityProducer:
         visible_ids: list[str] = []
         visible_specs: list[dict[str, object]] = []
         text_receipts: list[tuple[str, PdfTextIntegrityReceipt]] = []
-        pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
+        pdf: Optional[fitz.Document] = None
         try:
             for page_number in base.coverage.decoded_pages:
                 page_index = int(page_number) - 1
                 page_id = str(page_number)
                 partition_id = f"page:{page_number}"
-                page = pdf.load_page(page_index)
-                native = extract_native_page(page)
-                for word in native.get("words") or ():
-                    raw_text = str(word.get("text") or "")
-                    geometry = tuple(float(value) for value in (word.get("bbox") or ()))
-                    primitive_ref = native_word_primitive_ref(word)
+                derived = _cached_visibility_page(
+                    base.revision.source_sha256, int(page_number)
+                )
+                if derived is None:
+                    if pdf is None:
+                        pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
+                    page = pdf.load_page(page_index)
+                    native_cached = _cached_native_page(
+                        base.revision.source_sha256, int(page_number)
+                    )
+                    derived = _derive_visibility_page(
+                        page,
+                        native_page=(
+                            None
+                            if native_cached is None or native_cached.failed
+                            else native_cached.native_page
+                        ),
+                    )
+                    _remember_visibility_page(
+                        base.revision.source_sha256, int(page_number), derived
+                    )
+
+                for word in derived.words:
                     parent_id = _native_word_observation_id(
                         document_id=base.revision.document_id,
                         revision_id=base.revision.revision_id,
                         page_id=page_id,
                         partition_id=partition_id,
-                        primitive_ref=primitive_ref,
-                        raw_text=raw_text,
-                        geometry=geometry,
+                        primitive_ref=word.primitive_ref,
+                        raw_text=word.raw_text,
+                        geometry=word.geometry,
                     )
-                    decision = classify_native_word_integrity(page, word)
                     text_receipts.append(
                         (
                             parent_id,
@@ -820,34 +977,28 @@ class SourceVisibilityProducer:
                                 source_sha256=base.revision.source_sha256,
                                 page_id=page_id,
                                 source_partition_id=partition_id,
-                                geometry=geometry,
-                                decision=decision,
-                                block_no=word.get("block_no"),
-                                line_no=word.get("line_no"),
-                                word_no=word.get("word_no"),
+                                geometry=word.geometry,
+                                decision=word.decision,
+                                block_no=word.block_no,
+                                line_no=word.line_no,
+                                word_no=word.word_no,
                             ),
                         )
                     )
-                for segment in native.get("segments") or ():
-                    decision = classify_native_segment_visibility(segment)
-                    if not decision.visible:
-                        continue
-                    raw_segment_id = str(segment.get("id") or "").strip()
-                    if not raw_segment_id:
-                        continue
-                    parent_ref = f"segment:{raw_segment_id}"
+                for segment in derived.visible_segments:
+                    parent_ref = f"segment:{segment.raw_segment_id}"
                     parent_id = _native_parent_observation_id(
                         document_id=base.revision.document_id,
                         revision_id=base.revision.revision_id,
                         page_id=page_id,
                         partition_id=partition_id,
                         primitive_ref=parent_ref,
-                        geometry=decision.geometry,
+                        geometry=segment.geometry,
                     )
                     visible_ref = f"visible:{parent_ref}"
                     origin_kind = (
                         RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND
-                        if VISIBILITY_PROVEN_RECTANGULAR_CLIP in decision.reason_codes
+                        if VISIBILITY_PROVEN_RECTANGULAR_CLIP in segment.reason_codes
                         else VISIBLE_SEGMENT_ORIGIN_KIND
                     )
                     visible_id = _visible_observation_id(
@@ -857,7 +1008,7 @@ class SourceVisibilityProducer:
                         partition_id=partition_id,
                         primitive_ref=visible_ref,
                         parent_observation_id=parent_id,
-                        geometry=decision.geometry,
+                        geometry=segment.geometry,
                         origin_kind=origin_kind,
                     )
                     visible_specs.append(
@@ -869,14 +1020,15 @@ class SourceVisibilityProducer:
                             "origin_kind": origin_kind,
                             "parent_observation_ids": (parent_id,),
                             "raw_text": "",
-                            "geometry": decision.geometry,
+                            "geometry": segment.geometry,
                             "viewport_id": None,
                             "observation_id": visible_id,
                         }
                     )
                     visible_ids.append(visible_id)
         finally:
-            pdf.close()
+            if pdf is not None:
+                pdf.close()
 
         if visible_specs:
             snapshot = self._producer.publish_derived_observations(
@@ -1245,6 +1397,25 @@ class SourceVisibilityAuthority:
             physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
             reason_codes=(reason,),
         )
+
+    def visible_observation_ids_for_snapshot(self, snapshot_id: str) -> frozenset[str]:
+        """Return producer-receipted visible ids for one immutable snapshot.
+
+        This is an addressing index only.  Consumers must still call
+        ``resolve_visible`` for every returned id before using its observation.
+        """
+        snapshot_id = str(snapshot_id)
+        ids = {
+            observation_id
+            for (receipt_snapshot_id, observation_id) in self._visibility_receipts
+            if receipt_snapshot_id == snapshot_id
+        }
+        ids.update(
+            observation_id
+            for (receipt_snapshot_id, observation_id) in self._raster_visibility_receipts
+            if receipt_snapshot_id == snapshot_id
+        )
+        return frozenset(ids)
 
     def resolve_visible(self, selector: ObservationSelector) -> SourceObservationAuthorityResult:
         expected_parent = self._visibility_receipts.get(

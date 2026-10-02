@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Optional
+from typing import Optional, Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_plan_opening_detection_v171 import (
@@ -332,6 +332,10 @@ def _endpoint_at_projection(
 
 def _candidate_collinear_record_pairs(
     records: tuple[SourceObservationRecord, ...],
+    *,
+    line_geometries: Optional[
+        Sequence[Optional[tuple[float, float, float, float]]]
+    ] = None,
 ) -> tuple[tuple[int, int], ...]:
     """Return a conservative broad-phase superset of collinear record pairs.
 
@@ -344,10 +348,17 @@ def _candidate_collinear_record_pairs(
     if len(records) < 2:
         return ()
 
+    lines = (
+        tuple(line_geometries)
+        if line_geometries is not None
+        else tuple(_line_geometry(record) for record in records)
+    )
+    if len(lines) != len(records):
+        raise ValueError("line_geometries must align with records")
+
     indexed: list[tuple[int, float, float, float]] = []
     max_radius = 0.0
-    for index, record in enumerate(records):
-        line = _line_geometry(record)
+    for index, line in enumerate(lines):
         if line is None:
             continue
         direction = _canonical_direction(line)
@@ -391,10 +402,10 @@ def _candidate_collinear_record_pairs(
                     buckets.get((neighbor_angle, o_bin + do), ())
                 )
 
-        line = _line_geometry(records[index])
+        line = lines[index]
         assert line is not None
         for prior in candidate_indexes:
-            prior_line = _line_geometry(records[prior])
+            prior_line = lines[prior]
             assert prior_line is not None
             if _parallel(prior_line, line) and _collinear(prior_line, line):
                 pairs.add((prior, index) if prior < index else (index, prior))
@@ -406,9 +417,14 @@ def _candidate_collinear_record_pairs(
 def _face_break(
     first: SourceObservationRecord,
     second: SourceObservationRecord,
+    *,
+    first_line: Optional[tuple[float, float, float, float]] = None,
+    second_line: Optional[tuple[float, float, float, float]] = None,
 ) -> Optional[_FaceBreak]:
-    first_line = _line_geometry(first)
-    second_line = _line_geometry(second)
+    if first_line is None:
+        first_line = _line_geometry(first)
+    if second_line is None:
+        second_line = _line_geometry(second)
     if first_line is None or second_line is None or not _collinear(first_line, second_line):
         return None
     direction = _canonical_direction(first_line)
@@ -495,6 +511,26 @@ class PhysicalOpeningAuthority:
             tuple[str, str, str, str, str],
             tuple[CandidateSemanticOpening, ...],
         ] = {}
+        self._visible_candidate_membership_cache: dict[
+            tuple[str, str, str, str, str],
+            dict[str, tuple[CandidateSemanticOpening, ...]],
+        ] = {}
+        self._visible_existence_cache: dict[
+            tuple[str, str, str, str, str],
+            PhysicalOpeningExistenceResult,
+        ] = {}
+        self._visible_disposition_cache: dict[
+            tuple[str, str, str, str, str],
+            PhysicalOpeningDispositionResult,
+        ] = {}
+        # Visibility resolution is immutable for one exact source snapshot.
+        # Snapshot materialization below already resolves every observation;
+        # retain those exact authority results so per-observation proofs do not
+        # re-run the same source/receipt validation thousands of times.
+        self._visible_source_result_cache: dict[
+            tuple[str, str, str, str, str],
+            SourceObservationAuthorityResult,
+        ] = {}
         self._visible_snapshot_cache: dict[
             tuple[str, str, str, str],
             tuple[
@@ -550,6 +586,33 @@ class PhysicalOpeningAuthority:
                 failures.append(result)
         return tuple(records), tuple(failures)
 
+    @staticmethod
+    def _visible_selector_cache_key(
+        selector: ObservationSelector,
+    ) -> tuple[str, str, str, str, str]:
+        return (
+            str(selector.document_id),
+            str(selector.revision_id),
+            str(selector.source_sha256),
+            str(selector.snapshot_id),
+            str(selector.observation_id),
+        )
+
+    def _resolve_visible_cached(
+        self,
+        selector: ObservationSelector,
+    ) -> SourceObservationAuthorityResult:
+        visibility = self._source_visibility_authority
+        if visibility is None:
+            raise RuntimeError(VISIBLE_SOURCE_AUTHORITY_REQUIRED)
+        key = self._visible_selector_cache_key(selector)
+        cached = self._visible_source_result_cache.get(key)
+        if cached is not None:
+            return cached
+        result = visibility.resolve_visible(selector)
+        self._visible_source_result_cache[key] = result
+        return result
+
     def _visible_snapshot_records(
         self,
         seed: SourceObservationAuthorityResult,
@@ -568,8 +631,18 @@ class PhysicalOpeningAuthority:
             return cached
         records: list[SourceObservationRecord] = []
         failures: list[SourceObservationAuthorityResult] = []
+        visible_observation_ids = visibility.visible_observation_ids_for_snapshot(
+            seed.snapshot.snapshot_id
+        )
         for observation_id in seed.snapshot.observation_ids:
-            result = visibility.resolve_visible(
+            # Non-visible source observations historically resolve to
+            # VISIBILITY_RECEIPT_UNAVAILABLE and are intentionally ignored.
+            # Skip that no-op authority round trip using the producer-owned
+            # receipt index, while preserving exact snapshot ordering for every
+            # visible record that still undergoes full resolve_visible checks.
+            if observation_id not in visible_observation_ids:
+                continue
+            result = self._resolve_visible_cached(
                 ObservationSelector(
                     document_id=seed.snapshot.document_id,
                     revision_id=seed.snapshot.revision_id,
@@ -692,29 +765,54 @@ class PhysicalOpeningAuthority:
         still decided by the original exact predicates for same-gap, distinct
         parallel axes, segment matching, lineage and final geometry dedupe.
         """
-        scoped = tuple(
-            record
-            for record in records
-            if record.observation_kind in {
-                NATIVE_PDF_VISIBLE_SEGMENT,
-                RASTER_PDF_VISIBLE_SEGMENT,
-            }
-            and record.document_id == seed.document_id
-            and record.revision_id == seed.revision_id
-            and record.source_sha256 == seed.source_sha256
-            and record.snapshot_id == seed.snapshot_id
-            and record.page_id == seed.page_id
-            and record.viewport_id is None
-            and _line_geometry(record) is not None
-        )
+        scoped_records: list[SourceObservationRecord] = []
+        scoped_lines: list[tuple[float, float, float, float]] = []
+        for record in records:
+            if (
+                record.observation_kind not in {
+                    NATIVE_PDF_VISIBLE_SEGMENT,
+                    RASTER_PDF_VISIBLE_SEGMENT,
+                }
+                or record.document_id != seed.document_id
+                or record.revision_id != seed.revision_id
+                or record.source_sha256 != seed.source_sha256
+                or record.snapshot_id != seed.snapshot_id
+                or record.page_id != seed.page_id
+                or record.viewport_id is not None
+            ):
+                continue
+            line = _line_geometry(record)
+            if line is None:
+                continue
+            scoped_records.append(record)
+            scoped_lines.append(line)
+        scoped = tuple(scoped_records)
+        cached_lines = tuple(scoped_lines)
         breaks: list[_FaceBreak] = []
-        for first_index, second_index in _candidate_collinear_record_pairs(scoped):
-            found = _face_break(scoped[first_index], scoped[second_index])
+        for first_index, second_index in _candidate_collinear_record_pairs(
+            scoped, line_geometries=cached_lines
+        ):
+            found = _face_break(
+                scoped[first_index],
+                scoped[second_index],
+                first_line=cached_lines[first_index],
+                second_line=cached_lines[second_index],
+            )
             if found is not None:
                 breaks.append(found)
 
         if not breaks:
             return ()
+
+        # Every discovered support tuple reuses the same immutable source
+        # observations. Canonicalising six lines for every candidate pairing
+        # repeatedly rebuilt identical geometry hundreds of thousands of times
+        # on dense CAD pages. Cache the exact legacy canonical representation
+        # once per observation for this page.
+        canonical_line_by_observation_id = {
+            record.observation_id: _canonical_line(record)
+            for record in scoped
+        }
 
         coord_tol = _COORD_EQ_ABS_TOL
         max_same_angle = math.acos(max(-1.0, 1.0 - _PARALLEL_REL_TOL))
@@ -731,17 +829,19 @@ class PhysicalOpeningAuthority:
             angle = math.atan2(direction[1], direction[0]) % math.pi
             return int(math.floor(angle / angle_width)) % angle_bucket_count
 
-        endpoint_index: dict[
-            tuple[tuple[int, int], tuple[int, int]],
-            list[SourceObservationRecord],
+        endpoint_point_index: dict[
+            tuple[int, int], list[SourceObservationRecord]
         ] = {}
-        for record in scoped:
-            line = _line_geometry(record)
-            assert line is not None
+        scoped_position = {
+            record.observation_id: index for index, record in enumerate(scoped)
+        }
+        for index, record in enumerate(scoped):
+            line = cached_lines[index]
             a = point_bin((line[0], line[1]))
             b = point_bin((line[2], line[3]))
-            endpoint_index.setdefault((a, b), []).append(record)
-            endpoint_index.setdefault((b, a), []).append(record)
+            endpoint_point_index.setdefault(a, []).append(record)
+            if b != a:
+                endpoint_point_index.setdefault(b, []).append(record)
 
         segment_match_cache: dict[
             tuple[tuple[float, float], tuple[float, float]],
@@ -757,19 +857,18 @@ class PhysicalOpeningAuthority:
             if cached is not None:
                 return cached
             first_bin = point_bin(first)
-            second_bin = point_bin(second)
             candidates: dict[str, SourceObservationRecord] = {}
             for fdx in (-1, 0, 1):
                 for fdy in (-1, 0, 1):
                     fb = (first_bin[0] + fdx, first_bin[1] + fdy)
-                    for sdx in (-1, 0, 1):
-                        for sdy in (-1, 0, 1):
-                            sb = (second_bin[0] + sdx, second_bin[1] + sdy)
-                            for record in endpoint_index.get((fb, sb), ()):
-                                candidates[record.observation_id] = record
+                    for record in endpoint_point_index.get(fb, ()):
+                        candidates[record.observation_id] = record
             result = tuple(
                 record
-                for record in candidates.values()
+                for record in sorted(
+                    candidates.values(),
+                    key=lambda item: scoped_position[item.observation_id],
+                )
                 if _segment_matches(record, first, second)
             )
             segment_match_cache[key] = result
@@ -785,12 +884,17 @@ class PhysicalOpeningAuthority:
             ge = coord_bin(second_break.gap_end)
             ga = angle_bin(second_break.direction)
 
-            prior_indexes: set[int] = set()
+            # Each prior break is stored in exactly one (gap-start, gap-end,
+            # angle) bin, and the 27 neighbor keys below are distinct. A set
+            # therefore performs duplicate tracking that can never remove an
+            # item. Extend a list instead, then preserve the historical sorted
+            # first-index evaluation order exactly.
+            prior_indexes: list[int] = []
             for ds in (-1, 0, 1):
                 for de in (-1, 0, 1):
                     for da in (-1, 0, 1):
                         ak = (ga + da) % angle_bucket_count
-                        prior_indexes.update(
+                        prior_indexes.extend(
                             break_index.get((gs + ds, ge + de, ak), ())
                         )
 
@@ -831,7 +935,12 @@ class PhysicalOpeningAuthority:
                         if not lineage_ok or len(set(parent_ids)) != 6:
                             continue
                         geometry_key = tuple(
-                            sorted(_canonical_line(item) for item in support)
+                            sorted(
+                                canonical_line_by_observation_id[
+                                    item.observation_id
+                                ]
+                                for item in support
+                            )
                         )
                         key = (
                             seed.document_id,
@@ -1177,6 +1286,14 @@ class PhysicalOpeningAuthority:
             return cached
         candidates = self._visible_all_structural_candidates(seed, records)
         self._visible_candidate_cache[key] = candidates
+        membership: dict[str, list[CandidateSemanticOpening]] = {}
+        for candidate in candidates:
+            for observation_id in candidate.source_observation_ids:
+                membership.setdefault(str(observation_id), []).append(candidate)
+        self._visible_candidate_membership_cache[key] = {
+            observation_id: tuple(rows)
+            for observation_id, rows in membership.items()
+        }
         return candidates
 
     def assess_visible_candidate_closure(
@@ -1206,7 +1323,7 @@ class PhysicalOpeningAuthority:
             )
 
         visibility = self._source_visibility_authority
-        source_result = visibility.resolve_visible(selector)
+        source_result = self._resolve_visible_cached(selector)
         if (
             source_result.status is not EvidenceResolutionStatus.CORROBORATED
             or source_result.observation is None
@@ -1424,7 +1541,7 @@ class PhysicalOpeningAuthority:
             )
 
         visibility = self._source_visibility_authority
-        source_result = visibility.resolve_visible(selector)
+        source_result = self._resolve_visible_cached(selector)
         if (
             source_result.status is not EvidenceResolutionStatus.CORROBORATED
             or source_result.observation is None
@@ -1472,12 +1589,29 @@ class PhysicalOpeningAuthority:
             )
 
         visibility = self._source_visibility_authority
-        source_result = visibility.resolve_visible(selector)
+        visible_cache_key = (
+            str(selector.document_id),
+            str(selector.revision_id),
+            str(selector.source_sha256),
+            str(selector.snapshot_id),
+            str(selector.observation_id),
+        )
+        cached_disposition = self._visible_disposition_cache.get(visible_cache_key)
+        if cached_disposition is not None:
+            return cached_disposition
+
+        def cache_visible(
+            result: PhysicalOpeningDispositionResult,
+        ) -> PhysicalOpeningDispositionResult:
+            self._visible_disposition_cache[visible_cache_key] = result
+            return result
+
+        source_result = self._resolve_visible_cached(selector)
         if (
             source_result.status is not EvidenceResolutionStatus.CORROBORATED
             or source_result.observation is None
         ):
-            return PhysicalOpeningDispositionResult(
+            return cache_visible(PhysicalOpeningDispositionResult(
                 status=_source_failure_status(source_result),
                 disposition=(
                     PHYSICAL_OPENING_DISPOSITION_CONFLICT
@@ -1485,12 +1619,12 @@ class PhysicalOpeningAuthority:
                     else PHYSICAL_OPENING_DISPOSITION_UNRESOLVED
                 ),
                 reason_codes=_dedupe_reason_codes(source_result.reason_codes),
-            )
+            ))
 
         records, failures = self._visible_snapshot_records(source_result)
         if failures:
             status = _source_failure_status(*failures)
-            return PhysicalOpeningDispositionResult(
+            return cache_visible(PhysicalOpeningDispositionResult(
                 status=status,
                 disposition=(
                     PHYSICAL_OPENING_DISPOSITION_CONFLICT
@@ -1501,49 +1635,65 @@ class PhysicalOpeningAuthority:
                     (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),
                     *tuple(result.reason_codes for result in failures),
                 ),
-            )
+            ))
 
         observation = source_result.observation
         candidates = self._visible_candidates_for(observation, records)
-        containing = tuple(
-            candidate
-            for candidate in candidates
-            if observation.observation_id in candidate.source_observation_ids
+        page_key = (
+            observation.document_id,
+            observation.revision_id,
+            observation.source_sha256,
+            observation.snapshot_id,
+            observation.page_id,
         )
+        membership = self._visible_candidate_membership_cache.get(page_key)
+        if membership is None:
+            # Defensive compatibility for any pre-populated candidate cache.
+            rebuilt: dict[str, list[CandidateSemanticOpening]] = {}
+            for candidate in candidates:
+                for observation_id in candidate.source_observation_ids:
+                    rebuilt.setdefault(str(observation_id), []).append(candidate)
+            membership = {
+                observation_id: tuple(rows)
+                for observation_id, rows in rebuilt.items()
+            }
+            self._visible_candidate_membership_cache[page_key] = membership
+        containing = membership.get(str(observation.observation_id), ())
+
         if len(containing) > 1:
-            return PhysicalOpeningDispositionResult(
+            return cache_visible(PhysicalOpeningDispositionResult(
                 status=EvidenceResolutionStatus.CONFLICT,
                 disposition=PHYSICAL_OPENING_DISPOSITION_CONFLICT,
                 reason_codes=(AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES,),
                 candidate_ids=tuple(
                     sorted(candidate.candidate_id for candidate in containing)
                 ),
-            )
+            ))
         if len(containing) == 1:
             existence = self.prove_existence(selector)
             if (
                 existence.status is EvidenceResolutionStatus.CORROBORATED
                 and existence.existence_record is not None
             ):
-                return PhysicalOpeningDispositionResult(
+                return cache_visible(PhysicalOpeningDispositionResult(
                     status=EvidenceResolutionStatus.CORROBORATED,
                     disposition=PHYSICAL_OPENING_DISPOSITION_OPENING_SUPPORT,
                     reason_codes=existence.reason_codes,
                     candidate_ids=(containing[0].candidate_id,),
                     existence_record=existence.existence_record,
-                )
-            return PhysicalOpeningDispositionResult(
+                ))
+            return cache_visible(PhysicalOpeningDispositionResult(
                 status=EvidenceResolutionStatus.CANDIDATE,
                 disposition=PHYSICAL_OPENING_DISPOSITION_CANDIDATE,
                 reason_codes=containing[0].reason_codes,
                 candidate_ids=(containing[0].candidate_id,),
-            )
+            ))
 
-        return PhysicalOpeningDispositionResult(
+        return cache_visible(PhysicalOpeningDispositionResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             disposition=PHYSICAL_OPENING_DISPOSITION_NO_CANDIDATE,
             reason_codes=(VISIBLE_WALL_CONTINUATION_REQUIRED,),
-        )
+        ))
 
     def prove_existence(self, selector: ObservationSelector) -> PhysicalOpeningExistenceResult:
         if not isinstance(selector, ObservationSelector):
@@ -1605,25 +1755,40 @@ class PhysicalOpeningAuthority:
             )
 
         visibility = self._source_visibility_authority
-        source_result = visibility.resolve_visible(selector)
+        visible_cache_key = (
+            str(selector.document_id),
+            str(selector.revision_id),
+            str(selector.source_sha256),
+            str(selector.snapshot_id),
+            str(selector.observation_id),
+        )
+        cached_existence = self._visible_existence_cache.get(visible_cache_key)
+        if cached_existence is not None:
+            return cached_existence
+
+        def cache_visible(result: PhysicalOpeningExistenceResult) -> PhysicalOpeningExistenceResult:
+            self._visible_existence_cache[visible_cache_key] = result
+            return result
+
+        source_result = self._resolve_visible_cached(selector)
         if source_result.status is not EvidenceResolutionStatus.CORROBORATED or source_result.observation is None:
-            return PhysicalOpeningExistenceResult(
+            return cache_visible(PhysicalOpeningExistenceResult(
                 status=_source_failure_status(source_result), proposition=None,
                 physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
                 reason_codes=_dedupe_reason_codes(source_result.reason_codes),
                 source_observation=source_result,
                 missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
-            )
+            ))
         records, failures = self._visible_snapshot_records(source_result)
         if failures:
-            return PhysicalOpeningExistenceResult(
+            return cache_visible(PhysicalOpeningExistenceResult(
                 status=_source_failure_status(*failures), proposition=None,
                 physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
                 reason_codes=_dedupe_reason_codes(
                     (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),
                     *tuple(result.reason_codes for result in failures),
                 ), source_observation=source_result,
-            )
+            ))
         observation = source_result.observation
         candidates = self._visible_candidates_for(observation, records)
         containing = tuple(
@@ -1631,20 +1796,20 @@ class PhysicalOpeningAuthority:
             if observation.observation_id in candidate.source_observation_ids
         )
         if len(containing) > 1:
-            return PhysicalOpeningExistenceResult(
+            return cache_visible(PhysicalOpeningExistenceResult(
                 status=EvidenceResolutionStatus.CONFLICT, proposition=None,
                 physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
                 reason_codes=(AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES,),
                 source_observation=source_result,
-            )
+            ))
         if len(containing) != 1 or source_result.snapshot is None:
-            return PhysicalOpeningExistenceResult(
+            return cache_visible(PhysicalOpeningExistenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED, proposition=None,
                 physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
                 reason_codes=(VISIBLE_WALL_CONTINUATION_REQUIRED,),
                 source_observation=source_result,
                 missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
-            )
+            ))
 
         candidate = containing[0]
         record_payload = {
@@ -1680,7 +1845,7 @@ class PhysicalOpeningAuthority:
             producer_version=source_result.snapshot.producer_version,
             producer_generation=source_result.snapshot.producer_generation,
         )
-        return PhysicalOpeningExistenceResult(
+        return cache_visible(PhysicalOpeningExistenceResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             proposition=PHYSICAL_OPENING_EXISTS,
             physical_opening_existence=PHYSICAL_OPENING_EXISTS,
@@ -1688,7 +1853,7 @@ class PhysicalOpeningAuthority:
             source_observation=source_result,
             candidate=candidate,
             existence_record=existence,
-        )
+        ))
 
     @staticmethod
     def _identity_scope(record: PhysicalOpeningExistenceRecord) -> tuple[str, str, str, str, str]:
