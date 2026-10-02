@@ -41,6 +41,7 @@ from pb_opening_universe_completeness_source_adapter import (
 )
 from pb_physical_opening_authority import PhysicalOpeningAuthority
 from pb_physical_wall_candidate_authority import (
+    PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED,
     PhysicalWallCandidateAuthority,
     PhysicalWallCandidateProducer,
     PhysicalWallCandidateSelector,
@@ -58,6 +59,10 @@ LIVE_WALL_OPENING_COMPOSITION_SCHEMA_VERSION = "1.0.0"
 LIVE_WALL_OPENING_COMPOSITION_RESOLVED = "live_wall_opening_composition_resolved"
 LIVE_WALL_OPENING_COMPOSITION_PARTIAL = "live_wall_opening_composition_partial"
 LIVE_WALL_OPENING_COMPOSITION_UNAVAILABLE = "live_wall_opening_composition_unavailable"
+
+
+class LiveWallOpeningScopeComplexityExceeded(RuntimeError):
+    """The source wall scope exceeded the fail-closed topology budget."""
 
 
 @dataclass(frozen=True)
@@ -174,6 +179,43 @@ def compose_live_wall_opening_authority(
     published = refreshed
 
     wall_authority = wall_producer.authority()
+
+    # Resolve producer-owned wall scopes before any semantic-opening work. If
+    # exact topology has already failed closed on source complexity, no later
+    # host/opening proposition can restore a publishable wall quantity; avoid
+    # spending minutes reconciling openings against an unavailable wall universe.
+    wall_traces: list[LiveWallScopeTrace] = []
+    for page_id in selected_pages:
+        wall_result = wall_authority.resolve_scope(
+            PhysicalWallCandidateSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                page_id=page_id,
+                decision_scope_id=f"wall-source:page-{page_id}",
+            )
+        )
+        wall_traces.append(
+            LiveWallScopeTrace(
+                page_id=page_id,
+                status=wall_result.status,
+                reason_codes=tuple(wall_result.reason_codes),
+                scope_complete=bool(wall_result.scope_complete),
+                wall_candidate_ids=tuple(
+                    record.wall_candidate_id for record in wall_result.records
+                ),
+            )
+        )
+    if any(
+        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+        in trace.reason_codes
+        for trace in wall_traces
+    ):
+        raise LiveWallOpeningScopeComplexityExceeded(
+            PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+        )
+
     host_universe_authority = (
         OpeningHostWallUniverseProducer.from_physical_wall_candidate_authority(
             wall_authority
@@ -258,29 +300,6 @@ def compose_live_wall_opening_authority(
         host_wall_universe_authority=host_universe_authority,
     )
 
-    wall_traces: list[LiveWallScopeTrace] = []
-    for page_id in selected_pages:
-        wall_result = wall_authority.resolve_scope(
-            PhysicalWallCandidateSelector(
-                document_id=published.revision.document_id,
-                revision_id=published.revision.revision_id,
-                source_sha256=published.revision.source_sha256,
-                snapshot_id=published.snapshot.snapshot_id,
-                page_id=page_id,
-                decision_scope_id=f"wall-source:page-{page_id}",
-            )
-        )
-        wall_traces.append(
-            LiveWallScopeTrace(
-                page_id=page_id,
-                status=wall_result.status,
-                reason_codes=tuple(wall_result.reason_codes),
-                scope_complete=bool(wall_result.scope_complete),
-                wall_candidate_ids=tuple(
-                    record.wall_candidate_id for record in wall_result.records
-                ),
-            )
-        )
 
     opening_traces: list[LiveOpeningHostTrace] = []
     binding_selectors: dict[str, OpeningHostBindingSelector] = {}
