@@ -20,6 +20,7 @@ segments, graphs, candidate lists/counts or completeness flags.
 """
 from __future__ import annotations
 
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 import hashlib
 import math
@@ -81,6 +82,24 @@ PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED = (
 # limit is a runtime-safety boundary only: exceeding it never publishes a wall
 # or quantity and never changes evidence into a positive claim.
 MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS = 20_000
+
+# Dense CAD exports can encode hatch / symbol texture as tens of thousands of
+# one-segment drawing paths. Those paths are not allowed to enter exact wall
+# topology merely because the source omitted useful layer names. The filter
+# below is intentionally source-structural rather than project-specific: it
+# requires a singleton drawing path plus a repeated translation-invariant
+# stroke signature. Unique short walls and unique diagonal walls therefore
+# remain eligible, including green/stroked panel boundaries. Thresholds are
+# page-relative for span and deliberately high for orthogonal motifs because
+# orthogonal short returns are common legitimate wall geometry.
+_REPEATED_MOTIF_ORTHOGONAL_REPEAT_MIN = 32
+_REPEATED_MOTIF_NON_ORTHOGONAL_REPEAT_MIN = 4
+_REPEATED_MOTIF_MULTI_ANGLE_REPEAT_MIN = 16
+_REPEATED_MOTIF_MULTI_ANGLE_COUNT_MIN = 3
+_REPEATED_MOTIF_ORTHOGONAL_SPAN_FRACTION = 0.005
+_REPEATED_MOTIF_NON_ORTHOGONAL_SPAN_FRACTION = 0.03
+_REPEATED_MOTIF_MULTI_ANGLE_SPAN_FRACTION = 0.006
+_REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG = 2.0
 PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE = (
     "physical_wall_candidate_source_integrity_failure"
 )
@@ -343,6 +362,127 @@ def _producer_owned_points_per_mm(
     if not math.isfinite(value) or value <= 0.0:
         return None
     return value
+
+
+def _segment_length(segment: Mapping[str, object]) -> float:
+    x1, y1, x2, y2 = _segment_geometry(segment)
+    return math.hypot(x2 - x1, y2 - y1)
+
+
+def _segment_angle_deg(segment: Mapping[str, object]) -> float:
+    x1, y1, x2, y2 = _segment_geometry(segment)
+    return math.degrees(math.atan2(y2 - y1, x2 - x1)) % 180.0
+
+
+def _repeated_motif_signature(segment: Mapping[str, object]) -> tuple[object, ...]:
+    return (
+        str(segment.get("stroke") or ""),
+        round(float(segment.get("width") or 0.0), 2),
+        round(_segment_length(segment), 2),
+        round(_segment_angle_deg(segment), 1),
+    )
+
+
+def _repeated_motif_style_length(segment: Mapping[str, object]) -> tuple[object, ...]:
+    signature = _repeated_motif_signature(segment)
+    return signature[:3]
+
+
+def _is_orthogonal_angle(angle_deg: float) -> bool:
+    return min(
+        abs(angle_deg),
+        abs(angle_deg - 90.0),
+        abs(angle_deg - 180.0),
+    ) <= _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG
+
+
+def _filter_repeated_non_physical_drafting_primitives(
+    segments: Sequence[dict],
+    *,
+    page_width: float,
+    page_height: float,
+) -> tuple[dict, ...]:
+    """Exclude only source-proven dense singleton drafting motifs.
+
+    A segment is never rejected on length, colour, angle, or repetition alone.
+    It must be a one-segment source path and belong to a repeated exact-ish
+    source stroke family. Orthogonal families require much stronger repetition
+    because legitimate wall returns are commonly orthogonal. Multi-angle motif
+    families provide an additional hatch/symbol proof.
+    """
+    path_counts = Counter(segment.get("path_index") for segment in segments)
+    singleton_lines = tuple(
+        segment
+        for segment in segments
+        if str(segment.get("kind") or "") == "line"
+        and path_counts.get(segment.get("path_index"), 0) == 1
+    )
+    singleton_ids = {id(segment) for segment in singleton_lines}
+    signature_counts = Counter(
+        _repeated_motif_signature(segment) for segment in singleton_lines
+    )
+    by_style_length: dict[tuple[object, ...], Counter[float]] = defaultdict(Counter)
+    for segment in singleton_lines:
+        by_style_length[_repeated_motif_style_length(segment)][
+            round(_segment_angle_deg(segment), 1)
+        ] += 1
+
+    multi_angle_styles = {
+        style
+        for style, angle_counts in by_style_length.items()
+        if sum(
+            count >= _REPEATED_MOTIF_MULTI_ANGLE_REPEAT_MIN
+            for count in angle_counts.values()
+        ) >= _REPEATED_MOTIF_MULTI_ANGLE_COUNT_MIN
+    }
+
+    page_span = min(float(page_width), float(page_height))
+    orthogonal_span = page_span * _REPEATED_MOTIF_ORTHOGONAL_SPAN_FRACTION
+    non_orthogonal_span = page_span * _REPEATED_MOTIF_NON_ORTHOGONAL_SPAN_FRACTION
+    multi_angle_span = page_span * _REPEATED_MOTIF_MULTI_ANGLE_SPAN_FRACTION
+
+    kept: list[dict] = []
+    for segment in segments:
+        # extract_native_page expands a PDF fill-only "re" command into four
+        # synthetic rect_edge records. When the source has no stroke, those
+        # edges were never drawn as linework and therefore cannot enter the
+        # wall-line topology. The source rectangle remains present in the
+        # immutable observation snapshot; this filter only prevents synthetic
+        # fill boundaries from masquerading as stroked walls.
+        if (
+            str(segment.get("kind") or "") == "rect_edge"
+            and not bool(segment.get("stroke_present", False))
+            and bool(segment.get("fill_present", False))
+        ):
+            continue
+        if id(segment) not in singleton_ids:
+            kept.append(segment)
+            continue
+        length = _segment_length(segment)
+        angle = _segment_angle_deg(segment)
+        signature = _repeated_motif_signature(segment)
+        style_length = _repeated_motif_style_length(segment)
+        repeated = signature_counts[signature]
+        angle_key = round(angle, 1)
+        multi_angle_member = (
+            length <= multi_angle_span
+            and style_length in multi_angle_styles
+            and by_style_length[style_length][angle_key]
+            >= _REPEATED_MOTIF_MULTI_ANGLE_REPEAT_MIN
+        )
+        if _is_orthogonal_angle(angle):
+            decorative = (
+                length <= orthogonal_span
+                and repeated >= _REPEATED_MOTIF_ORTHOGONAL_REPEAT_MIN
+            ) or multi_angle_member
+        else:
+            decorative = (
+                length <= non_orthogonal_span
+                and repeated >= _REPEATED_MOTIF_NON_ORTHOGONAL_REPEAT_MIN
+            ) or multi_angle_member
+        if not decorative:
+            kept.append(segment)
+    return tuple(kept)
 
 
 def _segment_geometry(segment: Mapping[str, object]) -> Line:
@@ -1966,14 +2106,19 @@ def _assemble_scope_result(
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = selector.decision_scope_id
-    if len(segments) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
+    topology_segments = _filter_repeated_non_physical_drafting_primitives(
+        segments,
+        page_width=page_width,
+        page_height=page_height,
+    )
+    if len(topology_segments) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
         return _blocked(
             selector,
             PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED,
         )
-    proven_wall_strips = _proven_filled_wall_strips(tuple(segments))
+    proven_wall_strips = _proven_filled_wall_strips(topology_segments)
     graph_segments = _filter_proven_wall_strip_geometry(
-        tuple(segments),
+        topology_segments,
         proven_wall_strips,
     )
     graph = build_wall_graph_for_viewport(graph_segments)
@@ -2159,11 +2304,6 @@ def _build_scope_result(
         decision_scope_id=scope_id,
         resolved_visible_observations=resolved_visible_observations,
     )
-    if len(segments) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
-        return _blocked(
-            selector,
-            PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED,
-        )
     scale_producer = (
         physical_scale_producer
         if physical_scale_producer is not None
