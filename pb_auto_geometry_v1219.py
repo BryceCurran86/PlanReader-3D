@@ -970,6 +970,107 @@ def _physical_wall_claim_problem(claim: Any, source_sha256: str, page_indices: S
     return None
 
 
+def _opening_quantity_customer_rows(
+    workspace_id: int,
+    claim: Any,
+) -> tuple[List[Tuple[Any, ...]], tuple[Any, ...]]:
+    """Project source-closed opening-area quantities into reviewable customer rows.
+
+    This adapter never invents an opening or a measurement. It consumes only
+    QuantityEvidence already emitted by the live physical-opening chain. The
+    database row remains PROVISIONAL/customer-reviewable; the exact quantity id
+    is carried separately in TakeoffOutputRow for lifecycle linkage.
+    """
+    from pb_migration_contracts import QuantityEvidence
+    from pb_takeoff_output_authority import TakeoffOutputRow
+
+    rows: List[Tuple[Any, ...]] = []
+    outputs: list[TakeoffOutputRow] = []
+    seen_quantity_ids: set[str] = set()
+    for quantity in tuple(getattr(claim, "opening_quantity_evidence", ()) or ()):
+        if type(quantity) is not QuantityEvidence:
+            continue
+        if (
+            quantity.abstained
+            or quantity.status != "corroborated"
+            or quantity.family != "opening_area"
+            or not _is_finite_number(quantity.value)
+            or float(quantity.value) <= 0.0
+            or len(quantity.input_entity_ids) != 1
+        ):
+            continue
+        if quantity.quantity_id in seen_quantity_ids:
+            raise TakeoffRowContractError(
+                f"duplicate live opening quantity id {quantity.quantity_id!r}"
+            )
+        seen_quantity_ids.add(quantity.quantity_id)
+
+        metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+        opening_kind = str(metadata.get("opening_kind") or "").strip().lower()
+        canonical_id = str(metadata.get("canonical_opening_id") or "").strip()
+        if (
+            opening_kind not in {"door", "window"}
+            or not canonical_id
+            or canonical_id != str(quantity.input_entity_ids[0]).strip()
+        ):
+            continue
+        area_basis = str(metadata.get("area_basis") or "").strip()
+        if area_basis not in {"figured_opening_label", "resolved_opening_geometry"}:
+            continue
+
+        page_no = str(metadata.get("page_no") or "").strip()
+        source_page = f"p{page_no}" if page_no else "Selected PDF pages"
+        source_ref = (
+            f"{SOURCE_PREFIX} · physical_opening_area:{quantity.quantity_id}"
+        )
+        basis_note = (
+            "source-authenticated figured opening label"
+            if area_basis == "figured_opening_label"
+            else "source-authenticated physical opening geometry"
+        )
+        element = f"{opening_kind.title()} area"
+        location = f"Physical opening · {canonical_id}"
+        confidence = "Documented" if area_basis == "figured_opening_label" else "Derived"
+        value = float(quantity.value)
+        rows.append(
+            _takeoff_row(
+                workspace_id=workspace_id,
+                section="Openings",
+                element=element,
+                location=location,
+                substrate="Other",
+                quantity=value,
+                status="Measured",
+                source_page=source_page,
+                source_reference=source_ref,
+                confidence=confidence,
+                notes=(
+                    f"{element} from {basis_note}; canonical physical identity "
+                    f"{canonical_id}. Customer review remains required before pricing."
+                ),
+                row_role="",
+                unit="m²",
+                preserve_quantity=True,
+            )
+        )
+        outputs.append(
+            TakeoffOutputRow(
+                quantity_id=quantity.quantity_id,
+                description=element,
+                value=value,
+                unit="m2",
+                trade=opening_kind,
+                source_page=source_page,
+                geometry_ref=canonical_id,
+                dimension_text_id=(
+                    str(metadata.get("measurement_record_id") or "").strip() or None
+                ),
+                is_publishable=False,
+            )
+        )
+    return rows, tuple(outputs)
+
+
 def _try_physical_net_wall_rows(
     app: Any, workspace_id: int, pages: Sequence[Dict[str, Any]], facades: Sequence[Dict[str, Any]]
 ) -> Optional[List[Tuple[Any, ...]]]:
@@ -996,7 +1097,11 @@ def _try_physical_net_wall_rows(
     }
     workspace_coverage[int(workspace_id)] = current_coverage
 
-    def record_coverage(claim: Any, row: Optional[Tuple[Any, ...]] = None) -> None:
+    def record_coverage(
+        claim: Any,
+        row: Optional[Tuple[Any, ...]] = None,
+        opening_output_rows: Sequence[Any] = (),
+    ) -> None:
         from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 
         if type(claim) is not LivePhysicalNetWallClaim:
@@ -1005,19 +1110,33 @@ def _try_physical_net_wall_rows(
             from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
             from pb_takeoff_output_authority import TakeoffOutputRow
 
-            quantity = claim.publication.quantity_evidence
-            output = ()
+            wall_quantity = claim.publication.quantity_evidence
+            quantities = (
+                *((wall_quantity,) if wall_quantity is not None else ()),
+                *tuple(getattr(claim, "opening_quantity_evidence", ()) or ()),
+            )
+            output: tuple[TakeoffOutputRow, ...] = tuple(
+                value
+                for value in opening_output_rows
+                if type(value) is TakeoffOutputRow
+            )
             if row is not None:
                 named = dict(zip(TAKEOFF_ROW_FIELDS, row))
-                output = (TakeoffOutputRow(
-                    quantity_id=claim.quantity_id, description=named["element"],
-                    value=named["quantity"], unit=named["unit"],
-                    source_page=named["source_page"], is_publishable=False,
-                ),)
+                output = (
+                    TakeoffOutputRow(
+                        quantity_id=claim.quantity_id,
+                        description=named["element"],
+                        value=named["quantity"],
+                        unit=named["unit"],
+                        source_page=named["source_page"],
+                        is_publishable=False,
+                    ),
+                    *output,
+                )
             summaries, family_gaps = collect_live_canonical_coverage(
                 objects=(*claim.canonical_walls, *claim.canonical_openings,
                          *claim.canonical_rooms, *claim.canonical_floors),
-                quantities=(quantity,) if quantity is not None else (),
+                quantities=quantities,
                 output_rows=output,
                 registry_run_scope=f"customer_workspace:{int(workspace_id)}",
             )
@@ -1071,7 +1190,10 @@ def _try_physical_net_wall_rows(
             wall_gap(f"workspace_document_enumeration_failed:{type(exc).__name__}")
     current_coverage["source_sha256s"] = sorted(source_groups)
 
-    accepted: List[Tuple[Any, Tuple[Any, ...], Dict[str, Any]]] = []
+    accepted: List[
+        Tuple[Any, Tuple[Any, ...], Dict[str, Any], tuple[Any, ...]]
+    ] = []
+    opening_customer_rows: List[Tuple[Any, ...]] = []
     for sha256, group in source_groups.items():
         source_report: Dict[str, Any] = {
             "source_sha256": sha256, "document_ids": sorted(group["document_ids"]),
@@ -1082,6 +1204,11 @@ def _try_physical_net_wall_rows(
             from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
 
             claim = collect_live_physical_net_wall_claim(group["path"], pages=tuple(sorted(group["page_indices"])))
+            claim_opening_rows, claim_opening_outputs = _opening_quantity_customer_rows(
+                int(workspace_id),
+                claim,
+            )
+            opening_customer_rows.extend(claim_opening_rows)
             status_val = getattr(claim.status, "value", str(claim.status))
             source_report.update(status=status_val, quantity_id=claim.quantity_id,
                                  reason_codes=list(getattr(claim, "reason_codes", ())))
@@ -1090,7 +1217,10 @@ def _try_physical_net_wall_rows(
                 if problem:
                     wall_gap(problem)
                     source_report.update(status="review", reason_codes=[problem])
-                    record_coverage(claim)
+                    record_coverage(
+                        claim,
+                        opening_output_rows=claim_opening_outputs,
+                    )
                     continue
             if (
                 status_val == "corroborated"
@@ -1130,33 +1260,54 @@ def _try_physical_net_wall_rows(
                     row_role="external_wall",
                     preserve_quantity=True,
                 )
-                accepted.append((claim, row, source_report))
+                accepted.append(
+                    (claim, row, source_report, claim_opening_outputs)
+                )
             else:
-                record_coverage(claim)
+                record_coverage(
+                    claim,
+                    opening_output_rows=claim_opening_outputs,
+                )
         except Exception as exc:
             reason = f"live_physical_net_wall_collection_failed:{type(exc).__name__}"
             wall_gap(reason)
             source_report.update(status="review", reason_codes=[reason])
 
     quantity_sources: Dict[str, List[str]] = {}
-    for claim, _, source_report in accepted:
-        quantity_sources.setdefault(claim.quantity_id, []).append(source_report["source_sha256"])
-    direct_rows = []
-    for claim, row, source_report in accepted:
+    for claim, _, source_report, _opening_outputs in accepted:
+        quantity_sources.setdefault(claim.quantity_id, []).append(
+            source_report["source_sha256"]
+        )
+    wall_direct_rows: List[Tuple[Any, ...]] = []
+    for claim, row, source_report, opening_outputs in accepted:
         if len(quantity_sources[claim.quantity_id]) > 1:
             wall_gap("conflicting_quantity_identity_across_sources")
-            source_report.update(status="review", reason_codes=["conflicting_quantity_identity_across_sources"])
-            record_coverage(claim)
+            source_report.update(
+                status="review",
+                reason_codes=["conflicting_quantity_identity_across_sources"],
+            )
+            record_coverage(
+                claim,
+                opening_output_rows=opening_outputs,
+            )
             continue
-        direct_rows.append(row)
-        current_coverage["physical_net_document_ids"].extend(source_report["document_ids"])
-        record_coverage(claim, row)
-    if direct_rows:
+        wall_direct_rows.append(row)
+        current_coverage["physical_net_document_ids"].extend(
+            source_report["document_ids"]
+        )
+        record_coverage(
+            claim,
+            row,
+            opening_output_rows=opening_outputs,
+        )
+    if wall_direct_rows:
         current_coverage["wall_bridge_mode"] = "direct"
-        return direct_rows
+        return [*opening_customer_rows, *wall_direct_rows]
     if any(report["status"] in {"review", "conflict", "ambiguous"}
            for report in current_coverage["source_reports"]):
-        return None  # An unresolved identity cannot be rescued by a weaker path.
+        # Opening quantities are an independent source-closed family; retaining
+        # them does not rescue or relabel an unresolved wall claim.
+        return opening_customer_rows or None
 
     # 2. Check unified registered-wall authority with verified opening deductions
     if hasattr(app, "build_registered_walls_v139") and callable(getattr(app, "build_registered_walls_v139")):
@@ -1267,11 +1418,11 @@ def _try_physical_net_wall_rows(
                     if reg_rows:
                         current_coverage["wall_bridge_mode"] = "registered"
                         wall_gap("registered_wall_path_has_no_live_canonical_registry")
-                        return reg_rows
+                        return [*opening_customer_rows, *reg_rows]
         except Exception:
             pass
 
-    return None
+    return opening_customer_rows or None
 
 
 def _build_facade_rows(app: Any, workspace_id: int, pages: Sequence[Dict[str, Any]]) -> Tuple[List[Tuple[Any, ...]], List[Dict[str, Any]]]:
