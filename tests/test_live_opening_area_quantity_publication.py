@@ -130,6 +130,11 @@ def test_untyped_opening_never_publishes_trade_area() -> None:
     assert _opening_quantity(_opening(kind=None)) is None
 
 
+def test_opening_without_owned_viewport_never_publishes_area_quantity() -> None:
+    opening = replace(_opening(), viewport_id=None)
+    assert _opening_quantity(opening) is None
+
+
 def test_figured_area_requires_its_measurement_record_in_canonical_provenance() -> None:
     opening = replace(
         _opening(),
