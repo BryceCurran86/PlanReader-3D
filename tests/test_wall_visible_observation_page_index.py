@@ -191,15 +191,17 @@ def test_wall_candidate_producer_constructs_one_opening_authority_per_revision(
     monkeypatch,
 ):
     source, _published, _payload = _source(page_count=5)
-    original = module.PhysicalOpeningAuthority
+    original_init = PhysicalOpeningAuthority.__init__
     constructions = 0
 
-    def counted(authority):
+    def counted(self, *args, **kwargs):
         nonlocal constructions
         constructions += 1
-        return original(authority)
+        return original_init(self, *args, **kwargs)
 
-    monkeypatch.setattr(module, "PhysicalOpeningAuthority", counted)
+    # The source producer now owns/reuses the opening authority. Count the
+    # actual constructor rather than the obsolete wall-module import alias.
+    monkeypatch.setattr(PhysicalOpeningAuthority, "__init__", counted)
 
     producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
         source,
@@ -345,4 +347,3 @@ def test_page_index_does_not_bypass_generic_opening_evidence(monkeypatch):
     )
     assert result == {}
     assert calls == [oid for oid, _observation in rows]
-

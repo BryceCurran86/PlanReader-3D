@@ -119,3 +119,28 @@ authenticating and replaying native overprinted words. With the existing cache,
 it reads once and returns identical trusted decisions. Separate-page mismatches
 and missing paint logs still abstain. All 94 focused text-integrity/occlusion/
 overprint tests pass in 0.94 seconds. No source-dependent threshold is added.
+
+Full CI at published head `528b1439` exposes one stale instrumentation test:
+`test_wall_candidate_producer_constructs_one_opening_authority_per_revision`
+patches the wall-module constructor alias. #1197 deliberately moved authority
+ownership to `SourceVisibilityProducer.physical_opening_authority`, so that
+alias is no longer the live constructor. Count the actual class constructor
+instead; keep the one-construction assertion and all scope-equivalence tests.
+The Python 3.14 run otherwise passes 7,331 tests with 55 skipped/13 xfailed.
+
+The A140 normal extractor completes at 340.07 seconds with 3,827.01 MiB peak RSS
+and no predictions. Canonical rooms abstain with
+`live_canonical_room_composition_unavailable` and
+`source_room_face_scope_unavailable`; floor surfaces are unavailable. This is a
+failed room gate, not successful source closure or customer publication.
+
+The first local customer probe used the intermediate v1.3.5 launcher and is
+interrupted without a publication claim. The deployed v1.5.1 entry point is
+`pb_planreader_v133_app`; the probe is repeated through its entire normal startup
+chain. The intermediate run's repeated stack snapshots nevertheless identify
+an isolated allocation defect: `extract_and_calibrate_rooms` rebuilds every raw
+polygon for every face before `filter_face` can reject tiny/unmeasured faces.
+Its precomputed polygon tuple list is unused. Precompute the exact raw polygon
+list once and pass the same read-only values to each existing filter invocation.
+Do not reuse the rounded identity tuples as metric geometry. No face extraction,
+filter predicate, calibration, label ownership, status or quantity rule changes.
