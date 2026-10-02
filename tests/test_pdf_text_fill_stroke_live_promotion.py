@@ -21,11 +21,13 @@ class _FakePage:
     def __init__(self, spans, bboxlog):
         self._spans = list(spans)
         self._bboxlog = list(bboxlog)
+        self.bboxlog_calls = 0
 
     def get_texttrace(self):
         return list(self._spans)
 
     def get_bboxlog(self):
+        self.bboxlog_calls += 1
         return list(self._bboxlog)
 
 
@@ -82,6 +84,17 @@ def _page(**overrides):
 
 
 _WORD = {"text": "PAIR", "bbox": (10.0, 20.0, 30.0, 30.0)}
+
+
+def test_exact_pair_reuses_cached_bboxlog_without_replaying_page_render():
+    page = _page()
+
+    first = _exact_fill_stroke_overprint_pair(page, _WORD, tuple(page._spans))
+    second = _exact_fill_stroke_overprint_pair(page, _WORD, tuple(page._spans))
+
+    assert first is not None
+    assert second is not None
+    assert page.bboxlog_calls == 1
 
 
 def test_exact_pair_identity_proof_is_deterministic_and_non_mutating():
