@@ -2,20 +2,18 @@
 
 This authority is the positive downstream companion to Item 19A/19B.
 
-It consumes only:
-1. producer-owned source-derived WallFinishFaceBindingAuthority; and
-2. producer-owned NetWallBooleanUnionAuthority.
-
-A numeric finish quantity can publish only when the finish authority proves a
-COMPLETE exact physical-face universe for one trade/material and every covered
-face resolves to authenticated net-wall geometry. Caller assignments, nearest
+It consumes only producer-owned source-derived finish/face bindings plus the
+measurement authority appropriate to that finish family. Non-tile finishes may
+reuse authenticated net-wall geometry. Tile finishes are stricter: every
+covered face must resolve to an authenticated internal-elevation wall-face tile
+extent. Caller assignments, nearest
 matching, page-wide finish keywords, expected benchmark values, and confidence
 ranking are not inputs.
 
-One exact physical face contributes one net-wall area. Replayed/duplicate source
-evidence for the same physical_face_id is deduplicated. Two distinct proven
-physical faces of the same physical wall may each contribute once when both are
-members of the complete source-owned target-face universe.
+Replayed/duplicate source evidence for the same physical_face_id is deduplicated.
+For non-tile finishes one exact physical face contributes one authenticated
+net-wall area. For tile finishes one exact physical face contributes only its
+authenticated elevation tile extent; whole-wall area is never a tile proxy.
 """
 from __future__ import annotations
 
@@ -24,6 +22,7 @@ import math
 from types import MappingProxyType
 from typing import Mapping
 
+from pb_hardened_authority_contract import AuthenticatedWallFaceTileExtentAuthority
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_net_wall_boolean_union_authority import (
     NET_WALL_BOOLEAN_UNION_RESOLVED,
@@ -36,7 +35,7 @@ from pb_wall_finish_face_binding_authority import (
     WallFinishFaceBindingScopeSelector,
 )
 
-SOURCE_BOUND_WALL_FINISH_QUANTITY_SCHEMA_VERSION = "1.0.0"
+SOURCE_BOUND_WALL_FINISH_QUANTITY_SCHEMA_VERSION = "1.1.0"
 
 FINISH_QUANTITY_RESOLVED = "source_bound_wall_finish_quantity_resolved"
 FINISH_QUANTITY_BINDING_SCOPE_UNAVAILABLE = "source_bound_wall_finish_binding_scope_unavailable"
@@ -48,6 +47,7 @@ FINISH_QUANTITY_FACE_UNIVERSE_MISMATCH = "source_bound_wall_finish_face_universe
 FINISH_QUANTITY_NET_WALL_UNRESOLVED = "source_bound_wall_finish_net_wall_unresolved"
 FINISH_QUANTITY_NET_WALL_LINEAGE_MISMATCH = "source_bound_wall_finish_net_wall_lineage_mismatch"
 FINISH_QUANTITY_INVALID_AREA = "source_bound_wall_finish_invalid_area"
+FINISH_QUANTITY_TILE_EXTENT_REQUIRED = "source_bound_wall_finish_tile_extent_required"
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
@@ -61,6 +61,17 @@ def _required(value: object, name: str) -> str:
     if not text:
         raise ValueError(f"{name} must be non-empty")
     return text
+
+
+def _is_tile_finish(selector: "SourceBoundWallFinishQuantitySelector") -> bool:
+    tokens = {
+        token
+        for token in (
+            str(selector.trade_scope_id or "") + " " + str(selector.finish_material or "")
+        ).lower().replace("-", " ").replace("_", " ").split()
+        if token
+    }
+    return bool(tokens.intersection({"tile", "tiles", "tiling", "tiled"}))
 
 
 @dataclass(frozen=True)
@@ -124,6 +135,8 @@ class SourceBoundWallFinishQuantityRecord:
     finish_scope_record_id: str
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
+    tile_surface_ids: tuple[str, ...] = ()
+    tile_extent_ids: tuple[str, ...] = ()
     schema_version: str = SOURCE_BOUND_WALL_FINISH_QUANTITY_SCHEMA_VERSION
     _seal: object = None
 
@@ -197,6 +210,7 @@ class SourceBoundWallFinishQuantityProducer:
         finish_binding_authority: WallFinishFaceBindingAuthority,
         net_wall_authority: NetWallBooleanUnionAuthority,
         *,
+        tile_extent_authority: AuthenticatedWallFaceTileExtentAuthority | None = None,
         _seal: object = None,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
@@ -209,8 +223,16 @@ class SourceBoundWallFinishQuantityProducer:
             )
         if type(net_wall_authority) is not NetWallBooleanUnionAuthority:
             raise TypeError("net_wall_authority must be NetWallBooleanUnionAuthority")
+        if (
+            tile_extent_authority is not None
+            and type(tile_extent_authority) is not AuthenticatedWallFaceTileExtentAuthority
+        ):
+            raise TypeError(
+                "tile_extent_authority must be AuthenticatedWallFaceTileExtentAuthority"
+            )
         self._finish = finish_binding_authority
         self._net = net_wall_authority
+        self._tile_extents = tile_extent_authority
         self._results: dict[_Key, SourceBoundWallFinishQuantityResult] = {}
 
     @classmethod
@@ -218,10 +240,13 @@ class SourceBoundWallFinishQuantityProducer:
         cls,
         finish_binding_authority: WallFinishFaceBindingAuthority,
         net_wall_authority: NetWallBooleanUnionAuthority,
+        *,
+        tile_extent_authority: AuthenticatedWallFaceTileExtentAuthority | None = None,
     ) -> "SourceBoundWallFinishQuantityProducer":
         return cls(
             finish_binding_authority,
             net_wall_authority,
+            tile_extent_authority=tile_extent_authority,
             _seal=_PRODUCER_SEAL,
         )
 
@@ -452,10 +477,57 @@ class SourceBoundWallFinishQuantityProducer:
         quantity_m2 = 0.0
         net_record_ids: set[str] = set()
         physical_wall_ids: set[str] = set()
+        tile_surface_ids: set[str] = set()
+        tile_extent_ids: set[str] = set()
+        tile_finish = _is_tile_finish(selector)
 
         for face_id in target_faces:
             binding = face_bindings[face_id]
             wall_id = str(getattr(binding, "physical_wall_id"))
+            physical_wall_ids.add(wall_id)
+
+            if tile_finish:
+                if self._tile_extents is None:
+                    return self._store(
+                        selector,
+                        _blocked(
+                            EvidenceResolutionStatus.ABSTAINED,
+                            FINISH_QUANTITY_TILE_EXTENT_REQUIRED,
+                            f"physical_face_id={face_id}",
+                        ),
+                    )
+                surface = self._tile_extents.resolve(
+                    viewport_id=selector.viewport_id,
+                    physical_wall_face_id=face_id,
+                )
+                if surface is None:
+                    return self._store(
+                        selector,
+                        _blocked(
+                            EvidenceResolutionStatus.ABSTAINED,
+                            FINISH_QUANTITY_TILE_EXTENT_REQUIRED,
+                            f"physical_face_id={face_id}",
+                        ),
+                    )
+                area = surface.tile_extent_m2
+                if (
+                    area is None
+                    or not math.isfinite(float(area))
+                    or float(area) <= 0.0
+                ):
+                    return self._store(
+                        selector,
+                        _blocked(
+                            EvidenceResolutionStatus.ABSTAINED,
+                            FINISH_QUANTITY_INVALID_AREA,
+                            f"physical_face_id={face_id}",
+                        ),
+                    )
+                quantity_m2 += float(area)
+                tile_surface_ids.add(surface.canonical_wall_surface_id)
+                tile_extent_ids.add(surface.tile_extent_id)
+                continue
+
             net_selector = NetWallBooleanUnionSelector(
                 document_id=selector.document_id,
                 revision_id=selector.revision_id,
@@ -510,11 +582,12 @@ class SourceBoundWallFinishQuantityProducer:
                 )
             quantity_m2 += float(area)
             net_record_ids.add(net_record.record_id)
-            physical_wall_ids.add(wall_id)
 
         finish_binding_ids = tuple(sorted(required_binding_ids))
         net_ids = tuple(sorted(net_record_ids))
         wall_ids = tuple(sorted(physical_wall_ids))
+        tile_surfaces = tuple(sorted(tile_surface_ids))
+        tile_extents = tuple(sorted(tile_extent_ids))
         payload = {
             "selector": selector.key,
             "finish_scope_record_id": scope.scope_id,
@@ -522,6 +595,8 @@ class SourceBoundWallFinishQuantityProducer:
             "physical_wall_ids": wall_ids,
             "finish_binding_ids": finish_binding_ids,
             "net_wall_record_ids": net_ids,
+            "tile_surface_ids": tile_surfaces,
+            "tile_extent_ids": tile_extents,
             "quantity_m2": round(quantity_m2, 12),
             "schema_version": SOURCE_BOUND_WALL_FINISH_QUANTITY_SCHEMA_VERSION,
         }
@@ -548,6 +623,8 @@ class SourceBoundWallFinishQuantityProducer:
             finish_scope_record_id=scope.scope_id,
             status=EvidenceResolutionStatus.CORROBORATED,
             reason_codes=(FINISH_QUANTITY_RESOLVED,),
+            tile_surface_ids=tile_surfaces,
+            tile_extent_ids=tile_extents,
             _seal=_RECORD_SEAL,
         )
         return self._store(
@@ -571,6 +648,7 @@ __all__ = [
     "FINISH_QUANTITY_RESOLVED",
     "FINISH_QUANTITY_SCOPE_CONFLICT",
     "FINISH_QUANTITY_SCOPE_INCOMPLETE",
+    "FINISH_QUANTITY_TILE_EXTENT_REQUIRED",
     "SOURCE_BOUND_WALL_FINISH_QUANTITY_SCHEMA_VERSION",
     "SourceBoundWallFinishQuantityAuthority",
     "SourceBoundWallFinishQuantityProducer",
