@@ -1,7 +1,7 @@
 """Benchmark-neutral sealed export of source-closed production quantities.
 
 The export contains only production-owned identities and provenance. It has no
-knowledge of benchmark IDs, expected quantities, golden values, or scoring
+knowledge of benchmark IDs, expected quantities, reference truth values, or scoring
 rules. A benchmark may reconcile these records only after the run is sealed.
 """
 from __future__ import annotations
