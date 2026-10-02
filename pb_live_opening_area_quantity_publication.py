@@ -35,11 +35,13 @@ def _opening_quantity(
 
     canonical_id = str(opening.canonical_opening_id or "").strip()
     physical_id = str(opening.physical_opening_id or "").strip()
+    viewport_id = str(opening.viewport_id or "").strip()
     opening_kind = str(opening.opening_kind or "").strip().lower()
     basis = str(opening.area_basis or "").strip()
     if (
         not canonical_id
         or canonical_id != physical_id
+        or not viewport_id
         or opening_kind not in {"door", "window"}
         or not basis
         or opening.area_m2 is None
@@ -119,7 +121,7 @@ def _opening_quantity(
             "revision_id": opening.revision_id,
             "source_sha256": opening.source_sha256,
             "page_no": opening.page_id,
-            "viewport_id": opening.viewport_id,
+            "viewport_id": viewport_id,
             "canonical_opening_id": canonical_id,
             "physical_opening_id": physical_id,
             "opening_kind": opening_kind,
