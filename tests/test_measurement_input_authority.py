@@ -301,6 +301,32 @@ def test_figured_vs_scaled_conflict_abstains() -> None:
     assert result.blocking_reasons == ("figured_measurement_not_firm",)
 
 
+
+def test_authenticated_figured_dimension_survives_conflicting_scale_bindings() -> None:
+    scale = _scale(ScaleSourceType.SCALE_BAR)
+    binding = _binding(scale)
+    # Two independently eligible bindings for the same owned viewport are a
+    # scale-authority conflict.  They may not authorize geometry-scaled
+    # measurement, but they also may not erase a separately corroborated
+    # figured dimension.
+    result = resolve_linear_measurement_input(
+        context=_context(),
+        document=_document(),
+        viewport=_viewport(resolved_scale_id=binding.scale_fingerprint),
+        entity=_entity(),
+        page_no=1,
+        scaled_length_page_units=scale.px_per_m * 9.0,
+        scale_bindings=(binding, replace(binding)),
+        wall_viewport_id="vp-1",
+        figured_evidence=_figured("6500"),
+    )
+    assert result.abstained is False
+    assert result.authority_status == AuthorityStatus.FIRM.value
+    assert result.source_type == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+    assert result.value_m == 6.5
+    assert result.scale_fingerprint == binding.scale_fingerprint
+
+
 def test_unresolved_entity_abstains() -> None:
     result = resolve_linear_measurement_input(
         context=_context(),
