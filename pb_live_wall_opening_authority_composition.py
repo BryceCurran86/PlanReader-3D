@@ -223,10 +223,8 @@ def compose_live_wall_opening_authority(
     )
 
     physical_opening_authority = (
-        wall_producer.physical_opening_authority_for_revision(revision_id)
+        source_visibility_producer.physical_opening_authority()
     )
-    if physical_opening_authority is None:
-        raise ValueError(LIVE_WALL_OPENING_COMPOSITION_UNAVAILABLE)
     semantic_producer = (
         SemanticOpeningEnumerationProducer.from_source_visibility_producer(
             source_visibility_producer
