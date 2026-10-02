@@ -144,7 +144,7 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
             self.assertEqual(item.host_evidence_ids, ("net-wall-record-1",))
             self.assertTrue(item.spec_evidence_ids)
 
-    def test_wall_face_finishes_require_explicit_physical_face_ownership(self):
+    def test_wall_tiling_requires_authenticated_face_extent_not_bare_face_ids(self):
         specs = {
             "painting": {
                 "material": "Acrylic paint",
@@ -161,10 +161,7 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
 
         quantities = derive_wall_trade_quantities(_wall(), specs)
 
-        self.assertEqual(len(quantities), 1)
-        self.assertEqual(quantities[0].trade_scope, "tiling")
-        self.assertEqual(quantities[0].quantity, 46.8)
-        self.assertIn("2 source-bound face(s)", quantities[0].derivation_formula)
+        self.assertEqual(quantities, [])
 
     def test_wall_without_resolved_canonical_quantity_fails_closed(self):
         wall = _wall()
