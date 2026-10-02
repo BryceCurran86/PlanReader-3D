@@ -5,6 +5,7 @@ import pytest
 
 from pb_internal_elevation_tile_extent_authority import (
     extract_internal_elevation_tile_surfaces,
+    tile_surface_resolution_to_quantity_evidence,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
 
@@ -205,6 +206,47 @@ def test_scaled_niche_vector_geometry_supplies_missing_niche_width():
     resolved = [r for r in result.resolutions if r.status is EvidenceResolutionStatus.CORROBORATED]
     assert len(resolved) == 1
     assert resolved[0].quantity_m2 == pytest.approx(4.296, rel=0.01)
+    doc.close()
+
+
+
+def test_authenticated_canonical_wall_surface_projects_to_quantity_evidence():
+    doc, page = _page()
+    _wall(page, 70, 100, 1.68, 2.7)
+    target = _wall(page, 330, 100, 0.9, 2.7)
+    _title(page, 75, 310, "Wet Area A")
+    _title(page, 335, 310, "Wet Area B")
+    page.insert_text((332, 80), "SHOWER TILES TO", fontsize=7)
+    page.insert_text((332, 90), "RUN UP TO CEILING", fontsize=7)
+    page.insert_text((340, target.y1 + 14), "900 SHW", fontsize=7)
+
+    extraction = extract_internal_elevation_tile_surfaces(
+        page,
+        document_id="doc",
+        source_sha256=SHA,
+        page_id="12",
+        page_number=12,
+    )
+    resolution = [
+        row
+        for row in extraction.resolutions
+        if row.status is EvidenceResolutionStatus.CORROBORATED
+    ][0]
+    quantity = tile_surface_resolution_to_quantity_evidence(
+        resolution,
+        document_id="doc",
+        source_sha256=SHA,
+        page_id="12",
+    )
+
+    assert quantity.abstained is False
+    assert quantity.family == "wall_tile_finish_area"
+    assert quantity.unit == "m2"
+    assert quantity.value == pytest.approx(2.43, rel=0.01)
+    assert quantity.input_entity_ids == (
+        resolution.canonical_wall_surface.canonical_wall_surface_id,
+    )
+    assert quantity.evidence_ids == resolution.canonical_wall_surface.evidence_ids
     doc.close()
 
 
