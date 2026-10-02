@@ -70,6 +70,11 @@ _ALLOWED_TAIL_RE = re.compile(
     r"PANEL|LIFT|DOOR)\b[\s-]*)*$",
     re.IGNORECASE,
 )
+_ALLOWED_SINGLE_TAIL_RE = re.compile(
+    r"^\s*(?:(?:ASW|AAW|ADH|ADHW|ASHW|AFW|ALW|ASD|ASSD|VSD|CS|OBS|"
+    r"PANEL|LIFT|DOOR)\b\s*)*$",
+    re.IGNORECASE,
+)
 
 _Key = tuple[str, str, str, str, str]
 
@@ -193,7 +198,7 @@ def parse_opening_label_dimensions(text: str) -> Optional[ParsedOpeningLabel]:
         return None
     tail = str(single.group("tail") or "")
     kind = _semantic_kind(tail)
-    if tail.strip() and _ALLOWED_TAIL_RE.fullmatch(tail) is None:
+    if tail.strip() and _ALLOWED_SINGLE_TAIL_RE.fullmatch(tail) is None:
         return None
     value = _dimension_token_mm(single.group("a"), compact_allowed=False)
     if value is None:
@@ -527,6 +532,12 @@ def _prefer_richer_label_fragments(
             other_ids = set(other.observation_ids)
             if not own_ids < other_ids:
                 continue
+            if (
+                len(other_parsed.dimension_values_mm)
+                > len(parsed.dimension_values_mm)
+            ):
+                dominated = True
+                break
             if parsed.dimension_values_mm != other_parsed.dimension_values_mm:
                 continue
             if (
