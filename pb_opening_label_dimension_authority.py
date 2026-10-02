@@ -66,7 +66,7 @@ _DOOR_TOKEN_RE = re.compile(
 )
 _ALLOWED_TAIL_RE = re.compile(
     r"^(?:\s*[-–—]?\s*)"
-    r"(?:(?:ASW|AAW|ADH|ADHW|ASHW|AFW|ALW|ASD|ASSD|VSD|CS|OBS|CLEAR|"
+    r"(?:(?:ASW|AAW|ADH|ADHW|ASHW|AFW|ALW|ASD|ASSD|VSD|CS|OBS|"
     r"PANEL|LIFT|DOOR)\b[\s-]*)*$",
     re.IGNORECASE,
 )
