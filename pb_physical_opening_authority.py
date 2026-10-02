@@ -17,6 +17,11 @@ import math
 from typing import Optional
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_hardened_authority_contract import (
+    build_opening_evidence_fingerprint,
+    build_physical_opening_identity_fingerprint,
+    normalize_geometry_for_identity,
+)
 from pb_plan_opening_detection_v171 import (
     Segment as LegacyPlanSegment,
     detect_door_candidates,
@@ -132,6 +137,8 @@ class PhysicalOpeningExistenceRecord:
     producer_method: str
     producer_version: str
     producer_generation: int
+    physical_identity_fingerprint: str = ""
+    evidence_fingerprint: str = ""
 
 
 @dataclass(frozen=True)
@@ -1828,6 +1835,34 @@ class PhysicalOpeningAuthority:
             ))
 
         candidate = containing[0]
+        identity_geometry = self._candidate_identity_geometry(candidate, records)
+        if not identity_geometry:
+            return cache_visible(PhysicalOpeningExistenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=(VISIBLE_WALL_CONTINUATION_REQUIRED,),
+                source_observation=source_result,
+                candidate=candidate,
+                missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
+            ))
+        physical_identity_fingerprint = build_physical_opening_identity_fingerprint(
+            document_id=candidate.document_id,
+            source_sha256=candidate.source_sha256,
+            page_id=candidate.page_id,
+            viewport_id=candidate.viewport_id,
+            geometry=identity_geometry,
+        )
+        evidence_fingerprint = build_opening_evidence_fingerprint(
+            physical_identity_fingerprint=physical_identity_fingerprint,
+            observation_ids=candidate.source_observation_ids,
+            lineage_root_ids=candidate.source_lineage_root_ids,
+            producer_method=source_result.snapshot.producer_method,
+            producer_version=source_result.snapshot.producer_version,
+            producer_generation=source_result.snapshot.producer_generation,
+            revision_id=candidate.revision_id,
+            snapshot_id=candidate.snapshot_id,
+        )
         record_payload = {
             "document_id": candidate.document_id,
             "revision_id": candidate.revision_id,
@@ -1839,6 +1874,8 @@ class PhysicalOpeningAuthority:
             "structural_pattern": candidate.structural_pattern,
             "source_observation_ids": candidate.source_observation_ids,
             "source_lineage_root_ids": candidate.source_lineage_root_ids,
+            "physical_identity_fingerprint": physical_identity_fingerprint,
+            "evidence_fingerprint": evidence_fingerprint,
         }
         existence = PhysicalOpeningExistenceRecord(
             record_id=stable_contract_id("physical_opening_existence", record_payload, digest_chars=32),
@@ -1860,6 +1897,8 @@ class PhysicalOpeningAuthority:
             producer_method=source_result.snapshot.producer_method,
             producer_version=source_result.snapshot.producer_version,
             producer_generation=source_result.snapshot.producer_generation,
+            physical_identity_fingerprint=physical_identity_fingerprint,
+            evidence_fingerprint=evidence_fingerprint,
         )
         return cache_visible(PhysicalOpeningExistenceResult(
             status=EvidenceResolutionStatus.CORROBORATED,
@@ -1870,6 +1909,29 @@ class PhysicalOpeningAuthority:
             candidate=candidate,
             existence_record=existence,
         ))
+
+    @staticmethod
+    def _candidate_identity_geometry(
+        candidate: CandidateSemanticOpening,
+        records: tuple[SourceObservationRecord, ...],
+    ) -> tuple[tuple[float, float], ...]:
+        """Canonical geometry only; never detector/version/source-ID metadata."""
+        by_id = {record.observation_id: record for record in records}
+        segments: list[tuple[tuple[float, float], ...]] = []
+        for observation_id in candidate.source_observation_ids:
+            record = by_id.get(observation_id)
+            if record is None:
+                continue
+            line = _line_geometry(record)
+            if line is None:
+                continue
+            segments.append(
+                normalize_geometry_for_identity(
+                    ((line[0], line[1]), (line[2], line[3]))
+                )
+            )
+        segments.sort()
+        return tuple(point for segment in segments for point in segment)
 
     @staticmethod
     def _identity_scope(record: PhysicalOpeningExistenceRecord) -> tuple[str, str, str, str, str]:
@@ -1942,10 +2004,12 @@ class PhysicalOpeningAuthority:
                 ),
             )
 
-        if left_record.record_id == right_record.record_id:
+        left_identity = left_record.physical_identity_fingerprint or left_record.record_id
+        right_identity = right_record.physical_identity_fingerprint or right_record.record_id
+        if left_identity == right_identity:
             return PhysicalOpeningIdentityResult(
                 status=EvidenceResolutionStatus.CORROBORATED,
-                physical_opening_identity=left_record.record_id,
+                physical_opening_identity=left_identity,
                 proven_same=True,
                 reason_codes=(PHYSICAL_OPENING_IDENTITY_RESOLVED,),
                 left_source_observation=left_source,
