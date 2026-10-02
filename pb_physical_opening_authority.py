@@ -424,13 +424,13 @@ def _face_break_from_proven_collinear_lines(
     first_line: tuple[float, float, float, float],
     second_line: tuple[float, float, float, float],
 ) -> Optional[_FaceBreak]:
-    \"\"\"Build one face break after exact collinearity has already been proved.
+    """Build one face break after exact collinearity has already been proved.
 
     The production caller consumes pairs emitted by
     _candidate_collinear_record_pairs(), which already applies the exact
     _parallel and _collinear predicates to these same cached line geometries.
     Avoiding the duplicate proof changes no candidate membership or tolerance.
-    \"\"\"
+    """
     direction = _canonical_direction(first_line)
     first_values = sorted(
         (_projection((first_line[0], first_line[1]), direction),
