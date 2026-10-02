@@ -1205,24 +1205,80 @@ def _get_measured_surfaces_for_page(
     """
     surfaces: List[Dict[str, Any]] = []
 
-    # 1. Room face polygons from Priority 2
-    try:
-        from pb_room_face_takeoff import extract_room_faces_from_page
-        room_faces = extract_room_faces_from_page(app, page)
-        for rf in room_faces:
-            poly = rf.polygon_pdf_pts
-            if poly and len(poly) >= 3:
-                surfaces.append({
-                    "polygon": [(float(p[0]), float(p[1])) for p in poly],
-                    "ref": str(rf.room_ref or rf.label or ""),
-                    "type": "room",
-                    "area_m2": rf.floor_area_m2,
-                })
-        diagnostics.measured_room_targets_count = len([
-            s for s in surfaces if s["type"] == "room"
-        ])
-    except Exception as exc:
-        diagnostics.room_extraction_error = f"{type(exc).__name__}: {exc}"
+    # 1. Room geometry: authenticated source-owned canonical rooms outrank
+    #    the older room-face extractor. A weaker legacy room must never
+    #    supersede an already-corroborated source room.
+    source_rooms = getattr(app, "canonical_rooms_live", None)
+    source_status = (
+        str(source_rooms.get("status") or "").strip().lower()
+        if isinstance(source_rooms, dict)
+        else ""
+    )
+    authenticated_rooms_added = 0
+    if source_status == "corroborated":
+        for room in source_rooms.get("rooms", ()) or ():
+            if not isinstance(room, dict):
+                continue
+            room_page = str(room.get("page_id") or room.get("source_page") or "")
+            if room_page and room_page != str(page.get("page_no") or ""):
+                continue
+            poly = room.get("polygon_pdf_pts") or ()
+            evidence_ids = tuple(
+                str(value)
+                for value in (room.get("evidence_ids") or ())
+                if str(value)
+            )
+            source_record = str(
+                room.get("source_room_face_record_id") or ""
+            ).strip()
+            canonical_room_id = str(room.get("canonical_room_id") or "").strip()
+            if (
+                room.get("geometry_complete") is not True
+                or not canonical_room_id
+                or not source_record
+                or not evidence_ids
+                or not isinstance(poly, (list, tuple))
+                or len(poly) < 3
+            ):
+                continue
+            surfaces.append({
+                "polygon": [(float(p[0]), float(p[1])) for p in poly],
+                "ref": canonical_room_id,
+                "type": "room",
+                "area_m2": room.get("metric_area_m2"),
+                "authority": "authenticated_source_room",
+                "source_room_face_record_id": source_record,
+                "evidence_ids": evidence_ids,
+            })
+            authenticated_rooms_added += 1
+
+    # ABSTAIN/CONFLICT/UNRESOLVED does not erase a valid stronger result;
+    # if no authenticated room exists for this page, legacy remains a
+    # fallback only and is explicitly marked as weaker authority.
+    if authenticated_rooms_added == 0:
+        try:
+            from pb_room_face_takeoff import extract_room_faces_from_page
+            room_faces = extract_room_faces_from_page(app, page)
+            for rf in room_faces:
+                poly = rf.polygon_pdf_pts
+                if poly and len(poly) >= 3:
+                    surfaces.append({
+                        "polygon": [
+                            (float(p[0]), float(p[1])) for p in poly
+                        ],
+                        "ref": str(rf.room_ref or rf.label or ""),
+                        "type": "room",
+                        "area_m2": rf.floor_area_m2,
+                        "authority": "legacy_room_face",
+                    })
+        except Exception as exc:
+            diagnostics.room_extraction_error = (
+                f"{type(exc).__name__}: {exc}"
+            )
+
+    diagnostics.measured_room_targets_count = len([
+        surface for surface in surfaces if surface["type"] == "room"
+    ])
 
     # 2. Registered wall data from v135 (only if source_polygon is real coords)
     try:
