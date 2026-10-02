@@ -396,6 +396,35 @@ def _is_orthogonal_angle(angle_deg: float) -> bool:
     ) <= _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG
 
 
+def _is_proven_annotation_mask_edge(
+    segment: Mapping[str, object],
+) -> bool:
+    """Return True only for producer-authenticated annotation-mask edges.
+
+    Fill-only rectangles are ambiguous by default: they may be wipeouts,
+    filled wall bodies, equipment, columns, hatches, or other legitimate
+    physical geometry.  The wall topology layer therefore cannot infer
+    annotation semantics from fill/stroke state alone.
+
+    Positive filtering requires upstream producer-owned proof of all material
+    propositions: text-sized geometry, spatial text association, explicit
+    absence of physical-wall authority, and non-participation in any larger
+    source-owned physical object.  Ordinary caller metadata or missing fields
+    fail closed by preserving the segment.
+    """
+
+    return (
+        str(segment.get("kind") or "") == "rect_edge"
+        and not bool(segment.get("stroke_present", False))
+        and bool(segment.get("fill_present", False))
+        and str(segment.get("annotation_mask_authority") or "") == "producer_owned"
+        and segment.get("annotation_mask_text_sized") is True
+        and segment.get("annotation_text_overlap") is True
+        and segment.get("physical_wall_authority") is False
+        and segment.get("participates_in_source_physical_object") is False
+    )
+
+
 def _filter_repeated_non_physical_drafting_primitives(
     segments: Sequence[dict],
     *,
@@ -443,17 +472,13 @@ def _filter_repeated_non_physical_drafting_primitives(
 
     kept: list[dict] = []
     for segment in segments:
-        # extract_native_page expands a PDF fill-only "re" command into four
-        # synthetic rect_edge records. When the source has no stroke, those
-        # edges were never drawn as linework and therefore cannot enter the
-        # wall-line topology. The source rectangle remains present in the
-        # immutable observation snapshot; this filter only prevents synthetic
-        # fill boundaries from masquerading as stroked walls.
-        if (
-            str(segment.get("kind") or "") == "rect_edge"
-            and not bool(segment.get("stroke_present", False))
-            and bool(segment.get("fill_present", False))
-        ):
+        # A fill-only PDF rectangle is not automatically an annotation wipeout.
+        # Filled rectangles can also be legitimate source-owned physical
+        # geometry. Prune its synthetic rect_edge linework only when an
+        # upstream producer has explicitly authenticated the rectangle as a
+        # text-associated annotation mask and proved it does not participate in
+        # a physical wall/object. Missing proof preserves the source geometry.
+        if _is_proven_annotation_mask_edge(segment):
             continue
         if id(segment) not in singleton_ids:
             kept.append(segment)
