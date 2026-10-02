@@ -12,7 +12,7 @@ publication remain separate downstream authorities.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from typing import Optional, Sequence
 
@@ -89,6 +89,9 @@ PHYSICAL_OPENING_CANDIDATE_CLOSURE_RESOLVED = "physical_opening_candidate_closur
 # candidate membership between otherwise unrelated primitives.
 _COORD_EQ_ABS_TOL = 1e-6
 _PARALLEL_REL_TOL = 1e-9
+_VIEWPORT_SCOPED_PRODUCER_SEAL = object()
+OPENING_CANDIDATE_OUTSIDE_FLOOR_PLAN_SCOPE = "opening_candidate_outside_floor_plan_scope"
+OPENING_CANDIDATE_VIEWPORT_SCOPE_UNRESOLVED = "opening_candidate_viewport_scope_unresolved"
 
 
 @dataclass(frozen=True)
@@ -493,6 +496,9 @@ class PhysicalOpeningAuthority:
     def __init__(
         self,
         source_observation_authority: SourceObservationAuthority | SourceVisibilityAuthority,
+        *,
+        _source_visibility_producer=None,
+        _source_visibility_producer_seal: object = None,
     ) -> None:
         if type(source_observation_authority) is SourceObservationAuthority:
             self._source_observation_authority: Optional[SourceObservationAuthority] = (
@@ -507,6 +513,23 @@ class PhysicalOpeningAuthority:
                 "source_observation_authority must be the concrete producer-owned "
                 "SourceObservationAuthority or SourceVisibilityAuthority reader"
             )
+        if (
+            _source_visibility_producer is not None
+            and _source_visibility_producer_seal is not _VIEWPORT_SCOPED_PRODUCER_SEAL
+        ):
+            raise TypeError(
+                "viewport-scoped physical opening authority must be obtained from "
+                "PhysicalOpeningAuthority.from_source_visibility_producer()"
+            )
+        self._source_visibility_producer = _source_visibility_producer
+        self._visible_viewport_scope_cache: dict[
+            tuple[str, str, str, str, str],
+            tuple[
+                tuple[CandidateSemanticOpening, ...],
+                dict[str, object],
+                tuple[str, ...],
+            ],
+        ] = {}
         self._visible_candidate_cache: dict[
             tuple[str, str, str, str, str],
             tuple[CandidateSemanticOpening, ...],
@@ -538,6 +561,19 @@ class PhysicalOpeningAuthority:
                 tuple[SourceObservationAuthorityResult, ...],
             ],
         ] = {}
+
+    @classmethod
+    def from_source_visibility_producer(cls, source_visibility_producer):
+        """Build the live viewport-scoped authority from its producer-owned source root."""
+        from pb_source_visibility_authority import SourceVisibilityProducer
+
+        if type(source_visibility_producer) is not SourceVisibilityProducer:
+            raise TypeError("source_visibility_producer must be the concrete producer-owned SourceVisibilityProducer")
+        return cls(
+            source_visibility_producer.authority(),
+            _source_visibility_producer=source_visibility_producer,
+            _source_visibility_producer_seal=_VIEWPORT_SCOPED_PRODUCER_SEAL,
+        )
 
     def source_visibility_authority(self) -> Optional[SourceVisibilityAuthority]:
         """Return the producer-owned visibility reader when this authority is visibility-backed.
@@ -1296,6 +1332,101 @@ class PhysicalOpeningAuthority:
         }
         return candidates
 
+    def _viewport_scoped_visible_candidates_for(
+        self,
+        seed: SourceObservationRecord,
+        records: tuple[SourceObservationRecord, ...],
+    ) -> tuple[
+        tuple[CandidateSemanticOpening, ...],
+        dict[str, object],
+        tuple[str, ...],
+    ]:
+        """Return only candidates positively owned by one authenticated floor-plan viewport.
+
+        Raw page-wide candidate discovery remains available for diagnostics.
+        This promotion gate is enabled only for authorities constructed from the
+        producer-owned SourceVisibilityProducer.
+        """
+        candidates = self._visible_candidates_for(seed, records)
+        if self._source_visibility_producer is None:
+            return candidates, {}, ()
+
+        key = (
+            seed.document_id,
+            seed.revision_id,
+            seed.source_sha256,
+            seed.snapshot_id,
+            seed.page_id,
+        )
+        cached = self._visible_viewport_scope_cache.get(key)
+        if cached is not None:
+            return cached
+
+        from pb_physical_opening_viewport_scope_authority import (
+            classify_opening_candidate_viewport_scopes,
+        )
+
+        scope_result = classify_opening_candidate_viewport_scopes(
+            source_visibility_producer=self._source_visibility_producer,
+            revision_id=seed.revision_id,
+            page_id=seed.page_id,
+            snapshot_id=seed.snapshot_id,
+            candidates=candidates,
+            records=records,
+        )
+        decisions = dict(scope_result.decisions)
+        if scope_result.status is not EvidenceResolutionStatus.CORROBORATED:
+            result = ((), decisions, tuple(scope_result.reason_codes))
+            self._visible_viewport_scope_cache[key] = result
+            return result
+
+        promoted: list[CandidateSemanticOpening] = []
+        for candidate in candidates:
+            decision = decisions.get(candidate.candidate_id)
+            if decision is None or not bool(getattr(decision, "promotable", False)):
+                continue
+            viewport_id = str(getattr(decision, "viewport_id", "") or "").strip()
+            if not viewport_id:
+                continue
+            if candidate.viewport_id is not None and str(candidate.viewport_id) != viewport_id:
+                continue
+            promoted.append(replace(candidate, viewport_id=viewport_id))
+
+        result = (
+            tuple(promoted),
+            decisions,
+            tuple(scope_result.reason_codes),
+        )
+        self._visible_viewport_scope_cache[key] = result
+        return result
+
+    @staticmethod
+    def _scope_reason_codes_for(
+        raw_containing: Sequence[CandidateSemanticOpening],
+        decisions: dict[str, object],
+        fallback: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        scopes = tuple(
+            sorted(
+                {
+                    str(getattr(decisions.get(candidate.candidate_id), "scope", "") or "")
+                    for candidate in raw_containing
+                    if decisions.get(candidate.candidate_id) is not None
+                }
+                - {""}
+            )
+        )
+        if scopes:
+            return _dedupe_reason_codes(
+                (OPENING_CANDIDATE_VIEWPORT_SCOPE_UNRESOLVED,),
+                scopes,
+                fallback,
+            )
+        return _dedupe_reason_codes(
+            (OPENING_CANDIDATE_VIEWPORT_SCOPE_UNRESOLVED,),
+            fallback,
+        )
+
     def assess_visible_candidate_closure(
         self,
         selector: ObservationSelector,
@@ -1451,9 +1582,21 @@ class PhysicalOpeningAuthority:
                 )
 
         proven = self._visible_candidates_for(seed, records)
+        promotable, viewport_decisions, viewport_reasons = (
+            self._viewport_scoped_visible_candidates_for(seed, records)
+        )
         proven_supports = tuple(
             frozenset(candidate.source_observation_ids)
+            for candidate in promotable
+        )
+        typed_non_plan_supports = tuple(
+            frozenset(candidate.source_observation_ids)
             for candidate in proven
+            if str(
+                getattr(viewport_decisions.get(candidate.candidate_id), "scope", "")
+                or ""
+            )
+            == "in_authenticated_non_plan_viewport"
         )
 
         unresolved_ids: list[str] = []
@@ -1461,6 +1604,11 @@ class PhysicalOpeningAuthority:
         resolved_count = 0
         for candidate_id, support in raw_candidates.items():
             if any(support <= proven_support for proven_support in proven_supports):
+                resolved_count += 1
+            elif any(support <= non_plan for non_plan in typed_non_plan_supports):
+                # Authenticated non-plan viewport ownership is a typed negative
+                # for floor-plan opening promotion. It disposes this covered
+                # candidate path without asserting universal non-existence.
                 resolved_count += 1
             else:
                 unresolved_ids.append(candidate_id)
@@ -1638,27 +1786,44 @@ class PhysicalOpeningAuthority:
             ))
 
         observation = source_result.observation
-        candidates = self._visible_candidates_for(observation, records)
-        page_key = (
-            observation.document_id,
-            observation.revision_id,
-            observation.source_sha256,
-            observation.snapshot_id,
-            observation.page_id,
+        raw_candidates = self._visible_candidates_for(observation, records)
+        candidates, viewport_decisions, viewport_reasons = (
+            self._viewport_scoped_visible_candidates_for(observation, records)
         )
-        membership = self._visible_candidate_membership_cache.get(page_key)
-        if membership is None:
-            # Defensive compatibility for any pre-populated candidate cache.
-            rebuilt: dict[str, list[CandidateSemanticOpening]] = {}
-            for candidate in candidates:
-                for observation_id in candidate.source_observation_ids:
-                    rebuilt.setdefault(str(observation_id), []).append(candidate)
-            membership = {
-                observation_id: tuple(rows)
-                for observation_id, rows in rebuilt.items()
+        raw_containing = tuple(
+            candidate
+            for candidate in raw_candidates
+            if observation.observation_id in candidate.source_observation_ids
+        )
+        containing = tuple(
+            candidate
+            for candidate in candidates
+            if observation.observation_id in candidate.source_observation_ids
+        )
+
+        if self._source_visibility_producer is not None and raw_containing and not containing:
+            raw_scopes = {
+                str(getattr(viewport_decisions.get(candidate.candidate_id), "scope", "") or "")
+                for candidate in raw_containing
             }
-            self._visible_candidate_membership_cache[page_key] = membership
-        containing = membership.get(str(observation.observation_id), ())
+            if raw_scopes and raw_scopes <= {"in_authenticated_non_plan_viewport"}:
+                return cache_visible(PhysicalOpeningDispositionResult(
+                    status=EvidenceResolutionStatus.CORROBORATED,
+                    disposition=PHYSICAL_OPENING_DISPOSITION_NO_CANDIDATE,
+                    reason_codes=_dedupe_reason_codes(
+                        (OPENING_CANDIDATE_OUTSIDE_FLOOR_PLAN_SCOPE,),
+                        tuple(sorted(raw_scopes)),
+                        viewport_reasons,
+                    ),
+                ))
+            return cache_visible(PhysicalOpeningDispositionResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                disposition=PHYSICAL_OPENING_DISPOSITION_UNRESOLVED,
+                reason_codes=self._scope_reason_codes_for(
+                    raw_containing, viewport_decisions, viewport_reasons
+                ),
+                candidate_ids=tuple(sorted(candidate.candidate_id for candidate in raw_containing)),
+            ))
 
         if len(containing) > 1:
             return cache_visible(PhysicalOpeningDispositionResult(
@@ -1790,11 +1955,29 @@ class PhysicalOpeningAuthority:
                 ), source_observation=source_result,
             ))
         observation = source_result.observation
-        candidates = self._visible_candidates_for(observation, records)
+        raw_candidates = self._visible_candidates_for(observation, records)
+        candidates, viewport_decisions, viewport_reasons = (
+            self._viewport_scoped_visible_candidates_for(observation, records)
+        )
+        raw_containing = tuple(
+            candidate for candidate in raw_candidates
+            if observation.observation_id in candidate.source_observation_ids
+        )
         containing = tuple(
             candidate for candidate in candidates
             if observation.observation_id in candidate.source_observation_ids
         )
+        if self._source_visibility_producer is not None and raw_containing and not containing:
+            return cache_visible(PhysicalOpeningExistenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=self._scope_reason_codes_for(
+                    raw_containing, viewport_decisions, viewport_reasons
+                ),
+                source_observation=source_result,
+                missing_upstream_capability=MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY,
+            ))
         if len(containing) > 1:
             return cache_visible(PhysicalOpeningExistenceResult(
                 status=EvidenceResolutionStatus.CONFLICT, proposition=None,
