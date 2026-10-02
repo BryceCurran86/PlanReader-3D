@@ -33,7 +33,7 @@ def _line(
     }
 
 
-def _fill_rect_edges(path_index: int) -> list[dict]:
+def _fill_rect_edges(path_index: int, *, annotation_mask: bool = False) -> list[dict]:
     result = []
     points = ((10.0, 10.0), (20.0, 10.0), (20.0, 20.0), (10.0, 20.0))
     for idx, (first, second) in enumerate(zip(points, points[1:] + points[:1])):
@@ -52,6 +52,11 @@ def _fill_rect_edges(path_index: int) -> list[dict]:
                 "fill_present": True,
                 "width": 0.0,
                 "width_present": False,
+                "annotation_mask_authority": ("producer_owned" if annotation_mask else ""),
+                "annotation_mask_text_sized": annotation_mask,
+                "annotation_text_overlap": annotation_mask,
+                "physical_wall_authority": False if annotation_mask else None,
+                "participates_in_source_physical_object": False if annotation_mask else None,
             }
         )
     return result
@@ -94,8 +99,13 @@ def test_green_stroked_insulated_panel_boundaries_are_preserved() -> None:
     assert _filter(walls) == tuple(walls)
 
 
-def test_fill_only_rectangle_edges_do_not_become_wall_linework() -> None:
+def test_legitimate_fill_only_rectangle_survives_without_annotation_mask_proof() -> None:
     fill_edges = _fill_rect_edges(path_index=1)
+    assert _filter(fill_edges) == tuple(fill_edges)
+
+
+def test_producer_authenticated_annotation_mask_edges_are_excluded() -> None:
+    fill_edges = _fill_rect_edges(path_index=1, annotation_mask=True)
     assert _filter(fill_edges) == ()
 
 
