@@ -198,17 +198,58 @@ def _witness_for(
     jamb: SourceObservationRecord,
     records: Sequence[SourceObservationRecord],
     excluded_ids: set[str],
+    *,
+    line_by_id: Optional[dict[str, tuple[float, float, float, float]]] = None,
+    unit_by_id: Optional[dict[str, tuple[float, float]]] = None,
+    endpoint_index: Optional[
+        dict[tuple[int, int], tuple[SourceObservationRecord, ...]]
+    ] = None,
 ) -> Optional[SourceObservationRecord]:
-    jamb_line = _line(jamb)
+    jamb_line = (
+        line_by_id.get(jamb.observation_id)
+        if line_by_id is not None
+        else _line(jamb)
+    )
     if jamb_line is None:
         return None
     jamb_endpoints = _endpoints(jamb_line)
+    jamb_unit = (
+        unit_by_id.get(jamb.observation_id)
+        if unit_by_id is not None
+        else _unit(*jamb_endpoints)
+    )
+
+    candidate_records: Sequence[SourceObservationRecord] = records
+    if endpoint_index is not None:
+        bx = math.floor(float(dimension_point[0]) / _COORD_TOL)
+        by = math.floor(float(dimension_point[1]) / _COORD_TOL)
+        indexed: dict[str, SourceObservationRecord] = {}
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for record in endpoint_index.get((bx + dx, by + dy), ()):
+                    indexed[record.observation_id] = record
+        candidate_records = tuple(indexed.values())
+
     matches: list[SourceObservationRecord] = []
-    for record in records:
+    for record in candidate_records:
         if record.observation_id in excluded_ids:
             continue
-        geometry = _line(record)
-        if geometry is None or not _parallel(geometry, jamb_line):
+        geometry = (
+            line_by_id.get(record.observation_id)
+            if line_by_id is not None
+            else _line(record)
+        )
+        record_unit = (
+            unit_by_id.get(record.observation_id)
+            if unit_by_id is not None
+            else (_unit(*_endpoints(geometry)) if geometry is not None else None)
+        )
+        if (
+            geometry is None
+            or jamb_unit is None
+            or record_unit is None
+            or abs(_cross(record_unit, jamb_unit)) > _PARALLEL_TOL
+        ):
             continue
         first, second = _endpoints(geometry)
         if _point_close(first, dimension_point) and any(
@@ -282,6 +323,7 @@ class OpeningDimensionAuthority:
         visibility_authority: SourceVisibilityAuthority,
         text_integrity_authority: PdfTextIntegrityAuthority,
         *,
+        physical_opening_authority: PhysicalOpeningAuthority | None = None,
         _seal: object = None,
     ) -> None:
         if _seal is not _OPENING_DIMENSION_AUTHORITY_SEAL:
@@ -299,7 +341,29 @@ class OpeningDimensionAuthority:
             )
         self._visibility = visibility_authority
         self._text = text_integrity_authority
-        self._physical = PhysicalOpeningAuthority(visibility_authority)
+        self._physical = (
+            physical_opening_authority
+            if physical_opening_authority is not None
+            else PhysicalOpeningAuthority(visibility_authority)
+        )
+        self._visible_page_cache: dict[
+            tuple[str, str, str, str, str], tuple[SourceObservationRecord, ...]
+        ] = {}
+        self._visible_geometry_cache: dict[
+            tuple[str, str, str, str, str],
+            tuple[
+                dict[str, tuple[float, float, float, float]],
+                dict[str, tuple[float, float]],
+                dict[tuple[int, int], tuple[SourceObservationRecord, ...]],
+            ],
+        ] = {}
+        self._trusted_text_snapshot_cache: dict[
+            tuple[str, str, str, str],
+            tuple[
+                bool,
+                dict[str, tuple[tuple[str, str, tuple[float, ...]], ...]],
+            ],
+        ] = {}
 
     def _unresolved(
         self,
@@ -345,6 +409,16 @@ class OpeningDimensionAuthority:
         existence: PhysicalOpeningExistenceRecord,
         snapshot_ids: Sequence[str],
     ) -> tuple[SourceObservationRecord, ...]:
+        cache_key = (
+            existence.document_id,
+            existence.revision_id,
+            existence.source_sha256,
+            existence.snapshot_id,
+            str(existence.page_id),
+        )
+        cached = self._visible_page_cache.get(cache_key)
+        if cached is not None:
+            return cached
         records: list[SourceObservationRecord] = []
         for observation_id in snapshot_ids:
             result = self._visibility.resolve_visible(
@@ -362,7 +436,108 @@ class OpeningDimensionAuthority:
                 and result.observation.page_id == existence.page_id
             ):
                 records.append(result.observation)
-        return tuple(records)
+        resolved = tuple(records)
+        self._visible_page_cache[cache_key] = resolved
+        return resolved
+
+    def _visible_geometry_index(
+        self,
+        existence: PhysicalOpeningExistenceRecord,
+        records: Sequence[SourceObservationRecord],
+    ) -> tuple[
+        dict[str, tuple[float, float, float, float]],
+        dict[str, tuple[float, float]],
+        dict[tuple[int, int], tuple[SourceObservationRecord, ...]],
+    ]:
+        cache_key = (
+            existence.document_id,
+            existence.revision_id,
+            existence.source_sha256,
+            existence.snapshot_id,
+            str(existence.page_id),
+        )
+        cached = self._visible_geometry_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        line_by_id: dict[str, tuple[float, float, float, float]] = {}
+        unit_by_id: dict[str, tuple[float, float]] = {}
+        endpoint_rows: dict[
+            tuple[int, int], list[SourceObservationRecord]
+        ] = {}
+        for record in records:
+            geometry = _line(record)
+            if geometry is None:
+                continue
+            line_by_id[record.observation_id] = geometry
+            direction = _unit(*_endpoints(geometry))
+            if direction is not None:
+                unit_by_id[record.observation_id] = direction
+            for x, y in _endpoints(geometry):
+                key = (
+                    math.floor(float(x) / _COORD_TOL),
+                    math.floor(float(y) / _COORD_TOL),
+                )
+                endpoint_rows.setdefault(key, []).append(record)
+
+        resolved = (
+            line_by_id,
+            unit_by_id,
+            {key: tuple(rows) for key, rows in endpoint_rows.items()},
+        )
+        self._visible_geometry_cache[cache_key] = resolved
+        return resolved
+
+    def _trusted_text_snapshot(
+        self,
+        existence: PhysicalOpeningExistenceRecord,
+        snapshot_ids: Sequence[str],
+    ) -> tuple[
+        bool,
+        dict[str, tuple[tuple[str, str, tuple[float, ...]], ...]],
+    ]:
+        cache_key = (
+            existence.document_id,
+            existence.revision_id,
+            existence.source_sha256,
+            existence.snapshot_id,
+        )
+        cached = self._trusted_text_snapshot_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        integrity_conflict = False
+        by_page: dict[str, list[tuple[str, str, tuple[float, ...]]]] = {}
+        for observation_id in snapshot_ids:
+            result = self._text.resolve_text(
+                ObservationSelector(
+                    document_id=existence.document_id,
+                    revision_id=existence.revision_id,
+                    source_sha256=existence.source_sha256,
+                    snapshot_id=existence.snapshot_id,
+                    observation_id=observation_id,
+                )
+            )
+            if result.status is EvidenceResolutionStatus.CONFLICT:
+                integrity_conflict = True
+                continue
+            if (
+                result.status is EvidenceResolutionStatus.CORROBORATED
+                and result.trusted_text is not None
+                and result.receipt is not None
+            ):
+                by_page.setdefault(str(result.receipt.page_id), []).append(
+                    (
+                        observation_id,
+                        result.trusted_text,
+                        tuple(float(value) for value in result.receipt.geometry),
+                    )
+                )
+        resolved = (
+            integrity_conflict,
+            {page_id: tuple(rows) for page_id, rows in by_page.items()},
+        )
+        self._trusted_text_snapshot_cache[cache_key] = resolved
+        return resolved
 
     def resolve_width(self, selector: ObservationSelector) -> OpeningDimensionResult:
         if not isinstance(selector, ObservationSelector):
@@ -413,6 +588,10 @@ class OpeningDimensionAuthority:
         all_visible = self._all_visible_records(
             existence, source_result.snapshot.observation_ids
         )
+        line_by_id, unit_by_id, endpoint_index = self._visible_geometry_index(
+            existence,
+            all_visible,
+        )
         support_ids = set(existence.source_observation_ids)
         candidates: list[
             tuple[SourceObservationRecord, SourceObservationRecord, SourceObservationRecord]
@@ -420,10 +599,10 @@ class OpeningDimensionAuthority:
         for record in all_visible:
             if record.observation_id in support_ids:
                 continue
-            geometry = _line(record)
+            geometry = line_by_id.get(record.observation_id)
             if geometry is None:
                 continue
-            dimension_axis = _unit(*_endpoints(geometry))
+            dimension_axis = unit_by_id.get(record.observation_id)
             if dimension_axis is None or abs(_cross(dimension_axis, axis)) > _PARALLEL_TOL:
                 continue
             if not _matches_endpoint_set(geometry, jambs, axis):
@@ -433,10 +612,22 @@ class OpeningDimensionAuthority:
                 continue
             excluded = support_ids | {record.observation_id}
             first_witness = _witness_for(
-                associations[0][0], associations[0][1], all_visible, excluded
+                associations[0][0],
+                associations[0][1],
+                all_visible,
+                excluded,
+                line_by_id=line_by_id,
+                unit_by_id=unit_by_id,
+                endpoint_index=endpoint_index,
             )
             second_witness = _witness_for(
-                associations[1][0], associations[1][1], all_visible, excluded
+                associations[1][0],
+                associations[1][1],
+                all_visible,
+                excluded,
+                line_by_id=line_by_id,
+                unit_by_id=unit_by_id,
+                endpoint_index=endpoint_index,
             )
             if first_witness is None or second_witness is None:
                 continue
@@ -461,34 +652,18 @@ class OpeningDimensionAuthority:
         assert dimension_geometry is not None
 
         bound_text: list[tuple[str, float]] = []
-        text_integrity_conflict = False
-        trusted_text_seen = False
-        for observation_id in source_result.snapshot.observation_ids:
-            text_result = self._text.resolve_text(
-                ObservationSelector(
-                    document_id=existence.document_id,
-                    revision_id=existence.revision_id,
-                    source_sha256=existence.source_sha256,
-                    snapshot_id=existence.snapshot_id,
-                    observation_id=observation_id,
-                )
-            )
-            if text_result.status is EvidenceResolutionStatus.CONFLICT:
-                text_integrity_conflict = True
-                continue
-            if (
-                text_result.status is not EvidenceResolutionStatus.CORROBORATED
-                or text_result.trusted_text is None
-                or text_result.receipt is None
-                or text_result.receipt.page_id != existence.page_id
-            ):
-                continue
-            trusted_text_seen = True
-            value = _numeric_dimension_mm(text_result.trusted_text)
+        text_integrity_conflict, trusted_text_by_page = self._trusted_text_snapshot(
+            existence,
+            source_result.snapshot.observation_ids,
+        )
+        trusted_rows = trusted_text_by_page.get(str(existence.page_id), ())
+        trusted_text_seen = bool(trusted_rows)
+        for observation_id, trusted_text, receipt_geometry in trusted_rows:
+            value = _numeric_dimension_mm(trusted_text)
             if value is None:
                 continue
             if not _bbox_bound_to_dimension_line(
-                text_result.receipt.geometry, dimension_geometry, axis
+                receipt_geometry, dimension_geometry, axis
             ):
                 continue
             bound_text.append((observation_id, value))
