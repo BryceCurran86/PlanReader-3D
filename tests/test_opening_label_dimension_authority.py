@@ -9,6 +9,7 @@ from pb_opening_label_dimension_authority import (
     OPENING_LABEL_DIMENSION_RESOLVED,
     OPENING_LABEL_DIMENSION_TEXT_UNAVAILABLE,
     OpeningLabelDimensionProducer,
+    _parseable_opening_label_fragments,
     parse_opening_label_dimensions,
 )
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
@@ -45,6 +46,84 @@ def test_parser_accepts_typed_compact_hundred_mm_notation_only() -> None:
 
     # Untyped two-digit arithmetic/text cannot silently become dimensions.
     assert parse_opening_label_dimensions("21 - 15") is None
+
+
+def _word_row(order: int, text: str, x0: float):
+    width = max(4.0, len(text) * 4.0)
+    return (order, f"obs-{order}", text, (x0, 10.0, x0 + width, 18.0))
+
+
+def test_native_line_with_two_adjacent_opening_callouts_is_split_without_merging() -> None:
+    rows = (
+        _word_row(0, "1,800", 0.0),
+        _word_row(1, "-", 28.0),
+        _word_row(2, "610", 34.0),
+        _word_row(3, "1,200", 70.0),
+        _word_row(4, "-", 98.0),
+        _word_row(5, "1,810", 104.0),
+        _word_row(6, "asw", 134.0),
+    )
+    fragments = _parseable_opening_label_fragments(rows)
+    assert [fragment.text for fragment in fragments] == [
+        "1,800 - 610",
+        "1,200 - 1,810 asw",
+    ]
+
+
+def test_semantic_callout_outranks_its_untyped_subparse() -> None:
+    rows = (
+        _word_row(0, "1,200", 0.0),
+        _word_row(1, "-", 28.0),
+        _word_row(2, "1,810", 34.0),
+        _word_row(3, "asw", 64.0),
+    )
+    fragments = _parseable_opening_label_fragments(rows)
+    assert len(fragments) == 1
+    assert fragments[0].text == "1,200 - 1,810 asw"
+
+
+def test_pair_callout_outranks_single_dimension_subparses() -> None:
+    rows = (
+        _word_row(0, "2,100", 0.0),
+        _word_row(1, "x", 28.0),
+        _word_row(2, "1,030", 34.0),
+    )
+    fragments = _parseable_opening_label_fragments(rows)
+    assert len(fragments) == 1
+    assert fragments[0].text == "2,100 x 1,030"
+
+
+def test_compact_door_and_metric_window_callouts_can_share_one_native_line() -> None:
+    rows = (
+        _word_row(0, "21", 0.0),
+        _word_row(1, "-", 12.0),
+        _word_row(2, "15", 18.0),
+        _word_row(3, "-", 30.0),
+        _word_row(4, "asd", 36.0),
+        _word_row(5, "600", 58.0),
+        _word_row(6, "-", 74.0),
+        _word_row(7, "1,510", 80.0),
+        _word_row(8, "asw", 108.0),
+    )
+    fragments = _parseable_opening_label_fragments(rows)
+    assert [fragment.text for fragment in fragments] == [
+        "21 - 15 - asd",
+        "600 - 1,510 asw",
+    ]
+
+
+def test_non_opening_text_fragments_are_not_created_from_native_line() -> None:
+    rows = (
+        _word_row(0, "900x1200", 0.0),
+        _word_row(1, "CLEAR", 40.0),
+        _word_row(2, "04", 75.0),
+        _word_row(3, "-", 87.0),
+        _word_row(4, "06", 93.0),
+        _word_row(5, "Niche", 108.0),
+        _word_row(6, "Scale", 145.0),
+        _word_row(7, "1:100", 170.0),
+    )
+    assert _parseable_opening_label_fragments(rows) == ()
 
 
 def test_parser_keeps_single_dimension_separate_and_rejects_clear_zone_text() -> None:
@@ -138,6 +217,68 @@ def test_producer_binds_one_figured_pair_by_gap_projection_not_nearest_choice() 
     assert result.evidence.area_m2 == pytest.approx(1.08)
     assert result.evidence.axis_order_resolved is False
     assert result.evidence.source_text_observation_ids
+
+
+def test_producer_stitches_one_source_callout_split_over_adjacent_native_lines() -> None:
+    source, published = _ingest(
+        _pdf(
+            labels=(
+                (108.0, 120.0, "1,800 -"),
+                (108.0, 128.0, "910 asw"),
+            )
+        ),
+        "split-callout",
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.evidence is not None
+    assert result.evidence.dimension_values_mm == (1800.0, 910.0)
+    assert result.evidence.semantic_kind == "window"
+    assert result.evidence.area_m2 == pytest.approx(1.638)
+    assert len(result.evidence.source_text_observation_ids) >= 2
+
+
+def test_remote_lines_with_complementary_syntax_do_not_stitch() -> None:
+    source, published = _ingest(
+        _pdf(
+            labels=(
+                (108.0, 120.0, "1,800 -"),
+                (108.0, 180.0, "910 asw"),
+            )
+        ),
+        "split-remote",
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.evidence is None
+    assert OPENING_LABEL_DIMENSION_TEXT_UNAVAILABLE in result.reason_codes
+
+
+def test_split_niche_annotation_does_not_become_opening_dimension() -> None:
+    source, published = _ingest(
+        _pdf(
+            labels=(
+                (108.0, 120.0, "04 - 06"),
+                (108.0, 128.0, "Niche"),
+            )
+        ),
+        "split-niche",
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.evidence is None
 
 
 def test_two_distinct_eligible_callouts_conflict_instead_of_picking_closest() -> None:
