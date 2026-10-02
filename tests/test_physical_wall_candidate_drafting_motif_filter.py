@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pb_physical_wall_candidate_authority import (
+    MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS,
     _filter_repeated_non_physical_drafting_primitives,
+    filtered_wall_topology_source_segment_count,
 )
 
 
@@ -139,3 +141,40 @@ def test_repeated_orthogonal_short_returns_below_motif_threshold_are_preserved()
         for idx in range(4)
     ]
     assert _filter(walls) == tuple(walls)
+
+def test_complexity_census_uses_filtered_topology_not_raw_cad_density() -> None:
+    motif = [
+        _line(
+            f"dense-{idx}",
+            float(idx),
+            0.0,
+            float(idx) + 1.0,
+            1.0,
+            path_index=idx,
+            stroke=(0.5, 0.5, 0.5),
+            width=0.24,
+        )
+        for idx in range(MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS + 1)
+    ]
+    assert len(motif) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS
+    assert (
+        filtered_wall_topology_source_segment_count(
+            motif,
+            page_width=1000.0,
+            page_height=1000.0,
+        )
+        == 0
+    )
+
+
+def test_complexity_census_preserves_unproven_filled_physical_geometry() -> None:
+    fill_edges = _fill_rect_edges(path_index=1)
+    assert (
+        filtered_wall_topology_source_segment_count(
+            fill_edges,
+            page_width=1000.0,
+            page_height=1000.0,
+        )
+        == len(fill_edges)
+    )
+\n
