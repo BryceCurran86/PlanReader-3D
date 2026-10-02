@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import fitz
 import pytest
 
 import pb_pdf_text_integrity_authority as authority
@@ -274,3 +275,54 @@ def test_exact_pair_promotes_only_through_producer_owned_native_lineage():
     assert trusted[0].receipt.trace_sequence_numbers
     assert len(trusted[0].receipt.trace_sequence_numbers) == 2
     assert TEXT_TRACE_AMBIGUOUS not in trusted[0].reason_codes
+
+
+def test_repeated_native_overprint_authentication_reads_page_paint_once(monkeypatch):
+    original = fitz.Page.get_bboxlog
+    paint_reads = []
+
+    def counted_bboxlog(page, *args, **kwargs):
+        paint_reads.append(page.number)
+        return original(page, *args, **kwargs)
+
+    monkeypatch.setattr(fitz.Page, "get_bboxlog", counted_bboxlog)
+    with fitz.open(stream=_fill_stroke_pdf(), filetype="pdf") as document:
+        page = document[0]
+        words = [
+            {"text": word[4], "bbox": tuple(word[:4])}
+            for word in page.get_text("words")
+        ]
+        first = [classify_native_word_integrity(page, word) for word in words]
+        replay = [classify_native_word_integrity(page, word) for word in words]
+
+    assert first and all(decision.trusted for decision in first)
+    assert replay == first
+    assert paint_reads == [0]
+
+
+def test_overprint_paint_cache_is_not_shared_between_pages():
+    first_page = _page()
+    other_page = _page()
+    other_page._bboxlog[11] = ("fill-text", other_page._spans[1]["bbox"])
+    before = deepcopy(other_page._bboxlog)
+
+    assert _exact_fill_stroke_overprint_pair(
+        first_page, _WORD, tuple(first_page._spans),
+    ) is not None
+    assert _exact_fill_stroke_overprint_pair(
+        other_page, _WORD, tuple(other_page._spans),
+    ) is None
+    assert other_page._bboxlog == before
+
+
+def test_unavailable_overprint_paint_log_abstains_on_every_attempt():
+    class UnavailablePaintPage(_FakePage):
+        def get_bboxlog(self):
+            raise RuntimeError("paint log unavailable")
+
+    base = _page()
+    page = UnavailablePaintPage(base._spans, base._bboxlog)
+    for _ in range(2):
+        assert _exact_fill_stroke_overprint_pair(
+            page, _WORD, tuple(page._spans),
+        ) is None

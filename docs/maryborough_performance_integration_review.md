@@ -113,3 +113,9 @@ handler still abstains if the log cannot be read. This is not a new authority
 cache, metric conversion or room-closure rule. Repeated authentication, separate
 pages and unavailable-paint-log cases must establish equivalent decisions before
 the private-source run is repeated.
+
+The real synthetic-PDF regression first reads the paint log five times while
+authenticating and replaying native overprinted words. With the existing cache,
+it reads once and returns identical trusted decisions. Separate-page mismatches
+and missing paint logs still abstain. All 94 focused text-integrity/occlusion/
+overprint tests pass in 0.94 seconds. No source-dependent threshold is added.
