@@ -105,6 +105,30 @@ def test_live_authority_promotes_only_authenticated_floor_plan_candidate() -> No
     assert "in_authenticated_non_plan_viewport" in elevation.reason_codes
 
 
+def test_source_producer_cached_opening_authority_is_viewport_scoped() -> None:
+    source, published = _ingest(_two_view_sheet(), "producer-cache-two-view")
+    candidates = _raw_candidates(source, published)
+    ordered = sorted(
+        candidates,
+        key=lambda candidate: _candidate_mean_x(candidate, source, published),
+    )
+    plan_candidate, elevation_candidate = ordered
+
+    scoped = source.physical_opening_authority()
+    assert scoped is source.physical_opening_authority()
+
+    plan = scoped.prove_existence(
+        _selector(published, plan_candidate.source_observation_ids[0])
+    )
+    elevation = scoped.prove_existence(
+        _selector(published, elevation_candidate.source_observation_ids[0])
+    )
+    assert plan.status is EvidenceResolutionStatus.CORROBORATED
+    assert plan.existence_record is not None
+    assert elevation.status is EvidenceResolutionStatus.ABSTAINED
+    assert elevation.existence_record is None
+
+
 def test_semantic_enumeration_excludes_authenticated_elevation_false_candidate() -> None:
     source, published = _ingest(_two_view_sheet(), "semantic-two-view")
     producer = SemanticOpeningEnumerationProducer.from_source_visibility_producer(source)
