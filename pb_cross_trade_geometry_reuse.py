@@ -739,6 +739,36 @@ def derive_floor_surface_trade_quantities(
     )
 
 
+_PANEL_FINISH_SEMANTICS = frozenset({"insulated_panel", "sandwich_panel"})
+
+
+def _ceiling_insulation_spec_allowed(spec: Optional[Mapping[str, Any]]) -> bool:
+    if spec is None:
+        return True
+    material = _clean(
+        spec.get("material")
+        or spec.get("system")
+        or spec.get("profile")
+        or spec.get("substrate")
+    )
+    normalized_material = material.lower().replace("-", "_").replace(" ", "_")
+    semantic_finish = _clean(spec.get("semantic_finish")).lower()
+
+    # Panel-like ceiling insulation requires an upstream normalized semantic.
+    # Raw project abbreviations (notably IP) and unnormalized panel wording are
+    # never interpreted in the canonical quantity layer.
+    panel_like = (
+        material.upper() == "IP"
+        or normalized_material in {
+            "insulated_panel",
+            "insulation_panel",
+            "sandwich_panel",
+        }
+    )
+    if panel_like:
+        return semantic_finish in _PANEL_FINISH_SEMANTICS
+    return True
+
 def derive_ceiling_trade_quantities(
     ceiling: Mapping[str, Any],
     specs: Optional[Mapping[str, Any]] = None,
@@ -750,9 +780,17 @@ def derive_ceiling_trade_quantities(
         or ceiling.get("metric_area_complete") is not True
     ):
         return []
+    effective_specs = specs
+    insulation_spec = _trade_spec(specs, "insulation")
+    if insulation_spec is not None and not _ceiling_insulation_spec_allowed(
+        insulation_spec
+    ):
+        effective_specs = dict(specs or {})
+        effective_specs.pop("insulation", None)
+
     return _derive_area_surface_trade_quantities(
         surface=ceiling,
-        specs=specs,
+        specs=effective_specs,
         host_id_field="canonical_ceiling_id",
         host_type="CEILING",
         area_field="area_m2",
