@@ -1791,26 +1791,10 @@ class PhysicalOpeningAuthority:
             ))
         observation = source_result.observation
         candidates = self._visible_candidates_for(observation, records)
-        page_key = (
-            observation.document_id,
-            observation.revision_id,
-            observation.source_sha256,
-            observation.snapshot_id,
-            observation.page_id,
+        containing = tuple(
+            candidate for candidate in candidates
+            if observation.observation_id in candidate.source_observation_ids
         )
-        membership = self._visible_candidate_membership_cache.get(page_key)
-        if membership is None:
-            # Defensive compatibility for any pre-populated candidate cache.
-            rebuilt: dict[str, list[CandidateSemanticOpening]] = {}
-            for candidate in candidates:
-                for observation_id in candidate.source_observation_ids:
-                    rebuilt.setdefault(str(observation_id), []).append(candidate)
-            membership = {
-                observation_id: tuple(rows)
-                for observation_id, rows in rebuilt.items()
-            }
-            self._visible_candidate_membership_cache[page_key] = membership
-        containing = membership.get(str(observation.observation_id), ())
         if len(containing) > 1:
             return cache_visible(PhysicalOpeningExistenceResult(
                 status=EvidenceResolutionStatus.CONFLICT, proposition=None,
@@ -1849,7 +1833,7 @@ class PhysicalOpeningAuthority:
             source_sha256=candidate.source_sha256,
             snapshot_id=candidate.snapshot_id,
             page_id=candidate.page_id,
-            viewport_id=None,
+            viewport_id=candidate.viewport_id,
             semantic_class="opening",
             status=EvidenceResolutionStatus.CORROBORATED,
             proposition=PHYSICAL_OPENING_EXISTS,

@@ -1502,27 +1502,13 @@ def _producer_opening_relation_overrides(
 
     prefix = "visible:segment:"
 
-    # Exact downstream-eligibility broad phase: an opening relation can only
-    # override physical-wall equivalence when *all* six of its native source
-    # primitives map to unique wall candidates. Proving an opening from a seed
-    # whose own primitive is absent from ``by_raw_id`` can therefore never alter
-    # the accepted override set. Restrict expensive G17 existence proofs to the
-    # producer-owned native observations that can still participate in a valid
-    # override; every retained seed is still proved by the unchanged authority.
-    eligible_seed_ids: set[str] = set()
+    # Preserve the #969 authority contract exactly: every authenticated visible
+    # observation on this page is proved once. The page index removes repeated
+    # document-wide ownership scans, but does not narrow the opening authority's
+    # evidence universe or preflight candidate membership.
     for observation_id, observation in page_visible_rows:
         if str(observation.page_id) != str(page_id):
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        primitive_ref = str(observation.source_primitive_ref or "")
-        if not primitive_ref.startswith(prefix):
-            continue
-        raw_id = primitive_ref[len(prefix) :]
-        if raw_id in by_raw_id:
-            eligible_seed_ids.add(observation_id)
-
-    for observation_id, observation in page_visible_rows:
-        if observation_id not in eligible_seed_ids:
-            continue
         selector = ObservationSelector(
             document_id=published.revision.document_id,
             revision_id=published.revision.revision_id,
