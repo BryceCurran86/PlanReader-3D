@@ -81,6 +81,7 @@ ROOM_LABEL_EXACT: set[str] = {
     # Utility
     "garage", "carport", "shed", "plant", "mech", "mechanical",
     "electrical", "server", "comms", "riser", "duct",
+    "freezer", "coolroom", "coldroom",
     # Other rooms
     "nursery", "playroom", "sunroom", "conservatory", "cellar",
     "basement", "attic", "loft", "void",
@@ -142,6 +143,7 @@ KNOWN_ROOM_PHRASES: frozenset[str] = frozenset({
     "guest room", "nurse room",
     "sun room", "sunroom",
     "service duct", "service riser",
+    "cold room", "cool room", "dry store", "food prep", "wash up",
 })
 
 # Maximum horizontal gap (PDF pts) between words to consider them contiguous
@@ -265,8 +267,7 @@ def _match_room_phrase(words: Sequence[str]) -> Optional[str]:
     """Try to match a contiguous sequence of words against known room phrases.
 
     Args:
-        words: Sequence of individual word strings (already filtered to
-               room-label candidates).
+        words: Sequence of individual source word strings.
 
     Returns:
         Matched phrase string (e.g. "MASTER BEDROOM") or None.
@@ -299,145 +300,258 @@ def filter_room_label_candidates(
     words: List[Dict[str, Any]],
     line_y_tolerance: float = 8.0,
 ) -> List[Dict[str, Any]]:
-    """Filter PDF words to credible room-label candidates, handling multi-word labels.
+    """Filter source words to credible room-label candidates.
 
-    Performs proper contiguous phrase reconstruction:
-    - Groups words by vertical proximity (same line)
-    - Sorts left-to-right within each line
-    - Checks consecutive room-label words for known phrases (MASTER BEDROOM,
-      WALK IN ROBE, LIVING ROOM, etc.)
-    - Uses horizontal gap to prevent merging unrelated words
-    - Does NOT concatenate arbitrary words from across an entire line
+    Registered multi-word phrases are reconstructed before individual token
+    gating. This keeps phrases such as FOOD PREP and CONFERENCE ROOM reachable
+    without promoting broad words such as food or conference to standalone
+    room labels.
 
-    Args:
-        words: PDF word dicts with 'text' and 'bbox' keys.
-        line_y_tolerance: Max vertical distance (PDF pts) to consider words on same line.
-
-    Returns:
-        Filtered list of label dicts: [{"label": str, "x": float, "y": float, "confidence": float}].
+    Native block/line/word ordering is preserved when available. When native
+    word ordering is unavailable, exact known phrases may also be reconstructed
+    from spatially adjacent vertical tokens in either reading direction.
+    Unconsumed words retain the historical single-token candidate rules.
     """
     if not words:
         return []
 
-    # Group words into lines by vertical proximity
-    sorted_words = sorted(words, key=lambda w: (
-        float(w.get("bbox", [0, 0, 0, 0])[1]),  # sort by y0
-        float(w.get("bbox", [0, 0, 0, 0])[0]),  # then by x0
-    ))
-
-    lines: List[List[Dict[str, Any]]] = []
-    current_line: List[Dict[str, Any]] = []
-    current_y: float = -9999.0
-
-    for word in sorted_words:
+    indexed_words: List[Tuple[int, Dict[str, Any]]] = []
+    for source_index, word in enumerate(words):
         bbox = word.get("bbox", [])
         if len(bbox) < 4:
             continue
         text = str(word.get("text") or "").strip()
         if not text:
             continue
-        y0 = float(bbox[1])
-        if abs(y0 - current_y) > line_y_tolerance and current_line:
-            lines.append(current_line)
-            current_line = []
-        current_y = y0
-        current_line.append(word)
-    if current_line:
-        lines.append(current_line)
+        try:
+            tuple(float(value) for value in bbox[:4])
+        except (TypeError, ValueError):
+            continue
+        indexed_words.append((source_index, word))
 
-    # For each line, find room label candidates using phrase reconstruction
+    if not indexed_words:
+        return []
+
+    def _bbox(word: Dict[str, Any]) -> Tuple[float, float, float, float]:
+        raw = word.get("bbox", [0, 0, 0, 0])
+        return tuple(float(value) for value in raw[:4])  # type: ignore[return-value]
+
+    def _bbox_distance(left: Dict[str, Any], right: Dict[str, Any]) -> float:
+        lx0, ly0, lx1, ly1 = _bbox(left)
+        rx0, ry0, rx1, ry1 = _bbox(right)
+        gap_x = max(0.0, rx0 - lx1, lx0 - rx1)
+        gap_y = max(0.0, ry0 - ly1, ly0 - ry1)
+        return math.hypot(gap_x, gap_y)
+
+    def _candidate(
+        label: str,
+        entries: Sequence[Tuple[int, Dict[str, Any]]],
+        confidence: float,
+    ) -> Dict[str, Any]:
+        boxes = [_bbox(word) for _idx, word in entries]
+        x0 = min(box[0] for box in boxes)
+        y0 = min(box[1] for box in boxes)
+        x1 = max(box[2] for box in boxes)
+        y1 = max(box[3] for box in boxes)
+        return {
+            "label": label,
+            "x": (x0 + x1) / 2.0,
+            "y": (y0 + y1) / 2.0,
+            "confidence": confidence,
+        }
+
+    def _spatial_cluster(
+        entries: Sequence[Tuple[int, Dict[str, Any]]],
+        *,
+        axis: int,
+    ) -> List[List[Tuple[int, Dict[str, Any]]]]:
+        if not entries:
+            return []
+        ordered = sorted(
+            entries,
+            key=lambda item: (_bbox(item[1])[axis] + _bbox(item[1])[axis + 2]) / 2.0,
+        )
+        groups: List[List[Tuple[int, Dict[str, Any]]]] = []
+        current: List[Tuple[int, Dict[str, Any]]] = []
+        anchor = 0.0
+        for entry in ordered:
+            box = _bbox(entry[1])
+            coordinate = (box[axis] + box[axis + 2]) / 2.0
+            if current and abs(coordinate - anchor) > line_y_tolerance:
+                groups.append(current)
+                current = []
+            if not current:
+                anchor = coordinate
+            current.append(entry)
+        if current:
+            groups.append(current)
+        return groups
+
+    def _sort_group(
+        entries: Sequence[Tuple[int, Dict[str, Any]]],
+    ) -> Tuple[List[Tuple[int, Dict[str, Any]]], bool]:
+        """Return reading-order candidates and whether reverse matching is safe."""
+        copied = list(entries)
+        if copied and all(
+            word.get("word_no") is not None for _idx, word in copied
+        ):
+            try:
+                copied.sort(key=lambda item: int(item[1].get("word_no", 0)))
+                return copied, False
+            except (TypeError, ValueError):
+                pass
+
+        xs = [(_bbox(word)[0] + _bbox(word)[2]) / 2.0 for _idx, word in copied]
+        ys = [(_bbox(word)[1] + _bbox(word)[3]) / 2.0 for _idx, word in copied]
+        dx = max(xs) - min(xs) if xs else 0.0
+        dy = max(ys) - min(ys) if ys else 0.0
+        if dy > dx:
+            copied.sort(key=lambda item: (_bbox(item[1])[1] + _bbox(item[1])[3]) / 2.0)
+            return copied, True
+        copied.sort(key=lambda item: (_bbox(item[1])[0] + _bbox(item[1])[2]) / 2.0)
+        return copied, False
+
+    native_lines: Dict[Tuple[Any, Any], List[Tuple[int, Dict[str, Any]]]] = {}
+    loose_entries: List[Tuple[int, Dict[str, Any]]] = []
+    for entry in indexed_words:
+        word = entry[1]
+        block_no = word.get("block_no")
+        line_no = word.get("line_no")
+        if block_no is not None and line_no is not None:
+            native_lines.setdefault((block_no, line_no), []).append(entry)
+        else:
+            loose_entries.append(entry)
+
+    phrase_groups: List[Tuple[List[Tuple[int, Dict[str, Any]]], bool]] = []
+    native_group_records: List[
+        Tuple[Any, Any, List[Tuple[int, Dict[str, Any]]], bool]
+    ] = []
+    for (block_no, line_no), entries in native_lines.items():
+        ordered, allow_reverse = _sort_group(entries)
+        phrase_groups.append((ordered, allow_reverse))
+        native_group_records.append((block_no, line_no, ordered, allow_reverse))
+
+    for group in _spatial_cluster(loose_entries, axis=1):
+        ordered = sorted(
+            group,
+            key=lambda item: (_bbox(item[1])[0] + _bbox(item[1])[2]) / 2.0,
+        )
+        phrase_groups.append((ordered, False))
+    for group in _spatial_cluster(loose_entries, axis=0):
+        ordered = sorted(
+            group,
+            key=lambda item: (_bbox(item[1])[1] + _bbox(item[1])[3]) / 2.0,
+        )
+        phrase_groups.append((ordered, True))
+
     candidates: List[Dict[str, Any]] = []
-    for line_words in lines:
-        # Sort words left to right
-        line_words.sort(key=lambda w: float(w.get("bbox", [0, 0, 0, 0])[0]))
+    consumed: set[int] = set()
 
-        if not line_words:
+    def _try_phrase_group(
+        ordered: Sequence[Tuple[int, Dict[str, Any]]],
+        *,
+        allow_reverse: bool,
+    ) -> None:
+        if len(ordered) < 2:
+            return
+        for length in range(min(4, len(ordered)), 1, -1):
+            for start_index in range(0, len(ordered) - length + 1):
+                window = list(ordered[start_index : start_index + length])
+                window_ids = [entry[0] for entry in window]
+                if any(source_id in consumed for source_id in window_ids):
+                    continue
+                if any(
+                    _bbox_distance(window[offset][1], window[offset + 1][1])
+                    > _MAX_PHRASE_GAP_PT
+                    for offset in range(len(window) - 1)
+                ):
+                    continue
+                texts = [
+                    str(word.get("text") or "").strip()
+                    for _source_id, word in window
+                ]
+                matched = _match_room_phrase(texts)
+                if matched is None and allow_reverse:
+                    matched = _match_room_phrase(list(reversed(texts)))
+                if matched is None:
+                    continue
+                candidates.append(_candidate(matched, window, 0.95))
+                consumed.update(window_ids)
+
+    for ordered, allow_reverse in phrase_groups:
+        _try_phrase_group(ordered, allow_reverse=allow_reverse)
+
+    by_block: Dict[Any, List[Tuple[Any, List[Tuple[int, Dict[str, Any]]], bool]]] = {}
+    for block_no, line_no, ordered, allow_reverse in native_group_records:
+        by_block.setdefault(block_no, []).append((line_no, ordered, allow_reverse))
+
+    def _line_sort_key(value: Any) -> Tuple[int, Any]:
+        try:
+            return (0, int(value))
+        except (TypeError, ValueError):
+            return (1, str(value))
+
+    for block_lines in by_block.values():
+        if len(block_lines) < 2:
+            continue
+        block_lines.sort(key=lambda item: _line_sort_key(item[0]))
+        all_entries = [entry for _line_no, entries, _rev in block_lines for entry in entries]
+        if not 2 <= len(all_entries) <= 4:
+            continue
+        if any(source_id in consumed for source_id, _word in all_entries):
             continue
 
-        # Mark which words are room-label candidates
-        is_room: List[bool] = []
-        for word in line_words:
-            text = str(word.get("text") or "").strip()
-            is_room.append(bool(text and _is_room_label_candidate(text)))
-
-        if not any(is_room):
+        compatible = True
+        for index in range(len(block_lines) - 1):
+            left_entries = block_lines[index][1]
+            right_entries = block_lines[index + 1][1]
+            left_boxes = [_bbox(word) for _source_id, word in left_entries]
+            right_boxes = [_bbox(word) for _source_id, word in right_entries]
+            left = (
+                min(box[0] for box in left_boxes),
+                min(box[1] for box in left_boxes),
+                max(box[2] for box in left_boxes),
+                max(box[3] for box in left_boxes),
+            )
+            right = (
+                min(box[0] for box in right_boxes),
+                min(box[1] for box in right_boxes),
+                max(box[2] for box in right_boxes),
+                max(box[3] for box in right_boxes),
+            )
+            horizontal_overlap = max(
+                0.0, min(left[2], right[2]) - max(left[0], right[0])
+            )
+            minimum_width = max(
+                1e-9, min(left[2] - left[0], right[2] - right[0])
+            )
+            vertical_gap = max(0.0, right[1] - left[3], left[1] - right[3])
+            if (
+                horizontal_overlap / minimum_width < 0.25
+                or vertical_gap > _MAX_PHRASE_GAP_PT
+            ):
+                compatible = False
+                break
+        if not compatible:
             continue
 
-        # Try contiguous phrase reconstruction.
-        # Iterate over ALL words on the line, but only start phrases from
-        # room-label anchor words.  Extend forward through adjacent words
-        # (even non-room-label words like "IN" in "WALK IN ROBE") to match
-        # known multi-word room phrases.
-        used_in_phrase: set[int] = set()  # indices into line_words
-        for i in range(len(line_words)):
-            if not is_room[i] or i in used_in_phrase:
-                continue
-            anchor_text = str(line_words[i].get("text") or "").strip()
+        texts = [
+            str(word.get("text") or "").strip()
+            for _source_id, word in all_entries
+        ]
+        matched = _match_room_phrase(texts)
+        if matched is None:
+            continue
+        candidates.append(_candidate(matched, all_entries, 0.95))
+        consumed.update(source_id for source_id, _word in all_entries)
 
-            # Try 3-word phrases: anchor + next 2 words on the line
-            if i + 2 < len(line_words) and (i + 2) not in used_in_phrase:
-                w2 = str(line_words[i + 1].get("text") or "").strip()
-                w3 = str(line_words[i + 2].get("text") or "").strip()
-                phrase_3 = _match_room_phrase([anchor_text, w2, w3])
-                if phrase_3:
-                    # Check gaps between consecutive words
-                    g1 = float(line_words[i + 1].get("bbox", [0,0,0,0])[0]) - float(line_words[i].get("bbox", [0,0,0,0])[2])
-                    g2 = float(line_words[i + 2].get("bbox", [0,0,0,0])[0]) - float(line_words[i + 1].get("bbox", [0,0,0,0])[2])
-                    if g1 <= _MAX_PHRASE_GAP_PT and g2 <= _MAX_PHRASE_GAP_PT:
-                        three = line_words[i:i + 3]
-                        bboxes = [w["bbox"] for w in three if len(w.get("bbox", [])) >= 4]
-                        if bboxes:
-                            x0 = min(float(b[0]) for b in bboxes)
-                            y0 = min(float(b[1]) for b in bboxes)
-                            x1 = max(float(b[2]) for b in bboxes)
-                            y1 = max(float(b[3]) for b in bboxes)
-                            candidates.append({
-                                "label": phrase_3,
-                                "x": (x0 + x1) / 2.0,
-                                "y": (y0 + y1) / 2.0,
-                                "confidence": 0.95,
-                            })
-                            used_in_phrase.update(range(i, i + 3))
-                            continue
-
-            # Try 2-word phrases: anchor + next word on the line
-            if i + 1 < len(line_words) and (i + 1) not in used_in_phrase:
-                w2 = str(line_words[i + 1].get("text") or "").strip()
-                phrase_2 = _match_room_phrase([anchor_text, w2])
-                if phrase_2:
-                    g = float(line_words[i + 1].get("bbox", [0,0,0,0])[0]) - float(line_words[i].get("bbox", [0,0,0,0])[2])
-                    if g <= _MAX_PHRASE_GAP_PT:
-                        two = line_words[i:i + 2]
-                        bboxes = [w["bbox"] for w in two if len(w.get("bbox", [])) >= 4]
-                        if bboxes:
-                            x0 = min(float(b[0]) for b in bboxes)
-                            y0 = min(float(b[1]) for b in bboxes)
-                            x1 = max(float(b[2]) for b in bboxes)
-                            y1 = max(float(b[3]) for b in bboxes)
-                            candidates.append({
-                                "label": phrase_2,
-                                "x": (x0 + x1) / 2.0,
-                                "y": (y0 + y1) / 2.0,
-                                "confidence": 0.95,
-                            })
-                            used_in_phrase.update(range(i, i + 2))
-                            continue
-
-        # Individual room-label words not consumed by phrases
-        for i, word in enumerate(line_words):
-            if i in used_in_phrase or not is_room[i]:
-                continue
-            text = str(word.get("text") or "").strip()
-            bbox = word.get("bbox", [])
-            if len(bbox) < 4:
-                continue
-            cx = (float(bbox[0]) + float(bbox[2])) / 2.0
-            cy = (float(bbox[1]) + float(bbox[3])) / 2.0
-            candidates.append({
-                "label": text,
-                "x": cx, "y": cy,
-                "confidence": 0.85,
-            })
+    for source_id, word in indexed_words:
+        if source_id in consumed:
+            continue
+        text = str(word.get("text") or "").strip()
+        if not _is_room_label_candidate(text):
+            continue
+        candidates.append(_candidate(text, [(source_id, word)], 0.85))
 
     return candidates
 
