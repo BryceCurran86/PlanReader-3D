@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pb_physical_wall_candidate_authority import (
+    MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS,
     _filter_repeated_non_physical_drafting_primitives,
+    wall_topology_source_segment_count,
 )
 
 
@@ -139,3 +141,28 @@ def test_repeated_orthogonal_short_returns_below_motif_threshold_are_preserved()
         for idx in range(4)
     ]
     assert _filter(walls) == tuple(walls)
+
+
+def test_preflight_counts_filtered_topology_not_raw_dense_drafting_segments() -> None:
+    motif = [
+        _line(
+            f"dense-{idx}",
+            float(idx % 100),
+            float(idx // 100),
+            float(idx % 100) + 3.0,
+            float(idx // 100) + 3.0,
+            path_index=idx,
+            stroke=(0.5, 0.5, 0.5),
+            width=0.24,
+        )
+        for idx in range(MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS + 8)
+    ]
+    assert len(motif) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS
+    assert (
+        wall_topology_source_segment_count(
+            motif,
+            page_width=1000.0,
+            page_height=1000.0,
+        )
+        == 0
+    )
