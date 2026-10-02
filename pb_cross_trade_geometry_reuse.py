@@ -22,6 +22,7 @@ from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
 from pb_auto_geometry_v1219 import SOURCE_PREFIX
 import pb_takeoff_row_contract as takeoff_contract
+from pb_hardened_authority_contract import authenticated_tile_surface_rows
 
 
 _ALLOWED_HOST_TYPES = {"WALL", "SLAB", "ROOF", "SPACE", "FLOOR", "CEILING"}
@@ -262,7 +263,6 @@ def derive_wall_trade_quantities(
     for spec_name, trade_scope, element in (
         ("linings", "linings", "Wall lining"),
         ("painting", "painting", "Wall painting"),
-        ("tiling", "tiling", "Wall tiling"),
     ):
         spec = _trade_spec(specs, spec_name)
         if spec is None:
@@ -297,6 +297,61 @@ def derive_wall_trade_quantities(
                 ),
             )
         )
+
+    # Wall tiling is not allowed to reuse the whole canonical net-wall area
+    # merely because a finish spec names one or more face IDs.  It must arrive
+    # through the hardened internal-elevation authority chain and carry an
+    # authenticated per-face tile extent.
+    tiling = _trade_spec(specs, "tiling")
+    if tiling is not None:
+        material = _material(tiling)
+        spec_evidence = _spec_evidence(tiling)
+        face_section = _spec_section(tiling)
+        authenticated_surfaces = authenticated_tile_surface_rows(
+            tiling, canonical_wall_id=wall_id
+        )
+        if material and spec_evidence and face_section is not None and authenticated_surfaces:
+            quantity_m2 = sum(
+                float(row["tile_extent_m2"]) for row in authenticated_surfaces
+            )
+            face_ids = tuple(
+                str(row["physical_wall_face_id"]) for row in authenticated_surfaces
+            )
+            surface_evidence = tuple(
+                dict.fromkeys(
+                    evidence_id
+                    for row in authenticated_surfaces
+                    for evidence_id in (row.get("evidence_ids") or ())
+                    if str(evidence_id)
+                )
+            )
+            results.append(
+                _quantity(
+                    trade_scope="tiling",
+                    section=face_section,
+                    element="Wall tiling",
+                    location=f"{wall_id} · {';'.join(face_ids)}",
+                    material=material,
+                    quantity=quantity_m2,
+                    unit="m²",
+                    host_id=wall_id,
+                    host_type="WALL",
+                    formula=(
+                        "Authenticated internal-elevation wall-face tile extents: "
+                        + " + ".join(
+                            f"{float(row['tile_extent_m2']):.6f} m²"
+                            for row in authenticated_surfaces
+                        )
+                    ),
+                    host_evidence_ids=tuple(dict.fromkeys(host_evidence + surface_evidence)),
+                    spec_evidence_ids=spec_evidence,
+                    notes=(
+                        f"Tile quantity derived only from authenticated physical wall-face "
+                        f"extent(s) on canonical wall {wall_id}; canonical net wall area "
+                        "is not used as a tile proxy."
+                    ),
+                )
+            )
 
     skirting = _trade_spec(specs, "skirting")
     if skirting is not None:
