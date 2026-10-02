@@ -39,15 +39,15 @@ def test_semantic_producer_reuses_snapshot_bound_physical_authority(
     monkeypatch,
 ) -> None:
     source, revision_id = _ingest("semantic-reuse")
-    original = semantic.PhysicalOpeningAuthority
+    original = source.physical_opening_authority
     constructions = 0
 
-    def counted(authority):
+    def counted():
         nonlocal constructions
         constructions += 1
-        return original(authority)
+        return original()
 
-    monkeypatch.setattr(semantic, "PhysicalOpeningAuthority", counted)
+    monkeypatch.setattr(source, "physical_opening_authority", counted)
 
     producer = semantic.SemanticOpeningEnumerationProducer.from_source_visibility_producer(
         source
