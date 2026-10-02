@@ -7,6 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 import pb_material_schedule_v1222 as mat
+import pb_selected_evidence_floor_v1226 as selected
 
 
 class _App:
@@ -46,6 +47,24 @@ class MaterialScheduleV1222Tests(unittest.TestCase):
         ])
         state = mat.build_material_dictionary(app, 4)
         entry = state["dictionary"]["IP"]
+        self.assertEqual(entry["status"], "Confirmed")
+        self.assertEqual(entry["semantic_finish"], "insulated_panel")
+
+    def test_selected_sheet_rebuild_preserves_authenticated_ip_semantic(self):
+        entry = selected._rebuild_dictionary_item(
+            "IP",
+            [
+                {
+                    "code": "IP",
+                    "description": "75mm Insulated Panel",
+                    "substrate": "Insulated Panel",
+                    "finish": "",
+                    "page_id": 9,
+                    "page_label": "A900",
+                }
+            ],
+        )
+        self.assertIsNotNone(entry)
         self.assertEqual(entry["status"], "Confirmed")
         self.assertEqual(entry["semantic_finish"], "insulated_panel")
 
