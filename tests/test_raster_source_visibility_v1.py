@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from io import BytesIO
 import inspect
+import random
 
 import fitz
 from PIL import Image, ImageDraw
@@ -13,6 +14,8 @@ from pb_physical_opening_authority import (
     PhysicalOpeningAuthority,
 )
 from pb_raster_visible_segment_detector import (
+    _dedupe,
+    _snap_intersections,
     detect_axis_aligned_raster_segments,
 )
 from pb_source_observation_authority import ObservationSelector
@@ -108,6 +111,112 @@ def _selector(published, observation_id: str) -> ObservationSelector:
         observation_id=observation_id,
     )
 
+
+
+def _bruteforce_snap_intersections(horizontal, vertical, *, tolerance_px):
+    snapped_h = []
+    for x0, y0, x1, _y1 in horizontal:
+        left = x0
+        right = x1
+        for vx0, vy0, _vx1, vy1 in vertical:
+            vx = vx0
+            if vy0 - tolerance_px <= y0 <= vy1 + tolerance_px:
+                if abs(left - vx) <= tolerance_px:
+                    left = vx
+                if abs(right - vx) <= tolerance_px:
+                    right = vx
+        if right - left > 0.0:
+            snapped_h.append((left, y0, right, y0))
+
+    snapped_v = []
+    for x0, y0, _x1, y1 in vertical:
+        top = y0
+        bottom = y1
+        for hx0, hy0, hx1, _hy1 in snapped_h:
+            if hx0 - tolerance_px <= x0 <= hx1 + tolerance_px:
+                if abs(top - hy0) <= tolerance_px:
+                    top = hy0
+                if abs(bottom - hy0) <= tolerance_px:
+                    bottom = hy0
+        if bottom - top > 0.0:
+            snapped_v.append((x0, top, x0, bottom))
+
+    final_h = []
+    for x0, y0, x1, _y1 in snapped_h:
+        left = x0
+        right = x1
+        for vx0, vy0, _vx1, vy1 in snapped_v:
+            if vy0 - tolerance_px <= y0 <= vy1 + tolerance_px:
+                if abs(left - vx0) <= tolerance_px:
+                    left = vx0
+                if abs(right - vx0) <= tolerance_px:
+                    right = vx0
+        final_h.append((left, y0, right, y0))
+
+    return _dedupe(final_h), _dedupe(snapped_v)
+
+
+def test_spatial_snap_matches_bruteforce_chain_semantics() -> None:
+    horizontal = [
+        (10.0, 10.0, 90.0, 10.0),
+        (8.0, 20.0, 92.0, 20.0),
+        (10.0, 30.0, 90.0, 30.0),
+    ]
+    vertical = [
+        (8.5, 0.0, 8.5, 40.0),
+        (9.75, 0.0, 9.75, 40.0),
+        (10.75, 0.0, 10.75, 40.0),
+        (89.25, 0.0, 89.25, 40.0),
+        (90.5, 0.0, 90.5, 40.0),
+        (91.5, 0.0, 91.5, 40.0),
+    ]
+    expected = _bruteforce_snap_intersections(
+        horizontal,
+        vertical,
+        tolerance_px=1.5,
+    )
+    assert _snap_intersections(
+        horizontal,
+        vertical,
+        tolerance_px=1.5,
+    ) == expected
+
+
+def test_spatial_snap_matches_bruteforce_randomized_fixture() -> None:
+    rng = random.Random(731)
+    horizontal = _dedupe([
+        (
+            float(rng.randrange(0, 180)),
+            float(rng.randrange(0, 120)),
+            float(rng.randrange(181, 360)),
+            float(rng.randrange(0, 120)),
+        )
+        for _ in range(80)
+    ])
+    horizontal = [(x0, y0, x1, y0) for x0, y0, x1, _ in horizontal]
+    vertical = _dedupe([
+        (
+            float(rng.randrange(0, 360)),
+            float(rng.randrange(0, 70)),
+            float(rng.randrange(0, 360)),
+            float(rng.randrange(71, 180)),
+        )
+        for _ in range(110)
+    ])
+    vertical = [(x0, y0, x0, y1) for x0, y0, _, y1 in vertical]
+
+    for tolerance_px in (1.0, 2.0, 4.0):
+        expected = _bruteforce_snap_intersections(
+            horizontal,
+            vertical,
+            tolerance_px=tolerance_px,
+        )
+        actual = _snap_intersections(
+            horizontal,
+            vertical,
+            tolerance_px=tolerance_px,
+        )
+        assert actual == expected
 
 def test_detector_recovers_axis_aligned_g17_segments_from_pixels() -> None:
     segments = detect_axis_aligned_raster_segments(_opening_png(), dpi=144)
