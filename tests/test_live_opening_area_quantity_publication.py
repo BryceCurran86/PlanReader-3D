@@ -15,6 +15,12 @@ from pb_live_physical_opening_void_composition import (
     LivePhysicalOpeningVoidComposition,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_quantity_takeoff_adapter import (
+    CommercialMeasurementAuthority,
+    CommercialTakeoffSourceTrace,
+    quantity_evidence_to_takeoff_output_row,
+)
+from pb_source_closed_run_export import seal_source_closed_quantity
 
 
 SHA = "a" * 64
@@ -167,3 +173,47 @@ def test_duplicate_physical_opening_identity_fails_closed() -> None:
         publish_live_opening_area_quantities(
             _composition(duplicate, duplicate)
         )
+
+
+def test_figured_opening_quantity_is_sealable_and_commercially_projectable() -> None:
+    opening = _opening()
+    quantity = _opening_quantity(opening)
+    assert quantity is not None
+
+    trace = CommercialTakeoffSourceTrace(
+        workspace_id=1,
+        project_id="project-fixture",
+        document_id=opening.document_id,
+        source_sha256=opening.source_sha256,
+        source_page=opening.page_id,
+        viewport_id=opening.viewport_id or "viewport-fixture",
+        revision_id=opening.revision_id,
+        current_revision_id=opening.revision_id,
+        evidence_ids=tuple(quantity.evidence_ids),
+        canonical_entity_ids=(opening.canonical_opening_id,),
+    )
+    authority = CommercialMeasurementAuthority(
+        method="figured_dimension",
+        figured_dimension_ids=(opening.figured_area_record_id,),
+    )
+
+    sealed = seal_source_closed_quantity(quantity, trace=trace)
+    assert sealed.lineage_ok is True
+    assert sealed.object_identity_refs == (opening.canonical_opening_id,)
+    assert sealed.value == pytest.approx(2.172)
+    assert sealed.unit == "m2"
+
+    row = quantity_evidence_to_takeoff_output_row(
+        quantity,
+        trace=trace,
+        authority=authority,
+    )
+    assert row is not None
+    assert row["quantity"] == pytest.approx(2.172)
+    assert row["quantity_id"] == quantity.quantity_id
+    assert row["canonical_entity_ids"] == [opening.canonical_opening_id]
+    assert row["measurement_method"] == "figured_dimension"
+    assert row["figured_dimension_ids"] == [opening.figured_area_record_id]
+    # Existing commercial governance remains intact: automated quantities
+    # enter customer takeoff as review rows rather than bypassing approval.
+    assert row["quantity_status"] == "To review"
