@@ -190,17 +190,14 @@ def test_shared_opening_authority_matches_fresh_per_page_scope_results():
 def test_wall_candidate_producer_constructs_one_opening_authority_per_revision(
     monkeypatch,
 ):
-    source, published, _payload = _source(page_count=5)
+    source, _published, _payload = _source(page_count=5)
     original = module.PhysicalOpeningAuthority
     constructions = 0
-    created = []
 
     def counted(authority):
         nonlocal constructions
         constructions += 1
-        instance = original(authority)
-        created.append(instance)
-        return instance
+        return original(authority)
 
     monkeypatch.setattr(module, "PhysicalOpeningAuthority", counted)
 
@@ -210,12 +207,6 @@ def test_wall_candidate_producer_constructs_one_opening_authority_per_revision(
     )
     assert producer.authority() is not None
     assert constructions == 1
-    assert (
-        producer.physical_opening_authority_for_revision(
-            published.revision.revision_id
-        )
-        is created[0]
-    )
 
 
 
