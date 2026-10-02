@@ -1634,7 +1634,12 @@ class PhysicalOpeningAuthority:
             observation.snapshot_id,
             observation.page_id,
         )
-        membership = self._visible_candidate_membership_cache.get(page_key)
+        cache_candidates = self._visible_candidate_cache.get(page_key)
+        membership = (
+            self._visible_candidate_membership_cache.get(page_key)
+            if cache_candidates is candidates
+            else None
+        )
         if membership is None:
             # Defensive compatibility for any pre-populated candidate cache.
             rebuilt: dict[str, list[CandidateSemanticOpening]] = {}
@@ -1645,7 +1650,8 @@ class PhysicalOpeningAuthority:
                 observation_id: tuple(rows)
                 for observation_id, rows in rebuilt.items()
             }
-            self._visible_candidate_membership_cache[page_key] = membership
+            if cache_candidates is candidates:
+                self._visible_candidate_membership_cache[page_key] = membership
         containing = membership.get(str(observation.observation_id), ())
 
         if len(containing) > 1:
@@ -1785,7 +1791,12 @@ class PhysicalOpeningAuthority:
             observation.snapshot_id,
             observation.page_id,
         )
-        membership = self._visible_candidate_membership_cache.get(page_key)
+        cache_candidates = self._visible_candidate_cache.get(page_key)
+        membership = (
+            self._visible_candidate_membership_cache.get(page_key)
+            if cache_candidates is candidates
+            else None
+        )
         if membership is None:
             # Defensive compatibility for any pre-populated candidate cache.
             rebuilt: dict[str, list[CandidateSemanticOpening]] = {}
@@ -1796,7 +1807,8 @@ class PhysicalOpeningAuthority:
                 observation_id: tuple(rows)
                 for observation_id, rows in rebuilt.items()
             }
-            self._visible_candidate_membership_cache[page_key] = membership
+            if cache_candidates is candidates:
+                self._visible_candidate_membership_cache[page_key] = membership
         containing = membership.get(str(observation.observation_id), ())
         if len(containing) > 1:
             return cache_visible(PhysicalOpeningExistenceResult(

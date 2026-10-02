@@ -84,3 +84,32 @@ other foundation, viewer and benchmark changes; that history is not imported
 wholesale. Its full room-face pytest suite is run in a separate worktree before
 the two commits enter this integration. Source-only labels still cannot supply
 missing physical boundaries, scale, dimensions or customer quantity authority.
+
+The branch's real focused suite initially fails 16 tests with a missing `math`
+import. Adding that import makes all 107 room-face tests pass. The two label
+commits and the import correction are cherry-picked separately, without the
+branch's unrelated parent history. Combined room/customer/coverage/performance
+checks expose an existing authenticated viewport being lost through the new
+candidate membership cache. That cache must be reused only for the exact
+candidate tuple from which it was built; alternate authenticated projections
+must build their own membership. The unchanged viewport regression passes after
+that correction, and all 222 combined focused tests pass in 4.02 seconds.
+
+## Real-source performance observation
+
+The normal extractor on the pinned, unchanged Maryborough PDF, selecting A140,
+reaches Item 35 at 11.37 seconds. Repeated one-minute stack snapshots then show
+`_exact_fill_stroke_overprint_pair` calling `page.get_bboxlog()` for individual
+words during full-source visibility ingestion. This helper reconstructs the
+paint log even though `_visibility_status` already uses `_cached_bboxlog`.
+The run is interrupted after recording that bottleneck; no completed source or
+customer parity result is claimed from it.
+
+The narrow proposed change is to call the existing `_cached_bboxlog` from the
+overprint proof too. Both consumers read the same immutable page paint state;
+the consecutive sequence numbers, exact character/font/layer identity and
+complementary rendering predicates remain unchanged. The existing exception
+handler still abstains if the log cannot be read. This is not a new authority
+cache, metric conversion or room-closure rule. Repeated authentication, separate
+pages and unavailable-paint-log cases must establish equivalent decisions before
+the private-source run is repeated.
