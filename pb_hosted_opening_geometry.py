@@ -147,6 +147,42 @@ class _Interval:
     hi: float
 
 
+def _candidate_face_row_pairs(
+    face_rows: Sequence[Tuple[float, List["_Interval"]]],
+):
+    """Yield thickness-eligible pairs in historical nested-loop order.
+
+    A Y-bucket index removes impossible distant rows, but surviving indices
+    are sorted by original source-row position so downstream first-wins
+    near-duplicate collapse remains byte-for-byte compatible.
+    """
+    bucket_size = _MAX_WALL_THICKNESS_PT
+    buckets: dict[int, list[int]] = {}
+    for index, (y, _coverage) in enumerate(face_rows):
+        buckets.setdefault(math.floor(float(y) / bucket_size), []).append(index)
+
+    for i, left in enumerate(face_rows):
+        y_left = float(left[0])
+        first_bucket = math.floor(
+            (y_left - _MAX_WALL_THICKNESS_PT) / bucket_size
+        )
+        last_bucket = math.floor(
+            (y_left + _MAX_WALL_THICKNESS_PT) / bucket_size
+        )
+        candidate_indices: set[int] = set()
+        for bucket in range(first_bucket, last_bucket + 1):
+            candidate_indices.update(buckets.get(bucket, ()))
+        for j in sorted(index for index in candidate_indices if index > i):
+            right = face_rows[j]
+            thickness = abs(float(right[0]) - y_left)
+            if (
+                _MIN_WALL_THICKNESS_PT
+                <= thickness
+                <= _MAX_WALL_THICKNESS_PT
+            ):
+                yield left, right
+
+
 def _merge_intervals(intervals: Sequence[_Interval]) -> List[_Interval]:
     if not intervals:
         return []
@@ -438,6 +474,110 @@ def _horizontal_face_evidence(
     return fill_buckets + line_buckets
 
 
+class _VerticalJambSpatialIndex:
+    """Pre-merge jamb strokes once, then bucket their Y coverages."""
+
+    def __init__(
+        self,
+        lines: Sequence[Tuple[float, float, float, float]],
+        *,
+        bucket_size: float = _MAX_WALL_THICKNESS_PT,
+    ) -> None:
+        self._lines = tuple(lines)
+        self._bucket_size = max(float(bucket_size), _MAX_WALL_THICKNESS_PT)
+
+        # Raw line buckets remain available for diagnostics/tests.
+        raw_buckets: dict[int, list[int]] = {}
+        for index, (_x0, y0, _x1, y1) in enumerate(self._lines):
+            lo, hi = sorted((float(y0), float(y1)))
+            first = math.floor(lo / self._bucket_size)
+            last = math.floor(hi / self._bucket_size)
+            for bucket in range(first, last + 1):
+                raw_buckets.setdefault(bucket, []).append(index)
+        self._buckets = raw_buckets
+
+        # Preserve _vertical_jamb_positions' exact grouping rule, but pay its
+        # collinear-fragment merge cost once for the whole viewport.
+        by_x: List[Tuple[float, List[_Interval]]] = []
+        for x0, y0, x1, y1 in self._lines:
+            if abs(x1 - x0) > _FACE_COORD_TOL_PT:
+                continue
+            x = (x0 + x1) / 2.0
+            segment = _Interval(min(y0, y1), max(y0, y1))
+            for bx, intervals in by_x:
+                if abs(bx - x) <= _FACE_COORD_TOL_PT:
+                    intervals.append(segment)
+                    break
+            else:
+                by_x.append((x, [segment]))
+
+        self._merged_by_x = tuple(
+            (x, tuple(_merge_intervals(intervals)))
+            for x, intervals in by_x
+        )
+        coverage_buckets: dict[int, set[int]] = {}
+        for group_index, (_x, intervals) in enumerate(self._merged_by_x):
+            for interval in intervals:
+                first = math.floor(
+                    (interval.lo - _JAMB_COVERAGE_TOL_PT) / self._bucket_size
+                )
+                last = math.floor(
+                    (interval.hi + _JAMB_COVERAGE_TOL_PT) / self._bucket_size
+                )
+                for bucket in range(first, last + 1):
+                    coverage_buckets.setdefault(bucket, set()).add(group_index)
+        self._coverage_buckets = coverage_buckets
+
+    def query_lines(
+        self,
+        near_y: float,
+        far_y: float,
+    ) -> tuple[Tuple[float, float, float, float], ...]:
+        lo, hi = sorted((float(near_y), float(far_y)))
+        lo -= _JAMB_COVERAGE_TOL_PT
+        hi += _JAMB_COVERAGE_TOL_PT
+        first = math.floor(lo / self._bucket_size)
+        last = math.floor(hi / self._bucket_size)
+        indices: set[int] = set()
+        for bucket in range(first, last + 1):
+            indices.update(self._buckets.get(bucket, ()))
+        return tuple(
+            self._lines[index]
+            for index in sorted(indices)
+            if max(
+                min(self._lines[index][1], self._lines[index][3]),
+                lo,
+            )
+            <= min(
+                max(self._lines[index][1], self._lines[index][3]),
+                hi,
+            )
+        )
+
+    def jamb_positions(self, near_y: float, far_y: float) -> List[float]:
+        lo, hi = sorted((float(near_y), float(far_y)))
+        first = math.floor(
+            (lo - _JAMB_COVERAGE_TOL_PT) / self._bucket_size
+        )
+        last = math.floor(
+            (hi + _JAMB_COVERAGE_TOL_PT) / self._bucket_size
+        )
+        candidate_groups: set[int] = set()
+        for bucket in range(first, last + 1):
+            candidate_groups.update(self._coverage_buckets.get(bucket, ()))
+
+        jambs: List[float] = []
+        for group_index in sorted(candidate_groups):
+            x, intervals = self._merged_by_x[group_index]
+            if any(
+                interval.lo <= lo + _JAMB_COVERAGE_TOL_PT
+                and interval.hi >= hi - _JAMB_COVERAGE_TOL_PT
+                for interval in intervals
+            ):
+                jambs.append(x)
+        return jambs
+
+
 def _vertical_jamb_positions(
     lines: Sequence[Tuple[float, float, float, float]],
     near_y: float,
@@ -617,6 +757,7 @@ def _door_swing_anchor(
     far: float,
     *,
     swapped: bool = False,
+    door_swing_hits: Optional[Sequence[object]] = None,
 ) -> bool:
     """A quarter-circle door-swing cubic whose own bbox starts at (or very
     near) one jamb of this candidate span, used purely as a comparator --
@@ -629,10 +770,13 @@ def _door_swing_anchor(
     (never swapped themselves), so they must be swapped here too before
     comparing against the already-swapped gap/near/far values, or a real
     door swing on a vertical wall would never match."""
-    try:
-        hits = iter_quarter_circle_cubics(page, page_num=0)
-    except Exception:
-        return False
+    if door_swing_hits is None:
+        try:
+            hits = tuple(iter_quarter_circle_cubics(page, page_num=0))
+        except Exception:
+            return False
+    else:
+        hits = door_swing_hits
     lo_perp, hi_perp = min(near, far), max(near, far)
     for hit in hits:
         hit_x, hit_y = (hit.y, hit.x) if swapped else (hit.x, hit.y)
@@ -738,17 +882,15 @@ def _resolve_horizontal_openings(
     source_page: int,
     scale_pt_per_m: Optional[float],
     swapped: bool = False,
+    door_swing_hits: Sequence[object] = (),
 ) -> List[HostedOpeningSpan]:
     face_rows = _horizontal_face_evidence(horiz_lines, _horizontal_fill_faces(fills))
     results: List[HostedOpeningSpan] = []
-    n = len(face_rows)
-    for i in range(n):
-        y_a, cov_a = face_rows[i]
-        for j in range(i + 1, n):
-            y_b, cov_b = face_rows[j]
+    jamb_index = _VerticalJambSpatialIndex(vert_lines)
+    for left_row, right_row in _candidate_face_row_pairs(face_rows):
+            y_a, cov_a = left_row
+            y_b, cov_b = right_row
             thickness = abs(y_b - y_a)
-            if not (_MIN_WALL_THICKNESS_PT <= thickness <= _MAX_WALL_THICKNESS_PT):
-                continue
             merged_a = _merge_intervals(cov_a)
             merged_b = _merge_intervals(cov_b)
             span_lo = max(min(iv.lo for iv in merged_a), min(iv.lo for iv in merged_b))
@@ -763,7 +905,7 @@ def _resolve_horizontal_openings(
             gaps_a = {round(g.lo, 1): g for g in _gaps_between(merged_a, span_lo, span_hi)}
             gaps_b = {round(g.lo, 1): g for g in _gaps_between(merged_b, span_lo, span_hi)}
             aligned_keys = set(gaps_a) & set(gaps_b)
-            jambs_for_row = _vertical_jamb_positions(vert_lines, y_a, y_b)
+            jambs_for_row = jamb_index.jamb_positions(y_a, y_b)
 
             # Independently-validated gaps for THIS row pair -- aligned on
             # both faces, width/thickness-ratio valid, and boundary-
@@ -849,7 +991,15 @@ def _resolve_horizontal_openings(
                 evidence_flags: List[str] = ["host_wall_band", "aligned_two_face_gap", "jamb_boundaries_confirmed"]
 
                 subtype: Literal["window_like", "door_like", "opening_unknown"] = "opening_unknown"
-                if _door_swing_anchor(page, gap_lo, gap_hi, y_a, y_b, swapped=swapped):
+                if _door_swing_anchor(
+                        page,
+                        gap_lo,
+                        gap_hi,
+                        y_a,
+                        y_b,
+                        swapped=swapped,
+                        door_swing_hits=door_swing_hits,
+                    ):
                     subtype = "door_like"
                     evidence_flags.append("jamb_anchored_door_swing")
                 elif _has_internal_evidence(horiz_lines, gap_lo, gap_hi, y_a, y_b):
@@ -908,7 +1058,15 @@ def _resolve_horizontal_openings(
                 jambs = jambs_for_row
                 jamb_start_ok = any(abs(x - gap_lo) <= _JAMB_COVERAGE_TOL_PT for x in jambs)
                 jamb_end_ok = any(abs(x - gap_hi) <= _JAMB_COVERAGE_TOL_PT for x in jambs)
-                is_door = _door_swing_anchor(page, gap_lo, gap_hi, y_a, y_b, swapped=swapped)
+                is_door = _door_swing_anchor(
+                        page,
+                        gap_lo,
+                        gap_hi,
+                        y_a,
+                        y_b,
+                        swapped=swapped,
+                        door_swing_hits=door_swing_hits,
+                    )
                 if not (is_door or (jamb_start_ok and jamb_end_ok)):
                     continue
 
@@ -977,6 +1135,10 @@ def resolve_hosted_opening_spans(
 
     horiz_lines, vert_lines, diag_lines = _collect_axis_lines(page, (vx0, vy0, vx1, vy1))
     fills = _collect_wall_like_fills(page, (vx0, vy0, vx1, vy1))
+    try:
+        door_swing_hits = tuple(iter_quarter_circle_cubics(page, page_num=0))
+    except Exception:
+        door_swing_hits = ()
     source_page = getattr(page, "number", 0) + 1 if hasattr(page, "number") else 0
 
     horizontal_hits = _resolve_horizontal_openings(
@@ -987,6 +1149,7 @@ def resolve_hosted_opening_spans(
         diag_lines,
         source_page=source_page,
         scale_pt_per_m=scale_authority,
+        door_swing_hits=door_swing_hits,
     )
 
     # Vertical orientation: reuse the same horizontal-oriented resolver by
@@ -1006,6 +1169,7 @@ def resolve_hosted_opening_spans(
         source_page=source_page,
         scale_pt_per_m=scale_authority,
         swapped=True,
+        door_swing_hits=door_swing_hits,
     )
     vertical_hits = [
         HostedOpeningSpan(
