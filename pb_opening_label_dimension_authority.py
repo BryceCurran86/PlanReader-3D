@@ -348,6 +348,200 @@ def _bbox_union(values: Sequence[Sequence[float]]) -> Optional[tuple[float, floa
     )
 
 
+def _parseable_opening_label_fragments(
+    rows: Sequence[tuple[int, str, str, tuple[float, ...]]],
+) -> tuple[_TrustedTextLine, ...]:
+    """Split one native PDF text line into non-overlapping opening callouts.
+
+    PyMuPDF can place several architectural opening callouts in one native text
+    line. Treating the whole line as one label loses those individual source
+    claims. We therefore enumerate only short contiguous word spans that are
+    independently accepted by the existing fail-closed label grammar.
+
+    Overlapping parses are resolved by evidence richness: two-axis dimensions
+    outrank single dimensions, explicit opening semantics outrank untyped text,
+    and then the longer source span wins. This suppresses sub-parses of a
+    semantic callout without merging adjacent callouts on the same PDF line.
+    """
+
+    ordered = sorted(rows, key=lambda item: (item[0], item[1]))
+    if not ordered:
+        return ()
+
+    candidates: list[
+        tuple[
+            tuple[int, int, int],
+            int,
+            int,
+            _TrustedTextLine,
+        ]
+    ] = []
+    max_words = 7
+    for start in range(len(ordered)):
+        for end in range(start + 1, min(len(ordered), start + max_words) + 1):
+            subset = ordered[start:end]
+            text_value = " ".join(row[2] for row in subset)
+            parsed = parse_opening_label_dimensions(text_value)
+            if parsed is None:
+                continue
+            bbox = _bbox_union([row[3] for row in subset])
+            if bbox is None:
+                continue
+            rank = (
+                len(parsed.dimension_values_mm),
+                1 if parsed.semantic_kind is not None else 0,
+                end - start,
+            )
+            candidates.append(
+                (
+                    rank,
+                    start,
+                    end,
+                    _TrustedTextLine(
+                        observation_ids=tuple(row[1] for row in subset),
+                        text=text_value,
+                        bbox=bbox,
+                    ),
+                )
+            )
+
+    selected: list[tuple[int, int, _TrustedTextLine]] = []
+    occupied: set[int] = set()
+    for _rank, start, end, fragment in sorted(
+        candidates,
+        key=lambda item: (
+            -item[0][0],
+            -item[0][1],
+            -item[0][2],
+            item[1],
+            item[2],
+        ),
+    ):
+        token_indexes = set(range(start, end))
+        if token_indexes & occupied:
+            continue
+        selected.append((start, end, fragment))
+        occupied.update(token_indexes)
+
+    return tuple(
+        fragment
+        for _start, _end, fragment in sorted(
+            selected,
+            key=lambda item: (item[0], item[1], item[2].observation_ids),
+        )
+    )
+
+def _bbox_overlap_fraction(
+    first_min: float,
+    first_max: float,
+    second_min: float,
+    second_max: float,
+) -> float:
+    overlap = max(0.0, min(first_max, second_max) - max(first_min, second_min))
+    denominator = min(first_max - first_min, second_max - second_min)
+    if denominator <= _COORD_TOL:
+        return 0.0
+    return overlap / denominator
+
+
+def _line_stitchable(
+    first: _TrustedTextLine,
+    second: _TrustedTextLine,
+) -> bool:
+    """Return True only for source lines that are geometrically contiguous."""
+    ax0, ay0, ax1, ay1 = first.bbox
+    bx0, by0, bx1, by1 = second.bbox
+    a_width, a_height = ax1 - ax0, ay1 - ay0
+    b_width, b_height = bx1 - bx0, by1 - by0
+    if min(a_width, a_height, b_width, b_height) <= _COORD_TOL:
+        return False
+
+    x_overlap = _bbox_overlap_fraction(ax0, ax1, bx0, bx1)
+    y_overlap = _bbox_overlap_fraction(ay0, ay1, by0, by1)
+    vertical_gap = max(0.0, max(ay0, by0) - min(ay1, by1))
+    horizontal_gap = max(0.0, max(ax0, bx0) - min(ax1, bx1))
+
+    stacked = (
+        x_overlap >= 0.65
+        and vertical_gap <= 0.75 * max(a_height, b_height)
+    )
+    side_by_side = (
+        y_overlap >= 0.65
+        and horizontal_gap <= 0.75 * max(a_width, b_width)
+    )
+    return stacked or side_by_side
+
+
+def _stitched_opening_label_fragment(
+    first: _TrustedTextLine,
+    second: _TrustedTextLine,
+) -> Optional[_TrustedTextLine]:
+    """Join two contiguous native lines only when one unique parse results."""
+    if not _line_stitchable(first, second):
+        return None
+    bbox = _bbox_union((first.bbox, second.bbox))
+    if bbox is None:
+        return None
+
+    possibilities: dict[
+        tuple[tuple[float, ...], Optional[str]],
+        tuple[str, tuple[str, ...]],
+    ] = {}
+    for left, right in ((first, second), (second, first)):
+        combined = f"{left.text} {right.text}"
+        parsed = parse_opening_label_dimensions(combined)
+        if parsed is None:
+            continue
+        signature = (parsed.dimension_values_mm, parsed.semantic_kind)
+        possibilities.setdefault(
+            signature,
+            (combined, (*left.observation_ids, *right.observation_ids)),
+        )
+    if len(possibilities) != 1:
+        return None
+    combined, observation_ids = next(iter(possibilities.values()))
+    return _TrustedTextLine(
+        observation_ids=tuple(dict.fromkeys(observation_ids)),
+        text=combined,
+        bbox=bbox,
+    )
+
+
+def _prefer_richer_label_fragments(
+    fragments: Sequence[_TrustedTextLine],
+) -> tuple[_TrustedTextLine, ...]:
+    """Suppress only provenance-contained weaker parses of the same dimensions."""
+    parsed_rows: list[tuple[_TrustedTextLine, ParsedOpeningLabel]] = []
+    for fragment in fragments:
+        parsed = parse_opening_label_dimensions(fragment.text)
+        if parsed is not None:
+            parsed_rows.append((fragment, parsed))
+
+    kept: list[_TrustedTextLine] = []
+    for fragment, parsed in parsed_rows:
+        own_ids = set(fragment.observation_ids)
+        dominated = False
+        for other, other_parsed in parsed_rows:
+            if other is fragment:
+                continue
+            other_ids = set(other.observation_ids)
+            if not own_ids < other_ids:
+                continue
+            if parsed.dimension_values_mm != other_parsed.dimension_values_mm:
+                continue
+            if (
+                parsed.semantic_kind is None
+                and other_parsed.semantic_kind is not None
+            ):
+                dominated = True
+                break
+            if parsed.semantic_kind == other_parsed.semantic_kind:
+                dominated = True
+                break
+        if not dominated:
+            kept.append(fragment)
+    return tuple(kept)
+
 def _trusted_text_lines(
     source: SourceVisibilityProducer,
     opening: PhysicalOpeningExistenceRecord,
@@ -393,20 +587,43 @@ def _trusted_text_lines(
             )
         )
 
-    lines: list[_TrustedTextLine] = []
+    raw_lines: list[_TrustedTextLine] = []
+    fragments: list[_TrustedTextLine] = []
     for rows in grouped.values():
-        rows.sort(key=lambda item: (item[0], item[1]))
-        bbox = _bbox_union([row[3] for row in rows])
+        ordered = sorted(rows, key=lambda item: (item[0], item[1]))
+        bbox = _bbox_union([row[3] for row in ordered])
         if bbox is None:
             continue
-        lines.append(
+        raw_lines.append(
             _TrustedTextLine(
-                observation_ids=tuple(row[1] for row in rows),
-                text=" ".join(row[2] for row in rows),
+                observation_ids=tuple(row[1] for row in ordered),
+                text=" ".join(row[2] for row in ordered),
                 bbox=bbox,
             )
         )
-    return tuple(lines)
+        fragments.extend(_parseable_opening_label_fragments(ordered))
+
+    # Some CAD exports wrap one callout over two immediately adjacent native
+    # lines. Add only syntax-valid, geometry-contiguous two-line claims.
+    for index, first in enumerate(raw_lines):
+        for second in raw_lines[index + 1:]:
+            stitched = _stitched_opening_label_fragment(first, second)
+            if stitched is not None:
+                fragments.append(stitched)
+
+    fragments = list(_prefer_richer_label_fragments(fragments))
+    return tuple(
+        sorted(
+            fragments,
+            key=lambda item: (
+                item.bbox[1],
+                item.bbox[0],
+                item.bbox[3],
+                item.bbox[2],
+                item.observation_ids,
+            ),
+        )
+    )
 
 
 def _label_matches_gap(label: _TrustedTextLine, gap: _GapSpan) -> bool:
