@@ -875,7 +875,7 @@ def _exact_fill_stroke_overprint_pair(
         return None
 
     try:
-        bboxlog = list(page.get_bboxlog() or ())  # type: ignore[attr-defined]
+        bboxlog = _cached_bboxlog(page)
     except Exception:
         return None
     sequence_numbers = (ordered[0][0], ordered[1][0])
