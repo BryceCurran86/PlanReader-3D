@@ -3452,15 +3452,20 @@ class GenericPlanReaderExtractor:
             from pb_physical_wall_candidate_authority import (
                 MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS,
                 PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED,
+                wall_topology_source_segment_count,
             )
             from pb_vector_geometry_v130 import extract_native_page
 
             physical_net_complexity_blocked = False
             for page_index in physical_net_pages:
-                native_segment_count = len(
-                    extract_native_page(doc[page_index]).get("segments") or ()
+                source_page = doc[page_index]
+                native_page = extract_native_page(source_page)
+                topology_segment_count = wall_topology_source_segment_count(
+                    native_page.get("segments") or (),
+                    page_width=float(source_page.rect.width),
+                    page_height=float(source_page.rect.height),
                 )
-                if native_segment_count > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
+                if topology_segment_count > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
                     physical_net_complexity_blocked = True
                     break
 
