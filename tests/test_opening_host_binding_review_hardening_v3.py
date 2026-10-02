@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import fitz
 import pytest
+from types import SimpleNamespace
 
 from pb_geometry_takeoff_model import MeasurementAuthorityType
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -200,3 +201,43 @@ def test_off_center_band_remains_visible_as_competitor_when_centered_host_exists
     centers = tuple(band.center_offset for band in result.bands)
     assert any(abs(center) <= 1e-9 for center in centers)
     assert any(abs(center - 20.0) <= 1e-9 for center in centers)
+
+
+def _obs(line):
+    return SimpleNamespace(geometry=tuple(float(value) for value in line))
+
+
+def test_window_jamb_pair_reconstructs_two_face_opening_geometry_from_topology_only() -> None:
+    records = (
+        _obs((20.0, 80.0, 120.0, 80.0)),
+        _obs((160.0, 80.0, 280.0, 80.0)),
+        _obs((120.0, 80.0, 120.0, 100.0)),
+        _obs((160.0, 80.0, 160.0, 100.0)),
+    )
+    geometry = host._window_jamb_pair_geometry(records)
+    assert geometry is not None
+    assert geometry.origin == pytest.approx((120.0, 90.0))
+    assert geometry.length == pytest.approx(40.0)
+    assert geometry.thickness == pytest.approx(20.0)
+    assert abs(geometry.axis[0]) == pytest.approx(1.0)
+    assert abs(geometry.axis[1]) == pytest.approx(0.0)
+
+
+def test_window_jamb_pair_rejects_unattached_nearby_parallel_jamb() -> None:
+    records = (
+        _obs((20.0, 80.0, 120.0, 80.0)),
+        _obs((160.0, 80.0, 280.0, 80.0)),
+        _obs((120.0, 80.0, 120.0, 100.0)),
+        _obs((161.0, 80.0, 161.0, 100.0)),
+    )
+    assert host._window_jamb_pair_geometry(records) is None
+
+
+def test_window_jamb_pair_rejects_jambs_on_opposite_wall_sides() -> None:
+    records = (
+        _obs((20.0, 80.0, 120.0, 80.0)),
+        _obs((160.0, 80.0, 280.0, 80.0)),
+        _obs((120.0, 80.0, 120.0, 100.0)),
+        _obs((160.0, 80.0, 160.0, 60.0)),
+    )
+    assert host._window_jamb_pair_geometry(records) is None
