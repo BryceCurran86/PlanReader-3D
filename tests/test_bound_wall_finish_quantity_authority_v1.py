@@ -11,10 +11,19 @@ from pb_bound_wall_finish_quantity_authority import (
     FINISH_QUANTITY_NET_WALL_UNRESOLVED,
     FINISH_QUANTITY_RESOLVED,
     FINISH_QUANTITY_SCOPE_INCOMPLETE,
+    FINISH_QUANTITY_TILE_EXTENT_REQUIRED,
     SourceBoundWallFinishQuantityProducer,
     SourceBoundWallFinishQuantitySelector,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_hardened_authority_contract import (
+    AuthenticatedWallFaceTileExtentAuthority,
+    InternalElevationViewport,
+    PhysicalWallFace,
+    TileExtent,
+    WallViewIdentity,
+    resolve_internal_elevation_wall_surface,
+)
 from pb_net_wall_boolean_union_authority import (
     NET_WALL_BOOLEAN_UNION_RESOLVED,
     NetWallBooleanUnionAuthority,
@@ -45,7 +54,11 @@ TRADE = "external_key_pointing"
 MATERIAL = "key_pointing"
 
 
-def _selector() -> SourceBoundWallFinishQuantitySelector:
+def _selector(
+    *,
+    trade_scope_id: str = TRADE,
+    finish_material: str = MATERIAL,
+) -> SourceBoundWallFinishQuantitySelector:
     return SourceBoundWallFinishQuantitySelector(
         document_id=DOC,
         revision_id=REV,
@@ -54,8 +67,8 @@ def _selector() -> SourceBoundWallFinishQuantitySelector:
         page_id=PAGE,
         viewport_id=VIEWPORT,
         decision_scope_id=SCOPE,
-        trade_scope_id=TRADE,
-        finish_material=MATERIAL,
+        trade_scope_id=trade_scope_id,
+        finish_material=finish_material,
     )
 
 
@@ -65,6 +78,8 @@ def _binding(
     wall_id: str,
     *,
     revision_id: str = REV,
+    trade_scope_id: str = TRADE,
+    finish_material: str = MATERIAL,
 ) -> WallFinishFaceBindingRecord:
     return WallFinishFaceBindingRecord(
         binding_id=binding_id,
@@ -79,8 +94,8 @@ def _binding(
         physical_face_id=face_id,
         physical_face_role=PhysicalFaceRole.EXTERIOR_FACE,
         source_face_segment_ids=(f"seg-{wall_id}",),
-        trade_scope_id=TRADE,
-        finish_material=MATERIAL,
+        trade_scope_id=trade_scope_id,
+        finish_material=finish_material,
         annotation_observation_ids=(f"ann-{binding_id}",),
         leader_path_ids=(f"leader-{binding_id}",),
         terminator_primitive_ids=(f"term-{binding_id}",),
@@ -101,6 +116,8 @@ def _finish_authority(
     complete: bool = True,
     binding_ids: tuple[str, ...] | None = None,
     target_faces: tuple[str, ...] | None = None,
+    trade_scope_id: str = TRADE,
+    finish_material: str = MATERIAL,
 ) -> WallFinishFaceBindingAuthority:
     selector = WallFinishFaceBindingScopeSelector(
         document_id=DOC,
@@ -126,8 +143,8 @@ def _finish_authority(
             page_id=PAGE,
             viewport_id=VIEWPORT,
             decision_scope_id=SCOPE,
-            trade_scope_id=TRADE,
-            finish_material=MATERIAL,
+            trade_scope_id=trade_scope_id,
+            finish_material=finish_material,
             target_face_ids=targets,
             covered_face_ids=targets,
             binding_ids=ids,
@@ -147,8 +164,8 @@ def _finish_authority(
             page_id=PAGE,
             viewport_id=VIEWPORT,
             decision_scope_id=SCOPE,
-            trade_scope_id=TRADE,
-            finish_material=MATERIAL,
+            trade_scope_id=trade_scope_id,
+            finish_material=finish_material,
             target_face_ids=(),
             covered_face_ids=covered,
             binding_ids=ids,
@@ -236,8 +253,51 @@ def _net_authority(
 def _producer(
     finish: WallFinishFaceBindingAuthority,
     net: NetWallBooleanUnionAuthority,
+    tile_extent_authority: AuthenticatedWallFaceTileExtentAuthority | None = None,
 ) -> SourceBoundWallFinishQuantityProducer:
-    return SourceBoundWallFinishQuantityProducer.from_authorities(finish, net)
+    return SourceBoundWallFinishQuantityProducer.from_authorities(
+        finish,
+        net,
+        tile_extent_authority=tile_extent_authority,
+    )
+
+
+def _tile_extent_authority(
+    *,
+    face_id: str = "face-1",
+    wall_id: str = "wall-1",
+    area_m2: float = 2.4,
+) -> AuthenticatedWallFaceTileExtentAuthority:
+    resolved = resolve_internal_elevation_wall_surface(
+        viewport=InternalElevationViewport(
+            viewport_id=VIEWPORT,
+            page_id=PAGE,
+            evidence_ids=("viewport-evidence",),
+        ),
+        wall_view=WallViewIdentity(
+            wall_view_id="wall-view-1",
+            viewport_id=VIEWPORT,
+            canonical_wall_id=wall_id,
+            evidence_ids=("wall-view-evidence",),
+        ),
+        wall_face=PhysicalWallFace(
+            physical_wall_face_id=face_id,
+            wall_view_id="wall-view-1",
+            canonical_wall_id=wall_id,
+            evidence_ids=("wall-face-evidence",),
+        ),
+        tile_extent=TileExtent(
+            tile_extent_id="tile-extent-1",
+            viewport_id=VIEWPORT,
+            wall_view_id="wall-view-1",
+            physical_wall_face_id=face_id,
+            area_m2=area_m2,
+            evidence_ids=("tile-extent-evidence",),
+        ),
+        plan_room_viewport_id="plan-vp",
+    )
+    assert resolved.status is EvidenceResolutionStatus.CORROBORATED
+    return AuthenticatedWallFaceTileExtentAuthority.from_resolutions((resolved,))
 
 
 def test_complete_source_owned_face_scope_publishes_net_finish_quantity() -> None:
@@ -254,6 +314,56 @@ def test_complete_source_owned_face_scope_publishes_net_finish_quantity() -> Non
     assert result.record.physical_face_ids == ("face-1",)
     assert result.record.physical_wall_ids == ("wall-1",)
     assert result.record.net_wall_record_ids == ("net-wall-1",)
+
+
+def test_tile_finish_uses_authenticated_face_extent_not_full_net_wall_area() -> None:
+    trade = "tiling"
+    material = "ceramic_wall_tile"
+    binding = _binding(
+        "b1",
+        "face-1",
+        "wall-1",
+        trade_scope_id=trade,
+        finish_material=material,
+    )
+    result = _producer(
+        _finish_authority(
+            (binding,),
+            trade_scope_id=trade,
+            finish_material=material,
+        ),
+        _net_authority({"wall-1": 12.5}),
+        _tile_extent_authority(area_m2=2.4),
+    ).publish(_selector(trade_scope_id=trade, finish_material=material))
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.record is not None
+    assert result.record.quantity_m2 == pytest.approx(2.4)
+    assert result.record.quantity_m2 != pytest.approx(12.5)
+
+
+def test_tile_finish_without_authenticated_face_extent_abstains() -> None:
+    trade = "tiling"
+    material = "ceramic_wall_tile"
+    binding = _binding(
+        "b1",
+        "face-1",
+        "wall-1",
+        trade_scope_id=trade,
+        finish_material=material,
+    )
+    result = _producer(
+        _finish_authority(
+            (binding,),
+            trade_scope_id=trade,
+            finish_material=material,
+        ),
+        _net_authority({"wall-1": 12.5}),
+    ).publish(_selector(trade_scope_id=trade, finish_material=material))
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+    assert FINISH_QUANTITY_TILE_EXTENT_REQUIRED in result.reason_codes
 
 
 def test_partial_finish_scope_never_publishes_quantity() -> None:
