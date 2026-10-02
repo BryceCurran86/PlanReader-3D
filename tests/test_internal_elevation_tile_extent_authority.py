@@ -152,6 +152,62 @@ def test_rear_full_height_tile_face_subtracts_authenticated_niche_face():
     doc.close()
 
 
+
+def test_full_height_shower_note_variant_authorizes_scaled_height():
+    doc, page = _page()
+    _wall(page, 70, 100, 1.86, 2.7)
+    target = _wall(page, 330, 100, 0.9, 2.7)
+    _title(page, 75, 310, "Wet Area A")
+    _title(page, 335, 310, "Wet Area B")
+    page.insert_text((332, 80), "FULL HEIGHT TILING IN SHOWER AREA", fontsize=7)
+    page.insert_text((340, target.y1 + 14), "900 SHW", fontsize=7)
+
+    result = extract_internal_elevation_tile_surfaces(
+        page,
+        document_id="doc",
+        source_sha256=SHA,
+        page_id="12",
+        page_number=12,
+    )
+
+    resolved = [r for r in result.resolutions if r.status is EvidenceResolutionStatus.CORROBORATED]
+    assert len(resolved) == 1
+    assert resolved[0].quantity_m2 == pytest.approx(2.43, rel=0.01)
+    doc.close()
+
+
+def test_scaled_niche_vector_geometry_supplies_missing_niche_width():
+    doc, page = _page()
+    wall = _wall(page, 70, 100, 1.68, 2.7)
+    _wall(page, 330, 100, 0.9, 2.7)
+    _title(page, 75, 310, "Wet Area A")
+    _title(page, 335, 310, "Wet Area B")
+    page.insert_text((72, 80), "SHOWER TILES TO", fontsize=7)
+    page.insert_text((72, 90), "RUN UP TO CEILING", fontsize=7)
+    page.insert_text((85, wall.y1 + 14), "1,680", fontsize=7)
+    niche = fitz.Rect(
+        120,
+        160,
+        120 + 0.6 * PT_PER_M_AT_1_50,
+        160 + 0.4 * PT_PER_M_AT_1_50,
+    )
+    page.draw_rect(niche, width=1.0)
+    page.insert_text((niche.x0 + 4, niche.y0 + 12), "400 NICHE", fontsize=7)
+
+    result = extract_internal_elevation_tile_surfaces(
+        page,
+        document_id="doc",
+        source_sha256=SHA,
+        page_id="12",
+        page_number=12,
+    )
+
+    resolved = [r for r in result.resolutions if r.status is EvidenceResolutionStatus.CORROBORATED]
+    assert len(resolved) == 1
+    assert resolved[0].quantity_m2 == pytest.approx(4.296, rel=0.01)
+    doc.close()
+
+
 def test_plan_title_is_not_promoted_as_internal_elevation_viewport():
     doc, page = _page()
     _wall(page, 70, 100, 2.0, 2.7)
