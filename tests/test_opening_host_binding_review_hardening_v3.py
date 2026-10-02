@@ -5,6 +5,7 @@ byte-for-byte unchanged.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import fitz
 import pytest
 from types import SimpleNamespace
@@ -241,3 +242,77 @@ def test_window_jamb_pair_rejects_jambs_on_opposite_wall_sides() -> None:
         _obs((160.0, 80.0, 160.0, 60.0)),
     )
     assert host._window_jamb_pair_geometry(records) is None
+
+
+def _source_obs(line, raw_id: str):
+    return SimpleNamespace(
+        geometry=tuple(float(value) for value in line),
+        source_primitive_ref="visible:" + raw_id,
+    )
+
+
+def test_generic_gap_host_binds_exact_source_lineage_not_nearest_wall() -> None:
+    left = _record("left", ((-100.0, 0.0), (0.0, 0.0)))
+    right = _record("right", ((40.0, 0.0), (140.0, 0.0)))
+    unrelated = _record("unrelated", ((-5.0, 1.0), (45.0, 1.0)))
+    records = (left, right, unrelated)
+
+    opening_records = (
+        _source_obs((-100.0, 0.0, 0.0, 0.0), "source:left"),
+        _source_obs((40.0, 0.0, 140.0, 0.0), "source:right"),
+        _source_obs((0.0, 0.0, 0.0, 40.0), "source:leaf"),
+    )
+    result = host._resolve_gap_lineage_host_from_records(
+        opening_records,
+        records,
+        _equivalence(records),
+    )
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.bands) == 1
+    assert result.bands[0].member_ids == ("left", "right")
+    assert "unrelated" not in result.bands[0].member_ids
+
+
+def test_generic_gap_host_abstains_when_source_wall_lineage_is_unmapped() -> None:
+    left = _record("left", ((-100.0, 0.0), (0.0, 0.0)))
+    records = (left,)
+    opening_records = (
+        _source_obs((-100.0, 0.0, 0.0, 0.0), "source:left"),
+        _source_obs((40.0, 0.0, 140.0, 0.0), "source:right"),
+        _source_obs((0.0, 0.0, 0.0, 40.0), "source:leaf"),
+    )
+    result = host._resolve_gap_lineage_host_from_records(
+        opening_records,
+        records,
+        _equivalence(records),
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.bands == ()
+    assert host.HOST_GAP_LINEAGE_UNMAPPED in result.reason_codes
+
+
+def test_generic_gap_host_conflicts_when_one_source_role_has_multiple_unproved_owners() -> None:
+    left_a = _record("left-a", ((-100.0, 0.0), (0.0, 0.0)))
+    left_b_base = _record("left-b", ((-100.0, 0.0), (0.0, 0.0)))
+    left_b = replace(
+        left_b_base,
+        physical_identity=replace(
+            left_b_base.physical_identity,
+            source_primitive_ids=("source:left-a",),
+        ),
+    )
+    right = _record("right", ((40.0, 0.0), (140.0, 0.0)))
+    records = (left_a, left_b, right)
+    opening_records = (
+        _source_obs((-100.0, 0.0, 0.0, 0.0), "source:left-a"),
+        _source_obs((40.0, 0.0, 140.0, 0.0), "source:right"),
+        _source_obs((0.0, 0.0, 0.0, 40.0), "source:leaf"),
+    )
+    result = host._resolve_gap_lineage_host_from_records(
+        opening_records,
+        records,
+        _equivalence(records),
+    )
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.bands == ()
+    assert host.HOST_GAP_LINEAGE_AMBIGUOUS in result.reason_codes
