@@ -56,12 +56,11 @@ _SINGLE_RE = re.compile(
     r"^\s*(?P<a>\d{1,2}[,.]\d{3}|\d{3,4})(?P<tail>.*)$",
     re.IGNORECASE,
 )
-_WINDOW_TOKEN_RE = re.compile(
-    r"\b(?:ASW|AAW|ADH|ADHW|ASHW|AFW|ALW)\b",
-    re.IGNORECASE,
-)
-_DOOR_TOKEN_RE = re.compile(
-    r"\b(?:ASD|ASSD|VSD|CS)\b|\b(?:PANEL\s+LIFT\s+)?DOOR\b",
+_WINDOW_TOKEN_RE = re.compile(r"\bWINDOWS?\b", re.IGNORECASE)
+_DOOR_TOKEN_RE = re.compile(r"\bDOORS?\b", re.IGNORECASE)
+_OPENING_MODIFIER_TOKEN_RE = re.compile(
+    r"\b(?:ASW|AAW|ADH|ADHW|ASHW|AFW|ALW|ASD|ASSD|VSD|CS|OBS|"
+    r"PANEL|LIFT|DOOR|WINDOW)\b",
     re.IGNORECASE,
 )
 _ALLOWED_TAIL_RE = re.compile(
@@ -169,8 +168,18 @@ def _dimension_token_mm(raw: str, *, compact_allowed: bool) -> Optional[tuple[fl
     return value, compact
 
 
-def parse_opening_label_dimensions(text: str) -> Optional[ParsedOpeningLabel]:
-    """Parse one trusted source line without deciding which opening owns it."""
+def parse_opening_label_dimensions(
+    text: str,
+    *,
+    structural_kind_hint: Optional[str] = None,
+) -> Optional[ParsedOpeningLabel]:
+    """Parse source dimensions without treating raw abbreviations as type authority.
+
+    structural_kind_hint may be supplied only by an independently proven
+    physical opening. It permits compact hundred-millimetre notation when the
+    same fragment carries an opening-style modifier, but the modifier itself
+    does not establish door/window semantic class.
+    """
     raw = " ".join(str(text or "").split())
     if not raw:
         return None
@@ -179,7 +188,14 @@ def parse_opening_label_dimensions(text: str) -> Optional[ParsedOpeningLabel]:
     if pair is not None:
         tail = str(pair.group("tail") or "")
         kind = _semantic_kind(tail)
-        compact_allowed = kind is not None
+        clean_hint = str(structural_kind_hint or "").strip().lower()
+        compact_allowed = bool(
+            kind is not None
+            or (
+                clean_hint in {"door", "window"}
+                and _OPENING_MODIFIER_TOKEN_RE.search(tail) is not None
+            )
+        )
         first = _dimension_token_mm(pair.group("a"), compact_allowed=compact_allowed)
         second = _dimension_token_mm(pair.group("b"), compact_allowed=compact_allowed)
         if first is None or second is None:
@@ -355,6 +371,8 @@ def _bbox_union(values: Sequence[Sequence[float]]) -> Optional[tuple[float, floa
 
 def _parseable_opening_label_fragments(
     rows: Sequence[tuple[int, str, str, tuple[float, ...]]],
+    *,
+    structural_kind_hint: Optional[str] = None,
 ) -> tuple[_TrustedTextLine, ...]:
     """Split one native PDF text line into non-overlapping opening callouts.
 
@@ -386,7 +404,10 @@ def _parseable_opening_label_fragments(
         for end in range(start + 1, min(len(ordered), start + max_words) + 1):
             subset = ordered[start:end]
             text_value = " ".join(row[2] for row in subset)
-            parsed = parse_opening_label_dimensions(text_value)
+            parsed = parse_opening_label_dimensions(
+                text_value,
+                structural_kind_hint=structural_kind_hint,
+            )
             if parsed is None:
                 continue
             bbox = _bbox_union([row[3] for row in subset])
@@ -480,6 +501,8 @@ def _line_stitchable(
 def _stitched_opening_label_fragment(
     first: _TrustedTextLine,
     second: _TrustedTextLine,
+    *,
+    structural_kind_hint: Optional[str] = None,
 ) -> Optional[_TrustedTextLine]:
     """Join two contiguous native lines only when one unique parse results."""
     if not _line_stitchable(first, second):
@@ -494,7 +517,10 @@ def _stitched_opening_label_fragment(
     ] = {}
     for left, right in ((first, second), (second, first)):
         combined = f"{left.text} {right.text}"
-        parsed = parse_opening_label_dimensions(combined)
+        parsed = parse_opening_label_dimensions(
+            combined,
+            structural_kind_hint=structural_kind_hint,
+        )
         if parsed is None:
             continue
         signature = (parsed.dimension_values_mm, parsed.semantic_kind)
@@ -514,11 +540,16 @@ def _stitched_opening_label_fragment(
 
 def _prefer_richer_label_fragments(
     fragments: Sequence[_TrustedTextLine],
+    *,
+    structural_kind_hint: Optional[str] = None,
 ) -> tuple[_TrustedTextLine, ...]:
     """Suppress only provenance-contained weaker parses of the same dimensions."""
     parsed_rows: list[tuple[_TrustedTextLine, ParsedOpeningLabel]] = []
     for fragment in fragments:
-        parsed = parse_opening_label_dimensions(fragment.text)
+        parsed = parse_opening_label_dimensions(
+            fragment.text,
+            structural_kind_hint=structural_kind_hint,
+        )
         if parsed is not None:
             parsed_rows.append((fragment, parsed))
 
@@ -556,6 +587,8 @@ def _prefer_richer_label_fragments(
 def _trusted_text_lines(
     source: SourceVisibilityProducer,
     opening: PhysicalOpeningExistenceRecord,
+    *,
+    structural_kind_hint: Optional[str] = None,
 ) -> tuple[_TrustedTextLine, ...]:
     published = source.published_snapshot_for_revision(opening.revision_id)
     if published is None or published.snapshot.snapshot_id != opening.snapshot_id:
@@ -612,17 +645,31 @@ def _trusted_text_lines(
                 bbox=bbox,
             )
         )
-        fragments.extend(_parseable_opening_label_fragments(ordered))
+        fragments.extend(
+            _parseable_opening_label_fragments(
+                ordered,
+                structural_kind_hint=structural_kind_hint,
+            )
+        )
 
     # Some CAD exports wrap one callout over two immediately adjacent native
     # lines. Add only syntax-valid, geometry-contiguous two-line claims.
     for index, first in enumerate(raw_lines):
         for second in raw_lines[index + 1:]:
-            stitched = _stitched_opening_label_fragment(first, second)
+            stitched = _stitched_opening_label_fragment(
+                first,
+                second,
+                structural_kind_hint=structural_kind_hint,
+            )
             if stitched is not None:
                 fragments.append(stitched)
 
-    fragments = list(_prefer_richer_label_fragments(fragments))
+    fragments = list(
+        _prefer_richer_label_fragments(
+            fragments,
+            structural_kind_hint=structural_kind_hint,
+        )
+    )
     return tuple(
         sorted(
             fragments,
@@ -748,8 +795,15 @@ class OpeningLabelDimensionProducer:
             tuple[str, tuple[float, ...], Optional[str], tuple[float, float, float, float]],
             tuple[_TrustedTextLine, ParsedOpeningLabel],
         ] = {}
-        for line in _trusted_text_lines(self._source, opening):
-            parsed = parse_opening_label_dimensions(line.text)
+        for line in _trusted_text_lines(
+            self._source,
+            opening,
+            structural_kind_hint=structural_kind,
+        ):
+            parsed = parse_opening_label_dimensions(
+                line.text,
+                structural_kind_hint=structural_kind,
+            )
             if parsed is None or not _label_matches_gap(line, gap):
                 continue
             if (
