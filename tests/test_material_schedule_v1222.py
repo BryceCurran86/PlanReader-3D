@@ -7,6 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 import pb_material_schedule_v1222 as mat
+import pb_selected_evidence_floor_v1226 as selected
 
 
 class _App:
@@ -30,6 +31,50 @@ class MaterialScheduleV1222Tests(unittest.TestCase):
         self.assertEqual(by_code["EC1"]["substrate"], "Lineaboard Cladding")
         self.assertEqual(by_code["EC2"]["substrate"], "Textureboard Cladding")
         self.assertIn("Dulux Natural White", by_code["PT1"]["finish"])
+
+    def test_authenticated_ip_schedule_normalizes_to_insulated_panel_semantic(self):
+        app = _App([
+            {
+                "id": 9,
+                "page_label": "A900",
+                "page_type": "Finishes Schedule",
+                "extracted_text": "FINISH SCHEDULE\nIP - 75mm Insulated Panel",
+                "image_path": "",
+                "document_id": 1,
+                "page_no": 1,
+                "render_zoom": 1,
+            }
+        ])
+        state = mat.build_material_dictionary(app, 4)
+        entry = state["dictionary"]["IP"]
+        self.assertEqual(entry["status"], "Confirmed")
+        self.assertEqual(entry["semantic_finish"], "insulated_panel")
+
+    def test_selected_sheet_rebuild_preserves_authenticated_ip_semantic(self):
+        entry = selected._rebuild_dictionary_item(
+            "IP",
+            [
+                {
+                    "code": "IP",
+                    "description": "75mm Insulated Panel",
+                    "substrate": "Insulated Panel",
+                    "finish": "",
+                    "page_id": 9,
+                    "page_label": "A900",
+                }
+            ],
+        )
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["status"], "Confirmed")
+        self.assertEqual(entry["semantic_finish"], "insulated_panel")
+
+    def test_bare_ip_has_no_finish_semantic_without_confirmed_schedule_meaning(self):
+        self.assertEqual(
+            mat.semantic_finish_from_schedule_entry(
+                {"code": "IP", "status": "Confirmed", "description": "IP"}
+            ),
+            "",
+        )
 
     def test_conflicting_schedule_definition_is_not_silently_confirmed(self):
         app = _App([

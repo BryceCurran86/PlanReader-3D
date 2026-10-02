@@ -354,6 +354,33 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
             self.assertEqual(item.host_object_type, "CEILING")
             self.assertIn("qty-ceiling-101", item.host_evidence_ids)
 
+    def test_authenticated_ip_semantic_can_publish_insulated_panel_quantity(self):
+        specs = {
+            "insulation": {
+                "material": "IP",
+                "semantic_finish": "insulated_panel",
+                "section": "Internal",
+                "evidence_ids": ["schedule-ip-definition"],
+            }
+        }
+        quantities = derive_ceiling_trade_quantities(_ceiling_surface(), specs)
+        self.assertEqual(len(quantities), 1)
+        self.assertEqual(quantities[0].trade_scope, "insulation")
+        self.assertEqual(quantities[0].quantity, 24.0)
+
+    def test_bare_ip_without_normalized_semantic_publishes_no_panel_quantity(self):
+        specs = {
+            "insulation": {
+                "material": "IP",
+                "section": "Internal",
+                "evidence_ids": ["bare-ip-callout"],
+            }
+        }
+        self.assertEqual(
+            derive_ceiling_trade_quantities(_ceiling_surface(), specs),
+            [],
+        )
+
     def test_ceiling_incomplete_metric_area_fails_closed(self):
         ceiling = _ceiling_surface()
         ceiling["metric_area_complete"] = False
