@@ -324,7 +324,7 @@ def test_authenticated_figured_dimension_survives_conflicting_scale_bindings() -
     assert result.authority_status == AuthorityStatus.FIRM.value
     assert result.source_type == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
     assert result.value_m == 6.5
-    assert result.scale_fingerprint == binding.scale_fingerprint
+    assert result.scale_fingerprint is None
 
 
 def test_unresolved_entity_abstains() -> None:
