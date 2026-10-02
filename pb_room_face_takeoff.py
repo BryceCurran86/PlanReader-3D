@@ -16,6 +16,7 @@ Never produce a confidently stated m² quantity from an uncalibrated polygon.
 from __future__ import annotations
 
 import copy
+import math
 import re
 import threading
 from collections import OrderedDict
