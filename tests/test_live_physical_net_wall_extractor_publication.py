@@ -84,6 +84,56 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
         "evidence_ids": ["gross-1", "void-1", "role-1"],
     }
     canonical_wall = SimpleNamespace(to_dict=lambda: canonical_wall_payload)
+    canonical_opening_payload = {
+        "canonical_opening_id": "opening-1",
+        "physical_opening_id": "opening-1",
+        "page_id": "1",
+        "viewport_id": "floor-plan-1",
+        "semantic_class": "opening",
+        "opening_kind": "window",
+        "type_mark": "W1",
+        "structural_pattern": "jamb_bounded_two_face_interruption",
+        "host_wall_id": "whole-wall-1",
+        "wall_local_frame_id": "whole-wall-1",
+        "u0": 4.0,
+        "u1": 5.0,
+        "z0": 0.0,
+        "z1": 2.5,
+        "width_m": 1.0,
+        "height_m": 2.5,
+        "area_m2": 2.5,
+        "geometry_complete": True,
+        "source_observation_ids": ["obs-a", "obs-b"],
+        "source_geometries": [[10.0, 20.0, 20.0, 20.0]],
+        "evidence_ids": ["opening-1", "void-1"],
+    }
+    canonical_opening = SimpleNamespace(
+        to_dict=lambda: canonical_opening_payload
+    )
+    canonical_room_payload = {
+        "canonical_room_id": "room-1",
+        "physical_room_id": "room-1",
+        "page_id": "1",
+        "viewport_id": None,
+        "polygon_pdf_pts": [[20.0, 20.0], [100.0, 20.0], [100.0, 80.0], [20.0, 80.0]],
+        "bounding_wall_ids": ["whole-wall-1"],
+        "coordinate_unit": "pdf_pt",
+        "geometry_complete": True,
+        "metric_geometry_complete": False,
+    }
+    canonical_room = SimpleNamespace(to_dict=lambda: canonical_room_payload)
+    canonical_floor_payload = {
+        "canonical_floor_id": "floor-room-1",
+        "room_entity_id": "room-1",
+        "page_id": "1",
+        "polygon_pdf_pts": canonical_room_payload["polygon_pdf_pts"],
+        "geometry_complete": True,
+        "metric_geometry_complete": False,
+        "metric_area_m2": None,
+        "finish_descriptor": None,
+        "commercial_quantity_authority": False,
+    }
+    canonical_floor = SimpleNamespace(to_dict=lambda: canonical_floor_payload)
 
     def fake_physical_wall_claim(pdf_path, *, pages=None):
         seen["pdf_path"] = pdf_path
@@ -94,6 +144,19 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
             quantity_m2=42.5,
             source_pages=(1,),
             canonical_walls=(canonical_wall,),
+            canonical_wall_status=EvidenceResolutionStatus.CORROBORATED,
+            canonical_wall_reason_codes=("test_canonical_wall_resolved",),
+            canonical_wall_source_pages=(1,),
+            unresolved_wall_candidate_ids=(),
+            canonical_openings=(canonical_opening,),
+            canonical_rooms=(canonical_room,),
+            canonical_floors=(canonical_floor,),
+            canonical_floor_status=EvidenceResolutionStatus.CORROBORATED,
+            canonical_floor_reason_codes=("test_canonical_floor_resolved",),
+            canonical_floor_source_pages=(1,),
+            canonical_room_status=EvidenceResolutionStatus.CORROBORATED,
+            canonical_room_reason_codes=("test_canonical_room_resolved",),
+            canonical_room_source_pages=(1,),
             external_wall_ids=("whole-wall-1",),
             evidence_ids=("gross-1", "void-1", "role-1"),
             quantity_id="physical-net-wall-q1",
@@ -128,6 +191,29 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
     assert extractor.physical_net_wall_live["canonical_walls"] == [
         canonical_wall_payload
     ]
+    assert extractor.canonical_walls_live["status"] == "corroborated"
+    assert extractor.canonical_walls_live["source_pages"] == [1]
+    assert extractor.canonical_walls_live["unresolved_wall_candidate_ids"] == []
+    assert extractor.canonical_walls_live["walls"] == [canonical_wall_payload]
+    assert extractor.canonical_openings_live["status"] == "corroborated"
+    assert extractor.canonical_openings_live["openings"] == [
+        canonical_opening_payload
+    ]
+    assert extractor.canonical_rooms_live["status"] == "corroborated"
+    assert extractor.canonical_rooms_live["source_pages"] == [1]
+    assert extractor.canonical_rooms_live["rooms"] == [canonical_room_payload]
+    assert extractor.canonical_building_live["status"] == "corroborated"
+    assert extractor.canonical_building_live["building_id"]
+    assert extractor.canonical_building_live["levels"] == []
+    assert extractor.canonical_building_live["level_assignment_complete"] is False
+    assert extractor.canonical_building_live["object_counts"]["walls"] == 1
+    assert extractor.canonical_building_live["object_counts"]["openings"] == 1
+    assert extractor.canonical_building_live["object_counts"]["rooms"] == 1
+    assert extractor.canonical_building_live["object_counts"]["floors"] == 1
+    assert wall.metadata["canonical_opening_ids"] == ["opening-1"]
+    assert wall.metadata["canonical_opening_objects"] == [
+        canonical_opening_payload
+    ]
     assert extractor.extraction_status["physical_net_wall_live"] == "corroborated"
 
 
@@ -137,6 +223,49 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
 ) -> None:
     path = tmp_path / "drawing.pdf"
     path.write_bytes(_drawing_and_boq_pdf())
+    canonical_opening_payload = {
+        "canonical_opening_id": "opening-1",
+        "physical_opening_id": "opening-1",
+        "host_wall_id": "whole-wall-1",
+        "geometry_complete": False,
+    }
+    canonical_opening = SimpleNamespace(
+        to_dict=lambda: canonical_opening_payload
+    )
+    canonical_room_payload = {
+        "canonical_room_id": "room-1",
+        "physical_room_id": "room-1",
+        "page_id": "1",
+        "viewport_id": None,
+        "polygon_pdf_pts": [[20.0, 20.0], [100.0, 20.0], [100.0, 80.0], [20.0, 80.0]],
+        "bounding_wall_ids": ["whole-wall-1"],
+        "coordinate_unit": "pdf_pt",
+        "geometry_complete": True,
+        "metric_geometry_complete": False,
+    }
+    canonical_room = SimpleNamespace(to_dict=lambda: canonical_room_payload)
+    canonical_floor_payload = {
+        "canonical_floor_id": "floor-room-1",
+        "room_entity_id": "room-1",
+        "page_id": "1",
+        "polygon_pdf_pts": canonical_room_payload["polygon_pdf_pts"],
+        "geometry_complete": True,
+        "metric_geometry_complete": False,
+        "metric_area_m2": None,
+        "finish_descriptor": None,
+        "commercial_quantity_authority": False,
+    }
+    canonical_floor = SimpleNamespace(to_dict=lambda: canonical_floor_payload)
+    canonical_wall_payload = {
+        "canonical_wall_id": "wall2-candidate-1",
+        "physical_wall_id": None,
+        "identity_status": "candidate_physical_equivalence_unresolved",
+        "physical_identity_resolved": False,
+        "geometry_complete": True,
+        "metric_geometry_complete": False,
+        "quantity_complete": False,
+    }
+    canonical_wall = SimpleNamespace(to_dict=lambda: canonical_wall_payload)
 
     monkeypatch.setattr(
         GenericPlanReaderExtractor,
@@ -150,7 +279,20 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
             reason_codes=("test_physical_net_wall_unavailable",),
             quantity_m2=None,
             source_pages=(),
-            canonical_walls=(),
+            canonical_walls=(canonical_wall,),
+            canonical_wall_status=EvidenceResolutionStatus.CANDIDATE,
+            canonical_wall_reason_codes=("test_canonical_wall_candidate",),
+            canonical_wall_source_pages=(1,),
+            unresolved_wall_candidate_ids=("wall-candidate-1",),
+            canonical_openings=(canonical_opening,),
+            canonical_rooms=(canonical_room,),
+            canonical_floors=(canonical_floor,),
+            canonical_floor_status=EvidenceResolutionStatus.CORROBORATED,
+            canonical_floor_reason_codes=("test_canonical_floor_resolved",),
+            canonical_floor_source_pages=(1,),
+            canonical_room_status=EvidenceResolutionStatus.CORROBORATED,
+            canonical_room_reason_codes=("test_canonical_room_resolved",),
+            canonical_room_source_pages=(1,),
             external_wall_ids=(),
             evidence_ids=(),
             quantity_id=None,
@@ -166,6 +308,20 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
     )
 
     assert extractor.physical_net_wall_live["status"] == "abstained"
+    assert extractor.canonical_walls_live["status"] == "candidate"
+    assert extractor.canonical_walls_live["walls"] == [canonical_wall_payload]
+    assert extractor.canonical_walls_live["unresolved_wall_candidate_ids"] == [
+        "wall-candidate-1"
+    ]
+    assert extractor.canonical_openings_live["status"] == "corroborated"
+    assert extractor.canonical_openings_live["openings"] == [
+        canonical_opening_payload
+    ]
+    assert extractor.canonical_rooms_live["status"] == "corroborated"
+    assert extractor.canonical_rooms_live["rooms"] == [canonical_room_payload]
+    assert extractor.canonical_building_live["status"] == "corroborated"
+    assert extractor.canonical_building_live["building_id"]
+    assert extractor.canonical_building_live["levels"] == []
     physical_promotions = [
         pred
         for pred in predictions

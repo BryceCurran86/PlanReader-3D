@@ -1,0 +1,361 @@
+"""Canonical room-floor surface projection from source-owned room faces.
+
+A source-authenticated room footprint is useful shared geometry for flooring,
+tiling, coatings, skirtings, costing, 3D and drawings. This module preserves
+that footprint once as a room-owned horizontal surface without claiming that:
+- a structural slab has been identified,
+- a floor finish/material has been identified,
+- metric geometry or metric area is resolved,
+- a commercial quantity is authorized.
+
+Structural slabs remain a separate canonical object family.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+import math
+from typing import Optional
+
+from pb_live_canonical_room_composition import (
+    LiveCanonicalRoomComposition,
+    LiveCanonicalRoomObject,
+)
+from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_source_room_area_bridge import SourceRoomAreaBridgeResult
+
+
+LIVE_CANONICAL_FLOOR_SURFACE_SCHEMA_VERSION = "1.0.0"
+LIVE_CANONICAL_FLOOR_SURFACE_RESOLVED = (
+    "live_canonical_floor_surface_projection_resolved"
+)
+LIVE_CANONICAL_FLOOR_SURFACE_PARTIAL = (
+    "live_canonical_floor_surface_projection_partial"
+)
+LIVE_CANONICAL_FLOOR_SURFACE_UNAVAILABLE = (
+    "live_canonical_floor_surface_projection_unavailable"
+)
+LIVE_CANONICAL_FLOOR_METRIC_AREA_RESOLVED = (
+    "live_canonical_floor_metric_area_resolved"
+)
+LIVE_CANONICAL_FLOOR_METRIC_AREA_PARTIAL = (
+    "live_canonical_floor_metric_area_partial"
+)
+LIVE_CANONICAL_FLOOR_METRIC_AREA_UNAVAILABLE = (
+    "live_canonical_floor_metric_area_unavailable"
+)
+LIVE_CANONICAL_FLOOR_METRIC_AREA_CONFLICT = (
+    "live_canonical_floor_metric_area_conflict"
+)
+
+
+@dataclass(frozen=True)
+class LiveCanonicalFloorSurfaceObject:
+    canonical_floor_id: str
+    room_entity_id: str
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    snapshot_id: str
+    page_id: str
+    viewport_id: Optional[str]
+    polygon_pdf_pts: tuple[tuple[float, float], ...]
+    area_page_pts2: float
+    bounding_wall_ids: tuple[str, ...]
+    canonical_bounding_wall_ids: tuple[str, ...]
+    source_room_face_record_id: str
+    evidence_ids: tuple[str, ...]
+    geometry_complete: bool
+    metric_geometry_complete: bool
+    metric_area_m2: Optional[float]
+    metric_area_quantity_id: Optional[str]
+    metric_area_authority: Optional[str]
+    finish_descriptor: Optional[str]
+    structural_slab_id: Optional[str]
+    physical_floor_surface_identity_resolved: bool
+    commercial_quantity_authority: bool
+    coordinate_space: str = "source_page_points"
+    schema_version: str = LIVE_CANONICAL_FLOOR_SURFACE_SCHEMA_VERSION
+
+    def to_dict(self) -> dict:
+        return {
+            "canonical_floor_id": self.canonical_floor_id,
+            "room_entity_id": self.room_entity_id,
+            "document_id": self.document_id,
+            "revision_id": self.revision_id,
+            "source_sha256": self.source_sha256,
+            "snapshot_id": self.snapshot_id,
+            "page_id": self.page_id,
+            "viewport_id": self.viewport_id,
+            "polygon_pdf_pts": [list(point) for point in self.polygon_pdf_pts],
+            "area_page_pts2": self.area_page_pts2,
+            "bounding_wall_ids": list(self.bounding_wall_ids),
+            "canonical_bounding_wall_ids": list(
+                self.canonical_bounding_wall_ids
+            ),
+            "source_room_face_record_id": self.source_room_face_record_id,
+            "evidence_ids": list(self.evidence_ids),
+            "geometry_complete": self.geometry_complete,
+            "metric_geometry_complete": self.metric_geometry_complete,
+            "metric_area_m2": self.metric_area_m2,
+            "metric_area_quantity_id": self.metric_area_quantity_id,
+            "metric_area_authority": self.metric_area_authority,
+            "finish_descriptor": self.finish_descriptor,
+            "structural_slab_id": self.structural_slab_id,
+            "physical_floor_surface_identity_resolved": (
+                self.physical_floor_surface_identity_resolved
+            ),
+            "commercial_quantity_authority": self.commercial_quantity_authority,
+            "coordinate_space": self.coordinate_space,
+            "schema_version": self.schema_version,
+        }
+
+
+@dataclass(frozen=True)
+class LiveCanonicalFloorSurfaceComposition:
+    status: EvidenceResolutionStatus
+    reason_codes: tuple[str, ...]
+    floors: tuple[LiveCanonicalFloorSurfaceObject, ...]
+    source_pages: tuple[int, ...]
+    schema_version: str = LIVE_CANONICAL_FLOOR_SURFACE_SCHEMA_VERSION
+
+
+def _floor_from_room(room: LiveCanonicalRoomObject) -> LiveCanonicalFloorSurfaceObject:
+    floor_id = stable_contract_id(
+        "live_canonical_room_floor_surface",
+        {
+            "source_sha256": room.source_sha256,
+            "revision_id": room.revision_id,
+            "room_entity_id": room.canonical_room_id,
+            "source_room_face_record_id": room.source_room_face_record_id,
+        },
+        digest_chars=32,
+    )
+    return LiveCanonicalFloorSurfaceObject(
+        canonical_floor_id=floor_id,
+        room_entity_id=room.canonical_room_id,
+        document_id=room.document_id,
+        revision_id=room.revision_id,
+        source_sha256=room.source_sha256,
+        snapshot_id=room.snapshot_id,
+        page_id=room.page_id,
+        viewport_id=room.viewport_id,
+        polygon_pdf_pts=room.polygon_pdf_pts,
+        area_page_pts2=float(room.area_page_pts2),
+        bounding_wall_ids=room.bounding_wall_ids,
+        canonical_bounding_wall_ids=room.canonical_bounding_wall_ids,
+        source_room_face_record_id=room.source_room_face_record_id,
+        evidence_ids=room.evidence_ids,
+        geometry_complete=bool(room.geometry_complete),
+        metric_geometry_complete=False,
+        metric_area_m2=None,
+        metric_area_quantity_id=None,
+        metric_area_authority=None,
+        finish_descriptor=None,
+        structural_slab_id=None,
+        physical_floor_surface_identity_resolved=False,
+        commercial_quantity_authority=False,
+    )
+
+
+def compose_live_canonical_floor_surfaces(
+    room_composition: LiveCanonicalRoomComposition,
+) -> LiveCanonicalFloorSurfaceComposition:
+    """Project canonical room footprints into reusable floor-surface candidates."""
+
+    if type(room_composition) is not LiveCanonicalRoomComposition:
+        raise TypeError(
+            "room_composition must be LiveCanonicalRoomComposition"
+        )
+
+    if not room_composition.rooms:
+        return LiveCanonicalFloorSurfaceComposition(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(LIVE_CANONICAL_FLOOR_SURFACE_UNAVAILABLE,),
+            floors=(),
+            source_pages=(),
+        )
+
+    floors = tuple(
+        sorted(
+            (_floor_from_room(room) for room in room_composition.rooms),
+            key=lambda floor: (floor.page_id, floor.canonical_floor_id),
+        )
+    )
+
+    if room_composition.status is EvidenceResolutionStatus.CORROBORATED:
+        status = EvidenceResolutionStatus.CORROBORATED
+        reasons = (LIVE_CANONICAL_FLOOR_SURFACE_RESOLVED,)
+    else:
+        status = EvidenceResolutionStatus.CANDIDATE
+        reasons = (
+            LIVE_CANONICAL_FLOOR_SURFACE_PARTIAL,
+            *room_composition.reason_codes,
+        )
+
+    return LiveCanonicalFloorSurfaceComposition(
+        status=status,
+        reason_codes=reasons,
+        floors=floors,
+        source_pages=room_composition.source_pages,
+    )
+
+
+def _valid_metric_area_quantity(
+    floor: LiveCanonicalFloorSurfaceObject,
+    quantity,
+) -> bool:
+    if quantity.abstained:
+        return False
+    if str(quantity.family or "") != "room_area":
+        return False
+    if str(quantity.status or "").lower() != "firm":
+        return False
+    if str(quantity.unit or "").lower() not in {"m2", "m²"}:
+        return False
+    if tuple(quantity.input_entity_ids or ()) != (floor.room_entity_id,):
+        return False
+    if not str(quantity.quantity_id or "").strip():
+        return False
+    if not str(quantity.authority or "").strip():
+        return False
+    try:
+        value = float(quantity.value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if not math.isfinite(value) or value <= 0.0:
+        return False
+    metadata = dict(quantity.metadata or {})
+    if str(metadata.get("source_sha256") or "").lower() != floor.source_sha256.lower():
+        return False
+    if str(metadata.get("revision_id") or "") != floor.revision_id:
+        return False
+    if str(metadata.get("page_no") or "") != str(floor.page_id):
+        return False
+    quantity_evidence_ids = tuple(str(value) for value in (quantity.evidence_ids or ()))
+    if not quantity_evidence_ids:
+        return False
+    if not set(quantity_evidence_ids).issubset(set(floor.evidence_ids)):
+        return False
+    return True
+
+
+def enrich_live_canonical_floor_metric_areas(
+    floor_composition: LiveCanonicalFloorSurfaceComposition,
+    room_area_bridge: SourceRoomAreaBridgeResult,
+) -> LiveCanonicalFloorSurfaceComposition:
+    """Attach producer-owned metric room area to the same canonical floor identity.
+
+    The bridge may enrich area only.  It cannot promote source-page polygon
+    coordinates into metric geometry, identify a structural slab, assign a
+    finish, or grant commercial quantity authority.
+    """
+
+    if type(floor_composition) is not LiveCanonicalFloorSurfaceComposition:
+        raise TypeError(
+            "floor_composition must be LiveCanonicalFloorSurfaceComposition"
+        )
+    if type(room_area_bridge) is not SourceRoomAreaBridgeResult:
+        raise TypeError("room_area_bridge must be SourceRoomAreaBridgeResult")
+    if not floor_composition.floors:
+        return floor_composition
+
+    quantities_by_room: dict[str, list] = {}
+    for quantity in room_area_bridge.quantities:
+        room_ids = tuple(str(value) for value in (quantity.input_entity_ids or ()))
+        if len(room_ids) == 1:
+            quantities_by_room.setdefault(room_ids[0], []).append(quantity)
+
+    enriched: list[LiveCanonicalFloorSurfaceObject] = []
+    resolved_count = 0
+    conflict = False
+    for floor in floor_composition.floors:
+        candidates = [
+            quantity
+            for quantity in quantities_by_room.get(floor.room_entity_id, ())
+            if _valid_metric_area_quantity(floor, quantity)
+        ]
+        if len(candidates) > 1:
+            conflict = True
+            enriched.append(floor)
+            continue
+        if not candidates:
+            enriched.append(floor)
+            continue
+
+        quantity = candidates[0]
+        value = float(quantity.value)
+        enriched.append(
+            replace(
+                floor,
+                evidence_ids=tuple(
+                    dict.fromkeys(
+                        (
+                            *floor.evidence_ids,
+                            *(str(item) for item in quantity.evidence_ids),
+                        )
+                    )
+                ),
+                metric_area_m2=value,
+                metric_area_quantity_id=str(quantity.quantity_id),
+                metric_area_authority=str(quantity.authority),
+                metric_geometry_complete=False,
+                commercial_quantity_authority=False,
+            )
+        )
+        resolved_count += 1
+
+    if conflict:
+        return LiveCanonicalFloorSurfaceComposition(
+            status=EvidenceResolutionStatus.CONFLICT,
+            reason_codes=(LIVE_CANONICAL_FLOOR_METRIC_AREA_CONFLICT,),
+            floors=tuple(enriched),
+            source_pages=floor_composition.source_pages,
+        )
+
+    if resolved_count == len(floor_composition.floors):
+        return LiveCanonicalFloorSurfaceComposition(
+            status=floor_composition.status,
+            reason_codes=(
+                *floor_composition.reason_codes,
+                LIVE_CANONICAL_FLOOR_METRIC_AREA_RESOLVED,
+            ),
+            floors=tuple(enriched),
+            source_pages=floor_composition.source_pages,
+        )
+
+    if resolved_count:
+        return LiveCanonicalFloorSurfaceComposition(
+            status=EvidenceResolutionStatus.CANDIDATE,
+            reason_codes=(
+                LIVE_CANONICAL_FLOOR_SURFACE_PARTIAL,
+                LIVE_CANONICAL_FLOOR_METRIC_AREA_PARTIAL,
+            ),
+            floors=tuple(enriched),
+            source_pages=floor_composition.source_pages,
+        )
+
+    return LiveCanonicalFloorSurfaceComposition(
+        status=floor_composition.status,
+        reason_codes=(
+            *floor_composition.reason_codes,
+            LIVE_CANONICAL_FLOOR_METRIC_AREA_UNAVAILABLE,
+        ),
+        floors=tuple(enriched),
+        source_pages=floor_composition.source_pages,
+    )
+
+
+__all__ = [
+    "LIVE_CANONICAL_FLOOR_METRIC_AREA_CONFLICT",
+    "LIVE_CANONICAL_FLOOR_METRIC_AREA_PARTIAL",
+    "LIVE_CANONICAL_FLOOR_METRIC_AREA_RESOLVED",
+    "LIVE_CANONICAL_FLOOR_METRIC_AREA_UNAVAILABLE",
+    "LIVE_CANONICAL_FLOOR_SURFACE_PARTIAL",
+    "LIVE_CANONICAL_FLOOR_SURFACE_RESOLVED",
+    "LIVE_CANONICAL_FLOOR_SURFACE_SCHEMA_VERSION",
+    "LIVE_CANONICAL_FLOOR_SURFACE_UNAVAILABLE",
+    "LiveCanonicalFloorSurfaceComposition",
+    "LiveCanonicalFloorSurfaceObject",
+    "compose_live_canonical_floor_surfaces",
+    "enrich_live_canonical_floor_metric_areas",
+]

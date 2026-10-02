@@ -28,7 +28,27 @@ def test_live_physical_net_wall_runs_real_source_chain_and_fails_closed_without_
     }
     assert result.quantity_m2 is None
     assert result.quantity_id is None
-    assert result.canonical_walls == ()
+
+    # Semantic wall identity/geometry must survive independently from later
+    # height/gross/net-wall quantity authority.
+    assert result.canonical_wall_status is EvidenceResolutionStatus.CORROBORATED
+    assert result.canonical_walls
+    assert all(wall.geometry_complete for wall in result.canonical_walls)
+    assert any(
+        wall.physical_identity_resolved
+        and wall.identity_status == "physical_resolved_by_opening_host_frame"
+        for wall in result.canonical_walls
+    )
+    assert all(
+        wall.metric_geometry_complete is False
+        for wall in result.canonical_walls
+    )
+
+    assert result.canonical_openings
+    assert all(
+        opening.canonical_opening_id == opening.physical_opening_id
+        for opening in result.canonical_openings
+    )
     assert result.external_wall_ids == ()
 
 

@@ -8,7 +8,11 @@ from pb_canonical_building import CanonicalLevel, CanonicalWall, Vector2D
 from pb_migration_contracts import QuantityEvidence
 from pb_takeoff_coverage_audit_adapter import (
     REASON_NOT_IN_REGISTRY_UNIVERSE,
+    RUNTIME_COVERAGE_AVAILABLE,
     RegistryCoverageRecordProviderV1,
+    RuntimeCoverageStage,
+    audit_registry_runtime_lifecycle,
+    build_runtime_coverage_publication,
 )
 from pb_takeoff_coverage_registry import (
     COVERAGE_BASIS_EXPLICIT_DEPENDENCIES_ONLY,
@@ -244,11 +248,69 @@ def test_w10_authority_flags_are_not_mutated_by_registry_adapter():
     assert w.deduction_authority is False
 
 
-def test_no_live_non_test_module_imports_registry_audit_adapter():
+def test_runtime_lifecycle_reaches_published_only_when_customer_row_exists():
+    summary = summary_for()
+    report = audit_registry_runtime_lifecycle(
+        summary,
+        published_takeoff_rows=[
+            {
+                "id": 91,
+                "source_reference": "PB Auto Geometry v1.2.19 · structural:q-1",
+            }
+        ],
+    )
+
+    assert report.status == RUNTIME_COVERAGE_AVAILABLE
+    assert report.stage_counts == {
+        "DETECTED": 1,
+        "AUTHENTICATED": 1,
+        "CANONICALIZED": 1,
+        "QUANTIFIED": 1,
+        "PUBLISHED": 1,
+    }
+    obj = report.object_reports[0]
+    assert obj.highest_stage_reached is RuntimeCoverageStage.PUBLISHED
+    assert obj.died_at_stage is None
+    assert obj.death_reason is None
+
+
+def test_runtime_lifecycle_quantified_object_fails_closed_without_customer_row():
+    report = audit_registry_runtime_lifecycle(
+        summary_for(),
+        published_takeoff_rows=[],
+    )
+
+    assert report.stage_counts["QUANTIFIED"] == 1
+    assert report.stage_counts["PUBLISHED"] == 0
+    obj = report.object_reports[0]
+    assert obj.highest_stage_reached is RuntimeCoverageStage.QUANTIFIED
+    assert obj.died_at_stage is RuntimeCoverageStage.PUBLISHED
+    assert obj.death_reason == "customer_takeoff_row_not_found"
+
+
+def test_runtime_publication_without_live_registry_is_unavailable_not_zero():
+    payload = build_runtime_coverage_publication(
+        (),
+        published_takeoff_rows=[{"source_reference": "anything"}],
+    )
+
+    assert payload["status"] == "unavailable"
+    assert payload["expected_family_completeness"] == "UNKNOWN"
+    assert payload["stage_counts"] == {
+        "DETECTED": None,
+        "AUTHENTICATED": None,
+        "CANONICALIZED": None,
+        "QUANTIFIED": None,
+        "PUBLISHED": None,
+    }
+
+
+def test_customer_runtime_is_only_approved_live_adapter_importer():
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
     offenders = []
+    approved = {"pb_auto_geometry_v1219.py"}
     for path in root.rglob("*.py"):
         rel = path.relative_to(root)
         if rel.parts and rel.parts[0] == "tests":
@@ -256,6 +318,9 @@ def test_no_live_non_test_module_imports_registry_audit_adapter():
         if path.name == "pb_takeoff_coverage_audit_adapter.py":
             continue
         text = path.read_text(encoding="utf-8-sig")
-        if "pb_takeoff_coverage_audit_adapter" in text or "RegistryCoverageRecordProviderV1" in text:
+        if (
+            "pb_takeoff_coverage_audit_adapter" in text
+            or "RegistryCoverageRecordProviderV1" in text
+        ) and str(rel).replace("\\", "/") not in approved:
             offenders.append(str(rel))
     assert offenders == []

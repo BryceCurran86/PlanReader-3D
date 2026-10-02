@@ -60,6 +60,50 @@
         "standard_plans:p5:electrical_vector_inner_faces:2616.2x1600.2_mm",
         "standard_inclusions:p1:laundry_floor_tiles_throughout"
       ]
+    },
+    {
+      "object_ref": "q5446:surface:floor:ground_living",
+      "physical_kind": "floor_finish_surface",
+      "classification": "VERIFIED_CORE_OBJECT",
+      "finish_scope": "porcelain_floor_tile",
+      "expected_area_m2": 12.92,
+      "figured_dimensions_mm": [
+        4000,
+        3230
+      ],
+      "vector_inner_faces_mm": [
+        3996.27,
+        3234.27
+      ],
+      "source_locations": [
+        "standard_plans:p1:LIVING_4000x3230",
+        "standard_plans:p1:vector_inner_faces:3996.27x3234.27_mm",
+        "sales_advice:p6:porcelain_tiles_to_living"
+      ],
+      "verification": {
+        "object_exists": true,
+        "object_identified": true,
+        "geometry_verified": true,
+        "geometry_scope": "2D rectangular room extents only",
+        "quantity_verified": true,
+        "fully_source_closed": true,
+        "source_closure_scope": "Living floor-surface identity, porcelain finish scope, 2D room extents and area"
+      },
+      "provenance": {
+        "document_refs": [
+          "Q5446_Standard_Plans_V1_20220320.pdf",
+          "Q5446_Sales_Advice_Estimate_V1_20220320.pdf"
+        ],
+        "sheet_page_refs": [
+          "standard_plans:p1",
+          "sales_advice:p6"
+        ],
+        "source_evidence_refs": [
+          "standard_plans:p1:figured_dimensions:LIVING_4000x3230",
+          "standard_plans:p1:vector_inner_faces:3996.27x3234.27_mm",
+          "sales_advice:p6:porcelain_floor_tiles_to_living_area"
+        ]
+      }
     }
   ],
   "unverified_area_candidates": [

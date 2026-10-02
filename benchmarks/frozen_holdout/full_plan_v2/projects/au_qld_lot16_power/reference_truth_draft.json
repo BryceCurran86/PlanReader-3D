@@ -1,0 +1,2293 @@
+{
+  "schema_version": "draft-reference-truth-v1",
+  "project_id": "au_qld_lot16_power",
+  "status": "DRAFT_INCOMPLETE",
+  "truth_source_policy": "source-declared-quantity-or-independent-dimension-measurement-only; never PlanReader output",
+  "source_documents": [
+    {
+      "name": "1. Construction Plans - Lot 16 Power (REV E).pdf",
+      "sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+    }
+  ],
+  "aggregate_controls_not_denominator": [
+    {
+      "control_id": "lot16:control:total_floor_area",
+      "description": "Residence + alfresco + porch aggregate",
+      "expected_quantity": 224.36,
+      "unit": "m2",
+      "source_location": "architectural:p3:area_calculations:TOTAL_224.36_m2",
+      "reason": "aggregate overlaps component surfaces"
+    },
+    {
+      "control_id": "lot16:control:roof_sheeting_total_from_four_dimensioned_planes",
+      "description": "Calculated total sloped Colorbond roof sheeting area across four dimensioned roof planes",
+      "expected_quantity": 255.250324,
+      "unit": "m2",
+      "source_location": "architectural:p6:roof_plan:four_dimensioned_pitch_regions; architectural:p4-p5:elevations:pitch_crosscheck",
+      "reason": "sum control over atomic roof planes; not a second denominator item"
+    }
+  ],
+  "unresolved_surface_families": [
+    "internal_wall_faces_beyond_closed_bed2_bed3_and_explicit_internal_elevation_top_plate_gross_faces_with_room_access_robe_and_2110_square_set_deductions_pending_linen_broom_joinery_and_unlabelled_archways",
+    "external_wall_faces_and_cladding",
+    "ceilings_beyond_closed_bed1_ensuite_wir_porch_raked_and_garage_flat_planes_including_entry_and_other_flat_regions",
+    "custom_front_glazing_measure_on_site_only",
+    "wet_area_wall_tiling_beyond_three_closed_bath_gross_faces_including_remaining_bath_face_and_raked_ensuite",
+    "structural_members_beyond_closed_wall_bracing_and_explicit_architectural_supports",
+    "roof_planes_final_crosscheck_blocked_by_missing_engineering_stormwater_drainage_plan",
+    "site_retaining_wall_final_extent_and_profile"
+  ],
+  "completion_rule": "Do not mark project VERIFIED until every in-scope family is independently closed and aggregate controls reconcile without double counting.",
+  "verified_physical_candidates": [
+    {
+      "object_ref": "lot16:opening:p3:0615_sgw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "0615 SGW",
+      "expected_quantity": 0.9,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 0.6,
+        "width_m": 1.5,
+        "source_bbox_pdf_pt": [
+          445.3,
+          534.1,
+          473.1,
+          541.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:0615_SGW"
+    },
+    {
+      "object_ref": "lot16:opening:p3:0621_sgw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "0621 SGW",
+      "expected_quantity": 1.26,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 0.6,
+        "width_m": 2.1,
+        "source_bbox_pdf_pt": [
+          364.6,
+          196.1,
+          392.4,
+          203.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:0621_SGW"
+    },
+    {
+      "object_ref": "lot16:opening:p3:0630_fg:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "0630 fixed glass",
+      "expected_quantity": 1.8,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "fixed_glass",
+        "height_m": 0.6,
+        "width_m": 3,
+        "source_bbox_pdf_pt": [
+          814,
+          180.1,
+          836.3,
+          187.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:0630_fixed_glass"
+    },
+    {
+      "object_ref": "lot16:opening:p3:0906_sgw_obs:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "0906 SGW obs",
+      "expected_quantity": 0.54,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 0.9,
+        "width_m": 0.6,
+        "source_bbox_pdf_pt": [
+          485.3,
+          180.1,
+          523.8,
+          187.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:0906_SGW_obs"
+    },
+    {
+      "object_ref": "lot16:opening:p3:1215_sgw_obs:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1215 SGW obs",
+      "expected_quantity": 1.8,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 1.2,
+        "width_m": 1.5,
+        "source_bbox_pdf_pt": [
+          622.4,
+          430.7,
+          661,
+          438.5
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:1215_SGW_obs"
+    },
+    {
+      "object_ref": "lot16:opening:p3:1218_sgw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1218 SGW #1",
+      "expected_quantity": 2.16,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 1.2,
+        "width_m": 1.8,
+        "source_bbox_pdf_pt": [
+          545.5,
+          180.1,
+          573.3,
+          187.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:1218_SGW_#1"
+    },
+    {
+      "object_ref": "lot16:opening:p3:1218_sgw:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1218 SGW #2",
+      "expected_quantity": 2.16,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "sliding_glass_window",
+        "height_m": 1.2,
+        "width_m": 1.8,
+        "source_bbox_pdf_pt": [
+          655.1,
+          180.1,
+          682.9,
+          187.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:1218_SGW_#2"
+    },
+    {
+      "object_ref": "lot16:opening:p3:2124_corner_stack:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2124 corner stack opening",
+      "expected_quantity": 5.04,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "corner_stacker_door",
+        "height_m": 2.1,
+        "width_m": 2.4,
+        "source_bbox_pdf_pt": [
+          896.5,
+          271.6,
+          933.8,
+          277.3
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:2124_corner_stack_opening"
+    },
+    {
+      "object_ref": "lot16:opening:p3:2127_stacker:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2127 stacker door",
+      "expected_quantity": 5.67,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "stacker_door",
+        "height_m": 2.1,
+        "width_m": 2.7,
+        "source_bbox_pdf_pt": [
+          783.6,
+          435.2,
+          813.6,
+          440.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:2127_stacker_door"
+    },
+    {
+      "object_ref": "lot16:opening:p3:2148_panel_lift:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2148 panel lift door",
+      "expected_quantity": 10.08,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "panel_lift_door",
+        "height_m": 2.1,
+        "width_m": 4.8,
+        "source_bbox_pdf_pt": [
+          414.9,
+          421.4,
+          420.6,
+          454.9
+        ]
+      },
+      "source_location": "architectural:p3:floor_plan:2148_panel_lift_door"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A1:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A1 PLY-1 bracing instance 1 of 1",
+      "expected_quantity": 0.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A1",
+        "brace_type": "PLY-1",
+        "schedule_instance_count": 1
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A2:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A2 PLY-2 bracing instance 1 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A2:02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A2 PLY-2 bracing instance 2 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A2:03",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A2 PLY-2 bracing instance 3 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A2:04",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A2 PLY-2 bracing instance 4 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A2:05",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A2 PLY-2 bracing instance 5 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A2:06",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A2 PLY-2 bracing instance 6 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A2:07",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A2 PLY-2 bracing instance 7 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A3:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A3 PLY-2 bracing instance 1 of 1",
+      "expected_quantity": 1.7,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A3",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 1
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A3"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A4:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A4 PLY-2 bracing instance 1 of 2",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A4",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 2
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A4"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A4:02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A4 PLY-2 bracing instance 2 of 2",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A4",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 2
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A4"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A5:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A5 PLY-2 bracing instance 1 of 2",
+      "expected_quantity": 2.4,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A5",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 2
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A5"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A5:02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A5 PLY-2 bracing instance 2 of 2",
+      "expected_quantity": 2.4,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A5",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 2
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A5"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A6:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A6 PTC bracing instance 1 of 2",
+      "expected_quantity": 0.4,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A6",
+        "brace_type": "PTC",
+        "schedule_instance_count": 2
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A6"
+    },
+    {
+      "object_ref": "lot16:structural:brace:A6:02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A6 PTC bracing instance 2 of 2",
+      "expected_quantity": 0.4,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A6",
+        "brace_type": "PTC",
+        "schedule_instance_count": 2
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:A6"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B1:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B1 PLY-2 bracing instance 1 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B1",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B1:02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B1 PLY-2 bracing instance 2 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B1",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B1:03",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B1 PLY-2 bracing instance 3 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B1",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B1:04",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B1 PLY-2 bracing instance 4 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B1",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B1:05",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B1 PLY-2 bracing instance 5 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B1",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B1:06",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B1 PLY-2 bracing instance 6 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B1",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B1:07",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B1 PLY-2 bracing instance 7 of 7",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B1",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 7
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B1"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B2:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B2 PLY-2 bracing instance 1 of 1",
+      "expected_quantity": 1.2,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B2",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 1
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B2"
+    },
+    {
+      "object_ref": "lot16:structural:brace:B3:01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B3 PLY-2 bracing instance 1 of 1",
+      "expected_quantity": 2.4,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B3",
+        "brace_type": "PLY-2",
+        "schedule_instance_count": 1
+      },
+      "source_location": "structural:p10:S10:bracing_schedule:B3"
+    },
+    {
+      "object_ref": "lot16:surface:floor:alfresco",
+      "description": "Alfresco tiled floor surface",
+      "expected_quantity": 28.1,
+      "unit": "m2",
+      "source_location": "architectural:p3:area_calculations:ALFRESCO_28.10_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "lot16:surface:floor:bed_1",
+      "description": "Bed 1 vinyl floor surface",
+      "expected_quantity": 12.64,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_1:declared_12.64_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "lot16:surface:floor:bed_2",
+      "description": "Bed 2 vinyl floor surface",
+      "expected_quantity": 11.88,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_2:declared_11.88_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "lot16:surface:floor:bed_3",
+      "description": "Bed 3 vinyl floor surface",
+      "expected_quantity": 11.7,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_3:declared_11.70_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "lot16:surface:floor:porch",
+      "description": "Porch tiled floor surface",
+      "expected_quantity": 3.02,
+      "unit": "m2",
+      "source_location": "architectural:p3:area_calculations:PORCH_3.02_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "lot16:surface:floor:residence_composite_region",
+      "physical_kind": "surface",
+      "object_family": "floor",
+      "description": "Source-defined enclosed residence floor region",
+      "expected_quantity": 193.24,
+      "unit": "m2",
+      "attributes": {
+        "region_granularity": "source_area_schedule_composite",
+        "finish_scope": "mixed internal floor finishes",
+        "closure_group": "lot16_declared_floor_area"
+      },
+      "source_location": "architectural:p3:area_calculations:RESIDENCE_193.24_m2"
+    },
+    {
+      "object_ref": "lot16:surface:roof:lower_left_5deg",
+      "physical_kind": "surface",
+      "object_family": "roof_sheathing",
+      "description": "Colorbond roof plane lower left 5deg",
+      "expected_quantity": 42.606731,
+      "unit": "m2",
+      "attributes": {
+        "plan_width_m": 6.54,
+        "plan_run_m": 6.49,
+        "pitch_degrees": 5,
+        "projected_area_m2": 42.4446,
+        "calculation": "plan_width_m * plan_run_m / cos(pitch_degrees)",
+        "material": "selected Colorbond roof sheeting",
+        "source_note": "roof plan is a guide and is cross-checked to elevation pitch labels"
+      },
+      "source_location": "architectural:p6:roof_plan:lower_left:6540_x_6490; elevations:p4-p5:pitch_crosscheck"
+    },
+    {
+      "object_ref": "lot16:surface:roof:lower_right_5deg",
+      "physical_kind": "surface",
+      "object_family": "roof_sheathing",
+      "description": "Colorbond roof plane lower right 5deg",
+      "expected_quantity": 88.963894,
+      "unit": "m2",
+      "attributes": {
+        "plan_width_m": 15.16,
+        "plan_run_m": 5.846,
+        "pitch_degrees": 5,
+        "projected_area_m2": 88.62536,
+        "calculation": "plan_width_m * plan_run_m / cos(pitch_degrees)",
+        "material": "selected Colorbond roof sheeting",
+        "source_note": "roof plan is a guide and is cross-checked to elevation pitch labels"
+      },
+      "source_location": "architectural:p6:roof_plan:lower_right:15160_x_5846; elevations:p4-p5:pitch_crosscheck"
+    },
+    {
+      "object_ref": "lot16:surface:roof:upper_left_12deg",
+      "physical_kind": "surface",
+      "object_family": "roof_sheathing",
+      "description": "Colorbond roof plane upper left 12deg",
+      "expected_quantity": 93.451131,
+      "unit": "m2",
+      "attributes": {
+        "plan_width_m": 16.15,
+        "plan_run_m": 5.66,
+        "pitch_degrees": 12,
+        "projected_area_m2": 91.409,
+        "calculation": "plan_width_m * plan_run_m / cos(pitch_degrees)",
+        "material": "selected Colorbond roof sheeting",
+        "source_note": "roof plan is a guide and is cross-checked to elevation pitch labels"
+      },
+      "source_location": "architectural:p6:roof_plan:upper_left:16150_x_5660; elevations:p4-p5:pitch_crosscheck"
+    },
+    {
+      "object_ref": "lot16:surface:roof:upper_right_12deg",
+      "physical_kind": "surface",
+      "object_family": "roof_sheathing",
+      "description": "Colorbond roof plane upper right 12deg",
+      "expected_quantity": 30.228567,
+      "unit": "m2",
+      "attributes": {
+        "plan_width_m": 9.24,
+        "plan_run_m": 3.2,
+        "pitch_degrees": 12,
+        "projected_area_m2": 29.568,
+        "calculation": "plan_width_m * plan_run_m / cos(pitch_degrees)",
+        "material": "selected Colorbond roof sheeting",
+        "source_note": "roof plan is a guide and is cross-checked to elevation pitch labels"
+      },
+      "source_location": "architectural:p6:roof_plan:upper_right:9240_x_3200; elevations:p4-p5:pitch_crosscheck"
+    },
+    {
+      "object_ref": "lot16:surface:site:driveway_concrete",
+      "description": "Driveway concrete surface",
+      "expected_quantity": 10.7,
+      "unit": "m2",
+      "source_location": "architectural:p2:site_plan:DRIVEWAY_CONCRETE_10.7_m2",
+      "physical_kind": "surface",
+      "object_family": "site_concrete"
+    },
+    {
+      "object_ref": "lot16:structural:telescopic_pier:01",
+      "object_family": "architectural_support_member",
+      "physical_kind": "structural_member",
+      "description": "Telescopic pier, floor-plan instance 1",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:floor_plan:TELESCOPIC_PIER_instance_1",
+      "attributes": {
+        "member_type": "telescopic_pier",
+        "engineering_instance_crosscheck": "not_project_tagged_in_structural_set"
+      }
+    },
+    {
+      "object_ref": "lot16:structural:telescopic_pier:02",
+      "object_family": "architectural_support_member",
+      "physical_kind": "structural_member",
+      "description": "Telescopic pier, floor-plan instance 2",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:floor_plan:TELESCOPIC_PIER_instance_2",
+      "attributes": {
+        "member_type": "telescopic_pier",
+        "engineering_instance_crosscheck": "not_project_tagged_in_structural_set"
+      }
+    },
+    {
+      "object_ref": "lot16:structural:timber_post:90x90:01",
+      "object_family": "architectural_support_member",
+      "physical_kind": "structural_member",
+      "description": "90x90 hardwood timber post called out on Elevation 1",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p4:elevation_1:90x90_HWD_Timber_Post",
+      "attributes": {
+        "member_type": "timber_post",
+        "section_mm": "90x90",
+        "material": "hardwood",
+        "engineering_instance_crosscheck": "not_project_tagged_in_structural_set"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:1200_entry_hinged:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 front entry hinged opening",
+      "expected_quantity": 2.52,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "hinged_external_entry_door",
+        "height_m": 2.1,
+        "width_m": 1.2,
+        "quantity_basis": "explicit floor-plan opening width x elevation FSL-to-joinery-line height"
+      },
+      "source_location": "architectural:p3:floor_plan:ENTRY_PORCH_1200_opening; architectural:p4-p5:elevations:FSL_to_JL_2100"
+    },
+    {
+      "object_ref": "lot16:opening:p3:0870_laundry_external:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "870 laundry external hinged opening",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "hinged_external_door",
+        "height_m": 2.1,
+        "width_m": 0.87,
+        "quantity_basis": "explicit floor-plan perimeter door width x elevation FSL-to-joinery-line height"
+      },
+      "source_location": "architectural:p3:floor_plan:LDRY_external_870; architectural:p5:elevation_4:door_between_1215_SGW_obs_and_2127_STACKER; architectural:p4-p5:elevations:FSL_to_JL_2100"
+    },
+    {
+      "object_ref": "lot16:opening:p3:0870_garage_personnel:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "870 garage personnel external hinged opening",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "hinged_external_personnel_door",
+        "height_m": 2.1,
+        "width_m": 0.87,
+        "quantity_basis": "explicit floor-plan perimeter door width x elevation FSL-to-joinery-line height"
+      },
+      "source_location": "architectural:p3:floor_plan:GARAGE_external_870; architectural:p4-p5:elevations:FSL_to_JL_2100"
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed2:3300_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 2 gross room-side wall face, 3.300m side 1",
+      "expected_quantity": 8.547,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_2:figured_3300mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.3,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed2:3300_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 2 gross room-side wall face, 3.300m side 2",
+      "expected_quantity": 8.547,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_2:figured_3300mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.3,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed2:3600_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 2 gross room-side wall face, 3.600m side 1",
+      "expected_quantity": 9.324,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_2:figured_3600mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.6,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed2:3600_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 2 gross room-side wall face, 3.600m side 2",
+      "expected_quantity": 9.324,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_2:figured_3600mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.6,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed3:3250_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 3 gross room-side wall face, 3.250m side 1",
+      "expected_quantity": 8.4175,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_3:figured_3250mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.25,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed3:3250_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 3 gross room-side wall face, 3.250m side 2",
+      "expected_quantity": 8.4175,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_3:figured_3250mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.25,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed3:3600_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 3 gross room-side wall face, 3.600m side 1",
+      "expected_quantity": 9.324,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_3:figured_3600mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.6,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed3:3600_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 3 gross room-side wall face, 3.600m side 2",
+      "expected_quantity": 9.324,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_3:figured_3600mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.6,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bath:elev1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bath gross internal wall face, elevation 1",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_Elevation_1:1200_finished_wall_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.2,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bath:shower",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bath gross internal shower wall face",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_SHR_Elev:1200_finished_wall_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.2,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bath:elev4",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bath gross internal wall face, elevation 4",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_Elevation_4:1200_finished_wall_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.2,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:ensuite:elev1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Ensuite gross internal wall face, elevation 1",
+      "expected_quantity": 4.7138,
+      "unit": "m2",
+      "source_location": "architectural:p11:Ensuite_Elevation_1:1820_finished_wall_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.82,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:ensuite:elev2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Ensuite gross internal wall face, elevation 2",
+      "expected_quantity": 4.3771,
+      "unit": "m2",
+      "source_location": "architectural:p11:Ensuite_Elevation_2:1690_finished_wall_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.69,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:wc:elev1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "WC gross internal wall face, elevation 1",
+      "expected_quantity": 2.6677,
+      "unit": "m2",
+      "source_location": "architectural:p11:WC_Elevation_1:1030_finished_wall_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.03,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:laundry:elev1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Laundry gross internal wall face, elevation 1",
+      "expected_quantity": 8.5729,
+      "unit": "m2",
+      "source_location": "architectural:p10:Laundry_Elevation_1:3310_finished_wall_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 3.31,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:laundry:elev2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Laundry gross internal wall face, elevation 2",
+      "expected_quantity": 5.7239,
+      "unit": "m2",
+      "source_location": "architectural:p10:Laundry_Elevation_2:1090+70+1050_finished_dimension_chain=2210; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 2.21,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_internal_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_finish_scope_and_ceiling_intersections_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed1:3510_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 1 gross room-side wall face, 3.510m side",
+      "expected_quantity": 9.0909,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_1:figured_3510mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.51,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed1:3510_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 1 gross room-side wall face, 3.510m side",
+      "expected_quantity": 9.0909,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_1:figured_3510mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.51,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed1:3600_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 1 gross room-side wall face, 3.600m side",
+      "expected_quantity": 9.324,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_1:figured_3600mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.6,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:internal_wall_gross:bed1:3600_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bed 1 gross room-side wall face, 3.600m side",
+      "expected_quantity": 9.324,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_1:figured_3600mm_room_dimension; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_room_face_width_m": 3.6,
+        "wall_height_to_top_plate_m": 2.59,
+        "surface_layer": "gross_room_side_wall_face_to_top_plate_datum",
+        "openings_deducted": false,
+        "raked_ceiling_extension_included": false,
+        "denominator_readiness": "draft_only_until_openings_and_ceiling_intersection_are_resolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile_gross:bath:elev1",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "physical_kind": "surface",
+      "description": "Bath tiled wall gross face, elevation 1",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_Elevation_1:1200_finished_wall_dimension; architectural:p3:floor_plan:TILED_WALL_TO_CEILING; architectural:p4-p5:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.2,
+        "tile_height_to_top_plate_m": 2.59,
+        "calculation": "1.200m * 2.590m",
+        "quantity_basis": "gross explicitly tiled wall face to flat ceiling/top-plate datum",
+        "denominator_readiness": "draft_only_until_remaining_bath_face_niche_opening_and_return_deductions_are_closed"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile_gross:bath:shower",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "physical_kind": "surface",
+      "description": "Bath tiled shower wall gross face",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_SHR_Elev:1200_finished_wall_dimension; architectural:p3:floor_plan:TILED_WALL_TO_CEILING; architectural:p4-p5:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.2,
+        "tile_height_to_top_plate_m": 2.59,
+        "calculation": "1.200m * 2.590m",
+        "quantity_basis": "gross explicitly tiled wall face to flat ceiling/top-plate datum",
+        "denominator_readiness": "draft_only_until_remaining_bath_face_niche_opening_and_return_deductions_are_closed"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile_gross:bath:elev4",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "physical_kind": "surface",
+      "description": "Bath tiled wall gross face, elevation 4",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_Elevation_4:1200_finished_wall_dimension; architectural:p3:floor_plan:TILED_WALL_TO_CEILING; architectural:p4-p5:FSL_68560_to_TP_71150",
+      "attributes": {
+        "finished_face_width_m": 1.2,
+        "tile_height_to_top_plate_m": 2.59,
+        "calculation": "1.200m * 2.590m",
+        "quantity_basis": "gross explicitly tiled wall face to flat ceiling/top-plate datum",
+        "denominator_readiness": "draft_only_until_remaining_bath_face_niche_opening_and_return_deductions_are_closed"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile:bath_shower_full_height:01",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Bath shower wall tile finish to ceiling",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:TILED_WALL_TO_CEILING_leader_to_bath_shower_wall; architectural:p11:Bath_SHR_Elev:1200_finished_wall_width; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "host_wall_ref": "lot16:surface:internal_wall_gross:bath:shower",
+        "finished_face_width_m": 1.2,
+        "tile_height_m": 2.59,
+        "calculation": "finished_face_width_m * tile_height_m",
+        "finish_scope": "tiled_wall_to_ceiling",
+        "openings_in_host_face": false,
+        "net_finish_area_ready": true
+      }
+    },
+    {
+      "object_ref": "lot16:surface:ceiling:bed1_raked_12deg",
+      "object_family": "ceiling_plane",
+      "physical_kind": "surface",
+      "description": "Bed 1 raked ceiling plane following 12 degree roof pitch",
+      "expected_quantity": 12.922385,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_1_12.64_m2_and_RAKED_CEILING; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof",
+      "attributes": {
+        "plan_projection_area_m2": 12.64,
+        "pitch_degrees": 12,
+        "calculation": "12.64 / cos(12deg)",
+        "ceiling_geometry": "raked",
+        "denominator_readiness": "draft_only_until_remaining_ceiling_planes_and_raked_intersections_are_closed"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:ceiling:porch_raked_12deg",
+      "object_family": "ceiling_plane",
+      "physical_kind": "surface",
+      "description": "Front porch raked ceiling plane following 12 degree roof pitch",
+      "expected_quantity": 3.087469,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:PORCH_[RAKED_CEILING]; architectural:p3:area_calculations:PORCH_3.02_m2; architectural:p4:Elevation_1:12deg_front_roof",
+      "attributes": {
+        "plan_projection_area_m2": 3.02,
+        "pitch_degrees": 12,
+        "calculation": "3.02 / cos(12deg)",
+        "ceiling_geometry": "raked",
+        "source_closed_plane": true,
+        "denominator_readiness": "source_closed_plane_candidate"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile_gross:ensuite:elev1",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "physical_kind": "surface",
+      "description": "Ensuite elevation 1 full-height gross tiled wall face",
+      "expected_quantity": 4.7138,
+      "unit": "m2",
+      "source_location": "architectural:p11:Ensuite_Elevation_1:full_height_tile_grid; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "width_m": 1.82,
+        "tile_height_to_top_plate_m": 2.59,
+        "host_gross_wall_surface_ref": "lot16:surface:internal_wall_gross:ensuite:elev1",
+        "quantity_basis": "full-height tile grid shown on source internal elevation",
+        "deductions_applied": false,
+        "denominator_readiness": "draft_only_until_all_niches_fixtures_returns_and_wet_area_faces_are_closed"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile_gross:ensuite:elev2",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "physical_kind": "surface",
+      "description": "Ensuite elevation 2 full-height gross tiled wall face",
+      "expected_quantity": 4.3771,
+      "unit": "m2",
+      "source_location": "architectural:p11:Ensuite_Elevation_2:full_height_tile_grid; architectural:p4-p5:elevations:FSL_68560_to_TP_71150",
+      "attributes": {
+        "width_m": 1.69,
+        "tile_height_to_top_plate_m": 2.59,
+        "host_gross_wall_surface_ref": "lot16:surface:internal_wall_gross:ensuite:elev2",
+        "quantity_basis": "full-height tile grid shown on source internal elevation",
+        "deductions_applied": false,
+        "denominator_readiness": "draft_only_until_all_niches_fixtures_returns_and_wet_area_faces_are_closed"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p11:bath_elev4_niche:01",
+      "object_family": "wet_area_wall_tile_deduction_opening",
+      "physical_kind": "opening_surface",
+      "description": "Bath elevation 4 niche face opening",
+      "expected_quantity": 0.45,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_Elevation_4:900_wide_x_500_high_niche",
+      "attributes": {
+        "width_m": 0.9,
+        "height_m": 0.5,
+        "calculation": "width_m * height_m",
+        "host_gross_surface_ref": "lot16:surface:wall_tile_gross:bath:elev4",
+        "niche_return_depth_resolved": false,
+        "denominator_readiness": "deduction_face_closed_but_niche_returns_unresolved"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p11:ensuite_elev2_niche:01",
+      "object_family": "wet_area_wall_tile_deduction_opening",
+      "physical_kind": "opening_surface",
+      "description": "Ensuite elevation 2 niche face opening",
+      "expected_quantity": 0.45,
+      "unit": "m2",
+      "source_location": "architectural:p11:Ensuite_Elevation_2:900_wide_x_500_high_niche",
+      "attributes": {
+        "width_m": 0.9,
+        "height_m": 0.5,
+        "calculation": "width_m * height_m",
+        "host_gross_surface_ref": "lot16:surface:wall_tile_gross:ensuite:elev2",
+        "niche_return_depth_resolved": false,
+        "denominator_readiness": "deduction_face_closed_but_niche_returns_unresolved"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:ceiling:garage_flat",
+      "object_family": "ceiling_plane",
+      "physical_kind": "surface",
+      "description": "Garage flat ceiling plane",
+      "expected_quantity": 38.94,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:GARAGE_[FLAT_CEILING]:6000x6490_figured_dimensions",
+      "attributes": {
+        "ceiling_type": "flat",
+        "plan_width_m": 6,
+        "plan_length_m": 6.49,
+        "calculation": "plan_width_m * plan_length_m",
+        "raked_adjustment_required": false,
+        "source_closed_plane": true,
+        "denominator_readiness": "source_closed_plane_candidate"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:floor:garage",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Garage epoxy floor surface",
+      "expected_quantity": 38.94,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:GARAGE:6000x6490_figured_dimensions:EPOXY",
+      "attributes": {
+        "width_m": 6,
+        "length_m": 6.49,
+        "calculation": "width_m * length_m",
+        "finish": "epoxy",
+        "quantity_basis": "figured internal garage dimensions"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_bed3",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: bed3",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_bed3:bbox_627.5_276.9_634.9_287.8; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          627.5,
+          276.9,
+          634.9,
+          287.8
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_bed2",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: bed2",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_bed2:bbox_593.8_276.9_601.1_287.8; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          593.8,
+          276.9,
+          601.1,
+          287.8
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_bath",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: bath",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_bath:bbox_586.7_374.9_594.1_385.8; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          586.7,
+          374.9,
+          594.1,
+          385.8
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_laundry",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: laundry",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_laundry:bbox_690.2_343.4_697.6_354.2; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          690.2,
+          343.4,
+          697.6,
+          354.2
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_bed1",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: bed1",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_bed1:bbox_415.6_276.5_423_287.3; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          415.6,
+          276.5,
+          423,
+          287.3
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_wir",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: wir",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_wir:bbox_439.7_253.8_450.6_261.2; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          439.7,
+          253.8,
+          450.6,
+          261.2
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_ensuite",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: ensuite",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_ensuite:bbox_439.7_240_450.6_247.4; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          439.7,
+          240,
+          450.6,
+          247.4
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_wc",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm cavity-slider room-access opening: wc",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_wc:bbox_638.6_324.2_655.3_329.9; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          638.6,
+          324.2,
+          655.3,
+          329.9
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_access:0870_garage_to_entry",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 870 mm hinged room-access opening: garage to entry",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:870_garage_to_entry:bbox_567_354.6_574.4_365.4; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan 870 opening width x FSL-to-JL 2100mm joinery-height datum",
+        "source_bbox_pdf_pt": [
+          567,
+          354.6,
+          574.4,
+          365.4
+        ],
+        "wall_deduction_scope": "internal_room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_joinery:1765_bed2_robe_sliding",
+      "object_family": "internal_sliding_joinery_opening",
+      "physical_kind": "opening_surface",
+      "description": "Bed 2 robe opening with two sliding doors",
+      "expected_quantity": 3.7065,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_2_ROBE_2_sld_drs:1765_figured_opening_length; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "sliding_robe_joinery",
+        "width_m": 1.765,
+        "height_m": 2.1,
+        "calculation": "1.765m * 2.100m",
+        "quantity_basis": "figured robe opening length x FSL-to-JL 2100mm joinery-height datum",
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_joinery:1765_bed3_robe_sliding",
+      "object_family": "internal_sliding_joinery_opening",
+      "physical_kind": "opening_surface",
+      "description": "Bed 3 robe opening with two sliding doors",
+      "expected_quantity": 3.7065,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:BED_3_ROBE_2_sld_drs:1765_figured_opening_length; architectural:p4-p5:elevations:FSL_68560_to_JL_70660",
+      "attributes": {
+        "opening_type": "sliding_robe_joinery",
+        "width_m": 1.765,
+        "height_m": 2.1,
+        "calculation": "1.765m * 2.100m",
+        "quantity_basis": "figured robe opening length x FSL-to-JL 2100mm joinery-height datum",
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      }
+    },
+    {
+      "object_ref": "lot16:opening:p3:internal_open_archway:2110_square_set",
+      "object_family": "internal_open_archway",
+      "physical_kind": "opening_surface",
+      "description": "Explicit 2110 square-set internal opening",
+      "expected_quantity": 2.1,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:2110_SQ_SET_OPENING",
+      "attributes": {
+        "opening_type": "square_set_opening",
+        "width_m": 1.0,
+        "height_m": 2.1,
+        "calculation": "1.000m * 2.100m",
+        "quantity_basis": "source opening code 2110 = 2100mm high x 1000mm wide",
+        "wall_deduction_scope": "explicit_open_archway"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:ceiling:ensuite_raked_12deg",
+      "object_family": "ceiling_plane",
+      "physical_kind": "surface",
+      "description": "Ensuite raked ceiling plane following 12 degree roof pitch",
+      "expected_quantity": 5.613672,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:ENS_[RAKED_CEILING]:2890x1900_figured_dimensions; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof",
+      "attributes": {
+        "plan_width_m": 2.89,
+        "plan_length_m": 1.9,
+        "plan_projection_area_m2": 5.491,
+        "pitch_degrees": 12,
+        "calculation": "2.890m * 1.900m / cos(12deg)",
+        "ceiling_geometry": "raked",
+        "source_closed_plane": true,
+        "denominator_readiness": "source_closed_plane_candidate"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:ceiling:wir_raked_12deg",
+      "object_family": "ceiling_plane",
+      "physical_kind": "surface",
+      "description": "WIR raked ceiling plane following 12 degree roof pitch",
+      "expected_quantity": 4.786394,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:WIR_[RAKED_CEILING]:2890x1620_figured_dimensions; architectural:p7:Section_1:raked_ceiling_beneath_12deg_roof",
+      "attributes": {
+        "plan_width_m": 2.89,
+        "plan_length_m": 1.62,
+        "plan_projection_area_m2": 4.6818,
+        "pitch_degrees": 12,
+        "calculation": "2.890m * 1.620m / cos(12deg)",
+        "ceiling_geometry": "raked",
+        "source_closed_plane": true,
+        "denominator_readiness": "source_closed_plane_candidate"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:floor:ensuite",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Ensuite tiled floor surface",
+      "expected_quantity": 5.491,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:ENS:TILES:2890x1900_figured_dimensions",
+      "attributes": {
+        "width_m": 2.89,
+        "length_m": 1.9,
+        "calculation": "2.890m * 1.900m",
+        "finish": "tiles",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "lot16_declared_floor_area"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:floor:wir",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "WIR vinyl floor surface",
+      "expected_quantity": 4.6818,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:WIR:VINYL:2890x1620_figured_dimensions",
+      "attributes": {
+        "width_m": 2.89,
+        "length_m": 1.62,
+        "calculation": "2.890m * 1.620m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "lot16_declared_floor_area"
+      }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile:bath_elev4_flat_after_niche",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Bath elevation 4 flat tile face after niche opening deduction",
+      "expected_quantity": 2.658,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_Elevation_4:1200x2590_gross_less_900x500_niche_face",
+      "attributes": {
+        "host_gross_surface_ref": "lot16:surface:wall_tile_gross:bath:elev4",
+        "niche_deduction_ref": "lot16:opening:p11:bath_elev4_niche:01",
+        "gross_area_m2": 3.108,
+        "niche_face_deduction_m2": 0.45,
+        "calculation": "3.108 - 0.450",
+        "niche_returns_included": false,
+        "net_flat_face_area_ready": true
+      }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile:ensuite_elev2_topplate_flat_after_niche",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Ensuite elevation 2 tile face to top-plate datum after niche opening deduction",
+      "expected_quantity": 3.9271,
+      "unit": "m2",
+      "source_location": "architectural:p11:Ensuite_Elevation_2:1690x2590_gross_less_900x500_niche_face",
+      "attributes": {
+        "host_gross_surface_ref": "lot16:surface:wall_tile_gross:ensuite:elev2",
+        "niche_deduction_ref": "lot16:opening:p11:ensuite_elev2_niche:01",
+        "gross_area_to_top_plate_m2": 4.3771,
+        "niche_face_deduction_m2": 0.45,
+        "calculation": "4.3771 - 0.450",
+        "niche_returns_included": false,
+        "raked_extension_above_top_plate_included": false,
+        "top_plate_flat_portion_ready": true
+      }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile:bath_elev1_net",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Bath elevation 1 full-height tile finish",
+      "expected_quantity": 3.108,
+      "unit": "m2",
+      "source_location": "architectural:p11:Bath_Elevation_1:1200_finished_width_full_tile_grid_to_TP",
+      "attributes": {
+        "host_gross_surface_ref": "lot16:surface:wall_tile_gross:bath:elev1",
+        "finished_face_width_m": 1.2,
+        "tile_height_m": 2.59,
+        "calculation": "1.200m * 2.590m",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      }
+    },
+    {
+      "object_ref": "lot16:surface:wall_tile:ensuite_elev1_topplate_net",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Ensuite elevation 1 tile finish to top-plate datum",
+      "expected_quantity": 4.7138,
+      "unit": "m2",
+      "source_location": "architectural:p11:Ensuite_Elevation_1:1820_finished_width_full_tile_grid_to_TP",
+      "attributes": {
+        "host_gross_surface_ref": "lot16:surface:wall_tile_gross:ensuite:elev1",
+        "finished_face_width_m": 1.82,
+        "tile_height_to_top_plate_m": 2.59,
+        "calculation": "1.820m * 2.590m",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "raked_extension_above_top_plate_included": false,
+        "top_plate_flat_portion_ready": true
+      }
+    }
+  ],
+  "closure_checks": [
+    {
+      "check_id": "lot16:closure:declared_floor_area",
+      "component_object_refs": [
+        "lot16:surface:floor:residence_composite_region",
+        "lot16:surface:floor:alfresco",
+        "lot16:surface:floor:porch"
+      ],
+      "component_sum_m2": 224.36,
+      "declared_total_m2": 224.36,
+      "difference_m2": 0,
+      "source_location": "architectural:p3:area_calculations"
+    },
+    {
+      "check_id": "lot16:closure:wall_bracing_schedule",
+      "source_location": "structural:p10:S10:ground_floor_wall_bracing_plan",
+      "schedule_direction_a_resistance_required_kn": 98.9,
+      "schedule_direction_a_resistance_provided_kn": 104.96,
+      "schedule_direction_b_resistance_required_kn": 45.7,
+      "schedule_direction_b_resistance_provided_kn": 51.48,
+      "message": "test(benchmark): close Lot16 bracing schedule truth",
+      "component_object_refs": [
+        "lot16:structural:brace:A1:01",
+        "lot16:structural:brace:A2:01",
+        "lot16:structural:brace:A2:02",
+        "lot16:structural:brace:A2:03",
+        "lot16:structural:brace:A2:04",
+        "lot16:structural:brace:A2:05",
+        "lot16:structural:brace:A2:06",
+        "lot16:structural:brace:A2:07",
+        "lot16:structural:brace:A3:01",
+        "lot16:structural:brace:A4:01",
+        "lot16:structural:brace:A4:02",
+        "lot16:structural:brace:A5:01",
+        "lot16:structural:brace:A5:02",
+        "lot16:structural:brace:A6:01",
+        "lot16:structural:brace:A6:02",
+        "lot16:structural:brace:B1:01",
+        "lot16:structural:brace:B1:02",
+        "lot16:structural:brace:B1:03",
+        "lot16:structural:brace:B1:04",
+        "lot16:structural:brace:B1:05",
+        "lot16:structural:brace:B1:06",
+        "lot16:structural:brace:B1:07",
+        "lot16:structural:brace:B2:01",
+        "lot16:structural:brace:B3:01"
+      ],
+      "object_count": 24,
+      "total_length_m": 27.9
+    },
+    {
+      "check_id": "lot16:control:typed_external_opening_census",
+      "component_object_refs": [
+        "lot16:opening:p3:0615_sgw:01",
+        "lot16:opening:p3:0621_sgw:01",
+        "lot16:opening:p3:0630_fg:01",
+        "lot16:opening:p3:0906_sgw_obs:01",
+        "lot16:opening:p3:1215_sgw_obs:01",
+        "lot16:opening:p3:1218_sgw:01",
+        "lot16:opening:p3:1218_sgw:02",
+        "lot16:opening:p3:2124_corner_stack:01",
+        "lot16:opening:p3:2127_stacker:01",
+        "lot16:opening:p3:2148_panel_lift:01"
+      ],
+      "typed_opening_count": 10,
+      "typed_opening_area_m2": 31.41,
+      "complete_for_typed_dimensioned_labels": true,
+      "complete_for_all_openings": false,
+      "residual_unresolved": [
+        "custom_front_windows_measure_on_site"
+      ],
+      "source_locations": [
+        "architectural:p3:floor_plan:typed_external_opening_labels",
+        "architectural:p4-p5:elevations:typed_opening_crosscheck",
+        "architectural:p4:elevation_1:CUSTOM_WINDOWS_TO_FRONT_MEASURE_ON_SITE"
+      ],
+      "untyped_external_hinged_doors_closed_by_separate_control": true
+    },
+    {
+      "check_id": "lot16:control:wall_bracing_resistance",
+      "direction_A": {
+        "required_kN": 98.9,
+        "provided_kN": 104.96,
+        "margin_kN": 6.06
+      },
+      "direction_B": {
+        "required_kN": 45.7,
+        "provided_kN": 51.48,
+        "margin_kN": 5.78
+      },
+      "source_location": "structural:p10:S10:GROUND_FLOOR_WALL_BRACING_PLAN",
+      "note": "Independent engineering control over the already-closed 24-member bracing census; not a denominator quantity."
+    },
+    {
+      "check_id": "lot16:closure:explicit_architectural_support_census",
+      "component_object_refs": [
+        "lot16:structural:telescopic_pier:01",
+        "lot16:structural:telescopic_pier:02",
+        "lot16:structural:timber_post:90x90:01"
+      ],
+      "telescopic_pier_count": 2,
+      "hardwood_post_count": 1,
+      "object_count": 3,
+      "complete_for_explicitly_labelled_architectural_supports": true,
+      "structural_engineering_instance_schedule_available": false,
+      "source_locations": [
+        "architectural:p3:floor_plan:two_TELESCOPIC_PIER_labels",
+        "architectural:p4:elevation_1:90x90_HWD_Timber_Post"
+      ]
+    },
+    {
+      "check_id": "lot16:control:known_external_opening_census",
+      "component_object_refs": [
+        "lot16:opening:p3:0615_sgw:01",
+        "lot16:opening:p3:0621_sgw:01",
+        "lot16:opening:p3:0630_fg:01",
+        "lot16:opening:p3:0906_sgw_obs:01",
+        "lot16:opening:p3:1215_sgw_obs:01",
+        "lot16:opening:p3:1218_sgw:01",
+        "lot16:opening:p3:1218_sgw:02",
+        "lot16:opening:p3:2124_corner_stack:01",
+        "lot16:opening:p3:2127_stacker:01",
+        "lot16:opening:p3:2148_panel_lift:01",
+        "lot16:opening:p3:1200_entry_hinged:01",
+        "lot16:opening:p3:0870_laundry_external:01",
+        "lot16:opening:p3:0870_garage_personnel:01"
+      ],
+      "known_opening_count": 13,
+      "known_opening_area_m2": 37.584,
+      "complete_for_all_dimensioned_and_plan_width_openings": true,
+      "complete_for_all_external_openings": false,
+      "residual_unresolved": [
+        "custom_front_windows_measure_on_site"
+      ],
+      "source_locations": [
+        "architectural:p3:floor_plan:typed_openings_and_three_perimeter_hinged_door_widths",
+        "architectural:p4-p5:elevations:FSL_to_JL_2100_and_opening_crosscheck",
+        "architectural:p4:elevation_1:CUSTOM_WINDOWS_TO_FRONT_MEASURE_ON_SITE"
+      ]
+    },
+    {
+      "check_id": "lot16:control:roof_sheathing_geometry",
+      "component_object_refs": [
+        "lot16:surface:roof:lower_left_5deg",
+        "lot16:surface:roof:lower_right_5deg",
+        "lot16:surface:roof:upper_left_12deg",
+        "lot16:surface:roof:upper_right_12deg"
+      ],
+      "roof_plane_count": 4,
+      "total_projected_plan_area_m2": 252.04696,
+      "total_sloped_sheathing_area_m2": 255.250323,
+      "pitch_groups_degrees": [
+        5,
+        12
+      ],
+      "figured_dimension_source": "architectural:p6:roof_plan:6540x6490;15160x5846;16150x5660;9240x3200",
+      "pitch_crosscheck_source": "architectural:p4-p5:elevations:5deg_and_12deg",
+      "complete_for_architectural_guide_geometry": true,
+      "final_engineering_crosscheck_complete": false,
+      "blocker": "architectural p6 roof plan is GUIDE ONLY and requires an engineer stormwater drainage plan; supplied structural package has no stormwater, catchment, or downpipe design content, so final roof-plane truth must remain unresolved",
+      "engineering_crosscheck_search": {
+        "supplied_document": "4. Structural Engineering - Lot 16 Power.pdf",
+        "supplied_document_sha256": "add9dd4b0bd11554a13562ad0830e80847db1dcb043489e452a6c8d95a3b6cda",
+        "search_terms": [
+          "stormwater",
+          "catchment",
+          "downpipe"
+        ],
+        "matches_found": {
+          "stormwater": 0,
+          "catchment": 0,
+          "downpipe": 0
+        },
+        "conclusion": "required engineering stormwater drainage plan is not present in the supplied structural package"
+      }
+    },
+    {
+      "check_id": "lot16:blocker:custom_front_glazing_measure_on_site",
+      "status": "UNRESOLVED_SOURCE_LIMITATION",
+      "source_location": "architectural:p4:elevation_1:CUSTOM_WINDOWS_TO_FRONT_MEASURE_ON_SITE",
+      "exact_dimensions_available": false,
+      "scaling_substitute_allowed": false,
+      "reason": "source explicitly requires site measurement; no exact figured custom-front glazing dimensions are supplied in the frozen package",
+      "benchmark_rule": "do not promote custom front glazing to denominator truth until independent exact dimensions are supplied"
+    },
+    {
+      "check_id": "lot16:control:bed2_bed3_gross_wall_faces",
+      "component_object_refs": [
+        "lot16:surface:internal_wall_gross:bed2:3300_side_1",
+        "lot16:surface:internal_wall_gross:bed2:3300_side_2",
+        "lot16:surface:internal_wall_gross:bed2:3600_side_1",
+        "lot16:surface:internal_wall_gross:bed2:3600_side_2",
+        "lot16:surface:internal_wall_gross:bed3:3250_side_1",
+        "lot16:surface:internal_wall_gross:bed3:3250_side_2",
+        "lot16:surface:internal_wall_gross:bed3:3600_side_1",
+        "lot16:surface:internal_wall_gross:bed3:3600_side_2"
+      ],
+      "object_count": 8,
+      "bed2_floor_dimension_closure": {
+        "figured_dimensions_m": [
+          3.3,
+          3.6
+        ],
+        "calculated_floor_area_m2": 11.88,
+        "source_declared_floor_area_m2": 11.88,
+        "difference_m2": 0
+      },
+      "bed3_floor_dimension_closure": {
+        "figured_dimensions_m": [
+          3.25,
+          3.6
+        ],
+        "calculated_floor_area_m2": 11.7,
+        "source_declared_floor_area_m2": 11.7,
+        "difference_m2": 0
+      },
+      "wall_height_to_top_plate_m": 2.59,
+      "bed2_gross_wall_area_m2": 35.742,
+      "bed3_gross_wall_area_m2": 35.483,
+      "gross_wall_area_m2": 71.225,
+      "complete_for_bed2_bed3_top_plate_rectangular_wall_faces": true,
+      "openings_and_ceiling_intersections_resolved": false,
+      "source_locations": [
+        "architectural:p3:floor_plan:BED_2_3300x3600_and_11.88m2",
+        "architectural:p3:floor_plan:BED_3_3250x3600_and_11.70m2",
+        "architectural:p4-p5:elevations:FSL_68560_TP_71150"
+      ]
+    },
+    {
+      "check_id": "lot16:control:explicit_internal_elevation_wall_faces",
+      "component_object_refs": [
+        "lot16:surface:internal_wall_gross:bath:elev1",
+        "lot16:surface:internal_wall_gross:bath:shower",
+        "lot16:surface:internal_wall_gross:bath:elev4",
+        "lot16:surface:internal_wall_gross:ensuite:elev1",
+        "lot16:surface:internal_wall_gross:ensuite:elev2",
+        "lot16:surface:internal_wall_gross:wc:elev1",
+        "lot16:surface:internal_wall_gross:laundry:elev1",
+        "lot16:surface:internal_wall_gross:laundry:elev2"
+      ],
+      "object_count": 8,
+      "component_sum_m2": 35.3794,
+      "source_locations": [
+        "architectural:p10:Internal_Elevations:Laundry_1-2",
+        "architectural:p11:Internal_Elevations_2:Bath_1_SHR_4;Ensuite_1-2;WC_1",
+        "architectural:p4-p5:elevations:FSL_68560_to_TP_71150"
+      ],
+      "net_denominator_ready": false,
+      "reason": "source-dimensioned gross wall faces close to the 2.590m top-plate datum; openings, finish partitioning and any raked-ceiling extensions remain unresolved"
+    },
+    {
+      "check_id": "lot16:control:bed1_gross_wall_faces",
+      "component_object_refs": [
+        "lot16:surface:internal_wall_gross:bed1:3510_side_1",
+        "lot16:surface:internal_wall_gross:bed1:3510_side_2",
+        "lot16:surface:internal_wall_gross:bed1:3600_side_1",
+        "lot16:surface:internal_wall_gross:bed1:3600_side_2"
+      ],
+      "object_count": 4,
+      "bed1_floor_dimension_closure": {
+        "figured_dimensions_m": [
+          3.51,
+          3.6
+        ],
+        "calculated_floor_area_m2": 12.636,
+        "source_declared_floor_area_m2": 12.64,
+        "rounding_difference_m2": 0.004
+      },
+      "wall_height_to_top_plate_m": 2.59,
+      "gross_wall_area_m2": 36.8298,
+      "complete_for_bed1_top_plate_rectangular_wall_faces": true,
+      "openings_and_raked_ceiling_intersection_resolved": false,
+      "source_locations": [
+        "architectural:p3:floor_plan:BED_1:3510x3600_figured_dimensions_and_12.64m2_declared_area",
+        "architectural:p4-p5:elevations:FSL_68560_to_TP_71150"
+      ]
+    },
+    {
+      "check_id": "lot16:blocker:unscheduled_structural_members",
+      "status": "UNRESOLVED_SOURCE_LIMITATION",
+      "source_locations": [
+        "structural:p1:legend:L_LINTEL_BY_OTHERS_IF_NOT_DEFINED",
+        "structural:p1:legend:RB_ROOF_BEAM_BY_OTHERS_IF_NOT_DEFINED",
+        "structural:p1:legend:FB_FLOOR_BEAM_BY_OTHERS_IF_NOT_DEFINED",
+        "structural:p1:legend:GT_GIRDER_TRUSS_BY_OTHERS",
+        "structural:p3-p9:typical_NTS_connection_and_member_details",
+        "structural:p10:S10:closed_wall_bracing_plan"
+      ],
+      "instance_specific_bracing_schedule_available": true,
+      "remaining_instance_specific_beam_lintel_truss_schedule_available": false,
+      "typical_detail_scaling_allowed": false,
+      "reason": "the supplied engineering package closes the bracing instance universe but supplies generic/NTS details or by-others member categories for the remaining beam/lintel/truss families rather than a project instance schedule",
+      "benchmark_rule": "do not instantiate generic or by-others structural members into truth without a project-specific tagged schedule or dimensioned layout"
+    },
+    {
+      "check_id": "lot16:control:explicit_bath_tile_gross_faces",
+      "component_object_refs": [
+        "lot16:surface:wall_tile_gross:bath:elev1",
+        "lot16:surface:wall_tile_gross:bath:shower",
+        "lot16:surface:wall_tile_gross:bath:elev4"
+      ],
+      "object_count": 3,
+      "component_sum_m2": 9.324,
+      "source_locations": [
+        "architectural:p11:Bath_Elevation_1_Bath_SHR_Elev_Bath_Elevation_4:1200_each",
+        "architectural:p3:floor_plan:TILED_WALL_TO_CEILING",
+        "architectural:p4-p5:FSL_68560_to_TP_71150"
+      ],
+      "net_denominator_ready": false,
+      "reason": "three explicitly dimensioned full-height bath tile faces are gross-source-closed; remaining bath face, niche/opening deductions and returns remain unresolved"
+    },
+    {
+      "check_id": "lot16:closure:bath_shower_full_height_tile_face",
+      "component_object_refs": [
+        "lot16:surface:wall_tile:bath_shower_full_height:01"
+      ],
+      "host_wall_ref": "lot16:surface:internal_wall_gross:bath:shower",
+      "object_count": 1,
+      "tile_area_m2": 3.108,
+      "complete_for_this_explicit_face": true,
+      "complete_for_project_wet_area_tile_universe": false,
+      "source_locations": [
+        "architectural:p3:floor_plan:TILED_WALL_TO_CEILING",
+        "architectural:p11:Bath_SHR_Elev:1200_finished_wall_dimension",
+        "architectural:p4-p5:elevations:FSL_68560_to_TP_71150"
+      ]
+    },
+    {
+      "check_id": "lot16:control:bed1_raked_ceiling",
+      "component_object_refs": [
+        "lot16:surface:ceiling:bed1_raked_12deg"
+      ],
+      "component_sum_m2": 12.922385,
+      "source_locations": [
+        "architectural:p3:BED_1:12.64_m2_and_RAKED_CEILING",
+        "architectural:p7:Section_1:12deg_roof_with_raked_ceiling"
+      ],
+      "net_denominator_ready": false,
+      "reason": "Bed 1 raked ceiling is source-closed; remaining raked/flat ceiling regions are unresolved."
+    },
+    {
+      "check_id": "lot16:closure:porch_raked_ceiling",
+      "component_object_refs": [
+        "lot16:surface:ceiling:porch_raked_12deg"
+      ],
+      "plan_projection_area_m2": 3.02,
+      "raked_surface_area_m2": 3.087469,
+      "pitch_degrees": 12,
+      "source_locations": [
+        "architectural:p3:floor_plan:PORCH_[RAKED_CEILING]",
+        "architectural:p3:area_calculations:PORCH_3.02_m2",
+        "architectural:p4:Elevation_1:12deg_front_roof"
+      ],
+      "source_closed": true,
+      "complete_for_project_ceiling_universe": false
+    },
+    {
+      "check_id": "lot16:control:partial_wet_area_tile_faces",
+      "component_object_refs": [
+        "lot16:surface:wall_tile_gross:bath:elev1",
+        "lot16:surface:wall_tile_gross:bath:shower",
+        "lot16:surface:wall_tile_gross:bath:elev4",
+        "lot16:surface:wall_tile_gross:ensuite:elev1",
+        "lot16:surface:wall_tile_gross:ensuite:elev2"
+      ],
+      "niche_deduction_object_refs": [
+        "lot16:opening:p11:bath_elev4_niche:01",
+        "lot16:opening:p11:ensuite_elev2_niche:01"
+      ],
+      "gross_tile_face_count": 5,
+      "gross_tile_area_m2": 18.4149,
+      "source_dimensioned_niche_count": 2,
+      "flat_niche_face_deduction_area_m2": 0.9,
+      "flat_tile_area_after_known_niche_face_deductions_m2": 17.5149,
+      "complete_for_these_five_source_tiled_elevations": true,
+      "complete_for_project_wet_area_tile_universe": false,
+      "niche_return_depths_resolved": false,
+      "source_locations": [
+        "architectural:p11:Bath_Elevation_1_Bath_SHR_Elev_Bath_Elevation_4",
+        "architectural:p11:Ensuite_Elevation_1-2",
+        "architectural:p11:two_900x500_niches",
+        "architectural:p4-p5:FSL_68560_TP_71150"
+      ]
+    },
+    {
+      "check_id": "lot16:closure:garage_flat_ceiling_plane",
+      "component_object_refs": [
+        "lot16:surface:ceiling:garage_flat"
+      ],
+      "object_count": 1,
+      "ceiling_area_m2": 38.94,
+      "figured_dimensions_m": [
+        6,
+        6.49
+      ],
+      "complete_for_this_plane": true,
+      "complete_for_project_ceiling_universe": false,
+      "source_locations": [
+        "architectural:p3:floor_plan:GARAGE_[FLAT_CEILING]",
+        "architectural:p3:floor_plan:6000_and_6490_figured_dimensions"
+      ]
+    },
+    {
+      "check_id": "lot16:closure:garage_floor_flat_ceiling",
+      "component_object_refs": [
+        "lot16:surface:floor:garage",
+        "lot16:surface:ceiling:garage_flat"
+      ],
+      "figured_dimensions_m": [
+        6,
+        6.49
+      ],
+      "calculated_plan_area_m2": 38.94,
+      "floor_finish": "epoxy",
+      "ceiling_geometry": "flat",
+      "floor_surface_closed": true,
+      "ceiling_surface_closed": true,
+      "source_location": "architectural:p3:floor_plan:GARAGE:6000x6490:EPOXY:[FLAT_CEILING]"
+    },
+    {
+      "check_id": "lot16:closure:internal_room_access_opening_census",
+      "component_object_refs": [
+        "lot16:opening:p3:internal_access:0870_bed3",
+        "lot16:opening:p3:internal_access:0870_bed2",
+        "lot16:opening:p3:internal_access:0870_bath",
+        "lot16:opening:p3:internal_access:0870_laundry",
+        "lot16:opening:p3:internal_access:0870_bed1",
+        "lot16:opening:p3:internal_access:0870_wir",
+        "lot16:opening:p3:internal_access:0870_ensuite",
+        "lot16:opening:p3:internal_access:0870_wc",
+        "lot16:opening:p3:internal_access:0870_garage_to_entry"
+      ],
+      "internal_opening_count": 9,
+      "internal_opening_area_m2": 16.443,
+      "width_distribution_m": {
+        "0.87": 9
+      },
+      "joinery_height_m": 2.1,
+      "complete_for_explicit_internal_870_room_access_openings": true,
+      "complete_for_all_internal_wall_openings": false,
+      "residual_unresolved": [
+        "linen_broom_or_other_internal_joinery_openings",
+        "unlabelled_open_archways_beyond_explicit_2110_square_set"
+      ],
+      "excluded_external_870_labels": [
+        "laundry_external_service_door",
+        "garage_external_service_door"
+      ],
+      "source_locations": [
+        "architectural:p3:floor_plan:nine_internal_870_labels_with_native_text_bboxes",
+        "architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ]
+    },
+    {
+      "check_id": "lot16:closure:labelled_internal_joinery_and_square_set_openings",
+      "component_object_refs": [
+        "lot16:opening:p3:internal_joinery:1765_bed2_robe_sliding",
+        "lot16:opening:p3:internal_joinery:1765_bed3_robe_sliding",
+        "lot16:opening:p3:internal_open_archway:2110_square_set"
+      ],
+      "object_count": 3,
+      "robe_opening_count": 2,
+      "square_set_opening_count": 1,
+      "component_sum_m2": 9.513,
+      "source_locations": [
+        "architectural:p3:floor_plan:BED_2_and_BED_3_ROBE_2_sld_drs_with_1765_figured_lengths",
+        "architectural:p3:floor_plan:2110_SQ_SET_OPENING",
+        "architectural:p4-p5:elevations:FSL_68560_to_JL_70660"
+      ],
+      "source_closed_for_these_labelled_openings": true,
+      "complete_for_all_internal_wall_openings": false
+    },
+    {
+      "check_id": "lot16:closure:ensuite_wir_raked_ceiling_planes",
+      "component_object_refs": [
+        "lot16:surface:ceiling:ensuite_raked_12deg",
+        "lot16:surface:ceiling:wir_raked_12deg"
+      ],
+      "plan_projection_sum_m2": 10.1728,
+      "raked_surface_sum_m2": 10.400066,
+      "pitch_degrees": 12,
+      "source_location": "architectural:p3:floor_plan:ENS_WIR_[RAKED_CEILING]_figured_dimensions; architectural:p7:Section_1:12deg_raked_ceiling",
+      "source_closed": true
+    },
+    {
+      "check_id": "lot16:closure:ensuite_wir_floor_surfaces",
+      "component_object_refs": [
+        "lot16:surface:floor:ensuite",
+        "lot16:surface:floor:wir"
+      ],
+      "component_sum_m2": 10.1728,
+      "source_location": "architectural:p3:floor_plan:ENS_WIR_figured_dimensions_and_finish_labels",
+      "source_closed": true,
+      "overlap_note": "These atomic floor surfaces are components within the residence composite control; do not double-count the aggregate."
+    },
+    {
+      "check_id": "lot16:blocker:retaining_wall_final_extent",
+      "status": "UNRESOLVED_SOURCE_LIMITATION",
+      "source_location": "architectural:p13:RETAINING_A_profile_and_plan",
+      "profile_segment_lengths_m": [
+        6.1,
+        1.4,
+        3,
+        1.8,
+        2.8,
+        2.5,
+        2.8,
+        5.9,
+        2.7,
+        1.8,
+        1.9,
+        3.689
+      ],
+      "profile_chain_length_m": 36.389,
+      "plan_label_approx_length_m": 36.5,
+      "profile_vs_plan_approx_difference_m": -0.111,
+      "plan_note": "TO BE EXTENDED AS NEEDED TO REDUCE SLOPE",
+      "final_installed_length_resolved": false,
+      "source_closed_profile_chain": true,
+      "scaling_substitute_allowed": false,
+      "denominator_ready": false,
+      "conclusion": "The drawn profile chain is measurable, but the final installed retaining-wall extent is expressly variable and must remain unresolved."
+    },
+    {
+      "check_id": "lot16:closure:known_niche_flat_tile_faces",
+      "component_object_refs": [
+        "lot16:surface:wall_tile:bath_elev4_flat_after_niche",
+        "lot16:surface:wall_tile:ensuite_elev2_topplate_flat_after_niche"
+      ],
+      "object_count": 2,
+      "component_sum_m2": 6.5851,
+      "flat_niche_face_deduction_sum_m2": 0.9,
+      "bath_face_complete_excluding_niche_returns": true,
+      "ensuite_top_plate_portion_complete_excluding_niche_returns": true,
+      "ensuite_raked_extension_resolved": false,
+      "niche_returns_resolved": false,
+      "complete_for_project_wet_area_tile_universe": false
+    },
+    {
+      "check_id": "lot16:closure:niche_free_explicit_tile_faces",
+      "component_object_refs": [
+        "lot16:surface:wall_tile:bath_elev1_net",
+        "lot16:surface:wall_tile:ensuite_elev1_topplate_net"
+      ],
+      "object_count": 2,
+      "component_sum_m2": 7.8218,
+      "bath_face_complete": true,
+      "ensuite_top_plate_portion_complete": true,
+      "ensuite_raked_extension_resolved": false,
+      "complete_for_project_wet_area_tile_universe": false
+    }
+  ]
+}

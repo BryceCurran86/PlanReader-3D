@@ -21,10 +21,13 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import asdict, dataclass, field
+import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
+import time
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import fitz  # PyMuPDF
@@ -328,6 +331,39 @@ def merge_extracted_prediction(
         pred_dict[incoming.tag] = incoming
 
 
+def _best_effort_process_memory_mb() -> Dict[str, Optional[float]]:
+    """Return process memory diagnostics without creating a hard dependency.
+
+    ``psutil`` is intentionally optional: extraction correctness must not depend
+    on observability support being installed.  When unavailable, callers still
+    receive timing/progress events with ``None`` memory fields.
+    """
+    try:
+        import psutil  # type: ignore
+
+        process = psutil.Process(os.getpid())
+        info = process.memory_info()
+        result: Dict[str, Optional[float]] = {
+            "rss_mb": round(float(info.rss) / (1024.0 * 1024.0), 1),
+            "vms_mb": round(float(info.vms) / (1024.0 * 1024.0), 1),
+            "private_mb": None,
+        }
+        try:
+            full = process.memory_full_info()
+            private_bytes = getattr(full, "private", None)
+            if private_bytes is None:
+                private_bytes = getattr(full, "uss", None)
+            if private_bytes is not None:
+                result["private_mb"] = round(
+                    float(private_bytes) / (1024.0 * 1024.0), 1
+                )
+        except Exception:
+            pass
+        return result
+    except Exception:
+        return {"rss_mb": None, "vms_mb": None, "private_mb": None}
+
+
 class GenericPlanReaderExtractor:
     """Extracts physical building quantities from PDF drawing sets strictly from drawing evidence."""
 
@@ -376,6 +412,11 @@ class GenericPlanReaderExtractor:
             "reason_codes": ["not_collected"],
             "claims": [],
         }
+        self.canonical_ceilings_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "ceilings": [],
+        }
         self.roof_covering_shadow: Dict[str, Any] = {
             "status": "abstained",
             "reason": "not_collected",
@@ -385,6 +426,11 @@ class GenericPlanReaderExtractor:
             "slope_length_m": None,
             "roof_covering_area_m2": None,
         }
+        self.canonical_roofs_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "roofs": [],
+        }
         self.structural_member_coverage_shadow: Dict[str, Any] = {
             "status": "abstained",
             "reason_codes": ["not_collected"],
@@ -393,6 +439,13 @@ class GenericPlanReaderExtractor:
             "quantity_id": None,
             "object_universe_snapshot": None,
             "quantity_evidence": None,
+            "coverage_registry_summary": None,
+        }
+        self.canonical_structural_members_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "member_kind": None,
+            "members": [],
         }
         self.physical_net_wall_live: Dict[str, Any] = {
             "status": "abstained",
@@ -407,8 +460,144 @@ class GenericPlanReaderExtractor:
         # Declared source area claims are reconciliation-only diagnostics. They
         # remain observable even when no physical geometry can be established.
         self.declared_floor_area_claims: List[Dict[str, Any]] = []
+        self.canonical_levels_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "levels": [],
+        }
+        self.canonical_walls_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "source_pages": [],
+            "unresolved_wall_candidate_ids": [],
+            "walls": [],
+        }
+        self.canonical_openings_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "openings": [],
+        }
+        self.canonical_doors_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "doors": [],
+        }
+        self.canonical_windows_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "windows": [],
+        }
+        self.canonical_rooms_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "source_pages": [],
+            "rooms": [],
+        }
+        self.canonical_floors_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "source_pages": [],
+            "floors": [],
+        }
+        self.canonical_slabs_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "source_pages": [],
+            "slabs": [],
+        }
+        self.canonical_building_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "building_id": None,
+            "levels": [],
+            "unassigned": {},
+            "object_counts": {},
+            "level_assignment_complete": False,
+        }
         # Live extraction visibility: distinguish absence from failure/conflict.
         self.extraction_status: Dict[str, str] = {}
+        self.coverage_registry_summaries_live: tuple[Any, ...] = ()
+        self.coverage_family_gaps_live: Dict[str, list[str]] = {}
+        # Diagnostic-only extractor observability. This trace must never feed
+        # authority, prediction publication, or benchmark truth.
+        self.performance_trace: Dict[str, Any] = {
+            "version": "extractor-performance-v1",
+            "total_pages": 0,
+            "elapsed_seconds": 0.0,
+            "events": [],
+        }
+        self._performance_started_at: Optional[float] = None
+        self._performance_last_mark_at: Optional[float] = None
+        self._performance_emit_progress = False
+
+    def _reset_performance_trace(self, *, total_pages: int) -> None:
+        now = time.perf_counter()
+        self._performance_started_at = now
+        self._performance_last_mark_at = now
+        self._performance_emit_progress = str(
+            os.getenv("PLANREADER_EXTRACTOR_PROGRESS", "")
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        self.performance_trace = {
+            "version": "extractor-performance-v1",
+            "total_pages": int(total_pages),
+            "elapsed_seconds": 0.0,
+            "events": [],
+        }
+        self._mark_performance("extract_start")
+
+    def _mark_performance(
+        self,
+        stage: str,
+        *,
+        page: Optional[int] = None,
+        total_pages: Optional[int] = None,
+        note: Optional[str] = None,
+    ) -> None:
+        """Record a best-effort diagnostic event without affecting extraction."""
+        try:
+            now = time.perf_counter()
+            started = self._performance_started_at or now
+            previous = self._performance_last_mark_at or started
+            if stage in {"cross_page_pre_scan_page", "main_page_analysis_page"}:
+                memory = {"rss_mb": None, "vms_mb": None, "private_mb": None}
+            else:
+                try:
+                    memory = _best_effort_process_memory_mb()
+                except Exception:
+                    memory = {"rss_mb": None, "vms_mb": None, "private_mb": None}
+            event: Dict[str, Any] = {
+                "stage": str(stage),
+                "elapsed_seconds": round(now - started, 3),
+                "delta_seconds": round(now - previous, 3),
+                **memory,
+            }
+            if page is not None:
+                event["page"] = int(page)
+            if total_pages is not None:
+                event["total_pages"] = int(total_pages)
+            if note:
+                event["note"] = str(note)
+            events = self.performance_trace.setdefault("events", [])
+            if isinstance(events, list):
+                events.append(event)
+            self.performance_trace["elapsed_seconds"] = event["elapsed_seconds"]
+            self._performance_last_mark_at = now
+            if self._performance_emit_progress:
+                progress = ""
+                if page is not None:
+                    denominator = total_pages or self.performance_trace.get("total_pages")
+                    progress = f" page={page}/{denominator}" if denominator else f" page={page}"
+                mem = ""
+                if event.get("rss_mb") is not None:
+                    mem = f" rss_mb={event['rss_mb']}"
+                print(
+                    f"[PlanReaderPerf] stage={stage}{progress} "
+                    f"elapsed_s={event['elapsed_seconds']} delta_s={event['delta_seconds']}{mem}",
+                    flush=True,
+                )
+        except Exception:
+            # Observability is explicitly non-authoritative and fail-open.
+            pass
 
     def is_drawing_page(self, page_text: str, page: Optional[fitz.Page] = None) -> bool:
         """Heuristically determine if a PDF page contains architectural drawings."""
@@ -905,12 +1094,42 @@ class GenericPlanReaderExtractor:
 
         doc = fitz.open(str(p_path))
         target_pages = list(pages) if pages else list(range(len(doc)))
+        self._reset_performance_trace(total_pages=len(target_pages))
+        self._mark_performance("document_opened")
+
+        # One extraction owns one immutable PDF snapshot. Cache native page text
+        # and drawing-page classification once so later authorities do not ask
+        # PyMuPDF to reparse the same content stream repeatedly.
+        native_page_text: Dict[int, str] = {}
+        drawing_page_flags: Dict[int, bool] = {}
+
+        def _native_text(page_index: int) -> str:
+            cached = native_page_text.get(page_index)
+            if cached is None:
+                cached = doc[page_index].get_text("text") or ""
+                native_page_text[page_index] = cached
+            return cached
+
+        def _is_drawing_page_index(page_index: int) -> bool:
+            cached = drawing_page_flags.get(page_index)
+            if cached is None:
+                cached = self.is_drawing_page(
+                    _native_text(page_index),
+                    doc[page_index],
+                )
+                drawing_page_flags[page_index] = bool(cached)
+            return bool(cached)
+
         # OCR evidence is source-document scoped. Never carry cached text or
         # page-budget state across separate PDFs when an extractor instance is reused.
         self._ocr_text_by_page = {}
         self._ocr_pages_attempted = set()
         self.extraction_status = {}
         self.declared_floor_area_claims = []
+        self.coverage_registry_summaries_live = ()
+        self.coverage_family_gaps_live = {}
+        _coverage_objects: list[Any] = []
+        _coverage_quantities: list[Any] = []
         self.hosted_opening_shadow = {
             "status": "abstained",
             "reason": "not_collected",
@@ -940,6 +1159,22 @@ class GenericPlanReaderExtractor:
             "reason_codes": ["not_collected"],
             "claims": [],
         }
+        self.canonical_ceilings_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "ceilings": [],
+        }
+        self.canonical_slabs_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "source_pages": [],
+            "slabs": [],
+        }
+        self.canonical_roofs_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "roofs": [],
+        }
         self.roof_covering_shadow = {
             "status": "abstained",
             "reason": "not_collected",
@@ -957,6 +1192,22 @@ class GenericPlanReaderExtractor:
             "quantity_id": None,
             "object_universe_snapshot": None,
             "quantity_evidence": None,
+            "coverage_registry_summary": None,
+        }
+        self.canonical_structural_members_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "member_kind": None,
+            "members": [],
+        }
+        self.canonical_building_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "building_id": None,
+            "levels": [],
+            "unassigned": {},
+            "object_counts": {},
+            "level_assignment_complete": False,
         }
 
         self.physical_net_wall_live = {
@@ -968,6 +1219,39 @@ class GenericPlanReaderExtractor:
             "external_wall_ids": [],
             "evidence_ids": [],
             "quantity_id": None,
+        }
+        self.canonical_openings_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "openings": [],
+        }
+        self.canonical_doors_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "doors": [],
+        }
+        self.canonical_windows_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "windows": [],
+        }
+        self.canonical_levels_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "levels": [],
+        }
+        self.canonical_walls_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "source_pages": [],
+            "unresolved_wall_candidate_ids": [],
+            "walls": [],
+        }
+        self.canonical_rooms_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "source_pages": [],
+            "rooms": [],
         }
 
         # ------------------------------------------------------------------
@@ -991,9 +1275,14 @@ class GenericPlanReaderExtractor:
         for p_idx in target_pages:
             if p_idx < 0 or p_idx >= len(doc):
                 continue
+            self._mark_performance(
+                "cross_page_pre_scan_page",
+                page=p_idx + 1,
+                total_pages=len(target_pages),
+            )
             page_obj = doc[p_idx]
-            pg_txt = page_obj.get_text("text")
-            if not self.is_drawing_page(pg_txt, page_obj):
+            pg_txt = _native_text(p_idx)
+            if not _is_drawing_page_index(p_idx):
                 continue
             native_sparse = len((pg_txt or "").strip()) < 150
             if native_sparse or self._page_has_large_raster(page_obj):
@@ -1129,6 +1418,8 @@ class GenericPlanReaderExtractor:
             if secondary_support_evidence is not None:
                 global_secondary_area_support_evidence.append(secondary_support_evidence)
 
+        self._mark_performance("cross_page_pre_scan_complete")
+
         # Resolve wall height strictly from real level-datum evidence when
         # present; otherwise this stays None and every wall-height use below
         # falls back to self.default_ceiling_height_m exactly as before --
@@ -1164,10 +1455,7 @@ class GenericPlanReaderExtractor:
 
         pred_dict: Dict[str, ExtractedPrediction] = {}
 
-        if (
-            global_resolved_secondary_support is not None
-            and global_resolved_secondary_support.zone_type == "verandah"
-        ):
+        if global_resolved_secondary_support is not None:
             # Structural support quantity is live only after the producer-owned
             # physical-member authority resolves the complete source-visible
             # instance row. Corroborated text/dimension arithmetic may remain
@@ -1207,6 +1495,29 @@ class GenericPlanReaderExtractor:
                 ),
             ).resolution
 
+            from pb_live_canonical_structural_member_projection import (
+                project_structural_member_resolution,
+            )
+
+            structural_projection = project_structural_member_resolution(
+                structural_support
+            )
+            _coverage_objects.extend(structural_projection.objects)
+            canonical_structural_member_objects = [
+                member.to_dict()
+                for member in structural_projection.objects
+            ]
+            self.canonical_structural_members_live = {
+                "status": (
+                    "corroborated"
+                    if canonical_structural_member_objects
+                    else "abstained"
+                ),
+                "reason_codes": list(structural_projection.reason_codes),
+                "member_kind": structural_support.selector.member_kind,
+                "members": canonical_structural_member_objects,
+            }
+
             # Structural coverage SHADOW only. It reissues the already-resolved
             # producer-owned member universe and quantity trace. Failure here is
             # diagnostic only and must never change live prediction publication.
@@ -1221,6 +1532,7 @@ class GenericPlanReaderExtractor:
                         registry_run_id=(
                             f"extractor-structural:{structural_source_sha256}"
                         ),
+                        quantity_evidence_sink=_coverage_quantities.append,
                     )
                 )
             except Exception:
@@ -1232,14 +1544,16 @@ class GenericPlanReaderExtractor:
                     "quantity_id": None,
                     "object_universe_snapshot": None,
                     "quantity_evidence": None,
+                    "coverage_registry_summary": None,
                 }
 
             if (
-                structural_support.status is EvidenceResolutionStatus.CORROBORATED
+                global_resolved_secondary_support.zone_type == "verandah"
+                and structural_support.status is EvidenceResolutionStatus.CORROBORATED
                 and structural_support.quantity is not None
             ):
                 support_sheet_no = self.extract_sheet_number(
-                    doc[support_page - 1].get_text("text"), support_page
+                    _native_text(support_page - 1), support_page
                 )
                 pred_dict["verandah_pillars"] = ExtractedPrediction(
                     tag="verandah_pillars",
@@ -1261,6 +1575,13 @@ class GenericPlanReaderExtractor:
                             member.physical_member_id
                             for member in structural_support.members
                         ],
+                        "canonical_structural_member_ids": [
+                            member["canonical_structural_member_id"]
+                            for member in canonical_structural_member_objects
+                        ],
+                        "canonical_structural_member_objects": (
+                            canonical_structural_member_objects
+                        ),
                         "source_sha256": structural_source_sha256,
                         "zone_type": global_resolved_secondary_support.zone_type,
                         "support_kind": global_resolved_secondary_support.support_kind,
@@ -1283,14 +1604,20 @@ class GenericPlanReaderExtractor:
                     },
                 )
 
+        self._mark_performance("main_page_analysis_start")
         for pno in target_pages:
             if pno < 0 or pno >= len(doc):
                 continue
 
+            self._mark_performance(
+                "main_page_analysis_page",
+                page=pno + 1,
+                total_pages=len(target_pages),
+            )
             page = doc[pno]
-            page_text = page.get_text("text")
+            page_text = _native_text(pno)
 
-            if not self.is_drawing_page(page_text, page):
+            if not _is_drawing_page_index(pno):
                 continue
 
             sheet_no = self.extract_sheet_number(page_text, pno + 1)
@@ -1641,6 +1968,53 @@ class GenericPlanReaderExtractor:
                             ]
                             if len(resolved_slabs) == 1:
                                 slab = resolved_slabs[0]
+                                from pb_live_canonical_slab_projection import (
+                                    project_resolved_slab_entity,
+                                )
+
+                                slab_projection = project_resolved_slab_entity(
+                                    slab=slab,
+                                    boundary=slab_boundary,
+                                )
+                                canonical_slab_payload = None
+                                if slab_projection.object is not None:
+                                    _coverage_objects.append(slab_projection.object)
+                                    canonical_slab_payload = (
+                                        slab_projection.object.to_dict()
+                                    )
+                                    existing_slabs = list(
+                                        self.canonical_slabs_live.get(
+                                            "slabs",
+                                            [],
+                                        )
+                                    )
+                                    if not any(
+                                        existing.get("canonical_slab_id")
+                                        == canonical_slab_payload[
+                                            "canonical_slab_id"
+                                        ]
+                                        for existing in existing_slabs
+                                    ):
+                                        existing_slabs.append(
+                                            canonical_slab_payload
+                                        )
+                                    source_pages = sorted(
+                                        {
+                                            int(existing.get("source_page"))
+                                            for existing in existing_slabs
+                                            if existing.get("source_page")
+                                            is not None
+                                        }
+                                    )
+                                    self.canonical_slabs_live = {
+                                        "status": "corroborated",
+                                        "reason_codes": list(
+                                            slab_projection.reason_codes
+                                        ),
+                                        "source_pages": source_pages,
+                                        "slabs": existing_slabs,
+                                    }
+
                                 pred_dict["reinforced_floor_slab"] = ExtractedPrediction(
                                     tag="reinforced_floor_slab",
                                     trade_type="structure",
@@ -1664,6 +2038,17 @@ class GenericPlanReaderExtractor:
                                         "boundary_id": slab_boundary.boundary_id,
                                         "resolution_state": slab.resolution_state,
                                         "provenance": slab.provenance,
+                                        "canonical_slab_id": (
+                                            canonical_slab_payload[
+                                                "canonical_slab_id"
+                                            ]
+                                            if canonical_slab_payload
+                                            is not None
+                                            else None
+                                        ),
+                                        "canonical_slab_object": (
+                                            canonical_slab_payload
+                                        ),
                                     },
                                 )
 
@@ -2230,13 +2615,15 @@ class GenericPlanReaderExtractor:
                     "evidence_present_unresolved_physical_members"
                 )
 
+        self._mark_performance("main_page_analysis_complete")
+
         # ------------------------------------------------------------------
         # Generic Schedule & Table Extraction (Phase F.8)
         # ------------------------------------------------------------------
         try:
             from pb_raster_schedule_extractor import GenericScheduleTableExtractor
             schedule_extractor = GenericScheduleTableExtractor()
-            dwg_pages = [p for p in target_pages if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])]
+            dwg_pages = [p for p in target_pages if 0 <= p < len(doc) and _is_drawing_page_index(p)]
             schedule_rows = schedule_extractor.extract_from_document(doc, pages=dwg_pages)
 
             self.extraction_status["schedule"] = (
@@ -2300,6 +2687,7 @@ class GenericPlanReaderExtractor:
                 )
         except Exception:
             self.extraction_status["schedule"] = "extraction_failed"
+        self._mark_performance("schedule_extraction_complete")
 
         # ------------------------------------------------------------------
         # Plan instance marks (hyphenated W-# / D-# stamps on scanned plans)
@@ -2315,9 +2703,9 @@ class GenericPlanReaderExtractor:
 
             dwg_pages = [
                 p for p in target_pages
-                if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])
+                if 0 <= p < len(doc) and _is_drawing_page_index(p)
             ]
-            drawing_texts = [doc[p].get_text("text") or "" for p in dwg_pages]
+            drawing_texts = [_native_text(p) for p in dwg_pages]
 
             # Opening-system semantics must come from drawing-owned source pages.
             # BOQ/specification pages may describe commercial scope but cannot
@@ -2396,6 +2784,7 @@ class GenericPlanReaderExtractor:
                         )
         except Exception:
             self.extraction_status["plan_instance_marks"] = "extraction_failed"
+        self._mark_performance("plan_instance_marks_complete")
 
         # ------------------------------------------------------------------
         # Sole unlabeled floor-plan door swing (native quarter-circle cubic)
@@ -2408,7 +2797,7 @@ class GenericPlanReaderExtractor:
 
             dwg_pages = [
                 p for p in target_pages
-                if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])
+                if 0 <= p < len(doc) and _is_drawing_page_index(p)
             ]
             sole = extract_sole_plan_door_swing(doc, dwg_pages)
             if (
@@ -2444,7 +2833,7 @@ class GenericPlanReaderExtractor:
 
             dwg_pages = [
                 p for p in target_pages
-                if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])
+                if 0 <= p < len(doc) and _is_drawing_page_index(p)
             ]
             interior = extract_interior_plan_door_swings(doc, dwg_pages)
             if interior is not None and should_emit_interior_door_total(
@@ -2491,9 +2880,12 @@ class GenericPlanReaderExtractor:
         except Exception:
             pass
 
+        self._mark_performance("door_geometry_passes_complete")
+
         # ------------------------------------------------------------------
         # Generic Drawing Vision / OCR Evidence Layer (Phase F.10)
         # ------------------------------------------------------------------
+        self._mark_performance("drawing_ocr_reconciliation_start")
         try:
             from pb_drawing_ocr_evidence_layer import (
                 DrawingEvidenceParser,
@@ -2505,11 +2897,11 @@ class GenericPlanReaderExtractor:
             )
 
             ocr_engine = DrawingOCREngine()
-            dwg_pages = [p for p in target_pages if 0 <= p < len(doc) and self.is_drawing_page(doc[p].get_text("text"), doc[p])]
+            dwg_pages = [p for p in target_pages if 0 <= p < len(doc) and _is_drawing_page_index(p)]
 
             for p_num in dwg_pages:
                 page = doc[p_num]
-                p_text = page.get_text("text")
+                p_text = _native_text(p_num)
 
                 # Prefer native evidence first:
                 # Only run raster OCR if native extraction on this sheet is insufficient:
@@ -2560,7 +2952,17 @@ class GenericPlanReaderExtractor:
                 # evidence on this page is insufficient (raster/scanned
                 # sheet, or a schedule-word page with incomplete native
                 # window/door quantities).
+                self._mark_performance(
+                    "drawing_ocr_page_start",
+                    page=p_num + 1,
+                    total_pages=len(target_pages),
+                )
                 ocr_lines = ocr_engine.recognize_page_rect(page, dpi=150)
+                self._mark_performance(
+                    "drawing_ocr_page_complete",
+                    page=p_num + 1,
+                    total_pages=len(target_pages),
+                )
                 ocr_records: List[DrawingEvidenceRecord] = []
                 for o_line in ocr_lines:
                     rec = DrawingEvidenceParser.parse_schedule_line(
@@ -2669,6 +3071,7 @@ class GenericPlanReaderExtractor:
             self.extraction_status.setdefault("ocr_reconcile", "evidence_present")
         except Exception:
             self.extraction_status["ocr_reconcile"] = "extraction_failed"
+        self._mark_performance("drawing_ocr_reconciliation_complete")
 
         # ------------------------------------------------------------------
         # Unique door WxH callout → already identified dimensionless D#
@@ -2679,7 +3082,7 @@ class GenericPlanReaderExtractor:
             )
 
             dwg_texts = [
-                doc[p].get_text("text") or ""
+                _native_text(p)
                 for p in target_pages
                 if 0 <= p < len(doc)
             ]
@@ -2690,6 +3093,7 @@ class GenericPlanReaderExtractor:
         # ------------------------------------------------------------------
         # Generic Opening Deduction Pipeline (Phase F.9)
         # ------------------------------------------------------------------
+        self._mark_performance("opening_deduction_start")
         try:
             from pb_opening_deduction_pipeline import (
                 GenericOpeningDeductionPipeline,
@@ -2757,8 +3161,10 @@ class GenericPlanReaderExtractor:
                 self.live_net_wall_shadow = collect_live_net_wall_shadow(wall_results)
         except Exception:
             self.extraction_status["opening_deduction"] = "extraction_failed"
+        self._mark_performance("opening_deduction_complete")
 
         # Hosted-opening SHADOW only. Never appended to F.9 live openings.
+        self._mark_performance("opening_shadows_start")
         # Collection requires an F.07 RESOLVED floor-plan viewport bbox.
         try:
             from pb_hosted_opening_instance_adapter import (
@@ -2803,6 +3209,8 @@ class GenericPlanReaderExtractor:
                 "openings": [],
             }
 
+        self._mark_performance("opening_shadows_complete")
+
         # Item 35 production-authority SHADOW only. This executes the real
         # source-visibility -> semantic-opening -> commercial-count gate on the
         # same PDF bytes, but never mutates pred_dict or the F.9 deduction path.
@@ -2810,6 +3218,7 @@ class GenericPlanReaderExtractor:
         # Scoped extraction passes only page addresses. The Item 35 producer
         # still owns source observations, physical-opening discovery, and
         # semantic inventory; callers cannot inject a candidate universe.
+        self._mark_performance("item35_shadow_start")
         if collect_item35_shadow:
             try:
                 from pb_item35_production_authority_shadow import (
@@ -2833,8 +3242,68 @@ class GenericPlanReaderExtractor:
                     reason=f"shadow_exception:{type(exc).__name__}"
                 )
                 self.extraction_status["item35_authority_shadow"] = "extraction_failed"
+        self._mark_performance("item35_shadow_complete")
+
+        # Source-owned floor-plan level identity. Only authoritative F.07
+        # floor-plan viewport labels can mint a level scope; no default
+        # "Ground" level is introduced for unlabeled geometry.
+        _live_level_records = ()
+        try:
+            from pb_live_floor_plan_level_identity import (
+                LIVE_FLOOR_PLAN_LEVEL_RESOLVED,
+                LIVE_FLOOR_PLAN_LEVEL_UNAVAILABLE,
+                collect_source_owned_floor_plan_levels,
+            )
+
+            _level_source_sha = hashlib.sha256(p_path.read_bytes()).hexdigest()
+            _level_pages = [
+                page_index
+                for page_index in target_pages
+                if (
+                    0 <= page_index < len(doc)
+                    and _is_drawing_page_index(page_index)
+                )
+            ]
+            _live_level_records = collect_source_owned_floor_plan_levels(
+                doc,
+                page_indices=_level_pages,
+                source_sha256=_level_source_sha,
+            )
+            self.canonical_levels_live = {
+                "status": (
+                    "corroborated"
+                    if _live_level_records
+                    else "abstained"
+                ),
+                "reason_codes": [
+                    (
+                        LIVE_FLOOR_PLAN_LEVEL_RESOLVED
+                        if _live_level_records
+                        else LIVE_FLOOR_PLAN_LEVEL_UNAVAILABLE
+                    )
+                ],
+                "levels": [
+                    record.to_dict() for record in _live_level_records
+                ],
+            }
+            self.extraction_status["canonical_levels_live"] = (
+                self.canonical_levels_live["status"]
+            )
+        except Exception as _level_exc:  # noqa: BLE001
+            _live_level_records = ()
+            self.canonical_levels_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_floor_plan_level_exception:{type(_level_exc).__name__}"
+                ],
+                "levels": [],
+            }
+            self.extraction_status["canonical_levels_live"] = (
+                "extraction_failed"
+            )
 
         # Source-owned physical external net-wall LIVE firm output.
+        self._mark_performance("physical_net_wall_live_start")
         #
         # This is intentionally late: the complete source-owned
         # wall -> opening/void -> gross geometry -> whole-wall role ->
@@ -2851,10 +3320,7 @@ class GenericPlanReaderExtractor:
                 for page_index in target_pages
                 if (
                     0 <= page_index < len(doc)
-                    and self.is_drawing_page(
-                        doc[page_index].get_text("text"),
-                        doc[page_index],
-                    )
+                    and _is_drawing_page_index(page_index)
                 )
             ]
             if physical_net_pages:
@@ -2862,10 +3328,182 @@ class GenericPlanReaderExtractor:
                     p_path,
                     pages=physical_net_pages,
                 )
+                _coverage_objects.extend(physical_wall_result.canonical_walls)
+                _coverage_objects.extend(physical_wall_result.canonical_openings)
+                _coverage_objects.extend(getattr(physical_wall_result, "canonical_rooms", ()))
+                _coverage_objects.extend(getattr(physical_wall_result, "canonical_floors", ()))
+                _wall_quantity = getattr(getattr(physical_wall_result, "publication", None), "quantity_evidence", None)
+                if _wall_quantity is not None:
+                    _coverage_quantities.append(_wall_quantity)
                 canonical_wall_objects = [
                     wall.to_dict()
                     for wall in physical_wall_result.canonical_walls
                 ]
+                from pb_live_floor_plan_level_identity import (
+                    enrich_live_wall_level_ownership,
+                )
+
+                canonical_wall_objects = list(
+                    enrich_live_wall_level_ownership(
+                        canonical_wall_objects,
+                        levels=_live_level_records,
+                    )
+                )
+                wall_status = getattr(
+                    physical_wall_result,
+                    "canonical_wall_status",
+                    None,
+                )
+                wall_status_value = getattr(wall_status, "value", None)
+                if wall_status_value is None:
+                    wall_status_value = (
+                        "corroborated"
+                        if canonical_wall_objects
+                        else "abstained"
+                    )
+                self.canonical_walls_live = {
+                    "status": wall_status_value,
+                    "reason_codes": list(
+                        getattr(
+                            physical_wall_result,
+                            "canonical_wall_reason_codes",
+                            (),
+                        )
+                    ),
+                    "source_pages": list(
+                        getattr(
+                            physical_wall_result,
+                            "canonical_wall_source_pages",
+                            (),
+                        )
+                    ),
+                    "unresolved_wall_candidate_ids": list(
+                        getattr(
+                            physical_wall_result,
+                            "unresolved_wall_candidate_ids",
+                            (),
+                        )
+                    ),
+                    "walls": canonical_wall_objects,
+                }
+                canonical_opening_objects = [
+                    opening.to_dict()
+                    for opening in physical_wall_result.canonical_openings
+                ]
+                canonical_room_objects = [
+                    room.to_dict()
+                    for room in getattr(
+                        physical_wall_result,
+                        "canonical_rooms",
+                        (),
+                    )
+                ]
+                canonical_floor_objects = [
+                    floor.to_dict()
+                    for floor in getattr(
+                        physical_wall_result,
+                        "canonical_floors",
+                        (),
+                    )
+                ]
+                self.canonical_openings_live = {
+                    "status": (
+                        "corroborated"
+                        if canonical_opening_objects
+                        else "abstained"
+                    ),
+                    "reason_codes": list(physical_wall_result.reason_codes),
+                    "openings": canonical_opening_objects,
+                }
+                canonical_door_objects = [
+                    opening
+                    for opening in canonical_opening_objects
+                    if opening.get("opening_kind") == "door"
+                ]
+                canonical_window_objects = [
+                    opening
+                    for opening in canonical_opening_objects
+                    if opening.get("opening_kind") == "window"
+                ]
+                self.canonical_doors_live = {
+                    "status": (
+                        "corroborated"
+                        if canonical_door_objects
+                        else "abstained"
+                    ),
+                    "reason_codes": list(physical_wall_result.reason_codes),
+                    "doors": canonical_door_objects,
+                }
+                self.canonical_windows_live = {
+                    "status": (
+                        "corroborated"
+                        if canonical_window_objects
+                        else "abstained"
+                    ),
+                    "reason_codes": list(physical_wall_result.reason_codes),
+                    "windows": canonical_window_objects,
+                }
+                room_status = getattr(
+                    physical_wall_result,
+                    "canonical_room_status",
+                    None,
+                )
+                room_status_value = getattr(room_status, "value", None)
+                if room_status_value is None:
+                    room_status_value = (
+                        "corroborated"
+                        if canonical_room_objects
+                        else "abstained"
+                    )
+                room_reason_codes = list(
+                    getattr(
+                        physical_wall_result,
+                        "canonical_room_reason_codes",
+                        (),
+                    )
+                )
+                self.canonical_rooms_live = {
+                    "status": room_status_value,
+                    "reason_codes": room_reason_codes,
+                    "source_pages": list(
+                        getattr(
+                            physical_wall_result,
+                            "canonical_room_source_pages",
+                            (),
+                        )
+                    ),
+                    "rooms": canonical_room_objects,
+                }
+                floor_status = getattr(
+                    physical_wall_result,
+                    "canonical_floor_status",
+                    None,
+                )
+                floor_status_value = getattr(floor_status, "value", None)
+                if floor_status_value is None:
+                    floor_status_value = (
+                        "corroborated"
+                        if canonical_floor_objects
+                        else "abstained"
+                    )
+                self.canonical_floors_live = {
+                    "status": floor_status_value,
+                    "reason_codes": list(
+                        getattr(
+                            physical_wall_result,
+                            "canonical_floor_reason_codes",
+                            (),
+                        )
+                    ),
+                    "source_pages": list(
+                        getattr(
+                            physical_wall_result,
+                            "canonical_floor_source_pages",
+                            (),
+                        )
+                    ),
+                    "floors": canonical_floor_objects,
+                }
                 self.physical_net_wall_live = {
                     "status": physical_wall_result.status.value,
                     "reason_codes": list(physical_wall_result.reason_codes),
@@ -2934,6 +3572,11 @@ class GenericPlanReaderExtractor:
                                 for wall in canonical_wall_objects
                             ],
                             "canonical_wall_objects": canonical_wall_objects,
+                            "canonical_opening_ids": [
+                                opening["canonical_opening_id"]
+                                for opening in canonical_opening_objects
+                            ],
+                            "canonical_opening_objects": canonical_opening_objects,
                             "evidence_ids": list(
                                 physical_wall_result.evidence_ids
                             ),
@@ -2956,6 +3599,39 @@ class GenericPlanReaderExtractor:
                     "evidence_ids": [],
                     "quantity_id": None,
                 }
+                self.canonical_walls_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "source_pages": [],
+                    "unresolved_wall_candidate_ids": [],
+                    "walls": [],
+                }
+                self.canonical_openings_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "openings": [],
+                }
+                self.canonical_doors_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "doors": [],
+                }
+                self.canonical_windows_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "windows": [],
+                }
+                self.canonical_rooms_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "rooms": [],
+                }
+                self.canonical_floors_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "source_pages": [],
+                    "floors": [],
+                }
                 self.extraction_status["physical_net_wall_live"] = "abstained"
         except Exception as exc:
             self.physical_net_wall_live = {
@@ -2969,11 +3645,58 @@ class GenericPlanReaderExtractor:
                 "evidence_ids": [],
                 "quantity_id": None,
             }
+            self.canonical_walls_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_wall_exception:{type(exc).__name__}"
+                ],
+                "source_pages": [],
+                "unresolved_wall_candidate_ids": [],
+                "walls": [],
+            }
+            self.canonical_openings_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_opening_exception:{type(exc).__name__}"
+                ],
+                "openings": [],
+            }
+            self.canonical_doors_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_door_exception:{type(exc).__name__}"
+                ],
+                "doors": [],
+            }
+            self.canonical_windows_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_window_exception:{type(exc).__name__}"
+                ],
+                "windows": [],
+            }
+            self.canonical_rooms_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_room_exception:{type(exc).__name__}"
+                ],
+                "rooms": [],
+            }
+            self.canonical_floors_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_floor_exception:{type(exc).__name__}"
+                ],
+                "source_pages": [],
+                "floors": [],
+            }
             self.extraction_status["physical_net_wall_live"] = (
                 "extraction_failed"
             )
+        self._mark_performance("physical_net_wall_live_complete")
 
         # Source-owned ceiling-lining LIVE provisional output.
+        self._mark_performance("ceiling_lining_live_start")
         #
         # This is deliberately late and additive: it cannot feed any floor,
         # wall, opening-deduction, or legacy finish derivation above.  The
@@ -2991,6 +3714,23 @@ class GenericPlanReaderExtractor:
                 p_path,
                 pages=target_pages,
             )
+            canonical_ceiling_objects = [
+                ceiling.to_dict()
+                for ceiling in getattr(
+                    ceiling_result,
+                    "canonical_ceilings",
+                    (),
+                )
+            ]
+            self.canonical_ceilings_live = {
+                "status": (
+                    "corroborated"
+                    if canonical_ceiling_objects
+                    else "abstained"
+                ),
+                "reason_codes": list(ceiling_result.reason_codes),
+                "ceilings": canonical_ceiling_objects,
+            }
             self.ceiling_lining_live = {
                 "status": ceiling_result.status.value,
                 "reason_codes": list(ceiling_result.reason_codes),
@@ -3010,8 +3750,15 @@ class GenericPlanReaderExtractor:
                 ],
             }
             self.extraction_status["ceiling_lining_live"] = ceiling_result.status.value
+            _coverage_objects.extend(ceiling_result.canonical_ceilings)
 
             for claim in ceiling_result.claims:
+                claim_ceiling_objects = [
+                    ceiling
+                    for ceiling in canonical_ceiling_objects
+                    if ceiling.get("room_entity_id")
+                    in set(claim.room_entity_ids)
+                ]
                 merge_extracted_prediction(
                     pred_dict,
                     ExtractedPrediction(
@@ -3037,6 +3784,11 @@ class GenericPlanReaderExtractor:
                             "finish_descriptor": claim.finish_descriptor,
                             "room_quantity_ids": list(claim.room_quantity_ids),
                             "room_entity_ids": list(claim.room_entity_ids),
+                            "canonical_ceiling_ids": [
+                                ceiling["canonical_ceiling_id"]
+                                for ceiling in claim_ceiling_objects
+                            ],
+                            "canonical_ceiling_objects": claim_ceiling_objects,
                             "evidence_ids": list(claim.evidence_ids),
                             "physical_scale_record_id": claim.physical_scale_record_id,
                             "raw_evidence_ref": claim.claim_id,
@@ -3050,10 +3802,20 @@ class GenericPlanReaderExtractor:
                 "reason_codes": [f"live_ceiling_exception:{type(exc).__name__}"],
                 "claims": [],
             }
+            self.canonical_ceilings_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_ceiling_exception:{type(exc).__name__}"
+                ],
+                "ceilings": [],
+            }
             self.extraction_status["ceiling_lining_live"] = "extraction_failed"
+        self._mark_performance("ceiling_lining_live_complete")
 
         # ------------------------------------------------------------------
         # Generic source-owned roof covering measurement (shadow mode)
+        # ------------------------------------------------------------------
+        self._mark_performance("roof_covering_shadow_start")
         # ------------------------------------------------------------------
         try:
             from pb_source_roof_covering_authority import (
@@ -3170,6 +3932,34 @@ class GenericPlanReaderExtractor:
                             if len(_axis_trials) == 1:
                                 _roof_meas = _axis_trials[0]
 
+                from pb_live_canonical_roof_projection import (
+                    project_source_gable_roof,
+                )
+
+                _roof_projection = project_source_gable_roof(_roof_meas)
+                if _roof_projection.object is not None:
+                    _coverage_objects.append(_roof_projection.object)
+                    if _roof_meas.quantity_evidence is not None:
+                        _coverage_quantities.append(_roof_meas.quantity_evidence)
+                _canonical_roof_payload = (
+                    _roof_projection.object.to_dict()
+                    if _roof_projection.object is not None
+                    else None
+                )
+                self.canonical_roofs_live = {
+                    "status": (
+                        "corroborated"
+                        if _canonical_roof_payload is not None
+                        else "abstained"
+                    ),
+                    "reason_codes": list(_roof_projection.reason_codes),
+                    "roofs": (
+                        [_canonical_roof_payload]
+                        if _canonical_roof_payload is not None
+                        else []
+                    ),
+                }
+
                 self.roof_covering_shadow = {
                     "status": _roof_meas.status.value,
                     "reason_codes": list(_roof_meas.reason_codes),
@@ -3183,6 +3973,12 @@ class GenericPlanReaderExtractor:
                         if _roof_meas.quantity_evidence
                         else None
                     ),
+                    "canonical_roof_id": (
+                        _canonical_roof_payload["canonical_roof_id"]
+                        if _canonical_roof_payload is not None
+                        else None
+                    ),
+                    "canonical_roof_object": _canonical_roof_payload,
                 }
                 self.extraction_status["roof_covering_shadow"] = _roof_meas.status.value
 
@@ -3244,6 +4040,11 @@ class GenericPlanReaderExtractor:
                         }
                     )
             else:
+                self.canonical_roofs_live = {
+                    "status": "abstained",
+                    "reason_codes": ["footprint_envelope_unavailable"],
+                    "roofs": [],
+                }
                 self.roof_covering_shadow = {
                     "status": "abstained",
                     "reason": "footprint_envelope_unavailable",
@@ -3255,6 +4056,13 @@ class GenericPlanReaderExtractor:
                 }
                 self.extraction_status["roof_covering_shadow"] = "abstained"
         except Exception as _exc:  # noqa: BLE001
+            self.canonical_roofs_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_roof_exception:{type(_exc).__name__}"
+                ],
+                "roofs": [],
+            }
             self.roof_covering_shadow = {
                 "status": "abstained",
                 "reason": f"roof_covering_shadow_exception:{type(_exc).__name__}",
@@ -3265,7 +4073,69 @@ class GenericPlanReaderExtractor:
                 "roof_covering_area_m2": None,
             }
             self.extraction_status["roof_covering_shadow"] = "failed"
+        self._mark_performance("roof_covering_shadow_complete")
 
+        # Assemble the source-revision canonical Building -> Level graph only
+        # after every live object family has completed. Storey ownership is
+        # propagated solely through proven level IDs / physical relationships;
+        # missing ownership remains explicitly unassigned.
+        try:
+            from pb_live_canonical_building_core import (
+                assemble_live_canonical_building_core,
+            )
+
+            _building_core = assemble_live_canonical_building_core(
+                source_sha256=hashlib.sha256(p_path.read_bytes()).hexdigest(),
+                levels=self.canonical_levels_live.get("levels", ()),
+                walls=self.canonical_walls_live.get("walls", ()),
+                openings=self.canonical_openings_live.get("openings", ()),
+                rooms=self.canonical_rooms_live.get("rooms", ()),
+                floors=self.canonical_floors_live.get("floors", ()),
+                slabs=self.canonical_slabs_live.get("slabs", ()),
+                ceilings=self.canonical_ceilings_live.get("ceilings", ()),
+                roofs=self.canonical_roofs_live.get("roofs", ()),
+                structural_members=self.canonical_structural_members_live.get(
+                    "members",
+                    (),
+                ),
+            )
+            self.canonical_building_live = _building_core.to_dict()
+            self.extraction_status["canonical_building_live"] = (
+                _building_core.status.value
+            )
+        except Exception as _building_exc:  # noqa: BLE001
+            self.canonical_building_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_building_exception:{type(_building_exc).__name__}"
+                ],
+                "building_id": None,
+                "levels": [],
+                "unassigned": {},
+                "object_counts": {},
+                "level_assignment_complete": False,
+            }
+            self.extraction_status["canonical_building_live"] = (
+                "extraction_failed"
+            )
+
+        # Read-only exact producer coverage. A diagnostic failure cannot change
+        # predictions or promote a canonical candidate into physical authority.
+        try:
+            from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
+
+            self.coverage_registry_summaries_live, self.coverage_family_gaps_live = (
+                collect_live_canonical_coverage(
+                    objects=_coverage_objects, quantities=_coverage_quantities,
+                    registry_run_scope="generic_pdf_extractor",
+                )
+            )
+        except Exception as _coverage_exc:
+            self.coverage_registry_summaries_live = ()
+            self.coverage_family_gaps_live = {
+                "wall": [f"live_coverage_collection_failed:{type(_coverage_exc).__name__}"]
+            }
+        self._mark_performance("extract_complete")
         doc.close()
         return list(pred_dict.values())
 

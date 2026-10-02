@@ -1,0 +1,3383 @@
+{
+  "schema_version": "draft-reference-truth-v1",
+  "project_id": "au_qld_3laurel",
+  "status": "DRAFT_INCOMPLETE",
+  "truth_source_policy": "source-declared-quantity-or-independent-dimension-measurement-only; never PlanReader output",
+  "source_documents": [
+    {
+      "name": "3LAUREL - Construction Plan Set Rev3 08.05.26.pdf",
+      "sha256": "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+    }
+  ],
+  "aggregate_controls_not_denominator": [
+    {
+      "control_id": "3laurel:control:total_floor_area",
+      "description": "Total declared floor area",
+      "expected_quantity": 297.5,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:area_table:TOTAL_FLOOR_AREA_297.50_m2",
+      "reason": "aggregate overlaps all component floor surfaces"
+    },
+    {
+      "control_id": "3laurel:control:building_site_coverage",
+      "description": "Building site coverage",
+      "expected_quantity": 297.6,
+      "unit": "m2",
+      "source_location": "architectural:p2:site_plan:BUILDING_SITE_COVERAGE_297.6_m2",
+      "reason": "site coverage is a separate aggregate control and differs by 0.1 m2 from floor-area schedule"
+    }
+  ],
+  "unresolved_surface_families": [
+    "internal_wall_faces_beyond_closed_bathroom_main_ensuite_main_wc_main_laundry_gf_ensuite_laundry_bed2_bed3_net_geometry_and_media_gross_faces",
+    "external_wall_faces_and_cladding",
+    "roof_planes",
+    "structural_members_beyond_closed_wall_bracing_and_explicit_140x140_posts_470x470_piers",
+    "secondary_fc_soffit_and_beam_faces_beyond_primary_ceiling_planes",
+    "wet_area_tile_all_niche_return_depths",
+    "wet_area_non_shower_tile_scope_beyond_closed_laundry_A_B_D_skirtings_and_A_B_splashbacks",
+    "unlabelled_internal_wall_breaks_beyond_two_closed_dimensioned_open_archways_for_wall_face_deductions"
+  ],
+  "completion_rule": "Do not mark project VERIFIED until every in-scope family is independently closed and aggregate controls reconcile without double counting.",
+  "verified_physical_candidates": [
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "Bed 2 1200 x 1810 ASW",
+      "expected_quantity": 2.172,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          663.3,
+          463.1,
+          718.8,
+          470.9
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed_2_external_1200x1810_ASW:bbox_663.3_463.1_718.8_470.9"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "Bed 3 1200 x 1810 ASW",
+      "expected_quantity": 2.172,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          576.3,
+          463.1,
+          631.7,
+          470.9
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed_3_external_1200x1810_ASW:bbox_576.3_463.1_631.7_470.9"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:03",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 x 1810 ASW #3",
+      "expected_quantity": 2.172,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          383.3,
+          463.1,
+          438.7,
+          470.9
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:03"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200x1810_asw:04",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 x 1810 ASW #4",
+      "expected_quantity": 2.172,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.2,
+        "width_m": 1.81,
+        "source_bbox_pdf_pt": [
+          168.3,
+          259.3,
+          223.7,
+          267.1
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:04"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #1",
+      "expected_quantity": 4.338,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          275.6,
+          180.5,
+          331,
+          188.3
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #2",
+      "expected_quantity": 4.338,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          391.8,
+          270.1,
+          447.2,
+          277.9
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:02"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:03",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #3",
+      "expected_quantity": 4.338,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          522.3,
+          180.5,
+          577.7,
+          188.3
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:03"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x2410_asw:04",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 2410 ASW #4",
+      "expected_quantity": 4.338,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 2.41,
+        "source_bbox_pdf_pt": [
+          624.6,
+          180.5,
+          680.1,
+          188.3
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:04"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x610_asw_obs:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 610 ASW obs",
+      "expected_quantity": 1.098,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window_obscure",
+        "height_m": 1.8,
+        "width_m": 0.61,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:1800_610_asw_obs"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x900_adh:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 900 ADH #1",
+      "expected_quantity": 1.62,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_double_hung_window",
+        "height_m": 1.8,
+        "width_m": 0.9,
+        "source_bbox_pdf_pt": [
+          994.8,
+          200.7,
+          1002.6,
+          236
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x900_adh:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 900 ADH #2",
+      "expected_quantity": 1.62,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_double_hung_window",
+        "height_m": 1.8,
+        "width_m": 0.9,
+        "source_bbox_pdf_pt": [
+          994.8,
+          252.3,
+          1002.6,
+          287.6
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:02"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1800x910_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1800 x 910 ASW",
+      "expected_quantity": 1.638,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 1.8,
+        "width_m": 0.91,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:1800_910_asw"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:2100x1500_asd:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 1500 ASD",
+      "expected_quantity": 3.15,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_door",
+        "height_m": 2.1,
+        "width_m": 1.5,
+        "source_bbox_pdf_pt": [
+          740,
+          460.5,
+          779.2,
+          468.3
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:2100x2100_asd:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 2100 ASD",
+      "expected_quantity": 4.41,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_door",
+        "height_m": 2.1,
+        "width_m": 2.1,
+        "source_bbox_pdf_pt": [
+          236.7,
+          211.5,
+          244.5,
+          250.7
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:2100x2700_assd:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 2700 ASSD",
+      "expected_quantity": 5.67,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_stack_door",
+        "height_m": 2.1,
+        "width_m": 2.7,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:21_27_assd"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:2100x4800_panel_lift:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "2100 x 4800 panel lift door",
+      "expected_quantity": 10.08,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "panel_lift_door",
+        "height_m": 2.1,
+        "width_m": 4.8,
+        "source_bbox_pdf_pt": [
+          957.9,
+          381.9,
+          965.8,
+          471.2
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1210_asw_obs:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1210 ASW obs #1",
+      "expected_quantity": 0.726,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window_obscure",
+        "height_m": 0.6,
+        "width_m": 1.21,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:600_1210_asw_obs_01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1210_asw_obs:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1210 ASW obs #2",
+      "expected_quantity": 0.726,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window_obscure",
+        "height_m": 0.6,
+        "width_m": 1.21,
+        "quantity_basis": "explicit typed floor-plan opening label"
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:600_1210_asw_obs_02"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1510_asw:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1510 ASW #1",
+      "expected_quantity": 0.906,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 0.6,
+        "width_m": 1.51,
+        "source_bbox_pdf_pt": [
+          132.5,
+          374.8,
+          140.3,
+          424.4
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:01"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:600x1510_asw:02",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "600 x 1510 ASW #2",
+      "expected_quantity": 0.906,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_sliding_window",
+        "height_m": 0.6,
+        "width_m": 1.51,
+        "source_bbox_pdf_pt": [
+          132.5,
+          288.9,
+          140.3,
+          338.5
+        ]
+      },
+      "source_location": "architectural:p3:A0.3:floor_plan:02"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-01 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-01",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-01"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-02 750 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.75,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-02",
+        "brace_type": "750 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-02"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-03",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-03 1500 Ply - Meth B bracing panel/member",
+      "expected_quantity": 1.5,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-03",
+        "brace_type": "1500 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-03"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-04",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-04 1200 Ply - Meth B bracing panel/member",
+      "expected_quantity": 1.2,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-04",
+        "brace_type": "1200 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-04"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-05",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-05 1800 Ply - Meth B bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-05",
+        "brace_type": "1800 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-05"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-06",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-06 2700 Ply - Meth B bracing panel/member",
+      "expected_quantity": 2.7,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-06",
+        "brace_type": "2700 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-06"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-07",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-07 2700 Ply - Meth B bracing panel/member",
+      "expected_quantity": 2.7,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-07",
+        "brace_type": "2700 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-07"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-08",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-08 900 Ply - Meth B bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-08",
+        "brace_type": "900 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-08"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-09",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-09 1800 Ply - Meth B bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-09",
+        "brace_type": "1800 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-09"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-10",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-10 1800 Ply - Meth B bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-10",
+        "brace_type": "1800 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-10"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-11",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-11 900 Ply - Meth B bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-11",
+        "brace_type": "900 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-11"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-12",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-12 700 Ply - Meth B bracing panel/member",
+      "expected_quantity": 0.7,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-12",
+        "brace_type": "700 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-12"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-13",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-13 1800 Galv. Angle bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-13",
+        "brace_type": "1800 Galv. Angle"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-13"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-14",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-14 1800 Galv. Angle bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-14",
+        "brace_type": "1800 Galv. Angle"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-14"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-U2-01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-U2-01 1200 Ply - Meth A bracing panel/member",
+      "expected_quantity": 1.2,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-U2-01",
+        "brace_type": "1200 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-U2-01"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-U2-02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-U2-02 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-U2-02",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-U2-02"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-U2-03",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-U2-03 900 Ply - Meth B bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-U2-03",
+        "brace_type": "900 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-U2-03"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-U2-04",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-U2-04 1100 Ply - Meth A bracing panel/member",
+      "expected_quantity": 1.1,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-U2-04",
+        "brace_type": "1100 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-U2-04"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-U2-05",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-U2-05 1800 Galv. Angle bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-U2-05",
+        "brace_type": "1800 Galv. Angle"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-U2-05"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-U2-06",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-U2-06 1800 Galv. Angle bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-U2-06",
+        "brace_type": "1800 Galv. Angle"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-U2-06"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:A-U2-07",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "A-U2-07 1800 Galv. Angle bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "A-U2-07",
+        "brace_type": "1800 Galv. Angle"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:A-U2-07"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-01 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-01",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-01"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-02 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-02",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-02"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-03",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-03 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-03",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-03"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-04",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-04 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-04",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-04"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-05",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-05 1800 Ply - Meth B bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-05",
+        "brace_type": "1800 Ply - Meth B"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-05"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-06",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-06 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-06",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-06"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-07",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-07 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-07",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-07"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-08",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-08 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-08",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-08"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-09",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-09 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-09",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-09"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-U2-01",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-U2-01 750 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.75,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-U2-01",
+        "brace_type": "750 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-U2-01"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-U2-02",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-U2-02 750 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.75,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-U2-02",
+        "brace_type": "750 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-U2-02"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-U2-03",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-U2-03 1800 Ply - Meth A bracing panel/member",
+      "expected_quantity": 1.8,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-U2-03",
+        "brace_type": "1800 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-U2-03"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-U2-04",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-U2-04 600 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.6,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-U2-04",
+        "brace_type": "600 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-U2-04"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-U2-05",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-U2-05 900 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.9,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-U2-05",
+        "brace_type": "900 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-U2-05"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-U2-06",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-U2-06 600 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.6,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-U2-06",
+        "brace_type": "600 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-U2-06"
+    },
+    {
+      "object_ref": "3laurel:structural:brace:B-U2-07",
+      "physical_kind": "structural_member",
+      "object_family": "wall_bracing",
+      "description": "B-U2-07 600 Ply - Meth A bracing panel/member",
+      "expected_quantity": 0.6,
+      "unit": "m",
+      "attributes": {
+        "schedule_code": "B-U2-07",
+        "brace_type": "600 Ply - Meth A"
+      },
+      "source_location": "architectural:p8:A0.8:bracing_schedule:B-U2-07"
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:garage",
+      "physical_kind": "surface",
+      "object_family": "ceiling_plane",
+      "description": "Garage ceiling plane",
+      "expected_quantity": 36.4,
+      "unit": "m2",
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "10mm Gyprock to truss bottom chord",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_location": "architectural:p3:A0.3:floor_area_region:garage; architectural:p7:A0.7:ceiling_bottom_chord_note"
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:gf_alfresco",
+      "physical_kind": "surface",
+      "object_family": "ceiling_plane",
+      "description": "Granny-flat alfresco ceiling plane",
+      "expected_quantity": 10.5,
+      "unit": "m2",
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "horizontal underside ceiling plane",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_location": "architectural:p3:A0.3:floor_area_region:gf_alfresco; architectural:p7:A0.7:ceiling_bottom_chord_note"
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:gf_living",
+      "physical_kind": "surface",
+      "object_family": "ceiling_plane",
+      "description": "Granny-flat internal ceiling plane",
+      "expected_quantity": 60,
+      "unit": "m2",
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "10mm Gyprock to truss bottom chord",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_location": "architectural:p3:A0.3:floor_area_region:gf_living; architectural:p7:A0.7:ceiling_bottom_chord_note"
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:gf_porch",
+      "physical_kind": "surface",
+      "object_family": "ceiling_plane",
+      "description": "Granny-flat porch ceiling plane",
+      "expected_quantity": 1.4,
+      "unit": "m2",
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "FC sheet to underside truss/joists",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_location": "architectural:p3:A0.3:floor_area_region:gf_porch; architectural:p7:A0.7:ceiling_bottom_chord_note"
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:main_alfresco",
+      "physical_kind": "surface",
+      "object_family": "ceiling_plane",
+      "description": "Main-house alfresco ceiling plane",
+      "expected_quantity": 13.6,
+      "unit": "m2",
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "plaster to underside of trusses",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_location": "architectural:p3:A0.3:floor_area_region:main_alfresco; architectural:p7:A0.7:ceiling_bottom_chord_note"
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:main_living",
+      "physical_kind": "surface",
+      "object_family": "ceiling_plane",
+      "description": "Main-house internal ceiling plane",
+      "expected_quantity": 168.1,
+      "unit": "m2",
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "10mm Gyprock to truss bottom chord",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_location": "architectural:p3:A0.3:floor_area_region:main_living; architectural:p7:A0.7:ceiling_bottom_chord_note"
+    },
+    {
+      "object_ref": "3laurel:surface:ceiling:main_porch",
+      "physical_kind": "surface",
+      "object_family": "ceiling_plane",
+      "description": "Main-house porch ceiling plane",
+      "expected_quantity": 7.5,
+      "unit": "m2",
+      "attributes": {
+        "ceiling_geometry": "horizontal",
+        "lining_basis": "FC sheet to underside truss/joists",
+        "quantity_basis": "corresponding source-declared floor-region plan area"
+      },
+      "source_location": "architectural:p3:A0.3:floor_area_region:main_porch; architectural:p7:A0.7:ceiling_bottom_chord_note"
+    },
+    {
+      "object_ref": "3laurel:surface:floor:garage",
+      "description": "Garage concrete floor surface",
+      "expected_quantity": 36.4,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:area_table:GARAGE_36.40_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "3laurel:surface:floor:gf_alfresco",
+      "description": "Granny-flat alfresco tiled floor surface",
+      "expected_quantity": 10.5,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:area_table:GF_ALFRESCO_10.50_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "3laurel:surface:floor:gf_living_composite_region",
+      "physical_kind": "surface",
+      "object_family": "floor",
+      "description": "Source-defined granny-flat living floor region",
+      "expected_quantity": 60,
+      "unit": "m2",
+      "attributes": {
+        "region_granularity": "source_area_schedule_composite",
+        "finish_scope": "mixed internal floor finishes",
+        "closure_group": "3laurel_declared_floor_area"
+      },
+      "source_location": "architectural:p3:floor_plan:area_table:GF_LIVING_60.00_m2"
+    },
+    {
+      "object_ref": "3laurel:surface:floor:gf_porch",
+      "description": "Granny-flat porch tiled floor surface",
+      "expected_quantity": 1.4,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:area_table:GF_PORCH_1.40_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "3laurel:surface:floor:main_alfresco",
+      "description": "Main-house alfresco tiled floor surface",
+      "expected_quantity": 13.6,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:area_table:ALFRESCO_13.60_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "3laurel:surface:floor:main_living_composite_region",
+      "physical_kind": "surface",
+      "object_family": "floor",
+      "description": "Source-defined main-house living floor region",
+      "expected_quantity": 168.1,
+      "unit": "m2",
+      "attributes": {
+        "region_granularity": "source_area_schedule_composite",
+        "finish_scope": "mixed internal floor finishes",
+        "closure_group": "3laurel_declared_floor_area"
+      },
+      "source_location": "architectural:p3:floor_plan:area_table:MAIN_LIVING_168.10_m2"
+    },
+    {
+      "object_ref": "3laurel:surface:floor:main_porch",
+      "description": "Main-house porch tiled floor surface",
+      "expected_quantity": 7.5,
+      "unit": "m2",
+      "source_location": "architectural:p3:floor_plan:area_table:PORCH_7.50_m2",
+      "physical_kind": "surface",
+      "object_family": "floor"
+    },
+    {
+      "object_ref": "3laurel:surface:site:driveway_entry",
+      "description": "Exposed-aggregate driveway and entry path surface",
+      "expected_quantity": 71.2,
+      "unit": "m2",
+      "source_location": "architectural:p2:site_plan:DRIVEWAY_ENTRY_PATH_TOTAL_71.2_m2",
+      "physical_kind": "surface",
+      "object_family": "site_concrete"
+    },
+    {
+      "object_ref": "3laurel:surface:site:path",
+      "description": "Exposed-aggregate path surface",
+      "expected_quantity": 26.7,
+      "unit": "m2",
+      "source_location": "architectural:p2:site_plan:PATH_TOTAL_26.7_m2",
+      "physical_kind": "surface",
+      "object_family": "site_concrete"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_1",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "Main bathroom C shower wall",
+      "expected_quantity": 1.89,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 0.9,
+        "tile_height_m": 2.1,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "gross_face_is_also_net_finish_face_no_opening_or_niche",
+        "host_elevation": "Bathroom C",
+        "niche_present": false
+      },
+      "source_location": "architectural:p11:A0.11:Bathroom_C:900_SHW_x_2100_TILES:no_niche"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_2",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "Main bathroom D shower wall",
+      "expected_quantity": 1.89,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 0.9,
+        "tile_height_m": 2.1,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "deduction_face_closed_but_niche_returns_unresolved",
+        "host_elevation": "Bathroom D",
+        "niche_present": true
+      },
+      "source_location": "architectural:p11:A0.11:Bathroom_D:900_SHW_x_2100_TILES:1100_sill_400_high_niche; architectural:p3:A0.3:floor_plan:04-06_Niche"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_rear",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "Main ensuite shower rear wall",
+      "expected_quantity": 4.536,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 1.68,
+        "tile_height_m": 2.7,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "draft_only_until_niche_and_return_adjustments_are_resolved"
+      },
+      "source_location": "architectural:p12:A0.12:ensuite_A:1680_wall:shower_tiles_to_ceiling; architectural:p7:A0.7:FCL_2700"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_return_1",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "Main ensuite shower return wall 1",
+      "expected_quantity": 2.43,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "gross_face_is_also_net_finish_face_no_opening_or_niche",
+        "host_elevation": "Ensuite B",
+        "niche_present": false
+      },
+      "source_location": "architectural:p12:A0.12:Ensuite_B:900_SHW:SHOWER_TILES_TO_RUN_UP_TO_CEILING"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_return_2",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "Main ensuite shower return wall 2",
+      "expected_quantity": 2.43,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "gross_face_is_also_net_finish_face_no_opening_or_niche",
+        "host_elevation": "Ensuite D",
+        "niche_present": false
+      },
+      "source_location": "architectural:p12:A0.12:Ensuite_D:900_SHW:full_height_shower_tiling_scope"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_rear",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "GF ensuite shower rear wall",
+      "expected_quantity": 5.049,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 1.87,
+        "tile_height_m": 2.7,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "draft_only_until_niche_and_return_adjustments_are_resolved"
+      },
+      "source_location": "architectural:p15:A0.15:GF_Ens_Ldry_C:1870_wall:shower_tiles_to_ceiling; architectural:p7:A0.7:FCL_2700"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_return_1",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "GF ensuite shower return wall 1",
+      "expected_quantity": 2.43,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "gross_face_is_also_net_finish_face_no_opening_or_niche",
+        "host_elevation": "GF Ens/Ldry B",
+        "niche_present": false
+      },
+      "source_location": "architectural:p15:A0.15:GF_Ens_Ldry_B:900_SHW:SHOWER_TILES_TO_RUN_UP_TO_CEILING"
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_return_2",
+      "physical_kind": "surface",
+      "object_family": "wet_area_wall_tile_gross_face",
+      "description": "GF ensuite shower return wall 2",
+      "expected_quantity": 2.43,
+      "unit": "m2",
+      "attributes": {
+        "width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "width_m * tile_height_m",
+        "quantity_basis": "gross designated tiled wall face before niche/recess return adjustment",
+        "denominator_readiness": "gross_face_is_also_net_finish_face_no_opening_or_niche",
+        "host_elevation": "GF Ens/Ldry D",
+        "niche_present": false
+      },
+      "source_location": "architectural:p15:A0.15:GF_Ens_Ldry_D:900_SHW:SHOWER_TILES_TO_RUN_UP_TO_CEILING"
+    },
+    {
+      "object_ref": "3laurel:structural:timber_post:140x140:01",
+      "object_family": "external_structural_post",
+      "physical_kind": "structural_member",
+      "description": "140x140 timber post, floor-plan instance 1",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:A0.3:floor_plan:140_POST_instance_1",
+      "attributes": {
+        "section_mm": "140x140",
+        "material": "timber",
+        "crosscheck": "architectural:p5:A0.5:140x140_TIMBER_POST"
+      }
+    },
+    {
+      "object_ref": "3laurel:structural:timber_post:140x140:02",
+      "object_family": "external_structural_post",
+      "physical_kind": "structural_member",
+      "description": "140x140 timber post, floor-plan instance 2",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:A0.3:floor_plan:140_POST_instance_2",
+      "attributes": {
+        "section_mm": "140x140",
+        "material": "timber",
+        "crosscheck": "architectural:p5:A0.5:140x140_TIMBER_POST"
+      }
+    },
+    {
+      "object_ref": "3laurel:structural:brick_pier:470x470:01",
+      "object_family": "external_structural_pier",
+      "physical_kind": "structural_member",
+      "description": "470x470 brick pier clad in stone, floor-plan instance 1",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:A0.3:floor_plan:470_PIER_instance_1",
+      "attributes": {
+        "section_mm": "470x470",
+        "material": "brick_pier_clad_in_stone",
+        "crosscheck": "architectural:p4-p5:A0.4-A0.5:470x470_BRICK_PIER"
+      }
+    },
+    {
+      "object_ref": "3laurel:structural:brick_pier:470x470:02",
+      "object_family": "external_structural_pier",
+      "physical_kind": "structural_member",
+      "description": "470x470 brick pier clad in stone, floor-plan instance 2",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:A0.3:floor_plan:470_PIER_instance_2",
+      "attributes": {
+        "section_mm": "470x470",
+        "material": "brick_pier_clad_in_stone",
+        "crosscheck": "architectural:p4-p5:A0.4-A0.5:470x470_BRICK_PIER"
+      }
+    },
+    {
+      "object_ref": "3laurel:structural:brick_pier:470x470:03",
+      "object_family": "external_structural_pier",
+      "physical_kind": "structural_member",
+      "description": "470x470 brick pier clad in stone, floor-plan instance 3",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:A0.3:floor_plan:470_PIER_instance_3",
+      "attributes": {
+        "section_mm": "470x470",
+        "material": "brick_pier_clad_in_stone",
+        "crosscheck": "architectural:p4-p5:A0.4-A0.5:470x470_BRICK_PIER"
+      }
+    },
+    {
+      "object_ref": "3laurel:structural:brick_pier:470x470:04",
+      "object_family": "external_structural_pier",
+      "physical_kind": "structural_member",
+      "description": "470x470 brick pier clad in stone, floor-plan instance 4",
+      "expected_quantity": 1,
+      "unit": "count",
+      "source_location": "architectural:p3:A0.3:floor_plan:470_PIER_instance_4",
+      "attributes": {
+        "section_mm": "470x470",
+        "material": "brick_pier_clad_in_stone",
+        "crosscheck": "architectural:p4-p5:A0.4-A0.5:470x470_BRICK_PIER"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:1200_main_entry_hinged:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "1200 main entry hinged opening",
+      "expected_quantity": 2.52,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "aluminium_entry_door",
+        "height_m": 2.1,
+        "width_m": 1.2,
+        "quantity_basis": "explicit floor-plan entry opening width x elevation joinery height 2100 AFL U.N.O."
+      },
+      "source_location": "architectural:p3:A0.3:ENTRY_PORCH_1200_opening; architectural:p4:A0.4:ALUMINIUM_ENTRY_DOOR_and_JOINERY_2100_AFL_UNO"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:0870_gf_entry_hinged:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "870 granny-flat porch entry hinged opening",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "hinged_external_entry_door",
+        "height_m": 2.1,
+        "width_m": 0.87,
+        "quantity_basis": "explicit perimeter door width x elevation joinery height 2100 AFL U.N.O."
+      },
+      "source_location": "architectural:p3:A0.3:GF_PORCH_entry_870; architectural:p4:A0.4:JOINERY_HEIGHTS_2100_AFL_UNO"
+    },
+    {
+      "object_ref": "3laurel:opening:p3:0870_garage_personnel_hinged:01",
+      "physical_kind": "opening_surface",
+      "object_family": "external_opening",
+      "description": "870 garage personnel external hinged opening",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "attributes": {
+        "opening_type": "hinged_external_personnel_door",
+        "height_m": 2.1,
+        "width_m": 0.87,
+        "quantity_basis": "explicit perimeter door width x elevation joinery height 2100 AFL U.N.O."
+      },
+      "source_location": "architectural:p3:A0.3:GARAGE_perimeter_870; architectural:p4:A0.4:JOINERY_HEIGHTS_2100_AFL_UNO"
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bathroom:long_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bathroom gross internal wall face, 2.750m side 1",
+      "expected_quantity": 7.425,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:Bathroom_Layout:2750_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 2.75,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bathroom:long_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bathroom gross internal wall face, 2.750m side 2",
+      "expected_quantity": 7.425,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:Bathroom_Layout:2750_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 2.75,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bathroom:short_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bathroom gross internal wall face, 1.880m side 1",
+      "expected_quantity": 5.076,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:Bathroom_Layout:1880_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.88,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bathroom:short_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Bathroom gross internal wall face, 1.880m side 2",
+      "expected_quantity": 5.076,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:Bathroom_Layout:1880_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.88,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:long_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "GF Ensuite/Laundry gross internal wall face, 3.470m side 1",
+      "expected_quantity": 9.369,
+      "unit": "m2",
+      "source_location": "architectural:p15:A0.15:GF_Ensuite_Laundry:3470_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 3.47,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:long_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "GF Ensuite/Laundry gross internal wall face, 3.470m side 2",
+      "expected_quantity": 9.369,
+      "unit": "m2",
+      "source_location": "architectural:p15:A0.15:GF_Ensuite_Laundry:3470_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 3.47,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:short_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "GF Ensuite/Laundry gross internal wall face, 1.870m side 1",
+      "expected_quantity": 5.049,
+      "unit": "m2",
+      "source_location": "architectural:p15:A0.15:GF_Ensuite_Laundry:1870_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.87,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:short_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "GF Ensuite/Laundry gross internal wall face, 1.870m side 2",
+      "expected_quantity": 5.049,
+      "unit": "m2",
+      "source_location": "architectural:p15:A0.15:GF_Ensuite_Laundry:1870_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.87,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:laundry:long_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main laundry gross internal wall face, 3.080m side 1",
+      "expected_quantity": 8.316,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_Layout:3080_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 3.08,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:laundry:long_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main laundry gross internal wall face, 3.080m side 2",
+      "expected_quantity": 8.316,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_Layout:3080_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 3.08,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:laundry:short_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main laundry gross internal wall face, 1.680m side 1",
+      "expected_quantity": 4.536,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_Layout:1680_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.68,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:laundry:short_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main laundry gross internal wall face, 1.680m side 2",
+      "expected_quantity": 4.536,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_Layout:1680_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.68,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p12:main_ensuite_niche:01",
+      "object_family": "wet_area_wall_tile_deduction_opening",
+      "physical_kind": "opening_surface",
+      "description": "Main ensuite shower niche face opening",
+      "expected_quantity": 0.24,
+      "unit": "m2",
+      "source_location": "architectural:p12:A0.12:Ensuite_A:600_niche_width; architectural:p12:A0.12:Ensuite_A-D:400_niche_height",
+      "attributes": {
+        "width_m": 0.6,
+        "height_m": 0.4,
+        "calculation": "width_m * height_m",
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_rear",
+        "niche_return_depth_resolved": false,
+        "denominator_readiness": "deduction_face_closed_but_niche_returns_unresolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p15:gf_ensuite_niche:01",
+      "object_family": "wet_area_wall_tile_deduction_opening",
+      "physical_kind": "opening_surface",
+      "description": "GF ensuite shower niche face opening",
+      "expected_quantity": 0.24,
+      "unit": "m2",
+      "source_location": "architectural:p15:A0.15:GF_Ensuite_plan:600_niche_width; architectural:p15:A0.15:GF_Ens_Ldry_C-D:400_niche_height",
+      "attributes": {
+        "width_m": 0.6,
+        "height_m": 0.4,
+        "calculation": "width_m * height_m",
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_rear",
+        "niche_return_depth_resolved": false,
+        "denominator_readiness": "deduction_face_closed_but_niche_returns_unresolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p11:bathroom_niche:01",
+      "object_family": "wet_area_wall_tile_deduction_opening",
+      "physical_kind": "opening_surface",
+      "description": "Main bathroom shower niche face opening",
+      "expected_quantity": 0.24,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:04-06_Niche; architectural:p11:A0.11:Bathroom_D:400_niche_height",
+      "attributes": {
+        "width_m": 0.6,
+        "height_m": 0.4,
+        "calculation": "width_m * height_m",
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_2",
+        "niche_return_depth_resolved": false,
+        "denominator_readiness": "deduction_face_closed_but_niche_returns_unresolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_ensuite:A",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main ensuite gross internal wall face A",
+      "expected_quantity": 4.536,
+      "unit": "m2",
+      "source_location": "architectural:p12:A0.12:A_elevation:1680_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.68,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_ensuite:B",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main ensuite gross internal wall face B",
+      "expected_quantity": 7.668,
+      "unit": "m2",
+      "source_location": "architectural:p12:A0.12:B_elevation:2840_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 2.84,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_ensuite:C",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main ensuite gross internal wall face C",
+      "expected_quantity": 5.022,
+      "unit": "m2",
+      "source_location": "architectural:p12:A0.12:C_elevation:1860_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.86,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_ensuite:D",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main ensuite gross internal wall face D",
+      "expected_quantity": 7.668,
+      "unit": "m2",
+      "source_location": "architectural:p12:A0.12:D_elevation:2840_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 2.84,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_ensuite:E",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main ensuite gross internal wall face E",
+      "expected_quantity": 5.022,
+      "unit": "m2",
+      "source_location": "architectural:p12:A0.12:E_elevation:1860_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.86,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_wc:long_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main WC gross internal wall face, 1.560m side 1",
+      "expected_quantity": 4.212,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:WC_E-F_and_plan:1560_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.56,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_wc:long_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main WC gross internal wall face, 1.560m side 2",
+      "expected_quantity": 4.212,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:WC_E-F_and_plan:1560_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.56,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_wc:short_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main WC gross internal wall face, 1.110m side 1",
+      "expected_quantity": 2.997,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:WC_E-F_and_plan:1110_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.11,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:main_wc:short_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Main WC gross internal wall face, 1.110m side 2",
+      "expected_quantity": 2.997,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:WC_E-F_and_plan:1110_finished_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_face_width_m": 1.11,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_internal_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_openings_and_finish_scope_are_resolved"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0720_cs:01",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal room-access 720 mm cavity-slider opening",
+      "expected_quantity": 1.512,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:WIP-side 720 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.72,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          739.1,
+          219.6,
+          750.8,
+          227.4
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_cs:01",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal room-access 870 mm cavity-slider opening",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:ENS/WIR-side 870 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          814.2,
+          276.3,
+          825.9,
+          284.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:01",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal room-access 870 mm hinged opening",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:master/WIR-entry zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          894.3,
+          285.2,
+          905.9,
+          293
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:1200_cs:01",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal room-access 1200 mm cavity-slider opening",
+      "expected_quantity": 2.52,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:media-side 1200 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 1.2,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          470.6,
+          302.8,
+          478.4,
+          329.2
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_cs:02",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal room-access 870 mm cavity-slider opening",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:granny-flat wet-area zone 870 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          249,
+          330.5,
+          256.8,
+          351.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:02",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal room-access 870 mm hinged opening: Bed 3",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed_3_hall_870:bbox_559.4_347.5_567.2_359.1; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          559.4,
+          347.5,
+          567.2,
+          359.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:03",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal room-access 870 mm hinged opening: Bed 2",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed_2_hall_870:bbox_722.8_347.5_730.6_359.1; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          722.8,
+          347.5,
+          730.6,
+          359.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:04",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal room-access 870 mm hinged opening",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:laundry/hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          783.6,
+          347.5,
+          791.4,
+          359.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0720_cs:02",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal room-access 720 mm cavity-slider opening",
+      "expected_quantity": 1.512,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:granny-flat bathroom-side 720 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.72,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          222.7,
+          347.9,
+          243.2,
+          355.7
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:05",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal room-access 870 mm hinged opening",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed 5/WIR zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          155.3,
+          356.7,
+          166.9,
+          364.5
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:06",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal room-access 870 mm hinged opening",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:laundry/bedroom hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          744.2,
+          367.8,
+          755.8,
+          375.6
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0720_cs:03",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal room-access 720 mm cavity-slider opening",
+      "expected_quantity": 1.512,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:main WC-side 720 cs; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "cavity_slider",
+        "width_m": 0.72,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          506.1,
+          372.9,
+          526.7,
+          380.7
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0870_swing:07",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal room-access 870 mm hinged opening",
+      "expected_quantity": 1.827,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed 3/4 hall zone 870; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.87,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          468.3,
+          381.5,
+          476.1,
+          393.1
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_access:0720_swing:01",
+      "object_family": "internal_room_access_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal room-access 720 mm hinged opening",
+      "expected_quantity": 1.512,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:main bathroom 720 hinged opening; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "hinged_swing",
+        "width_m": 0.72,
+        "height_m": 2.1,
+        "quantity_basis": "explicit floor-plan door width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          514,
+          401.8,
+          525.6,
+          409.6
+        ],
+        "wall_deduction_scope": "room_access_opening_only"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_joinery:1200_vsd_laundry_linen:01",
+      "object_family": "internal_sliding_joinery_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 1200 mm vertical sliding joinery opening",
+      "expected_quantity": 2.52,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:laundry/linen 1200 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "vertical_sliding_joinery_door",
+        "width_m": 1.2,
+        "height_m": 2.1,
+        "quantity_basis": "explicit VSD width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          757.8,
+          386.9,
+          765.6,
+          397.8
+        ],
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_joinery:1800_vsd_bed3_robe:01",
+      "object_family": "internal_sliding_joinery_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 1800 mm vertical sliding joinery opening",
+      "expected_quantity": 3.78,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed 3 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "vertical_sliding_joinery_door",
+        "width_m": 1.8,
+        "height_m": 2.1,
+        "quantity_basis": "explicit VSD width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          609,
+          355.4,
+          619.9,
+          363.2
+        ],
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_joinery:1800_vsd_bed2_robe:01",
+      "object_family": "internal_sliding_joinery_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 1800 mm vertical sliding joinery opening",
+      "expected_quantity": 3.78,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed 2 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "vertical_sliding_joinery_door",
+        "width_m": 1.8,
+        "height_m": 2.1,
+        "quantity_basis": "explicit VSD width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          691.6,
+          355.4,
+          702.5,
+          363.2
+        ],
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_joinery:1800_vsd_bed4_robe:01",
+      "object_family": "internal_sliding_joinery_opening",
+      "physical_kind": "opening_surface",
+      "description": "Internal 1800 mm vertical sliding joinery opening",
+      "expected_quantity": 3.78,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:Bed 4 ROBE 1800 vsd; architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO",
+      "attributes": {
+        "opening_type": "vertical_sliding_joinery_door",
+        "width_m": 1.8,
+        "height_m": 2.1,
+        "quantity_basis": "explicit VSD width x JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+        "source_bbox_pdf_pt": [
+          453,
+          404.8,
+          460.9,
+          415.7
+        ],
+        "wall_deduction_scope": "labelled_sliding_joinery_opening"
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_archway:2100x1030:01",
+      "object_family": "internal_open_archway",
+      "physical_kind": "opening_surface",
+      "description": "Dimensioned internal open archway, 2100 high x 1030 wide",
+      "expected_quantity": 2.163,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:wall_break_between_living_media_and_WC_Bed3_hall:2100x1030",
+      "attributes": {
+        "opening_type": "open_archway",
+        "width_m": 1.03,
+        "height_m": 2.1,
+        "calculation": "1.030m * 2.100m",
+        "wall_deduction_scope": "dimensioned_open_archway",
+        "source_closed_opening": true
+      }
+    },
+    {
+      "object_ref": "3laurel:opening:p3:internal_archway:2100x1000:01",
+      "object_family": "internal_open_archway",
+      "physical_kind": "opening_surface",
+      "description": "Dimensioned internal open archway, 2100 high x 1000 wide",
+      "expected_quantity": 2.1,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:wall_break_between_dining_entry_and_Bed2_laundry_hall:2100x1000",
+      "attributes": {
+        "opening_type": "open_archway",
+        "width_m": 1,
+        "height_m": 2.1,
+        "calculation": "1.000m * 2.100m",
+        "wall_deduction_scope": "dimensioned_open_archway",
+        "source_closed_opening": true
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed2:3000_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED2 gross room-side wall face, 3.000m side 1",
+      "expected_quantity": 8.1,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED2:3000_finished_room_width; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 3,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_external_window_or_robe_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed2:3000_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED2 gross room-side wall face, 3.000m side 2",
+      "expected_quantity": 8.1,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED2:3000_finished_room_width; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 3,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_external_window_or_robe_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed2:4200_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED2 gross room-side wall face, 4.200m side 1",
+      "expected_quantity": 11.34,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED2:4200_room_depth; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 4.2,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_room_access_and_robe_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed2:4200_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED2 gross room-side wall face, 4.200m side 2",
+      "expected_quantity": 11.34,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED2:4200_room_depth; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 4.2,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_room_access_and_robe_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed3:3000_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED3 gross room-side wall face, 3.000m side 1",
+      "expected_quantity": 8.1,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED3:3000_finished_room_width; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 3,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_external_window_or_robe_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed3:3000_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED3 gross room-side wall face, 3.000m side 2",
+      "expected_quantity": 8.1,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED3:3000_finished_room_width; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 3,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_external_window_or_robe_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed3:4200_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED3 gross room-side wall face, 4.200m side 1",
+      "expected_quantity": 11.34,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED3:4200_room_depth; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 4.2,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_room_access_and_robe_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:bed3:4200_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "BED3 gross room-side wall face, 4.200m side 2",
+      "expected_quantity": 11.34,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED3:4200_room_depth; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 4.2,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_room_access_and_robe_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:floor:media",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Media room vinyl floor surface",
+      "expected_quantity": 13.146,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:MEDIA:4200x3130_figured_dimensions:VINYL",
+      "attributes": {
+        "width_m": 4.2,
+        "length_m": 3.13,
+        "calculation": "4.200m * 3.130m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:media:4200_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Media gross room-side wall face, 4.200m side",
+      "expected_quantity": 11.34,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:MEDIA:4200_finished_room_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 4.2,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_window_room_access_and_other_wall_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:media:4200_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Media gross room-side wall face, 4.200m side",
+      "expected_quantity": 11.34,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:MEDIA:4200_finished_room_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 4.2,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_window_room_access_and_other_wall_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:media:3130_side_1",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Media gross room-side wall face, 3.130m side",
+      "expected_quantity": 8.451,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:MEDIA:3130_finished_room_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 3.13,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_window_room_access_and_other_wall_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:internal_wall_gross:media:3130_side_2",
+      "object_family": "internal_wall_gross_face",
+      "physical_kind": "surface",
+      "description": "Media gross room-side wall face, 3.130m side",
+      "expected_quantity": 8.451,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:MEDIA:3130_finished_room_dimension; architectural:p7:A0.7:FCL_2700",
+      "attributes": {
+        "finished_room_face_width_m": 3.13,
+        "finished_ceiling_height_m": 2.7,
+        "surface_layer": "gross_room_side_wall_face",
+        "openings_deducted": false,
+        "denominator_readiness": "draft_only_until_window_room_access_and_other_wall_opening_deductions_are_applied"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:floor:bed2",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Bed 2 vinyl floor surface",
+      "expected_quantity": 12.6,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED_2:3000x4200_figured_dimensions:VINYL",
+      "attributes": {
+        "width_m": 3,
+        "length_m": 4.2,
+        "calculation": "3.000m * 4.200m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:floor:bed3",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Bed 3 vinyl floor surface",
+      "expected_quantity": 12.6,
+      "unit": "m2",
+      "source_location": "architectural:p3:A0.3:floor_plan:BED_3:3000x4200_figured_dimensions:VINYL",
+      "attributes": {
+        "width_m": 3,
+        "length_m": 4.2,
+        "calculation": "3.000m * 4.200m",
+        "finish": "vinyl",
+        "quantity_basis": "figured finished room dimensions",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:floor:bathroom",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Main bathroom tiled floor surface",
+      "expected_quantity": 5.17,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:Bathroom_Layout:1880x2750_finished_dimensions; architectural:p3:A0.3:BATH:TILES",
+      "attributes": {
+        "width_m": 1.88,
+        "length_m": 2.75,
+        "calculation": "1.880m * 2.750m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from bathroom layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:floor:main_wc",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Main WC tiled floor surface",
+      "expected_quantity": 1.7316,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:WC_plan:1560x1110_finished_dimensions; architectural:p3:A0.3:WC:TILES",
+      "attributes": {
+        "width_m": 1.56,
+        "length_m": 1.11,
+        "calculation": "1.560m * 1.110m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from WC layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:floor:laundry",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Main laundry tiled floor surface",
+      "expected_quantity": 5.1744,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_Layout:3080x1680_finished_dimensions; architectural:p3:A0.3:LDY:TILES",
+      "attributes": {
+        "width_m": 3.08,
+        "length_m": 1.68,
+        "calculation": "3.080m * 1.680m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from laundry layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:main_living_composite_region"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:floor:gf_ensuite_laundry",
+      "object_family": "floor",
+      "physical_kind": "surface",
+      "description": "Granny-flat ensuite/laundry tiled floor surface",
+      "expected_quantity": 6.4889,
+      "unit": "m2",
+      "source_location": "architectural:p15:A0.15:GF_Ensuite_Laundry:1870x3470_finished_dimensions; architectural:p3:A0.3:GF_wet_area:TILES",
+      "attributes": {
+        "width_m": 1.87,
+        "length_m": 3.47,
+        "calculation": "1.870m * 3.470m",
+        "finish": "tiles",
+        "quantity_basis": "finished room dimensions from GF ensuite/laundry layout",
+        "closure_group": "3laurel_declared_floor_area",
+        "overlaps_aggregate_ref": "3laurel:surface:floor:gf_living_composite_region"
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:laundry_A_skirting",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Laundry A exposed tile skirting strip",
+      "expected_quantity": 0.2052,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_A:1080_exposed_wall_width_x_190_TILE_SKIRTING_height",
+      "attributes": {
+        "finished_face_width_m": 1.08,
+        "tile_height_m": 0.19,
+        "calculation": "1.080m * 0.190m",
+        "finish_scope": "tile_skirting",
+        "net_finish_area_ready": true
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:laundry_A_splashback",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Laundry A tub splashback",
+      "expected_quantity": 0.36,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_A:600_wide_tub_x_600_TILE_splashback_height",
+      "attributes": {
+        "finished_face_width_m": 0.6,
+        "tile_height_m": 0.6,
+        "calculation": "0.600m * 0.600m",
+        "finish_scope": "splashback",
+        "net_finish_area_ready": true
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:laundry_B_skirting",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Laundry B exposed tile skirting strip at right return",
+      "expected_quantity": 0.0285,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_B:150_exposed_return_x_190_TILE_SKIRTING_height",
+      "attributes": {
+        "finished_face_width_m": 0.15,
+        "tile_height_m": 0.19,
+        "calculation": "0.150m * 0.190m",
+        "finish_scope": "tile_skirting",
+        "net_finish_area_ready": true
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:laundry_B_splashback",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Laundry B benchtop and washing-machine splashback",
+      "expected_quantity": 0.9684,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_B:(980+634)_splashback_width_x_600_TILE_height",
+      "attributes": {
+        "finished_face_width_m": 1.614,
+        "tile_height_m": 0.6,
+        "calculation": "(0.980m + 0.634m) * 0.600m",
+        "finish_scope": "splashback",
+        "net_finish_area_ready": true
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:laundry_D_skirting",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Laundry D tile skirting strip",
+      "expected_quantity": 0.5852,
+      "unit": "m2",
+      "source_location": "architectural:p13:A0.13:Laundry_D:3080_finished_wall_width_x_190_TILE_SKIRTING_height",
+      "attributes": {
+        "finished_face_width_m": 3.08,
+        "tile_height_m": 0.19,
+        "calculation": "3.080m * 0.190m",
+        "finish_scope": "tile_skirting",
+        "floor_level_openings_in_host_face": false,
+        "net_finish_area_ready": true
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:bathroom_C_shower_net",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Main bathroom C shower tile finish",
+      "expected_quantity": 1.89,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:Bathroom_C:900_SHW_x_2100_TILES:no_niche",
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_1",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.1,
+        "calculation": "0.900m * 2.100m",
+        "finish_scope": "shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:ensuite_B_shower_return_net",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Ensuite B full-height shower return tile finish",
+      "expected_quantity": 2.43,
+      "unit": "m2",
+      "source_location": "architectural:p12:A0.12:Ensuite_B:900_SHW:SHOWER_TILES_TO_RUN_UP_TO_CEILING",
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_return_1",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "0.900m * 2.700m",
+        "finish_scope": "full_height_shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:ensuite_D_shower_return_net",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Ensuite D full-height shower return tile finish",
+      "expected_quantity": 2.43,
+      "unit": "m2",
+      "source_location": "architectural:p12:A0.12:Ensuite_D:900_SHW:full_height_shower_tiling_scope",
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_return_2",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "0.900m * 2.700m",
+        "finish_scope": "full_height_shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:gf_ensuite_B_shower_return_net",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "GF Ens/Ldry B full-height shower return tile finish",
+      "expected_quantity": 2.43,
+      "unit": "m2",
+      "source_location": "architectural:p15:A0.15:GF_Ens_Ldry_B:900_SHW:SHOWER_TILES_TO_RUN_UP_TO_CEILING",
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_return_1",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "0.900m * 2.700m",
+        "finish_scope": "full_height_shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:gf_ensuite_D_shower_return_net",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "GF Ens/Ldry D full-height shower return tile finish",
+      "expected_quantity": 2.43,
+      "unit": "m2",
+      "source_location": "architectural:p15:A0.15:GF_Ens_Ldry_D:900_SHW:SHOWER_TILES_TO_RUN_UP_TO_CEILING",
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_return_2",
+        "finished_face_width_m": 0.9,
+        "tile_height_m": 2.7,
+        "calculation": "0.900m * 2.700m",
+        "finish_scope": "full_height_shower_wall_tile",
+        "openings_in_host_face": false,
+        "niche_in_host_face": false,
+        "net_finish_area_ready": true
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:ensuite_rear_flat_after_niche",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Main ensuite rear shower wall flat tile face after niche opening deduction",
+      "expected_quantity": 4.296,
+      "unit": "m2",
+      "source_location": "architectural:p12:A0.12:Ensuite_A:1680x2700_gross_less_600x400_niche_face",
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:ensuite_shower_rear",
+        "niche_deduction_ref": "3laurel:opening:p12:main_ensuite_niche:01",
+        "gross_area_m2": 4.536,
+        "niche_face_deduction_m2": 0.24,
+        "calculation": "4.536 - 0.240",
+        "niche_returns_included": false,
+        "net_flat_face_area_ready": true
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:gf_ensuite_rear_flat_after_niche",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "GF ensuite rear shower wall flat tile face after niche opening deduction",
+      "expected_quantity": 4.809,
+      "unit": "m2",
+      "source_location": "architectural:p15:A0.15:GF_Ens_Ldry_C:1870x2700_gross_less_600x400_niche_face",
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:gf_ensuite_shower_rear",
+        "niche_deduction_ref": "3laurel:opening:p15:gf_ensuite_niche:01",
+        "gross_area_m2": 5.049,
+        "niche_face_deduction_m2": 0.24,
+        "calculation": "5.049 - 0.240",
+        "niche_returns_included": false,
+        "net_flat_face_area_ready": true
+      }
+    },
+    {
+      "object_ref": "3laurel:surface:wall_tile:bath_D_flat_after_niche",
+      "object_family": "wet_area_wall_tile_finish",
+      "physical_kind": "surface",
+      "description": "Main bathroom D shower wall flat tile face after niche opening deduction",
+      "expected_quantity": 1.65,
+      "unit": "m2",
+      "source_location": "architectural:p11:A0.11:Bathroom_D:900x2100_gross; architectural:p3:A0.3:floor_plan:04-06_Niche",
+      "attributes": {
+        "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_2",
+        "niche_deduction_ref": "3laurel:opening:p11:bathroom_niche:01",
+        "gross_area_m2": 1.89,
+        "niche_face_deduction_m2": 0.24,
+        "calculation": "1.890 - 0.240",
+        "niche_returns_included": false,
+        "net_flat_face_area_ready": true
+      }
+    }
+  ],
+  "closure_checks": [
+    {
+      "check_id": "3laurel:closure:declared_floor_area",
+      "component_object_refs": [
+        "3laurel:surface:floor:main_living_composite_region",
+        "3laurel:surface:floor:garage",
+        "3laurel:surface:floor:main_porch",
+        "3laurel:surface:floor:main_alfresco",
+        "3laurel:surface:floor:gf_living_composite_region",
+        "3laurel:surface:floor:gf_alfresco",
+        "3laurel:surface:floor:gf_porch"
+      ],
+      "component_sum_m2": 297.5,
+      "declared_total_m2": 297.5,
+      "difference_m2": 0,
+      "source_location": "architectural:p3:floor_plan:area_table"
+    },
+    {
+      "check_id": "3laurel:closure:primary_ceiling_planes",
+      "component_object_refs": [
+        "3laurel:surface:ceiling:main_living",
+        "3laurel:surface:ceiling:garage",
+        "3laurel:surface:ceiling:main_porch",
+        "3laurel:surface:ceiling:main_alfresco",
+        "3laurel:surface:ceiling:gf_living",
+        "3laurel:surface:ceiling:gf_alfresco",
+        "3laurel:surface:ceiling:gf_porch"
+      ],
+      "component_sum_m2": 297.5,
+      "declared_reference_plan_area_m2": 297.5,
+      "difference_m2": 0,
+      "source_location": "architectural:p3:A0.3:area_table; architectural:p7:A0.7:ceilings_to_truss_bottom_chord"
+    },
+    {
+      "check_id": "3laurel:control:gross_shower_tile_faces",
+      "component_object_refs": [
+        "3laurel:surface:wall_tile_gross:bath_shower_wall_1",
+        "3laurel:surface:wall_tile_gross:bath_shower_wall_2",
+        "3laurel:surface:wall_tile_gross:ensuite_shower_rear",
+        "3laurel:surface:wall_tile_gross:ensuite_shower_return_1",
+        "3laurel:surface:wall_tile_gross:ensuite_shower_return_2",
+        "3laurel:surface:wall_tile_gross:gf_ensuite_shower_rear",
+        "3laurel:surface:wall_tile_gross:gf_ensuite_shower_return_1",
+        "3laurel:surface:wall_tile_gross:gf_ensuite_shower_return_2"
+      ],
+      "component_sum_m2": 23.085,
+      "net_denominator_ready": false,
+      "source_location": "architectural:p11:A0.11; architectural:p12:A0.12; architectural:p15:A0.15",
+      "reason": "gross designated shower tile faces only; all three source-dimensioned niche flat-face deductions are closed, while niche/recess return depths remain unresolved"
+    },
+    {
+      "check_id": "3laurel:control:typed_external_opening_census",
+      "component_object_refs": [
+        "3laurel:opening:p3:1200x1810_asw:01",
+        "3laurel:opening:p3:1200x1810_asw:02",
+        "3laurel:opening:p3:1200x1810_asw:03",
+        "3laurel:opening:p3:1200x1810_asw:04",
+        "3laurel:opening:p3:1800x2410_asw:01",
+        "3laurel:opening:p3:1800x2410_asw:02",
+        "3laurel:opening:p3:1800x2410_asw:03",
+        "3laurel:opening:p3:1800x2410_asw:04",
+        "3laurel:opening:p3:1800x610_asw_obs:01",
+        "3laurel:opening:p3:1800x900_adh:01",
+        "3laurel:opening:p3:1800x900_adh:02",
+        "3laurel:opening:p3:1800x910_asw:01",
+        "3laurel:opening:p3:2100x1500_asd:01",
+        "3laurel:opening:p3:2100x2100_asd:01",
+        "3laurel:opening:p3:2100x2700_assd:01",
+        "3laurel:opening:p3:2100x4800_panel_lift:01",
+        "3laurel:opening:p3:600x1210_asw_obs:01",
+        "3laurel:opening:p3:600x1210_asw_obs:02",
+        "3laurel:opening:p3:600x1510_asw:01",
+        "3laurel:opening:p3:600x1510_asw:02"
+      ],
+      "typed_opening_count": 20,
+      "typed_opening_area_m2": 58.59,
+      "complete_for_typed_labels": true,
+      "complete_for_all_openings": false,
+      "source_location": "architectural:p3:A0.3:floor_plan",
+      "reason": "typed-label subset only; separate full external census closes the three perimeter hinged doors",
+      "generic_external_hinged_doors_closed_by_separate_control": true
+    },
+    {
+      "check_id": "3laurel:closure:wall_bracing_schedule",
+      "source_location": "architectural:p8:A0.8:bracing_plan",
+      "message": "test(benchmark): close 3LAUREL bracing schedule truth",
+      "component_object_refs": [
+        "3laurel:structural:brace:A-01",
+        "3laurel:structural:brace:A-02",
+        "3laurel:structural:brace:A-03",
+        "3laurel:structural:brace:A-04",
+        "3laurel:structural:brace:A-05",
+        "3laurel:structural:brace:A-06",
+        "3laurel:structural:brace:A-07",
+        "3laurel:structural:brace:A-08",
+        "3laurel:structural:brace:A-09",
+        "3laurel:structural:brace:A-10",
+        "3laurel:structural:brace:A-11",
+        "3laurel:structural:brace:A-12",
+        "3laurel:structural:brace:A-13",
+        "3laurel:structural:brace:A-14",
+        "3laurel:structural:brace:A-U2-01",
+        "3laurel:structural:brace:A-U2-02",
+        "3laurel:structural:brace:A-U2-03",
+        "3laurel:structural:brace:A-U2-04",
+        "3laurel:structural:brace:A-U2-05",
+        "3laurel:structural:brace:A-U2-06",
+        "3laurel:structural:brace:A-U2-07",
+        "3laurel:structural:brace:B-01",
+        "3laurel:structural:brace:B-02",
+        "3laurel:structural:brace:B-03",
+        "3laurel:structural:brace:B-04",
+        "3laurel:structural:brace:B-05",
+        "3laurel:structural:brace:B-06",
+        "3laurel:structural:brace:B-07",
+        "3laurel:structural:brace:B-08",
+        "3laurel:structural:brace:B-09",
+        "3laurel:structural:brace:B-U2-01",
+        "3laurel:structural:brace:B-U2-02",
+        "3laurel:structural:brace:B-U2-03",
+        "3laurel:structural:brace:B-U2-04",
+        "3laurel:structural:brace:B-U2-05",
+        "3laurel:structural:brace:B-U2-06",
+        "3laurel:structural:brace:B-U2-07"
+      ],
+      "object_count": 37,
+      "total_length_m": 45.75
+    },
+    {
+      "check_id": "3laurel:closure:external_post_pier_census",
+      "component_object_refs": [
+        "3laurel:structural:timber_post:140x140:01",
+        "3laurel:structural:timber_post:140x140:02",
+        "3laurel:structural:brick_pier:470x470:01",
+        "3laurel:structural:brick_pier:470x470:02",
+        "3laurel:structural:brick_pier:470x470:03",
+        "3laurel:structural:brick_pier:470x470:04"
+      ],
+      "timber_post_count": 2,
+      "brick_pier_count": 4,
+      "object_count": 6,
+      "complete_for_explicitly_dimensioned_posts_and_piers": true,
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:two_140_POST_labels_and_four_470_PIER_labels",
+        "architectural:p4-p5:A0.4-A0.5:elevation_material_dimension_crosscheck"
+      ]
+    },
+    {
+      "check_id": "3laurel:control:wall_bracing_resistance",
+      "schedules": {
+        "A": {
+          "required_kN": 93.71,
+          "provided_kN": 97.84,
+          "margin_kN": 4.13
+        },
+        "B": {
+          "required_kN": 44.66,
+          "provided_kN": 49.68,
+          "margin_kN": 5.02
+        },
+        "A_U2": {
+          "required_kN": 25.41,
+          "provided_kN": 30.7,
+          "margin_kN": 5.29
+        },
+        "B_U2": {
+          "required_kN": 31.2,
+          "provided_kN": 33.6,
+          "margin_kN": 2.4
+        }
+      },
+      "source_location": "architectural:p8:A0.8:BRACING_SCHEDULES_A_B_AU2_BU2",
+      "note": "Independent source-declared resistance control over the closed 37-member bracing census; not a denominator quantity."
+    },
+    {
+      "check_id": "3laurel:closure:external_opening_census",
+      "component_object_refs": [
+        "3laurel:opening:p3:1200x1810_asw:01",
+        "3laurel:opening:p3:1200x1810_asw:02",
+        "3laurel:opening:p3:1200x1810_asw:03",
+        "3laurel:opening:p3:1200x1810_asw:04",
+        "3laurel:opening:p3:1800x2410_asw:01",
+        "3laurel:opening:p3:1800x2410_asw:02",
+        "3laurel:opening:p3:1800x2410_asw:03",
+        "3laurel:opening:p3:1800x2410_asw:04",
+        "3laurel:opening:p3:1800x610_asw_obs:01",
+        "3laurel:opening:p3:1800x900_adh:01",
+        "3laurel:opening:p3:1800x900_adh:02",
+        "3laurel:opening:p3:1800x910_asw:01",
+        "3laurel:opening:p3:2100x1500_asd:01",
+        "3laurel:opening:p3:2100x2100_asd:01",
+        "3laurel:opening:p3:2100x2700_assd:01",
+        "3laurel:opening:p3:2100x4800_panel_lift:01",
+        "3laurel:opening:p3:600x1210_asw_obs:01",
+        "3laurel:opening:p3:600x1210_asw_obs:02",
+        "3laurel:opening:p3:600x1510_asw:01",
+        "3laurel:opening:p3:600x1510_asw:02",
+        "3laurel:opening:p3:1200_main_entry_hinged:01",
+        "3laurel:opening:p3:0870_gf_entry_hinged:01",
+        "3laurel:opening:p3:0870_garage_personnel_hinged:01"
+      ],
+      "external_opening_count": 23,
+      "external_opening_area_m2": 64.764,
+      "complete_for_all_external_openings": true,
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:all_perimeter_typed_openings_plus_main_entry_GF_entry_and_garage_personnel_door",
+        "architectural:p4-p5:A0.4-A0.5:elevations:entry_door_crosscheck_and_JOINERY_HEIGHTS_2100_AFL_UNO"
+      ],
+      "note": "Internal door openings remain a separate wall-face deduction universe and are not claimed closed here."
+    },
+    {
+      "check_id": "3laurel:control:partial_internal_wall_gross_faces",
+      "component_object_refs": [
+        "3laurel:surface:internal_wall_gross:bathroom:long_1",
+        "3laurel:surface:internal_wall_gross:bathroom:long_2",
+        "3laurel:surface:internal_wall_gross:bathroom:short_1",
+        "3laurel:surface:internal_wall_gross:bathroom:short_2",
+        "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:long_1",
+        "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:long_2",
+        "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:short_1",
+        "3laurel:surface:internal_wall_gross:gf_ensuite_laundry:short_2"
+      ],
+      "object_count": 8,
+      "gross_area_m2": 53.838,
+      "bathroom_gross_area_m2": 25.002,
+      "gf_ensuite_laundry_gross_area_m2": 28.836,
+      "complete_for_these_two_finished_room_perimeters": true,
+      "complete_for_project_internal_wall_universe": false,
+      "openings_and_finish_deductions_resolved": false,
+      "source_locations": [
+        "architectural:p11:A0.11:Bathroom_Layout:1880x2750_finished_internal_dimensions",
+        "architectural:p15:A0.15:GF_Ensuite_Laundry:1870x3470_finished_internal_dimensions",
+        "architectural:p7:A0.7:FCL_2700"
+      ]
+    },
+    {
+      "check_id": "3laurel:blocker:roof_plane_geometry",
+      "status": "UNRESOLVED_SOURCE_LIMITATION",
+      "source_locations": [
+        "architectural:p4:A0.4:elevations:25deg_pitch",
+        "architectural:p7:A0.7:section_A-A:25deg_pitch",
+        "architectural:all_sheets:dimensions_shall_not_be_obtained_by_scaling"
+      ],
+      "roof_plan_sheet_present": false,
+      "pitch_evidence_degrees": [
+        25
+      ],
+      "figured_roof_plane_dimensions_available": false,
+      "scaling_substitute_allowed": false,
+      "reason": "the frozen construction set supplies elevation/section pitch but no dimensioned roof-plan geometry; source notes expressly prohibit obtaining dimensions by scaling",
+      "benchmark_rule": "keep roof_planes unresolved until an independent dimensioned roof/framing source is supplied"
+    },
+    {
+      "check_id": "3laurel:control:main_laundry_internal_wall_gross_faces",
+      "component_object_refs": [
+        "3laurel:surface:internal_wall_gross:laundry:long_1",
+        "3laurel:surface:internal_wall_gross:laundry:long_2",
+        "3laurel:surface:internal_wall_gross:laundry:short_1",
+        "3laurel:surface:internal_wall_gross:laundry:short_2"
+      ],
+      "object_count": 4,
+      "gross_area_m2": 25.704,
+      "room_finished_dimensions_m": [
+        3.08,
+        1.68
+      ],
+      "finished_ceiling_height_m": 2.7,
+      "complete_for_main_laundry_finished_room_perimeter": true,
+      "openings_and_finish_deductions_resolved": false,
+      "source_locations": [
+        "architectural:p13:A0.13:Laundry_Layout:3080x1680_finished_internal_dimensions",
+        "architectural:p7:A0.7:FCL_2700"
+      ]
+    },
+    {
+      "check_id": "3laurel:control:source_dimensioned_niche_face_deductions",
+      "component_object_refs": [
+        "3laurel:opening:p12:main_ensuite_niche:01",
+        "3laurel:opening:p15:gf_ensuite_niche:01",
+        "3laurel:opening:p11:bathroom_niche:01"
+      ],
+      "niche_opening_count": 3,
+      "flat_face_deduction_area_m2": 0.72,
+      "affected_gross_surface_refs": [
+        "3laurel:surface:wall_tile_gross:ensuite_shower_rear",
+        "3laurel:surface:wall_tile_gross:gf_ensuite_shower_rear",
+        "3laurel:surface:wall_tile_gross:bath_shower_wall_2"
+      ],
+      "main_ensuite_rear_flat_tile_area_after_niche_m2": 4.296,
+      "gf_ensuite_rear_flat_tile_area_after_niche_m2": 4.809,
+      "bathroom_D_flat_tile_area_after_niche_m2": 1.65,
+      "niche_return_depths_resolved": false,
+      "bathroom_niche_deduction_resolved": true,
+      "reason": "A0.12 and A0.15 explicitly dimension 600mm niche width and 400mm niche height. A0.3 independently labels the bathroom niche 04-06 while A0.11 dimensions its 400mm height, closing a 600x400 flat face. Niche depths/returns are not figured.",
+      "source_locations": [
+        "architectural:p12:A0.12:Ensuite_A-D",
+        "architectural:p15:A0.15:GF_Ensuite_plan_and_C-D",
+        "architectural:p3:A0.3:floor_plan:04-06_Niche",
+        "architectural:p11:A0.11:Bathroom_D:400_niche_height"
+      ]
+    },
+    {
+      "check_id": "3laurel:control:main_ensuite_internal_wall_gross_faces",
+      "component_object_refs": [
+        "3laurel:surface:internal_wall_gross:main_ensuite:A",
+        "3laurel:surface:internal_wall_gross:main_ensuite:B",
+        "3laurel:surface:internal_wall_gross:main_ensuite:C",
+        "3laurel:surface:internal_wall_gross:main_ensuite:D",
+        "3laurel:surface:internal_wall_gross:main_ensuite:E"
+      ],
+      "object_count": 5,
+      "component_sum_m2": 29.916,
+      "source_locations": [
+        "architectural:p12:A0.12:Ensuite_A-E_finished_wall_dimensions",
+        "architectural:p7:A0.7:FCL_2700"
+      ],
+      "net_denominator_ready": false,
+      "reason": "gross physical wall faces are source-closed; door/opening deductions and finish-scope partitioning remain unresolved"
+    },
+    {
+      "check_id": "3laurel:control:main_wc_internal_wall_gross_faces",
+      "component_object_refs": [
+        "3laurel:surface:internal_wall_gross:main_wc:long_1",
+        "3laurel:surface:internal_wall_gross:main_wc:long_2",
+        "3laurel:surface:internal_wall_gross:main_wc:short_1",
+        "3laurel:surface:internal_wall_gross:main_wc:short_2"
+      ],
+      "object_count": 4,
+      "component_sum_m2": 14.418,
+      "source_locations": [
+        "architectural:p11:A0.11:WC_plan_and_elevations_E-F:1560_x_1110_finished_dimensions",
+        "architectural:p7:A0.7:FCL_2700"
+      ],
+      "net_denominator_ready": false,
+      "reason": "gross physical WC wall faces are source-closed; door deduction and finish-scope partitioning remain unresolved"
+    },
+    {
+      "check_id": "3laurel:closure:internal_room_access_door_census",
+      "component_object_refs": [
+        "3laurel:opening:p3:internal_access:0720_cs:01",
+        "3laurel:opening:p3:internal_access:0870_cs:01",
+        "3laurel:opening:p3:internal_access:0870_swing:01",
+        "3laurel:opening:p3:internal_access:1200_cs:01",
+        "3laurel:opening:p3:internal_access:0870_cs:02",
+        "3laurel:opening:p3:internal_access:0870_swing:02",
+        "3laurel:opening:p3:internal_access:0870_swing:03",
+        "3laurel:opening:p3:internal_access:0870_swing:04",
+        "3laurel:opening:p3:internal_access:0720_cs:02",
+        "3laurel:opening:p3:internal_access:0870_swing:05",
+        "3laurel:opening:p3:internal_access:0870_swing:06",
+        "3laurel:opening:p3:internal_access:0720_cs:03",
+        "3laurel:opening:p3:internal_access:0870_swing:07",
+        "3laurel:opening:p3:internal_access:0720_swing:01"
+      ],
+      "room_access_opening_count": 14,
+      "room_access_opening_area_m2": 25.011,
+      "hinged_count": 8,
+      "cavity_slider_count": 6,
+      "width_distribution_m": {
+        "0.72": 4,
+        "0.87": 9,
+        "1.20": 1
+      },
+      "joinery_height_m": 2.1,
+      "complete_for_labelled_room_access_doors": true,
+      "complete_for_all_internal_wall_openings": false,
+      "residual_unresolved": [
+        "robe_and_linen_sliding_joinery_openings",
+        "any_unlabelled_internal_wall_openings"
+      ],
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:internal_room_access_door_width_labels_and_swing_or_cs_symbols",
+        "architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_TO_BE_2100_AFL_UNO"
+      ]
+    },
+    {
+      "check_id": "3laurel:closure:internal_sliding_joinery_opening_census",
+      "component_object_refs": [
+        "3laurel:opening:p3:internal_joinery:1200_vsd_laundry_linen:01",
+        "3laurel:opening:p3:internal_joinery:1800_vsd_bed3_robe:01",
+        "3laurel:opening:p3:internal_joinery:1800_vsd_bed2_robe:01",
+        "3laurel:opening:p3:internal_joinery:1800_vsd_bed4_robe:01"
+      ],
+      "labelled_vsd_opening_count": 4,
+      "labelled_vsd_opening_area_m2": 13.86,
+      "width_distribution_m": {
+        "1.20": 1,
+        "1.80": 3
+      },
+      "joinery_height_m": 2.1,
+      "complete_for_explicit_vsd_labels": true,
+      "complete_for_all_internal_wall_openings": false,
+      "residual_unresolved": [
+        "unlabelled_internal_wall_breaks_or_open_archways"
+      ],
+      "source_locations": [
+        "architectural:p3:A0.3:floor_plan:four_explicit_vsd_labels",
+        "architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_TO_BE_2100_AFL_UNO"
+      ]
+    },
+    {
+      "check_id": "3laurel:control:bathroom_wc_room_access_deductions",
+      "room_controls": [
+        {
+          "room": "main_bathroom",
+          "gross_wall_area_m2": 25.002,
+          "access_opening_ref": "3laurel:opening:p3:internal_access:0720_swing:01",
+          "access_opening_area_m2": 1.512,
+          "gross_less_room_access_opening_m2": 23.49
+        },
+        {
+          "room": "main_wc",
+          "gross_wall_area_m2": 14.418,
+          "access_opening_ref": "3laurel:opening:p3:internal_access:0720_cs:03",
+          "access_opening_area_m2": 1.512,
+          "gross_less_room_access_opening_m2": 12.906
+        }
+      ],
+      "mapped_room_access_opening_count": 2,
+      "mapped_room_access_opening_area_m2": 3.024,
+      "complete_for_these_room_access_openings": true,
+      "complete_for_all_wall_openings": false,
+      "finish_scope_resolved": false,
+      "reason": "room-access door deductions are source-mapped, but any exterior windows, niches, joinery interfaces and finish partitioning remain separate truth layers",
+      "source_locations": [
+        "architectural:p11:A0.11:Bathroom_and_WC_finished_room_dimensions",
+        "architectural:p3:A0.3:main_bathroom_720_hinged_and_main_WC_720_cs",
+        "architectural:p4-p5:A0.4-A0.5:JOINERY_HEIGHTS_2100_AFL_UNO"
+      ]
+    },
+    {
+      "check_id": "3laurel:closure:dimensioned_internal_open_archways",
+      "component_object_refs": [
+        "3laurel:opening:p3:internal_archway:2100x1030:01",
+        "3laurel:opening:p3:internal_archway:2100x1000:01"
+      ],
+      "object_count": 2,
+      "total_opening_area_m2": 4.263,
+      "source_location": "architectural:p3:A0.3:floor_plan:2100x1030_and_2100x1000_wall_breaks",
+      "source_closed": true
+    },
+    {
+      "check_id": "3laurel:closure:bed2_bed3_gross_wall_faces",
+      "component_object_refs": [
+        "3laurel:surface:internal_wall_gross:bed2:3000_side_1",
+        "3laurel:surface:internal_wall_gross:bed2:3000_side_2",
+        "3laurel:surface:internal_wall_gross:bed2:4200_side_1",
+        "3laurel:surface:internal_wall_gross:bed2:4200_side_2",
+        "3laurel:surface:internal_wall_gross:bed3:3000_side_1",
+        "3laurel:surface:internal_wall_gross:bed3:3000_side_2",
+        "3laurel:surface:internal_wall_gross:bed3:4200_side_1",
+        "3laurel:surface:internal_wall_gross:bed3:4200_side_2"
+      ],
+      "room_count": 2,
+      "object_count": 8,
+      "gross_wall_area_m2": 77.76,
+      "figured_room_dimensions_m": [
+        3,
+        4.2
+      ],
+      "wall_height_m": 2.7,
+      "source_location": "architectural:p3:A0.3:floor_plan:3000_B2_3000_B3_and_4200_B2&B3; architectural:p7:A0.7:FCL_2700",
+      "openings_deducted": false,
+      "source_closed_gross_geometry": true
+    },
+    {
+      "check_id": "3laurel:closure:media_floor_and_gross_wall_faces",
+      "component_object_refs": [
+        "3laurel:surface:floor:media",
+        "3laurel:surface:internal_wall_gross:media:4200_side_1",
+        "3laurel:surface:internal_wall_gross:media:4200_side_2",
+        "3laurel:surface:internal_wall_gross:media:3130_side_1",
+        "3laurel:surface:internal_wall_gross:media:3130_side_2"
+      ],
+      "floor_area_m2": 13.146,
+      "gross_wall_area_m2": 39.582,
+      "figured_room_dimensions_m": [
+        4.2,
+        3.13
+      ],
+      "wall_height_m": 2.7,
+      "floor_finish": "vinyl",
+      "source_location": "architectural:p3:A0.3:floor_plan:4200_MEDIA_and_3130_MEDIA; architectural:p7:A0.7:FCL_2700",
+      "source_closed_gross_geometry": true,
+      "openings_deducted": false,
+      "overlap_note": "Atomic media floor is a component of main_living_composite_region and must not be double-counted with that aggregate."
+    },
+    {
+      "check_id": "3laurel:closure:bed2_bed3_floor_surfaces",
+      "component_object_refs": [
+        "3laurel:surface:floor:bed2",
+        "3laurel:surface:floor:bed3"
+      ],
+      "room_count": 2,
+      "floor_area_each_m2": 12.6,
+      "component_sum_m2": 25.2,
+      "figured_room_dimensions_m": [
+        3,
+        4.2
+      ],
+      "finish": "vinyl",
+      "source_location": "architectural:p3:A0.3:floor_plan:3000_B2_3000_B3_and_4200_B2&B3_with_VINYL_labels",
+      "source_closed": true,
+      "overlap_note": "Atomic bedroom floors are components of main_living_composite_region and must not be double-counted with that aggregate."
+    },
+    {
+      "check_id": "3laurel:blocker:bathroom_niche_width_and_niche_return_depths",
+      "status": "UNRESOLVED_SOURCE_LIMITATION",
+      "source_location": "architectural:p11:A0.11:Bathroom_D_and_Bathroom_plan",
+      "explicit_dimensions_available": {
+        "sill_height_mm": 1100,
+        "niche_height_mm": 400,
+        "bathroom_niche_width_mm": 600
+      },
+      "missing_dimensions": [
+        "bathroom_niche_return_depth",
+        "main_ensuite_niche_return_depth",
+        "gf_ensuite_niche_return_depth"
+      ],
+      "drawing_instruction": "Dimensions shall not be obtained by scaling.",
+      "scaling_substitute_allowed": false,
+      "conclusion": "Bathroom niche flat face is closed at 600x400 from A0.3 plus A0.11; all niche return areas remain unresolved until independent depth dimensions are supplied."
+    },
+    {
+      "check_id": "3laurel:closure:wet_area_atomic_floor_surfaces",
+      "component_object_refs": [
+        "3laurel:surface:floor:bathroom",
+        "3laurel:surface:floor:main_wc",
+        "3laurel:surface:floor:laundry",
+        "3laurel:surface:floor:gf_ensuite_laundry"
+      ],
+      "object_count": 4,
+      "component_sum_m2": 18.5649,
+      "source_closed": true,
+      "aggregate_overlap": {
+        "main_living_refs": [
+          "3laurel:surface:floor:bathroom",
+          "3laurel:surface:floor:main_wc",
+          "3laurel:surface:floor:laundry"
+        ],
+        "gf_living_refs": [
+          "3laurel:surface:floor:gf_ensuite_laundry"
+        ],
+        "rule": "Atomic wet-area floor surfaces are components of the declared living aggregates and must not be double-counted with those aggregate controls."
+      }
+    },
+    {
+      "check_id": "3laurel:closure:laundry_A_B_explicit_tile_finishes",
+      "component_object_refs": [
+        "3laurel:surface:wall_tile:laundry_A_skirting",
+        "3laurel:surface:wall_tile:laundry_A_splashback",
+        "3laurel:surface:wall_tile:laundry_B_skirting",
+        "3laurel:surface:wall_tile:laundry_B_splashback"
+      ],
+      "object_count": 4,
+      "component_sum_m2": 1.5621,
+      "source_location": "architectural:p13:A0.13:Laundry_A_and_B_dimensioned_tile_skirting_and_splashback_extents",
+      "source_closed": true,
+      "complete_for_project_non_shower_tile_universe": false
+    },
+    {
+      "check_id": "3laurel:closure:laundry_D_tile_skirting",
+      "component_object_refs": [
+        "3laurel:surface:wall_tile:laundry_D_skirting"
+      ],
+      "object_count": 1,
+      "tile_area_m2": 0.5852,
+      "source_location": "architectural:p13:A0.13:Laundry_D",
+      "complete_for_this_explicit_strip": true,
+      "complete_for_project_non_shower_tile_universe": false
+    },
+    {
+      "check_id": "3laurel:closure:bathroom_C_shower_tile_face",
+      "component_object_refs": [
+        "3laurel:surface:wall_tile:bathroom_C_shower_net"
+      ],
+      "host_gross_surface_ref": "3laurel:surface:wall_tile_gross:bath_shower_wall_1",
+      "object_count": 1,
+      "tile_area_m2": 1.89,
+      "source_location": "architectural:p11:A0.11:Bathroom_C",
+      "complete_for_this_explicit_face": true,
+      "complete_for_project_wet_area_tile_universe": false
+    },
+    {
+      "check_id": "3laurel:closure:niche_free_ensuite_shower_returns",
+      "component_object_refs": [
+        "3laurel:surface:wall_tile:ensuite_B_shower_return_net",
+        "3laurel:surface:wall_tile:ensuite_D_shower_return_net",
+        "3laurel:surface:wall_tile:gf_ensuite_B_shower_return_net",
+        "3laurel:surface:wall_tile:gf_ensuite_D_shower_return_net"
+      ],
+      "object_count": 4,
+      "tile_area_each_m2": 2.43,
+      "component_sum_m2": 9.72,
+      "source_locations": [
+        "architectural:p12:A0.12:Ensuite_B_and_D",
+        "architectural:p15:A0.15:GF_Ens_Ldry_B_and_D"
+      ],
+      "complete_for_these_four_faces": true,
+      "complete_for_project_wet_area_tile_universe": false
+    },
+    {
+      "check_id": "3laurel:closure:ensuite_rear_flat_faces_after_niche_deductions",
+      "component_object_refs": [
+        "3laurel:surface:wall_tile:ensuite_rear_flat_after_niche",
+        "3laurel:surface:wall_tile:gf_ensuite_rear_flat_after_niche",
+        "3laurel:surface:wall_tile:bath_D_flat_after_niche"
+      ],
+      "object_count": 3,
+      "component_sum_m2": 10.755,
+      "flat_face_niche_deduction_sum_m2": 0.72,
+      "niche_returns_resolved": false,
+      "complete_for_three_flat_host_faces": true,
+      "complete_for_full_niche_tile_assemblies": false
+    },
+    {
+      "check_id": "3laurel:closure:bed2_bed3_net_wall_geometry",
+      "source_location": "architectural:p3:A0.3:Bed_2_and_Bed_3_opening_and_room_dimension_census",
+      "rooms": [
+        {
+          "room": "bed2",
+          "gross_surface_refs": [
+            "3laurel:surface:internal_wall_gross:bed2:3000_side_1",
+            "3laurel:surface:internal_wall_gross:bed2:3000_side_2",
+            "3laurel:surface:internal_wall_gross:bed2:4200_side_1",
+            "3laurel:surface:internal_wall_gross:bed2:4200_side_2"
+          ],
+          "deduction_opening_refs": [
+            "3laurel:opening:p3:1200x1810_asw:01",
+            "3laurel:opening:p3:internal_access:0870_swing:03",
+            "3laurel:opening:p3:internal_joinery:1800_vsd_bed2_robe:01"
+          ],
+          "gross_wall_area_m2": 38.88,
+          "opening_deduction_area_m2": 7.779,
+          "net_wall_geometry_m2": 31.101
+        },
+        {
+          "room": "bed3",
+          "gross_surface_refs": [
+            "3laurel:surface:internal_wall_gross:bed3:3000_side_1",
+            "3laurel:surface:internal_wall_gross:bed3:3000_side_2",
+            "3laurel:surface:internal_wall_gross:bed3:4200_side_1",
+            "3laurel:surface:internal_wall_gross:bed3:4200_side_2"
+          ],
+          "deduction_opening_refs": [
+            "3laurel:opening:p3:1200x1810_asw:02",
+            "3laurel:opening:p3:internal_access:0870_swing:02",
+            "3laurel:opening:p3:internal_joinery:1800_vsd_bed3_robe:01"
+          ],
+          "gross_wall_area_m2": 38.88,
+          "opening_deduction_area_m2": 7.779,
+          "net_wall_geometry_m2": 31.101
+        }
+      ],
+      "combined_gross_wall_area_m2": 77.76,
+      "combined_opening_deduction_area_m2": 15.558,
+      "combined_net_wall_geometry_m2": 62.202,
+      "complete_for_bed2_bed3_known_opening_geometry": true,
+      "finish_scope_resolved": false
+    }
+  ]
+}

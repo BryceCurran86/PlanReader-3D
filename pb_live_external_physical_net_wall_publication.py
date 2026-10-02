@@ -153,31 +153,53 @@ class LiveCanonicalWallObject:
     """Persistent semantic wall snapshot; quantities are derived from this object."""
 
     canonical_wall_id: str
-    physical_wall_id: str
+    physical_wall_id: Optional[str]
     document_id: str
     revision_id: str
     source_sha256: str
     snapshot_id: str
     page_id: str
     decision_scope_id: str
-    wall_local_frame_id: str
-    role: str
-    coordinate_unit: str
-    length_m: float
-    height_m: float
-    gross_area_m2: float
-    net_area_m2: float
-    gross_polygon_wkb_hex: str
-    net_polygon_wkb_hex: str
+    wall_local_frame_id: Optional[str]
+    role: Optional[str]
+    coordinate_unit: Optional[str]
+    length_m: Optional[float]
+    height_m: Optional[float]
+    gross_area_m2: Optional[float]
+    net_area_m2: Optional[float]
+    gross_polygon_wkb_hex: Optional[str]
+    net_polygon_wkb_hex: Optional[str]
     member_wall_candidate_ids: tuple[str, ...]
     plan_members: tuple[CanonicalWallPlanMember, ...]
     level_ids: tuple[str, ...]
     opening_identity_ids: tuple[str, ...]
     opening_voids: tuple[CanonicalOpeningVoidGeometry, ...]
-    gross_geometry_record_id: str
-    whole_wall_role_record_id: str
+    gross_geometry_record_id: Optional[str]
+    whole_wall_role_record_id: Optional[str]
     evidence_ids: tuple[str, ...]
     schema_version: str = CANONICAL_WALL_OBJECT_SCHEMA_VERSION
+    identity_status: str = "physical_resolved"
+    physical_identity_resolved: bool = True
+
+    @property
+    def geometry_complete(self) -> bool:
+        return bool(
+            self.plan_members
+            and all(member.centerline_pts for member in self.plan_members)
+        )
+
+    @property
+    def metric_geometry_complete(self) -> bool:
+        return bool(
+            self.length_m is not None
+            and self.height_m is not None
+            and self.gross_area_m2 is not None
+            and self.gross_polygon_wkb_hex
+        )
+
+    @property
+    def quantity_complete(self) -> bool:
+        return self.net_area_m2 is not None and bool(self.net_polygon_wkb_hex)
 
     def to_dict(self) -> dict:
         return {
@@ -206,6 +228,11 @@ class LiveCanonicalWallObject:
             "gross_geometry_record_id": self.gross_geometry_record_id,
             "whole_wall_role_record_id": self.whole_wall_role_record_id,
             "evidence_ids": list(self.evidence_ids),
+            "identity_status": self.identity_status,
+            "physical_identity_resolved": self.physical_identity_resolved,
+            "geometry_complete": self.geometry_complete,
+            "metric_geometry_complete": self.metric_geometry_complete,
+            "quantity_complete": self.quantity_complete,
             "schema_version": self.schema_version,
         }
 

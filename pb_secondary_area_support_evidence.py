@@ -5,7 +5,7 @@ pattern on an architectural plan:
 
 1. two independent, parallel figured-dimension chains describe the same
    repeated bay sequence and therefore the same N+1 support count;
-2. a named secondary area (currently a verandah/veranda) sits spatially
+2. a named secondary area (verandah/veranda, alfresco, porch, or patio) sits spatially
    between those two chains; and
 3. a short, explicit support specification (pole/column/pillar/post/pier)
    sits adjacent to the corroborating chain pair in the same horizontal band.
@@ -44,6 +44,7 @@ class SecondaryAreaSupportEvidence:
     zone_text: str
     support_text: str
     support_symbol_ids: Tuple[str, ...] = ()
+    support_symbol_bboxes: Tuple[BBox, ...] = ()
     evidence_mode: str = "text_specification"
     confidence: float = 0.94
 
@@ -113,8 +114,12 @@ def _text_blocks(page: Any) -> list[_TextBlock]:
 
 
 def _zone_type(text: str) -> Optional[str]:
+    """Return a canonical secondary-area type from explicit source text only."""
     if re.search(r"\bveranda(?:h)?\b", text, re.IGNORECASE):
         return "verandah"
+    for zone_type in ("alfresco", "porch", "patio"):
+        if re.search(rf"\b{zone_type}\b", text, re.IGNORECASE):
+            return zone_type
     return None
 
 
@@ -487,6 +492,7 @@ def _physical_support_evidence(
         zone_text=zone.text,
         support_text="",
         support_symbol_ids=ids,
+        support_symbol_bboxes=tuple(glyph.bbox for glyph in row),
         evidence_mode="physical_symbol",
         confidence=0.97,
     )
@@ -633,6 +639,21 @@ def resolve_document_secondary_area_support_evidence(
     chosen = max(rows, key=lambda row: row.confidence)
     pages = tuple(sorted({page for row in rows for page in row.source_pages}))
     chain_ids = tuple(dict.fromkeys(cid for row in rows for cid in row.chain_ids))
+    support_geometry_by_id: dict[str, BBox] = {}
+    for row in rows:
+        if row.support_symbol_bboxes and (
+            len(row.support_symbol_bboxes) != len(row.support_symbol_ids)
+        ):
+            return None
+        for symbol_id, bbox in zip(
+            row.support_symbol_ids,
+            row.support_symbol_bboxes,
+        ):
+            clean_bbox = tuple(float(value) for value in bbox)
+            prior = support_geometry_by_id.get(symbol_id)
+            if prior is not None and prior != clean_bbox:
+                return None
+            support_geometry_by_id[symbol_id] = clean_bbox
     support_symbol_ids = tuple(
         dict.fromkeys(
             symbol_id
@@ -640,6 +661,15 @@ def resolve_document_secondary_area_support_evidence(
             for symbol_id in row.support_symbol_ids
         )
     )
+    support_symbol_bboxes = tuple(
+        support_geometry_by_id[symbol_id]
+        for symbol_id in support_symbol_ids
+        if symbol_id in support_geometry_by_id
+    )
+    if support_geometry_by_id and (
+        len(support_symbol_bboxes) != len(support_symbol_ids)
+    ):
+        return None
     evidence_modes = {row.evidence_mode for row in rows}
     evidence_mode = (
         next(iter(evidence_modes))
@@ -651,5 +681,6 @@ def resolve_document_secondary_area_support_evidence(
         source_pages=pages,
         chain_ids=chain_ids,
         support_symbol_ids=support_symbol_ids,
+        support_symbol_bboxes=support_symbol_bboxes,
         evidence_mode=evidence_mode,
     )

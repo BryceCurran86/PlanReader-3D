@@ -1677,23 +1677,239 @@ class CustomerRuntimeNetWallParityTests(unittest.TestCase):
             suggested_action="review",
         )
 
+        import pb_takeoff_row_contract as takeoff_contract
+
         sample_rows = [
-            (
-                1, 1, "04 Masonry", "North Wall", "Brickwork", "Face brick", 45.0, "m²",
-                "Measured", 1, "North Elevation", "A201", "PB Auto Geometry v1.2.19", "Existing notes",
-                "", "", "", "", "", "", "",
+            auto._takeoff_row(
+                workspace_id=1,
+                section="External",
+                element="04 Masonry",
+                location="North Wall",
+                substrate="Brickwork",
+                quantity=45.0,
+                status="Measured",
+                source_page="A201",
+                source_reference=f"{auto.SOURCE_PREFIX} · facade:north-wall",
+                confidence="Documented",
+                notes="Existing notes",
+                row_role="external_wall",
             ),
         ]
 
         annotated = annotate_rows_with_conflicts(sample_rows, [conflict])
         self.assertEqual(len(annotated), 1)
-        r = annotated[0]
-        # Quantity is strictly preserved (45.0 m2, not modified!)
-        self.assertEqual(r[6], 45.0)
-        # Quantity status escalated to Review
-        self.assertEqual(r[8], "Review")
-        # Notes contain the conflict provenance
-        self.assertIn("[SEMANTIC CONFLICT: Brick vs weatherboard conflict]", r[13])
+        named = takeoff_contract.mapping_from_values(
+            annotated[0],
+            takeoff_contract.CORE_FIELDS,
+        )
+        # Quantity and unrelated numeric fields are strictly preserved.
+        self.assertEqual(named["quantity"], 45.0)
+        self.assertEqual(named["coverage_m2_per_litre"], 0)
+        # Quantity status escalates to Review.
+        self.assertEqual(named["quantity_status"], "Review")
+        # Notes, not a numeric field, contain structured conflict provenance.
+        self.assertIn(
+            "[SEMANTIC CONFLICT: Brick vs weatherboard conflict",
+            named["notes"],
+        )
+        self.assertIn("id=conf-001", named["notes"])
+
+    def test_ag08_runtime_collects_same_face_finish_conflict(self):
+        """AG-08: exact shared physical face identity triggers automatic material conflict."""
+        from pb_semantic_conflict_guard import (
+            CONFLICT_KIND_INCOMPATIBLE_MATERIALS,
+            collect_runtime_semantic_conflicts,
+        )
+
+        finishes = [
+            {
+                "record_id": "fin-brick",
+                "finish_material": "brick",
+                "physical_wall_ids": ["wall-1"],
+                "physical_face_ids": ["face-1"],
+            },
+            {
+                "record_id": "fin-weatherboard",
+                "finish_material": "weatherboard",
+                "physical_wall_ids": ["wall-1"],
+                "physical_face_ids": ["face-1"],
+            },
+        ]
+
+        conflicts = collect_runtime_semantic_conflicts(
+            SimpleNamespace(),
+            finishes=finishes,
+        )
+
+        self.assertEqual(len(conflicts), 1)
+        conflict = conflicts[0]
+        self.assertEqual(
+            conflict.conflict_kind,
+            CONFLICT_KIND_INCOMPATIBLE_MATERIALS,
+        )
+        self.assertEqual(conflict.subject_id, "face-1")
+        self.assertEqual(
+            set(conflict.sources),
+            {
+                "bound_wall_finish:fin-brick",
+                "bound_wall_finish:fin-weatherboard",
+            },
+        )
+
+    def test_ag08_runtime_different_faces_do_not_conflict(self):
+        """AG-08: different physical faces are not collapsed into one material conflict."""
+        from pb_semantic_conflict_guard import collect_runtime_semantic_conflicts
+
+        finishes = [
+            {
+                "record_id": "fin-brick",
+                "finish_material": "brick",
+                "physical_face_ids": ["face-1"],
+            },
+            {
+                "record_id": "fin-weatherboard",
+                "finish_material": "weatherboard",
+                "physical_face_ids": ["face-2"],
+            },
+        ]
+
+        self.assertEqual(
+            collect_runtime_semantic_conflicts(
+                SimpleNamespace(),
+                finishes=finishes,
+            ),
+            [],
+        )
+
+    def test_ag08_runtime_collects_bound_opening_detail_conflict(self):
+        """AG-08: detail vs physical opening mismatch is found only through exact mark binding."""
+        from pb_semantic_conflict_guard import (
+            CONFLICT_KIND_OPENING_DEFINITION_MISMATCH,
+            collect_runtime_semantic_conflicts,
+        )
+
+        detail = SimpleNamespace(
+            record_id="det-W1",
+            semantic_identity_id="sem-W1",
+            family="window",
+            width_mm=1200,
+            status=EvidenceResolutionStatus.CORROBORATED,
+        )
+        app = SimpleNamespace(
+            opening_detail_definitions=[detail],
+            building_openings=[
+                {
+                    "opening_id": "opening-1",
+                    "type_mark": "W1",
+                    "host_wall_id": "wall-1",
+                    "family": "window",
+                    "width_m": 1.8,
+                }
+            ],
+            opening_mark_map={"W1": "sem-W1"},
+        )
+
+        conflicts = collect_runtime_semantic_conflicts(app)
+
+        self.assertEqual(len(conflicts), 1)
+        self.assertEqual(
+            conflicts[0].conflict_kind,
+            CONFLICT_KIND_OPENING_DEFINITION_MISMATCH,
+        )
+        self.assertEqual(conflicts[0].subject_id, "W1")
+        self.assertIn("1200mm", conflicts[0].description)
+        self.assertIn("1800mm", conflicts[0].description)
+
+    def test_ag08_analyse_workspace_publishes_review_rows_without_quantity_change(self):
+        """AG-08: automatic conflict reaches customer rows and report with quantity preserved."""
+        conflict_finishes = [
+            {
+                "record_id": "fin-brick",
+                "finish_material": "brick",
+                "physical_wall_ids": ["wall-1"],
+                "physical_face_ids": ["face-1"],
+                "quantity_m2": 45.0,
+                "page_id": "1",
+            },
+            {
+                "record_id": "fin-weatherboard",
+                "finish_material": "weatherboard",
+                "physical_wall_ids": ["wall-1"],
+                "physical_face_ids": ["face-1"],
+                "quantity_m2": 45.0,
+                "page_id": "1",
+            },
+        ]
+        finish_rows = [
+            auto._takeoff_row(
+                workspace_id=1,
+                section="External",
+                element="External wall finishes",
+                location=f"Wall (wall-1) · {material}",
+                substrate=material,
+                quantity=45.0,
+                status="Measured",
+                source_page="1",
+                source_reference=(
+                    f"{auto.SOURCE_PREFIX} · bound_wall_finish:{record_id}"
+                ),
+                confidence="Documented",
+                notes="Source-bound finish.",
+                row_role="wall_finish",
+            )
+            for record_id, material in (
+                ("fin-brick", "brick"),
+                ("fin-weatherboard", "weatherboard"),
+            )
+        ]
+
+        with _test_workspace() as ws:
+            app_mod.lexecute(
+                "INSERT INTO workspaces(id,job_name,created_at,updated_at) "
+                "VALUES(1,'AG08','x','x')"
+            )
+            with (
+                patch.object(auto, "_detect_footprint", return_value=None),
+                patch.object(auto, "_cross_calibrate_elevations", return_value=None),
+                patch.object(auto, "_build_unit_rows", return_value=([], [])),
+                patch.object(auto, "_build_facade_rows", return_value=([], [])),
+                patch.object(
+                    auto,
+                    "_build_internal_partition_rows",
+                    return_value=([], []),
+                ),
+                patch.object(
+                    auto,
+                    "_build_bound_wall_finish_rows",
+                    return_value=(finish_rows, conflict_finishes),
+                ),
+            ):
+                report = auto.analyse_workspace(ws.app, 1)
+
+            published = [
+                dict(row)
+                for row in app_mod.lquery(
+                    "SELECT quantity,quantity_status,coverage_m2_per_litre,"
+                    "notes,source_reference FROM takeoff_rows "
+                    "WHERE workspace_id=1 ORDER BY id"
+                )
+            ]
+
+        self.assertEqual(len(report["semantic_conflicts"]), 1)
+        self.assertEqual(len(published), 2)
+        self.assertEqual(
+            [row["quantity"] for row in published],
+            [45.0, 45.0],
+        )
+        self.assertTrue(
+            all(row["quantity_status"] == "Review" for row in published)
+        )
+        self.assertTrue(
+            all(row["coverage_m2_per_litre"] == 0 for row in published)
+        )
+        self.assertTrue(
+            all("[SEMANTIC CONFLICT:" in row["notes"] for row in published)
+        )
 
 
 if __name__ == "__main__":

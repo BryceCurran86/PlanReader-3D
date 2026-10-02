@@ -86,6 +86,7 @@ def test_constructor_starts_with_explicit_not_collected_shadow():
         "quantity_id": None,
         "object_universe_snapshot": None,
         "quantity_evidence": None,
+        "coverage_registry_summary": None,
     }
 
 
@@ -114,6 +115,27 @@ def test_complete_physical_supports_populate_exact_shadow_without_changing_predi
     source_sha = pred_map["verandah_pillars"].metadata["source_sha256"]
     assert shadow["registry_run_id"] == f"extractor-structural:{source_sha}"
     assert shadow["object_universe_snapshot"]["source_sha256"] == source_sha
+
+    summary = shadow["coverage_registry_summary"]
+    quantity_id = shadow["quantity_id"]
+    category = shadow["object_universe_snapshot"]["category"]
+    assert summary["manifest"]["expected_object_universe_keys"] == [
+        ["structural_member", category]
+    ]
+    assert summary["object_counts_by_coverage_state"]["PARTIAL"] == 4
+    assert summary["object_ids_by_coverage_state"]["PARTIAL"] == list(prediction_ids)
+    assert summary["quantity_ids_by_census_state"]["DANGLING_QUANTITY"] == [quantity_id]
+    assert summary["quantity_evidence_universe_complete"] is True
+    assert summary["takeoff_output_row_universe_complete"] is False
+    assert summary["quantity_census_conclusive"] is False
+    assert summary["takeoff_output_row_universe_snapshots"][0]["enumeration_status"] == (
+        "NOT_ENUMERATED"
+    )
+    assert summary["takeoff_output_row_universe_snapshots"][0]["reason_codes"] == [
+        "expected_takeoff_row_universe_snapshot_missing"
+    ]
+    assert all(record["quantity_ids"] == [quantity_id] for record in summary["object_records"])
+    assert all(record["takeoff_row_ids"] == [] for record in summary["object_records"])
 
 
 def test_text_only_support_evidence_never_becomes_complete_or_firm(tmp_path: Path):
@@ -165,6 +187,7 @@ def test_shadow_collection_failure_cannot_change_live_prediction(tmp_path: Path,
         "quantity_id": None,
         "object_universe_snapshot": None,
         "quantity_evidence": None,
+        "coverage_registry_summary": None,
     }
 
 
@@ -186,6 +209,7 @@ def test_shadow_resets_between_documents_when_extractor_is_reused(tmp_path: Path
         "quantity_id": None,
         "object_universe_snapshot": None,
         "quantity_evidence": None,
+        "coverage_registry_summary": None,
     }
 
 
@@ -240,6 +264,21 @@ def test_collector_preserves_exact_producer_lineage_and_is_replayable():
     assert first["object_universe_snapshot"]["source_document_id"] == "doc-coverage"
     assert first["quantity_evidence"]["metadata"]["snapshot_id"] == "snapshot-coverage"
     assert json.loads(json.dumps(first, allow_nan=False)) == first
+    assert resolution == before
+
+
+def test_diagnostic_sink_retains_original_typed_quantity_without_changing_shadow_payload():
+    resolution = _producer_resolution()
+    before = copy.deepcopy(resolution)
+    original = collect_structural_member_coverage_shadow(resolution, registry_run_id="run-sink")
+    retained = []
+    captured = collect_structural_member_coverage_shadow(
+        resolution, registry_run_id="run-sink", quantity_evidence_sink=retained.append,
+    )
+    assert len(retained) == 1
+    assert retained[0].to_dict() == original["quantity_evidence"]
+    assert retained[0].input_entity_ids == tuple(original["physical_member_ids"])
+    assert captured == original
     assert resolution == before
 
 

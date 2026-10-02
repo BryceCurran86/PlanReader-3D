@@ -25,7 +25,8 @@
     },
     {
       "family": "window_areas",
-      "reason": "W01-W06 identities/count are independently reconciled, but exact glazing/opening area semantics are not yet frozen."
+      "reason": "W01, W02, W05 and W06 nominal gross framed opening areas are source-closed from A610 and A110 identity reconciliation; W03 individual height/sill and W04 non-overlapping storefront/D01 area semantics remain unresolved.",
+      "status": "PARTIAL"
     }
   ]
 }

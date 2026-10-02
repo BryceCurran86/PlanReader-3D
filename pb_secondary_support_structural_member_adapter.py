@@ -66,6 +66,21 @@ def build_secondary_support_structural_member_authority(
         return SecondarySupportStructuralMemberResult(selector, resolution)
 
     page_id = str(evidence.source_pages[0])
+    geometry_by_symbol_id = (
+        {
+            str(symbol_id): tuple(float(value) for value in bbox)
+            for symbol_id, bbox in zip(
+                evidence.support_symbol_ids,
+                evidence.support_symbol_bboxes,
+            )
+        }
+        if (
+            evidence.support_symbol_bboxes
+            and len(evidence.support_symbol_bboxes)
+            == len(evidence.support_symbol_ids)
+        )
+        else {}
+    )
     observations = tuple(
         StructuralMemberObservation(
             observation_id=f"structural-member:{symbol_id}",
@@ -78,6 +93,16 @@ def build_secondary_support_structural_member_authority(
                 *(str(chain_id) for chain_id in evidence.chain_ids),
             })),
             source_primitive_ids=(str(symbol_id),),
+            source_primitive_bboxes=(
+                (
+                    (
+                        str(symbol_id),
+                        geometry_by_symbol_id[str(symbol_id)],
+                    ),
+                )
+                if str(symbol_id) in geometry_by_symbol_id
+                else ()
+            ),
         )
         for symbol_id in physical_ids
     )
