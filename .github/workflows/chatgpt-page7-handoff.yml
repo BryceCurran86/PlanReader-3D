@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - chatgpt/page7-wall-discrimination
-    paths:
-      - ".github/workflows/chatgpt-page7-handoff.yml"
 
 permissions:
   contents: read
