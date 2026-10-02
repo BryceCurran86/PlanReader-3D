@@ -129,6 +129,8 @@ class SurfaceEvidence:
     page_no: int = 0
     page_label: str = ""
     surface_id: str = ""          # e.g. "page_5:fill_3", "page_5:R04:fill_1"
+    viewport_id: str = ""
+    viewport_kind: str = ""       # e.g. "plan", "internal_elevation"
 
     # Raw geometry evidence (from PDF)
     source_geometry_type: str = ""  # "filled_polygon", "fill_only", "fill_stroke"
@@ -1001,6 +1003,8 @@ def build_surface_evidence(
     page_label: str = "",
     workspace_id: int = 0,
     scale_info: Optional[Dict[str, Any]] = None,
+    viewport_id: str = "",
+    viewport_kind: str = "",
 ) -> List[SurfaceEvidence]:
     """Convert extracted FillPolygons into SurfaceEvidence records.
 
@@ -1052,6 +1056,8 @@ def build_surface_evidence(
             page_no=page_no,
             page_label=page_label,
             surface_id=surface_id,
+            viewport_id=str(viewport_id or ""),
+            viewport_kind=str(viewport_kind or ""),
             source_geometry_type=geom_type,
             geometry_method=fp.geometry_method,
             polygon_pdf_pts=fp.vertices,
@@ -1102,6 +1108,21 @@ def associate_with_measured_surfaces(
         best_result: Optional[AssociationResult] = None
 
         for target in measured_surfaces:
+            target_type = str(target.get("type") or "").strip().lower()
+            target_viewport_id = str(target.get("viewport_id") or "").strip()
+
+            # Internal-elevation surface evidence is not plan-space evidence.
+            # It can bind only to an explicitly authenticated wall-face target
+            # in the same elevation viewport. Numeric coordinate overlap with a
+            # room polygon is never authority to tile that room.
+            if str(sev.viewport_kind or "").strip().lower() == "internal_elevation":
+                if target_type not in {"wall_face", "elevation_wall_face"}:
+                    continue
+                if not sev.viewport_id or target_viewport_id != sev.viewport_id:
+                    continue
+            elif sev.viewport_id and target_viewport_id and target_viewport_id != sev.viewport_id:
+                continue
+
             target_poly = target.get("polygon") or []
             if not target_poly:
                 # Try bbox
@@ -1148,6 +1169,15 @@ def associate_with_measured_surfaces(
             fp = FillPolygon(vertices=sev.polygon_pdf_pts, fill=sev.fill_colour, geometry_method=sev.geometry_method)
             associated_raw: List[str] = []
             for code_occ in code_occurrences:
+                occurrence_viewport_id = str(code_occ.get("viewport_id") or "").strip()
+                if (
+                    str(sev.viewport_kind or "").strip().lower() == "internal_elevation"
+                    and (
+                        not sev.viewport_id
+                        or occurrence_viewport_id != sev.viewport_id
+                    )
+                ):
+                    continue
                 code_bbox = code_occ.get("bbox")
                 if not code_bbox:
                     continue
@@ -1286,10 +1316,16 @@ def _get_measured_surfaces_for_page(
                 source_poly = wall.get("source_polygon")
                 # source_polygon may be a string ID or actual coords
                 if isinstance(source_poly, (list, tuple)) and len(source_poly) >= 3:
+                    wall_viewport_id = str(wall.get("viewport_id") or "").strip()
+                    is_internal_elevation = (
+                        "internal" in str(page.get("page_type") or "").lower()
+                        and "elevation" in str(page.get("page_type") or "").lower()
+                    )
                     surfaces.append({
                         "polygon": [(float(p[0]), float(p[1])) for p in source_poly],
                         "ref": str(wall.get("wall_ref") or ""),
-                        "type": "wall",
+                        "type": "wall_face" if is_internal_elevation else "wall",
+                        "viewport_id": wall_viewport_id,
                         "area_m2": wall.get("net_m2"),
                     })
         diagnostics.measured_wall_targets_count = len([
@@ -1484,6 +1520,17 @@ def process_page_surface_evidence(
         # Step 6: Build SurfaceEvidence with calibration
         # ------------------------------------------------------------------
         scale = page_scale_info(page_dict)
+        is_internal_elevation = "internal" in page_type.lower() and "elevation" in page_type.lower()
+        surface_viewport_kind = "internal_elevation" if is_internal_elevation else ""
+        surface_viewport_id = (
+            f"page:{page_id}:internal_elevation"
+            if is_internal_elevation
+            else ""
+        )
+        if is_internal_elevation:
+            for occurrence in positioned_code_occurrences:
+                occurrence["viewport_id"] = surface_viewport_id
+
         evidence_list = build_surface_evidence(
             fill_polygons,
             page_id=page_id,
@@ -1491,6 +1538,8 @@ def process_page_surface_evidence(
             page_label=page_label,
             workspace_id=workspace_id,
             scale_info=scale,
+            viewport_id=surface_viewport_id,
+            viewport_kind=surface_viewport_kind,
         )
 
         # Append hatch evidence (B2) — these carry their own surface_ids
