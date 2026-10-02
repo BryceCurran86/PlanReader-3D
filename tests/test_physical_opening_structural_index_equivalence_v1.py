@@ -6,9 +6,11 @@ from pb_physical_opening_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
     RASTER_PDF_VISIBLE_SEGMENT,
     PhysicalOpeningAuthority,
+    _candidate_collinear_record_pairs,
     _canonical_line,
     _distinct_parallel_axes,
     _face_break,
+    _face_break_from_proven_collinear_lines,
     _line_geometry,
     _same_gap,
     _segment_matches,
@@ -158,3 +160,67 @@ def test_indexed_structural_search_is_semantically_identical_to_reference() -> N
     }
     assert actual == expected
     assert len(actual) == 1
+
+
+def test_proven_collinear_face_break_fast_path_matches_defensive_path() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="face-break-fast-path-equivalence-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="face-break-fast-path-equivalence",
+        source_bytes=_pdf(),
+        source_locator="memory://face-break-fast-path-equivalence.pdf",
+    )
+    authority = PhysicalOpeningAuthority(source.authority())
+    resolved = source.authority().resolve_visible(
+        ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=published.visible_observation_ids[0],
+        )
+    )
+    assert resolved.observation is not None
+    records, failures = authority._visible_snapshot_records(resolved)
+    assert not failures
+
+    scoped = tuple(
+        record
+        for record in records
+        if record.observation_kind in {
+            NATIVE_PDF_VISIBLE_SEGMENT,
+            RASTER_PDF_VISIBLE_SEGMENT,
+        }
+        and record.document_id == resolved.observation.document_id
+        and record.revision_id == resolved.observation.revision_id
+        and record.source_sha256 == resolved.observation.source_sha256
+        and record.snapshot_id == resolved.observation.snapshot_id
+        and record.page_id == resolved.observation.page_id
+        and record.viewport_id is None
+        and _line_geometry(record) is not None
+    )
+    lines = tuple(_line_geometry(record) for record in scoped)
+    assert all(line is not None for line in lines)
+    cached_lines = tuple(line for line in lines if line is not None)
+
+    pairs = _candidate_collinear_record_pairs(
+        scoped,
+        line_geometries=cached_lines,
+    )
+    assert pairs
+    for first_index, second_index in pairs:
+        defensive = _face_break(
+            scoped[first_index],
+            scoped[second_index],
+            first_line=cached_lines[first_index],
+            second_line=cached_lines[second_index],
+        )
+        fast = _face_break_from_proven_collinear_lines(
+            scoped[first_index],
+            scoped[second_index],
+            first_line=cached_lines[first_index],
+            second_line=cached_lines[second_index],
+        )
+        assert fast == defensive
