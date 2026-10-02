@@ -457,6 +457,9 @@ class GenericPlanReaderExtractor:
             "evidence_ids": [],
             "quantity_id": None,
         }
+        # Declared source area claims are reconciliation-only diagnostics. They
+        # remain observable even when no physical geometry can be established.
+        self.declared_floor_area_claims: List[Dict[str, Any]] = []
         self.canonical_levels_live: Dict[str, Any] = {
             "status": "abstained",
             "reason_codes": ["not_collected"],
@@ -680,26 +683,18 @@ class GenericPlanReaderExtractor:
         new_quantity: float,
         new_metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """Replace first-page slab-bound quantities when a later page is stronger.
+        """Replace a slab-bound quantity only from the stronger physical basis.
 
-        DPM, mesh, surface bed, and DPC are derived from the current floor
-        envelope.  A small early reconstructed rectangle must not lock them
-        out of a later explicit FLOOR AREA, and a later weaker envelope must
-        not clobber that explicit quantity.
+        Declared text-area metadata is reconciliation-only and receives no
+        replacement privilege. Existing behaviour remains deterministic: a
+        positive later physical quantity replaces only a smaller existing one.
         """
+        del new_metadata
         if new_quantity <= 0:
             return False
         if existing is None:
             return True
-        existing_meta = existing.metadata or {}
-        new_meta = new_metadata or {}
-        existing_explicit = existing_meta.get("area_authority") == "explicit_drawing_floor_area"
-        new_explicit = new_meta.get("area_authority") == "explicit_drawing_floor_area"
-        if new_explicit and not existing_explicit:
-            return True
-        if new_explicit == existing_explicit:
-            return new_quantity > float(existing.quantity or 0)
-        return False
+        return new_quantity > float(existing.quantity or 0)
 
     @staticmethod
     def _has_dpc_specification(page_text: str) -> bool:
@@ -1130,6 +1125,7 @@ class GenericPlanReaderExtractor:
         self._ocr_text_by_page = {}
         self._ocr_pages_attempted = set()
         self.extraction_status = {}
+        self.declared_floor_area_claims = []
         self.coverage_registry_summaries_live = ()
         self.coverage_family_gaps_live = {}
         _coverage_objects: list[Any] = []
@@ -1295,15 +1291,27 @@ class GenericPlanReaderExtractor:
                     pg_txt = f"{pg_txt}\n{ocr_txt}"
             norm_pg = re.sub(r"\s+", " ", pg_txt.lower())
 
-            # F.26: explicit figured overall FLOOR AREA on an actual plan sheet
-            # outranks a later coarse rectangle reconstruction. This reads
-            # drawing text only and fails closed on ambiguity.
+            # F.26 authority correction: a printed FLOOR AREA is retained as a
+            # declared source claim for reconciliation only. It is not physical
+            # geometry authority and cannot by itself mint floor/slab quantities.
             from pb_explicit_floor_area_evidence import extract_explicit_floor_area_evidence
             explicit_floor_area = extract_explicit_floor_area_evidence(
                 pg_txt, source_page=p_idx + 1
             )
             if explicit_floor_area is not None:
                 global_explicit_floor_area_evidence.append(explicit_floor_area)
+                self.declared_floor_area_claims.append(
+                    {
+                        "declared_floor_area_m2": explicit_floor_area.area_m2,
+                        "declared_floor_area_source_pages": list(explicit_floor_area.source_pages),
+                        "declared_floor_area_raw_evidence": list(explicit_floor_area.raw_evidence),
+                        "declared_floor_area_binding": explicit_floor_area.binding,
+                        "declared_floor_area_role": explicit_floor_area.authority,
+                    }
+                )
+                self.extraction_status["declared_floor_area"] = (
+                    "evidence_present_reconciliation_only"
+                )
 
             # Track verandah mention across drawings
             if any(k in norm_pg for k in ("verandah", "veranda")):
@@ -1430,9 +1438,9 @@ class GenericPlanReaderExtractor:
         from pb_dimension_chain_evidence_extractor import resolve_corroborated_wall_thickness_m
         global_resolved_wall_thickness_m: Optional[float] = resolve_corroborated_wall_thickness_m(global_dimension_chains)
 
-        # Resolve document-level explicit area only when every qualifying plan
-        # annotation agrees. Multi-plan packages with different floor areas
-        # therefore remain unresolved rather than silently choosing one.
+        # Resolve repeated declared values only for reconciliation metadata.
+        # Agreement does not bind the claim to geometry or promote quantity
+        # authority; disagreement remains visible in declared_floor_area_claims.
         from pb_explicit_floor_area_evidence import resolve_explicit_floor_area_evidence
         global_resolved_explicit_floor_area = resolve_explicit_floor_area_evidence(
             global_explicit_floor_area_evidence
@@ -1658,76 +1666,51 @@ class GenericPlanReaderExtractor:
                 k in pt_lower for k in ("ground floor plan", "floor plan", "layout plan")
             )
 
-            # F.30: a dense multi-room plan can carry multiple same-axis
-            # overall/sub-chain dimensions. Prefer a source-corroborated
-            # orthogonal envelope only when native text direction plus the
-            # drawing's own explicit FLOOR AREA resolve one unique geometry.
-            # Otherwise preserve the existing size-ranked heuristic unchanged.
-            page_explicit_floor_area = (
+            # F.30 authority correction: dimension/viewport evidence may establish
+            # physical plan axes; a printed declared area may not select between
+            # competing length/width pairs. Declared area is reconciled only AFTER
+            # an envelope has been independently selected.
+            page_declared_floor_area = (
                 global_resolved_explicit_floor_area
                 if global_resolved_explicit_floor_area is not None
                 and page_num in global_resolved_explicit_floor_area.source_pages
                 else None
             )
             resolved_verandah_width_for_page = global_verandah_width
-            orthogonal_envelope_evidence = None
-            if not is_elevation_page and page_explicit_floor_area is not None:
-                from pb_orthogonal_envelope_evidence import (
-                    resolve_orthogonal_envelope_evidence,
+            floor_plan_dims_m: Optional[List[float]] = None
+            if not is_elevation_page:
+                try:
+                    from pb_wall_hatch_perimeter_correction import _floor_plan_viewport_bbox
+
+                    fp_box = _floor_plan_viewport_bbox(page)
+                    if fp_box is not None:
+                        fp_rect = fitz.Rect(fp_box)
+                        blocks = page.get_text("blocks")
+                        scoped_dims: List[float] = []
+                        for b in blocks:
+                            r = fitz.Rect(b[:4])
+                            center = fitz.Point((r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0)
+                            if center in fp_rect:
+                                txt = b[4].strip()
+                                for major, minor in re.findall(r"\b(\d{1,2})[,.]?(\d{3})\b", txt):
+                                    val = float(major) + float(minor) / 1000.0
+                                    if 2.0 <= val <= 35.0:
+                                        scoped_dims.append(round(val, 3))
+                        if len(scoped_dims) >= 2:
+                            floor_plan_dims_m = scoped_dims
+                except Exception:
+                    floor_plan_dims_m = None
+
+            length_m, width_m = None, None
+            if floor_plan_dims_m is not None:
+                length_m, width_m = self._detect_outer_envelope(
+                    floor_plan_dims_m, detected_span, is_elevation_page
                 )
 
-                orthogonal_envelope_evidence = resolve_orthogonal_envelope_evidence(
-                    page,
-                    explicit_floor_area_m2=page_explicit_floor_area.area_m2,
-                    secondary_width_m=global_verandah_width,
+            if length_m is None or width_m is None:
+                length_m, width_m = self._detect_outer_envelope(
+                    parsed_dims_m, detected_span, is_elevation_page
                 )
-
-            if orthogonal_envelope_evidence is not None:
-                length_m = orthogonal_envelope_evidence.length_m
-                width_m = orthogonal_envelope_evidence.width_m
-                if (
-                    resolved_verandah_width_for_page is None
-                    and orthogonal_envelope_evidence.secondary_width_m is not None
-                ):
-                    resolved_verandah_width_for_page = (
-                        orthogonal_envelope_evidence.secondary_width_m
-                    )
-            else:
-                floor_plan_dims_m: Optional[List[float]] = None
-                if not is_elevation_page:
-                    try:
-                        from pb_wall_hatch_perimeter_correction import _floor_plan_viewport_bbox
-
-                        fp_box = _floor_plan_viewport_bbox(page)
-                        if fp_box is not None:
-                            fp_rect = fitz.Rect(fp_box)
-                            blocks = page.get_text("blocks")
-                            scoped_dims: List[float] = []
-                            for b in blocks:
-                                r = fitz.Rect(b[:4])
-                                center = fitz.Point((r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0)
-                                if center in fp_rect:
-                                    txt = b[4].strip()
-                                    for major, minor in re.findall(r"\b(\d{1,2})[,.]?(\d{3})\b", txt):
-                                        val = float(major) + float(minor) / 1000.0
-                                        if 2.0 <= val <= 35.0:
-                                            scoped_dims.append(round(val, 3))
-                            if len(scoped_dims) >= 2:
-                                floor_plan_dims_m = scoped_dims
-                    except Exception:
-                        floor_plan_dims_m = None
-
-                length_m, width_m = None, None
-                if floor_plan_dims_m is not None:
-                    length_m, width_m = self._detect_outer_envelope(
-                        floor_plan_dims_m, detected_span, is_elevation_page
-                    )
-
-                if length_m is None or width_m is None:
-                    length_m, width_m = self._detect_outer_envelope(
-                        parsed_dims_m, detected_span, is_elevation_page
-                    )
-
             if length_m is not None and width_m is not None:
                 from pb_multi_space_footprint_geometry import MultiSpaceFootprintBuilder
 
@@ -1750,18 +1733,25 @@ class GenericPlanReaderExtractor:
 
                 footprint_res = builder.build()
                 derived_footprint_area_m2 = footprint_res.gross_floor_area_m2
-                explicit_floor_area_for_page = (
-                    global_resolved_explicit_floor_area
-                    if global_resolved_explicit_floor_area is not None
-                    and page_num in global_resolved_explicit_floor_area.source_pages
-                    else None
-                )
-                structural_bed_area_m2 = (
-                    explicit_floor_area_for_page.area_m2
-                    if explicit_floor_area_for_page is not None
-                    else derived_footprint_area_m2
-                )
+                declared_floor_area_for_page = page_declared_floor_area
+                # Physical bed/floor quantities remain geometry-derived. A
+                # declared aggregate is only reconciled against this result.
+                structural_bed_area_m2 = derived_footprint_area_m2
                 total_floor_screed = structural_bed_area_m2
+                declared_area_reconciliation = None
+                if declared_floor_area_for_page is not None:
+                    from pb_orthogonal_envelope_evidence import (
+                        reconcile_orthogonal_envelope_against_declared_area,
+                    )
+
+                    declared_area_reconciliation = (
+                        reconcile_orthogonal_envelope_against_declared_area(
+                            length_m=length_m,
+                            width_m=width_m,
+                            declared_floor_area_m2=declared_floor_area_for_page.area_m2,
+                            secondary_width_m=resolved_verandah_width_for_page,
+                        )
+                    )
 
                 # F.22: an enclosed main room's floor finish is measured to
                 # the clear wall faces when wall thickness is independently
@@ -1771,10 +1761,7 @@ class GenericPlanReaderExtractor:
                 # unchanged. Structural slab/DPM/mesh area is preserved
                 # separately below.
                 floor_finish_geometry = None
-                if (
-                    global_resolved_wall_thickness_m is not None
-                    and explicit_floor_area_for_page is None
-                ):
+                if global_resolved_wall_thickness_m is not None:
                     from pb_component_floor_finish_geometry import (
                         derive_component_aware_floor_finish_area,
                     )
@@ -1823,30 +1810,13 @@ class GenericPlanReaderExtractor:
 
                 existing_area = pred_dict.get("floor_screed")
                 current_best_area = existing_area.quantity if existing_area else 0.0
-                existing_area_meta = (existing_area.metadata or {}) if existing_area else {}
-                existing_is_explicit = (
-                    existing_area_meta.get("area_authority") == "explicit_drawing_floor_area"
-                )
-                current_is_explicit = explicit_floor_area_for_page is not None
-                page_has_plan_footprint_authority = (
-                    explicit_floor_area_for_page is not None
-                    or self._has_plan_footprint_context(page_text)
-                )
+                page_has_plan_footprint_authority = self._has_plan_footprint_context(page_text)
                 should_replace_area = page_has_plan_footprint_authority and (
-                    (current_is_explicit and not existing_is_explicit)
-                    or (
-                        current_is_explicit == existing_is_explicit
-                        and (total_floor_screed > current_best_area or current_best_area == 0)
-                    )
+                    total_floor_screed > current_best_area or current_best_area == 0
                 )
 
                 if should_replace_area:
-                    if explicit_floor_area_for_page is not None:
-                        desc_flr = (
-                            "Floor screed / finish ("
-                            f"{explicit_floor_area_for_page.area_m2} m2 explicit drawing FLOOR AREA)"
-                        )
-                    elif (
+                    if (
                         resolved_verandah_width_for_page is not None
                         and resolved_verandah_width_for_page > 0
                     ):
@@ -1902,38 +1872,27 @@ class GenericPlanReaderExtractor:
                             "derived_footprint_area_m2": derived_footprint_area_m2,
                             **(
                                 {
-                                    "envelope_authority": orthogonal_envelope_evidence.authority,
-                                    "orthogonal_horizontal_dimension_m": orthogonal_envelope_evidence.horizontal_m,
-                                    "orthogonal_vertical_dimension_m": orthogonal_envelope_evidence.vertical_m,
-                                    "orthogonal_corroborated_floor_area_m2": orthogonal_envelope_evidence.corroborated_area_m2,
-                                    "orthogonal_relative_area_error": orthogonal_envelope_evidence.relative_area_error,
+                                    "declared_floor_area_m2": declared_floor_area_for_page.area_m2,
+                                    "declared_floor_area_source_pages": list(
+                                        declared_floor_area_for_page.source_pages
+                                    ),
+                                    "declared_floor_area_raw_evidence": list(
+                                        declared_floor_area_for_page.raw_evidence
+                                    ),
+                                    "declared_floor_area_binding": declared_floor_area_for_page.binding,
+                                    "declared_floor_area_role": declared_floor_area_for_page.authority,
                                     **(
                                         {
-                                            "secondary_width_m": orthogonal_envelope_evidence.secondary_width_m,
-                                            "secondary_width_source": (
-                                                "spatial_label_dimension"
-                                                if orthogonal_envelope_evidence.secondary_width_evidence is not None
-                                                else "upstream_secondary_width"
-                                            ),
+                                            "declared_floor_area_reconciliation_status": declared_area_reconciliation.status,
+                                            "declared_floor_area_reconstructed_m2": declared_area_reconciliation.reconstructed_area_m2,
+                                            "declared_floor_area_delta_m2": declared_area_reconciliation.delta_m2,
+                                            "declared_floor_area_relative_error": declared_area_reconciliation.relative_error,
                                         }
-                                        if orthogonal_envelope_evidence.secondary_width_m is not None
+                                        if declared_area_reconciliation is not None
                                         else {}
                                     ),
                                 }
-                                if orthogonal_envelope_evidence is not None
-                                else {}
-                            ),
-                            **(
-                                {
-                                    "area_authority": explicit_floor_area_for_page.authority,
-                                    "explicit_floor_area_source_pages": list(
-                                        explicit_floor_area_for_page.source_pages
-                                    ),
-                                    "explicit_floor_area_raw_evidence": list(
-                                        explicit_floor_area_for_page.raw_evidence
-                                    ),
-                                }
-                                if explicit_floor_area_for_page is not None
+                                if declared_floor_area_for_page is not None
                                 else {}
                             ),
                             **(
@@ -2139,16 +2098,6 @@ class GenericPlanReaderExtractor:
                             "enclosed_wall_perimeter_m": perimeter_m,
                             "shared_edge_length_m": footprint_res.shared_edge_length_m,
                             "footprint_status": footprint_res.status,
-                            **(
-                                {
-                                    "envelope_authority": orthogonal_envelope_evidence.authority,
-                                    "orthogonal_horizontal_dimension_m": orthogonal_envelope_evidence.horizontal_m,
-                                    "orthogonal_vertical_dimension_m": orthogonal_envelope_evidence.vertical_m,
-                                    "secondary_width_m": orthogonal_envelope_evidence.secondary_width_m,
-                                }
-                                if orthogonal_envelope_evidence is not None
-                                else {}
-                            ),
                             "wall_height_source": (
                                 "resolved_level_datum_evidence"
                                 if height_is_genuine_evidence
