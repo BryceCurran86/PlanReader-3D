@@ -1,0 +1,17 @@
+start
+ingested 32.8
+wall_opening conflict ['live_wall_opening_composition_partial', 'semantic_opening_physical_conflict', 'semantic_opening_residual_source_evidence', 'semantic_opening_universe_exhaustiveness_unproven', 'opening_universe_completeness_record_unavailable', 'physical_wall_candidate_scope_resolved', 'physical_wall_candidate_scope_bounds_unresolved', 'complete_authenticated_host_wall_universe_required', 'physical_wall_candidate_scope_unavailable', 'ambiguous_physical_opening_candidates', 'opening_host_frame_host_unavailable', 'host_binding_record_unavailable'] 124.6 s
+semantic conflict ['semantic_opening_physical_conflict', 'semantic_opening_residual_source_evidence', 'semantic_opening_universe_exhaustiveness_unproven'] record True
+ representative_obs 139 physical_ids 139
+wall scopes [('3', 'corroborated', False, 2561)]
+opening bindings Counter({('abstained', ('complete_authenticated_host_wall_universe_required',)): 75, ('conflict', ('ambiguous_physical_opening_candidates',)): 64})
+host frames Counter({('abstained', ('opening_host_frame_host_unavailable',)): 75})
+void comp abstained ['live_physical_opening_void_composition_partial', 'live_physical_opening_void_upstream_incomplete', 'opening_universe_completeness_record_unavailable', 'physical_opening_void_universe_incomplete'] canon 75 traces 75
+  width {('abstained', 'opening_dimension_witness_topology_required'): 64, ('conflict', 'opening_dimension_witness_topology_required'): 10, ('abstained', 'opening_dimension_trusted_text_required'): 1}
+  schedule_binding {('abstained', 'schedule_opening_instance_binding_partial_source_coverage'): 75}
+  height {('abstained', 'schedule_opening_instance_binding_partial_source_coverage'): 75}
+  vertical {('abstained', 'schedule_opening_instance_binding_partial_source_coverage'): 75}
+  scale {('abstained', 'physical_scale_bar_unavailable'): 75}
+  void {('abstained', 'opening_universe_completeness_record_unavailable'): 75}
+wrote 75
+done
