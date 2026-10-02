@@ -1039,10 +1039,9 @@ def extract_and_calibrate_rooms(
     cal_scale = _scale_factor_m_per_pt(scale_info)
     calibration_conf = 0.95 if cal_scale is not None else 0.0
 
-    # Pre-compute polygon keys for containment analysis
-    all_polygon_tuples = [
-        _polygon_tuples(r.get("polygon", [])) for r in labelled
-    ]
+    # Each filter reads the same raw faces. Copy them once rather than
+    # rebuilding the entire page's polygons for every candidate face.
+    all_polygons = [list(r.get("polygon", [])) for r in labelled]
 
     # Filter and calibrate each face
     room_faces: List[RoomFace] = []
@@ -1058,7 +1057,7 @@ def extract_and_calibrate_rooms(
             scale_info,
             page_width_pt,
             page_height_pt,
-            all_polygons=[list(r.get("polygon", [])) for r in labelled],
+            all_polygons=all_polygons,
             label=label,
             polygon_index=idx,
         )

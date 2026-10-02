@@ -144,3 +144,10 @@ Its precomputed polygon tuple list is unused. Precompute the exact raw polygon
 list once and pass the same read-only values to each existing filter invocation.
 Do not reuse the rounded identity tuples as metric geometry. No face extraction,
 filter predicate, calibration, label ownership, status or quantity rule changes.
+
+The 2,500-face source-neutral allocation probe takes 1.077 seconds before this
+change and 0.024 seconds after it; all unmeasured loops still return no rooms.
+The deployed v1.5.1 customer run also reaches the same repeated polygon-list
+construction in multiple one-minute stack snapshots. It is interrupted before
+publication and repeated after the exact-value allocation fix. This probe is
+not a substitute for the repository performance gates or real-source parity.
