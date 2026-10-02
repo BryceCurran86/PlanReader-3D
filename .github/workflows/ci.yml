@@ -7,6 +7,35 @@ on:
     branches: [main]
 
 jobs:
+  handoff:
+    if: github.event_name == 'pull_request' && github.head_ref == 'ops/1229-exact-mary-handoff'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d26e642bba6f5ad7a8762cc508b824cd6545b837
+      - name: Build exact #1229 handoff
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+          out = Path('/tmp/planreader-1229-exact.zip')
+          excluded = {'.git', '.venv', '__pycache__', '.pytest_cache', '.ruff_cache'}
+          with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as zf:
+              for p in Path('.').rglob('*'):
+                  if not p.is_file():
+                      continue
+                  if any(part in excluded for part in p.parts):
+                      continue
+                  zf.write(p, p.as_posix())
+          print(out, out.stat().st_size)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-1229-exact
+          path: /tmp/planreader-1229-exact.zip
+          retention-days: 1
+
   test:
     runs-on: ubuntu-latest
     strategy:
