@@ -93,6 +93,25 @@ def test_pair_callout_outranks_single_dimension_subparses() -> None:
     assert fragments[0].text == "2,100 x 1,030"
 
 
+def test_compact_door_and_metric_window_callouts_can_share_one_native_line() -> None:
+    rows = (
+        _word_row(0, "21", 0.0),
+        _word_row(1, "-", 12.0),
+        _word_row(2, "15", 18.0),
+        _word_row(3, "-", 30.0),
+        _word_row(4, "asd", 36.0),
+        _word_row(5, "600", 58.0),
+        _word_row(6, "-", 74.0),
+        _word_row(7, "1,510", 80.0),
+        _word_row(8, "asw", 108.0),
+    )
+    fragments = _parseable_opening_label_fragments(rows)
+    assert [fragment.text for fragment in fragments] == [
+        "21 - 15 - asd",
+        "600 - 1,510 asw",
+    ]
+
+
 def test_non_opening_text_fragments_are_not_created_from_native_line() -> None:
     rows = (
         _word_row(0, "900x1200", 0.0),
