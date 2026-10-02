@@ -56,6 +56,12 @@ _MAX_PARALLEL_DIST_PT = 35.0
 # Maximum page-fraction a single stroke can span and still be hatch
 _MAX_LINE_FRACTION = 0.60
 
+# Fail-closed resource guard. Extremely dense CAD sheets can contain six-figure
+# drawing counts; materialising the full PyMuPDF drawing representation and the
+# legacy pairwise hatch clustering can exhaust process memory. Hatch evidence is
+# correction-only, so abstaining is safer than taking down full extraction.
+_MAX_CLUSTER_INPUT_STROKES = 50_000
+
 # Minimum number of words near a cluster to flag dimension proximity
 _DIM_WORD_MIN = 2
 
@@ -981,7 +987,31 @@ def detect_hatch_patterns(
         "associated": 0,
         "unassociated": 0,
         "extraction_error": "",
+        "resource_guard_triggered": False,
+        "compact_drawings_count": None,
     }
+
+    # Resource guard must run before get_drawings(). PyMuPDF's full drawing
+    # representation can itself require gigabytes on extremely dense CAD sheets.
+    # get_cdrawings() is compact and cheap enough to count first.
+    try:
+        compact_drawings = pdf_page.get_cdrawings()
+        compact_count = len(compact_drawings or ())
+        hatch_diag["compact_drawings_count"] = compact_count
+        del compact_drawings
+        if compact_count > _MAX_CLUSTER_INPUT_STROKES:
+            hatch_diag["resource_guard_triggered"] = True
+            hatch_diag["extraction_error"] = (
+                "resource_guard: hatch extraction skipped for "
+                f"{compact_count} compact drawings "
+                f"(limit {_MAX_CLUSTER_INPUT_STROKES})"
+            )
+            return [], [], hatch_diag
+    except Exception:
+        # Older/alternate page implementations may not expose get_cdrawings().
+        # Fall through to the established extraction path, which is guarded
+        # again after stroke extraction.
+        pass
 
     # Step 1: Extract strokes
     try:
@@ -993,6 +1023,14 @@ def detect_hatch_patterns(
     hatch_diag["strokes_extracted"] = len(strokes)
 
     if len(strokes) < _MIN_HATCH_STROKES:
+        return [], [], hatch_diag
+
+    if len(strokes) > _MAX_CLUSTER_INPUT_STROKES:
+        hatch_diag["resource_guard_triggered"] = True
+        hatch_diag["extraction_error"] = (
+            "resource_guard: hatch clustering skipped for "
+            f"{len(strokes)} strokes (limit {_MAX_CLUSTER_INPUT_STROKES})"
+        )
         return [], [], hatch_diag
 
     # Step 2: Cluster strokes
