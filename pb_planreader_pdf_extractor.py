@@ -1120,6 +1120,68 @@ class GenericPlanReaderExtractor:
                 drawing_page_flags[page_index] = bool(cached)
             return bool(cached)
 
+        physical_floor_plan_page_flags: Dict[int, bool] = {}
+        resolved_page_titles: Optional[Dict[int, tuple[str, int]]] = None
+
+        def _resolved_page_title_map() -> Dict[int, tuple[str, int]]:
+            """Resolve source-owned drawing titles once for page scoping."""
+            nonlocal resolved_page_titles
+            if resolved_page_titles is None:
+                resolved_page_titles = {}
+                try:
+                    import pb_page_title_authority as page_title_authority
+
+                    analyses = [
+                        page_title_authority.analyse_page(doc[index], index + 1)
+                        for index in range(len(doc))
+                    ]
+                    resolved = page_title_authority.resolve_document(analyses)
+                    for index, result in enumerate(resolved):
+                        resolved_page_titles[index] = (
+                            str(getattr(result, "title", "") or ""),
+                            int(getattr(result, "confidence", 0) or 0),
+                        )
+                except Exception:
+                    resolved_page_titles = {}
+            return resolved_page_titles
+
+        def _is_physical_floor_plan_page(page_index: int) -> bool:
+            """Admit only source-classified floor-plan pages to wall topology.
+
+            Drawing-page detection is deliberately too broad for physical wall
+            authority because it includes elevations, schedules, roof/RCP,
+            sections, and other vector-heavy sheets. This gate reuses the
+            established page-title/page-type authority and fails closed unless
+            the page is positively classified as a Floor Plan.
+            """
+            cached = physical_floor_plan_page_flags.get(page_index)
+            if cached is None:
+                try:
+                    from pb_page_registration_v1225 import weighted_page_type
+
+                    title, title_confidence = _resolved_page_title_map().get(
+                        page_index,
+                        ("", 0),
+                    )
+                    if title and title_confidence > 0:
+                        page_type, confidence, _evidence = weighted_page_type(
+                            "",
+                            p_path.name,
+                            title,
+                        )
+                        cached = page_type == "Floor Plan" and confidence >= 60
+                    else:
+                        page_type, confidence, _evidence = weighted_page_type(
+                            _native_text(page_index),
+                            p_path.name,
+                            "",
+                        )
+                        cached = page_type == "Floor Plan" and confidence >= 64
+                except Exception:
+                    cached = False
+                physical_floor_plan_page_flags[page_index] = bool(cached)
+            return bool(cached)
+
         # OCR evidence is source-document scoped. Never carry cached text or
         # page-budget state across separate PDFs when an extractor instance is reused.
         self._ocr_text_by_page = {}
@@ -3261,7 +3323,7 @@ class GenericPlanReaderExtractor:
                 for page_index in target_pages
                 if (
                     0 <= page_index < len(doc)
-                    and _is_drawing_page_index(page_index)
+                    and _is_physical_floor_plan_page(page_index)
                 )
             ]
             _live_level_records = collect_source_owned_floor_plan_levels(
@@ -3320,10 +3382,83 @@ class GenericPlanReaderExtractor:
                 for page_index in target_pages
                 if (
                     0 <= page_index < len(doc)
-                    and _is_drawing_page_index(page_index)
+                    and _is_physical_floor_plan_page(page_index)
                 )
             ]
-            if physical_net_pages:
+            from pb_physical_wall_candidate_authority import (
+                MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS,
+                PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED,
+            )
+            from pb_vector_geometry_v130 import extract_native_page
+
+            physical_net_complexity_blocked = False
+            for page_index in physical_net_pages:
+                native_segment_count = len(
+                    extract_native_page(doc[page_index]).get("segments") or ()
+                )
+                if native_segment_count > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
+                    physical_net_complexity_blocked = True
+                    break
+
+            if physical_net_complexity_blocked:
+                self.physical_net_wall_live = {
+                    "status": "abstained",
+                    "reason_codes": [
+                        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+                    ],
+                    "quantity_m2": None,
+                    "source_pages": [],
+                    "external_wall_ids": [],
+                    "evidence_ids": [],
+                    "quantity_id": None,
+                }
+                self.canonical_walls_live = {
+                    "status": "abstained",
+                    "reason_codes": [
+                        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+                    ],
+                    "source_pages": [],
+                    "unresolved_wall_candidate_ids": [],
+                    "walls": [],
+                }
+                self.canonical_openings_live = {
+                    "status": "abstained",
+                    "reason_codes": [
+                        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+                    ],
+                    "openings": [],
+                }
+                self.canonical_doors_live = {
+                    "status": "abstained",
+                    "reason_codes": [
+                        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+                    ],
+                    "doors": [],
+                }
+                self.canonical_windows_live = {
+                    "status": "abstained",
+                    "reason_codes": [
+                        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+                    ],
+                    "windows": [],
+                }
+                self.canonical_rooms_live = {
+                    "status": "abstained",
+                    "reason_codes": [
+                        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+                    ],
+                    "rooms": [],
+                }
+                self.canonical_floors_live = {
+                    "status": "abstained",
+                    "reason_codes": [
+                        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+                    ],
+                    "source_pages": [],
+                    "floors": [],
+                }
+                self.extraction_status["physical_net_wall_live"] = "abstained"
+            elif physical_net_pages:
                 physical_wall_result = collect_live_physical_net_wall_claim(
                     p_path,
                     pages=physical_net_pages,

@@ -131,11 +131,60 @@ def collect_live_physical_net_wall_claim(
         page_ids=page_ids,
     )
 
-    wall_opening = compose_live_wall_opening_authority(
-        source_visibility_producer=source,
-        revision_id=published.revision.revision_id,
-        page_ids=page_ids,
-    )
+    try:
+        wall_opening = compose_live_wall_opening_authority(
+            source_visibility_producer=source,
+            revision_id=published.revision.revision_id,
+            page_ids=page_ids,
+        )
+    except Exception as exc:
+        from pb_live_wall_opening_authority_composition import (
+            LiveWallOpeningScopeComplexityExceeded,
+        )
+
+        if not isinstance(exc, LiveWallOpeningScopeComplexityExceeded):
+            raise
+        reason = str(exc) or LIVE_PHYSICAL_NET_WALL_INTEGRATION_UNAVAILABLE
+        publication = LiveExternalPhysicalNetWallPublication(
+            revision_id=published.revision.revision_id,
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(reason,),
+            quantity_evidence=None,
+            canonical_walls=(),
+            external_wall_ids=(),
+            gross_geometry_record_ids=(),
+            whole_wall_role_record_ids=(),
+            physical_void_record_ids=(),
+            opening_universe_record_ids=(),
+        )
+        return LivePhysicalNetWallClaim(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(
+                LIVE_PHYSICAL_NET_WALL_INTEGRATION_UNAVAILABLE,
+                reason,
+            ),
+            quantity_m2=None,
+            source_pages=(),
+            canonical_walls=(),
+            canonical_wall_status=EvidenceResolutionStatus.ABSTAINED,
+            canonical_wall_reason_codes=(reason,),
+            canonical_wall_source_pages=(),
+            unresolved_wall_candidate_ids=(),
+            canonical_openings=(),
+            canonical_rooms=(),
+            canonical_floors=(),
+            canonical_floor_status=EvidenceResolutionStatus.ABSTAINED,
+            canonical_floor_reason_codes=(reason,),
+            canonical_floor_source_pages=(),
+            canonical_room_status=EvidenceResolutionStatus.ABSTAINED,
+            canonical_room_reason_codes=(reason,),
+            canonical_room_source_pages=(),
+            external_wall_ids=(),
+            evidence_ids=(),
+            quantity_id=None,
+            confidence=0.0,
+            publication=publication,
+        )
     canonical_wall_core = compose_live_canonical_walls(
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
