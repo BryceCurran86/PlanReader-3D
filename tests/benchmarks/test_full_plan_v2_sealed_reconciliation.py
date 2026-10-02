@@ -1,22 +1,47 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
+from pathlib import Path
+import sys
 
 import pytest
 
-from benchmarks.frozen_holdout.full_plan_v2.evaluator import (
-    PROJECT_VERIFIED,
-    ProjectBenchmarkManifestV2,
-    SourceDocumentV2,
-    VerifiedTakeoffItemV2,
-    evaluate_project_v2,
+
+_ROOT = (
+    Path(__file__).resolve().parents[2]
+    / "benchmarks"
+    / "frozen_holdout"
+    / "full_plan_v2"
 )
-from benchmarks.frozen_holdout.full_plan_v2.sealed_reconciliation import (
-    V2ProductionIdentityBinding,
-    V2ProductionIdentityMap,
-    reconcile_sealed_run_v2,
+_EVALUATOR_SPEC = importlib.util.spec_from_file_location(
+    "full_plan_takeoff_v2_evaluator",
+    _ROOT / "evaluator.py",
 )
+assert _EVALUATOR_SPEC is not None and _EVALUATOR_SPEC.loader is not None
+_EVALUATOR = importlib.util.module_from_spec(_EVALUATOR_SPEC)
+sys.modules[_EVALUATOR_SPEC.name] = _EVALUATOR
+_EVALUATOR_SPEC.loader.exec_module(_EVALUATOR)
+
+_RECON_SPEC = importlib.util.spec_from_file_location(
+    "full_plan_v2_sealed_reconciliation",
+    _ROOT / "sealed_reconciliation.py",
+)
+assert _RECON_SPEC is not None and _RECON_SPEC.loader is not None
+_RECON = importlib.util.module_from_spec(_RECON_SPEC)
+sys.modules[_RECON_SPEC.name] = _RECON
+_RECON_SPEC.loader.exec_module(_RECON)
+
+PROJECT_VERIFIED = _EVALUATOR.PROJECT_VERIFIED
+ProjectBenchmarkManifestV2 = _EVALUATOR.ProjectBenchmarkManifestV2
+SourceDocumentV2 = _EVALUATOR.SourceDocumentV2
+VerifiedTakeoffItemV2 = _EVALUATOR.VerifiedTakeoffItemV2
+evaluate_project_v2 = _EVALUATOR.evaluate_project_v2
+
+V2ProductionIdentityBinding = _RECON.V2ProductionIdentityBinding
+V2ProductionIdentityMap = _RECON.V2ProductionIdentityMap
+reconcile_sealed_run_v2 = _RECON.reconcile_sealed_run_v2
 
 
 SHA = "a" * 64
@@ -222,7 +247,7 @@ def test_tampered_quantity_fingerprint_fails_closed() -> None:
     row = sealed_quantity()
     row["value"] = 999.0
     run = sealed_run(row)
-    with pytest.raises(ValueError, match="quantities\[0\] fingerprint"):
+    with pytest.raises(ValueError, match=r"quantities\[0\] fingerprint"):
         reconcile_sealed_run_v2(manifest(), run, identity_map())
 
 
